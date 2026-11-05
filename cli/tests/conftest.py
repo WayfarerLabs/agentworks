@@ -1026,13 +1026,9 @@ def ssh_enrolls_on_first_use(trust_binding: object) -> None:
 @pytest.fixture
 def vm_access_recorder(monkeypatch: pytest.MonkeyPatch) -> AccessRecorder:
     """Route ``execution.vm_access`` and ``enrollment_access`` to a recording fake, and resolve ssh without a client."""
-    from tests.vm_access_support import AccessRecorder
+    from tests.vm_access_support import install_access_recorder
 
-    recorder = AccessRecorder()
-    monkeypatch.setattr("agentworks.execution.vm_access", recorder.vm_access)
-    monkeypatch.setattr("agentworks.execution.enrollment_access", recorder.enrollment_access)
-    monkeypatch.setattr("agentworks.execution.resolve_ssh", lambda: recorder.client)
-    return recorder
+    return install_access_recorder(monkeypatch)
 
 
 def seed_vm_trust(vm_name: str) -> None:

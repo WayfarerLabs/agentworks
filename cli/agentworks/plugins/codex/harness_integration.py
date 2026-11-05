@@ -146,6 +146,7 @@ if TYPE_CHECKING:
         VMSetupInvocation,
         WorkspaceSetupInvocation,
     )
+    from agentworks.execution.access import VMAccess
     from agentworks.transports import Transport
 
 
@@ -1357,12 +1358,12 @@ class CodexIntegration(HarnessIntegration):
                 ids.append(match.group(1))
         return _Layer2(tuple(ids), unnamed)
 
-    def _probe_target(self, transport: Transport) -> None:
+    def _probe_target(self, access: VMAccess) -> None:
         """Readiness proves only that ``codex`` is installed; it never
         inspects session state (detection is an op-time concern)."""
         require_commands(
             ("codex",),
-            transport,
+            access,
             harness_integration_name=self.name,
             template_name=self.owner_name,
             session_name=self._session_name,

@@ -31,8 +31,10 @@ from agentworks.artifacts.declarations import ArtifactsConfig
 from agentworks.bootstrap import build_registry as _real_build_registry
 from agentworks.bootstrap import load_request_registry as _real_load_request_registry
 from agentworks.capabilities.harness_integration import HarnessLaunchIntent, HarnessStart, ShellIntegration
+from agentworks.command_checks import presence_probe
 from agentworks.db import Database, InitStatus, SessionMode, SessionStatus
 from agentworks.errors import NotFoundError, StateError, UserAbort, ValidationError
+from agentworks.execution.access import Admin
 from agentworks.secrets.orchestration import (
     resolve_for_command as _real_resolve_for_command,
 )
@@ -41,6 +43,7 @@ from agentworks.sessions.manager._scope import _regenerate_tmuxinator as _real_r
 from agentworks.sessions.tmux import FingerprintProbe, ProbeStatus, TmuxServerFingerprint
 from agentworks.vms import manager as vm_manager
 from tests.conftest import seed_vm_trust
+from tests.vm_access_support import command_status, install_access_recorder, is_command_check
 
 from ..conftest import (
     ManifestDoc,
@@ -57,6 +60,8 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from agentworks.capabilities.base import RunContext
+    from agentworks.execution.results import Result
+    from tests.vm_access_support import Call
 
 
 # Every access a command builds is the recording fake: these tests run no ssh.
@@ -78,7 +83,12 @@ class _Result:
 
 
 class _Target:
-    """Transport double: records probe events into a shared log."""
+    """Launch-target double: records probe events into a shared log.
+
+    Its transport side answers ``run`` and ``write_file``; :meth:`answer`
+    answers its access's required-command checks, finding every command
+    except those in ``missing``.
+    """
 
     def __init__(self, events: list[str], *, missing: set[str] | None = None) -> None:
         self._events = events
@@ -87,11 +97,13 @@ class _Target:
     def run(self, cmd: str, **kwargs: object) -> _Result:
         if cmd.startswith("rm -f ") and ".tmuxinator.yml" in cmd:
             self._events.append("tmuxinator_remove")
-            return _Result()
-        if "command -v" in cmd:
-            self._events.append("probe")
-            return _Result(ok=not any(f"command -v {m} " in cmd for m in self._missing))
         return _Result()
+
+    def answer(self, call: Call) -> Result | None:
+        if not is_command_check(call.request):
+            return None
+        self._events.append("probe")
+        return command_status(20 if any(call.request == presence_probe(m) for m in self._missing) else 0)
 
     def write_file(self, remote_path: str, content: str, **kwargs: object) -> None:
         self._events.append(f"tmuxinator_write:{remote_path}")
@@ -131,11 +143,14 @@ def _requiring_template(monkeypatch: pytest.MonkeyPatch, *commands: str) -> None
 
 
 def _patch_transports(monkeypatch: pytest.MonkeyPatch, admin: _Target, agent: _Target) -> None:
+    """Route the admin's and the agent's transports and accesses to ``admin`` and ``agent``."""
     admin_factory = lambda vm, config, **kwargs: admin  # noqa: E731
     agent_factory = lambda vm, config, agent_row, **kwargs: agent  # noqa: E731
     monkeypatch.setattr("agentworks.transports.transport", admin_factory)
     monkeypatch.setattr("agentworks.sessions.manager.transport", admin_factory)
     monkeypatch.setattr("agentworks.transports.agent_transport", agent_factory)
+    recorder = install_access_recorder(monkeypatch)
+    recorder.answer = lambda call: (admin if isinstance(call.identity, Admin) else agent).answer(call)
 
 
 def test_create_flag_validation_precedes_unrelated_unsupported_live_overlay(

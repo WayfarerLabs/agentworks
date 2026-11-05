@@ -1,77 +1,82 @@
-"""Target-user command availability checks."""
+"""Read-only probes in a target user's own login and interactive shell."""
 
 from __future__ import annotations
 
+import re
 import shlex
 from typing import TYPE_CHECKING
 
-from agentworks.ssh import SSHError
+from agentworks.errors import ExternalError
+from agentworks.execution.requests import DiscardOutput, Script, Shell
 
 if TYPE_CHECKING:
-    from agentworks.ssh import SSHResult
-    from agentworks.transports import Transport
+    from agentworks.execution.access import VMAccess
+
+STATUS_PREFIX = "agentworks-command-status:"
+"""What starts the line a probe reports its command's status on."""
+
+_STATUS_LINE = re.compile(rb"agentworks-command-status:(\d{1,3})")
+_MISSING_STATUS = 20
 
 
-def run_user_shell_command(
-    command: str,
-    transport: Transport,
-    *,
-    timeout: int | None = None,
-) -> SSHResult:
-    """Run a read-only probe in the target user's login/interactive shell.
+def user_shell_probe(command: str, *, deadline: float | None = None) -> Script:
+    """The request :func:`run_user_shell_command` sends for ``command``.
 
-    The fixed descriptor channel distinguishes an inner-command status from a
-    shell-startup failure while the outer shell suppresses both startup and
-    command output.
+    The command runs in a subshell with both of its streams discarded on the
+    guest, then its status is printed on a line of its own. The script is
+    sourced by the account's login and interactive shell, so its startup
+    files have run first, as they do for the user's own workloads.
     """
-    status_probe = (
-        f"(\n{command}\n)\ncommand_status=$?\nprintf 'agentworks-command-status:%s\\n' \"$command_status\" >&3\nexit 0"
+    source = f"(\n{command}\n) >/dev/null 2>&1\nprintf '{STATUS_PREFIX}%s\\n' \"$?\"\n"
+    return Script(source, Shell.USER_DEFAULT, login=True, interactive=True, deadline=deadline)
+
+
+def presence_probe(command: str, *, deadline: float | None = None) -> Script:
+    """The probe :func:`check_required_commands` sends for one command: it exits 0 when found, 20 when not."""
+    return user_shell_probe(
+        f"command -v {shlex.quote(command)} >/dev/null 2>&1 || exit {_MISSING_STATUS}", deadline=deadline
     )
-    wrapper = (
-        f'status_line=$("$SHELL" -lic {shlex.quote(status_probe)} 3>&1 1>/dev/null 2>/dev/null) || exit 22\n'
-        'case "$status_line" in\n'
-        "  agentworks-command-status:[0-9]|"
-        "agentworks-command-status:[0-9][0-9]|"
-        "agentworks-command-status:[0-9][0-9][0-9]) ;;\n"
-        "  *) exit 22 ;;\n"
-        "esac\n"
-        "command_status=${status_line#agentworks-command-status:}\n"
-        '[ "$command_status" -le 255 ] || exit 22\n'
-        'exit "$command_status"'
-    )
-    return transport.run(
-        f"{{ {wrapper}; }} >/dev/null 2>&1",
-        check=False,
-        # Command redirection cannot suppress output from an outer login shell
-        # that a transport starts before evaluating this wrapper.
-        discard_output=True,
-        timeout=timeout,
-    )
+
+
+def run_user_shell_command(command: str, access: VMAccess, *, deadline: float | None = None) -> int:
+    """Run a read-only probe in the target user's login and interactive shell and return its exit status.
+
+    The command's own output never leaves the guest, and the shell's stderr
+    is discarded. Startup files may print to stdout, but only the last line
+    of the status form counts, and the probe's own line comes after them. A
+    probe that reports no status (a startup file that exits first, say) is
+    indeterminate, an ``ExternalError`` that quotes nothing it read; an
+    outcome other than a completion raises its typed execution error.
+    """
+    return _reported_status(access, user_shell_probe(command, deadline=deadline))
 
 
 def check_required_commands(
     commands: tuple[str, ...],
-    transport: Transport,
+    access: VMAccess,
     *,
-    timeout: int | None = None,
+    deadline: float | None = None,
 ) -> tuple[str, ...]:
-    """Return commands absent from the target user's login/interactive shell.
+    """Return the commands absent from the target user's login and interactive shell.
 
-    Command lookup uses the same login and interactive startup environment as
-    user workloads. A result other than present or absent is indeterminate and
-    fails with a value-safe transport error.
+    Command lookup uses the same startup environment as user workloads. A
+    result other than present or absent is indeterminate and raises, as
+    :func:`run_user_shell_command` does.
     """
     missing: list[str] = []
     for command in commands:
-        result = run_user_shell_command(
-            f"command -v {shlex.quote(command)} >/dev/null 2>&1 || exit 20",
-            transport,
-            timeout=timeout,
-        )
-        if result.returncode == 0:
-            continue
-        if result.returncode == 20:
+        status = _reported_status(access, presence_probe(command, deadline=deadline))
+        if status == _MISSING_STATUS:
             missing.append(command)
-            continue
-        raise SSHError("could not check required commands in the target user's shell")
+        elif status != 0:
+            raise ExternalError("could not check required commands in the target user's shell")
     return tuple(missing)
+
+
+def _reported_status(access: VMAccess, probe: Script) -> int:
+    result = access.run(probe, stderr=DiscardOutput())
+    result.require_completed(access.vm_name)
+    statuses = [match for line in result.stdout.splitlines() if (match := _STATUS_LINE.fullmatch(line))]
+    if not statuses or int(statuses[-1][1]) > 255:
+        raise ExternalError("could not read a command's status in the target user's shell")
+    return int(statuses[-1][1])

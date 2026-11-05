@@ -36,11 +36,15 @@ from agentworks.artifacts.declarations import ArtifactsConfig
 from agentworks.db import Database, SessionMode, SessionStatus
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.tmux import FingerprintProbe, ProbeStatus, TmuxServerFingerprint
+from tests.vm_access_support import command_status, install_access_recorder, is_command_check
 
 from ..conftest import stub_build_registry, stub_session_resolvers, stub_vm_gates
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from agentworks.execution.results import Result
+    from tests.vm_access_support import Call
 
 
 # Every access a command builds is the recording fake: these tests run no ssh.
@@ -70,8 +74,8 @@ class _Result:
 
 
 class _CodexTarget:
-    """Transport double for the codex op: answers the readiness
-    ``command -v codex`` probe and the three op-time probes (the recorder
+    """Launch-target double for the codex op: answers the readiness
+    ``command -v codex`` check (on its access) and the three op-time probes (the recorder
     read, the ``*-<sid>.jsonl`` rollout presence probe, and the
     source-filtered discovery probe), recording each into a shared event
     log. ``recorded`` seeds the recorder file with a codex-reported thread
@@ -92,9 +96,6 @@ class _CodexTarget:
         self._discovered = discovered
 
     def run(self, cmd: str, **kwargs: object) -> _Result:
-        if "command -v codex" in cmd:
-            self._events.append("probe")
-            return _Result()
         if ".thread" in cmd:
             self._events.append("read_recorder")
             if self._recorded is None:
@@ -107,6 +108,13 @@ class _CodexTarget:
             self._events.append("detect")
             return _Result(returncode=0 if self._present else 1)
         return _Result()
+
+    def answer(self, call: Call) -> Result | None:
+        """Its access finds the codex command; every other run falls through."""
+        if not is_command_check(call.request):
+            return None
+        self._events.append("probe")
+        return command_status(0)
 
 
 def _seed_db(tmp_path: Path) -> Database:
@@ -140,6 +148,7 @@ def _patch_transport(monkeypatch: pytest.MonkeyPatch, target: _CodexTarget) -> N
     admin_factory = lambda vm, config, **kwargs: target  # noqa: E731
     monkeypatch.setattr("agentworks.transports.transport", admin_factory)
     monkeypatch.setattr("agentworks.sessions.manager.transport", admin_factory)
+    install_access_recorder(monkeypatch).answer = target.answer
 
 
 def _capture_pane_command(monkeypatch: pytest.MonkeyPatch, events: list[str], captured: dict[str, str]) -> None:

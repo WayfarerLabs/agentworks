@@ -19,10 +19,12 @@ import pytest
 from agentworks.capabilities.base import OperationScope, RunContext, ScopeLevel
 from agentworks.capabilities.config import capability_config_references, validate_capability_config
 from agentworks.capabilities.harness_integration import HarnessLaunchIntent, HarnessStart
+from agentworks.command_checks import presence_probe
 from agentworks.errors import ConfigError, StateError
 from agentworks.plugins.claude.harness_integration import ClaudeCodeConfig, ClaudeCodeIntegration
 from agentworks.schema import RefOwner, merge_model
 from tests.conftest import _FakeResult, _FakeTarget
+from tests.vm_access_support import command_check_access
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -560,14 +562,13 @@ def test_returned_string_is_a_single_sh_c_that_echoes_then_execs() -> None:
 
 def test_readiness_probes_claude() -> None:
     harness_integration = _harness_integration()
-    target = _FakeTarget()  # command -v claude -> default ok
-    harness_integration.preflight(RunContext(operation_scope=_session_scope(), admin_target=target))
-    assert any("command -v claude" in cmd for cmd in target.commands)
+    access = command_check_access()
+    harness_integration.preflight(RunContext(operation_scope=_session_scope(), admin_access=access))
+    assert access.requests() == [presence_probe("claude")]
 
 
 def test_readiness_missing_claude_is_a_typed_error() -> None:
     harness_integration = _harness_integration()
-    target = _FakeTarget({"command -v claude": _FakeResult(20)})
-    ctx = RunContext(operation_scope=_session_scope(), admin_target=target)
+    ctx = RunContext(operation_scope=_session_scope(), admin_access=command_check_access(missing=("claude",)))
     with pytest.raises(StateError, match="'claude-code' harness integration.*requires 'claude'"):
         harness_integration.preflight(ctx)

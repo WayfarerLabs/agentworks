@@ -69,7 +69,7 @@ class _FakeHarnessIntegration(HarnessIntegration):
     ):
         return HarnessStart("")
 
-    def _probe_target(self, transport):  # type: ignore[no-untyped-def]
+    def _probe_target(self, access):  # type: ignore[no-untyped-def]
         return None
 
 

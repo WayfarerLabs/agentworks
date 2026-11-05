@@ -12,10 +12,12 @@ import pytest
 from agentworks.capabilities.base import OperationScope, RunContext, ScopeLevel
 from agentworks.capabilities.config import capability_config_references, validate_capability_config
 from agentworks.capabilities.harness_integration import HarnessLaunchIntent, HarnessStart
+from agentworks.command_checks import presence_probe
 from agentworks.errors import ConfigError, StateError
 from agentworks.plugins.grok.harness_integration import GrokBuildConfig, GrokBuildIntegration
 from agentworks.schema import RefOwner, merge_model
 from tests.conftest import _FakeResult, _FakeTarget, requires_posix_shell
+from tests.vm_access_support import command_check_access
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -418,12 +420,13 @@ def test_extra_args_are_quoted_and_appended_last() -> None:
 
 
 def test_readiness_requires_grok() -> None:
-    target = _FakeTarget({"command -v grok": _FakeResult(20)})
     with pytest.raises(StateError):
-        _integration().preflight(RunContext(operation_scope=_scope(), admin_target=target))
+        _integration().preflight(
+            RunContext(operation_scope=_scope(), admin_access=command_check_access(missing=("grok",)))
+        )
 
 
 def test_readiness_accepts_installed_grok() -> None:
-    target = _FakeTarget({"command -v grok": _FakeResult(0)})
-    _integration().preflight(RunContext(operation_scope=_scope(), admin_target=target))
-    assert any("command -v grok" in command for command in target.commands)
+    access = command_check_access()
+    _integration().preflight(RunContext(operation_scope=_scope(), admin_access=access))
+    assert access.requests() == [presence_probe("grok")]

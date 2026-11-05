@@ -454,11 +454,12 @@ world happens in readiness or ops.
 
 The base owns the whole readiness fork (`_run_readiness`): the loud scope-less error, the
 out-of-scope-level skip, the SESSION-level identity guard, the single-fire guard, the admin-vs-agent
-target selection, the pending-target defer to runup, and the preflight-tolerated / runup-fatal
-missing-transport split. A subclass fills in exactly one slot, `_probe_target`, which should call
-the shared `require_commands` helper with the executables the launch target must have on PATH
-(`shell`: the merged `required_commands`; `claude-code`: `("claude",)`; `codex`: `("codex",)`;
-`grok-build`: `("grok",)`).
+target selection (`ctx.admin_access()` or `ctx.agent_access()`), the pending-target defer to runup,
+and the preflight-tolerated / runup-fatal missing-access split. A subclass fills in exactly one
+slot, `_probe_target(access)`, which should call the shared `require_commands` helper with the
+launch target's `VMAccess` and the executables it must have on PATH (`shell`: the merged
+`required_commands`; `claude-code`: `("claude",)`; `codex`: `("codex",)`; `grok-build`:
+`("grok",)`).
 
 Keep readiness to tool PRESENCE. Session state (is there something to resume?) is an op-time
 concern: readiness is read-only and re-runnable by contract, and it runs at command start against a
@@ -685,13 +686,14 @@ requests; see
 [native setup evidence](../../../../docs/guides/native-harness-setup.md#native-compatibility-evidence).
 The session layers, with the shipped tests as templates:
 
-- **Unit (the bulk):** `cli/tests/test_claude_code_integration.py`. Use `_FakeTarget` /
-  `_FakeResult` from `cli/tests/conftest.py`: a substring-to-result map standing in for the
-  transport, so one fake serves the readiness probe (keyed on `command -v <tool>`) and the detection
-  probe (keyed on the stored id) in a single test. Cover: config vocabulary (accepts, unknown-field
-  raises, wrong-type raises), both detection directions (probe hit resumes, miss launches fresh,
-  other exit raises), flag mapping and `extra_args` quoting, the visible-decision line, state
-  minting, and the integration's create, resume-only, resume-or-new, and force-new behavior.
+- **Unit (the bulk):** `cli/tests/test_claude_code_integration.py`. Readiness runs against
+  `command_check_access` from `cli/tests/vm_access_support.py`, an access whose command checks find
+  every command except the ones a test names missing. The detection probe uses `_FakeTarget` /
+  `_FakeResult` from `cli/tests/conftest.py`, a substring-to-result map standing in for the
+  transport and keyed on the stored id. Cover: config vocabulary (accepts, unknown-field raises,
+  wrong-type raises), both detection directions (probe hit resumes, miss launches fresh, other exit
+  raises), flag mapping and `extra_args` quoting, the visible-decision line, state minting, and the
+  integration's create, resume-only, resume-or-new, and force-new behavior.
 - **Generated shell text, executed:** `cli/tests/test_codex_integration.py`. An exit-code stub
   proves how a probe's ANSWER is classified; it cannot prove the probe asks the right question, and
   the interesting logic in a stateful integration often lives in the shell text itself (codex's

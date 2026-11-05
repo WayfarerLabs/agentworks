@@ -20,8 +20,10 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.db import Database
+from agentworks.execution.access import Agent
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.tmux import FingerprintProbe, ProbeStatus, TmuxServerFingerprint
+from tests.vm_access_support import command_status, is_command_check
 
 from .conftest import (
     stub_build_registry,
@@ -40,7 +42,8 @@ def _stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 if TYPE_CHECKING:
-    pass
+    from agentworks.execution.results import Result
+    from tests.vm_access_support import AccessRecorder, Call
 
 
 # Every access a command builds is the recording fake: these tests run no ssh.
@@ -465,37 +468,33 @@ def test_create_session_uses_agent_target_for_tmux(tmp_path: Path, monkeypatch: 
     db.close()
 
 
-def test_create_session_aborts_on_missing_required_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_create_session_aborts_on_missing_required_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, vm_access_recorder: AccessRecorder
+) -> None:
     """A template whose ``required_commands`` aren't installed on the agent must
     abort with a clear ``StateError`` BEFORE any state mutation, rather than
     leaving the operator with the cryptic downstream tmux server-access failure.
     """
     from agentworks.agents import manager as agent_mgr
+    from agentworks.command_checks import presence_probe
     from agentworks.errors import StateError
     from agentworks.sessions import manager as session_manager
 
     db = _seed_db(tmp_path)
 
-    # Agent target whose `command -v` probe reports the binary as missing.
-    class _MissingCmdResult:
-        def __init__(self, ok: bool) -> None:
-            self.ok = ok
-            self.returncode = 0 if ok else 20
-            self.stdout = ""
-            self.stderr = ""
+    # The agent's command check reports the binary as missing.
+    seen_probes: list[Call] = []
 
-    seen_probes: list[str] = []
+    def answer(call: Call) -> Result | None:
+        if not is_command_check(call.request):
+            return None
+        seen_probes.append(call)
+        return command_status(20)
 
-    class _MissingCmdTarget:
-        def run(self, cmd: str, *_a: object, **_k: object) -> _MissingCmdResult:
-            if "command -v" in cmd:
-                seen_probes.append(cmd)
-                return _MissingCmdResult(ok=False)
-            return _MissingCmdResult(ok=True)
-
-    monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: _MissingCmdTarget())
-    monkeypatch.setattr("agentworks.sessions.manager.transport", lambda *a, **k: _MissingCmdTarget())
-    monkeypatch.setattr("agentworks.transports.agent_transport", lambda *a, **k: _MissingCmdTarget())
+    vm_access_recorder.answer = answer
+    monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: _Target("admin", []))
+    monkeypatch.setattr("agentworks.sessions.manager.transport", lambda *a, **k: _Target("admin", []))
+    monkeypatch.setattr("agentworks.transports.agent_transport", lambda *a, **k: _Target("agent", []))
     monkeypatch.setattr(agent_mgr, "_assert_agent_ssh_works", lambda *a, **k: None)
     stub_vm_gates(monkeypatch)
 
@@ -539,11 +538,10 @@ def test_create_session_aborts_on_missing_required_command(tmp_path: Path, monke
     assert not db.has_any_grant("a1", "ws1")
     assert add_calls == [], "agent added to workspace group before command preflight"
 
-    # Pin the probe's shell flags to `-lic`: same flags `tmux._pane_command`
-    # uses for the actual pane. A regression to `-lc` would silently skip
-    # PATH additions hidden behind interactive-only shell config.
-    assert len(seen_probes) == 1
-    assert " -lic " in seen_probes[0]
+    # The agent's own check, with the startup `tmux._pane_command` gives the
+    # pane: login and interactive (presence_probe), so PATH additions behind
+    # interactive-only shell config count.
+    assert [(call.identity, call.request) for call in seen_probes] == [(Agent("a1", "aw-a1"), presence_probe("claude"))]
     db.close()
 
 

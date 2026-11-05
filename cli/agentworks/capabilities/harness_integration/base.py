@@ -46,8 +46,8 @@ if TYPE_CHECKING:
         VMSetupInvocation,
         WorkspaceSetupInvocation,
     )
+    from agentworks.execution.access import VMAccess
     from agentworks.resources.reference import ResourceReference
-    from agentworks.transports import Transport
 
     # Structural, TYPE_CHECKING-only: the harness integration satisfies Readiness and
     # reads a target's ``.realized`` / ``.name``, but capabilities/harness_integration/
@@ -129,30 +129,27 @@ def require_implemented_start(
 
 def require_commands(
     commands: tuple[str, ...],
-    transport: Transport,
+    access: VMAccess,
     *,
     harness_integration_name: str,
     template_name: str,
     session_name: str,
     target_label: str,
 ) -> None:
-    """Probe every required command with ``$SHELL -lic 'command -v
-    <cmd>'``, the same shell flags the tmux pane command uses. Matters
-    because PATH additions can live in any of the dotfiles those flags
-    source:
+    """Probe every required command with ``command -v <cmd>`` in the
+    account's login and interactive shell (``check_required_commands``),
+    the same startup the tmux pane command gets. Matters because PATH
+    additions can live in any of the dotfiles those flags source:
 
     - ``-l`` (login): /etc/profile, ~/.profile, ~/.bash_profile,
       where mise activation and the agentworks profile fragments
       live.
     - ``-i`` (interactive): ~/.bashrc, ~/.zshrc, and any user PATH
       addition guarded by ``[[ $- == *i* ]]`` or ``[ -n "$PS1" ]``.
-    - ``-c``: run the probe and exit.
 
-    The probe runs over the SSH command channel without a PTY, so
-    shells may emit a "no job control in this shell" warning when
-    started interactive. The warning lands on stderr and doesn't
-    change the exit status; the probe uses ``check=False`` so
-    stderr is discarded.
+    The probe runs without a PTY, so shells may emit a "no job control in
+    this shell" warning when started interactive. The warning lands on
+    stderr, which the probe discards, and does not change the status.
 
     One residual gap: tools that gate PATH on ``[[ -t 0 ]]`` (real
     TTY check) won't be visible to the probe. Closing that would
@@ -172,7 +169,7 @@ def require_commands(
     imperative call sites do (``VM '<vm>'`` in admin/no-target mode,
     ``agent '<name>'`` otherwise) and hands it in.
     """
-    missing = check_required_commands(commands, transport)
+    missing = check_required_commands(commands, access)
     if not missing:
         return
     joined = ", ".join(repr(c) for c in missing)
@@ -259,7 +256,7 @@ class HarnessIntegration(Capability):
         workspace_name: str,  # the session's workspace ancestor
         workspace_path: str,  # the workspace's VM-side directory (the pane cd's here)
         target: _Target | None,  # the agent node it runs as; None in admin mode
-        admin: bool,  # admin mode (uses ctx.admin_target())
+        admin: bool,  # admin mode (uses ctx.admin_access())
         state: dict[str, object],  # this harness integration's OWN namespace of the persisted blob (mutated in place)
         artifact_context: SessionArtifactContext | None = None,
     ) -> None:
@@ -459,9 +456,9 @@ class HarnessIntegration(Capability):
         """
 
     @abstractmethod
-    def _probe_target(self, transport: Transport) -> None:
-        """Run the harness integration's required-command probe against ``transport``
-        (the resolved launch target). Called by :meth:`_run_readiness` at
+    def _probe_target(self, access: VMAccess) -> None:
+        """Run the harness integration's required-command probe through ``access``
+        (the resolved launch target's). Called by :meth:`_run_readiness` at
         the probe slot; each member names its own commands (``shell``: the
         merged ``required_commands``; ``claude-code``: ``claude``)."""
 
@@ -505,7 +502,7 @@ class HarnessIntegration(Capability):
         if self._probed:
             return
         if self._admin:
-            transport = ctx.admin_target()
+            access = ctx.admin_access()
         else:
             if self._target is None:
                 # Anti-silent-skip: in scope with no target is a
@@ -517,8 +514,8 @@ class HarnessIntegration(Capability):
                 )
             if not self._target.realized:
                 return  # pending target: defer to runup
-            transport = ctx.agent_target()
-        if transport is None:
+            access = ctx.agent_access()
+        if access is None:
             if stage == "preflight":
                 # The command-start context did not carry the target;
                 # the op-start context must.
@@ -526,9 +523,9 @@ class HarnessIntegration(Capability):
             raise StateError(
                 f"session '{self._session_name}': the harness integration reached runup "
                 f"with no launch target on the context; the orchestrator "
-                f"must hand the op-start context the target transport."
+                f"must hand the op-start context the target's access."
             )
-        self._probe_target(transport)
+        self._probe_target(access)
         self._probed = True
 
     def _check_identity(self, scope: OperationScope) -> None:

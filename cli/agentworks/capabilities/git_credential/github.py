@@ -155,14 +155,13 @@ class GitHubCredentialProvider(GitCredentialProvider):
 
     def _check_cli_readiness(self, ctx: RunContext) -> None:
         from agentworks import output
-        from agentworks.errors import StateError
-        from agentworks.ssh import SSHError
+        from agentworks.errors import ConnectivityError, ExternalError, StateError
 
-        target = ctx.admin_target() or ctx.agent_target()
-        if target is None:
-            raise StateError("GitHub CLI runup requires a current user target")
+        access = ctx.admin_access() or ctx.agent_access()
+        if access is None:
+            raise StateError("GitHub CLI runup requires a current user's access")
         try:
-            missing = check_required_commands(("gh",), target, timeout=10)
+            missing = check_required_commands(("gh",), access, deadline=10)
             if missing:
                 output.warn(
                     f"GitHub CLI credentials are currently unavailable for git-credential/{self.owner_name}; "
@@ -170,13 +169,14 @@ class GitHubCredentialProvider(GitCredentialProvider):
                     "if it is installed later, or install it for the target user"
                 )
                 return
-            result = run_user_shell_command(_GH_AUTH_CHECK, target, timeout=10)
-        except SSHError:
+            status = run_user_shell_command(_GH_AUTH_CHECK, access, deadline=10)
+        except (ConnectivityError, ExternalError, StateError):
+            # Indeterminate, a VM without python3 (VMNotReady) included: warn, never block the helper.
             output.warn(f"Could not determine GitHub CLI readiness for git-credential/{self.owner_name}")
             return
-        if result.returncode == 0:
+        if status == 0:
             output.detail(f"Verified GitHub CLI readiness for git-credential/{self.owner_name}")
-        elif result.returncode == 21:
+        elif status == 21:
             output.warn(
                 f"GitHub CLI credentials are currently unavailable for git-credential/{self.owner_name}; "
                 "the target user must run 'gh auth login' for the intended active github.com identity "

@@ -12,11 +12,15 @@ from agentworks.artifacts.declarations import ArtifactsConfig
 from agentworks.db import Database, SessionMode, SessionStatus
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.tmux import FingerprintProbe, ProbeStatus, TmuxServerFingerprint
+from tests.vm_access_support import command_status, install_access_recorder, is_command_check
 
 from ..conftest import stub_build_registry, stub_session_resolvers, stub_vm_gates
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from agentworks.execution.results import Result
+    from tests.vm_access_support import Call
 
 
 # Every access a command builds is the recording fake: these tests run no ssh.
@@ -42,13 +46,17 @@ class _GrokTarget:
         self._present = session_present
 
     def run(self, command: str, **kwargs: object) -> _Result:
-        if "command -v grok" in command:
-            self._events.append("probe")
-            return _Result()
         if "summary.json" in command:
             self._events.append("detect")
             return _Result(self._present)
         return _Result()
+
+    def answer(self, call: Call) -> Result | None:
+        """Its access finds the grok command; every other run falls through."""
+        if not is_command_check(call.request):
+            return None
+        self._events.append("probe")
+        return command_status(0)
 
 
 def _seed_db(tmp_path: Path) -> Database:
@@ -85,6 +93,7 @@ def _common_stubs(monkeypatch: pytest.MonkeyPatch, target: _GrokTarget) -> None:
     factory = lambda vm, config, **kwargs: target  # noqa: E731
     monkeypatch.setattr("agentworks.transports.transport", factory)
     monkeypatch.setattr("agentworks.sessions.manager.transport", factory)
+    install_access_recorder(monkeypatch).answer = target.answer
     stub_vm_gates(monkeypatch)
     stub_session_resolvers(monkeypatch)
     monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *args, **kwargs: None)

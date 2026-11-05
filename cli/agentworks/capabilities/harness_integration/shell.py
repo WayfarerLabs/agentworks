@@ -29,7 +29,7 @@ if TYPE_CHECKING:
         VMSetupInvocation,
         WorkspaceSetupInvocation,
     )
-    from agentworks.transports import Transport
+    from agentworks.execution.access import VMAccess
 
 
 class ShellConfig(AgwModel):
@@ -151,10 +151,10 @@ class ShellIntegration(HarnessIntegration):
             application = shell_artifacts(context.inputs, context.directory, session=True)
         return HarnessStart(command, artifacts=application)
 
-    def _probe_target(self, transport: Transport) -> None:
+    def _probe_target(self, access: VMAccess) -> None:
         require_commands(
             tuple(self.config.required_commands),
-            transport,
+            access,
             harness_integration_name=self.name,
             template_name=self.owner_name,
             session_name=self._session_name,

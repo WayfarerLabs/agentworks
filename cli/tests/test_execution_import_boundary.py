@@ -57,6 +57,11 @@ MIGRATED_FILES = (
     "vms/nodes.py",
     "orchestration/activation.py",
     "vms/initializer/tailscale_preflight.py",
+    "command_checks.py",
+    "capabilities/harness_integration/base.py",
+    "capabilities/harness_integration/shell.py",
+    "capabilities/git_credential/github.py",
+    "plugins/azure/azdo.py",
 )
 
 

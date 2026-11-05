@@ -51,8 +51,8 @@ from agentworks.schema import AgwModel, AgwRootModel
 if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
     from agentworks.db import VMRow, VMStatus
+    from agentworks.execution.access import VMAccess
     from agentworks.execution.root_script import RawRun
-    from agentworks.transports import Transport
 
 
 def config_model_for(kind: str, name: str) -> type[BaseModel]:
@@ -143,7 +143,7 @@ class ConformingHarnessIntegration(HarnessIntegration):
     ) -> HarnessStart:
         raise NotImplementedError
 
-    def _probe_target(self, transport: Transport) -> None:
+    def _probe_target(self, access: VMAccess) -> None:
         raise NotImplementedError
 
 

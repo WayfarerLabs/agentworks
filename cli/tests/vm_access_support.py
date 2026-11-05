@@ -52,9 +52,13 @@ class Call:
 class RecordingVMAccess(VMAccess):
     """Records ``run``, ``stream``, ``attach`` and ``forward`` and returns canned outcomes.
 
-    ``run_outcomes`` is consumed in order, then ``Completed(0)`` results follow.
-    An outcome that is an exception is raised. A stream ``run`` was asked to
-    discard comes back empty, as it would from a real access.
+    ``answer``, when a test sets it, is asked first with each recorded call
+    and may return the outcome, which suits a stateful double that answers
+    several probes. A request given an answer with :meth:`respond` gets it
+    every time it is asked. Any other ``run`` consumes ``run_outcomes`` in
+    order, then gets ``default_outcome``, ``Completed(0)`` unless a test sets
+    it. An outcome that is an exception is raised. A stream ``run`` was asked
+    to discard comes back empty, as it would from a real access.
     ``stream_status``, ``attach_status`` and ``forward_status`` are returned
     (or raised) by their operation.
     """
@@ -71,7 +75,10 @@ class RecordingVMAccess(VMAccess):
             trust_mode=trust_mode,
         )
         self.calls = calls
+        self.answer: Callable[[Call], Result | BaseException | None] | None = None
         self.run_outcomes: list[Result | BaseException] = []
+        self.responses: list[tuple[RunRequest, Result | BaseException]] = []
+        self.default_outcome: Result = Result(Completed(0))
         self.stream_status: int | BaseException = 0
         self.attach_status: int | BaseException = 0
         self.forward_status: int | BaseException = 0
@@ -84,16 +91,21 @@ class RecordingVMAccess(VMAccess):
         stderr: OutputSink = CaptureOutput(),
         check: bool = False,
     ) -> Result:
-        self.calls.append(
-            Call(
-                self.identity,
-                "run",
-                request,
-                {"check": check, "stdout": stdout, "stderr": stderr},
-                enrolling=self.trust_mode is TrustMode.ENROLL,
-            )
+        call = Call(
+            self.identity,
+            "run",
+            request,
+            {"check": check, "stdout": stdout, "stderr": stderr},
+            enrolling=self.trust_mode is TrustMode.ENROLL,
         )
-        outcome = self.run_outcomes.pop(0) if self.run_outcomes else Result(Completed(0))
+        self.calls.append(call)
+        answer = self.answer(call) if self.answer is not None else None
+        if answer is None:
+            answer = next((outcome for known, outcome in self.responses if known == request), None)
+        if answer is not None:
+            outcome = answer
+        else:
+            outcome = self.run_outcomes.pop(0) if self.run_outcomes else self.default_outcome
         if isinstance(outcome, BaseException):
             raise outcome
         if isinstance(stdout, DiscardOutput):
@@ -107,6 +119,18 @@ class RecordingVMAccess(VMAccess):
         if check and outcome.require_completed(self.vm_name) != 0:
             raise AssertionError("a canned non-zero result under check=True; script an exception instead")
         return outcome
+
+    def respond(self, request: RunRequest, outcome: Result | BaseException) -> None:
+        """Answer ``run`` with ``outcome`` whenever it is asked a request equal to ``request``.
+
+        Requests come from one named builder per probe, so a test names the
+        probe it answers by calling that builder.
+        """
+        self.responses.append((request, outcome))
+
+    def requests(self) -> list[RunRequest]:
+        """Every request ``run`` was asked, in order."""
+        return [call.request for call in self.calls if call.operation == "run" and call.identity == self.identity]
 
     def stream(self, request: RunRequest, *, stdin: BinaryIO | None, stdout: BinaryIO, stderr: BinaryIO) -> int:
         self.calls.append(Call(self.identity, "stream", request, {"stdin": stdin, "stdout": stdout, "stderr": stderr}))
@@ -139,6 +163,10 @@ class AccessRecorder:
         self._accesses: dict[Identity, RecordingVMAccess] = {}
         self._enrollment: RecordingVMAccess | None = None
         self.enrolled: list[str] = []
+        self.default_outcome: Result = Result(Completed(0))
+        """What each access it builds answers an unscripted ``run`` with; set it before the command runs."""
+        self.answer: Callable[[Call], Result | BaseException | None] | None = None
+        """Asked first by every access it builds, as ``RecordingVMAccess.answer`` is."""
 
     def vm_access(self, vm: Any, config: Any, identity: Identity, *, log: Any = None) -> RecordingVMAccess:
         self.built.append((vm.name, identity))
@@ -163,7 +191,10 @@ class AccessRecorder:
         """The access object for ``identity`` (the admin by default), created on first use."""
         identity = identity or Admin()
         if identity not in self._accesses:
-            self._accesses[identity] = RecordingVMAccess(self.calls, identity, vm_name=vm_name)
+            access = RecordingVMAccess(self.calls, identity, vm_name=vm_name)
+            access.default_outcome = self.default_outcome
+            access.answer = lambda call: self.answer(call) if self.answer is not None else None
+            self._accesses[identity] = access
         return self._accesses[identity]
 
     @property
@@ -173,6 +204,44 @@ class AccessRecorder:
 
     def requests(self, operation: str) -> list[Any]:
         return [call.request for call in self.calls if call.operation == operation]
+
+
+def install_access_recorder(monkeypatch: pytest.MonkeyPatch) -> AccessRecorder:
+    """Route ``execution.vm_access`` and ``enrollment_access`` to a new recording fake.
+
+    ssh resolves without a client. A later call replaces the earlier recorder.
+    """
+    recorder = AccessRecorder()
+    monkeypatch.setattr("agentworks.execution.vm_access", recorder.vm_access)
+    monkeypatch.setattr("agentworks.execution.enrollment_access", recorder.enrollment_access)
+    monkeypatch.setattr("agentworks.execution.resolve_ssh", lambda: recorder.client)
+    return recorder
+
+
+def command_status(status: int) -> Result:
+    """What a command check's probe reports for a command that exited ``status`` (``command_checks``)."""
+    from agentworks.command_checks import STATUS_PREFIX
+
+    return Result(Completed(0), f"{STATUS_PREFIX}{status}\n".encode())
+
+
+def is_command_check(request: object) -> bool:
+    """Whether ``request`` is a ``command_checks`` probe."""
+    from agentworks.command_checks import STATUS_PREFIX
+    from agentworks.execution.requests import Script
+
+    return isinstance(request, Script) and STATUS_PREFIX in request.source
+
+
+def command_check_access(*, missing: Sequence[str] = (), identity: Identity | None = None) -> RecordingVMAccess:
+    """An access on which every required-command check finds its command, except those in ``missing``."""
+    from agentworks.command_checks import presence_probe
+
+    access = RecordingVMAccess([], identity or Admin())
+    access.default_outcome = command_status(0)
+    for command in missing:
+        access.respond(presence_probe(command), command_status(20))
+    return access
 
 
 # -- A real access whose guest is this machine ------------------------------------------
@@ -295,6 +364,8 @@ __all__ = [
     "Call",
     "RecordingVMAccess",
     "account_shell",
+    "command_check_access",
+    "command_status",
     "local_remote_argv",
     "local_vm_access",
     "rewrite_launcher",

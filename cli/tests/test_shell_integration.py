@@ -28,22 +28,10 @@ from agentworks.capabilities.harness_integration import (
 from agentworks.capabilities.harness_integration.shell import ShellConfig
 from agentworks.errors import ConfigError, StateError
 from agentworks.schema import RefOwner, merge_model
+from tests.vm_access_support import command_check_access
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
-
-
-class _Probe:
-    """Recording transport double for the required-commands probe."""
-
-    def __init__(self, missing: set[str] | None = None) -> None:
-        self._missing = missing or set()
-        self.commands: list[str] = []
-
-    def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
-        self.commands.append(cmd)
-        ok = not any(f"command -v {m} " in cmd for m in self._missing)
-        return SimpleNamespace(ok=ok, returncode=0 if ok else 20)
 
 
 @pytest.mark.parametrize(
@@ -347,20 +335,20 @@ def test_shell_leaves_the_state_blob_untouched() -> None:
 
 def test_probe_fires_once_and_checks_every_required_command() -> None:
     harness_integration = _harness_integration({"required_commands": ["claude", "rg"]})
-    probe = _Probe()
+    probe = command_check_access()
     scope = _session_scope()
-    ctx = RunContext(operation_scope=scope, admin_target=probe)
+    ctx = RunContext(operation_scope=scope, admin_access=probe)
 
     harness_integration.preflight(ctx)
-    assert len(probe.commands) == 2  # one probe per required command
+    assert len(probe.requests()) == 2  # one probe per required command
     harness_integration.runup(ctx)
-    assert len(probe.commands) == 2  # single-fire guard: not re-probed
+    assert len(probe.requests()) == 2  # single-fire guard: not re-probed
 
 
 def test_missing_command_is_a_typed_error_naming_the_vm() -> None:
     harness_integration = _harness_integration({"required_commands": ["claude", "rg"]})
-    probe = _Probe(missing={"rg"})
-    ctx = RunContext(operation_scope=_session_scope(), admin_target=probe)
+    probe = command_check_access(missing={"rg"})
+    ctx = RunContext(operation_scope=_session_scope(), admin_access=probe)
 
     with pytest.raises(StateError, match="requires 'rg'") as exc:
         harness_integration.preflight(ctx)
@@ -375,25 +363,25 @@ def test_agent_mode_defers_pending_target_then_probes_after_flip() -> None:
         target=target,
         admin=False,
     )
-    probe = _Probe()
+    probe = command_check_access()
     scope = _session_scope(agent="dev", admin=False)
-    ctx = RunContext(operation_scope=scope, agent_target=probe)
+    ctx = RunContext(operation_scope=scope, agent_access=probe)
 
     harness_integration.preflight(ctx)
-    assert probe.commands == []  # pending target: deferred
+    assert probe.requests() == []  # pending target: deferred
 
     target.realized = True
     harness_integration.runup(ctx)
-    assert len(probe.commands) == 1  # probed once, post-flip
+    assert len(probe.requests()) == 1  # probed once, post-flip
 
 
 def test_agent_mode_missing_command_names_the_agent() -> None:
     target = SimpleNamespace(name="dev", realized=True)
     harness_integration = _harness_integration({"required_commands": ["claude"]}, target=target, admin=False)
-    probe = _Probe(missing={"claude"})
+    probe = command_check_access(missing={"claude"})
     ctx = RunContext(
         operation_scope=_session_scope(agent="dev", admin=False),
-        agent_target=probe,
+        agent_access=probe,
     )
     with pytest.raises(StateError, match="requires 'claude'") as exc:
         harness_integration.preflight(ctx)
@@ -431,7 +419,7 @@ def test_agent_mode_absent_target_is_a_loud_error() -> None:
 
 def test_missing_transport_defers_at_preflight_and_is_loud_at_runup() -> None:
     harness_integration = _harness_integration({"required_commands": ["claude"]})
-    ctx = RunContext(operation_scope=_session_scope())  # no admin_target
+    ctx = RunContext(operation_scope=_session_scope())  # no admin access
     harness_integration.preflight(ctx)  # deferred, no raise
     with pytest.raises(StateError, match="op-start context"):
         harness_integration.runup(ctx)
@@ -442,12 +430,12 @@ def test_missing_transport_defers_at_preflight_and_is_loud_at_runup() -> None:
 
 def test_identity_guard_raises_on_vm_mismatch() -> None:
     harness_integration = _harness_integration({"required_commands": ["claude"]}, vm_name="box")
-    probe = _Probe()
-    ctx = RunContext(operation_scope=_session_scope(vm="other-box"), admin_target=probe)
+    probe = command_check_access()
+    ctx = RunContext(operation_scope=_session_scope(vm="other-box"), admin_access=probe)
     with pytest.raises(StateError, match="wired for VM 'box'") as exc:
         harness_integration.preflight(ctx)
     assert exc.value.entity_name == "s1"
-    assert probe.commands == []  # never reached the probe
+    assert probe.requests() == []  # never reached the probe
 
 
 def test_identity_guard_raises_on_agent_mismatch() -> None:
@@ -455,7 +443,7 @@ def test_identity_guard_raises_on_agent_mismatch() -> None:
     harness_integration = _harness_integration({"required_commands": ["claude"]}, target=target, admin=False)
     ctx = RunContext(
         operation_scope=_session_scope(agent="someone-else", admin=False),
-        agent_target=_Probe(),
+        agent_access=command_check_access(),
     )
     with pytest.raises(StateError, match="runs as agent 'dev'"):
         harness_integration.preflight(ctx)
@@ -466,7 +454,7 @@ def test_identity_guard_raises_on_mode_mismatch() -> None:
     harness_integration = _harness_integration({"required_commands": ["claude"]}, admin=True)
     ctx = RunContext(
         operation_scope=_session_scope(agent="dev", admin=False),
-        admin_target=_Probe(),
+        admin_access=command_check_access(),
     )
     with pytest.raises(StateError, match="admin"):
         harness_integration.preflight(ctx)
@@ -474,10 +462,10 @@ def test_identity_guard_raises_on_mode_mismatch() -> None:
 
 def test_identity_guard_passes_the_matching_scope() -> None:
     harness_integration = _harness_integration({"required_commands": ["claude"]})
-    probe = _Probe()
-    ctx = RunContext(operation_scope=_session_scope(), admin_target=probe)
+    probe = command_check_access()
+    ctx = RunContext(operation_scope=_session_scope(), admin_access=probe)
     harness_integration.preflight(ctx)  # matching identity: no raise
-    assert len(probe.commands) == 1
+    assert len(probe.requests()) == 1
 
 
 # -- the layering rule (FRD R1) ----------------------------------------------
