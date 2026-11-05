@@ -7,7 +7,7 @@ instance-type catalog
 with smallest-that-fits selection, and the baseline-deny / ephemeral-scoped-allow
 exposure model azure's redesign established (a security
 group that denies all inbound by default; SSH via ephemeral rules scoped to the
-operator's egress prefixes; ``post_tailscale_ready`` / ``secure_failed_vm`` /
+operator's egress prefixes; ``close_provisioning_access`` and
 ``_transient_route`` close hooks; create rollback on both failure and operator
 interrupt). Two deliberate divergences from azure are documented where they
 live: ``runup`` / ``status`` classify credential rejection, authorization
@@ -548,7 +548,7 @@ class EC2Platform(PublicAddressPlatform):
             ec2.get_waiter("instance_running").wait(InstanceIds=[instance_id])
 
             # Open the scoped bootstrap SSH hole (the group is deny-baseline
-            # until now); post_tailscale_ready / secure_failed_vm close exactly
+            # until now); close_provisioning_access closes exactly
             # these prefixes, recorded in platform_metadata below.
             output.detail("Opening scoped SSH bootstrap access...")
             poke_ssh_allow(ec2, security_group_id, ssh_allow_prefixes)
@@ -673,42 +673,39 @@ class EC2Platform(PublicAddressPlatform):
         region = vm.platform_metadata.get("region")
         return f"{instance_id}@{region}" if region else instance_id
 
-    def post_tailscale_ready(self, vm: VMRow, ctx: RunContext) -> None:
-        """Close provisioning access now that Tailscale is up.
+    def close_provisioning_access(self, vm: VMRow, ctx: RunContext) -> None:
+        """Revoke EXACTLY the bootstrap allow's tuples on the VM's per-VM
+        security group, leaving zero inbound exposure (the empty security
+        group is the deny-all-inbound baseline; the public IP stays for the
+        VM's lifetime). Phase A calls it once, however it ends, with the
+        create op's own scoped context; on an ``access-key`` site the network
+        call authenticates as the configured key, with no ambient fallback.
+        A kept VM Phase A did not complete is debugged through the EC2 serial
+        console; ``vm delete``'s logout pokes a fresh transient allow via
+        :meth:`_transient_route`.
 
-        The VM comes out of :meth:`create` reachable only through the ephemeral
-        bootstrap SSH allow (scoped to the operator's egress prefixes; the empty
-        security group is the deny-all-inbound baseline). This hook fires at the
-        async Tailscale-ready point inside ``bootstrap_vm`` (Phase A) and revokes
-        EXACTLY the bootstrap allow's tuples (recorded in platform_metadata at
-        create), leaving zero inbound exposure; the public IP stays for the VM's
-        lifetime.
-
-        ``ctx`` is the create op's own scoped context (secrets already resolved
-        before Phase A): revoking the allow is a network call and reads the
-        credential through it, with no ambient fallback.
-        """
-        self._close_provisioning_access(vm, ctx)
-
-    def secure_failed_vm(self, vm: VMRow, ctx: RunContext) -> None:
-        """Fail closed after kept post-create verification failure.
-
-        Mirrors :meth:`post_tailscale_ready`, which only fires on success: a VM
-        whose Phase A failed (marked FAILED) or was interrupted (left incomplete)
-        is kept for debugging, and this hook revokes exactly the bootstrap allow's tuples so
-        it defaults to zero inbound exposure. Create-time bootstrap failures roll
-        back inside :meth:`create` and never reach this hook. The ordinary-command
-        gate refuses the kept VM, ``vm shell --platform`` included, so
-        debugging goes through the EC2 serial console; ``vm delete``'s logout
-        pokes a fresh transient allow via :meth:`_transient_route`.
-
-        ``ctx`` is the create op's own scoped context, whose secrets were
-        resolved before Phase A began, so even the interrupt path never resolves
-        a secret here for the first time; on an ``access-key`` site the
-        network call authenticates as the configured access key, with no ambient
-        fallback.
-        """
-        self._close_provisioning_access(vm, ctx)
+        Revoking exactly the recorded bootstrap prefixes, rather than sweeping
+        all ingress, is what lets a concurrent ``vm shell --platform`` route
+        (nothing serializes commands per VM) keep its own distinct allow: a
+        blanket revoke-all would tear it out. The prefixes come from
+        platform_metadata, recorded by :meth:`create` as exactly what it poked;
+        recomputing them here would drift if the operator's egress IP or
+        ``ssh_allow_cidrs`` changed since create, revoking the wrong tuples.
+        ``remove_ssh_allow`` is tolerant of an already-gone tuple, so a shared
+        prefix another route revoked first is a no-op. A row with no recorded
+        security group or prefixes is warned and skipped (the hook is
+        best effort; ``delete`` removes the group outright regardless)."""
+        security_group_id = vm.platform_metadata.get("security_group_id")
+        if not security_group_id:
+            output.warn(f"VM '{vm.name}' has no EC2 security_group_id; cannot close provisioning access")
+            return
+        recorded = vm.platform_metadata.get("bootstrap_ssh_prefixes")
+        prefixes = [p for p in recorded.split(",") if p] if recorded else []
+        if not prefixes:
+            output.warn(f"VM '{vm.name}' has no recorded bootstrap SSH prefixes; cannot close provisioning access")
+            return
+        ec2 = self._client("ec2", self._region_of(vm), ctx)
+        remove_ssh_allow(ec2, str(security_group_id), prefixes)
 
     @contextlib.contextmanager
     def _transient_route(self, vm: VMRow, ctx: RunContext) -> Iterator[None]:
@@ -789,33 +786,6 @@ class EC2Platform(PublicAddressPlatform):
         edits) falling back to the site's configured region for rows that
         predate the metadata key."""
         return str(vm.platform_metadata.get("region") or self.config.region)
-
-    def _close_provisioning_access(self, vm: VMRow, ctx: RunContext) -> None:
-        """Revoke EXACTLY the bootstrap allow's tuples on the VM's per-VM
-        security group (best-effort). Shared by the two close hooks.
-
-        Revoking exactly the recorded bootstrap prefixes, rather than sweeping
-        all ingress, is what lets a concurrent ``vm shell --platform`` route
-        (nothing serializes commands per VM) keep its own distinct allow: a
-        blanket revoke-all would tear it out. The prefixes come from
-        platform_metadata, recorded by :meth:`create` as exactly what it poked;
-        recomputing them here would drift if the operator's egress IP or
-        ``ssh_allow_cidrs`` changed since create, revoking the wrong tuples.
-        ``remove_ssh_allow`` is tolerant of an already-gone tuple, so a shared
-        prefix another route revoked first is a no-op. A row with no recorded
-        security group or prefixes is warned and skipped (the hooks are
-        best-effort; ``delete`` removes the group outright regardless)."""
-        security_group_id = vm.platform_metadata.get("security_group_id")
-        if not security_group_id:
-            output.warn(f"VM '{vm.name}' has no EC2 security_group_id; cannot close provisioning access")
-            return
-        recorded = vm.platform_metadata.get("bootstrap_ssh_prefixes")
-        prefixes = [p for p in recorded.split(",") if p] if recorded else []
-        if not prefixes:
-            output.warn(f"VM '{vm.name}' has no recorded bootstrap SSH prefixes; cannot close provisioning access")
-            return
-        ec2 = self._client("ec2", self._region_of(vm), ctx)
-        remove_ssh_allow(ec2, str(security_group_id), prefixes)
 
     def _public_address(self, vm: VMRow, ctx: RunContext) -> str:
         return self._public_ip(self._client("ec2", self._region_of(vm), ctx), self._instance_id(vm))

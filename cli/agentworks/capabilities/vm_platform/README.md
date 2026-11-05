@@ -159,8 +159,8 @@ replicating it in another category would cross the platform's ownership boundary
 3. **Local platforms** (local Lima, `wsl2`). The host is the operator's own machine and exposure is
    inherently host-local (Lima forwards guest SSH to a local port, `localPort: 0` in
    `LIMA_TEMPLATE`; WSL2 traffic rides `wsl.exe` into a NAT'd virtual network). There is nothing to
-   arm or lift, which is why `secure_failed_vm` correctly stays at its default here and the clouds'
-   private route machinery has no counterpart.
+   arm or lift, which is why `close_provisioning_access` correctly stays at its default here and the
+   clouds' private route machinery has no counterpart.
 
 ### The Platform Surface
 
@@ -250,29 +250,27 @@ the VM is running or was just started:
   keepalive that holds the distro against Windows' idle-shutdown for the span of a command, with
   Win32 Job-Object orphan-proofing for a hard-killed `agw`. No `ctx`: every hold that exists is
   local and makes no backend call. A cloud hold that did would take `ctx` as the ops do.
-- `post_tailscale_ready(vm, ctx) -> None` (default no-op). The contract is "close provisioning
-  access": Phase A calls it once the VM answers over Tailscale and the VM contract has passed. Azure
-  deletes the ephemeral bootstrap SSH allow rule here, leaving the VM with zero inbound exposure
-  behind its permanent deny-all-inbound baseline (the public IP itself stays attached for the VM's
-  whole lifetime); EC2 revokes exactly the bootstrap allow's tuples (recorded in platform_metadata
-  at create) to the same end, so a concurrent native route's distinct allow survives; GCE removes
-  its provider-ID-owned stable allow and retains its priority-1 all-ingress deny. The asymmetry with
-  the per-call route is intentional: the bootstrap ingress opens inside `create()` (cloud-init needs
-  inbound SSH from the operator), and neither that nor this closing point is context-manager-shaped.
-- `secure_failed_vm(vm, ctx) -> None` (default no-op). Same contract as `post_tailscale_ready`, for
-  the paths where a completed create is kept after Phase A fails (first contact, enrollment or the
-  VM contract, which marks the row FAILED) or the operator interrupts it (the row stays incomplete);
-  the success-only hook never fired on either. Create-time bootstrap failure stays inside the
-  platform rollback window and never reaches this hook. Azure and GCE delete the owned fixed-name
-  bootstrap allow and EC2 revokes the recorded bootstrap tuples, so the VM defaults to zero inbound
-  exposure. The ordinary-command gate refuses the kept VM, `vm shell --platform` included, so
-  debugging goes through the platform's serial console (not firewall-gated); `vm delete`'s logout
-  opens its own per-operation allow.
+- `close_provisioning_access(vm, ctx) -> None` (default no-op). Phase A calls it exactly once, from
+  a `finally` around its span, so it runs whether the VM contract passed, Phase A failed (the row is
+  marked FAILED) or the operator interrupted it (the row stays incomplete). A create that fails
+  before it returns rolls back its own ingress inside the platform's rollback window and never
+  reaches this hook. Azure deletes the ephemeral bootstrap SSH allow rule here, leaving the VM with
+  zero inbound exposure behind its permanent deny-all-inbound baseline (the public IP itself stays
+  attached for the VM's whole lifetime); EC2 revokes exactly the bootstrap allow's tuples (recorded
+  in platform_metadata at create) to the same end, so a concurrent native route's distinct allow
+  survives; GCE removes its provider-ID-owned stable allow and retains its priority-1 all-ingress
+  deny. The asymmetry with the per-call route is intentional: the bootstrap ingress opens inside
+  `create()` (cloud-init needs inbound SSH from the operator), and neither that nor this closing
+  point is context-manager-shaped. The hook must not assume the VM is reachable or complete, and
+  Phase A treats it as best effort: a failure warns, and an error or interrupt already propagating
+  keeps going. The ordinary-command gate refuses a VM Phase A did not complete,
+  `vm shell --platform` included, so debugging such a VM goes through the platform's serial console
+  (not firewall-gated); `vm delete`'s logout opens its own per-operation allow.
 
-The two closing hooks and the route take `ctx` because opening or closing the firewall route (an
-Azure NSG rule, an EC2 security-group rule) is a backend call; Phase A (`phase_a.bootstrap`) passes
-the two closing hooks the create's own scoped context, whose secrets are already resolved before
-Phase A begins, so even the interrupt path never resolves a secret for the first time.
+The closing hook and the route take `ctx` because opening or closing the firewall route (an Azure
+NSG rule, an EC2 security-group rule) is a backend call; Phase A (`phase_a.bootstrap`) passes the
+closing hook the create's own scoped context, whose secrets are already resolved before Phase A
+begins, so even the interrupt path never resolves a secret for the first time.
 
 Callers must pass the context their composition root already built for the platform's ops
 (`gated_vm_boundary` and `_live_vm_boundary` in `agentworks.vms.manager.boundary` both hand one out;

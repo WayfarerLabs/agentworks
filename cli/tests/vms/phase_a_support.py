@@ -36,26 +36,18 @@ def contract_outcomes(
 
 
 class SpyPlatform:
-    """Records the hook calls Phase A makes; ``secure_error`` and ``ready_error`` make a hook fail."""
+    """Records the provisioning status of the row each close was given; ``close_error`` makes the close fail."""
 
     name = "stub"
 
     def __init__(self) -> None:
-        self.secured: list[str] = []
-        self.secure_error: Exception | None = None
-        self.ready: list[str] = []
-        """The provisioning status of the row each ``post_tailscale_ready`` call was given."""
-        self.ready_error: BaseException | None = None
+        self.closed: list[str] = []
+        self.close_error: BaseException | None = None
 
-    def post_tailscale_ready(self, vm: Any, ctx: object) -> None:
-        self.ready.append(vm.provisioning_status)
-        if self.ready_error is not None:
-            raise self.ready_error
-
-    def secure_failed_vm(self, vm: Any, ctx: object) -> None:
-        if self.secure_error is not None:
-            raise self.secure_error
-        self.secured.append(vm.name)
+    def close_provisioning_access(self, vm: Any, ctx: object) -> None:
+        self.closed.append(vm.provisioning_status)
+        if self.close_error is not None:
+            raise self.close_error
 
 
 class SpyLog:

@@ -610,23 +610,15 @@ class TestCreateRollback:
 
 
 class TestCloseProvisioningHooks:
-    def test_post_tailscale_ready_revokes_the_bootstrap_tuples(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Once Tailscale is up the bootstrap hole closes: exactly the recorded
+    def test_the_close_revokes_the_bootstrap_tuples(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """When Phase A ends the bootstrap hole closes: exactly the recorded
         bootstrap prefixes are revoked, restoring the deny baseline."""
         install_fakes(monkeypatch)
         platform = _platform()
         platform.create(_request(), RunContext(config=_config()))
         assert _ec2(platform).ingress["sg-123"] == {_DETECTED_PREFIX: "sgr-1"}
 
-        platform.post_tailscale_ready(_vm(), RunContext())
-        assert _ec2(platform).ingress["sg-123"] == {}
-
-    def test_secure_failed_vm_revokes_the_bootstrap_tuples(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        install_fakes(monkeypatch)
-        platform = _platform()
-        platform.create(_request(), RunContext(config=_config()))
-
-        platform.secure_failed_vm(_vm(), RunContext())
+        platform.close_provisioning_access(_vm(), RunContext())
         assert _ec2(platform).ingress["sg-123"] == {}
 
     def test_close_leaves_a_distinct_concurrent_route_intact(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -641,15 +633,15 @@ class TestCloseProvisioningHooks:
         poke_ssh_allow(ec2, "sg-123", ["198.51.100.7/32"])
         assert set(ec2.ingress["sg-123"]) == {_DETECTED_PREFIX, "198.51.100.7/32"}
 
-        platform.post_tailscale_ready(_vm(), RunContext())
+        platform.close_provisioning_access(_vm(), RunContext())
         assert set(ec2.ingress["sg-123"]) == {"198.51.100.7/32"}
 
     def test_hook_tolerates_missing_security_group(self, monkeypatch: pytest.MonkeyPatch, captured_output: Any) -> None:
         """A row with no recorded security group is warned and skipped, not an
-        error (the hooks are best-effort)."""
+        error (the hook is best effort)."""
         install_fakes(monkeypatch)
         vm = SimpleNamespace(name="dev", admin_username="agw", platform_metadata={"instance_id": "i-123"})
-        _platform().post_tailscale_ready(vm, RunContext())  # no raise
+        _platform().close_provisioning_access(vm, RunContext())  # no raise
         assert any("no EC2 security_group_id" in w for w in captured_output.warnings)
 
 

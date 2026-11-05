@@ -7,7 +7,7 @@ and NO standing allow: SSH happens through ephemeral allows in the band
 [100, 199] (always outranking the deny), scoped to the detected operator
 egress IP plus the ``operator.ssh_allow_cidrs`` config extras.
 ``create`` opens the fixed-name bootstrap hole,
-``post_tailscale_ready`` / ``secure_failed_vm`` close it, and
+``close_provisioning_access`` closes it, and
 ``_transient_route`` pokes/removes a per-operation nonce-named rule
 around each root script or native shell (concurrent ops each own theirs),
 converging legacy VMs on the way.
@@ -296,31 +296,19 @@ class TestPrefixAssembly:
 
 
 class TestCloseProvisioningAccessHooks:
-    def test_post_tailscale_ready_deletes_the_bootstrap_allow(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """The success hook deletes the fixed-name bootstrap allow (no
-        in-process state needed); the deny baseline is permanent, so
-        there is nothing to restore."""
+    def test_the_close_deletes_the_bootstrap_allow(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The hook deletes the fixed-name bootstrap allow (no in-process
+        state needed); the deny baseline is permanent, so there is nothing
+        to restore."""
         network = _install_fakes(monkeypatch).network
         vm: VMRow = _fake_vm()  # type: ignore[assignment]
 
-        _platform().post_tailscale_ready(vm, RunContext())
+        _platform().close_provisioning_access(vm, RunContext())
 
         assert network.security_rules.deletes() == [("rg1", "vm1-nsg", BOOTSTRAP_ALLOW_RULE_NAME)]
         assert network.security_rules.creates() == []
 
-    def test_secure_failed_vm_deletes_the_bootstrap_allow(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Fail closed: the kept-VM hook removes the fixed-name bootstrap
-        allow too, so a failed or interrupted create defaults to zero
-        inbound exposure."""
-        network = _install_fakes(monkeypatch).network
-        vm: VMRow = _fake_vm()  # type: ignore[assignment]
-
-        _platform().secure_failed_vm(vm, RunContext())
-
-        assert network.security_rules.deletes() == [("rg1", "vm1-nsg", BOOTSTRAP_ALLOW_RULE_NAME)]
-        assert network.security_rules.creates() == []
-
-    def test_hooks_tolerate_missing_allow(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_the_close_tolerates_a_missing_allow(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A 404 on the delete (hook re-run, already-closed VM) is fine."""
         from azure.core.exceptions import ResourceNotFoundError
 
@@ -328,8 +316,7 @@ class TestCloseProvisioningAccessHooks:
         network.security_rules.delete_error = ResourceNotFoundError("already gone")
         vm: VMRow = _fake_vm()  # type: ignore[assignment]
 
-        _platform().post_tailscale_ready(vm, RunContext())
-        _platform().secure_failed_vm(vm, RunContext())  # no raise either
+        _platform().close_provisioning_access(vm, RunContext())  # no raise
 
 
 class TestTransientRoute:

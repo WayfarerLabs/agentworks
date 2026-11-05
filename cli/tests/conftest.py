@@ -524,10 +524,7 @@ class _StubPlatform:
 
         return VMStatus.RUNNING
 
-    def post_tailscale_ready(self, vm: object, ctx: object) -> None:
-        return None
-
-    def secure_failed_vm(self, vm: object, ctx: object) -> None:
+    def close_provisioning_access(self, vm: object, ctx: object) -> None:
         return None
 
 

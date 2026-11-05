@@ -579,10 +579,7 @@ class GCEPlatform(PublicAddressPlatform):
         verify_instance_network(current, network_url=identity.network_url, subnet_url=identity.subnet_url)
         return live_external_ipv4(current, access_config_name=identity.access_config_name)
 
-    def post_tailscale_ready(self, vm: VMRow, ctx: RunContext) -> None:
-        self._close_stable_allow(vm, ctx)
-
-    def secure_failed_vm(self, vm: VMRow, ctx: RunContext) -> None:
+    def close_provisioning_access(self, vm: VMRow, ctx: RunContext) -> None:
         self._close_stable_allow(vm, ctx)
 
     @contextlib.contextmanager

@@ -137,7 +137,7 @@ def test_close_reconstructs_stable_allow_from_original_normalized_prefixes(
     allow_name = result.platform_metadata["allow_rule"]
     assert result.platform_metadata["allow_source_ranges"] == "198.18.0.7/32,203.0.113.9/32"
 
-    platform.post_tailscale_ready(vm, gce_ctx("192.0.2.44/32"))
+    platform.close_provisioning_access(vm, gce_ctx("192.0.2.44/32"))
 
     assert allow_name not in cache.firewalls.resources
 
@@ -268,7 +268,7 @@ def test_lifecycle_is_idempotent_live_ip_and_transient_routes_are_distinct(
     firewalls = cache.firewalls
     instances = cache.instances
 
-    platform.post_tailscale_ready(vm, gce_ctx())
+    platform.close_provisioning_access(vm, gce_ctx())
     assert result.platform_metadata["allow_rule"] not in firewalls.resources
     instances.get_calls.clear()
     assert platform.status(vm, gce_ctx()) is VMStatus.RUNNING
@@ -622,10 +622,8 @@ def test_delete_keeps_deny_when_allow_read_and_instance_delete_are_indeterminate
     assert "provider-private-detail" not in (caught.value.hint or "")
 
 
-@pytest.mark.parametrize("hook_name", ("post_tailscale_ready", "secure_failed_vm"))
-def test_stable_allow_close_hooks_fail_closed_on_provider_read_error(
+def test_the_stable_allow_close_fails_closed_on_provider_read_error(
     monkeypatch: pytest.MonkeyPatch,
-    hook_name: str,
 ) -> None:
     warnings: list[str] = []
     monkeypatch.setattr("agentworks.plugins.gcp.platform.output.warn", warnings.append)
@@ -635,7 +633,7 @@ def test_stable_allow_close_hooks_fail_closed_on_provider_read_error(
     allow_name = result.platform_metadata["allow_rule"]
     cache.firewalls.get_failures[allow_name] = [api_error(api_exceptions.ServiceUnavailable, "provider-private-detail")]
 
-    getattr(platform, hook_name)(vm, gce_ctx())
+    platform.close_provisioning_access(vm, gce_ctx())
 
     assert allow_name in cache.firewalls.resources
     assert all(request.firewall != allow_name for request in cache.firewalls.delete_requests)
@@ -649,7 +647,7 @@ def test_transient_route_open_failure_never_yields_or_mutates_stable_deny(
     platform, cache = gce_platform(monkeypatch, gce_guest())
     result = platform.create(gce_request(), gce_ctx())
     vm = _vm(result.platform_metadata)
-    platform.post_tailscale_ready(vm, gce_ctx())
+    platform.close_provisioning_access(vm, gce_ctx())
     unavailable_one = api_error(api_exceptions.ServiceUnavailable, "first-private-detail")
     unavailable_two = api_error(api_exceptions.ServiceUnavailable, "second-private-detail")
     cache.firewalls.insert_failures = [unavailable_one, unavailable_two]
@@ -672,7 +670,7 @@ def test_transient_route_close_failure_warns_and_retains_only_its_exact_rule(
     platform, cache = gce_platform(monkeypatch, gce_guest())
     result = platform.create(gce_request(), gce_ctx())
     vm = _vm(result.platform_metadata)
-    platform.post_tailscale_ready(vm, gce_ctx())
+    platform.close_provisioning_access(vm, gce_ctx())
     cache.firewalls.delete_failures = [api_error(api_exceptions.ServiceUnavailable, "provider-private-detail")]
 
     with platform._transient_route(vm, gce_ctx()):

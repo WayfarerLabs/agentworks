@@ -114,7 +114,7 @@ the SSH config writer would not check. It is called at two boundaries:
    `ProvisionResult.__post_init__`: every platform builds the value as its last statement
    (`lima.py:465`), after its rollback window closed, so a raise there would leave a backend VM with
    only its row unwound. In `phase_a` a bad value is an ordinary Phase A failure: the VM is retained
-   as failed with delete guidance, after `secure_failed_vm`.
+   as failed with delete guidance, its provisioning access closed.
 
 The check is "an assignable IPv4 address". Nothing checks that it is in a tailnet range, which would
 reject a valid self-hosted tailnet with another prefix. The connection that follows is verified
@@ -348,20 +348,23 @@ SSH-config sync (non-fatal, as today) and Phase B's `SSHTransport(..., trust=VM,
    The release is therefore the first contract request, directly after the first connection, as R1
    and D10 require; a release that fails raises before anything else is asked of the VM.
 5. **Complete.** Mark provisioning `COMPLETE` and record the `provisioning_complete` event with the
-   address, both inside the span as the event is today (`driver.py:172`). Then, outside the span,
-   `bootstrap` calls `platform.post_tailscale_ready` on the refreshed row with the create's context
-   (a hook failure warns), then `reachability.wait(access, wording=RECONNECT)`, whose `False` warns
-   "proceeding anyway".
+   address, both inside the span as the event is today (`driver.py:172`). After a span that passed
+   comes `reachability.wait(access, wording=RECONNECT)`, whose `False` warns "proceeding anyway".
 
 Any `Exception` in steps 1 to 5's span takes the existing arm: provisioning `FAILED`, the
-`provisioning_failed` event, `platform.secure_failed_vm`, the log pointer, re-raise
-(`driver.py:175-192`). The provisioning event's detail was the native transport's description
-(`exec_target.describe()`, `driver.py:149`); it becomes `ssh ADDRESS`.
+`provisioning_failed` event, the log pointer, re-raise (`driver.py:175-192`). However the span ends,
+its `finally` then calls `platform.close_provisioning_access` once, on the re-read row with the
+create's context (a hook failure warns and replaces nothing), so the clouds' bootstrap allow closes
+after a contract that passed, a failure, and an interrupt anywhere in the span, including one that
+lands just after the `COMPLETE` write. The hook replaces version 1's two, `post_tailscale_ready` on
+success and `secure_failed_vm` on failure, which every cloud implemented identically. The
+provisioning event's detail was the native transport's description (`exec_target.describe()`,
+`driver.py:149`); it becomes `ssh ADDRESS`.
 
 **Status and interrupts.** `COMPLETE` is now written after the contract passes, not before the first
 connection (`driver.py:396-404`). An interrupt that lands before then finds the row `PENDING` or
-`IN_PROGRESS`; the `except BaseException` arm (`driver.py:193-210`) only secures the VM, as today,
-and leaves the row as the interrupt found it. The gate holds the promise instead: the
+`IN_PROGRESS`; it passes through the failure arm, leaving the row as the interrupt found it, and the
+span's `finally` closes the VM's provisioning access. The gate holds the promise instead: the
 ordinary-command gate (`_guard_incomplete_vm`, `vms/manager/_helpers.py`) refuses every row whose
 provisioning is not `COMPLETE`, naming `vm delete`, so a VM that was never attested is retained
 unattested and gated, as D9 and incident row I26 require, including one a hard kill (`SIGKILL`, or
@@ -609,14 +612,16 @@ None restates the implementation or our prose.
   attempt with no sleep; `CONNECTION`, `TRUNCATED` and `DEADLINE` poll; `TrustMissing` propagates
   unpolled.
 - **Phase A** (fakes for the database, platform and access): the order of the sequence, with the row
-  re-read after the address is recorded; an invalid address fails before any connection and secures
-  the VM; each of a first-contact timeout, an enrollment that left no key, a release mismatch and a
-  base failure marks `FAILED`, records `provisioning_failed`, calls `secure_failed_vm` and leaves
-  the process raising; **an interrupt before the contract passes secures the VM and leaves it gated,
-  and one after `COMPLETE` leaves it `COMPLETE`**; the post-ready wait returning `False` warns and
-  proceeds; Phase B receives a VM-bound legacy target; the only `enrollment_access` call is the
-  first contact. Reinit: no enrollment and no reachability wait, release drift refuses, a base
-  failure stops before `run_initialization`, the agents reach the script's environment.
+  re-read after the address is recorded; an invalid address fails before any connection and closes
+  the VM's provisioning access; each of a first-contact timeout, an enrollment that left no key, a
+  release mismatch and a base failure marks `FAILED`, records `provisioning_failed`, closes the
+  provisioning access once and leaves the process raising; **an interrupt before the contract passes
+  closes the access and leaves the VM gated, and one after `COMPLETE` leaves it `COMPLETE`**; a
+  failing close warns and replaces neither a failure nor an interrupt; the post-ready wait returning
+  `False` warns and proceeds; Phase B receives a VM-bound legacy target; the only
+  `enrollment_access` call is the first contact. Reinit: no enrollment and no reachability wait,
+  release drift refuses, a base failure stops before `run_initialization`, the agents reach the
+  script's environment.
 - **Provisioning.** `read_tailnet_address` and `settle_tailnet_address` over a fake `run_as_root`: a
   first-read success and a success on the last read; a value that does not parse, a non-zero status,
   an unknown outcome and a platform `ConnectivityError` each treated as a failed read; a
@@ -720,19 +725,20 @@ stays slice 4's with the port off `ExecTransport`; this slice leaves the key-bea
 ### Result
 
 Audited at PR B's final-review code. Phase A moved into `vms/initializer/phase_a.py` in this slice,
-so HLA row I16 (a failed or interrupted Phase A secures the VM) is re-proved here too. The unit half
-of each proof is below; no live cell has yet run against PR B's Phase A, so I25's live half (a WSL2
-create whose hold is all that keeps the distro up through Phase A) has no evidence. It belongs to
-slice 3's open live-evidence box.
+so HLA row I16 (a failed or interrupted Phase A secures the VM) is re-proved here too, now by the
+one `finally` that closes the VM's provisioning access however Phase A ends. The unit half of each
+proof is below; no live cell has yet run against PR B's Phase A, so I25's live half (a WSL2 create
+whose hold is all that keeps the distro up through Phase A) has no evidence. It belongs to slice 3's
+open live-evidence box.
 
 | Row | Where it holds now                                                                                                                                                                                        | Proof                                                                                                                                                                                                                                             |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| I16 | Phase A's failure arm marks the row `FAILED` and runs `_secure`, and its interrupt arm runs `_secure`, each before the error propagates (`vms/initializer/phase_a.py:116-131`)                            | `test_a_failure_before_the_contract_passes_marks_failed_and_secures`, `test_an_interrupt_before_the_contract_passes_secures_and_leaves_the_vm_gated`, `test_a_secure_hook_failure_does_not_mask_the_phase_a_failure`                              |
-| I22 | Phase A's `except BaseException` arm runs `_secure`, then re-raises (`vms/initializer/phase_a.py:127-131`)                                                                                                | `test_an_interrupt_before_the_contract_passes_secures_and_leaves_the_vm_gated`, `test_a_secure_hook_failure_does_not_mask_the_interrupt`                                                                                                          |
-| I23 | After the first contact, a store with no record raises `ProvisioningError` with delete guidance (`vms/initializer/phase_a.py:98-106`)                                                                     | `test_a_failure_before_the_contract_passes_marks_failed_and_secures` (its `_no_key_recorded` case)                                                                                                                                                |
+| I16 | Phase A's failure arm marks the row `FAILED`, and the span's `finally` runs `_close_provisioning_access` on every exit, each before the error propagates (`vms/initializer/phase_a.py:116-132`)           | `test_a_failure_before_the_contract_passes_marks_failed_and_closes_access`, `test_an_interrupt_before_the_contract_passes_closes_access_and_leaves_the_vm_gated`, `test_a_close_failure_does_not_mask_the_phase_a_failure`                        |
+| I22 | An interrupt passes the failure arm, and the span's `finally` runs `_close_provisioning_access` before it propagates (`vms/initializer/phase_a.py:128-132`)                                               | `test_an_interrupt_before_the_contract_passes_closes_access_and_leaves_the_vm_gated`, `test_a_close_failure_does_not_mask_the_interrupt`                                                                                                          |
+| I23 | After the first contact, a store with no record raises `ProvisioningError` with delete guidance (`vms/initializer/phase_a.py:98-106`)                                                                     | `test_a_failure_before_the_contract_passes_marks_failed_and_closes_access` (its `_no_key_recorded` case)                                                                                                                                          |
 | I24 | `join_tailscale` runs once and never retries; the settle reads the address, and when the reads run out logs the node out and never joins again (`capabilities/vm_platform/tailscale_join.py:65`, `:133`)  | `test_a_failed_join_raises_once_without_the_key`, `test_exhaustion_logs_out_once_and_gives_the_rerun_hint`, `test_exhausted_reads_after_the_join_log_out_without_joining_again`, `test_a_failed_join_or_address_rolls_back_without_a_second_join` |
 | I25 | The hold enters `init_stack` just before Phase A, and the stack closes after Phase B (`vms/manager/lifecycle.py:364`, `:612`)                                                                             | `test_create_keeps_a_vm_whose_phase_a_did_not_complete_out_of_every_command` (the hold precedes Phase A); the span through Phase B is by construction, with no test of its own; the live half has no evidence                                     |
-| I26 | The release is the contract's first request, recorded from the guest's answer and enforced before `COMPLETE` (`vms/initializer/phase_a.py:107-111`)                                                       | `test_the_sequence_records_enrolls_checks_then_completes`, `test_a_failure_before_the_contract_passes_marks_failed_and_secures` (its `_release_mismatch` case), `test_a_failed_release_check_records_no_release`                                  |
+| I26 | The release is the contract's first request, recorded from the guest's answer and enforced before `COMPLETE` (`vms/initializer/phase_a.py:107-111`)                                                       | `test_the_sequence_records_enrolls_checks_then_completes`, `test_a_failure_before_the_contract_passes_marks_failed_and_closes_access` (its `_release_mismatch` case), `test_a_failed_release_check_records_no_release`                            |
 | I27 | `reconcile_release` raises `StateError` on live drift, and `confirm_vm_release` is the explicit adoption (`vms/manager/release.py:23-42`)                                                                 | `test_reconcile_release_refuses_recorded_live_drift`, the `test_confirm_release_*` tests in `tests/test_vm_release.py`                                                                                                                            |
 | I28 | `SSHLogger` takes its redactions at construction, before any write (`ssh.py:117-132`); `_operation_log` passes them (`vms/manager/_helpers.py:215-223`); `root_script.run` redacts every field it returns | `test_redactions_cannot_be_registered_after_writes`, `test_shell_quoted_secret_is_redacted_from_command`, `test_record_redacts_a_registered_secret_in_the_argv_the_streams_and_the_diagnostics`, `test_the_operation_log_never_holds_the_key`     |
 
@@ -752,7 +758,7 @@ slice 3's open live-evidence box.
     core observing the release over SSH.
   - `cli/agentworks/plugins/README.md:206-221`: the same paragraph, including "return a transport
     through which core probes" and "may omit the Tailscale IP", which become the required address.
-  - `base.py`'s `create` docstring (`:262-270`) and `secure_failed_vm` docstring (`:377`).
+  - `base.py`'s `create` docstring (`:262-270`) and the `close_provisioning_access` docstring.
 - **Command reference** (`cli/command-reference.md`): `vm reinit` (`:688-696`) states the contract's
   diagnoses, that pam_env and unsupported login shells are warnings, and that a VM without python3
   needs `agw vm recover` once slice 4 lands; `vm confirm-release` (`:705-712`) reads the release

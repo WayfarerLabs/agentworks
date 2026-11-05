@@ -14,12 +14,12 @@ fail-closed span:
 5. Provisioning complete.
 
 Any failure in the span marks provisioning failed, records the
-``provisioning_failed`` event, closes the kept VM's provisioning access
-(``secure_failed_vm``) and re-raises. An interrupt there closes that access
-too and leaves the row as it found it: complete is written only once the
-contract passed, and every ordinary command refuses a VM that is not
-complete. After the span come the platform's post-ready hook and a wait for
-the VM to answer again.
+``provisioning_failed`` event and re-raises. An interrupt there leaves the
+row as it found it: complete is written only once the contract passed, and
+every ordinary command refuses a VM that is not complete. However the span
+ends, the platform then closes the VM's provisioning access
+(``close_provisioning_access``) exactly once. After a span that passed comes
+a wait for the VM to answer again.
 
 The log is typed as the small protocol below, which ``SSHLogger`` satisfies.
 """
@@ -114,35 +114,28 @@ def bootstrap(
             db.update_vm_provisioning_status(vm_name, ProvisioningStatus.COMPLETE)
             db.insert_vm_event(vm_name, "provisioning_complete", address)
     except Exception as error:
-        # Nothing here may replace the original failure or skip securing the VM.
+        # Nothing here may replace the original failure. An operator
+        # interrupt escapes this arm, leaving the row never complete, which
+        # every ordinary command refuses.
         try:
             with db.transaction():
                 db.update_vm_provisioning_status(vm_name, ProvisioningStatus.FAILED)
                 db.insert_vm_event(vm_name, "provisioning_failed", str(error))
         except Exception as mark_error:
             output.warn(f"could not mark VM '{vm_name}' failed: {mark_error}")
-        _secure(db, vm_name, platform, ctx, what="failed")
         output.warn(f"Log: {log.display_path}")
         raise
-    except BaseException:
-        # An operator interrupt escapes the arm above. The VM is kept, so its
-        # provisioning access still closes. Its row stays as the interrupt left
-        # it, never complete, which every ordinary command refuses.
-        _secure(db, vm_name, platform, ctx, what="interrupted")
-        raise
+    finally:
+        # The VM is kept whatever happened, so its provisioning access
+        # closes on every path: once the contract passed, after a failure,
+        # and after an interrupt anywhere in the span.
+        _close_provisioning_access(db, vm_name, platform, ctx)
 
-    # The platform closes its provisioning access (the clouds remove their
-    # bootstrap SSH allow). A route change can unsettle the network briefly, so
-    # wait for the VM to answer again. The VM is attested and complete by now:
-    # a wait that runs out warns and proceeds, and one that raises (a changed
-    # host key, a refused key) propagates with the row still complete, which
-    # create reports as an initialization failure with reinit advice.
-    try:
-        ready = db.get_vm(vm_name)
-        assert ready is not None, "create_vm inserts the row before Phase A"
-        platform.post_tailscale_ready(ready, ctx)
-    except Exception as e:
-        output.warn(f"post-Tailscale-ready hook failed: {e}")
+    # A route change can unsettle the network briefly, so wait for the VM to
+    # answer again. The VM is attested and complete by now: a wait that runs
+    # out warns and proceeds, and one that raises (a changed host key, a
+    # refused key) propagates with the row still complete, which create
+    # reports as an initialization failure with reinit advice.
     if not reachability.wait(access, wording=reachability.Wording.RECONNECT):
         output.warn("Tailscale SSH did not reconnect after ~240s, proceeding anyway")
 
@@ -167,15 +160,16 @@ def _record_address(db: Database, vm_name: str, tailnet_address: str, log: Opera
     return address
 
 
-def _secure(db: Database, vm_name: str, platform: VMPlatform, ctx: RunContext, *, what: str) -> None:
-    """Close the kept VM's provisioning access, best effort: the original failure keeps propagating.
+def _close_provisioning_access(db: Database, vm_name: str, platform: VMPlatform, ctx: RunContext) -> None:
+    """Close the kept VM's provisioning access, best effort: a failure warns, and what is propagating keeps going.
 
-    The ordinary-command gate refuses the kept VM, ``vm shell --platform``
-    included, so the operator reaches it through the platform's console.
+    The ordinary-command gate refuses a VM that Phase A did not complete,
+    ``vm shell --platform`` included, so the operator reaches it through the
+    platform's console.
     """
     try:
         vm = db.get_vm(vm_name)
         assert vm is not None, "create_vm inserts the row before Phase A"
-        platform.secure_failed_vm(vm, ctx)
-    except Exception as secure_error:
-        output.warn(f"could not secure the {what} VM: {secure_error}")
+        platform.close_provisioning_access(vm, ctx)
+    except Exception as close_error:
+        output.warn(f"could not close the provisioning access of VM '{vm_name}': {close_error}")

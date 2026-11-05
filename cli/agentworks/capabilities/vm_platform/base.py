@@ -409,59 +409,34 @@ class VMPlatform(Capability):
 
         return root_script.read_host_keys(partial(self.run_as_root, vm, ctx))
 
-    def post_tailscale_ready(self, vm: VMRow, ctx: RunContext) -> None:  # noqa: B027  # intentional concrete no-op
-        """Hook called once the VM's Tailscale node is up during create.
+    def close_provisioning_access(self, vm: VMRow, ctx: RunContext) -> None:  # noqa: B027  # intentional concrete no-op
+        """Close whatever ingress the platform opened for bootstrap; Phase A calls it once, however it ends.
 
-        Default no-op. The hook's contract is "close provisioning
-        access": whatever ingress the platform opened for bootstrap is
-        no longer needed once Tailscale carries the traffic. The clouds
-        override it to remove their bootstrap SSH allow (scoped to the
-        operator's egress prefixes; the deny-all-inbound baseline
-        remains), leaving the VM with zero inbound exposure. Phase A
-        calls it after the VM contract passes, with the create's own
-        context. Unlike a cloud's route around each
-        :meth:`run_as_root` call, this ingress is not one scope: it
-        opens inside :meth:`create` (cloud-init needs inbound SSH) and
-        closes at an async Tailscale-ready point inside Phase A
-        (``phase_a.bootstrap``).
+        Default no-op. The clouds override it to remove their bootstrap SSH
+        allow (scoped to the operator's egress prefixes; the deny-all-inbound
+        baseline remains), leaving the VM with zero inbound exposure. Unlike a
+        cloud's route around each :meth:`run_as_root` call, this ingress is
+        not one scope: it opens inside :meth:`create` (cloud-init needs
+        inbound SSH) and closes when Phase A (``phase_a.bootstrap``) ends,
+        whether the VM contract passed, Phase A failed (the row is marked
+        FAILED) or the operator interrupted it (the row stays incomplete). A
+        create that fails before it returns rolls back its own ingress
+        inside :meth:`create` and never reaches this hook.
 
-        ``ctx`` is the op-start :class:`RunContext` (see
-        :meth:`create`): closing the ingress is a backend call and
-        reads any credential it needs from it. With a service principal
-        configured there is no ambient fallback, so the caller must hand
-        the real scoped context (the create op's own).
-        """
+        Implementations must not assume the VM is reachable or complete, and
+        the caller treats the hook as best effort: a failure warns, and an
+        error or interrupt already propagating keeps going. The
+        ordinary-command gate refuses a VM Phase A did not complete,
+        ``vm shell --platform`` included, so debugging such a VM goes
+        through the platform's console outside the firewalled path.
 
-    def secure_failed_vm(self, vm: VMRow, ctx: RunContext) -> None:  # noqa: B027  # intentional concrete no-op
-        """Hook called when a created VM is kept after Phase A fails: core
-        refused the returned ``tailnet_address``, the first contact or the VM
-        contract failed (the row is marked FAILED), or the operator
-        interrupted Phase A (the row stays incomplete), and the VM is kept for
-        debugging rather than rolled back.
-
-        Create-time bootstrap failures never reach this hook. They raise from
-        :meth:`create` while the platform's backend rollback window is open.
-
-        Default no-op. Same contract as :meth:`post_tailscale_ready`
-        (which only fires on success): close provisioning access. The
-        clouds override it to remove their bootstrap SSH allow, so a
-        failed VM defaults to zero inbound exposure rather than keeping
-        its bootstrap ingress indefinitely. Implementations must not
-        assume the VM is reachable, and the caller treats the hook as
-        best-effort: the original failure keeps propagating regardless.
-        The ordinary-command gate refuses the kept VM, ``vm shell
-        --platform`` included, so operator debugging goes through
-        platform consoles outside the firewalled path (Azure's serial
-        console), which the fail-closed posture leaves unaffected.
-
-        ``ctx`` is the op-start :class:`RunContext` (see
-        :meth:`create`): closing the ingress is a backend call and
-        reads any credential it needs from it. The caller passes the
-        create op's own scoped context, whose secrets are already
-        resolved (the boundary resolve ran before Phase A began), so
-        even the interrupt path never resolves a secret here for the
-        first time; with a service principal configured there is no
-        ambient fallback.
+        ``ctx`` is the op-start :class:`RunContext` (see :meth:`create`):
+        closing the ingress is a backend call and reads any credential it
+        needs from it. The caller passes the create op's own scoped context,
+        whose secrets were resolved before Phase A began, so even the
+        interrupt path never resolves a secret here for the first time; with
+        a service principal or access key configured there is no ambient
+        fallback.
         """
 
     def vm_active(self, vm: VMRow, *, config: Config | None = None) -> AbstractContextManager[None]:

@@ -320,9 +320,11 @@ state the full contract, and the
   `PublicSSH.wait_until_answering(seconds=..., retry_refused_key=True)`, where a refused key raises
   `public_ssh.KeyRefused` and is retried until the bound, since a cloud's guest agent may install
   the key after sshd starts; then it waits for cloud-init, joins and settles the address.
-- **Phase A always calls `post_tailscale_ready`** once the VM contract passes, with the create's own
-  context, and `secure_failed_vm` when Phase A fails or is interrupted. A platform that opens
-  provisioning access in `create`, such as a bootstrap firewall allow, closes it in both.
+- **`close_provisioning_access(vm, ctx)` replaces `post_tailscale_ready` and `secure_failed_vm`.**
+  Phase A calls it exactly once with the create's own context, however Phase A ends: after the VM
+  contract passes, when Phase A fails, and when it is interrupted. A platform that opens
+  provisioning access in `create`, such as a bootstrap firewall allow, closes it there. Rename an
+  override of either old hook; a platform that overrode both with the same body keeps one.
 - **`generate_bootstrap_script()` no longer takes `tailscale_auth_key`.** The script it generates
   holds no secret and stops once Tailscale is installed, so a provider may retain it.
   `run_bootstrap()` runs it through a root channel, and `parse_bootstrap_steps()` replaces

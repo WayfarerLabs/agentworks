@@ -480,10 +480,10 @@ class AzureVMPlatform(PublicAddressPlatform):
                 # Create the NSG: the permanent deny-all-inbound baseline plus
                 # the ephemeral bootstrap allow scoped to the operator's egress
                 # prefixes (cloud-init needs inbound SSH from the operator;
-                # post_tailscale_ready deletes the allow once Tailscale is up).
+                # close_provisioning_access deletes the allow when Phase A ends).
                 # The NSG create is what opens the bootstrap SSH route, so it
                 # announces the open with the transient poke's wording; the
-                # matching close line comes from the hooks' remove_ssh_allow
+                # matching close line comes from the hook's remove_ssh_allow
                 # (#350: the close was announced, the open was silent).
                 output.info(f"Opening SSH route (allow scoped to {', '.join(ssh_allow_prefixes)})...")
                 output.detail("Creating network security group...")
@@ -794,44 +794,19 @@ class AzureVMPlatform(PublicAddressPlatform):
             raise wrap_azure_error(exc) from exc
         return get_vm_public_ip(network, vm_info)
 
-    def post_tailscale_ready(self, vm: VMRow, ctx: RunContext) -> None:
-        """Close provisioning access now that Tailscale is up.
+    def close_provisioning_access(self, vm: VMRow, ctx: RunContext) -> None:
+        """Delete the bootstrap allow rule by its fixed name (no in-process state needed).
 
-        The VM comes out of :meth:`create` reachable only through the
-        ephemeral bootstrap allow rule (SSH scoped to the operator's
-        egress prefixes; the deny-all-inbound baseline is permanent).
-        This hook fires at the async Tailscale-ready point inside
-        ``bootstrap_vm`` (Phase A) and deletes that allow by its fixed
-        name (no in-process state needed), leaving zero inbound
-        exposure; the public IP stays for the VM's whole lifetime.
-
-        ``ctx`` is the create op's own scoped context (secrets already
-        resolved before Phase A): closing the allow is a network call
-        and reads the SP credential through it, with no ambient
-        fallback.
-        """
-        self._remove_ssh_allow(vm, ctx, BOOTSTRAP_ALLOW_RULE_NAME)
-
-    def secure_failed_vm(self, vm: VMRow, ctx: RunContext) -> None:
-        """Fail closed after kept post-create verification failure.
-
-        Mirrors :meth:`post_tailscale_ready`, which only fires on
-        success: a VM whose Phase A failed (marked FAILED) or was
-        interrupted (left incomplete) is kept for debugging, and this hook deletes
-        the fixed-name bootstrap allow so it defaults to zero inbound
-        exposure. Create-time bootstrap failures roll back inside
-        :meth:`create` and never reach this hook. The ordinary-command
-        gate refuses the kept VM, ``vm shell --platform`` included, so
-        debugging goes through the Azure serial console, which is not
-        NSG-gated; ``vm delete``'s logout pokes a fresh
+        The VM comes out of :meth:`create` reachable only through that
+        ephemeral rule (SSH scoped to the operator's egress prefixes; the
+        deny-all-inbound baseline is permanent), so this leaves zero inbound
+        exposure; the public IP stays for the VM's whole lifetime. Phase A
+        calls it once, however it ends, with the create op's own scoped
+        context; on a service-principal site the network call authenticates
+        as the configured principal, with no ambient fallback. A kept VM
+        Phase A did not complete is debugged through the Azure serial
+        console, which is not NSG-gated; ``vm delete``'s logout pokes a fresh
         transient allow via :meth:`_transient_route`.
-
-        ``ctx`` is the create op's own scoped context, whose secrets
-        were resolved before Phase A began, so even the interrupt path
-        that reaches this hook never resolves a secret here for the
-        first time; on a service-principal site the network call
-        authenticates as the configured principal, with no ambient
-        fallback.
         """
         self._remove_ssh_allow(vm, ctx, BOOTSTRAP_ALLOW_RULE_NAME)
 
