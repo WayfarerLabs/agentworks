@@ -365,19 +365,20 @@ and leaves the row as the interrupt found it. The gate holds the promise instead
 ordinary-command gate (`_guard_incomplete_vm`, `vms/manager/_helpers.py`) refuses every row whose
 provisioning is not `COMPLETE`, naming `vm delete`, so a VM that was never attested is retained
 unattested and gated, as D9 and incident row I26 require, including one a hard kill (`SIGKILL`, or
-any kill on Windows) left `IN_PROGRESS` with no arm run; on macOS and Linux create turns `SIGTERM`
-and `SIGHUP` into an interrupt. Create's cancel handler (`lifecycle.py:657-663`) marks nothing
-either: it reads the status once to choose its wording, the attestation interrupt arm's
-(`lifecycle.py:611-617`: the VM exists but was not verified; run `agw vm delete`) whenever
-provisioning is not `COMPLETE` or the read fails, and `_warn_init_cancel`'s reinit advice only for a
-`COMPLETE` row, because reinit refuses any other (`lifecycle.py:813`) and the `PENDING` window
-includes the hold entered before `bootstrap_vm` (`lifecycle.py:643`). An interrupt after step 5
-leaves `COMPLETE` and takes `_warn_init_cancel`. A post-ready wait that raises (`HOST_KEY`,
-`AUTH_FAILED`, anything else the table raises) is outside the span like the wait itself and
-propagates out of `bootstrap_vm` to `_raise_init_failure`: the row stays `COMPLETE`, the VM was
-attested seconds earlier, and the operator is told to `vm reinit`. A failure that leaves the row
-never complete gets `_raise_init_failure`'s delete guidance alone: a `VMNotReady` or `TrustMissing`
-cause, whose own hint names `agw vm recover`, is not chained, since recover refuses that VM.
+any kill on Windows) left `IN_PROGRESS` with no arm run; create turns `SIGTERM` and `SIGHUP` on
+macOS and Linux, and `SIGBREAK` on Windows, into an interrupt. Create's cancel handler
+(`lifecycle.py:657-663`) marks nothing either: it reads the status once to choose its wording, the
+attestation interrupt arm's (`lifecycle.py:611-617`: the VM exists but was not verified; run
+`agw vm delete`) whenever provisioning is not `COMPLETE` or the read fails, and
+`_warn_init_cancel`'s reinit advice only for a `COMPLETE` row, because reinit refuses any other
+(`lifecycle.py:813`) and the `PENDING` window includes the hold entered before `bootstrap_vm`
+(`lifecycle.py:643`). An interrupt after step 5 leaves `COMPLETE` and takes `_warn_init_cancel`. A
+post-ready wait that raises (`HOST_KEY`, `AUTH_FAILED`, anything else the table raises) is outside
+the span like the wait itself and propagates out of `bootstrap_vm` to `_raise_init_failure`: the row
+stays `COMPLETE`, the VM was attested seconds earlier, and the operator is told to `vm reinit`. A
+failure that leaves the row never complete gets `_raise_init_failure`'s delete guidance alone: a
+`VMNotReady` or `TrustMissing` cause, whose own hint names `agw vm recover`, is not chained, since
+recover refuses that VM.
 
 **Enroll covers more than one connection.** The first-contact wait can make up to 17 connections
 (sixteen attempts and the confirming probe), all in Enroll mode. `accept-new` records a key only

@@ -256,9 +256,10 @@ bootstrap allow; if closure cannot be proven, it retains and reports the rule. A
 close only the priority-1 deny remains. Every script Agentworks runs over the external address
 (`vm recover`, `vm rekey`, and the Tailscale logout at `vm delete`) and every `vm shell --platform`
 session opens a fresh UUID-named scoped SSH allow and removes only its own rule when that script or
-session ends; an unproven close is retained and reported rather than sweeping another rule. On macOS
-and Linux, every one of these allows, create's bootstrap allow included, is also removed when the
-command is ended by `SIGTERM` or `SIGHUP`; an interrupted create rolls back as it does on Ctrl-C.
+session ends; an unproven close is retained and reported rather than sweeping another rule. Every
+one of these allows, create's bootstrap allow included, is also removed when the command is ended on
+macOS and Linux by `SIGTERM` or `SIGHUP`, or on Windows by Ctrl-Break; an interrupted create rolls
+back as it does on Ctrl-C.
 
 ## Recovery and safe cleanup
 

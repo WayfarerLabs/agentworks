@@ -476,6 +476,7 @@ def test_an_interrupted_native_shell_still_closes_its_route(
     assert cloud.events == ["route-open", "probe", "shell", "route-close"]
 
 
+@pytest.mark.usefixtures("standard_streams")
 @pytest.mark.skipif(sys.platform == "win32", reason="os.kill delivery is POSIX")
 @pytest.mark.parametrize("factory", CLOUDS, ids=["aws", "azure", "gcp"])
 @pytest.mark.parametrize("signal_name", ["SIGTERM", "SIGHUP"])

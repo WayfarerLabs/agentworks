@@ -700,12 +700,12 @@ Agentworks then reaches the VM over SSH at that address. Its first connection re
 key, and the VM contract's base checks follow on verified connections: the Debian release first,
 then systemd, passwordless `sudo` for the admin, and the base tools Agentworks runs (`install`,
 `flock`, `nohup`, `setsid`, `tar`). The VM's provisioning is complete only once they pass. If any of
-this fails, the VM is kept in a failed state; if create is interrupted first (Ctrl-C, or on macOS
-and Linux `SIGTERM` or `SIGHUP`), it is kept with its provisioning incomplete. Either way its
-temporary provisioning access is closed, and `vm start`, `vm stop`, `vm rekey`, `vm recover`,
-`vm reinit`, `vm exec`, `vm shell` (with `--platform` too), `vm port-forward`, `vm backup` and
-`vm confirm-release` refuse it, as they do a VM a killed create left in progress; `vm describe`,
-`vm list` and `vm verify-connection` still run. `agw vm delete <name>` removes it.
+this fails, the VM is kept in a failed state; if create is interrupted first (Ctrl-C, on macOS and
+Linux `SIGTERM` or `SIGHUP`, or on Windows Ctrl-Break), it is kept with its provisioning incomplete.
+Either way its temporary provisioning access is closed, and `vm start`, `vm stop`, `vm rekey`,
+`vm recover`, `vm reinit`, `vm exec`, `vm shell` (with `--platform` too), `vm port-forward`,
+`vm backup` and `vm confirm-release` refuse it, as they do a VM a killed create left in progress;
+`vm describe`, `vm list` and `vm verify-connection` still run. `agw vm delete <name>` removes it.
 
 The first interactive `vm create` asks once for an optional **system slug** (3-20 chars, lowercase
 alphanumeric plus dash, no leading/trailing dash): a short identifier for this Agentworks
@@ -820,10 +820,10 @@ without it is reported as unable to run Agentworks requests, and `agw vm recover
 it. A command that is not found exits 127, one that cannot run exits 126, and a missing workspace
 directory exits 125.
 
-`vm port-forward` runs until interrupted and exits 0 when stopped with Ctrl-C, and on macOS and
-Linux also with `SIGTERM` or `SIGHUP` (a closed terminal); started under `nohup`, it keeps running
-after its terminal closes. It exits non-zero when a forward cannot be set up, such as a busy local
-port.
+`vm port-forward` runs until interrupted and exits 0 when stopped with Ctrl-C, on macOS and Linux
+also with `SIGTERM` or `SIGHUP` (a closed terminal), and on Windows also with Ctrl-Break; started
+under `nohup`, it keeps running after its terminal closes. It exits non-zero when a forward cannot
+be set up, such as a busy local port.
 
 In both exec commands the `--` separator is only required when the remote command's first token
 starts with `-` (it stops Agentworks from reading the token as its own option); without it, a
@@ -848,14 +848,15 @@ by running `true` through `sudo -n`, so an admin without passwordless sudo is re
 rather than as a VM that does not answer. The VM's firewall denies all inbound traffic at baseline;
 for the duration of the session a temporary SSH allow rule scoped to your detected public IP is
 created (one per session, so concurrent sessions never tear down each other's access) and removed
-again on exit, including, on macOS and Linux, when the session is ended by `SIGTERM` or a closed
-terminal. The same holds for the routes `vm recover`, `vm rekey` and `vm delete` open on a cloud VM.
-On Windows, closing the console window or killing `agw` runs no cleanup and leaves the rule in place
-until you delete it from the VM's firewall in the provider's console, so end the session by exiting
-the shell. If your SSH traffic egresses through a different address than the detection sees (VPN
-split tunnel, proxy, CGNAT), set `ssh_allow_cidrs` in the config's `[operator]` section to a list of
-IPv4 addresses and/or CIDRs to allow additionally; if detection fails entirely, those entries are
-used alone. A shell that ends with status 255 gets a notice that the connection may have dropped.
+again on exit, including when the session is ended by `SIGTERM` or a closed terminal on macOS and
+Linux, or by Ctrl-Break on Windows. The same holds for the routes `vm create`, `vm recover`,
+`vm rekey` and `vm delete` open on a cloud VM. On Windows, closing the console window or killing
+`agw` runs no cleanup and leaves the rule in place until you delete it from the VM's firewall in the
+provider's console, so end the session by exiting the shell. If your SSH traffic egresses through a
+different address than the detection sees (VPN split tunnel, proxy, CGNAT), set `ssh_allow_cidrs` in
+the config's `[operator]` section to a list of IPv4 addresses and/or CIDRs to allow additionally; if
+detection fails entirely, those entries are used alone. A shell that ends with status 255 gets a
+notice that the connection may have dropped.
 
 #### Host keys
 

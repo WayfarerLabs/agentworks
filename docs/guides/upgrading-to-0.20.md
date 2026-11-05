@@ -183,10 +183,10 @@ has started.
   131,071 bytes is refused before anything runs, because Linux cannot execute it.
 - **`vm shell` and `agent shell` without `--workspace` no longer print the message of the day or the
   last-login line.** sshd prints them only when it runs the login shell itself.
-- **`vm port-forward` exits 0 when you stop it** with Ctrl-C, and on macOS and Linux also with
-  `SIGTERM` or `SIGHUP` (a closed terminal); started under `nohup`, it keeps running after its
-  terminal closes. It exits non-zero when a forward cannot be set up (a busy local port, for
-  example) instead of running with nothing forwarded.
+- **`vm port-forward` exits 0 when you stop it** with Ctrl-C, on macOS and Linux also with `SIGTERM`
+  or `SIGHUP` (a closed terminal), and on Windows also with Ctrl-Break; started under `nohup`, it
+  keeps running after its terminal closes. It exits non-zero when a forward cannot be set up (a busy
+  local port, for example) instead of running with nothing forwarded.
 
 ## Create, reinit and the VM contract
 
@@ -260,12 +260,12 @@ before they resolve the auth key.
   the VM's power state once it holds the VM, so a WSL2 distro that the hold boots is still logged
   out; a VM that is still stopped or deallocated is not, and the warning names its node for removal
   in the admin console the same way.
-- **A cloud VM's temporary SSH allow closes on `SIGTERM` and `SIGHUP`.** On macOS and Linux, every
-  allow Agentworks opens to a cloud VM (AWS, Azure, GCP) is removed when the command is ended by
-  `SIGTERM` or `SIGHUP` (a closed terminal), as it is on Ctrl-C: `vm create` rolls back, bootstrap
-  allow included, and a root script (`vm recover`, `vm rekey`, the logout at `vm delete`) or a
-  `vm shell --platform` session removes its own allow. A second signal during that cleanup is
-  ignored, so it cannot cut the removal short.
+- **A cloud VM's temporary SSH allow closes on `SIGTERM`, `SIGHUP` and Ctrl-Break.** Every allow
+  Agentworks opens to a cloud VM (AWS, Azure, GCP) is removed when the command is ended on macOS and
+  Linux by `SIGTERM` or `SIGHUP` (a closed terminal), or on Windows by Ctrl-Break, as it is on
+  Ctrl-C: `vm create` rolls back, bootstrap allow included, and a root script (`vm recover`,
+  `vm rekey`, the logout at `vm delete`) or a `vm shell --platform` session removes its own allow. A
+  second signal during that cleanup is ignored, so it cannot cut the removal short.
 
 ## Third-party VM platforms
 

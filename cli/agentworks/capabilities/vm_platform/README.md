@@ -225,12 +225,12 @@ method semantics or ask a platform to interpret Debian's current release.
 
 **The clouds' route.** `public_ssh.PublicAddressPlatform`, the clouds' shared base, opens its own
 route around every `run_as_root`, `read_host_keys` and `native_shell` call and closes it before the
-call returns, so no firewall allow outlives one call; on macOS and Linux `SIGTERM` and `SIGHUP`
-unwind like Ctrl-C while the route may be open, so they close it too. Each cloud supplies it
-privately, as an abstract member of that base: `_transient_route(vm, ctx)`, a context manager that
-opens this call's own SSH allow scoped to the operator's egress prefixes (widened by
-`ctx.config.operator.ssh_allow_cidrs`) and removes exactly it in a `finally`. When the VM never
-answers, `PublicSSH.wait_until_answering` warns `public_ssh.PROBE_FAILURE_HINT`, the
+call returns, so no firewall allow outlives one call; `SIGTERM`, `SIGHUP` and, on Windows,
+`SIGBREAK` (Ctrl-Break) unwind like Ctrl-C while the route may be open, so they close it too. Each
+cloud supplies it privately, as an abstract member of that base: `_transient_route(vm, ctx)`, a
+context manager that opens this call's own SSH allow scoped to the operator's egress prefixes
+(widened by `ctx.config.operator.ssh_allow_cidrs`) and removes exactly it in a `finally`. When the
+VM never answers, `PublicSSH.wait_until_answering` warns `public_ssh.PROBE_FAILURE_HINT`, the
 `ssh_allow_cidrs` advice. Azure also heals a missing public IP and converges the NSG onto the
 baseline-deny model on enter; concurrent operations on one VM each own an independent rule, so they
 never cross-remove. EC2 needs no public-IP heal (a running instance receives an address
