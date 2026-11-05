@@ -213,11 +213,21 @@ class ExecutionIncomplete(ConnectivityError):
             hint = "The command did not start, so running it again is safe."
         elif getattr(completion, "reason", None) is UnknownReason.AUTH_FAILED:
             summary = f"VM '{vm_name}' did not accept the configured SSH key, so nothing ran"
-            hint = "Check that operator.ssh_private_key is the key authorized for this account on the VM."
+            hint = (
+                "Check that operator.ssh_private_key is the key authorized for this account on the VM; "
+                f"for the VM's admin, 'agw vm recover {vm_name}' restores it through the platform's own channel."
+            )
         else:
             reason = getattr(completion, "reason", None)
             summary = f"the outcome of the command on VM '{vm_name}' is unknown ({getattr(reason, 'value', reason)})"
             hint = "The command may have run; check its effects before running it again."
+            if reason is UnknownReason.CONNECTION:
+                # No start marker says nothing ran: one written after the payload started can be lost
+                # with the connection, so only the repair is named.
+                hint += (
+                    f" If the VM does not answer, 'agw vm recover {vm_name}' repairs its SSH server and"
+                    " Tailscale node through the platform's own channel."
+                )
         super().__init__(
             _with_tail(summary, result.client_log_tail),
             entity_kind="vm",

@@ -272,6 +272,21 @@ def test_each_outcome_that_is_not_a_completion_raises_its_typed_error(completion
         result(completion).require_completed("box")
 
 
+@pytest.mark.parametrize("reason", [UnknownReason.CONNECTION, UnknownReason.AUTH_FAILED])
+def test_a_connection_or_key_failure_names_recover(reason: UnknownReason) -> None:
+    """A removed node or a dead sshd ends here, and recover repairs both through the platform."""
+    hint = ExecutionIncomplete("box", result(Unknown(reason))).hint
+
+    assert "agw vm recover box" in (hint or "")
+
+
+@pytest.mark.parametrize("reason", [UnknownReason.TRUNCATED, UnknownReason.DEADLINE, UnknownReason.OUTPUT_LIMIT])
+def test_an_outcome_the_connection_reached_does_not_name_recover(reason: UnknownReason) -> None:
+    hint = ExecutionIncomplete("box", result(Unknown(reason))).hint
+
+    assert "agw vm recover" not in (hint or "")
+
+
 def test_a_completion_returns_its_status_whatever_it_is() -> None:
     assert result(Completed(255)).require_completed("box") == 255
 
