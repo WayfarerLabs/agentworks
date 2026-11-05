@@ -71,7 +71,7 @@ def start_vm(
     # WSL2 keepalive subprocess boots a stopped distro as a side effect,
     # which would make status() report RUNNING and mislabel the VM as
     # "already running". The keepalive then anchors the (now running) VM
-    # through the Tailscale verification.
+    # through the wait for SSH below.
     status = platform.status(vm, ops_ctx)
     if status == VMStatus.RUNNING:
         output.info(f"VM '{name}' is already running")
@@ -89,9 +89,9 @@ def start_vm(
     with vm_node.hold_active():
         _mgr._await_tailnet(db, config, vm, already_running=status == VMStatus.RUNNING)
     # Only emit "is ready" on the path that actually started the VM. When
-    # status was already RUNNING we already said so above, and Tailscale
-    # verification usually answers at once, so an extra "is ready" line is
-    # just noise. On the real-work path it confirms the VM answers over SSH.
+    # status was already RUNNING we already said so above, and the wait
+    # usually answers at once, so an extra "is ready" line is just noise.
+    # On the real-work path it confirms the VM answers over SSH.
     if status != VMStatus.RUNNING:
         output.info(f"VM '{name}' is ready")
 

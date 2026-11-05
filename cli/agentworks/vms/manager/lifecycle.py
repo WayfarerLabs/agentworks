@@ -349,8 +349,8 @@ def create_vm(
         resolver.resolve()
 
     # The keepalive hold spans BOTH init phases: WSL2 anchors its distro
-    # against idle shutdown between Phase A (wsl.exe transport) and Phase B
-    # (Tailscale SSH); the other platforms' hold is a no-op. It is entered
+    # against idle shutdown through Phase A and Phase B, both over SSH at its
+    # tailnet address; the other platforms' hold is a no-op. It is entered
     # (into ``init_stack``) just before Phase A and released when the stack
     # exits, after Phase B, on every path. Provisioning (platform create +
     # Phase A state recording/connectivity) and Initialization (Phase B) are

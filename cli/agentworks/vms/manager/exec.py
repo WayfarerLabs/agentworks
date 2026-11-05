@@ -44,7 +44,7 @@ def shell_vm(
     workspace_name: str | None = None,
     interaction: TtyInteractionPolicy,
 ) -> int:
-    """Open a shell on a VM as the admin user.
+    """Open a shell on a VM as the admin user, or as Lima's own guest user under ``--platform`` on Lima.
 
     Returns the interactive session's exit code; the CLI layer owns the
     translation to process exit (check 9: no sys.exit in the service),
@@ -160,7 +160,7 @@ def _shell_native(
     Refused, before anything resolves, when combined with a workspace (the
     native shell carries no environment and no working directory) and on a
     platform that offers no native shell. The boundary composes no
-    environment target, so no environment secret resolves (R7): the shell
+    environment target, so no environment secret resolves: the shell
     gets the account's own login environment. Inside the platform-channel
     gate, the platform runs the shell under the terminal guard with the
     boundary's op-start context, which a cloud needs for its route.
@@ -200,7 +200,7 @@ def _shell_native(
             code = vm_node.site.platform.native_shell(vm, ops_ctx)
             guard.clean_exit = code == 0
         # After the guard: its exit pass leaves the alternate screen, which
-        # would wipe anything written before it closes (I6).
+        # would wipe anything written before it closes.
         if code == _STATUS_CONNECTION_MAY_HAVE_DROPPED:
             output.warn(
                 f"the native shell ended with status {code} (the connection may have dropped); terminal restored."

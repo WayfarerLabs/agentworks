@@ -63,7 +63,8 @@ SETTLING_STATE_INTERVAL_SECONDS = 2
 """How often, and how far apart, the repair reads a ``BackendState`` that is still settling: about 30 seconds."""
 
 STABILIZE_SECONDS = 15
-"""Rekey's pause after each step, for the daemon and the network to settle (incident row I29)."""
+"""Rekey's pause after each step, for the daemon and the network to settle: without it a rekeyed node could be
+unreachable from its peers."""
 
 _REPAIR = """\
 set -eu
@@ -212,7 +213,8 @@ def rekey(
     """Run the rekey script once: restart ``tailscaled``, log out, join with ``auth_key``, restart.
 
     The restarts clear a stale daemon that would hang the logout, and a
-    rekeyed node that peers cannot reach (incident row I29).
+    rekeyed node that peers cannot reach; :data:`STABILIZE_SECONDS` after
+    each step lets the daemon and the network settle.
     """
     payload = _CAPTURED + _REKEY_STEPS.format(join=JOIN_FRAGMENT, pause=STABILIZE_SECONDS)
     return root_script.run(

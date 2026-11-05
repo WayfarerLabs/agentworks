@@ -216,12 +216,12 @@ and DB migration.
 - `recovery_needs_guest_sshd` **MUST** be declared (no default): `True` when the root channel goes
   through the guest's sshd.
 
-Vm-platform is an internal capability API. Its complete bundled contract is version 2, and all six
-implementations change atomically with the descriptor. Exact registration conformance rejects an
-inconsistent version or missing abstract implementation as a curation error. Returning unsupported
-or implementing a no-op still violates the contract and must be caught by review and provider tests;
-registration does not attempt to infer method semantics or ask a platform to interpret Debian's
-current release.
+Vm-platform is the contract that third-party VM platforms implement, as the bundled ones do. Its
+complete contract is version 2, and the six bundled implementations change atomically with the
+descriptor. Exact registration conformance rejects an inconsistent version or missing abstract
+implementation as a curation error. Returning unsupported or implementing a no-op still violates the
+contract and must be caught by review and provider tests; registration does not attempt to infer
+method semantics or ask a platform to interpret Debian's current release.
 
 **The clouds' route.** `public_ssh.PublicAddressPlatform`, the clouds' shared base, opens its own
 route around every `run_as_root`, `read_host_keys` and `native_shell` call and closes it before the

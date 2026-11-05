@@ -41,7 +41,7 @@ MIGRATED_FILES = (
     "capabilities/vm_platform/ssh_exposure.py",
     "capabilities/vm_platform/tailscale_join.py",
     "capabilities/vm_platform/wsl2.py",
-    # The plugins cannot pass the package guard until slice 5: importing one
+    # The plugins cannot pass the package guard yet: importing one
     # loads the plugin index, which loads the harness plugins.
     "plugins/aws/platform.py",
     "plugins/azure/platform.py",

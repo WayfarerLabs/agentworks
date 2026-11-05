@@ -23,8 +23,8 @@ from agentworks.execution.results import Unknown, UnknownReason
 if TYPE_CHECKING:
     from agentworks.execution.access import VMAccess
 
-# About 235 to 240 seconds in all when every attempt fails, the bound the
-# legacy wait kept (incident row I15).
+# About 235 to 240 seconds in all when every attempt fails: a cold tailnet
+# path can need minutes, and a longer bound only lengthens a failure.
 ATTEMPTS = 16
 PROBE_DEADLINE = 10
 PAUSE_SECONDS = 5

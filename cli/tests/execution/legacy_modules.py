@@ -1,4 +1,4 @@
-"""The legacy execution modules (R10, HLA D14), named once for every guard that blocks them."""
+"""The legacy execution modules, named once for every guard that blocks them."""
 
 from __future__ import annotations
 

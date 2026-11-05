@@ -1468,10 +1468,9 @@ def test_no_tailscale_vm_fails_pre_gate_with_zero_resolves(
     resolve_counter: list[list[str]],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The hoisted row guard: a VM with no Tailscale address refuses
-    BEFORE any prompt and before any VM start (the imperative body
-    checked it after its gate; the hoist forgoes the accidental heal
-    where a post-gate start's rejoin repopulated the row)."""
+    """The row guard: a VM with no Tailscale address refuses BEFORE any
+    prompt and before any VM start, since nothing the gate does could give
+    it one."""
     config = make_config()
     _seed_vm(db, "box", None)
     _seed_session(db, "s1", "ws-box")

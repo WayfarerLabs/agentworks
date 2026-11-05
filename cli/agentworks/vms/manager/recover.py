@@ -93,7 +93,10 @@ def recover_vm(db: Database, config: Config, name: str, *, interaction: TtyInter
             result = recovery.repair(platform, vm, ops_ctx, public_key=public_key, auth_key=auth_key, log=log.record)
             hint = f"Run 'agw vm logs {name}' for its output."
             if platform.recovery_needs_guest_sshd:
-                hint += " A broken SSH server on this platform needs the provider's console, or recreating the VM."
+                hint += (
+                    " A broken SSH server on this platform needs a way in that does not use it (a cloud "
+                    "provider's serial console), or recreating the VM."
+                )
             recovery.require_success(result, script="repair", vm_name=name, hint=hint)
             joined = recovery.joined(result)
 

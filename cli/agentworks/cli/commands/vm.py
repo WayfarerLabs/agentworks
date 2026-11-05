@@ -410,7 +410,7 @@ def vm_shell(
         typer.Option("--workspace", help="cd into a workspace (not with --platform)"),
     ] = None,
 ) -> None:
-    """Open a shell on a VM as the admin user."""
+    """Open a shell on a VM as the admin user (as Lima's own guest user under --platform on Lima)."""
     interaction = ordinary_tty_interaction_policy()
     from agentworks.config import load_config
     from agentworks.vms.manager import shell_vm

@@ -769,7 +769,8 @@ resolves up front, with the site's secrets. In one run it:
 
 A failed step stops there and names the script; its output is in the operation log
 (`agw vm logs <name>`). On Lima, Remote Lima and the clouds the channel itself is the VM's SSH
-server, so a broken one there needs the provider's console or recreation.
+server, so a broken one there needs a way in that does not use it (a cloud provider's serial
+console) or recreation.
 
 `vm rekey` restarts `tailscaled`, logs the node out, joins with the new key and restarts it again,
 in one script through the platform's own channel, then reads and records the new address and waits
