@@ -737,11 +737,10 @@ def rollback_create_on_interrupt(
     The second interrupt is absorbed so the caller re-raises the
     ORIGINAL one; either way a KeyboardInterrupt propagates to
     ``create_vm``, whose unwind then deletes the DB row it no longer
-    needs. A VM delete failure inside the teardown warns here (the
-    proxmox rollbacks' ``_warn_if_vm_remains`` precedent, using the
-    captured failure instead of a probe): this path is already
-    unwinding on the operator's interrupt, so raising like the delete
-    op does would replace it, but a silent orphan is never acceptable.
+    needs. A VM delete failure inside the teardown warns here, using the
+    captured failure: this path is already unwinding on the operator's
+    interrupt, so raising like the delete op does would replace it, but a
+    silent orphan is never acceptable.
     """
     output.warn(
         f"Interrupted: cleaning up partial Azure resources for '{name}', please wait (Ctrl-C again to abandon them)..."

@@ -156,9 +156,13 @@ the site's placement host for an ssh-placed site); WSL2 the distro plus its inst
 second Ctrl-C abandons that cleanup, printing what to remove manually: the resource group and name
 prefix, the node and VMID, or the exact removal command (`limactl delete --force <name>`, run on the
 placement host for an ssh-placed site, or `wsl --unregister <name>` plus deleting the install
-directory it names). Where rollback isn't possible (`vm reinit`, `agent reinit`, the init phase of
-`vm create`) it prints a recovery hint: the next command to run (`vm reinit`, `vm delete --force`,
-...). Every cancellation exits with the conventional SIGINT exit code (130).
+directory it names). On AWS, Proxmox, Lima and WSL2, a cleanup that is abandoned this way, or that
+fails or cannot show the backend removed, after a failure or a Ctrl-C alike, keeps the VM in a
+failed state with the identifiers of what may remain, so `agw vm delete <name>` can finish the
+removal; that `vm create` exits with status 1, not 130. Where rollback isn't possible (`vm reinit`,
+`agent reinit`, the init phase of `vm create`) it prints a recovery hint: the next command to run
+(`vm reinit`, `vm delete --force`, ...). Every other cancellation exits with the conventional SIGINT
+exit code (130).
 
 ## Commands
 

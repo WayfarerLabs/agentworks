@@ -3,11 +3,13 @@
 A bare program name is looked up when the process starts, and that lookup can
 run a file from the current directory: Windows searches the current directory
 before ``PATH``, and on POSIX an empty or relative ``PATH`` element means the
-current directory. Every program Agentworks starts by name goes through
-:func:`resolve_program`, which considers only absolute ``PATH`` elements, so a
-program planted in whatever directory the operator runs ``agw`` from is never
-started. The OpenSSH client has its own resolver (``execution.client``), which
-uses :func:`find_program` on POSIX and fixed locations on Windows.
+current directory. A program started through :func:`resolve_program`, which
+considers only absolute ``PATH`` elements, is never one planted in whatever
+directory the operator runs ``agw`` from. The OpenSSH client has its own
+resolver (``execution.client``), which uses :func:`find_program` on POSIX and
+fixed locations on Windows. Four starts still pass a bare name: the legacy
+paths that run ``ssh`` and ``scp``, local Lima's ``limactl``, and VS Code's
+``code`` after ``workspace create``.
 """
 
 from __future__ import annotations

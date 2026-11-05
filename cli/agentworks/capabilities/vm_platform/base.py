@@ -376,10 +376,14 @@ class VMPlatform(Capability):
         no field for one, because no channel's status is trusted; core reads
         the status from markers in the streams). ``script`` can carry a
         secret, so it never reaches an argument, a log, an exception or a
-        file. Raise an ``AgentworksError`` when the channel cannot start or a
-        provider call fails; core treats that like an unknown outcome and
-        never dispatches again. ``ctx`` is the op-start context, for a
-        platform whose channel needs a credential.
+        file. A channel that waits for the VM to answer before it dispatches
+        (the clouds' public SSH, Proxmox's guest agent) raises
+        ``root_script.ChannelUnreachable`` when that wait runs out, since
+        nothing was dispatched: callers stop there, and do not try a logout
+        they could not deliver. Raise another ``AgentworksError`` when the
+        channel cannot start or a provider call fails; core treats that like
+        an unknown outcome and never dispatches again. ``ctx`` is the
+        op-start context, for a platform whose channel needs a credential.
         """
 
     def native_shell(self, vm: VMRow, ctx: RunContext) -> int:
