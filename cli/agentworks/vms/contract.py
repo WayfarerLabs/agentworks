@@ -152,9 +152,6 @@ SUDO = RequestCheck("sudo", Severity.FAIL, Command(("id", "-u"), elevated=True, 
 
 SCRIPT_ROWS = (SYSTEMD, BASE_TOOLS, LOGIN_SHELLS, PAM_ENV)
 
-CHECKS: tuple[Check, ...] = (*SCRIPT_ROWS, SUDO)
-"""The contract's rows, in request and report order: the script's rows, then the elevated check."""
-
 LINE = re.compile(r"AGW-CHECK(\s+)(\S+)(.*)", re.DOTALL)
 END_LINE = "AGW-CHECK-END"
 
