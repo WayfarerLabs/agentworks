@@ -912,12 +912,19 @@ def capture_output(
     longer than the pane width survives later per-line trimming as one
     line; off by default to keep other callers' output shape unchanged.
     """
-    q_session = exact_tmux_target(session_name)
+    q_session = exact_tmux_target(session_name + ":")
     flags = "-p -J" if join_wrapped else "-p"
     result = run_command(
         tmux_cmd(f"capture-pane -t {q_session} {flags} -S -{lines}", socket_path),
         check=False,
     )
+    if result.returncode != 0:
+        from agentworks.errors import ExternalError
+
+        raise ExternalError(
+            f"Could not capture output for session '{session_name}'.",
+            hint="Check that the session's tmux server and pane are reachable, then retry session logs.",
+        )
     return getattr(result, "stdout", "") or ""
 
 

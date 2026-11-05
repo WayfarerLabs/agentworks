@@ -130,11 +130,13 @@ def _reload_vm(db: Database, target_vm_name: str) -> VMRow:
     return refreshed_vm
 
 
-def _build_live_transport(vm: VMRow, config: Config) -> tuple[Transport, RunCommand]:
+def _build_live_transport(
+    vm: VMRow, config: Config, *, redactions: tuple[str, ...] = ()
+) -> tuple[Transport, RunCommand]:
     """Build the admin SSH transport for the live VM and its run command."""
     from agentworks.ssh import SSHLogger
 
-    logger = SSHLogger(vm.name, "session-create")
+    logger = SSHLogger(vm.name, "session-create", redactions=redactions)
     target = _mgr.transport(vm, config, logger=logger)
     run_command: RunCommand = target.run
     return target, run_command
@@ -407,7 +409,9 @@ def create_session(
     require_vm_ssh_boundary(db, config, graph.vm_node.row)
     with activation_gate(graph.vm_node, gate_secret_resolver(config, registry, graph.resolver)):
         vm = _reload_vm(db, plan.target_vm_name)
-        target, run_command = _build_live_transport(vm, config)
+        # Preflight precedes secret resolution and carries no workload values.
+        # Build the logged mutation target only once its redactions are known.
+        target = _mgr.transport(vm, config)
 
         secret_values, agent_target = _preflight_and_resolve(
             db,
@@ -418,6 +422,7 @@ def create_session(
             target=target,
             interaction=interaction,
         )
+        target, run_command = _build_live_transport(vm, config, redactions=tuple(secret_values.values()))
 
         # ===== Dependency-ordered roll-forward (S11) ========================
         #
