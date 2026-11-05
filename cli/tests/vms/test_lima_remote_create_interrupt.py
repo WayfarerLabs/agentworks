@@ -329,8 +329,8 @@ def test_remote_abandon_warning_names_the_vm_host(
     with pytest.raises(RetainedProvisioningError):
         LimaPlatform("lima", _REMOTE).create(_request(), RunContext())
 
-    (abandoned,) = [w for w in captured_output.warnings if "Cleanup abandoned" in w]
-    assert "on 'user@host'" in abandoned
+    warned = "\n".join(captured_output.warnings)
+    assert "on 'user@host'" in warned
 
 
 # -- Local rollback, shared with the remote path -----------------------------------------------

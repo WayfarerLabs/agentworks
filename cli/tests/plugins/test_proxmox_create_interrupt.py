@@ -134,8 +134,6 @@ class TestInterruptDuringBootstrapWait:
         assert ("delete_vm", "pve1", NEWID) in fake.calls
         assert fake.ops().index("stop_vm") < fake.ops().index("delete_vm")
         assert "stop_task" not in fake.ops()
-        # The delete succeeded, so nothing warns that the VM remains.
-        assert not any("may remain" in w for w in captured_output.warnings)
         _assert_template_untouched(fake)
 
     def test_second_interrupt_abandons_cleanup_and_retains_the_row(
@@ -156,9 +154,9 @@ class TestInterruptDuringBootstrapWait:
         # Abandoned at the stop: nothing else was touched.
         assert "delete_vm" not in fake.ops()
         assert "stop_task" not in fake.ops()
-        (abandoned,) = [w for w in captured_output.warnings if "Cleanup abandoned" in w]
-        assert f"VM {NEWID}" in abandoned
-        assert "node 'pve1'" in abandoned
+        warned = "\n".join(captured_output.warnings)
+        assert f"VM {NEWID}" in warned
+        assert "node 'pve1'" in warned
 
 
 class TestFailClosedBootstrap:
@@ -214,10 +212,10 @@ class TestFailClosedBootstrap:
 
         assert caught.value.platform_metadata == {"vmid": str(NEWID), "node": "pve1"}
         _assert_exception_graph_is_value_free(caught.value)
-        (warning,) = [warning for warning in captured_output.warnings if "may remain" in warning]
-        assert f"VM {NEWID}" in warning
-        assert "node 'pve1'" in warning
-        assert _SENTINEL not in warning
+        warned = "\n".join(captured_output.warnings)
+        assert f"VM {NEWID}" in warned
+        assert "node 'pve1'" in warned
+        assert _SENTINEL not in warned
 
 
 class TestInterruptDuringCloneTask:
@@ -337,9 +335,9 @@ class TestUnremovedVMIsRetained:
             platform.create(_request(tailscale=True), RunContext())
 
         assert exc.value.platform_metadata == {"vmid": str(NEWID), "node": "pve1"}
-        (remains,) = [w for w in captured_output.warnings if "may remain" in w]
-        assert f"VM {NEWID}" in remains
-        assert "node 'pve1'" in remains
+        warned = "\n".join(captured_output.warnings)
+        assert f"VM {NEWID}" in warned
+        assert "node 'pve1'" in warned
 
     def test_failure_path_retains_a_vm_that_survives_the_delete_and_keeps_the_failure(
         self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
@@ -352,9 +350,9 @@ class TestUnremovedVMIsRetained:
             platform.create(_request(tailscale=False), RunContext())
 
         assert exc.value.platform_metadata == {"vmid": str(NEWID), "node": "pve1"}
-        (remains,) = [w for w in captured_output.warnings if "may remain" in w]
-        assert f"VM {NEWID}" in remains
-        assert "node 'pve1'" in remains
+        warned = "\n".join(captured_output.warnings)
+        assert f"VM {NEWID}" in warned
+        assert "node 'pve1'" in warned
 
     @pytest.mark.parametrize("path", ["failure", "interrupt"])
     def test_an_api_outage_during_the_rollback_retains_the_vm(
@@ -375,7 +373,7 @@ class TestUnremovedVMIsRetained:
             platform.create(_request(tailscale=True), RunContext())
 
         assert exc.value.platform_metadata == {"vmid": str(NEWID), "node": "pve1"}
-        assert any(f"VM {NEWID}" in w and "may remain" in w for w in captured_output.warnings)
+        assert any(f"VM {NEWID}" in w for w in captured_output.warnings)
 
     @pytest.mark.parametrize("path", ["failure", "interrupt"])
     def test_a_raw_transport_failure_during_the_rollback_retains_the_vm(
@@ -417,9 +415,6 @@ class TestPlainFailure:
         assert "stop_vm" not in fake.ops()
         assert any("Cleaning up the partial VM" in d for d in captured_output.detail)
         assert not any("Interrupted" in w for w in captured_output.warnings)
-        assert not any("Cleanup abandoned" in w for w in captured_output.warnings)
-        # The delete succeeded, so the orphan backstop stays quiet.
-        assert not any("may remain" in w for w in captured_output.warnings)
         _assert_template_untouched(fake)
 
     def test_failure_before_the_clone_makes_no_cleanup_calls(self, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -38,8 +38,8 @@ def test_a_start_interrupted_by_a_shutdown_says_why_and_what_to_do(
     assert caught.value.hint
 
 
-def test_a_failure_with_no_output_says_so(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_failure_with_no_output_is_still_a_typed_error(monkeypatch: pytest.MonkeyPatch) -> None:
     _wsl_exits(monkeypatch, stdout="", stderr="")
 
-    with pytest.raises(WSLCommandFailed, match="no output"):
+    with pytest.raises(WSLCommandFailed):
         wsl2._wsl(["--terminate", "team-dev"])

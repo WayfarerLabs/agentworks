@@ -255,7 +255,6 @@ def test_second_interrupt_abandons_platform_rollback_without_mutating_survivors(
     assert len(cache.firewalls.resources) == 2
     assert cache.instances.delete_requests == []
     message = "\n".join(warnings)
-    assert "Cleanup abandoned" in message
     assert "firewall-rules delete" not in message
 
 

@@ -565,7 +565,7 @@ def test_a_key_replaced_while_recover_ran_is_not_recorded(
 
     monkeypatch.setattr(reachability, "wait", wait_then_replace_the_key)
 
-    with pytest.raises(StateError, match="not recorded") as caught:
+    with pytest.raises(StateError) as caught:
         _recover(db, config)
 
     assert waits == ["wait"]

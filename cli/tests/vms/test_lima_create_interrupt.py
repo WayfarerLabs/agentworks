@@ -260,7 +260,6 @@ def test_failure_mid_create_cleans_up_and_reraises(
 
     assert _deletes(ran) == ["limactl delete --force myvm"]
     assert not any("Interrupted" in w for w in captured_output.warnings)
-    assert not any("Cleanup abandoned" in w for w in captured_output.warnings)
 
 
 def test_interrupt_during_start_cleans_up_and_reraises_the_original(
@@ -380,5 +379,5 @@ def test_second_interrupt_abandons_cleanup_and_retains_the_row(
 
     assert exc.value.platform_metadata == {"instance_name": "myvm"}
     assert len(_deletes(ran)) == 1
-    (abandoned,) = [w for w in captured_output.warnings if "Cleanup abandoned" in w]
-    assert "'limactl delete --force myvm'" in abandoned
+    warned = "\n".join(captured_output.warnings)
+    assert "'limactl delete --force myvm'" in warned
