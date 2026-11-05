@@ -70,7 +70,8 @@ def test_missing_active_routing_record_preserves_existing_placement(db):
 @pytest.mark.parametrize("count", [0, 1])
 def test_first_failed_outer_attempt_has_no_confirmed_empty_routing_result(db, count):
     fixture = graph(db, active=("vm", "agent"), counts={"vm": count})
-    fixture.save("vm", complete=False)
+    partial = fixture.save("vm", complete=False).model_copy(update={"artifact_inputs": None})
+    write_native_setup(db, "vm", "vm", NativeSetupState(records=(partial,)), operation="fixture")
     result = setup_artifacts(db, fixture.registry, fixture.owners["agent"], fixture.vm, "shell")
     assert result.retain_previous == bool(count)
     assert not result.unresolved_routes and not result.inputs.deferred

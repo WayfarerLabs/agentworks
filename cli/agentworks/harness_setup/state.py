@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from agentworks.db import Database
     from agentworks.db.instance_state import InstanceKind, JsonObject
 
-_VERSION = 3
+_VERSION = 4
 _COMPONENTS: dict[str, frozenset[SetupComponent]] = {
     "vm": frozenset({"vm", "admin"}),
     "agent": frozenset({"agent"}),
@@ -36,7 +36,7 @@ def decode_native_setup(record: AppliedStateSlice) -> NativeSetupState:
     """Validate persisted evidence without echoing malformed input contents."""
     if record.key is not AppliedStateKey.HARNESS_NATIVE_SETUP or record.instance_kind not in _COMPONENTS:
         raise TypeError("native setup requires its matching owner slice")
-    if record.payload.payload_version not in (1, 2, _VERSION):
+    if record.payload.payload_version not in (1, 2, 3, _VERSION):
         raise UnsupportedNativeSetupVersionError(
             "native setup evidence requires a different Agentworks version",
             hint="Use a release that understands this native setup record. The stored evidence was retained.",
@@ -45,6 +45,18 @@ def decode_native_setup(record: AppliedStateSlice) -> NativeSetupState:
         state = NativeSetupState.model_validate(record.payload.value)
         if any(item.component not in _COMPONENTS[record.instance_kind] for item in state.records):
             raise ValueError("component does not belong to this owner")
+        if record.payload.payload_version < 4:
+            # Earlier writers could checkpoint input IDs before routing completed.
+            # An incomplete record without explicit routes cannot confirm that
+            # its empty deferral set means all inputs were handled.
+            state = NativeSetupState(
+                records=tuple(
+                    item.model_copy(update={"artifact_inputs": None})
+                    if not item.complete and not item.deferred
+                    else item
+                    for item in state.records
+                )
+            )
     except (ValidationError, ValueError, RecursionError):
         raise StateError("stored native setup evidence is malformed") from None
     return state

@@ -545,7 +545,7 @@ def test_uncaptured_ancestor_does_not_block_session_operations(lifecycle, monkey
         lifecycle.restart()
     name = "s2" if operation == "create" else "s1"
     record = read_native_setup(lifecycle.db, "session", name).records[0]
-    assert record.complete and record.artifact_files
+    assert not record.complete and record.artifact_files and record.incomplete_reasons
     assert "resolve" in lifecycle.events and "tmux_create" in lifecycle.events
 
 
@@ -637,3 +637,103 @@ def test_real_native_probe_failure_preserves_existing_runtime_before_teardown(
     assert (current.session_uuid, current.run_id, current.pid) == (previous.session_uuid, previous.run_id, previous.pid)
     assert [(path, path.read_bytes()) for path, _ in files] == files
     assert "kill" not in lifecycle.events and "tmux_create" not in lifecycle.events
+
+
+@pytest.mark.parametrize("capture_state", ["changed", "missing"])
+def test_unknown_passthrough_restart_records_missing_delivery_and_retires_old_files_after_teardown(
+    lifecycle, monkeypatch, captured_output, capture_state
+):
+    from agentworks.artifacts.application import ArtifactDeferral
+    from agentworks.artifacts.state import capture_owner, write_capture
+    from agentworks.harness_setup.inputs import SetupInputs
+    from agentworks.harness_setup.model import NativeSetupState, SetupRecord
+    from agentworks.harness_setup.state import write_native_setup
+    from agentworks.schema import CapabilityConfig
+    from agentworks.secrets.orchestration import SecretTarget
+    from agentworks.vms.templates import ResolvedVMTemplate
+    from tests.conftest import _StubRegistry
+
+    outer = ArtifactBundle(name="outer", hints={"vm-tools": HintArtifactSpec(text="VM-ONLY-CONTENT")})
+    lifecycle.config.artifact_bundles["outer"] = outer
+    template = ResolvedVMTemplate(
+        "default", artifacts=ArtifactsConfig(bundles=["outer"]), harness_integrations={"shell": CapabilityConfig()}
+    )
+    monkeypatch.setattr("agentworks.vms.templates.resolve_live_template", lambda *a, **k: template)
+    registry = _StubRegistry(lifecycle.config)
+    capture = capture_owner(registry, "vm", "vm1", "vm", template.artifacts)
+    write_capture(lifecycle.db, "vm", "vm1", "vm", capture, operation="fixture")
+    item = next(capture.inputs.items())
+    owner = SetupInputs("vm", "vm1", "vm", template.harness_integrations, SecretTarget(vm={}), template.artifacts)
+    record = SetupRecord(
+        component="vm",
+        integration="shell",
+        destination_id="d" * 64,
+        declaration=owner.declaration("shell", CapabilityConfig()),
+        complete=True,
+        artifact_inputs=(item.identity,),
+        deferred=(ArtifactDeferral(input_id=item.identity, destination="user", reason="fixture user delivery"),),
+    )
+    write_native_setup(lifecycle.db, "vm", "vm1", NativeSetupState(records=(record,)), operation="fixture")
+    lifecycle.restart()
+    old_files = {path: path.read_bytes() for path in lifecycle.files()}
+    assert any(b"VM-ONLY-CONTENT" in body for body in old_files.values())
+    first = lifecycle.db.get_session("s1")
+    assert first is not None
+
+    if capture_state == "changed":
+        outer.hints["vm-tools"] = HintArtifactSpec(text="UPDATED-VM-CONTENT")
+        changed = capture_owner(registry, "vm", "vm1", "vm", template.artifacts)
+        write_capture(lifecycle.db, "vm", "vm1", "vm", changed, operation="fixture")
+    else:
+        lifecycle.db._conn.execute(
+            "DELETE FROM instance_records WHERE instance_kind = 'vm' "
+            "AND instance_name = 'vm1' AND record_key = 'artifact-inputs'"
+        )
+        lifecycle.db._conn.commit()
+    lifecycle.events.clear()
+    captured_output.warnings.clear()
+    teardowns = []
+
+    def teardown(*args, **kwargs):
+        assert all(path.read_bytes() == body for path, body in old_files.items())
+        teardowns.append(True)
+        lifecycle.events.append("kill")
+
+    monkeypatch.setattr("agentworks.sessions.manager._lifecycle._teardown_session", teardown)
+    lifecycle.restart()
+    current = lifecycle.db.get_session("s1")
+    assert current is not None and current.run_id != first.run_id
+    assert teardowns == [True]
+    assert "tmux_create" in lifecycle.events and "kill" in lifecycle.events
+    state = read_native_setup(lifecycle.db, "session", "s1").records[0]
+    assert not state.complete and state.incomplete_reasons
+    assert item.identity in state.artifact_inputs
+    assert any(entry.input_id == item.identity and entry.destination == "session" for entry in state.deferred)
+    assert any("vm/vm1" in reason and item.identity[:12] in reason for reason in state.incomplete_reasons)
+    assert captured_output.warnings
+    assert all(not path.exists() for path in old_files)
+    new_root = lifecycle.target.home / ".agentworks-artifacts" / "session" / current.session_uuid / current.run_id
+    index = json.loads((new_root / "index.json").read_text())
+    assert all(group["owner"]["component"] != "vm" for group in index["groups"])
+    assert not any(b"VM-ONLY-CONTENT" in path.read_bytes() for path in new_root.rglob("*") if path.is_file())
+
+    # Repair the outer routing, then restart: delivery returns to the complete
+    # current input set without retaining a private history of unused runs.
+    repaired = capture_owner(registry, "vm", "vm1", "vm", template.artifacts)
+    write_capture(lifecycle.db, "vm", "vm1", "vm", repaired, operation="fixture")
+    renewed = next(repaired.inputs.items())
+    healed = record.model_copy(
+        update={
+            "artifact_inputs": (renewed.identity,),
+            "deferred": (ArtifactDeferral(input_id=renewed.identity, destination="user", reason="fixture repair"),),
+        }
+    )
+    write_native_setup(lifecycle.db, "vm", "vm1", NativeSetupState(records=(healed,)), operation="fixture")
+    monkeypatch.setattr(
+        "agentworks.sessions.manager._lifecycle._teardown_session", lambda *a, **k: lifecycle.events.append("kill")
+    )
+    lifecycle.restart()
+    state = read_native_setup(lifecycle.db, "session", "s1").records[0]
+    assert state.complete and not state.incomplete_reasons
+    assert not any(entry.input_id == item.identity for entry in state.deferred)
+    assert all(not path.exists() for path in old_files)

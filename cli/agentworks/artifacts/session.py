@@ -8,13 +8,19 @@ from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from agentworks import output
-from agentworks.artifacts.application import ArtifactApplication, OwnedArtifactFile, SessionArtifactContext
+from agentworks.artifacts.application import (
+    ArtifactApplication,
+    ArtifactDeferral,
+    OwnedArtifactFile,
+    SessionArtifactContext,
+)
 from agentworks.artifacts.publication import publish_artifacts, validate_application
 from agentworks.artifacts.reporting import report_applied, report_deferrals
 from agentworks.artifacts.state import CapturedArtifacts, capture_owner, write_capture
 from agentworks.errors import StateError
 from agentworks.harness_setup.inputs import SetupInputs
 from agentworks.harness_setup.model import NativeSetupState, SetupRecord
+from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
 from agentworks.harness_setup.state import read_native_setup, replace_setup_record, write_native_setup
 from agentworks.native_files import native_path
 from agentworks.schema import CapabilityConfig
@@ -32,6 +38,8 @@ class PreparedSessionArtifacts:
     context: SessionArtifactContext
     capture: CapturedArtifacts
     setup_inputs: SetupInputs
+    unresolved_routes: frozenset[str] = frozenset()
+    unavailable_reasons: tuple[str, ...] = ()
 
 
 def prepare_session_artifacts(
@@ -102,7 +110,13 @@ def prepare_session_artifacts(
         template.artifacts,
         capture,
     )
-    return PreparedSessionArtifacts(context, capture, setup_inputs)
+    return PreparedSessionArtifacts(
+        context,
+        capture,
+        setup_inputs,
+        routed.unresolved_routes,
+        tuple(sanitize_setup_diagnostic(reason) for reason in routed.unavailable_reasons),
+    )
 
 
 def validate_session_application(
@@ -133,7 +147,7 @@ def stage_session_artifacts(
     """Publish the prospective run while retaining files the old runtime can use."""
     context = prepared.context
     state = read_native_setup(db, "session", name)
-    if not context.inputs and not application.files and not state.records:
+    if not context.inputs and not application.files and not state.records and not prepared.unavailable_reasons:
         return
     previous = next((item for item in state.records if item.integration == integration), None)
     retained = () if previous is None else previous.artifact_files
@@ -142,9 +156,23 @@ def stage_session_artifacts(
         integration=integration,
         destination_id=hashlib.sha256(context.directory.encode()).hexdigest(),
         declaration=prepared.setup_inputs.declaration(integration, prepared.setup_inputs.activations[integration]),
-        artifact_inputs=tuple(item.identity for item in context.inputs.items()),
+        artifact_inputs=tuple(item.identity for item in context.inputs.items())
+        + tuple(sorted(prepared.unresolved_routes)),
         artifact_files=retained,
-        deferred=application.deferred,
+        deferred=(
+            *application.deferred,
+            *(
+                ArtifactDeferral(
+                    input_id=identity,
+                    destination="session",
+                    reason=(
+                        "The recorded upstream route has no readable captured content; this input was not delivered."
+                    ),
+                )
+                for identity in sorted(prepared.unresolved_routes)
+            ),
+        ),
+        incomplete_reasons=prepared.unavailable_reasons,
     )
 
     def checkpoint(files: tuple[OwnedArtifactFile, ...]) -> None:
@@ -209,7 +237,7 @@ def commit_session_artifacts(
         updated = record.model_copy(
             update={
                 "artifact_files": (*keep, *remaining.files),
-                "complete": record.integration == integration,
+                "complete": record.integration == integration and not prepared.unavailable_reasons,
                 "pending_cleanup": record.integration != integration and bool(remaining.files),
             }
         )

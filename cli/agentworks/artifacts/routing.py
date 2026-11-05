@@ -57,6 +57,7 @@ class RoutingResult:
     active_facets: tuple[ArtifactFacet, ...] = ()
     unresolved_routes: frozenset[str] = frozenset()
     retain_previous: bool = False
+    unavailable_reasons: tuple[str, ...] = ()
 
 
 def inspect_owner_artifacts(
@@ -82,8 +83,9 @@ def inspect_owner_artifacts(
             capture_status, reason = "stale", "Captured artifacts do not match the owner's current bundle declarations."
     except UnsupportedArtifactCaptureVersionError as error:
         capture_status, reason, repair_hint = "unavailable", f"{error}.", error.hint
-    except (ConfigError, StateError, KeyError):
+    except (ConfigError, StateError, KeyError) as error:
         capture_status, reason = "unavailable", "The owner's artifact declarations or captured state are unavailable."
+        repair_hint = error.hint if isinstance(error, StateError) else None
     prepared = ArtifactInputs(local=captured.inputs if captured is not None else None, deferred=inherited)
     if integration_name is not None:
         try:
@@ -312,6 +314,40 @@ def report_ancestor(view: ArtifactOwnerView, integration_name: str) -> None:
         )
 
 
+def _recorded_routes(view: ArtifactOwnerView, destination: ArtifactFacet, integration_name: str) -> tuple[str, ...]:
+    if integration_name not in view.owner.activations:
+        if destination != inactive_destination(view.owner.facet) or view.captured is None:
+            return ()
+        return tuple(item.identity for item in view.captured.inputs.items())
+    if view.record is None or destination not in ALLOWED_DEFERRALS[view.owner.facet]:
+        return ()
+    return tuple(item.input_id for item in view.record.deferred if item.destination == destination)
+
+
+def _routing_unknown(view: ArtifactOwnerView, destination: ArtifactFacet, integration_name: str) -> bool:
+    """Distinguish missing routing evidence from an incomplete native application."""
+    if integration_name not in view.owner.activations:
+        return destination == inactive_destination(view.owner.facet) and view.capture_status in (
+            "missing",
+            "unavailable",
+        )
+    if destination not in ALLOWED_DEFERRALS[view.owner.facet]:
+        return False
+    record = view.record
+    if record is None and view.status == "unavailable":
+        return True
+    if record is not None and any(
+        item.destination not in ALLOWED_DEFERRALS[view.owner.facet] for item in record.deferred
+    ):
+        return True
+    has_inputs = (
+        bool(view.prepared)
+        if view.captured is not None
+        else bool(view.owner.artifacts.bundles) or view.capture_status == "unavailable"
+    )
+    return has_inputs and (record is None or record.artifact_inputs is None)
+
+
 def setup_artifacts(
     db: Database, registry: Registry, inputs: SetupInputs, vm: VMRow, integration_name: str
 ) -> RoutingResult:
@@ -329,33 +365,12 @@ def setup_artifacts(
     report_ancestor(view, integration_name)
     inherited = available_deferred_inputs(view, inputs.facet, integration_name)
     known = {item.identity for group in inherited.values() for item in group.items()}
-    recorded = frozenset(
-        route.input_id
-        for route in (() if view.record is None else view.record.deferred)
-        if route.destination == inputs.facet
-    )
+    recorded = frozenset(_recorded_routes(view, inputs.facet, integration_name))
     unresolved = recorded - known
-    # Missing evidence cannot authorize removal of a descendant's existing files.
-    # A confirmed empty routing result, including an incomplete native-only
-    # attempt, remains distinct from unavailable artifact routing.
-    has_inputs = bool(view.captured.inputs) if view.captured is not None else bool(view.owner.artifacts.bundles)
-    unconfirmed = (
-        view.record is None
-        or view.record.artifact_inputs is None
-        or not view.record.complete
-        and not view.record.deferred
-    )
-    unknown = (
-        view.status == "unavailable"
-        or view.capture_status in ("missing", "unavailable")
-        or unconfirmed
-        and integration_name in view.owner.activations
-        and has_inputs
-    )
     return RoutingResult(
         ArtifactInputs(local=prepared.local, deferred=inherited),
         unresolved_routes=unresolved,
-        retain_previous=bool(unresolved) or unknown,
+        retain_previous=bool(unresolved) or _routing_unknown(view, inputs.facet, integration_name),
     )
 
 
@@ -375,8 +390,8 @@ def session_artifacts(
     ancestors = (vm_view, user_view, workspace_view)
     for view in ancestors:
         report_ancestor(view, integration_name)
-    inherited = session_inherited_inputs(*ancestors, integration_name=integration_name, report=True)
-    result = ArtifactInputs(local=local, deferred=inherited)
+    routed = _join_session_inputs(*ancestors, integration_name=integration_name, report=True)
+    result = ArtifactInputs(local=local, deferred=routed.inputs.deferred)
     files: list[OwnedArtifactFile] = []
     active: list[ArtifactFacet] = []
     for view in ancestors:
@@ -385,7 +400,14 @@ def session_artifacts(
             files.extend(item for item in view.record.artifact_files if item.path not in skipped_paths)
             if view.status == "current":
                 active.append(view.owner.facet)
-    return RoutingResult(result, tuple(files), tuple(active))
+    return RoutingResult(
+        result,
+        tuple(files),
+        tuple(active),
+        unresolved_routes=routed.unresolved_routes,
+        retain_previous=routed.retain_previous,
+        unavailable_reasons=routed.unavailable_reasons,
+    )
 
 
 def session_ancestor_views(
@@ -420,6 +442,80 @@ def session_ancestor_views(
     return vm_view, user_view, workspace_view
 
 
+def _session_routes(
+    vm: ArtifactOwnerView,
+    user: ArtifactOwnerView,
+    workspace: ArtifactOwnerView,
+    *,
+    integration_name: str,
+) -> tuple[tuple[ArtifactOwnerView, tuple[str, ...], bool], ...]:
+    """Keep passthrough route identities even when their captured payload is missing."""
+    routes = []
+    for view in (vm, user, workspace):
+        identities = _recorded_routes(view, "session", integration_name)
+        unknown = _routing_unknown(view, "session", integration_name)
+        if view is not vm and integration_name in view.owner.activations:
+            destination: ArtifactFacet = "user" if view is user else "workspace"
+            if (view.record is None or view.record.artifact_inputs is None) and _recorded_routes(
+                vm, destination, integration_name
+            ):
+                unknown = True
+        routes.append((view, identities, unknown))
+        if view is not vm and integration_name not in view.owner.activations:
+            destination = "user" if view is user else "workspace"
+            routes.append(
+                (
+                    vm,
+                    _recorded_routes(vm, destination, integration_name),
+                    _routing_unknown(vm, destination, integration_name),
+                )
+            )
+    return tuple(routes)
+
+
+def _join_session_inputs(
+    vm: ArtifactOwnerView,
+    user: ArtifactOwnerView,
+    workspace: ArtifactOwnerView,
+    *,
+    integration_name: str,
+    report: bool = False,
+) -> RoutingResult:
+    routes = _session_routes(vm, user, workspace, integration_name=integration_name)
+    selected = [identity for _, identities, _ in routes for identity in identities]
+    if report and len(set(selected)) != len(selected):
+        output.warn(f"Repeated artifact routes via {integration_name} were combined once; refresh the owning facets.")
+    selected_ids = set(selected)
+    result = {}
+    for view in (vm, user, workspace):
+        if view.captured is not None:
+            group = view.captured.inputs.select(selected_ids)
+            if group:
+                result[group.owner] = group
+    resolved = {item.identity for group in result.values() for item in group.items()}
+    unresolved = frozenset(selected_ids - resolved)
+    reasons = []
+    for view, identities, unknown in routes:
+        missing = tuple(identity[:12] for identity in identities if identity not in resolved)
+        if not missing and not unknown:
+            continue
+        detail = f"have no readable source ({_brief(missing)})" if missing else "have no confirmed routing result"
+        reason = (
+            f"Artifact inputs via {integration_name} at {view.owner.component}/{view.owner.name} {detail}. "
+            f"{owner_remediation(view)} Unavailable content was not delivered."
+        )
+        if reason not in reasons:
+            reasons.append(reason)
+            if report:
+                output.warn(reason)
+    return RoutingResult(
+        ArtifactInputs(deferred=result),
+        unresolved_routes=unresolved,
+        retain_previous=bool(reasons),
+        unavailable_reasons=tuple(reasons),
+    )
+
+
 def session_inherited_inputs(
     vm: ArtifactOwnerView,
     user: ArtifactOwnerView,
@@ -429,45 +525,9 @@ def session_inherited_inputs(
     report: bool = False,
 ) -> dict[ArtifactOwner, ArtifactGroup]:
     """Union available deferrals once in original owner and declaration order."""
-    ancestors = (vm, user, workspace)
-    routes = []
-    for view in ancestors:
-        if integration_name in view.owner.activations:
-            # A recorded result belongs to this facet's original invocation.
-            # Its upstream routes may have changed since then.
-            identities = (
-                ()
-                if view.record is None
-                else tuple(item.input_id for item in view.record.deferred if item.destination == "session")
-            )
-        else:
-            identities = tuple(
-                item.identity
-                for group in available_deferred_inputs(view, "session", integration_name).values()
-                for item in group.items()
-            )
-        routes.append(identities)
-    selected = [identity for route in routes for identity in route]
-    if report and len(set(selected)) != len(selected):
-        output.warn(f"Repeated artifact routes via {integration_name} were combined once; refresh the owning facets.")
-    selected_ids = set(selected)
-    result = {}
-    for view in ancestors:
-        if view.captured is not None:
-            group = view.captured.inputs.select(selected_ids)
-            if group:
-                result[group.owner] = group
-    resolved = {item.identity for group in result.values() for item in group.items()}
-    if report:
-        for view, route in zip(ancestors, routes, strict=True):
-            unresolved = tuple(identity[:12] for identity in route if identity not in resolved)
-            if unresolved:
-                output.warn(
-                    f"Artifact routes via {integration_name} at {view.owner.component}/{view.owner.name} "
-                    f"have no readable source in this owner graph: {_brief(unresolved)}. "
-                    f"{owner_remediation(view)} Unknown content was omitted."
-                )
-    return result
+    return dict(
+        _join_session_inputs(vm, user, workspace, integration_name=integration_name, report=report).inputs.deferred
+    )
 
 
 def owner_remediation(view: ArtifactOwnerView) -> str:

@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from agentworks.artifacts.application import ArtifactDeferral
 from agentworks.db import AppliedStateKey, AppliedStateSlice, Database, VersionedPayload
 from agentworks.db.backup import create_manual_backup, restore_backup
 from agentworks.errors import BackupError, StateError
@@ -71,13 +72,13 @@ def test_nested_declaration_survives_persistence(tmp_path):
 
 
 def test_unknown_version_is_retained_but_cannot_bless_setup():
-    record = _slice(VersionedPayload(4, {"future": True}))
+    record = _slice(VersionedPayload(99, {"future": True}))
     with pytest.raises(UnsupportedNativeSetupVersionError):
         decode_native_setup(record)
     assert canonicalize_native_setup(record) == record.payload
 
 
-@pytest.mark.parametrize("version", [1, 2])
+@pytest.mark.parametrize("version", [1, 2, 3])
 def test_legacy_records_default_to_no_entry_diagnostics_and_export_current_version(version):
     payload = _state().model_dump(mode="json")
     del payload["records"][0]["incomplete_reasons"]
@@ -85,7 +86,7 @@ def test_legacy_records_default_to_no_entry_diagnostics_and_export_current_versi
     state = decode_native_setup(record)
     assert state.records[0].incomplete_reasons == ()
     encoded = canonicalize_native_setup(record)
-    assert encoded.payload_version == 3
+    assert encoded.payload_version == 4
     assert decode_native_setup(_slice(encoded)) == state
 
 
@@ -167,3 +168,44 @@ def test_restore_preserves_native_applied_state_after_setup_releases_database(tm
             assert read_native_setup(restored, "agent", "a") == pending
     finally:
         restored.close()
+
+
+@pytest.mark.parametrize("version", [1, 2, 3])
+@pytest.mark.parametrize("case", ["complete", "explicit-route", "unconfirmed"])
+def test_legacy_codec_only_trusts_complete_or_explicit_routing_results(version, case):
+    identity = "b" * 64
+    original = (
+        _state()
+        .records[0]
+        .model_copy(
+            update={
+                "complete": case == "complete",
+                "incomplete_reasons": () if case == "complete" else ("fixture incomplete application",),
+                "artifact_inputs": (identity,),
+                "deferred": (ArtifactDeferral(input_id=identity, destination="session", reason="fixture route"),)
+                if case == "explicit-route"
+                else (),
+            }
+        )
+    )
+    payload = NativeSetupState(records=(original,)).model_dump(mode="json")
+    stored = _slice(VersionedPayload(version, payload))
+    decoded = decode_native_setup(stored)
+    expected = None if case == "unconfirmed" else (identity,)
+    assert decoded.records[0].artifact_inputs == expected
+    assert decoded.records[0].claims == original.claims
+    assert decoded.records[0].incomplete_reasons == original.incomplete_reasons
+    assert decoded.records[0].deferred == original.deferred
+    assert stored.payload.value == payload
+    canonical = canonicalize_native_setup(stored)
+    assert canonical.payload_version == 4
+    assert canonical.value["records"][0]["artifact_inputs"] == (None if expected is None else [identity])
+    assert decode_native_setup(_slice(canonical)) == decoded
+
+
+def test_current_codec_preserves_confirmed_empty_routes_despite_native_failure():
+    original = _state().records[0].model_copy(update={"artifact_inputs": ("b" * 64,)})
+    state = NativeSetupState(records=(original,))
+    encoded = encode_native_setup(state)
+    assert encoded.payload_version == 4
+    assert decode_native_setup(_slice(encoded)) == state
