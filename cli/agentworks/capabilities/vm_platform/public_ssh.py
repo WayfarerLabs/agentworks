@@ -145,7 +145,7 @@ class PublicSSH:
         starts); then the next probe waits :data:`REFUSED_KEY_INTERVAL_SECONDS`,
         and a refusal still standing at the bound is what raises.
         When no probe completes, :data:`PROBE_FAILURE_HINT` is warned before
-        the error.
+        :class:`ChannelUnreachable`.
         """
         expires = time.monotonic() + seconds
         waited = False
@@ -173,7 +173,7 @@ class PublicSSH:
         if refused is not None:
             raise refused
         output.warn(PROBE_FAILURE_HINT)
-        raise ConnectivityError(
+        raise root_script.ChannelUnreachable(
             f"VM '{self._vm_name}' did not answer over SSH at its public address {self._destination.host}",
             entity_kind="vm",
             entity_name=self._vm_name,

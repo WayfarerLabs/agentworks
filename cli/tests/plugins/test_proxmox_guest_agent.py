@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 
 from agentworks.errors import ConnectivityError, TokenRejectedError
-from agentworks.execution.root_script import RawRun
+from agentworks.execution.root_script import ChannelUnreachable, RawRun
 from agentworks.plugins.proxmox import guest_agent
 from agentworks.plugins.proxmox.api import ProxmoxAPIError
 
@@ -99,6 +99,7 @@ def test_a_failed_call_raises_without_the_script_anywhere(api: FakeAPI) -> None:
         run(api)
 
     error = caught.value
+    assert not isinstance(error, ChannelUnreachable)  # the agent answered, so a read may be tried again
     assert "tskey-auth-private" not in str(error)
     assert "tskey-auth-private" not in repr(error)
     assert error.__cause__ is None
@@ -143,7 +144,8 @@ def test_an_agent_that_never_answers_raises_at_the_cap_with_nothing_dispatched(
     )
     api = FakeAPI([], pings=[ProxmoxAPIError("not running")] * 1000)
 
-    with pytest.raises(ConnectivityError) as caught:
+    # Unreachable, so a caller stops instead of waiting out the cap again.
+    with pytest.raises(ChannelUnreachable) as caught:
         run(api, deadline=600)
 
     assert max(seen) <= guest_agent.AGENT_WAIT_SECONDS + 2 * guest_agent.POLL_INTERVAL_SECONDS

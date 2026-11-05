@@ -23,7 +23,7 @@ import time
 from typing import TYPE_CHECKING, cast
 
 from agentworks.errors import AgentworksError, ConnectivityError, TokenRejectedError
-from agentworks.execution.root_script import RawRun
+from agentworks.execution.root_script import ChannelUnreachable, RawRun
 from agentworks.plugins.proxmox.api import ProxmoxAPIError, _TruncatedQGAOutput
 
 if TYPE_CHECKING:
@@ -44,7 +44,7 @@ def run_as_root(api: ProxmoxAPI, node: str, vmid: int, script: bytes, deadline: 
     text, since that request carries only the PID. The API refusing the site's token (401 or 403) is a
     ``TokenRejectedError`` instead, since no connection problem explains it.
     A guest agent that does not answer its ping by the deadline raises
-    ``ConnectivityError`` before anything is dispatched.
+    ``ChannelUnreachable`` before anything is dispatched.
     """
     where = f"{vmid}@{node}"
     text = script.decode("utf-8")
@@ -113,7 +113,7 @@ def _await_agent(api: ProxmoxAPI, node: str, vmid: int, where: str, expires: flo
         if failure is not None:
             raise failure
         time.sleep(min(POLL_INTERVAL_SECONDS, max(0.0, expires - time.monotonic())))
-    raise ConnectivityError(
+    raise ChannelUnreachable(
         f"the QEMU guest agent of Proxmox VM {where} did not answer, so no script was dispatched",
         hint=(
             "The VM needs qemu-guest-agent installed and running; check it from the VM's console in the Proxmox web UI."

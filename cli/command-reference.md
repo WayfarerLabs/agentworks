@@ -785,8 +785,10 @@ console) or recreation.
 `vm rekey` restarts `tailscaled`, logs the node out, joins with the new key and restarts it again,
 in one script through the platform's own channel, then reads and records the new address and waits
 for the VM to answer there. If the new address cannot be read, the node is logged out and the error
-names `agw vm recover`, which rejoins it. A rekeyed VM that does not answer at its new address fails
-naming `agw vm recover`, as `vm start` does; the new address is recorded either way.
+names `agw vm recover`, which rejoins it. When the platform's channel cannot reach the VM at all
+(after its own wait of about two minutes), rekey stops at that first call, naming `agw vm recover`,
+and does not try a logout. A rekeyed VM that does not answer at its new address fails naming
+`agw vm recover`, as `vm start` does; the new address is recorded either way.
 
 `vm delete` requires `--force` if the VM has workspaces, agents, or sessions. The confirmation
 message shows what will be deleted. Pass `--yes` to skip the prompt. Delete logs the VM's node out

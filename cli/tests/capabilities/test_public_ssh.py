@@ -22,7 +22,7 @@ from agentworks.errors import ConnectivityError, StateError, ValidationError
 from agentworks.execution import client, root_script, trust
 from agentworks.execution.client import SSHClient
 from agentworks.execution.errors import TrustMismatch, TrustMissing
-from agentworks.execution.root_script import RawRun
+from agentworks.execution.root_script import ChannelUnreachable, RawRun
 from agentworks.execution.trust import TrustBinding, TrustMode
 from agentworks.plugins.aws.platform import EC2Platform
 from agentworks.plugins.azure.platform import AzureVMPlatform
@@ -214,7 +214,7 @@ def test_the_wait_warns_its_hint_and_raises_at_its_time_bound(
     clock = _Clock(monkeypatch)
     _answering_after(monkeypatch, clock, float("inf"))
 
-    with pytest.raises(ConnectivityError):
+    with pytest.raises(ChannelUnreachable):
         target().wait_until_answering()
 
     assert (

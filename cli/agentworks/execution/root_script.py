@@ -37,6 +37,16 @@ HOST_KEYS_DEADLINE_SECONDS = 30
 _HOST_KEYS_PAYLOAD = "cat /etc/ssh/ssh_host_*_key.pub"
 
 
+class ChannelUnreachable(ConnectivityError):
+    """A root channel's own bounded wait found no way to the VM, so no script was dispatched.
+
+    The clouds' public SSH and Proxmox's guest agent wait about two minutes
+    for a VM to answer before raising this, so calling the channel again
+    cannot help until the VM answers: a caller stops at the first one rather
+    than retrying it, and does not try a logout it could not deliver either.
+    """
+
+
 @dataclass(frozen=True)
 class RawRun:
     """Everything a root channel printed on each stream, uninterpreted. There is no status: none is trusted."""
@@ -158,7 +168,8 @@ def run_process(argv: Sequence[str], script: bytes, deadline: float) -> RawRun:
     passes the pump's 1 MiB limit; the last two kill the process. A
     descendant that keeps a pipe open never stalls it. A program that cannot
     start raises ``ConnectivityError`` naming it (``ClientUnsupported`` for
-    the OpenSSH client).
+    the OpenSSH client). A channel that waits for its VM and finds none
+    raises :class:`ChannelUnreachable`.
     """
     stdout, stderr = pump.Capture(), pump.Capture()
     with pump.PipeSession(

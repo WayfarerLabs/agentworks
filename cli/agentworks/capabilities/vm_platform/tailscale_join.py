@@ -19,6 +19,7 @@ from agentworks.capabilities.vm_platform.base import parse_tailnet_address
 from agentworks.capabilities.vm_platform.public_ssh import SudoRefused
 from agentworks.errors import ConnectivityError, ProvisioningError
 from agentworks.execution import root_script
+from agentworks.execution.root_script import ChannelUnreachable
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -101,8 +102,10 @@ def read_tailnet_address(
     A read fails on a non-zero status, an unknown outcome, a value
     :func:`parse_tailnet_address` refuses, or a ``ConnectivityError`` from
     the channel. Any other error propagates at once, since reading again
-    cannot change it. After :data:`ADDRESS_READS` failed reads this raises
-    ``ConnectivityError`` naming ``node``. It never logs the node out.
+    cannot change it, and so does :class:`ChannelUnreachable`, whose channel
+    has already waited for the VM. After :data:`ADDRESS_READS` failed reads
+    this raises ``ConnectivityError`` naming ``node``. It never logs the node
+    out.
     ``log`` records each read in the caller's operation log.
     """
     reason = ""
@@ -113,6 +116,8 @@ def read_tailnet_address(
         cause = None
         try:
             result = root_script.run(run_as_root, "tailscale ip -4", deadline=ADDRESS_READ_DEADLINE_SECONDS, log=log)
+        except ChannelUnreachable:
+            raise
         except ConnectivityError as error:
             cause, reason = error, "the platform channel failed"
             continue
@@ -148,22 +153,29 @@ def settle_tailnet_address(
     when the reads are exhausted :func:`log_out` runs once over the same
     channel. The error's hint is ``rerun_hint`` (``agw vm recover`` after a
     rekey or a recover, a fresh key before a create runs again); when the
-    logout did not succeed, it first names ``node`` for removal in the
-    Tailscale admin console. ``log`` records the reads and the logout in the
+    logout ran and failed, it first names ``node`` for removal in the
+    Tailscale admin console. A :class:`ChannelUnreachable` read propagates at
+    once with ``rerun_hint`` and no logout: nothing reaches the VM, so the
+    node may well be healthy. ``log`` records the reads and the logout in the
     caller's operation log.
     """
     try:
         return read_tailnet_address(run_as_root, node=node, log=log)
+    except ChannelUnreachable as error:
+        error.add_hint(rerun_hint)
+        raise
     except ConnectivityError as error:
         failure = error
     try:
-        logged_out = log_out(run_as_root, log=log).status == 0
+        status = log_out(run_as_root, log=log).status
     except ConnectivityError:
-        logged_out = False
-    if logged_out:
+        status = None
+    if status == 0:
         raise ConnectivityError(f"{failure}; the node was logged out of the tailnet", hint=rerun_hint) from failure
+    if status is None:
+        raise ConnectivityError(f"{failure}, and the logout did not run to an outcome", hint=rerun_hint) from failure
     raise ConnectivityError(
-        f"{failure}, and it could not be logged out",
+        f"{failure}, and its logout exited with status {status}",
         hint=f"Remove '{node}' in the Tailscale admin console. {rerun_hint}",
     ) from failure
 

@@ -387,6 +387,7 @@ def rekey_vm(
     from agentworks.capabilities.vm_platform.tailscale_join import settle_tailnet_address
     from agentworks.execution import reachability
     from agentworks.execution.access import Admin
+    from agentworks.execution.root_script import ChannelUnreachable
     from agentworks.orchestration.activation import activation_gate
     from agentworks.ssh_config import sync_ssh_config
     from agentworks.vms import recovery
@@ -432,7 +433,12 @@ def rekey_vm(
     ):
         output.info("Logging out and joining the tailnet with the new key (about a minute)...")
         logger.step("Rekey")
-        result = recovery.rekey(platform, vm, ops_ctx, auth_key=auth_key, log=logger.record)
+        try:
+            result = recovery.rekey(platform, vm, ops_ctx, auth_key=auth_key, log=logger.record)
+        except ChannelUnreachable as error:
+            # The script never ran, so the node is as it was; recover starts a stopped VM and repairs it.
+            error.add_hint(f"Run 'agw vm recover {name}'.")
+            raise
         recovery.require_success(
             result,
             script="rekey",

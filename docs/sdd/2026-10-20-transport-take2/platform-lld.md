@@ -257,12 +257,14 @@ the agent, as for every VM connection.
 - `wait_until_answering(*, seconds=PROBE_WAIT_SECONDS, retry_refused_key=False)` probes with
   `root_script.run(self.run_as_root, "true", deadline=10)` three seconds apart until one completes
   or `seconds` (120 s by default) have passed, then warns `PROBE_FAILURE_HINT`, the module's
-  `operator.ssh_allow_cidrs` advice, and raises `ConnectivityError`. It replaces today's propagation
-  wait after a fresh firewall allow (`transports/__init__.py:230-244`, incident row I17) and also
-  covers a VM that has just started: a cloud's `start` returns at the provider's state, before sshd
-  runs, and a booting sshd refuses fast, so the bound is time rather than a count of probes. `true`
-  reads nothing, so retrying it is allowed. A key refusal (`KeyRefused`, a `ConnectivityError`) or
-  `TrustMismatch` raises at once: on an enrolled VM, waiting cannot change either. Create passes
+  `operator.ssh_allow_cidrs` advice, and raises `root_script.ChannelUnreachable`, a
+  `ConnectivityError` saying the channel's own bounded wait found no way to the VM, so callers stop
+  at the first one instead of retrying it. It replaces today's propagation wait after a fresh
+  firewall allow (`transports/__init__.py:230-244`, incident row I17) and also covers a VM that has
+  just started: a cloud's `start` returns at the provider's state, before sshd runs, and a booting
+  sshd refuses fast, so the bound is time rather than a count of probes. `true` reads nothing, so
+  retrying it is allowed. A key refusal (`KeyRefused`, a `ConnectivityError`) or `TrustMismatch`
+  raises at once: on an enrolled VM, waiting cannot change either. Create passes
   `retry_refused_key=True`, since a cloud's guest agent may install the key after sshd starts; after
   a refusal the next probe waits 10 s (`REFUSED_KEY_INTERVAL_SECONDS`), so about 60 failed logins
   rather than 200 do not trip sshd's `PerSourcePenalties` (Debian 13), and a refusal still standing
@@ -317,18 +319,22 @@ takes a `run_as_root`:
   unknown outcome, a `ValueError` from `parse_tailnet_address`, or a `ConnectivityError` the
   platform raises, the channel's counterpart of today's `SSHError`; any other `AgentworksError`
   (`TrustMismatch`, `TrustMissing`, a provider's `StateError`) propagates at once, because a retry
-  cannot change it. Exhaustion raises `ConnectivityError` naming the node. `log` records each read
-  in the caller's operation log (recover and rekey pass theirs); recover's read alone, on
-  exhaustion, adds a hint naming `agw vm logs NAME`.
+  cannot change it, and so does `ChannelUnreachable`: its channel already waited about two minutes
+  for the VM, so six reads would wait twelve (a dead public sshd on AWS made a rekey take 925 s).
+  Exhaustion raises `ConnectivityError` naming the node. `log` records each read in the caller's
+  operation log (recover and rekey pass theirs); recover's read alone, on exhaustion, adds a hint
+  naming `agw vm logs NAME`.
 - `settle_tailnet_address(run_as_root, *, node, rerun_hint, log=None) -> str` is that read plus the
   one logout, both recorded through `log`: on exhaustion it runs `log_out` once (30 s) and raises
   `ConnectivityError` from the read's error. When the logout returned status 0, the message says so
-  and the hint is `rerun_hint`; otherwise the hint names the node for removal in the admin console,
-  then gives `rerun_hint`. Create passes `CREATE_RERUN_HINT`, which says the join spent the auth
-  key, so a single-use key needs replacing before the create runs again (the rollback reports for
-  itself whether the backend was removed), and rekey passes `agw vm recover NAME`: a node whose
-  address cannot be read is unusable, and the next recover's repair reads `NeedsLogin` and rejoins
-  it.
+  and the hint is `rerun_hint`; when it ran and returned another status, the hint names the node for
+  removal in the admin console, then gives `rerun_hint`; when it raised or its outcome is unknown,
+  the hint is `rerun_hint` alone, since nothing shows the node is stuck. A `ChannelUnreachable` read
+  propagates with `rerun_hint` added and no logout, which could not reach the VM either. Create
+  passes `CREATE_RERUN_HINT`, which says the join spent the auth key, so a single-use key needs
+  replacing before the create runs again (the rollback reports for itself whether the backend was
+  removed), and rekey passes `agw vm recover NAME`: a node whose address cannot be read is unusable,
+  and the next recover's repair reads `NeedsLogin` and rejoins it.
 - `log_out(run_as_root, *, log=None) -> RootScriptResult` runs `LOGOUT_SCRIPT` once (30 s), the one
   logout for the settle and for `vm delete`. It is the trapped form in "A channel that drops":
   `trap '' HUP PIPE`, `out=$(tailscale logout 2>&1) || s=$?`, then `printf` the output with
@@ -452,7 +458,7 @@ just started (recover starts a stopped one with no wait) has no agent running ye
 script, so asking again is safe; a token rejection raises `TokenRejectedError` at once, any other
 `ProxmoxAPIError` means not yet (anything else the client raises is a bug and propagates), and no
 answer within `AGENT_WAIT_SECONDS` (120 s) or the deadline, whichever comes first, raises
-`ConnectivityError` saying no script was dispatched, so a VM with no agent fails in about two
+`ChannelUnreachable` saying no script was dispatched, so a VM with no agent fails in about two
 minutes rather than after the repair's 600. Then one `guest_agent_exec` of `["/bin/bash", "-s"]`
 with `input-data`, with whatever remains of the deadline, then `guest_agent_exec_status` every two
 seconds until it reports exit or the deadline passes. Dispatch and status failures raise
@@ -667,7 +673,8 @@ updated row with `RECONNECT`, replacing the in-place repointing of a legacy tran
 - When the settle's reads run out, the node is logged out and the error names `agw vm recover NAME`,
   which rejoins it.
 - A failed or unknown script raises naming the script, its status and the log, with the hint
-  `agw vm recover NAME`.
+  `agw vm recover NAME`. A rekey script whose channel raises `ChannelUnreachable` never ran, so the
+  error propagates at once with `agw vm recover NAME` added, which starts a stopped VM.
 - A final wait that returns `False` raises `VMNotAnswering`, whose hint names `agw vm recover NAME`,
   as `vm start` does; the new address is recorded first, since the old one died with the logout.
 - The per-step progress lines become one line before the call ("about a minute").
@@ -729,22 +736,23 @@ The rejoin was the protocol's only user, so it goes whole:
 Slice 3's D13 ruling holds: no message, `repr` or hint holds a stream. A script's reason is in the
 operation log, and the error names the script, its status and `agw vm logs NAME`.
 
-| Situation                                              | Error                                                                | Hint or effect                                                                  |
-| ------------------------------------------------------ | -------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| No native shell on the platform                        | `FeatureUnavailable` (`StateError`, new in `execution/errors.py`)    | The platform's `native_shell_unavailable_hint`, when it declares one            |
-| `--platform` with `--workspace`                        | `ValidationError`                                                    | `cd` inside the shell                                                           |
-| Start or gate: no answer after the wait, or no address | `ConnectivityError`                                                  | `agw vm recover NAME`                                                           |
-| Recover: power state unknown                           | `StateError`                                                         | Check the provider or `agw vm describe NAME`; a stopped VM is started instead   |
-| Repair or rekey: non-zero status                       | `StateError` naming the script and status                            | The log; repair or recreate (R7) / recover                                      |
-| Repair or rekey: unknown, or the platform raised       | `ConnectivityError`, or the raise                                    | The log, the sshd note where it applies; never re-dispatched                    |
-| Recover: no answer after the repair                    | `ConnectivityError`                                                  | Tailnet sharing and ACLs, then recreate                                         |
-| Address read or settle exhausted                       | `ConnectivityError` naming the node; create's wrappers keep its hint | Hint: after a logout, `rerun_hint`; else the admin console; read alone, the log |
-| Cloud: the VM refuses the key at its public address    | `KeyRefused` from `PublicSSH`                                        | The provider console, or recreate                                               |
-| A cloud VM with no store record                        | `TrustMissing` from `run_as_root`, before the route                  | Recover re-establishes; delete warns naming the node                            |
-| Provisioning join or bootstrap: not status 0           | `ProvisioningError`, inside the platform's rollback                  | An unknown join names the node                                                  |
-| `python3` missing, or without its standard library     | `VMNotReady`                                                         | Now `agw vm recover NAME` (`execution/errors.py:77`)                            |
-| No store record                                        | `TrustMissing`                                                       | Import, or `agw vm recover NAME` (`errors.py:37-40`)                            |
-| `limactl` or `wsl.exe` cannot start                    | `ConnectivityError` naming the program                               | Install it                                                                      |
+| Situation                                              | Error                                                                | Hint or effect                                                                                     |
+| ------------------------------------------------------ | -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| No native shell on the platform                        | `FeatureUnavailable` (`StateError`, new in `execution/errors.py`)    | The platform's `native_shell_unavailable_hint`, when it declares one                               |
+| `--platform` with `--workspace`                        | `ValidationError`                                                    | `cd` inside the shell                                                                              |
+| Start or gate: no answer after the wait, or no address | `ConnectivityError`                                                  | `agw vm recover NAME`                                                                              |
+| Recover: power state unknown                           | `StateError`                                                         | Check the provider or `agw vm describe NAME`; a stopped VM is started instead                      |
+| Repair or rekey: non-zero status                       | `StateError` naming the script and status                            | The log; repair or recreate (R7) / recover                                                         |
+| Repair or rekey: unknown, or the platform raised       | `ConnectivityError`, or the raise                                    | The log, the sshd note where it applies; never re-dispatched                                       |
+| Recover: no answer after the repair                    | `ConnectivityError`                                                  | Tailnet sharing and ACLs, then recreate                                                            |
+| Address read or settle exhausted                       | `ConnectivityError` naming the node; create's wrappers keep its hint | Hint: after a logout, `rerun_hint`; after a failed one, the admin console too; read alone, the log |
+| A channel's own wait finds no way to the VM            | `ChannelUnreachable`, at the first call; no retry and no logout      | The caller's: `rerun_hint`, or `agw vm recover NAME` for rekey                                     |
+| Cloud: the VM refuses the key at its public address    | `KeyRefused` from `PublicSSH`                                        | The provider console, or recreate                                                                  |
+| A cloud VM with no store record                        | `TrustMissing` from `run_as_root`, before the route                  | Recover re-establishes; delete warns naming the node                                               |
+| Provisioning join or bootstrap: not status 0           | `ProvisioningError`, inside the platform's rollback                  | An unknown join names the node                                                                     |
+| `python3` missing, or without its standard library     | `VMNotReady`                                                         | Now `agw vm recover NAME` (`execution/errors.py:77`)                                               |
+| No store record                                        | `TrustMissing`                                                       | Import, or `agw vm recover NAME` (`errors.py:37-40`)                                               |
+| `limactl` or `wsl.exe` cannot start                    | `ConnectivityError` naming the program                               | Install it                                                                                         |
 
 `TrustMissing`'s hint keeps "delete and recreate a VM whose create never enrolled", because recover
 refuses a provisioning-failed VM (step 1).

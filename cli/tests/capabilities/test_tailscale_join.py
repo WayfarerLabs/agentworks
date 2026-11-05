@@ -24,7 +24,7 @@ from agentworks.capabilities.vm_platform.tailscale_join import (
 )
 from agentworks.errors import ConnectivityError, ProvisioningError
 from agentworks.execution.errors import TrustMismatch
-from agentworks.execution.root_script import RawRun
+from agentworks.execution.root_script import ChannelUnreachable, RawRun
 from agentworks.execution.trust import TrustBinding, TrustMode
 from tests._root_channel_fakes import ADDRESS, Answer, FakeGuest, answer_by_payload
 
@@ -205,9 +205,8 @@ def test_the_caller_s_log_records_every_read_and_the_logout() -> None:
     assert len(records) == ADDRESS_READS + 1 == len(guest.scripts)
 
 
-@pytest.mark.parametrize("logout", [Answer(status=1), Answer(status=None), Answer(raises=ConnectivityError("dropped"))])
-def test_a_failed_logout_names_the_node_for_the_admin_console(logout: Answer) -> None:
-    guest = reads_failing(Answer(status=1), logout=logout)
+def test_a_logout_that_ran_and_failed_names_the_node_for_the_admin_console() -> None:
+    guest = reads_failing(Answer(status=1), logout=Answer(status=1))
 
     with pytest.raises(ConnectivityError) as caught:
         settle_tailnet_address(guest.run_as_root, node=NODE, rerun_hint=HINT)
@@ -215,6 +214,40 @@ def test_a_failed_logout_names_the_node_for_the_admin_console(logout: Answer) ->
     assert guest.count(LOGOUT) == 1
     assert caught.value.hint != HINT
     assert NODE in (caught.value.hint or "")
+
+
+@pytest.mark.parametrize(
+    "logout", [Answer(status=None), Answer(raises=ConnectivityError("dropped"))], ids=["unknown", "channel-raised"]
+)
+def test_a_logout_that_did_not_run_to_an_outcome_does_not_advise_removing_the_node(logout: Answer) -> None:
+    """Nothing says the node is stuck: removing it could take a healthy node off the tailnet."""
+    guest = reads_failing(Answer(status=1), logout=logout)
+
+    with pytest.raises(ConnectivityError) as caught:
+        settle_tailnet_address(guest.run_as_root, node=NODE, rerun_hint=HINT)
+
+    assert guest.count(LOGOUT) == 1
+    assert caught.value.hint == HINT
+
+
+def test_an_unreachable_channel_ends_the_reads_at_once() -> None:
+    """The channel already waited for the VM; reading again would wait again for nothing."""
+    guest = reads_failing(Answer(raises=ChannelUnreachable("VM 'vm1' did not answer")))
+
+    with pytest.raises(ChannelUnreachable):
+        read_tailnet_address(guest.run_as_root, node=NODE)
+
+    assert guest.payloads == [READ]
+
+
+def test_a_settle_over_an_unreachable_channel_neither_logs_out_nor_advises_removing_the_node() -> None:
+    guest = reads_failing(Answer(raises=ChannelUnreachable("VM 'vm1' did not answer")))
+
+    with pytest.raises(ChannelUnreachable) as caught:
+        settle_tailnet_address(guest.run_as_root, node=NODE, rerun_hint=HINT)
+
+    assert guest.payloads == [READ]
+    assert caught.value.hint == HINT
 
 
 # -- The join --------------------------------------------------------------------------------
