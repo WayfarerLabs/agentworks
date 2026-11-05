@@ -1533,10 +1533,10 @@ Saga report `6665772379` is clean. Copilot's new review reports quota exhaustion
 There are no unresolved inline threads. Start comment `6667039978` records the batch, the current
 main `c8d4dfb` and return to draft. The separate full live report was not published by the cutoff.
 
-- [ ] Preserve the typed workload failure and exit status through expected failures of main and
+- [x] Preserve the typed workload failure and exit status through expected failures of main and
       alternate capture and server cleanup. Keep ordinary session-log capture strict and both pane
       targets exact; cancellation and unexpected internal errors retain their behavior.
-- [ ] Keep failed-command diagnostic transfer/read optional, preserving the native operation error
+- [x] Keep failed-command diagnostic transfer/read optional, preserving the native operation error
       without raw provider prose. Successful structured-response transfer remains required.
 - [x] Use one new native setup domain codec version, 3, accepting released versions 1 and 2 and
       normalizing their ambiguous incomplete zero-deferral records. Preserve unknown future data.
@@ -1560,3 +1560,15 @@ also replace that primary error. A failed optional native diagnostic copy replac
 operation error. The redaction deletion control exposes a secret marker when terminal parsing
 consumes the first character of a known multiline value. These are scoped local reproductions, not
 final backend acceptance. The full live result remains necessary before either SDD locks.
+
+### Integrated implementation evidence
+
+Runtime correction `9bd3f369` integrates delegated commit `8c5fb5f3`. Its baseline produced 19
+failures and 14 passes; the broader corrected selection passed 292 cases and the final focused
+selection passed 37. Four private guard-deletion controls produced 5, 4, 4 and 6 failures. The
+worker verified all 13 owned temporary roots absent and made no backend or model calls. The codec
+correction initially produced 10 failures and 12 passes against the prior writer; the corrected
+codec/routing/diagnostic selection passed 72. The new raw-redaction case passes with the guard and
+fails after removing that pass; the original source was restored. Root mypy passed 906 files before
+the runtime integration. These are scoped local checks; integrated gates and all three private lanes
+remain required, and no final live acceptance is claimed.
