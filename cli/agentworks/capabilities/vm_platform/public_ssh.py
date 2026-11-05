@@ -54,7 +54,8 @@ _PROVIDER_ACCESS_HINT = (
 # when the script never started.
 _SUDO_REFUSAL_PREFIX = "sudo: "
 
-PROBE_ATTEMPTS = 6
+PROBE_WAIT_SECONDS = 120
+"""How long a VM gets to answer at its public address: a fresh allow, or a VM that has just started, needs time."""
 PROBE_DEADLINE_SECONDS = 10
 PROBE_INTERVAL_SECONDS = 3
 
@@ -105,16 +106,22 @@ class PublicSSH:
         return ssh_process.run_terminal(argv)
 
     def wait_until_answering(self, *, failure_hint: str | None) -> None:
-        """Probe with ``true`` until one completes: a fresh firewall allow can take seconds to apply.
+        """Probe with ``true`` until one completes, for up to :data:`PROBE_WAIT_SECONDS`.
 
-        ``true`` reads nothing, so probing again is safe. A refused key, a
-        host-key mismatch or a ``sudo -n`` that refused to start the script
-        raises at once: the VM answered, and waiting cannot change any of
-        them. When no probe completes, ``failure_hint`` (the platform's
+        A fresh firewall allow can take seconds to apply, and a VM that has
+        just started (the clouds' ``start`` returns at the hypervisor's
+        state, before sshd runs) can take a minute or more, so the wait is
+        bounded by time rather than by a count of probes, which fast
+        refusals would use up. ``true`` reads nothing, so probing again is
+        safe. A refused key, a host-key mismatch or a ``sudo -n`` that
+        refused to start the script raises at once: the VM answered, and
+        waiting cannot change any of them. When no probe completes, ``failure_hint`` (the platform's
         guidance for an allow that does not match the operator's egress) is
         warned before the error.
         """
-        for attempt in range(PROBE_ATTEMPTS):
+        expires = time.monotonic() + PROBE_WAIT_SECONDS
+        waited = False
+        while True:
             result = root_script.run(self.run_as_root, "true", deadline=PROBE_DEADLINE_SECONDS)
             if result.status == 0:
                 return
@@ -131,10 +138,13 @@ class PublicSSH:
                         "sudo through the provider's console, or delete and recreate the VM."
                     ),
                 )
-            if attempt == 0:
+            remaining = expires - time.monotonic()
+            if remaining <= 0:
+                break
+            if not waited:
                 output.detail("Waiting for the VM to answer at its public address...")
-            if attempt < PROBE_ATTEMPTS - 1:
-                time.sleep(PROBE_INTERVAL_SECONDS)
+                waited = True
+            time.sleep(min(PROBE_INTERVAL_SECONDS, remaining))
         if failure_hint:
             output.warn(failure_hint)
         raise ConnectivityError(

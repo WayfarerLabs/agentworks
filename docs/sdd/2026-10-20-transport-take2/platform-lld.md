@@ -253,14 +253,17 @@ the agent, as for every VM connection.
   `client.agent_load_hint`, the check `VMAccess.passphrase_hint` makes, since it is given only when
   it is the likely cause.
 - `wait_until_answering(*, failure_hint)` probes with
-  `root_script.run(self.run_as_root, "true", deadline=10)` up to six times, three seconds apart, and
-  warns `failure_hint` before raising `ConnectivityError` when none completes: today's propagation
-  wait after a fresh firewall allow (`transports/__init__.py:230-244`, incident row I17). `true`
-  reads nothing, so retrying it is allowed. A key refusal or `TrustMismatch` raises at once: on an
-  enrolled VM, waiting cannot change either. So does a probe with no start marker whose channel tail
-  has a line starting `sudo:` (sudo's prefix when `-n` refuses), which `root_script.run` otherwise
-  reports as an unknown outcome: it raises `StateError` saying the VM answered but its admin lacks
-  passwordless sudo, rather than retrying and warning the firewall hint.
+  `root_script.run(self.run_as_root, "true", deadline=10)` three seconds apart until one completes
+  or `PROBE_WAIT_SECONDS` (120 s) have passed, then warns `failure_hint` and raises
+  `ConnectivityError`. It replaces today's propagation wait after a fresh firewall allow
+  (`transports/__init__.py:230-244`, incident row I17) and also covers a VM that has just started: a
+  cloud's `start` returns at the provider's state, before sshd runs, and a booting sshd refuses
+  fast, so the bound is time rather than a count of probes. `true` reads nothing, so retrying it is
+  allowed. A key refusal or `TrustMismatch` raises at once: on an enrolled VM, waiting cannot change
+  either. So does a probe with no start marker whose channel tail has a line starting `sudo:`
+  (sudo's prefix when `-n` refuses), which `root_script.run` otherwise reports as an unknown
+  outcome: it raises `StateError` saying the VM answered but its admin lacks passwordless sudo,
+  rather than retrying and warning the firewall hint.
 - `shell() -> int` runs the `TERMINAL` argv with no remote command (a login shell) and returns its
   status.
 
@@ -563,7 +566,9 @@ start failure is the signal. The README and ADR 0003 are updated to say so (Coll
    `platform.start` with no wait for SSH, clearing the operator-stopped flag as an explicit start
    does and printing that it did. Refusing it instead loops for a VM with no record: start boots it
    and its wait raises `TrustMissing` naming recover, and a WSL2 distro can idle out again after
-   start's hold ends, before recover runs.
+   start's hold ends, before recover runs. Recover needs no wait of its own because each remote root
+   channel waits about two minutes for a VM that has just started: the clouds'
+   `wait_until_answering` and Proxmox's guest-agent ping.
 4. The operation log, from a factory in `vms/manager/_helpers.py` (a legacy file, which owns
    `LOG_DIR`'s other uses) that constructs an `SSHLogger` for the `recover` stem with the auth key
    in its redaction set. `recover.py` types it with slice 3's small log Protocol (contract-lld,

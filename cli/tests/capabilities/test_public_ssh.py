@@ -153,15 +153,59 @@ def test_the_wait_returns_at_the_first_answer(monkeypatch: pytest.MonkeyPatch) -
     assert len(argvs) == 1
 
 
-def test_the_wait_warns_its_hint_and_raises_after_six_probes(
+class _Clock:
+    """A fake clock that only moves when the code under test sleeps; probes that are refused take no time."""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self.now = 0.0
+        monkeypatch.setattr("agentworks.capabilities.vm_platform.public_ssh.time.monotonic", lambda: self.now)
+        monkeypatch.setattr("agentworks.capabilities.vm_platform.public_ssh.time.sleep", self.sleep)
+
+    def sleep(self, seconds: float) -> None:
+        self.now += seconds
+
+
+def _answering_after(monkeypatch: pytest.MonkeyPatch, clock: _Clock, seconds: float) -> list[list[str]]:
+    """Refuse at once until ``seconds`` of the fake clock have passed, then answer."""
+    argvs = answering(monkeypatch)
+    answer = root_script.run_process
+
+    def run_process(argv: list[str], script: bytes, deadline: float) -> RawRun:
+        if clock.now < seconds:
+            argvs.append(list(argv))
+            Path(argv[argv.index("-E") + 1]).write_text("")
+            return RawRun(b"", b"")
+        return answer(argv, script, deadline)
+
+    monkeypatch.setattr(root_script, "run_process", run_process)
+    return argvs
+
+
+def test_the_wait_outlasts_a_vm_that_refuses_fast_while_it_boots(
     monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
 ) -> None:
-    argvs = answering(monkeypatch, status=None)
+    """A cloud VM just started returns at the hypervisor's state; its sshd refuses for a while, quickly."""
+    clock = _Clock(monkeypatch)
+    _answering_after(monkeypatch, clock, 30)
+
+    target().wait_until_answering(failure_hint="check operator.ssh_allow_cidrs")
+
+    assert clock.now >= 30
+    assert captured_output.warnings == []
+
+
+def test_the_wait_warns_its_hint_and_raises_at_its_time_bound(
+    monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+) -> None:
+    clock = _Clock(monkeypatch)
+    _answering_after(monkeypatch, clock, float("inf"))
 
     with pytest.raises(ConnectivityError):
         target().wait_until_answering(failure_hint="check operator.ssh_allow_cidrs")
 
-    assert len(argvs) == public_ssh.PROBE_ATTEMPTS
+    assert (
+        public_ssh.PROBE_WAIT_SECONDS <= clock.now < public_ssh.PROBE_WAIT_SECONDS + public_ssh.PROBE_INTERVAL_SECONDS
+    )
     assert "check operator.ssh_allow_cidrs" in captured_output.warnings
 
 
