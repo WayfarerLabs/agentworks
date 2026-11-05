@@ -640,7 +640,7 @@ The channels' details are in [platform-lld.md](./platform-lld.md).
 | --------------- | ------------------------------------------------------------------------------------------------------------- | ---------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------- |
 | Lima, local     | `limactl shell <instance> sudo -n /bin/bash -s`                                                               | yes              | yes          | `lima_host.py`, from `transports/lima.py`                                                                                 |
 | Remote Lima     | the host argv, then the same `limactl shell`                                                                  | yes              | yes          | `lima_host.py`: the host connection under the host policy, and the host-side detached create copied from `remote_exec.py` |
-| WSL2            | `wsl --distribution <distro> --user root --exec /bin/bash -s`                                                 | no               | yes          | `wsl.exe` wrappers and the keepalive                                                                                      |
+| WSL2            | `wsl --distribution <distro> --user root --exec setsid -w /bin/bash -s`                                       | no               | yes          | `wsl.exe` wrappers and the keepalive                                                                                      |
 | Proxmox         | QEMU guest agent exec of `/bin/bash -s` with `input-data`                                                     | no               | no           | QGA client as `plugins/proxmox/guest_agent.py`, replacing `plugins/proxmox/transport.py`                                  |
 | AWS, Azure, GCP | `public_ssh.py` to the public address under the VM policy, `sudo -n /bin/bash -s`, inside the transient route | yes              | yes          | provisioning and lost-record key reads under Unverified trust; recovery under VM trust                                    |
 
@@ -651,10 +651,10 @@ The channels' details are in [platform-lld.md](./platform-lld.md).
   price is that an operator's `ssh_config` stanza for a cloud address no longer applies to recovery
   and provisioning. agw-launch is not involved, so a VM without python3 can still be recovered.
 - **Core's recovery scripts** live in `vms/recovery.py`:
-  - **Repair** restores the admin's authorized key, installs python3 when `dpkg -s python3` fails,
-    repairs sshd (unmask, enable, configuration test, restart) where the platform's channel does not
-    need it, and joins Tailscale only when the node reports `NeedsLogin`. Only `agw vm recover` runs
-    it. Starting a VM, by `vm start` (`vms/manager/power.py:83-112`) or by the activation gate
+  - **Repair** restores the admin's authorized key, installs python3 when the interpreter agw-launch
+    runs does not start, repairs sshd (unmask, enable, configuration test, restart) on every
+    platform, and joins Tailscale only when the node reports `NeedsLogin`. Only `agw vm recover`
+    runs it. Starting a VM, by `vm start` (`vms/manager/power.py:83-112`) or by the activation gate
     (`LiveVMNode.auto_start`, `vms/nodes.py:232-273`), starts it and waits for it to answer over
     SSH; when it does not, the start fails with a hint naming `agw vm recover`, as the operator
     ruled on 2026-10-31 and 2026-11-01. Both starts' rejoin code goes, and with it the secret
@@ -831,7 +831,7 @@ linked issues and fix history) and adds rows before anything is deleted.
 | I15 | The reconnect wait: bounded at about 240 s, with a second probe confirming a success that follows a failed attempt, with closed wording (#251; `transports/__init__.py:241`, `:272-309`)                                                           | 3            |
 | I16 | A failed or interrupted Phase A secures the VM before the error propagates (`vms/initializer/driver.py:188`, `:206`)                                                                                                                               | 3            |
 | I17 | Azure's network propagation: the provisioning probe retries and shows the platform's hint before the error (`eb99a3f99`, `17f5c92c8`; `transports/__init__.py:223-237`)                                                                            | 4            |
-| I18 | A failed backend delete keeps the VM's row and its store record (#329; `vms/manager/power.py:312-320`)                                                                                                                                             | 4            |
+| I18 | A backend delete that runs and fails keeps the VM's row and its store record; one that cannot run because the site no longer binds drops the row with a warning naming what may remain (#329; `vms/manager/power.py`)                              | 4            |
 | I19 | The agent probe tells an unreachable VM from an agent that predates the rollout (ADR 0011; `agents/manager/_common.py:237-286`)                                                                                                                    | 2, 6         |
 | I20 | Backup's download stops the copy and removes the partial file on Ctrl-C (`97e11a168`; `vms/backup.py:504-505`)                                                                                                                                     | 7            |
 | I21 | The local terminal is sanitized on entry and restored on exit after a dropped or killed attach (`897248ead`, `80c813db4`)                                                                                                                          | 2            |

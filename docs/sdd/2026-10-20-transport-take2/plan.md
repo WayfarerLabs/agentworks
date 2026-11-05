@@ -392,7 +392,13 @@ Line numbers in this slice are at `60d347220`, the platform LLD's baseline.
     restarts the guest agent, and the guest agent's ping on each supported PVE major;
   - rekey, delete's logout and `vm recover` on every platform from at least one workstation each;
   - `vm start` after the node is removed, and after an ephemeral key's node expired;
-  - recovery of a broken sshd on WSL2 and on Proxmox;
+  - recovery of a broken sshd on WSL2, Proxmox and Lima, and W6's restart of `ssh.service` over
+    sshd's own channel on Lima, Remote Lima and a cloud;
+  - W7 on WSL2 with the `setsid` root channel;
+  - `vm recover` after the operator's key changes, then `vm exec`;
+  - `vm rekey` with a dead public sshd on a cloud: one wait, no node-removal advice;
+  - a closed terminal during a cloud `vm create`, and Ctrl-Break during a cloud command on Windows;
+  - the current-directory decoys for `tailscale` and PowerShell on Windows;
   - recovery of a lost store record on one cloud and on Remote Lima;
   - the V cells of vectors W1 and W3 to W9.
 
