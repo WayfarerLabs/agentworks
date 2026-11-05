@@ -10,11 +10,13 @@ from __future__ import annotations
 
 import re
 import shlex
+import subprocess
+from contextlib import suppress
 from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Literal, NoReturn, Protocol
 
-from agentworks.errors import StateError
+from agentworks.errors import ConnectivityError, ExternalError, StateError
 from agentworks.naming import LINUX_USERNAME_MAX_LENGTH
 
 if TYPE_CHECKING:
@@ -607,26 +609,30 @@ def _raise_workload_died(
 ) -> NoReturn:
     """Capture a dead pane's output, kill its server, and raise a typed error.
 
-    The capture must run before the kill (the scrollback dies with the
-    server). The kill is best-effort: the raise is the load-bearing part,
-    and a surviving server either self-removes its socket (server dead) or
+    Capture attempts precede the kill because teardown discards scrollback.
+    Expected diagnostic and cleanup I/O failures cannot replace the observed
+    workload failure. A surviving server either self-removes its socket or
     surfaces as the active-server conflict when the name is reused.
     """
-    captured = _trim_captured_output(
-        capture_output(session_name, run_command=run_command, socket_path=socket_path, join_wrapped=True),
-    )
+    captured = ""
+    with suppress(ConnectivityError, ExternalError, OSError, subprocess.SubprocessError):
+        captured = _trim_captured_output(
+            capture_output(session_name, run_command=run_command, socket_path=socket_path, join_wrapped=True),
+        )
     if not captured:
         # A TUI that crashed after entering the alternate screen leaves its
         # message there, invisible to the main-screen capture. One
         # best-effort attempt; tmux errors out when no alternate screen
         # exists, hence check=False.
-        q_session = exact_tmux_target(session_name)
-        alt = run_command(
-            tmux_cmd(f"capture-pane -t {q_session} -p -J -a", socket_path) + " 2>/dev/null",
-            check=False,
-        )
-        captured = _trim_captured_output(getattr(alt, "stdout", "") or "")
-    run_command(tmux_cmd("kill-server", socket_path) + " 2>/dev/null", check=False)
+        q_session = exact_tmux_target(session_name + ":")
+        with suppress(ConnectivityError, ExternalError, OSError, subprocess.SubprocessError):
+            alt = run_command(
+                tmux_cmd(f"capture-pane -t {q_session} -p -J -a", socket_path) + " 2>/dev/null",
+                check=False,
+            )
+            captured = _trim_captured_output(getattr(alt, "stdout", "") or "")
+    with suppress(ConnectivityError, ExternalError, OSError, subprocess.SubprocessError):
+        run_command(tmux_cmd("kill-server", socket_path) + " 2>/dev/null", check=False)
     status_note = f" (status {exit_status})" if exit_status else ""
     if captured:
         indented = "\n".join(f"  {line}" for line in captured.splitlines())
@@ -919,8 +925,6 @@ def capture_output(
         check=False,
     )
     if getattr(result, "returncode", None) != 0:
-        from agentworks.errors import ExternalError
-
         raise ExternalError(
             f"Could not capture output for session '{session_name}'.",
             hint="Check that the session's tmux server and pane are reachable, then retry session logs.",

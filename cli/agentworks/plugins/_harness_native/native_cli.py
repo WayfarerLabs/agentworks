@@ -11,12 +11,13 @@ import json
 import posixpath
 import re
 import shlex
+import subprocess
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 from urllib.parse import urlsplit, urlunsplit
 
 from agentworks.capabilities.harness_integration.settings import parse_settings
-from agentworks.errors import ConfigError, ExternalError
+from agentworks.errors import ConfigError, ConnectivityError, ExternalError
 from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
 
 if TYPE_CHECKING:
@@ -248,8 +249,11 @@ class NativeCLI:
         )
         result = self.files.runner.run("bash", input_text=script, env=env, check=False, timeout=180)
         if not result.ok:
-            self.files.runner.copy_from(diagnostic_path, local)
-            diagnostic = local.read_bytes().decode("utf-8", errors="replace")
+            try:
+                self.files.runner.copy_from(diagnostic_path, local)
+                diagnostic = local.read_bytes().decode("utf-8", errors="replace")
+            except (ConnectivityError, ExternalError, OSError, subprocess.SubprocessError):
+                diagnostic = ""
             match = _MARKETPLACE_ERROR.search(diagnostic)
             entry = "" if match is None else f" at native setting {'marketplaces.' + match[1]!r}"
             raise ExternalError(
