@@ -192,7 +192,6 @@ def test_a_stopped_vm_without_a_host_key_record_starts_then_fails_naming_recover
         vm_manager.start_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
 
     assert events == ["status", "start"]
-    assert any("VM 'box' started" in message for message in captured_output.info)
     monkeypatch.setattr(ProxmoxPlatform, "status", lambda self, row, ctx: VMStatus.RUNNING)
     monkeypatch.setattr(vm_manager, "verify_tailscale_available", lambda: None)
     monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)

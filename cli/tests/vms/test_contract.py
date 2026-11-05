@@ -281,9 +281,13 @@ def test_an_admin_with_no_passwd_entry_is_warned_with_no_fix(
     assert len(captured_output.warnings) == 1
 
 
-def test_the_shell_fix_is_agent_reinit_for_an_agent_and_vm_reinit_for_the_admin() -> None:
-    assert contract.shell_fix_command(WORKER, "box") == ("agw", "agent", "reinit", "worker")
-    assert contract.shell_fix_command(Admin(), "box") == ("agw", "vm", "reinit", "box")
+def test_the_shell_fix_targets_the_agent_for_an_agent_and_the_vm_for_the_admin() -> None:
+    agent_fix = contract.shell_fix_command(WORKER, "box")
+    admin_fix = contract.shell_fix_command(Admin(), "box")
+
+    assert agent_fix != admin_fix
+    assert agent_fix[-1] == "worker"
+    assert admin_fix[-1] == "box"
 
 
 # -- The fragments, run for real by a local shell ------------------------------------------

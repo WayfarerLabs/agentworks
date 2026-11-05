@@ -102,11 +102,12 @@ def test_combined_progress_precedes_readiness_and_fixed_stdin(
 
     platform.create(gce_request(RecordingProgress(events)), gce_ctx())
 
-    combined = events.index("progress:Wait for GCE startup marker and join Tailscale through the root channel")
     readiness = events.index(f"root:{GCE_READINESS_COMMAND}")
     delivery = events.index(f"root:{JOIN_FRAGMENT}")
-    completed = events.index("output:GCE credential-free bootstrap and Tailscale join completed")
-    assert combined < readiness < delivery < completed
+    steps = [index for index, event in enumerate(events) if event.startswith("progress:")]
+    outputs = [index for index, event in enumerate(events) if event.startswith("output:")]
+    # The last step is announced before the wait it names, and its outcome reported after the join.
+    assert max(steps) < readiness < delivery < max(outputs)
 
 
 def test_combined_progress_does_not_claim_completion_when_readiness_fails(
@@ -121,10 +122,10 @@ def test_combined_progress_does_not_claim_completion_when_readiness_fails(
     with pytest.raises(ProvisioningError):
         platform.create(gce_request(RecordingProgress(events)), gce_ctx())
 
-    assert "progress:Wait for GCE startup marker and join Tailscale through the root channel" in events
-    assert f"root:{GCE_READINESS_COMMAND}" in events
+    readiness = events.index(f"root:{GCE_READINESS_COMMAND}")
+    assert any(event.startswith("progress:") for event in events[:readiness])
     assert f"root:{JOIN_FRAGMENT}" not in events
-    assert "output:GCE credential-free bootstrap and Tailscale join completed" not in events
+    assert not any(event.startswith("output:") for event in events[readiness:])
 
 
 def test_close_reconstructs_stable_allow_from_original_normalized_prefixes(

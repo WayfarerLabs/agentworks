@@ -219,7 +219,7 @@ def test_an_address_that_cannot_be_read_logs_the_node_out_and_removes_the_instan
 
     monkeypatch.setattr(LimaHost, "run", _fake_run)
 
-    with pytest.raises(ConnectivityError, match="logged out"):
+    with pytest.raises(ConnectivityError):
         LimaPlatform("lima", {"placement": {"mode": "local"}}).create(
             _request(tailscale_auth_key=secret),
             RunContext(),

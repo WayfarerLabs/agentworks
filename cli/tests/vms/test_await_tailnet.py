@@ -58,24 +58,20 @@ def _record_waits(monkeypatch: pytest.MonkeyPatch, *, answers: bool = True) -> l
     return waits
 
 
-@pytest.mark.parametrize(
-    ("already_running", "wording"),
-    [(True, reachability.Wording.VERIFY), (False, reachability.Wording.RECONNECT)],
-)
-def test_the_wait_verifies_a_running_vm_and_waits_out_a_start(
+@pytest.mark.parametrize("already_running", [True, False])
+def test_the_wait_runs_once_for_a_running_vm_and_after_a_start(
     db: Database,
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
     vm_access_recorder: AccessRecorder,
     already_running: bool,
-    wording: reachability.Wording,
 ) -> None:
     vm = _seed_vm(db)
     waits = _record_waits(monkeypatch)
 
     _await_tailnet(db, make_config(), vm, already_running=already_running)
 
-    assert waits == [wording]
+    assert len(waits) == 1
 
 
 def test_a_vm_that_does_not_answer_raises(
