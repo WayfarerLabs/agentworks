@@ -42,7 +42,9 @@ returns canned outcomes without ssh.
 ## Conformance vectors
 
 `conformance/vectors.py` is one list of vectors, each naming the lanes that run it, and
-`conformance/lanes.py` has the three lanes:
+`conformance/lanes.py` has the three lanes. L and S run agw-launch on this machine as the guest, and
+agw-launch is a Linux program (`os.memfd_create`, `/proc`), so both skip on macOS and Windows, CI
+included; the root channel's W3 skips on a local lane without `/proc`.
 
 - **L** runs `$SHELL -c <remote command>` locally through the real `VMAccess` and pump, with the
   account's startup files set per vector and `SSH_CLIENT` exported as sshd does. It runs under each

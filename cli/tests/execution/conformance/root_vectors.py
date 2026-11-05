@@ -13,6 +13,7 @@ creates, and it removes them.
 
 from __future__ import annotations
 
+import os
 import time
 import uuid
 import warnings
@@ -84,6 +85,9 @@ def the_secret_reaches_the_payload_and_no_argv_or_child_env(lane: RootLane) -> N
     entries that hold it; ``grep`` reads the needle from a file, so its own
     argv cannot match.
     """
+    if lane.name != "V" and not os.path.exists("/proc/self/cmdline"):
+        # A local lane's guest is this machine; a V lane's is Debian, which always has it.
+        pytest.skip("W3 counts the processes holding the key through /proc, which this machine lacks")
     tmp = scratch_path()
     stub = f"""#!/bin/bash
 [ "$1" = up ] || exit 2

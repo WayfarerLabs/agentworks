@@ -680,10 +680,14 @@ def elevated_runs_as_root_in_the_rebuilt_environment(lane: Lane) -> None:
     assert (identity.completion, identity.stdout) == (Completed(0), b"0\n")
     assert environment.completion == Completed(0)
     names = dict(line.split("=", 1) for line in environment.stdout.decode().splitlines() if "=" in line)
-    # A local guest is this machine, whose root may live elsewhere (macOS: /var/root); a VM is Debian.
-    import pwd  # POSIX only, and this module is collected on Windows too
+    # A local guest is this machine, whose root may live elsewhere; a VM is Debian. Only a local
+    # lane reads the passwd database, so a Windows workstation's V lane needs no pwd.
+    if isinstance(lane, LocalFilesystem):
+        import pwd
 
-    root_home = pwd.getpwuid(0).pw_dir if isinstance(lane, LocalFilesystem) else "/root"
+        root_home = pwd.getpwuid(0).pw_dir
+    else:
+        root_home = "/root"
     assert (names.get("HOME"), names.get("USER")) == (root_home, "root")
     assert not [name for name in names if name.startswith("SUDO_")]
     assert "AGW_FROM_STARTUP" not in names
