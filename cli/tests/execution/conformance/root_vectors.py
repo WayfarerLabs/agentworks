@@ -223,7 +223,7 @@ def wsl2_missing_distro_error_reads_as_text(lane: RootLane) -> None:
     assert "\0" not in result.channel_tail
 
 
-# -- Core's recovery scripts: W4's rekey half, W6 and W9 ------------------------------------------
+# -- Core's recovery scripts and the logout: W4's rekey and logout halves, W6 and W9 ---------------
 
 
 @dataclass
@@ -249,11 +249,19 @@ def _admin(lane: RootLane) -> str:
     return result.stdout.decode().strip()
 
 
-def _stub_tailscale_and_systemctl(lane: RootLane, tmp: str, *, slow_logout: bool) -> None:
-    """Stubs first on ``PATH`` that record each call, so a live VM's node and daemons are untouched."""
+def _stub_tailscale_and_systemctl(lane: RootLane, tmp: str, *, slow_logout: bool, hangup: bool = False) -> None:
+    """Stubs first on ``PATH`` that record each call, so a live VM's node and daemons are untouched.
+
+    A slow logout touches ``logout-done`` when it completes. With ``hangup``, the logout first sends
+    itself ``SIGHUP``, as a dropped SSH session's would reach it: a logout that does not ignore it dies.
+    """
     stub = f"""#!/bin/bash
 printf '%s %s\\n' "$(basename "$0")" "$*" >> {tmp}/calls
-if [ "$(basename "$0")" = tailscale ] && [ "$1" = logout ] && [ -e {tmp}/slow ]; then /bin/sleep 3; fi
+if [ "$(basename "$0")" = tailscale ] && [ "$1" = logout ] && [ -e {tmp}/hup ]; then kill -HUP $$; fi
+if [ "$(basename "$0")" = tailscale ] && [ "$1" = logout ] && [ -e {tmp}/slow ]; then
+    /bin/sleep 3
+    touch {tmp}/logout-done
+fi
 if [ "$(basename "$0")" = tailscale ] && [ "$1" = up ]; then cat > {tmp}/joined-with; fi
 exit 0
 """
@@ -262,6 +270,8 @@ exit 0
     script += [f"chmod 700 {tmp}/tailscale {tmp}/systemctl {tmp}/sleep"]
     if slow_logout:
         script += [f"touch {tmp}/slow"]
+    if hangup:
+        script += [f"touch {tmp}/hup"]
     assert lane.check("\n".join(script))
 
 
@@ -290,6 +300,25 @@ def the_rekey_script_finishes_after_its_channel_closes_mid_logout(lane: RootLane
         "systemctl restart tailscaled",
         SECRET,
     ]
+
+
+def the_logout_finishes_after_a_hangup_and_its_channel_closing(lane: RootLane) -> None:
+    """W4's logout half: the logout is sent ``SIGHUP`` and its channel closes before it is done, and it lands.
+
+    On Azure a logout took the network away from its own SSH session, which then hung up on it.
+    """
+    if lane.name == "V" and lane.platform not in ("lima", "azure-vm"):
+        pytest.skip("W4's live cells are Lima, Remote Lima and Azure")
+    tmp = scratch_path()
+    _stub_tailscale_and_systemctl(lane, tmp, slow_logout=True, hangup=True)
+    platform = _LanePlatform(lane, prefix=f"export PATH={tmp}:$PATH\n", deadline=1)
+
+    result = log_out(partial(platform.run_as_root, None, None))
+    landed = _wait(lambda: lane.check(f"test -e {tmp}/logout-done"))
+    lane.run(f"rm -rf {tmp}")
+
+    assert result.status is None  # W4: the outcome is unknown
+    assert landed
 
 
 def the_repair_runs_to_status_zero(lane: RootLane) -> None:
@@ -361,6 +390,7 @@ ROOT_VECTORS = [
     RootVector("w3-secret-in-no-argv-or-child-env", "LV", the_secret_reaches_the_payload_and_no_argv_or_child_env),
     RootVector("w4-trapped-payload-outlives-its-channel", "LV", a_trapped_payload_finishes_after_its_channel_closes),
     RootVector("w4-rekey-outlives-its-channel", "LV", the_rekey_script_finishes_after_its_channel_closes_mid_logout),
+    RootVector("w4-logout-outlives-its-channel", "LV", the_logout_finishes_after_a_hangup_and_its_channel_closing),
     RootVector("w5-statuses", "LV", payload_statuses_come_back_as_themselves),
     RootVector("w6-repair-runs-to-zero", "V", the_repair_runs_to_status_zero),
     RootVector("w7-wsl2-no-controlling-terminal", "V", wsl2_payload_has_no_controlling_terminal),
