@@ -26,7 +26,6 @@ the network.
 from __future__ import annotations
 
 import base64
-import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
@@ -37,7 +36,6 @@ import pytest
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import ProvisionRequest, ssh_exposure
 from agentworks.debian import DebianRelease
-from agentworks.errors import ConnectivityError
 from agentworks.plugins.azure.network import AzureError
 from agentworks.plugins.azure.platform import AzureVMPlatform
 from tests._azure_platform_support import _install_fakes
@@ -304,14 +302,19 @@ class TestFailureDuringInlineWait:
         """SSH exhaustion raises before key delivery and removes every retained
         Azure resource, so Phase A cannot select generated-script staging."""
         fakes = _install_fakes(monkeypatch, vm_exists_lookup=False)
-        guest = _guest_failing(monkeypatch, None, ConnectivityError("connect timed out"))
-        # The wait sleeps 10s between its 30 probes; don't.
-        monkeypatch.setattr(time, "sleep", lambda _s: None)
+        guest = install_at_run_process(monkeypatch, FakeGuest(answer_by_payload(answers={"true": Answer(status=None)})))
+        # The wait runs out on a clock that moves only when it sleeps.
+        now = [0.0]
+        monkeypatch.setattr("agentworks.capabilities.vm_platform.public_ssh.time.monotonic", lambda: now[0])
+        monkeypatch.setattr(
+            "agentworks.capabilities.vm_platform.public_ssh.time.sleep",
+            lambda seconds: now.__setitem__(0, now[0] + seconds),
+        )
 
-        with pytest.raises(AzureError, match="did not answer over SSH") as caught:
+        with pytest.raises(AzureError) as caught:
             _platform().create(_request(tailscale=True), RunContext())
 
-        assert guest.payloads == ["true"] * 30
+        assert set(guest.payloads) == {"true"}
         self._assert_safe_provider_failure(fakes, guest, caught.value, captured_output)
 
     def test_cloud_init_wait_failure_fails_closed_without_key_delivery(

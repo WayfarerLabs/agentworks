@@ -467,7 +467,7 @@ class TestCreateRollback:
     @pytest.mark.parametrize(
         ("failure_command", "message", "expected_commands"),
         [
-            ("true", "did not answer over SSH", ["true"] * 30),
+            ("true", "did not answer over SSH", None),
             (
                 "cloud-init status --wait",
                 "cloud-init did not complete",
@@ -482,19 +482,35 @@ class TestCreateRollback:
         captured_output: CapturedOutput,
         failure_command: str,
         message: str,
-        expected_commands: list[str],
+        expected_commands: list[str] | None,
     ) -> None:
         """Provider-retained user-data stays credential-free and readiness
         failures remove the instance and security group without stdin join or
         generated-script staging."""
         rec = install_fakes(monkeypatch)
-        guest = _guest_failing(monkeypatch, failure_command, ConnectivityError(f"safe failure for {failure_command}"))
-        monkeypatch.setattr("agentworks.capabilities.vm_platform.tailscale_join.time.sleep", lambda _seconds: None)
+        if failure_command == "true":
+            # A VM that never answers: the wait runs out on a clock that moves only when it sleeps.
+            guest = install_at_run_process(
+                monkeypatch, FakeGuest(lambda payload, seen: Answer(status=None) if payload == "true" else Answer())
+            )
+            now = [0.0]
+            monkeypatch.setattr("agentworks.capabilities.vm_platform.public_ssh.time.monotonic", lambda: now[0])
+            monkeypatch.setattr(
+                "agentworks.capabilities.vm_platform.public_ssh.time.sleep",
+                lambda seconds: now.__setitem__(0, now[0] + seconds),
+            )
+        else:
+            guest = _guest_failing(
+                monkeypatch, failure_command, ConnectivityError(f"safe failure for {failure_command}")
+            )
 
         with pytest.raises(EC2Error, match=message) as caught:
             _platform().create(_request(tailscale=_SENTINEL), RunContext(config=_config()))
 
-        assert guest.payloads == expected_commands
+        if expected_commands is None:
+            assert set(guest.payloads) == {"true"}
+        else:
+            assert guest.payloads == expected_commands
         assert not any(b"AGW_SECRET" in script for script in guest.scripts)
         retained_user_data = gzip.decompress(rec.kwargs_for("run_instances")["UserData"]).decode()
         assert _SENTINEL not in retained_user_data

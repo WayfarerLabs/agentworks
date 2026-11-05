@@ -24,6 +24,7 @@ from agentworks.execution import root_script
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from agentworks.capabilities.vm_platform.public_ssh import PublicSSH
     from agentworks.execution.requests import RunRequest
     from agentworks.execution.results import Result
     from agentworks.execution.root_script import RawRun, RootScriptResult
@@ -36,9 +37,8 @@ ADDRESS_READS = 6
 ADDRESS_PAUSE_SECONDS = 2
 ADDRESS_READ_DEADLINE_SECONDS = 15
 LOGOUT_DEADLINE_SECONDS = 30
-READINESS_PROBES = 30
-READINESS_PAUSE_SECONDS = 10
-READINESS_PROBE_DEADLINE_SECONDS = 10
+READINESS_WAIT_SECONDS = 600
+"""How long a cloud VM being created gets to answer over SSH: it boots, and its guest agent may install the key."""
 READINESS_COMMAND_DEADLINE_SECONDS = 600
 
 CREATE_RERUN_HINT = "The join spent the auth key: replace a single-use key before running the create again."
@@ -161,7 +161,7 @@ def log_out(
 
 
 def complete_cloud_bootstrap(
-    run_as_root: Callable[[bytes, float], RawRun],
+    target: PublicSSH,
     auth_key: str,
     *,
     node: str,
@@ -170,40 +170,25 @@ def complete_cloud_bootstrap(
 ) -> str:
     """Finish a cloud VM's key-free bootstrap: wait for it, join as ``node`` once, and return the settled address.
 
-    A readiness failure raises before the key is sent, so the platform's
-    create rollback removes the partial VM with the key never used.
+    The wait is the cloud channel's own, for :data:`READINESS_WAIT_SECONDS`
+    and retrying a refused key, since a cloud's guest agent may install the
+    key after sshd starts. A readiness failure raises before the key is
+    sent, so the platform's create rollback removes the partial VM with the
+    key never used.
     """
-    _wait_for_readiness(run_as_root, readiness_command, readiness_label)
-    join_tailscale(run_as_root, auth_key, node=node)
-    return settle_tailnet_address(run_as_root, node=node, rerun_hint=CREATE_RERUN_HINT)
-
-
-def _wait_for_readiness(run_as_root: Callable[[bytes, float], RawRun], command: str, label: str) -> None:
-    output.detail(f"Waiting for {label} bootstrap to complete (this may take several minutes)...")
-    failure: ConnectivityError | None = None
-    for attempt in range(READINESS_PROBES):
-        if attempt:
-            time.sleep(READINESS_PAUSE_SECONDS)
-        failure = None
-        try:
-            probe = root_script.run(run_as_root, "true", deadline=READINESS_PROBE_DEADLINE_SECONDS)
-        except ConnectivityError as error:
-            # A refused key included: a cloud's guest agent may install the key after sshd starts.
-            failure = error
-            continue
-        if probe.status == 0:
-            break
-    else:
-        # A refused key's hint (load an encrypted key into the agent) is the operator's next step.
-        raise ProvisioningError(
-            "the VM did not answer over SSH for create-time bootstrap",
-            hint=failure.hint if failure else None,
-        ) from failure
-
-    incomplete = f"{label} did not complete successfully during create-time bootstrap"
+    output.detail(f"Waiting for {readiness_label} bootstrap to complete (this may take several minutes)...")
     try:
-        result = root_script.run(run_as_root, command, deadline=READINESS_COMMAND_DEADLINE_SECONDS)
+        target.wait_until_answering(seconds=READINESS_WAIT_SECONDS, retry_refused_key=True)
+    except ConnectivityError as error:
+        # A refused key's hint (load an encrypted key into the agent) is the operator's next step.
+        raise ProvisioningError("the VM did not answer over SSH for create-time bootstrap", hint=error.hint) from error
+
+    incomplete = f"{readiness_label} did not complete successfully during create-time bootstrap"
+    try:
+        result = root_script.run(target.run_as_root, readiness_command, deadline=READINESS_COMMAND_DEADLINE_SECONDS)
     except ConnectivityError as error:
         raise ProvisioningError(incomplete, hint=error.hint) from error
     if result.status != 0:
         raise ProvisioningError(incomplete)
+    join_tailscale(target.run_as_root, auth_key, node=node)
+    return settle_tailnet_address(target.run_as_root, node=node, rerun_hint=CREATE_RERUN_HINT)

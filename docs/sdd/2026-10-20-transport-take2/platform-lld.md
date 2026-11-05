@@ -252,18 +252,21 @@ the agent, as for every VM connection.
   encrypted and the agent does not hold it, the hint leads with the passphrase hint from
   `client.agent_load_hint`, the check `VMAccess.passphrase_hint` makes, since it is given only when
   it is the likely cause.
-- `wait_until_answering(*, failure_hint)` probes with
+- `wait_until_answering(*, seconds=PROBE_WAIT_SECONDS, retry_refused_key=False)` probes with
   `root_script.run(self.run_as_root, "true", deadline=10)` three seconds apart until one completes
-  or `PROBE_WAIT_SECONDS` (120 s) have passed, then warns `failure_hint` and raises
-  `ConnectivityError`. It replaces today's propagation wait after a fresh firewall allow
-  (`transports/__init__.py:230-244`, incident row I17) and also covers a VM that has just started: a
-  cloud's `start` returns at the provider's state, before sshd runs, and a booting sshd refuses
-  fast, so the bound is time rather than a count of probes. `true` reads nothing, so retrying it is
-  allowed. A key refusal or `TrustMismatch` raises at once: on an enrolled VM, waiting cannot change
-  either. So does a probe with no start marker whose channel tail has a line starting `sudo:`
-  (sudo's prefix when `-n` refuses), which `root_script.run` otherwise reports as an unknown
-  outcome: it raises `StateError` saying the VM answered but its admin lacks passwordless sudo,
-  rather than retrying and warning the firewall hint.
+  or `seconds` (120 s by default) have passed, then warns `PROBE_FAILURE_HINT`, the module's
+  `operator.ssh_allow_cidrs` advice, and raises `ConnectivityError`. It replaces today's propagation
+  wait after a fresh firewall allow (`transports/__init__.py:230-244`, incident row I17) and also
+  covers a VM that has just started: a cloud's `start` returns at the provider's state, before sshd
+  runs, and a booting sshd refuses fast, so the bound is time rather than a count of probes. `true`
+  reads nothing, so retrying it is allowed. A key refusal (`KeyRefused`, a `ConnectivityError`) or
+  `TrustMismatch` raises at once: on an enrolled VM, waiting cannot change either. Create passes
+  `retry_refused_key=True`, since a cloud's guest agent may install the key after sshd starts; a
+  refusal still standing at the bound then raises itself, with no firewall warning. So does a probe
+  with no start marker whose channel tail has a line starting `sudo:` (sudo's prefix when `-n`
+  refuses), which `root_script.run` otherwise reports as an unknown outcome: it raises `StateError`
+  saying the VM answered but its admin lacks passwordless sudo, rather than retrying and warning the
+  firewall hint.
 - `shell() -> int` runs the `TERMINAL` argv with no remote command (a login shell) and returns its
   status.
 
@@ -278,7 +281,7 @@ Changes to `capabilities/vm_platform/base.py`, under `contract_version` 2 (slice
 | `read_host_keys(vm, ctx) -> tuple[HostKey, ...]`            | New with a default, `root_script.read_host_keys(partial(self.run_as_root, vm, ctx))`; the clouds override it                                                                                                             |
 | `native_shell(vm, ctx) -> int`                              | New. The default raises `FeatureUnavailable`; a platform offers a shell by overriding it, and core checks first with `require_native_shell`, which compares `type(platform).native_shell` with `VMPlatform.native_shell` |
 | `native_shell_unavailable_hint`                             | Kept, as guidance text only (Proxmox's console pointer, `plugins/proxmox/platform.py:154-158`)                                                                                                                           |
-| `native_transport`, `transient_route`, `probe_failure_hint` | Deleted (`base.py:335`, `:408`, `:203`). The clouds keep a private `_transient_route(vm, ctx)` reading `ctx.config`, abstract on `PublicAddressPlatform`, whose `_probe_failure_hint` is one string for all three        |
+| `native_transport`, `transient_route`, `probe_failure_hint` | Deleted (`base.py:335`, `:408`, `:203`). The clouds keep a private `_transient_route(vm, ctx)` reading `ctx.config`, abstract on `PublicAddressPlatform`; the probe's firewall advice is `public_ssh.PROBE_FAILURE_HINT` |
 | `ProvisionRequest.ssh_private_key`                          | `Path`, not `Path \| None`: create always passes `config.operator.ssh_private_key` (`vms/manager/lifecycle.py:510`), a required `Path` (`config/models.py:29`)                                                           |
 
 The docstrings that present the route as a public hook (`:355-375`, `:377-406`, `:433-460`) are
@@ -327,18 +330,18 @@ takes a `run_as_root`:
   (`vms/manager/lifecycle.py:578-584`). That wrapper, and the AWS and Azure create arms'
   `wrap_ec2_error` and `wrap_azure_error`, keep the wrapped `AgentworksError`'s hint, so the
   settle's guidance (and `PublicSSH`'s key-refusal hint) reaches the operator.
-- `complete_cloud_bootstrap(run_as_root, auth_key, *, node, readiness_command, readiness_label)`
-  replaces `EphemeralTailscaleBootstrap` and keeps its readiness loop (`tailscale_join.py:90-97`):
-  up to 30 probes ten seconds apart, now `root_script.run(run_as_root, "true", deadline=10)`. It
-  retries every probe that does not end with status 0, a raised `ConnectivityError` included, within
-  that bound, so `PublicSSH`'s `Permission denied (publickey` refusal is retried during create. That
-  covers a guest agent that writes the key after sshd starts, as GCP's may (an inference, not
-  measured). When the probes are exhausted, the `ProvisioningError` carries the last refusal's hint
-  (an encrypted key not loaded in the agent gets `agent_load_hint`), and a readiness command whose
-  channel raises keeps that error's hint too. Then the readiness command runs once (600 s), and the
-  bootstrap joins and settles. `TAILSCALE_JOIN_STDIN_COMMAND` and the transport join leave
-  `tailscale_join.py`; they stay in `vms/initializer/credentials.py` only for rekey and `vm start`'s
-  rejoin, and go with them.
+- `complete_cloud_bootstrap(target, auth_key, *, node, readiness_command, readiness_label)` replaces
+  `EphemeralTailscaleBootstrap`; `target` is the create's `PublicSSH`. Its readiness wait is the
+  channel's own,
+  `target.wait_until_answering(seconds=READINESS_WAIT_SECONDS, retry_refused_key=True)` (600 s), so
+  `PublicSSH`'s `Permission denied (publickey` refusal is retried during create. That covers a guest
+  agent that writes the key after sshd starts, as GCP's may (an inference, not measured). A
+  `sudo -n` refusal or a host-key mismatch ends it at once. When the wait runs out, the
+  `ProvisioningError` carries the wait's error's hint (a standing refusal's `agent_load_hint` for an
+  encrypted key not loaded in the agent), and a readiness command whose channel raises keeps that
+  error's hint too. Then the readiness command runs once (600 s), and the bootstrap joins and
+  settles. `TAILSCALE_JOIN_STDIN_COMMAND` and the transport join leave `tailscale_join.py`; they
+  stay in `vms/initializer/credentials.py` only for rekey and `vm start`'s rejoin, and go with them.
 
 **The bootstrap script loses its key.** WSL2 and Proxmox are the last two platforms that generate
 the bootstrap with the key inside it (`capabilities/vm_platform/wsl2_bootstrap.py:62-69`,
@@ -454,10 +457,10 @@ when it is empty, where the factory raised it for every platform (`transports/__
 incident row I32); GCP's read raises `GCEError` itself instead. It then builds
 `PublicSSH(address, admin, identity_file, binding)` with the identity file from
 `ctx.config.operator.ssh_private_key` (every operation's context carries the configuration), runs
-`wait_until_answering(failure_hint=self._probe_failure_hint)`, and yields it for as long as the
-route is open. `_transient_route` is an abstract member of the base, which each cloud supplies and
-nothing outside the cloud calls; `_probe_failure_hint` is the base's one string, the shared
-`operator.ssh_allow_cidrs` advice. Then:
+`wait_until_answering()`, and yields it for as long as the route is open, all inside
+`termination_as_interrupt()`, so `SIGTERM` and `SIGHUP` unwind like Ctrl-C while a route may be
+open. `_transient_route` is an abstract member of the base, which each cloud supplies and nothing
+outside the cloud calls. Then:
 
 - `run_as_root`: `trust.require_record(vm.name)` first, so a VM with no record opens no firewall
   rule, then `run_as_root(script, deadline)` inside `_public_ssh` under VM trust.

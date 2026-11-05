@@ -635,9 +635,7 @@ class AzureVMPlatform(PublicAddressPlatform):
                 # a credential. Wait for it over the VM's root channel, then
                 # join once and settle the address.
                 target = PublicSSH(public_ip, admin_username, request.ssh_private_key, request.provisioning_trust)
-                tailnet_address = complete_cloud_bootstrap(
-                    target.run_as_root, tailscale_auth_key, node=request.hostname
-                )
+                tailnet_address = complete_cloud_bootstrap(target, tailscale_auth_key, node=request.hostname)
             except Exception as exc:
                 output.detail("Cleaning up resources...")
                 # The teardown captures a VM-delete failure rather than

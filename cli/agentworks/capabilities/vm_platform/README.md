@@ -229,18 +229,19 @@ call returns, so no firewall allow outlives one call; on macOS and Linux `SIGTER
 unwind like Ctrl-C while the route may be open, so they close it too. Each cloud supplies it
 privately, as an abstract member of that base: `_transient_route(vm, ctx)`, a context manager that
 opens this call's own SSH allow scoped to the operator's egress prefixes (widened by
-`ctx.config.operator.ssh_allow_cidrs`) and removes exactly it in a `finally`. The base warns its one
-`_probe_failure_hint`, the `ssh_allow_cidrs` advice, when the VM never answers inside a fresh route.
-Azure also heals a missing public IP and converges the NSG onto the baseline-deny model on enter;
-concurrent operations on one VM each own an independent rule, so they never cross-remove. EC2 needs
-no public-IP heal (a running instance receives an address automatically), but its rule model forces
-a divergence: an EC2 ingress rule's identity is its `(protocol, port, cidr)` tuple, not a name, so
-two concurrent routes from one operator egress share ONE rule rather than owning independent ones.
-The poke is therefore idempotent (tolerate `InvalidPermission.Duplicate`) and the per-op remove
-tolerant (tolerate `InvalidPermission.NotFound`), failing CLOSED (the deny baseline), never open;
-see `plugins/aws/network.py`. GCE uses a distinct UUID-suffixed firewall rule and provider ID for
-each route, so concurrent routes close independently. The route's calls read the credential from
-`ctx`, so a credentials-configured site authenticates as itself with no ambient fallback.
+`ctx.config.operator.ssh_allow_cidrs`) and removes exactly it in a `finally`. When the VM never
+answers, `PublicSSH.wait_until_answering` warns `public_ssh.PROBE_FAILURE_HINT`, the
+`ssh_allow_cidrs` advice. Azure also heals a missing public IP and converges the NSG onto the
+baseline-deny model on enter; concurrent operations on one VM each own an independent rule, so they
+never cross-remove. EC2 needs no public-IP heal (a running instance receives an address
+automatically), but its rule model forces a divergence: an EC2 ingress rule's identity is its
+`(protocol, port, cidr)` tuple, not a name, so two concurrent routes from one operator egress share
+ONE rule rather than owning independent ones. The poke is therefore idempotent (tolerate
+`InvalidPermission.Duplicate`) and the per-op remove tolerant (tolerate
+`InvalidPermission.NotFound`), failing CLOSED (the deny baseline), never open; see
+`plugins/aws/network.py`. GCE uses a distinct UUID-suffixed firewall rule and provider ID for each
+route, so concurrent routes close independently. The route's calls read the credential from `ctx`,
+so a credentials-configured site authenticates as itself with no ambient fallback.
 
 **Lifecycle hooks** have sensible defaults. All are entered by callers that gate first, so on entry
 the VM is running or was just started:

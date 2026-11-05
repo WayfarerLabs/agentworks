@@ -17,7 +17,7 @@ import pytest
 import agentworks.execution as execution
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import public_ssh
-from agentworks.capabilities.vm_platform.public_ssh import PublicSSH
+from agentworks.capabilities.vm_platform.public_ssh import KeyRefused, PublicSSH
 from agentworks.errors import ConnectivityError, StateError, ValidationError
 from agentworks.execution import client, root_script, trust
 from agentworks.execution.client import SSHClient
@@ -162,7 +162,7 @@ def test_failure_text_in_the_log_of_a_script_that_started_is_not_a_failure(
 def test_the_wait_returns_at_the_first_answer(monkeypatch: pytest.MonkeyPatch) -> None:
     argvs = answering(monkeypatch)
 
-    target().wait_until_answering(failure_hint=None)
+    target().wait_until_answering()
 
     assert len(argvs) == 1
 
@@ -202,7 +202,7 @@ def test_the_wait_outlasts_a_vm_that_refuses_fast_while_it_boots(
     clock = _Clock(monkeypatch)
     _answering_after(monkeypatch, clock, 30)
 
-    target().wait_until_answering(failure_hint="check operator.ssh_allow_cidrs")
+    target().wait_until_answering()
 
     assert clock.now >= 30
     assert captured_output.warnings == []
@@ -215,19 +215,19 @@ def test_the_wait_warns_its_hint_and_raises_at_its_time_bound(
     _answering_after(monkeypatch, clock, float("inf"))
 
     with pytest.raises(ConnectivityError):
-        target().wait_until_answering(failure_hint="check operator.ssh_allow_cidrs")
+        target().wait_until_answering()
 
     assert (
         public_ssh.PROBE_WAIT_SECONDS <= clock.now < public_ssh.PROBE_WAIT_SECONDS + public_ssh.PROBE_INTERVAL_SECONDS
     )
-    assert "check operator.ssh_allow_cidrs" in captured_output.warnings
+    assert captured_output.warnings == [public_ssh.PROBE_FAILURE_HINT]
 
 
 @pytest.mark.parametrize(
     ("log_text", "error"),
     [
         ("Host key verification failed.\n", TrustMismatch),
-        ("agw@203.0.113.7: Permission denied (publickey).\n", ConnectivityError),
+        ("agw@203.0.113.7: Permission denied (publickey).\n", KeyRefused),
     ],
 )
 def test_the_wait_stops_at_once_where_waiting_cannot_help(
@@ -236,9 +236,49 @@ def test_the_wait_stops_at_once_where_waiting_cannot_help(
     argvs = answering(monkeypatch, log_text=log_text, status=None)
 
     with pytest.raises(error):
-        target().wait_until_answering(failure_hint=None)
+        target().wait_until_answering()
 
     assert len(argvs) == 1
+
+
+def _refusing_the_key_until(monkeypatch: pytest.MonkeyPatch, clock: _Clock, seconds: float) -> None:
+    """Refuse the configured key until ``seconds`` of the fake clock have passed, then answer."""
+    answering(monkeypatch)
+    real = root_script.run_process
+
+    def run_process(argv: list[str], script: bytes, deadline: float) -> RawRun:
+        if clock.now < seconds:
+            Path(argv[argv.index("-E") + 1]).write_text("agw@203.0.113.7: Permission denied (publickey).\n")
+            return RawRun(b"", b"")
+        return real(argv, script, deadline)
+
+    monkeypatch.setattr(root_script, "run_process", run_process)
+
+
+def test_a_create_s_wait_retries_a_refused_key_while_the_guest_agent_installs_it(
+    monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+) -> None:
+    clock = _Clock(monkeypatch)
+    _refusing_the_key_until(monkeypatch, clock, 30)
+
+    target().wait_until_answering(seconds=600, retry_refused_key=True)
+
+    assert clock.now >= 30
+    assert captured_output.warnings == []
+
+
+def test_a_refusal_standing_at_the_bound_is_what_raises(
+    monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+) -> None:
+    """The VM answers, so the firewall advice would mislead; the refusal's own hint is the next step."""
+    clock = _Clock(monkeypatch)
+    _refusing_the_key_until(monkeypatch, clock, float("inf"))
+
+    with pytest.raises(KeyRefused):
+        target().wait_until_answering(seconds=600, retry_refused_key=True)
+
+    assert 600 <= clock.now < 600 + public_ssh.PROBE_INTERVAL_SECONDS
+    assert captured_output.warnings == []
 
 
 def test_the_wait_stops_at_once_when_sudo_refuses_to_start_the_script(
@@ -255,7 +295,7 @@ def test_the_wait_stops_at_once_when_sudo_refuses_to_start_the_script(
     monkeypatch.setattr(root_script, "run_process", run_process)
 
     with pytest.raises(StateError) as caught:
-        target().wait_until_answering(failure_hint="check operator.ssh_allow_cidrs")
+        target().wait_until_answering()
 
     assert not isinstance(caught.value, ConnectivityError)
     assert caught.value.hint
@@ -311,7 +351,7 @@ class _Cloud:
             original(access, host, user, identity, binding)
 
         monkeypatch.setattr(PublicSSH, "__init__", recording_init)
-        monkeypatch.setattr(PublicSSH, "wait_until_answering", lambda access, *, failure_hint: self._ran("probe"))
+        monkeypatch.setattr(PublicSSH, "wait_until_answering", lambda access: self._ran("probe"))
 
     def _ran(self, what: str) -> None:
         self.events.append(what)

@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import shlex
+from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from agentworks.capabilities.vm_platform.base import parse_tailnet_address
+from agentworks.capabilities.vm_platform.public_ssh import KeyRefused, PublicSSH
 from agentworks.capabilities.vm_platform.tailscale_join import (
     ADDRESS_READS,
     JOIN_FRAGMENT,
-    READINESS_PROBES,
+    READINESS_WAIT_SECONDS,
     complete_cloud_bootstrap,
     join_tailscale,
     read_tailnet_address,
@@ -18,7 +21,11 @@ from agentworks.capabilities.vm_platform.tailscale_join import (
 )
 from agentworks.errors import ConnectivityError, ProvisioningError
 from agentworks.execution.errors import TrustMismatch
+from agentworks.execution.trust import TrustBinding, TrustMode
 from tests._root_channel_fakes import ADDRESS, Answer, FakeGuest
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 KEY = "tskey-auth-join-'swordfish"
 NODE = "lab-vm1"
@@ -27,9 +34,35 @@ LOGOUT = "tailscale logout"
 HINT = "Run it again."
 
 
+class _Clock:
+    """The cloud wait's clock: it moves only when the wait sleeps."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def sleep(self, seconds: float) -> None:
+        self.now += seconds
+
+
 @pytest.fixture(autouse=True)
-def _no_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
+def clock(monkeypatch: pytest.MonkeyPatch) -> _Clock:
     monkeypatch.setattr("agentworks.capabilities.vm_platform.tailscale_join.time.sleep", lambda seconds: None)
+    clock = _Clock()
+    monkeypatch.setattr("agentworks.capabilities.vm_platform.public_ssh.time.monotonic", lambda: clock.now)
+    monkeypatch.setattr("agentworks.capabilities.vm_platform.public_ssh.time.sleep", clock.sleep)
+    return clock
+
+
+@pytest.fixture
+def cloud(monkeypatch: pytest.MonkeyPatch) -> Callable[[FakeGuest], PublicSSH]:
+    """A cloud VM's channel whose scripts the fake guest answers."""
+
+    def channel(guest: FakeGuest) -> PublicSSH:
+        target = PublicSSH("203.0.113.7", "agw", Path("/k"), TrustBinding(TrustMode.VM, "vm1"))
+        monkeypatch.setattr(target, "run_as_root", guest.run_as_root)
+        return target
+
+    return channel
 
 
 def reads_failing(failure: Answer, *, logout: Answer | None = None, succeed_on: int | None = None) -> FakeGuest:
@@ -210,22 +243,20 @@ def test_a_failed_join_raises_once_without_the_key(answer: Answer) -> None:
 # -- The cloud bootstrap ---------------------------------------------------------------------
 
 
-def test_the_bootstrap_waits_joins_once_and_settles() -> None:
+def test_the_bootstrap_waits_joins_once_and_settles(cloud: Callable[[FakeGuest], PublicSSH]) -> None:
     guest = FakeGuest()
 
-    address = complete_cloud_bootstrap(guest.run_as_root, KEY, node=NODE, readiness_command="ready")
+    address = complete_cloud_bootstrap(cloud(guest), KEY, node=NODE, readiness_command="ready")
 
     assert address == ADDRESS
     assert guest.payloads == ["true", "ready", JOIN_FRAGMENT, READ]
     assert [holds_key(script) for script in guest.scripts] == [False, False, True, False]
 
 
-def test_the_readiness_loop_retries_a_refused_key_and_any_probe_that_does_not_complete() -> None:
-    refusals = [
-        Answer(raises=ConnectivityError("VM 'vm1' refused the configured SSH key")),
-        Answer(status=None),
-        Answer(status=1),
-    ]
+def test_the_readiness_wait_retries_a_refused_key_and_any_probe_that_does_not_complete(
+    cloud: Callable[[FakeGuest], PublicSSH],
+) -> None:
+    refusals = [Answer(raises=KeyRefused("VM 'vm1' refused the configured SSH key")), Answer(status=None)]
 
     def respond(payload: str, seen: int) -> Answer:
         if payload == "true" and seen < len(refusals):
@@ -234,58 +265,67 @@ def test_the_readiness_loop_retries_a_refused_key_and_any_probe_that_does_not_co
 
     guest = FakeGuest(respond)
 
-    complete_cloud_bootstrap(guest.run_as_root, KEY, node=NODE)
+    complete_cloud_bootstrap(cloud(guest), KEY, node=NODE)
 
     assert guest.count("true") == len(refusals) + 1
     assert guest.joins == 1
 
 
-def test_readiness_stops_at_its_bound_without_sending_the_key_and_keeps_the_refusal_hint() -> None:
-    refused = ConnectivityError("VM 'vm1' refused the configured SSH key", hint="Load the key into the agent.")
+def test_readiness_stops_at_its_bound_without_sending_the_key_and_keeps_the_refusal_hint(
+    cloud: Callable[[FakeGuest], PublicSSH], clock: _Clock
+) -> None:
+    refused = KeyRefused("VM 'vm1' refused the configured SSH key", hint="Load the key into the agent.")
     guest = FakeGuest(lambda payload, seen: Answer(raises=refused))
 
     with pytest.raises(ProvisioningError) as caught:
-        complete_cloud_bootstrap(guest.run_as_root, KEY, node=NODE)
+        complete_cloud_bootstrap(cloud(guest), KEY, node=NODE)
 
-    assert guest.payloads == ["true"] * READINESS_PROBES
+    assert set(guest.payloads) == {"true"}
+    assert clock.now >= READINESS_WAIT_SECONDS
     assert caught.value.hint == refused.hint
 
 
-def test_a_readiness_command_whose_channel_fails_keeps_the_channel_hint() -> None:
+def test_a_readiness_command_whose_channel_fails_keeps_the_channel_hint(
+    cloud: Callable[[FakeGuest], PublicSSH],
+) -> None:
     dropped = ConnectivityError("the channel dropped", hint="Check the route.")
     guest = FakeGuest(lambda payload, seen: Answer(raises=dropped) if payload == "ready" else Answer())
 
     with pytest.raises(ProvisioningError) as caught:
-        complete_cloud_bootstrap(guest.run_as_root, KEY, node=NODE, readiness_command="ready")
+        complete_cloud_bootstrap(cloud(guest), KEY, node=NODE, readiness_command="ready")
 
     assert caught.value.hint == dropped.hint
     assert guest.joins == 0
 
 
-def test_a_host_key_mismatch_ends_readiness_at_once() -> None:
+def test_a_host_key_mismatch_ends_readiness_at_once(cloud: Callable[[FakeGuest], PublicSSH]) -> None:
     guest = FakeGuest(lambda payload, seen: Answer(raises=TrustMismatch("vm1")))
 
     with pytest.raises(TrustMismatch):
-        complete_cloud_bootstrap(guest.run_as_root, KEY, node=NODE)
+        complete_cloud_bootstrap(cloud(guest), KEY, node=NODE)
 
     assert guest.payloads == ["true"]
 
 
 @pytest.mark.parametrize("answer", [Answer(status=1), Answer(status=None), Answer(raises=ConnectivityError("x"))])
-def test_a_failed_readiness_command_raises_before_the_join(answer: Answer) -> None:
+def test_a_failed_readiness_command_raises_before_the_join(
+    cloud: Callable[[FakeGuest], PublicSSH], answer: Answer
+) -> None:
     guest = FakeGuest(lambda payload, seen: answer if payload == "ready" else Answer())
 
     with pytest.raises(ProvisioningError):
-        complete_cloud_bootstrap(guest.run_as_root, KEY, node=NODE, readiness_command="ready")
+        complete_cloud_bootstrap(cloud(guest), KEY, node=NODE, readiness_command="ready")
 
     assert guest.payloads == ["true", "ready"]
 
 
-def test_exhausted_reads_after_the_join_log_out_without_joining_again() -> None:
+def test_exhausted_reads_after_the_join_log_out_without_joining_again(
+    cloud: Callable[[FakeGuest], PublicSSH],
+) -> None:
     guest = reads_failing(Answer(status=None))
 
     with pytest.raises(ConnectivityError) as caught:
-        complete_cloud_bootstrap(guest.run_as_root, KEY, node=NODE)
+        complete_cloud_bootstrap(cloud(guest), KEY, node=NODE)
 
     assert guest.joins == 1
     assert guest.count(LOGOUT) == 1

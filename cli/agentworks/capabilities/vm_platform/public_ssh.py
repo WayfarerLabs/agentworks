@@ -39,7 +39,7 @@ if TYPE_CHECKING:
 
     from agentworks.capabilities.base import RunContext
     from agentworks.db import VMRow
-    from agentworks.execution.root_script import RawRun
+    from agentworks.execution.root_script import RawRun, RootScriptResult
     from agentworks.execution.trust import HostKey
 
 ROOT_COMMAND = "sudo -n /bin/bash -s"
@@ -59,6 +59,18 @@ PROBE_WAIT_SECONDS = 120
 """How long a VM gets to answer at its public address: a fresh allow, or a VM that has just started, needs time."""
 PROBE_DEADLINE_SECONDS = 10
 PROBE_INTERVAL_SECONDS = 3
+
+PROBE_FAILURE_HINT = (
+    "The temporary SSH allow is scoped to your detected public IP; if your SSH traffic leaves through "
+    "another address (VPN split tunnel, proxy, CGNAT), add it to operator.ssh_allow_cidrs in your "
+    "agentworks config."
+)
+"""Warned when a VM never answers: every cloud scopes its allow to the detected egress address, so an operator
+whose SSH traffic leaves through another one gets an allow that does not match, and every probe times out."""
+
+
+class KeyRefused(ConnectivityError):
+    """The VM answered at its public address and refused the configured SSH key."""
 
 
 class PublicSSH:
@@ -98,7 +110,7 @@ class PublicSSH:
             # unless the key is encrypted and the agent does not hold it. That hint comes first:
             # it is given only when it is the likely cause.
             load_hint = client.agent_load_hint(self._identity_file)
-            raise ConnectivityError(
+            raise KeyRefused(
                 f"VM '{self._vm_name}' refused the configured SSH key at its public address {self._destination.host}",
                 entity_kind="vm",
                 entity_name=self._vm_name,
@@ -113,39 +125,37 @@ class PublicSSH:
         )
         return ssh_process.run_terminal(argv)
 
-    def wait_until_answering(self, *, failure_hint: str | None) -> None:
-        """Probe with ``true`` until one completes, for up to :data:`PROBE_WAIT_SECONDS`.
+    def wait_until_answering(self, *, seconds: float = PROBE_WAIT_SECONDS, retry_refused_key: bool = False) -> None:
+        """Probe with ``true`` until one completes, for up to ``seconds``.
 
         A fresh firewall allow can take seconds to apply, and a VM that has
         just started (the clouds' ``start`` returns at the hypervisor's
         state, before sshd runs) can take a minute or more, so the wait is
         bounded by time rather than by a count of probes, which fast
         refusals would use up. ``true`` reads nothing, so probing again is
-        safe. A refused key, a host-key mismatch or a ``sudo -n`` that
-        refused to start the script raises at once: the VM answered, and
-        waiting cannot change any of them. When no probe completes, ``failure_hint`` (the platform's
-        guidance for an allow that does not match the operator's egress) is
-        warned before the error.
+        safe. A host-key mismatch or a ``sudo -n`` that refused to start the
+        script raises at once: the VM answered, and waiting cannot change
+        either. So does a refused key, unless ``retry_refused_key`` (a VM
+        being created, whose guest agent may install the key after sshd
+        starts); then a refusal still standing at the bound is what raises.
+        When no probe completes, :data:`PROBE_FAILURE_HINT` is warned before
+        the error.
         """
-        expires = time.monotonic() + PROBE_WAIT_SECONDS
+        expires = time.monotonic() + seconds
         waited = False
+        refused: KeyRefused | None = None
         while True:
-            result = root_script.run(self.run_as_root, "true", deadline=PROBE_DEADLINE_SECONDS)
-            if result.status == 0:
-                return
-            if result.status is None and any(
-                line.startswith(_SUDO_REFUSAL_PREFIX) for line in result.channel_tail.splitlines()
-            ):
-                raise StateError(
-                    f"VM '{self._vm_name}' answered at its public address {self._destination.host}, but its admin "
-                    f"'{self._destination.user}' cannot run sudo without a password",
-                    entity_kind="vm",
-                    entity_name=self._vm_name,
-                    hint=(
-                        "Agentworks runs its root scripts there with 'sudo -n'. Restore the admin's passwordless "
-                        "sudo through the provider's console, or delete and recreate the VM."
-                    ),
-                )
+            try:
+                result = root_script.run(self.run_as_root, "true", deadline=PROBE_DEADLINE_SECONDS)
+            except KeyRefused as error:
+                if not retry_refused_key:
+                    raise
+                refused = error
+            else:
+                refused = None
+                if result.status == 0:
+                    return
+                self._refuse_without_sudo(result)
             remaining = expires - time.monotonic()
             if remaining <= 0:
                 break
@@ -153,13 +163,30 @@ class PublicSSH:
                 output.detail("Waiting for the VM to answer at its public address...")
                 waited = True
             time.sleep(min(PROBE_INTERVAL_SECONDS, remaining))
-        if failure_hint:
-            output.warn(failure_hint)
+        if refused is not None:
+            raise refused
+        output.warn(PROBE_FAILURE_HINT)
         raise ConnectivityError(
             f"VM '{self._vm_name}' did not answer over SSH at its public address {self._destination.host}",
             entity_kind="vm",
             entity_name=self._vm_name,
         )
+
+    def _refuse_without_sudo(self, result: RootScriptResult) -> None:
+        """Raise when a probe never started because ``sudo -n`` refused it: the VM answered."""
+        if result.status is None and any(
+            line.startswith(_SUDO_REFUSAL_PREFIX) for line in result.channel_tail.splitlines()
+        ):
+            raise StateError(
+                f"VM '{self._vm_name}' answered at its public address {self._destination.host}, but its admin "
+                f"'{self._destination.user}' cannot run sudo without a password",
+                entity_kind="vm",
+                entity_name=self._vm_name,
+                hint=(
+                    "Agentworks runs its root scripts there with 'sudo -n'. Restore the admin's passwordless "
+                    "sudo through the provider's console, or delete and recreate the VM."
+                ),
+            )
 
 
 class PublicAddressPlatform(VMPlatform):
@@ -173,16 +200,6 @@ class PublicAddressPlatform(VMPlatform):
     """
 
     recovery_needs_guest_sshd: ClassVar[bool] = True
-
-    # Warned when the VM never answers inside a fresh route. Every cloud's allow
-    # is scoped to the DETECTED egress IP, so an operator whose SSH traffic leaves
-    # through a different address (VPN split tunnel, proxy, CGNAT) gets a hole
-    # that does not match and every probe times out.
-    _probe_failure_hint: ClassVar[str] = (
-        "The temporary SSH allow is scoped to your detected public IP; if your SSH traffic leaves through "
-        "another address (VPN split tunnel, proxy, CGNAT), add it to operator.ssh_allow_cidrs in your "
-        "agentworks config."
-    )
 
     @property
     @abstractmethod
@@ -266,5 +283,5 @@ class PublicAddressPlatform(VMPlatform):
             # Every operation's context is built with the operator's configuration.
             assert ctx.config is not None
             target = PublicSSH(address, vm.admin_username, ctx.config.operator.ssh_private_key, binding)
-            target.wait_until_answering(failure_hint=self._probe_failure_hint)
+            target.wait_until_answering()
             yield target

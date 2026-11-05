@@ -406,7 +406,7 @@ class GCEPlatform(PublicAddressPlatform):
 
             request.progress.step("Wait for GCE startup marker and join Tailscale through the root channel")
             tailnet_address = complete_cloud_bootstrap(
-                target.run_as_root,
+                target,
                 request.tailscale_auth_key,
                 node=request.hostname,
                 readiness_command=GCE_READINESS_COMMAND,
