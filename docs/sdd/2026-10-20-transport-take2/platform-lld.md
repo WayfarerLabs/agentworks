@@ -642,7 +642,7 @@ returns.
 refuses `--workspace` before anything else, with the hint to `cd` inside the shell. It calls
 `require_native_shell` right after resolving the site, before the boundary, which raises
 `FeatureUnavailable` with the platform's hint when there is none. Otherwise, inside
-`gated_vm_platform_recovery_boundary` with no environment targets, it runs
+`gated_vm_platform_channel_boundary` with no environment targets, it runs
 `platform.native_shell(vm, ops_ctx)` under `guarded_terminal`, sets `clean_exit` on a zero status,
 and after the guard prints the 255 notice (I6) without claiming the cause: "the native shell ended
 with status 255 (the connection may have dropped); terminal restored". The environment is not

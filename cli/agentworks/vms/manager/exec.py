@@ -13,7 +13,7 @@ from ._helpers import (
 )
 from .boundary import (
     gated_vm_boundary,
-    gated_vm_platform_recovery_boundary,
+    gated_vm_platform_channel_boundary,
 )
 
 if TYPE_CHECKING:
@@ -161,7 +161,7 @@ def _shell_native(
     native shell carries no environment and no working directory) and on a
     platform that offers no native shell. The boundary composes no
     environment target, so no environment secret resolves (R7): the shell
-    gets the account's own login environment. Inside the platform-recovery
+    gets the account's own login environment. Inside the platform-channel
     gate, the platform runs the shell under the terminal guard with the
     boundary's op-start context, which a cloud needs for its route.
     ``SIGTERM`` and ``SIGHUP`` raise ``KeyboardInterrupt`` meanwhile, so what
@@ -190,7 +190,7 @@ def _shell_native(
     # cloud's temporary firewall allow are released.
     with (
         termination_as_interrupt(),
-        gated_vm_platform_recovery_boundary(db, config, registry, vm, interaction=interaction) as (
+        gated_vm_platform_channel_boundary(db, config, registry, vm, interaction=interaction) as (
             vm_node,
             _resolver,
             ops_ctx,

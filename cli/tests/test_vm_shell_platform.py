@@ -205,7 +205,7 @@ def test_a_platform_without_a_native_shell_is_refused_before_the_boundary_resolv
     db = _seed_db(tmp_path, platform="proxmox")
     platform = ProxmoxPlatform("proxmox", dict(PROXMOX_CONFIG))
     monkeypatch.setattr("agentworks.vms.sites.resolve_site", lambda *_a, **_k: platform)
-    monkeypatch.setattr("agentworks.vms.manager.exec.gated_vm_platform_recovery_boundary", _forbidden)
+    monkeypatch.setattr("agentworks.vms.manager.exec.gated_vm_platform_channel_boundary", _forbidden)
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", _forbidden)
 
     with pytest.raises(FeatureUnavailable) as caught:

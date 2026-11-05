@@ -47,7 +47,7 @@ from ._helpers import (
 from .boundary import (
     _live_vm_boundary,
     gated_vm_boundary,
-    gated_vm_platform_recovery_boundary,
+    gated_vm_platform_channel_boundary,
     require_vm_ssh_boundary,
 )
 from .exec import exec_vm, shell_vm
@@ -98,7 +98,7 @@ __all__ = [
     "describe_vm",
     "exec_vm",
     "gated_vm_boundary",
-    "gated_vm_platform_recovery_boundary",
+    "gated_vm_platform_channel_boundary",
     "list_vms",
     "port_forward_vm",
     "recover_vm",

@@ -212,26 +212,21 @@ def gated_vm_boundary(
 
 
 @contextlib.contextmanager
-def gated_vm_platform_recovery_boundary(
+def gated_vm_platform_channel_boundary(
     db: Database,
     config: Config,
     registry: Registry,
     vm: VMRow,
     *,
-    targets: Sequence[SecretTarget] = (),
-    scope: OperationScope | None = None,
     interaction: TtyInteractionPolicy,
 ) -> Iterator[tuple[LiveVMNode, Resolver, RunContext]]:
-    """Compose the explicit platform-native recovery gate without SSH proof."""
-    with _gated_vm_boundary(
-        db,
-        config,
-        registry,
-        vm,
-        targets=targets,
-        scope=scope,
-        interaction=interaction,
-    ) as boundary:
+    """Compose the VM gate for a command that reaches the VM through its platform's own channel.
+
+    It proves no SSH identity, since that channel does not use the
+    operator's key (``vm shell --platform`` is the command), and composes no
+    environment targets under the VM-level scope.
+    """
+    with _gated_vm_boundary(db, config, registry, vm, interaction=interaction) as boundary:
         yield boundary
 
 

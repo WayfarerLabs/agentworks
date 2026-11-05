@@ -43,7 +43,7 @@ def live_root_lane(monkeypatch: pytest.MonkeyPatch) -> Iterator[RootLane]:
     from agentworks.bootstrap import load_request_registry
     from agentworks.config import load_config
     from agentworks.secrets.policy import TtyInteractionPolicy
-    from agentworks.vms.manager import gated_vm_platform_recovery_boundary
+    from agentworks.vms.manager import gated_vm_platform_channel_boundary
 
     config = load_config()
     database = db_module.Database()
@@ -52,7 +52,7 @@ def live_root_lane(monkeypatch: pytest.MonkeyPatch) -> Iterator[RootLane]:
         if vm is None:
             pytest.fail(f"AGW_CONFORMANCE_VM names '{name}', which is not a VM in the operator's state")
         registry = load_request_registry(config, live_database=database)
-        with gated_vm_platform_recovery_boundary(
+        with gated_vm_platform_channel_boundary(
             database, config, registry, vm, interaction=TtyInteractionPolicy.ALLOW
         ) as (vm_node, _resolver, ops_ctx):
             platform = vm_node.site.platform
