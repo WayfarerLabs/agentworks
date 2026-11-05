@@ -87,9 +87,10 @@ and only while an operation needs it. Create opens a bootstrap allow and revokes
 reached the VM over Tailscale and checked it, or when the create fails or is interrupted. After
 that, every script Agentworks runs over the VM's public address (`vm recover`, `vm rekey`, and the
 Tailscale logout at `vm delete`) and every `vm shell --platform` session opens its own allow and
-revokes it when that script or session ends. On macOS and Linux, these per-script and per-session
-allows are also removed when the command is ended by `SIGTERM` or `SIGHUP`. Each operation revokes
-only the tuples it opened.
+revokes it when that script or session ends. On macOS and Linux, every one of these allows, create's
+bootstrap allow included, is also removed when the command is ended by `SIGTERM` or `SIGHUP`; an
+interrupted create rolls back as it does on Ctrl-C. Each operation revokes only the tuples it
+opened.
 
 `agw vm delete <name>` refreshes the STS identity and refuses an account mismatch. It reads the
 recorded instance and security group, verifies their `agentworks:vm` ownership and recorded

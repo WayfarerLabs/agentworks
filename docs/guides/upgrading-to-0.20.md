@@ -260,11 +260,12 @@ before they resolve the auth key.
   the VM's power state once it holds the VM, so a WSL2 distro that the hold boots is still logged
   out; a VM that is still stopped or deallocated is not, and the warning names its node for removal
   in the admin console the same way.
-- **A cloud VM's temporary SSH allow closes on `SIGTERM` and `SIGHUP`.** On macOS and Linux, the
-  allow that a root script (`vm recover`, `vm rekey`, the logout at `vm delete`) or a
-  `vm shell --platform` session opens to a cloud VM (AWS, Azure, GCP) is removed when the command is
-  ended by `SIGTERM` or `SIGHUP` (a closed terminal), as it is on Ctrl-C. A second signal during
-  that cleanup is ignored, so it cannot cut the removal short.
+- **A cloud VM's temporary SSH allow closes on `SIGTERM` and `SIGHUP`.** On macOS and Linux, every
+  allow Agentworks opens to a cloud VM (AWS, Azure, GCP) is removed when the command is ended by
+  `SIGTERM` or `SIGHUP` (a closed terminal), as it is on Ctrl-C: `vm create` rolls back, bootstrap
+  allow included, and a root script (`vm recover`, `vm rekey`, the logout at `vm delete`) or a
+  `vm shell --platform` session removes its own allow. A second signal during that cleanup is
+  ignored, so it cannot cut the removal short.
 
 ## Third-party VM platforms
 

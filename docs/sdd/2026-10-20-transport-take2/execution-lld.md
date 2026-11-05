@@ -540,7 +540,9 @@ above and waits for the client, polling `Popen.wait(timeout=0.2)` so Ctrl-C is d
   thread, changes nothing (`interrupts.py:32-59`). `port_forward_vm` owns the 0 on an operator stop
   and returns the client's status for any other end. The clouds' route context opens the same block
   around every route (`public_ssh.py:272`), so a cloud's firewall allow for a root script or a
-  native shell is removed when the command is ended by either signal.
+  native shell is removed when the command is ended by either signal. `create_vm` opens one too,
+  first in the stack that spans provisioning and initialization, so either signal runs create's
+  interrupt arms: a cloud's create rolls back its bootstrap allow and its partial VM.
 
 ## Errors
 

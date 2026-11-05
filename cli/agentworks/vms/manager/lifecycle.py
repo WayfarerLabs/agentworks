@@ -360,8 +360,13 @@ def create_vm(
     from contextlib import ExitStack
 
     from agentworks.harness_setup.locking import native_mutation_guard
+    from agentworks.interrupts import termination_as_interrupt
 
     with ExitStack() as init_stack:
+        # First in, so last out: SIGTERM and SIGHUP unwind like Ctrl-C through
+        # every interrupt arm below (a cloud's create rolls back its bootstrap
+        # allow and its partial VM) and through the stack's own exits.
+        init_stack.enter_context(termination_as_interrupt())
         setup_guard = init_stack.enter_context(native_mutation_guard(db.path, vm_name))
         from agentworks.harness_setup.lifecycle import require_prepared_setup
 
