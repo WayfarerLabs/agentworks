@@ -222,6 +222,12 @@ def sudo_granted() -> bool:
     return subprocess.run([sudo, "-n", "true"], capture_output=True, check=False).returncode == 0
 
 
+def needs_sudo(lane: Lane) -> None:
+    """A local guest elevates only where the runner grants passwordless sudo: CI does, so it fails there without it."""
+    if isinstance(lane, LocalFilesystem) and not sudo_granted():
+        unavailable("the elevation vectors need passwordless sudo")
+
+
 def require_shell(name: str) -> str:
     """The shell's path; a missing one fails on CI and skips elsewhere."""
     found = find_shell(name)
@@ -267,6 +273,19 @@ class LocalLane(LocalFilesystem):
         self.access = self.access_with_log(None)
         monkeypatch.setattr(client, "resolve_ssh", lambda: SSHClient("/nonexistent/ssh", (9, 9)))
         monkeypatch.setattr(ssh_process, "build_argv", self._argv)
+        if python != ssh_process.DEFAULT_PYTHON:
+            # The guest's python3 is this interpreter for the payload's Python programs too.
+            self.rewrite_launcher(
+                b'program_interpreter = "/usr/bin/python3"', b"program_interpreter = " + repr(python).encode()
+            )
+
+    def use_lane_shell_as_account_shell(self) -> None:
+        """Send a launcher whose passwd entry names this lane's shell, as the account's default shell.
+
+        The runner's own account shell is whatever it is; a vector about the
+        default shell's startup needs the one the lane is parametrized by.
+        """
+        self.rewrite_launcher(b'shell = entry.pw_shell or "/bin/sh"', b"shell = " + repr(self.shell).encode())
 
     def access_with_log(self, log: Callable[[RunRequest, Result], None] | None) -> VMAccess:
         return VMAccess(

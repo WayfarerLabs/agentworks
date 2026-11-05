@@ -36,26 +36,36 @@ those two attributes once (the `vm_access_recorder` fixture) and every manager f
 | `forward(forwards, verbose=False)`            | the client's exit status | Blocking `ssh -N -L`; the caller owns the interrupt       |
 
 A request is a `Command` (a literal argv, run with no shell), a `Script` (source text run by `sh`,
-`bash` or the identity's default shell, optionally as a login shell) or a `LoginShell` (valid only
-for `attach`). Each takes `env` and `cwd` (absolute; `None` is the home directory); `Command` and
-`Script` also take `deadline` (seconds of local waiting; it never claims the guest command stopped).
-`vm exec` sends a `Script` under the identity's default shell, with several arguments shell-joined.
+`bash` or the identity's default shell), a `PythonProgram` (core's own Python source and its
+arguments) or a `LoginShell` (valid only for `attach`). Each takes `env` and `cwd` (absolute; `None`
+is the home directory); the first three also take `deadline` (seconds of local waiting; it never
+claims the guest command stopped). `vm exec` sends a `Script` under the identity's default shell,
+with several arguments shell-joined.
+
+`Script` and `PythonProgram` take `login` and `interactive`, for a payload that must see the
+environment the account's login or interactive startup builds, as a harness's own shell would. A
+script's source and a program's source travel in the request and reach the guest as an in-memory
+file, never as an argument. An interactive `Script` is sourced by an interactive shell
+(`<shell> [-l] -i -c '. "$0"' <file>`). A `PythonProgram` runs as
+`/usr/bin/python3 -I -S <file> <args>`, the system interpreter with no Python startup; with either
+flag the identity's default shell runs that startup first and then execs it, reopening the file as
+descriptor 9 itself, so nothing a startup file closes takes the source away.
 
 `run`'s sinks are `CaptureOutput(limit=1 MiB)`, the default, which keeps up to `limit` bytes and
 makes more `Unknown(OUTPUT_LIMIT)`, and `DiscardOutput()`, which keeps nothing while the stream is
 still read to its closing marker. A caller whose output can exceed 1 MiB sets the limit per call.
 
-`Command` and `Script` take the payload's input as `stdin`: `NoInput()`, the default, or
-`Bytes(data)`, which the client writes after the request and then closes, so the payload reads it
-from its first byte. Nothing bounds it but memory. `stream` takes the operator's stdin as its own
-argument instead, and refuses a request that carries input with a `ValidationError`. Input is never
-formatted into a log record or an error, and `Bytes` keeps `data` out of its `repr`.
+`Command`, `Script` and `PythonProgram` take the payload's input as `stdin`: `NoInput()`, the
+default, or `Bytes(data)`, which the client writes after the request and then closes, so the payload
+reads it from its first byte. Nothing bounds it but memory. `stream` takes the operator's stdin as
+its own argument instead, and refuses a request that carries input with a `ValidationError`. Input
+is never formatted into a log record or an error, and `Bytes` keeps `data` out of its `repr`.
 
-`Command` and `Script` also take `elevated`, which runs the whole operation as root under `sudo -n`:
-it is the prefix of the constant first-stage command (below), not part of the request message, and
-the launcher rebuilds the payload's environment from root's passwd entry. An agent-bound access
-refuses an elevated request with `PermissionDenied` before anything resolves, and the guest's
-`sudo -n` is the second layer. `LoginShell` has no such option, so an attach never elevates.
+They also take `elevated`, which runs the whole operation as root under `sudo -n`: it is the prefix
+of the constant first-stage command (below), not part of the request message, and the launcher
+rebuilds the payload's environment from root's passwd entry. An agent-bound access refuses an
+elevated request with `PermissionDenied` before anything resolves, and the guest's `sudo -n` is the
+second layer. `LoginShell` has no such option, so an attach never elevates.
 
 `reachability.wait(access, wording=)` is the one retry loop: it polls a fixed `true` probe (16
 attempts, 10 seconds each, 5 seconds apart, a second probe confirming an answer that followed a
@@ -91,8 +101,9 @@ The guest's account shell may print or export before stage 0 runs. The launcher 
 payload's output with marker lines (`0x1E`, a per-request nonce, a word, a newline), and the client
 drops everything before the start marker and after the closing lines. The payload gets a rebuilt
 environment (a fixed `PATH`, `LANG=C.UTF-8`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `SHLVL=1`, then the
-request's `env`), a fixed umask, default signal dispositions and no descriptors above 2. A payload
-running as the same user could learn the nonce, which only lets it misreport its own result.
+request's `env`), a fixed umask, default signal dispositions and no descriptor above 2 but its
+source file's. A payload running as the same user could learn the nonce, which only lets it
+misreport its own result.
 
 ## Outcomes
 

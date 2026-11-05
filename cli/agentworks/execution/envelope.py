@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING
 
 from agentworks.errors import ValidationError
 from agentworks.execution.agw_launch import STDLIB_MISSING_STATUS
-from agentworks.execution.requests import Command, LoginShell, Script
+from agentworks.execution.requests import Command, LoginShell, PythonProgram, Script
 from agentworks.execution.results import (
     REFUSAL_CODE,
     Completed,
@@ -102,7 +102,10 @@ def encode(request: Request, *, nonce: str, term: str | None = None, handover: s
             raise ValueError("a login shell travels as a handover and needs its token and TERM")
         mode, kind = "park", "shell"
     else:
-        mode, kind = "run", "argv" if isinstance(request, Command) else "script"
+        mode, kind = (
+            "run",
+            "argv" if isinstance(request, Command) else "python" if isinstance(request, PythonProgram) else "script",
+        )
         if handover is not None or term is not None:
             raise ValueError("only a login shell takes a handover or TERM")
     body: dict[str, object] = {
@@ -118,7 +121,17 @@ def encode(request: Request, *, nonce: str, term: str | None = None, handover: s
         body["argv"] = _checked_argv(request.argv)
     elif isinstance(request, Script):
         _text(request.source, "script source")
-        body.update(shell=request.shell.value, source=request.source, login=request.login)
+        body.update(
+            shell=request.shell.value, source=request.source, login=request.login, interactive=request.interactive
+        )
+    elif isinstance(request, PythonProgram):
+        _text(request.source, "program source")
+        body.update(
+            source=request.source,
+            args=_checked_arguments(request.args),
+            login=request.login,
+            interactive=request.interactive,
+        )
     return json.dumps(body, ensure_ascii=True, separators=(",", ":")).encode("ascii")
 
 
@@ -144,10 +157,14 @@ def _checked_term(term: str) -> str:
 def _checked_argv(argv: tuple[str, ...]) -> list[str]:
     if not argv or not argv[0]:
         raise ValidationError("a command needs a non-empty program name")
-    for position, argument in enumerate(argv):
+    return _checked_arguments(argv)
+
+
+def _checked_arguments(arguments: tuple[str, ...]) -> list[str]:
+    for position, argument in enumerate(arguments):
         if len(_text(argument, f"argument {position}")) > MAX_STRING_BYTES:
             raise ValidationError(f"argument {position} is longer than {MAX_STRING_BYTES} bytes")
-    return list(argv)
+    return list(arguments)
 
 
 def _checked_env(env: Mapping[str, str]) -> dict[str, str]:

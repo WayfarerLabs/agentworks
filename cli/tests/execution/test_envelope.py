@@ -10,7 +10,7 @@ import pytest
 from agentworks.errors import ValidationError
 from agentworks.execution import envelope
 from agentworks.execution.envelope import MAX_STRING_BYTES, encode
-from agentworks.execution.requests import Command, LoginShell, Script, Shell
+from agentworks.execution.requests import Bytes, Command, LoginShell, PythonProgram, Script, Shell
 
 NONCE = "0" * 32
 
@@ -20,7 +20,7 @@ def decode_text(value: str) -> bytes:
     return value.encode("utf-8", "surrogateescape")
 
 
-def wire(request: Command | Script | LoginShell, **extra: str) -> dict[str, object]:
+def wire(request: Command | Script | PythonProgram | LoginShell, **extra: str) -> dict[str, object]:
     body = encode(request, nonce=NONCE, **extra)
     assert body.isascii()
     return json.loads(body)  # type: ignore[no-any-return]
@@ -60,6 +60,19 @@ def test_script_source_cwd_and_flags_are_carried() -> None:
     assert (body["source"], body["cwd"], body["env"]) == ("echo hi\n", "/srv/ws", {"A": "b"})
 
 
+def test_an_interactive_script_carries_the_flag() -> None:
+    assert wire(Script("f\n", Shell.USER_DEFAULT, interactive=True))["interactive"] is True
+    assert wire(Script("f\n", Shell.USER_DEFAULT))["interactive"] is False
+
+
+def test_a_python_program_carries_its_source_arguments_and_startup_flags() -> None:
+    arguments = ("", " ", "a b", "$HOME", "'", "--", as_text(b"\xff"))
+    body = wire(PythonProgram("print(1)\n", args=arguments, login=True, interactive=True, env={"A": "b"}))
+
+    assert (body["kind"], body["mode"], body["source"]) == ("python", "run", "print(1)\n")
+    assert (body["args"], body["login"], body["interactive"], body["env"]) == (list(arguments), True, True, {"A": "b"})
+
+
 def test_a_login_shell_travels_as_a_handover_with_its_terminal_type() -> None:
     body = wire(LoginShell(cwd="/srv/ws"), term="xterm", handover="ab" * 8)
 
@@ -95,9 +108,13 @@ def test_only_a_login_shell_takes_a_handover(request_: Command | LoginShell) -> 
         Command(("tool",), cwd=""),
         Command(()),
         Command(("",)),
+        PythonProgram("print(\0)"),
+        PythonProgram("pass", args=("a\0b",)),
+        PythonProgram("pass", args=("\ud800",)),
+        PythonProgram("pass", args=("a" * (MAX_STRING_BYTES + 1),)),
     ],
 )
-def test_input_the_guest_cannot_represent_is_refused_up_front(request_: Command | Script) -> None:
+def test_input_the_guest_cannot_represent_is_refused_up_front(request_: Command | Script | PythonProgram) -> None:
     with pytest.raises(ValidationError):
         encode(request_, nonce=NONCE)
 
@@ -164,6 +181,7 @@ def test_requests_do_not_repr_their_payload() -> None:
     for request in (
         Command((secret,), env={"X": secret}),
         Script(secret, Shell.SH, env={"X": secret}),
+        PythonProgram(secret, args=(secret,), env={"X": secret}, stdin=Bytes(secret.encode())),
         LoginShell(env={"X": secret}),
     ):
         assert secret not in repr(request)

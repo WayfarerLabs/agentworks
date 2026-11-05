@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from agentworks.execution.oplog import format_record
-from agentworks.execution.requests import Bytes, Command, Script, Shell
+from agentworks.execution.requests import Bytes, Command, PythonProgram, Script, Shell
 from agentworks.execution.results import Completed, NotDelivered, NotDeliveredReason, Result, Unknown, UnknownReason
 
 ENV_VALUE = "env-value-7f3a"
@@ -68,3 +68,13 @@ def test_input_never_reaches_a_record_even_when_the_streams_are_logged() -> None
 
     assert marker not in record
     assert "out" in record
+
+
+def test_a_python_program_record_shows_its_arguments_and_holds_no_source() -> None:
+    request = PythonProgram(SOURCE, args=("stat", '{"path":"/etc/hosts"}'), login=True, env={"API_TOKEN": ENV_VALUE})
+
+    record = format_record(request, Result(Completed(0)), label="Checking")
+
+    assert "script-source" not in record
+    assert ENV_VALUE not in record
+    assert "/etc/hosts" in record

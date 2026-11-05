@@ -73,10 +73,25 @@ The elevation vectors (E1, E2 and E6) run on L and V. On L they need the runner'
 `sudo -n`, skipping without it locally and failing without it when `CI` is set; E4, the
 distribution's default sudoers on a fresh VM, is V only.
 
-`conformance/program_vectors.py` holds the vectors for the request input and output options: a
-request's `Bytes` input reaches no log record or error, and `log_streams=False` keeps its streams
-out of the record (F1, on L, S and V), and `run`'s sinks capture to their limit or discard (L and
-S). They join the list in `vectors.py`.
+`conformance/program_vectors.py` holds the vectors for the request vocabulary the files LLD adds,
+which join the list in `vectors.py`:
+
+- F1 (L, S and V): a request's `Bytes` input reaches no log record or error, and `log_streams=False`
+  keeps its streams out of the record.
+- F2 and F3 (L, S and V): every input byte reaches a `PythonProgram` from its first byte, its
+  arguments arrive exactly, and its source is in no argument.
+- F4 (L and V): a `PythonProgram` with `login`, `interactive` and both, under startup files that
+  print, export and end with a failing command substitution. On L the account's default shell is the
+  lane's own (`LocalLane.use_lane_shell_as_account_shell`), so the four shells are each covered; on
+  V it is the admin's.
+- F5 (L and V): an interactive `Script` under `sh`, `bash` and the default shell sees its
+  interactive startup and returns its own `exit` status.
+- F8 (L and V): an elevated request keeps its environment; on L it needs `sudo -n`, as the elevation
+  vectors do.
+- The `run` sinks capture to their limit or discard (L and S).
+
+On L, a 3.11 interpreter that is not the system one becomes the program interpreter as well as the
+launcher's, so a `PythonProgram` runs under it too.
 
 `conformance/test_attach_terminal.py` and `conformance/test_forward.py` cover what happens around
 the terminal half and a forward, on the same lanes.

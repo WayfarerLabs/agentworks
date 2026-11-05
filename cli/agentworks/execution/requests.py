@@ -112,12 +112,31 @@ class Script(BoundedRequestOptions):
 
     The text is in no argument vector, and the interpreter's stdin stays the
     caller's. ``login`` adds ``-l`` so the interpreter runs the account's
-    login startup first.
+    login startup first. ``interactive`` adds ``-i`` and has the interactive
+    shell source the script, so its interactive startup runs first too.
     """
 
     source: str = field(repr=False)
     shell: Shell
     login: bool = False
+    interactive: bool = False
+
+
+@dataclass(frozen=True)
+class PythonProgram(BoundedRequestOptions):
+    """Core's own Python source, run by the guest's ``/usr/bin/python3 -I -S`` from a file descriptor.
+
+    The source is in no argument vector, and ``args`` are the program's
+    arguments, ``sys.argv[1:]``. ``login`` and ``interactive`` run the
+    identity's default shell with that startup first, which then execs the
+    interpreter, so the program sees the environment a login or interactive
+    shell builds.
+    """
+
+    source: str = field(repr=False)
+    args: tuple[str, ...] = field(default=(), repr=False)
+    login: bool = False
+    interactive: bool = False
 
 
 @dataclass(frozen=True)
@@ -144,7 +163,7 @@ def shell_command_line(args: Sequence[str]) -> str:
     )
 
 
-RunRequest = Command | Script
+RunRequest = Command | Script | PythonProgram
 """The requests ``run`` and ``stream`` take."""
 
 

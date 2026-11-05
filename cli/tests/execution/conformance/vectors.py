@@ -32,7 +32,7 @@ from agentworks.execution.results import (
     UnknownReason,
 )
 from tests.execution.conformance import program_vectors
-from tests.execution.conformance.lanes import Lane, LocalFilesystem, LocalLane, SSHDLane, sudo_granted, unavailable
+from tests.execution.conformance.lanes import Lane, LocalFilesystem, LocalLane, SSHDLane, needs_sudo
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -662,12 +662,6 @@ def handover_shell_starts_with_clean_dispositions(lane: Lane) -> None:
 
 
 # -- Elevation (E1, E2, E4, E6) ----------------------------------------------------------
-
-
-def needs_sudo(lane: Lane) -> None:
-    """A local guest elevates only where the runner grants passwordless sudo: CI does, so it fails there without it."""
-    if isinstance(lane, LocalFilesystem) and not sudo_granted():
-        unavailable("the elevation vectors need passwordless sudo")
 
 
 def elevated_runs_as_root_in_the_rebuilt_environment(lane: Lane) -> None:
