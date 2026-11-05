@@ -14,7 +14,12 @@ from pathlib import Path, PureWindowsPath
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from agentworks import output
-from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
+from agentworks.capabilities.vm_platform.base import (
+    ProvisionRequest,
+    ProvisionResult,
+    RetainedProvisioningError,
+    VMPlatform,
+)
 from agentworks.capabilities.vm_platform.bootstrap_script import run_bootstrap
 from agentworks.capabilities.vm_platform.debian_release import code_owned_release_value
 from agentworks.capabilities.vm_platform.tailscale_join import (
@@ -824,10 +829,10 @@ class WSL2Platform(VMPlatform):
                 # _wsl / _powershell propagate unwrapped; the only new
                 # obligation is the teardown.
                 output.detail(f"Cleaning up the partial WSL2 distro '{vm_name}'...")
-                self._cleanup_partial_create(vm_name)
+                self._cleanup_partial_create(vm_name, vm_name=request.vm_name, failure=sys.exc_info()[1])
                 raise
         except KeyboardInterrupt:
-            self._rollback_create_on_interrupt(vm_name)
+            self._rollback_create_on_interrupt(vm_name, vm_name=request.vm_name)
             raise
 
         output.detail(f"WSL2 VM '{vm_name}' provisioned.")
@@ -836,44 +841,82 @@ class WSL2Platform(VMPlatform):
             tailnet_address=tailnet_address,
         )
 
-    def _cleanup_partial_create(self, distro_name: str) -> None:
-        """Best-effort teardown of the distro / install directory a
-        failed ``create`` made (only ever state this create named: the
-        pre-flight collision check guarantees the name was free when we
-        started).
+    def _cleanup_partial_create(self, distro_name: str, *, vm_name: str, failure: BaseException | None) -> None:
+        """Tear down the distro / install directory a failed or interrupted
+        ``create`` made (only ever state this create named: the pre-flight
+        collision check guarantees the name was free when we started).
 
-        Never raises a cleanup failure over the original error; it
-        warns with the manual removal command instead. An operator's
-        second Ctrl-C (``KeyboardInterrupt``) deliberately escapes so
+        A teardown that fails, or that leaves the distro registered, warns
+        with the manual removal command and hands the distro to core as
+        :class:`RetainedProvisioningError`, whose message carries the
+        original ``failure`` (``None`` for an interrupt), so the row
+        survives for ``vm delete`` to retry. An operator's second Ctrl-C
+        (``KeyboardInterrupt``) deliberately escapes so
         :meth:`_rollback_create_on_interrupt` can abandon the cleanup.
         """
         try:
             self._teardown_distro(distro_name)
+            remains = self._distro_listed(distro_name)
+            detail = "it is still registered"
+            cause: Exception | None = None
         except Exception as e:
-            output.warn(f"could not clean up the partial WSL2 distro '{distro_name}': {e}")
-            output.warn(self._manual_removal_hint(distro_name))
+            remains, detail, cause = True, str(e), e
+        if not remains:
+            return
+        output.warn(f"could not clean up the partial WSL2 distro '{distro_name}': {detail}")
+        output.warn(self._manual_removal_hint(distro_name))
+        what = "create was interrupted" if failure is None else f"create failed ({failure})"
+        raise self._retained(vm_name, distro_name, f"{what}, and removing the distro failed: {detail}") from cause
 
-    def _rollback_create_on_interrupt(self, distro_name: str) -> None:
+    def _rollback_create_on_interrupt(self, distro_name: str, *, vm_name: str) -> None:
         """Roll back the partially created distro after an operator
         interrupt inside :meth:`create` (the azure precedent:
         ``rollback_create_on_interrupt``, #338).
 
         A SECOND interrupt during the cleanup abandons it cleanly
-        instead of wedging, warning with the exact removal command; it
-        is absorbed so the caller re-raises the ORIGINAL interrupt,
-        which then reaches ``create_vm``, whose unwind deletes the DB
-        row it no longer needs."""
+        instead of wedging, warning with the exact removal command, and
+        raises :class:`RetainedProvisioningError` in place of the
+        interrupt, as a failed cleanup does, so the row survives for
+        ``vm delete``. A cleanup that completes returns, and the caller
+        re-raises the ORIGINAL interrupt, which then reaches
+        ``create_vm``, whose unwind deletes the DB row it no longer
+        needs."""
         output.warn(
             f"Interrupted: cleaning up the partial WSL2 distro '{distro_name}', "
-            "please wait (Ctrl-C again to abandon it)..."
+            "please wait (Ctrl-C again retains it for explicit deletion)..."
         )
         try:
-            self._cleanup_partial_create(distro_name)
-        except KeyboardInterrupt:
+            self._cleanup_partial_create(distro_name, vm_name=vm_name, failure=None)
+        except KeyboardInterrupt as second:
             output.warn(
                 f"Cleanup abandoned: the WSL2 distro '{distro_name}' may remain; "
                 + self._manual_removal_hint(distro_name)
             )
+            raise self._retained(
+                vm_name, distro_name, "create was interrupted, and so was removing the distro"
+            ) from second
+
+    def _retained(self, vm_name: str, distro_name: str, detail: str) -> RetainedProvisioningError:
+        """The retained-row handoff: the row keeps the distro name, so ``vm delete`` can retry its removal."""
+        return RetainedProvisioningError(
+            f"the WSL2 distro '{distro_name}' may remain: {detail}",
+            platform_metadata={"distro_name": distro_name},
+            entity_name=vm_name,
+            hint=f"Once the cause is fixed, run 'agw vm delete {vm_name}', or "
+            + self._manual_removal_hint(distro_name),
+        )
+
+    @staticmethod
+    def _distro_listed(distro_name: str) -> bool:
+        """Whether ``wsl --list`` still names the distro; a listing that cannot run raises.
+
+        Unlike the pre-flight's :meth:`_distro_exists`, nothing here reads a
+        failure as absence. ``wsl --list`` also exits non-zero when no distro
+        is installed at all, so its status is not read, only the names it
+        prints.
+        """
+        listing = _wsl(["--list", "--quiet"], check=False)
+        return any(line.strip() == distro_name for line in listing.splitlines())
 
     @staticmethod
     def _manual_removal_hint(distro_name: str) -> str:
@@ -927,7 +970,17 @@ class WSL2Platform(VMPlatform):
 
     def delete(self, vm: VMRow, ctx: RunContext) -> None:
         output.info(f"Unregistering WSL2 distro '{vm.name}'...")
-        self._teardown_distro(self._distro_name(vm))
+        distro_name = self._distro_name(vm)
+        self._teardown_distro(distro_name)
+        # Core drops the row only when this returns, so a distro still
+        # registered after the teardown fails the delete.
+        if self._distro_listed(distro_name):
+            raise StateError(
+                f"WSL2 distro '{distro_name}' is still registered after 'wsl --unregister'",
+                entity_kind="vm",
+                entity_name=vm.name,
+                hint=f"Run 'agw vm delete {vm.name}' again, or {self._manual_removal_hint(distro_name)}",
+            )
         output.info(f"WSL2 distro '{vm.name}' deleted")
 
     def display_backend_name(self, vm: VMRow) -> str:

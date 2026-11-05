@@ -694,8 +694,9 @@ then reads the VM's Tailscale address. If the address cannot be read, create log
 the tailnet and fails, removing the partial VM; the error says whether the logout worked, and names
 the node for removal in the Tailscale admin console when it did not. The join has spent the auth key
 by then, so before running create again, replace a single-use key with a fresh one; a reusable key
-works as is. When create cannot remove the partial VM it made (on AWS, Proxmox or Lima), it names
-what may remain and keeps the VM in a failed state, so `agw vm delete <name>` can retry the removal.
+works as is. When create cannot remove the partial VM it made (on AWS, Proxmox, Lima or WSL2), it
+names what may remain and keeps the VM in a failed state, so `agw vm delete <name>` can retry the
+removal.
 
 Agentworks then reaches the VM over SSH at that address. Its first connection records the VM's host
 key, and the VM contract's base checks follow on verified connections: the Debian release first,
