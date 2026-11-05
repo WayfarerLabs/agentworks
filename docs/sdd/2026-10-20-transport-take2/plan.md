@@ -297,7 +297,7 @@ Line numbers in this slice are at `60d347220`, the platform LLD's baseline.
       embedded secret, `run` with its optional operation log, `run_process` over
       `PipeSession(nonce=None)`, and `read_host_keys`. `spawn` raises `ConnectivityError` naming a
       program other than OpenSSH that cannot start, and `trust.fingerprint` lands.
-- [ ] Implement `run_as_root` on every platform before slice 3's address settle, so the settle is
+- [x] Implement `run_as_root` on every platform before slice 3's address settle, so the settle is
       written once over it:
   - `lima_host.py` for Lima and Remote Lima, with Remote Lima's host-side detached create;
   - WSL2 through `wsl --exec /bin/bash -s`, with a `_WSL` program constant shared with `_wsl`;
@@ -307,14 +307,14 @@ Line numbers in this slice are at `60d347220`, the platform LLD's baseline.
     `ProvisionRequest.ssh_private_key` becomes `Path`.
 - [x] Implement `build_host_argv` (HLA D2) in `ssh_process.py` for Remote Lima's host connection,
       its only caller, and refuse whitespace and control characters in `LimaSshPlacement.host`.
-- [ ] Port `tailscale_join.py` onto `run_as_root`: `JOIN_FRAGMENT` through
+- [x] Port `tailscale_join.py` onto `run_as_root`: `JOIN_FRAGMENT` through
       `--auth-key=file:/dev/stdin`, `join_tailscale`, `read_tailnet_address`,
       `settle_tailnet_address` with its `rerun_hint`, and `complete_cloud_bootstrap`. WSL2 and
       Proxmox run the key-free bootstrap through `bootstrap_script.run_bootstrap` over `run_as_root`
       and then join. Delete the bootstrap generator's key parameter and step 7, the staging files,
       and `TAILSCALE_JOIN_STDIN_COMMAND` with its last callers (rekey and `vm start`'s rejoin), and
       re-prove incident row I10 with a test.
-- [ ] Make `transient_route` and `probe_failure_hint` private to each cloud. Add explicit imports of
+- [x] Make `transient_route` and `probe_failure_hint` private to each cloud. Add explicit imports of
       `public_ssh.py` and `vms/recovery.py` to the package guard, and the plugin and migrated files
       the platform LLD lists to the static check (HLA D14).
 - [x] Add `vms/recovery.py` with the repair, rekey and logout scripts, and move rekey and delete's
@@ -335,13 +335,13 @@ Line numbers in this slice are at `60d347220`, the platform LLD's baseline.
       `GateTarget.repair_secret_refs`, `_GateSecrets`, `Resolver.resolve_late_repair`, and the call
       sites in `vms/nodes.py` and `sessions/manager/_scope.py`. Update the collateral that names it,
       including the `agentworks-reviewer` persona's sanctioned conditional-repair shape.
-- [ ] Move `vm shell --platform` onto `native_shell`, with `FeatureUnavailable` for a platform that
+- [x] Move `vm shell --platform` onto `native_shell`, with `FeatureUnavailable` for a platform that
       has none and a refusal of `--workspace` with `--platform`, and delete
       `vms/manager/platform_shell.py`.
-- [ ] Delete `VMPlatform.native_transport`, the `transports.native_transport` factory, the legacy
+- [x] Delete `VMPlatform.native_transport`, the `transports.native_transport` factory, the legacy
       platform transports (`transports/lima.py`, `remote_lima.py`, `wsl2.py`, `_shared.py`) and
       `plugins/proxmox/transport.py`, with their tests.
-- [ ] Tests, as the platform LLD lists them:
+- [x] Tests, as the platform LLD lists them:
   - the wrapper: the status only when both closing markers arrive, otherwise unknown, the secret in
     no field, `repr`, error or log record, and one dispatch however it ends;
   - `run_process`'s deadline, output limit and background child, and its error for a missing
@@ -352,9 +352,9 @@ Line numbers in this slice are at `60d347220`, the platform LLD's baseline.
   - the commands: start and the gate failing with the recover hint and resolving no secret, recover,
     rekey, delete's logout outcomes, and `vm shell --platform`'s refusals before the boundary;
   - conformance vectors W1 to W9.
-- [ ] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
+- [x] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
       issues and fix history); rows I29 to I34 are in the HLA inventory.
-- [ ] Collateral, as the platform LLD lists it: ADRs 0003 and 0019, platform author documentation,
+- [x] Collateral, as the platform LLD lists it: ADRs 0003 and 0019, platform author documentation,
       the command reference, the READMEs, the sample config, completions, the guides (including the
       Proxmox guide's start-time rejoin note, `docs/guides/proxmox.md:201-205`, and the
       troubleshooting topic), the reviewer persona, and the stale docstrings and comments.
