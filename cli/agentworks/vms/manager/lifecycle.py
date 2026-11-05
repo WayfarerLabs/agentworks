@@ -41,6 +41,7 @@ from agentworks.errors import (
     UserAbort,
 )
 from agentworks.execution import trust
+from agentworks.execution.errors import TrustMissing, VMNotReady
 from agentworks.naming import MAX_VM_NAME_LENGTH, validate_name
 
 if TYPE_CHECKING:
@@ -94,6 +95,10 @@ def _raise_init_failure(db: Database, vm_name: str, cause: Exception) -> NoRetur
     still be usable, reinit guidance). Both carry the ``Details:`` pointer to
     the most recent ``vm-create`` log when one exists. Shared by Phase A and
     Phase B so both fail identically.
+
+    A cause whose hint names ``agw vm recover`` (python3 missing, no host-key
+    record) is not chained on a VM that never completed: recover refuses that
+    VM, so the delete guidance is the only hint.
     """
     from agentworks.ssh import LOG_DIR
 
@@ -104,12 +109,15 @@ def _raise_init_failure(db: Database, vm_name: str, cause: Exception) -> NoRetur
 
     vm = db.get_vm(vm_name)
     if vm is not None and vm.provisioning_status != ProvisioningStatus.COMPLETE.value:
-        raise ProvisioningError(
+        failure = ProvisioningError(
             f"provisioning failed: {cause}{log_hint}",
             entity_kind="vm",
             entity_name=vm_name,
             hint=f"VM '{vm_name}' did not complete provisioning. Use 'vm delete {vm_name}' to clean up.",
-        ) from cause
+        )
+        if isinstance(cause, (TrustMissing, VMNotReady)):
+            raise failure from None
+        raise failure from cause
     raise ExternalError(
         f"initialization failed: {cause}{log_hint}",
         entity_kind="vm",

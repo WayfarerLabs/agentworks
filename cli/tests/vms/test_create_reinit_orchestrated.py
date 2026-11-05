@@ -22,6 +22,7 @@ from agentworks.config import load_config
 from agentworks.db import VersionedPayload, VMStatus
 from agentworks.debian import DebianRelease
 from agentworks.errors import ConfigError, ExternalError, ProvisioningError, StateError, UserAbort, ValidationError
+from agentworks.execution.errors import TrustMissing, VMNotReady
 from agentworks.execution.requests import Script
 from agentworks.execution.results import Completed, NotDelivered, NotDeliveredReason, Result
 from agentworks.output import Role
@@ -675,6 +676,46 @@ def test_create_phase_a_failure_maps_to_provisioning_error(
     row = db.get_vm("fvm")
     assert row is not None  # kept: past the unwind window
     assert row.provisioning_status == ProvisioningStatus.FAILED.value
+
+
+@pytest.mark.parametrize(
+    "cause",
+    [TrustMissing("fvm"), VMNotReady("fvm", NotDeliveredReason.PYTHON_MISSING)],
+    ids=["trust-missing", "python-missing"],
+)
+def test_a_phase_a_failure_that_would_hint_at_recover_gets_only_the_delete_guidance(
+    make_config,
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,
+    capsys: pytest.CaptureFixture[str],
+    cause: Exception,
+) -> None:
+    """Recover refuses a VM that never completed, so its hint must not reach the operator."""
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+    from agentworks.cli._errors import echo_hint
+    from agentworks.db import ProvisioningStatus
+    from agentworks.errors import ProvisioningError
+
+    monkeypatch.setattr(
+        LimaPlatform,
+        "create",
+        lambda self, request, ctx: ProvisionResult(platform_metadata={}, tailnet_address="100.64.0.7"),  # noqa: ARG005
+    )
+    monkeypatch.setattr(LimaPlatform, "vm_active", _noop_hold)
+
+    def _failing_bootstrap(db_: Database, config_: object, vm_name: str, *a: object, **k: object) -> None:
+        db_.update_vm_provisioning_status(vm_name, ProvisioningStatus.FAILED)
+        raise cause
+
+    monkeypatch.setattr(vm_manager, "bootstrap_vm", _failing_bootstrap)
+
+    with pytest.raises(ProvisioningError) as caught:
+        vm_manager.create_vm(db, make_config(), name="fvm", interaction=TtyInteractionPolicy.REFUSE)
+    capsys.readouterr()
+    echo_hint(caught.value)
+
+    assert capsys.readouterr().err.count("Hint:") == 1
 
 
 @pytest.mark.parametrize(
