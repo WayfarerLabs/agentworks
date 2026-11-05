@@ -987,3 +987,41 @@ by them.
 The closeout read also removed stale SDD statements about a shell file workaround and fatal native
 identity collisions. Shell publishes directly; session identity conflicts leave affected inputs
 unhandled while independent inputs continue. Unsafe filesystem overlaps remain errors.
+
+## Additional authorized feedback/fix round 2 of 2, 2026-11-05
+
+This sixth published correction round uses the final round of the operator's additional allowance.
+The batch freezes at 2026-11-05 19:18:22 UTC against ready head `082437fe`, after the normal
+one-hour reporting window. Muntz report `6666101942` identifies three material corrections; the
+lead's critical reading `6666264141` independently reproduces the error paths and accepts all three.
+Saga report `6665772379` is clean. Copilot's new review reports quota exhaustion, not findings.
+There are no unresolved inline threads. Start comment `6667039978` records the batch, the current
+main `c8d4dfb` and return to draft. The separate full live report was not published by the cutoff.
+
+- [ ] Preserve the typed workload failure and exit status through expected failures of main and
+      alternate capture and server cleanup. Keep ordinary session-log capture strict and both pane
+      targets exact; cancellation and unexpected internal errors retain their behavior.
+- [ ] Keep failed-command diagnostic transfer/read optional, preserving the native operation error
+      without raw provider prose. Successful structured-response transfer remains required.
+- [x] Use one new native setup domain codec version, 3, accepting released versions 1 and 2 and
+      normalizing their ambiguous incomplete zero-deferral records. Preserve unknown future data.
+- [x] Add a raw-before-normalized redaction regression with a failing deletion control. Keep the
+      necessary pass; do not add a shared deferral abstraction or change missing-route logic merely
+      for optional reason-text or counting differences.
+- [ ] Complete the three independent private lanes and required integrated gates on the corrected
+      head, and update permanent collateral wherever the correction changes an operator contract.
+- [ ] Publish the exact green ready handoff without `review-requested`, reporting the exhausted
+      correction allowance and the still-required independent live acceptance.
+- [ ] Reconcile final acceptance against every retained requirement, promote any actual remaining
+      guidance, and create both locks only when that evidence proves completion.
+
+Supersession: the earlier completed branch-only codec work is truthful history; the final writer
+combines those unreleased updates into version 3. No compatibility mechanism is introduced for the
+intermediate branch-only versions. The current LLD and implementation describe the final format.
+
+The two error paths are independently reproduced at the prior ready head. A failed main capture
+loses the known workload status and skips cleanup; alternate capture and cleanup transport failures
+also replace that primary error. A failed optional native diagnostic copy replaces the native
+operation error. The redaction deletion control exposes a secret marker when terminal parsing
+consumes the first character of a known multiline value. These are scoped local reproductions, not
+final backend acceptance. The full live result remains necessary before either SDD locks.
