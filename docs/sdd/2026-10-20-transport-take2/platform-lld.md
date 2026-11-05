@@ -425,19 +425,20 @@ dispatch-and-poll half of `plugins/proxmox/transport.py:51-137`. First it pings 
 (`guest_agent_ping`, `POST .../agent/ping`) every two seconds until it answers, since a VM that has
 just started (recover starts a stopped one with no wait) has no agent running yet. A ping carries no
 script, so asking again is safe; a token rejection raises `TokenRejectedError` at once, any other
-failure means not yet, and no answer within `AGENT_WAIT_SECONDS` (120 s) or the deadline, whichever
-comes first, raises `ConnectivityError` saying no script was dispatched, so a VM with no agent fails
-in about two minutes rather than after the repair's 600. Then one `guest_agent_exec` of
-`["/bin/bash", "-s"]` with `input-data`, with whatever remains of the deadline, then
-`guest_agent_exec_status` every two seconds until it reports exit or the deadline passes. Dispatch
-and status failures raise `ConnectivityError` with no stdin in the message (`transport.py:69-123`),
-except an HTTP 401 or 403, which raises `TokenRejectedError`; a status failure of either kind says
-the script may still be running. A `_TruncatedQGAOutput` report raises `ConnectivityError` saying
-the script exited with its output cut short. No failure chains the API error, whose request quotes
-the script. `create` runs the bootstrap through it with `run_bootstrap` and today's 600-second
-deadline (`platform.py:600`), then joins and settles, deleting `_run_bootstrap_via_agent`
-(`platform.py:566-636`); `native_transport` (`:488-502`) and `transport.py` go. No `native_shell`
-override. `recovery_needs_guest_sshd = False`.
+`ProxmoxAPIError` means not yet (anything else the client raises is a bug and propagates), and no
+answer within `AGENT_WAIT_SECONDS` (120 s) or the deadline, whichever comes first, raises
+`ConnectivityError` saying no script was dispatched, so a VM with no agent fails in about two
+minutes rather than after the repair's 600. Then one `guest_agent_exec` of `["/bin/bash", "-s"]`
+with `input-data`, with whatever remains of the deadline, then `guest_agent_exec_status` every two
+seconds until it reports exit or the deadline passes. Dispatch and status failures raise
+`ConnectivityError` with no stdin in the message (`transport.py:69-123`), except an HTTP 401 or 403,
+which raises `TokenRejectedError`; a status failure of either kind says the script may still be
+running. A `_TruncatedQGAOutput` report raises `ConnectivityError` saying the script exited with its
+output cut short. No failure chains the API error, whose request quotes the script. `create` runs
+the bootstrap through it with `run_bootstrap` and today's 600-second deadline (`platform.py:600`),
+then joins and settles, deleting `_run_bootstrap_via_agent` (`platform.py:566-636`);
+`native_transport` (`:488-502`) and `transport.py` go. No `native_shell` override.
+`recovery_needs_guest_sshd = False`.
 
 ### AWS, Azure and GCP
 

@@ -149,6 +149,17 @@ def test_a_rejected_token_on_the_ping_raises_at_once() -> None:
     assert caught.value.__context__ is None
 
 
+def test_a_client_bug_on_the_ping_surfaces_at_once() -> None:
+    """Only the API's own failures mean the agent is not answering yet."""
+    api = FakeAPI([], pings=[TypeError("a bug in the client"), None])
+
+    with pytest.raises(TypeError):
+        run(api)
+
+    assert api.ping_count == 1
+    assert api.execs == []
+
+
 def test_a_script_over_qgas_input_limit_is_refused_before_dispatch() -> None:
     api = FakeAPI([])
 

@@ -93,14 +93,15 @@ def run_as_root(api: ProxmoxAPI, node: str, vmid: int, script: bytes, deadline: 
 def _await_agent(api: ProxmoxAPI, node: str, vmid: int, where: str, expires: float) -> None:
     """Ping the guest agent until it answers, or raise by ``expires`` with nothing dispatched.
 
-    Any failure but a token rejection means the agent is not answering yet.
+    An API failure other than a token rejection means the agent is not
+    answering yet; anything else the client raises is a bug and propagates.
     """
     while (remaining := expires - time.monotonic()) > 0:
         failure: AgentworksError | None = None
         try:
             api.guest_agent_ping(node, vmid, timeout=remaining)
             return
-        except Exception as error:
+        except ProxmoxAPIError as error:
             failure = _token_rejected(
                 error, f"Proxmox rejected the API token while pinging the guest agent of VM {where}"
             )
