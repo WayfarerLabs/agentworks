@@ -503,17 +503,21 @@ incident row I32); GCP's read raises `GCEError` itself instead. It then builds
 `termination_as_interrupt()`, so `SIGTERM`, `SIGHUP` and, on Windows, `SIGBREAK` (Ctrl-Break) unwind
 like Ctrl-C while a route may be open, for every cloud command, not only the shell; `create_vm`
 opens the same block around its own stack, so a cloud create's bootstrap allow is removed by its
-interrupt rollback too. Once one arrives, all of them are ignored until the outermost block exits,
-so a second cannot cut the route's close short; a block nested in another, or off the main thread,
-changes nothing, and a signal already ignored (`nohup`) stays ignored. A hangup's terminal fails
-every write, and the first line a rollback printed would end it, so the hangup's handler points
-whichever of file descriptors 1 and 2 is a terminal, and a Python stream on another terminal, at the
-null device before it raises; the cleanup then runs to the end, silently there. It tells a terminal
-by its being a character device, since `isatty` answers no for a terminal that has hung up while
-every write to it still fails; output to a file or a pipe keeps its target, and a closed descriptor
-stays closed. Each cloud's close also deletes its allow before printing, and Azure's poke removes a
-rule whose create was interrupted, by the name it chose. `_transient_route` is an abstract member of
-the base, which each cloud supplies and nothing outside the cloud calls. Then:
+interrupt rollback too. The C runtime is believed to deliver a console window's close as `SIGBREAK`
+too, so closing the window may start the same unwind, but Windows ends the process within seconds,
+so nothing may rely on it finishing, and the docs tell the operator to remove a rule a closed window
+left; a kill runs nothing at all. The hangup's null-device redirect is not applied to `SIGBREAK`.
+Once one arrives, all of them are ignored until the outermost block exits, so a second cannot cut
+the route's close short; a block nested in another, or off the main thread, changes nothing, and a
+signal already ignored (`nohup`) stays ignored. A hangup's terminal fails every write, and the first
+line a rollback printed would end it, so the hangup's handler points whichever of file descriptors 1
+and 2 is a terminal, and a Python stream on another terminal, at the null device before it raises;
+the cleanup then runs to the end, silently there. It tells a terminal by its being a character
+device, since `isatty` answers no for a terminal that has hung up while every write to it still
+fails; output to a file or a pipe keeps its target, and a closed descriptor stays closed. Each
+cloud's close also deletes its allow before printing, and Azure's poke removes a rule whose create
+was interrupted, by the name it chose. `_transient_route` is an abstract member of the base, which
+each cloud supplies and nothing outside the cloud calls. Then:
 
 - `run_as_root`: `trust.require_record(vm.name)` first, so a VM with no record opens no firewall
   rule, then `run_as_root(script, deadline)` inside `_public_ssh` under VM trust.

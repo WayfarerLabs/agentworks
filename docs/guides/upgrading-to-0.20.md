@@ -274,7 +274,10 @@ before they resolve the auth key.
   Linux by `SIGTERM` or `SIGHUP` (a closed terminal), or on Windows by Ctrl-Break, as it is on
   Ctrl-C: `vm create` rolls back, bootstrap allow included, and a root script (`vm recover`,
   `vm rekey`, the logout at `vm delete`) or a `vm shell --platform` session removes its own allow. A
-  second signal during that cleanup is ignored, so it cannot cut the removal short.
+  second signal during that cleanup is ignored, so it cannot cut the removal short. Closing the
+  console window on Windows may start that cleanup, but Windows ends the process within seconds, so
+  it cannot be relied on to finish: end the command with Ctrl-C or Ctrl-Break instead, and delete a
+  rule a closed window left behind from the VM's firewall in the provider's console.
 
 ## Third-party VM platforms
 

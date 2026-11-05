@@ -259,7 +259,10 @@ session opens a fresh UUID-named scoped SSH allow and removes only its own rule 
 session ends; an unproven close is retained and reported rather than sweeping another rule. Every
 one of these allows, create's bootstrap allow included, is also removed when the command is ended on
 macOS and Linux by `SIGTERM` or `SIGHUP`, or on Windows by Ctrl-Break; an interrupted create rolls
-back as it does on Ctrl-C.
+back as it does on Ctrl-C. Closing the console window on Windows may start that cleanup, but Windows
+ends the process within seconds, so it cannot be relied on to finish: end the command with Ctrl-C or
+Ctrl-Break instead, and delete a rule a closed window left behind from the VM's firewall in the
+provider's console.
 
 ## Recovery and safe cleanup
 
