@@ -39,6 +39,8 @@ if TYPE_CHECKING:
 # been told to stop, so this only covers PVE tearing the worker down,
 # not a full clone finishing.
 _SETTLE_TIMEOUT = 60
+# The HTTP statuses of a request the API refused for the token's authorization.
+_REFUSED = frozenset({401, 403})
 
 
 def stop_and_delete_vm(api: ProxmoxAPI, node: str, vmid: int) -> None:
@@ -49,7 +51,8 @@ def stop_and_delete_vm(api: ProxmoxAPI, node: str, vmid: int) -> None:
     still leaves the delete to decide, and a failed delete counts as done
     when the node no longer lists the VMID. Otherwise the delete's error
     propagates, a listing that fails included, since it cannot show the
-    VMID gone. Shared by the delete op and the create rollback wrappers, so
+    VMID gone, and so does a delete refused for authorization (401 or 403),
+    whatever the listing shows. Shared by the delete op and the create rollback wrappers, so
     the stop-then-delete ordering lives in exactly one place.
     """
     with contextlib.suppress(ProxmoxAPIError):
@@ -60,8 +63,10 @@ def stop_and_delete_vm(api: ProxmoxAPI, node: str, vmid: int) -> None:
     try:
         upid = api.delete_vm(node, vmid)
         api.wait_for_task(node, upid)
-    except ProxmoxAPIError:
-        if not _vm_absent(api, node, vmid):
+    except ProxmoxAPIError as error:
+        # A token refused the delete may also be one the listing hides the
+        # VM from, so a refusal is never read as absence.
+        if error.code in _REFUSED or not _vm_absent(api, node, vmid):
             raise
 
 

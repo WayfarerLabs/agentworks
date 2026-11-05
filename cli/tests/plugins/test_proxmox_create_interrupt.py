@@ -477,6 +477,22 @@ class TestDeleteOp:
         with pytest.raises(ProxmoxAPIError, match="locked"):
             platform.delete(self._vm_row(), RunContext())
 
+    @pytest.mark.parametrize("code", [401, 403])
+    def test_a_delete_refused_for_authorization_raises_whatever_the_listing_shows(
+        self, monkeypatch: pytest.MonkeyPatch, code: int
+    ) -> None:
+        """A token without rights on the VM may not see it listed either, so the listing cannot show it gone."""
+        platform, fake = _platform_with_fake(monkeypatch)
+        refused = ProxmoxAPIError(f"Proxmox API DELETE /nodes/pve1/qemu/{NEWID} failed ({code})")
+        refused.code = code
+        fake.delete_error = refused
+
+        with pytest.raises(ProxmoxAPIError) as caught:
+            platform.delete(self._vm_row(), RunContext())
+
+        assert caught.value is refused
+        assert ("list_vms", "pve1") not in fake.calls
+
     def test_a_delete_while_the_api_is_down_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """No call answers, so nothing shows the VMID gone."""
         platform, fake = _platform_with_fake(monkeypatch)
