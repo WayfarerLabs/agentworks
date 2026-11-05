@@ -364,10 +364,11 @@ connection (`driver.py:396-404`). An interrupt that lands before then finds the 
 and leaves the row as the interrupt found it. The gate holds the promise instead: the
 ordinary-command gate (`_guard_incomplete_vm`, `vms/manager/_helpers.py`) refuses every row whose
 provisioning is not `COMPLETE`, naming `vm delete`, so a VM that was never attested is retained
-unattested and gated, as D9 and incident row I26 require, including one a hard kill (`SIGTERM`,
-`SIGKILL`) left `IN_PROGRESS` with no arm run. Create's cancel handler (`lifecycle.py:657-663`)
-marks nothing either: it reads the status once to choose its wording, the attestation interrupt
-arm's (`lifecycle.py:611-617`: the VM exists but was not verified; run `agw vm delete`) whenever
+unattested and gated, as D9 and incident row I26 require, including one a hard kill (`SIGKILL`, or
+any kill on Windows) left `IN_PROGRESS` with no arm run; on macOS and Linux create turns `SIGTERM`
+and `SIGHUP` into an interrupt. Create's cancel handler (`lifecycle.py:657-663`) marks nothing
+either: it reads the status once to choose its wording, the attestation interrupt arm's
+(`lifecycle.py:611-617`: the VM exists but was not verified; run `agw vm delete`) whenever
 provisioning is not `COMPLETE` or the read fails, and `_warn_init_cancel`'s reinit advice only for a
 `COMPLETE` row, because reinit refuses any other (`lifecycle.py:813`) and the `PENDING` window
 includes the hold entered before `bootstrap_vm` (`lifecycle.py:643`). An interrupt after step 5
