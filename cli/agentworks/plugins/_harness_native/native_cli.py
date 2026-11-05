@@ -62,7 +62,7 @@ with os.fdopen(fd, 'w') as output:
 _BOUND_STDERR = """import sys
 with open(sys.argv[1], 'rb') as source:
     data = source.read(8192)
-with open(sys.argv[1], 'wb') as destination:
+with open(sys.argv[2], 'xb') as destination:
     destination.write(data)
 """
 _MARKETPLACE_ERROR = re.compile(r"\bmarketplaces\.([A-Za-z0-9][A-Za-z0-9_.-]{0,127})(?=[`'\s:]|$)")
@@ -236,18 +236,19 @@ class NativeCLI:
         # transport logger. On failure only a bounded private stderr prefix is
         # inspected for a named marketplace, never rendered as provider prose.
         stderr = remote + ".stderr"
+        diagnostic_path = remote + ".diagnostic"
         script = (
             f"cd {shlex.quote(self.files.remote)} || exit 1\n"
             f"{shlex.join([executable, *args])} > {shlex.quote(remote)} 2> {shlex.quote(stderr)}\n"
             "native_status=$?\n"
             'if [ "$native_status" -ne 0 ]; then\n'
-            f"{shlex.join(['python3', '-c', _BOUND_STDERR, stderr])}\n"
+            f"{shlex.join(['python3', '-c', _BOUND_STDERR, stderr, diagnostic_path])}\n"
             "fi\n"
             'exit "$native_status"'
         )
         result = self.files.runner.run("bash", input_text=script, env=env, check=False, timeout=180)
         if not result.ok:
-            self.files.runner.copy_from(stderr, local)
+            self.files.runner.copy_from(diagnostic_path, local)
             diagnostic = local.read_bytes().decode("utf-8", errors="replace")
             match = _MARKETPLACE_ERROR.search(diagnostic)
             entry = "" if match is None else f" at native setting {'marketplaces.' + match[1]!r}"

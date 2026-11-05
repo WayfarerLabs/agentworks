@@ -155,16 +155,26 @@ def test_unobservable_named_source_is_local_and_never_invents_an_association(tra
 
 
 @pytest.mark.parametrize("offset", [0, 16384])
-def test_failed_native_inventory_only_exposes_bounded_named_selector(transport, offset):
+@pytest.mark.parametrize("read_only", [False, True])
+def test_failed_native_inventory_only_exposes_bounded_named_selector(transport, monkeypatch, offset, read_only):
     executable = transport.root / "fault-native"
     selector = "fixture-fault-market"
     executable.write_text(
-        "#!/usr/bin/python3\nimport sys\n"
-        f"sys.stderr.write('x' * {offset} + '\\nerror in `marketplaces.{selector}`\\n' "
+        "#!/usr/bin/python3\nimport os, sys\n"
+        + ("os.chmod(os.readlink('/proc/self/fd/2'), 0o400)\n" if read_only else "")
+        + f"sys.stderr.write('x' * {offset} + '\\nerror in `marketplaces.{selector}`\\n' "
         "+ '\\x1b]0;unsafe-title\\x07 https://fixture-secret@example.invalid/?token=fixture-query' "
         "+ 'x' * (1024 * 1024))\nsys.exit(1)\n"
     )
     executable.chmod(0o700)
+    copied_bytes: list[int] = []
+    original_copy = transport.copy_from
+
+    def capture_size(remote, local, **kwargs):
+        original_copy(remote, local, **kwargs)
+        copied_bytes.append(Path(local).stat().st_size)
+
+    monkeypatch.setattr(transport, "copy_from", capture_size)
     root = transport.home / ".codex"
     with NativeFiles(transport) as files:
         cli = NativeCLI("codex", files, home=str(transport.home), config_root=str(root))
@@ -174,6 +184,7 @@ def test_failed_native_inventory_only_exposes_bounded_named_selector(transport, 
     diagnostic = str(caught.value)
     assert (selector in diagnostic) == (offset == 0)
     assert len(diagnostic.encode()) < 1024
+    assert max(copied_bytes) <= 8192
     assert all(value not in diagnostic for value in ("fixture-secret", "fixture-query", "unsafe-title", "\x1b", "\x07"))
     assert not any(
         value in text
