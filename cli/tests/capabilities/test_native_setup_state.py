@@ -71,14 +71,15 @@ def test_nested_declaration_survives_persistence(tmp_path):
         db.close()
 
 
-def test_unknown_version_is_retained_but_cannot_bless_setup():
-    record = _slice(VersionedPayload(99, {"future": True}))
+@pytest.mark.parametrize("version", [4, 99])
+def test_unknown_version_is_retained_but_cannot_bless_setup(version):
+    record = _slice(VersionedPayload(version, {"future": True}))
     with pytest.raises(UnsupportedNativeSetupVersionError):
         decode_native_setup(record)
     assert canonicalize_native_setup(record) == record.payload
 
 
-@pytest.mark.parametrize("version", [1, 2, 3])
+@pytest.mark.parametrize("version", [1, 2])
 def test_legacy_records_default_to_no_entry_diagnostics_and_export_current_version(version):
     payload = _state().model_dump(mode="json")
     del payload["records"][0]["incomplete_reasons"]
@@ -86,7 +87,7 @@ def test_legacy_records_default_to_no_entry_diagnostics_and_export_current_versi
     state = decode_native_setup(record)
     assert state.records[0].incomplete_reasons == ()
     encoded = canonicalize_native_setup(record)
-    assert encoded.payload_version == 4
+    assert encoded.payload_version == 3
     assert decode_native_setup(_slice(encoded)) == state
 
 
@@ -170,7 +171,7 @@ def test_restore_preserves_native_applied_state_after_setup_releases_database(tm
         restored.close()
 
 
-@pytest.mark.parametrize("version", [1, 2, 3])
+@pytest.mark.parametrize("version", [1, 2])
 @pytest.mark.parametrize("case", ["complete", "explicit-route", "unconfirmed"])
 def test_legacy_codec_only_trusts_complete_or_explicit_routing_results(version, case):
     identity = "b" * 64
@@ -198,7 +199,7 @@ def test_legacy_codec_only_trusts_complete_or_explicit_routing_results(version, 
     assert decoded.records[0].deferred == original.deferred
     assert stored.payload.value == payload
     canonical = canonicalize_native_setup(stored)
-    assert canonical.payload_version == 4
+    assert canonical.payload_version == 3
     records = canonical.value["records"]
     assert isinstance(records, list) and isinstance(records[0], dict)
     assert records[0]["artifact_inputs"] == (None if expected is None else [identity])
@@ -209,5 +210,5 @@ def test_current_codec_preserves_confirmed_empty_routes_despite_native_failure()
     original = _state().records[0].model_copy(update={"artifact_inputs": ("b" * 64,)})
     state = NativeSetupState(records=(original,))
     encoded = encode_native_setup(state)
-    assert encoded.payload_version == 4
+    assert encoded.payload_version == 3
     assert decode_native_setup(_slice(encoded)) == state
