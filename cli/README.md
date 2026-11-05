@@ -557,9 +557,12 @@ as the VM admin, not root, and explicitly use `sudo` for privileged work.
 
 VM creation follows a two-phase lifecycle tracked by separate status columns:
 
-1. **Provisioning** (`provisioning_status`): one-time, platform-specific, over the provisioning
-   transport (Lima shell, SSH, or WSL2 exec): create user, install system packages, add SSH key,
-   install and join Tailscale
+1. **Provisioning** (`provisioning_status`): one-time and platform-specific: create user, install
+   system packages, add SSH key, install and join Tailscale. The platform runs these through a
+   provider's boot payload or its own root channel (`limactl shell` for Lima, `wsl.exe` for WSL2,
+   SSH to the public address for AWS, Azure and GCP, the QEMU guest agent for Proxmox), and always
+   joins Tailscale through that channel. Core then connects over Tailscale SSH, records the host key
+   and checks the VM contract; provisioning is complete only once that passes
 
 2. **Initialization** (`init_status`): repeatable via `vm reinit`, over Tailscale SSH: configure apt
    sources, install apt packages, install snap packages, install mise, set shell, reconcile SSH

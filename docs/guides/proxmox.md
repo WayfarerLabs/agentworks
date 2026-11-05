@@ -147,10 +147,10 @@ current Trixie creation.
 A site without `template_vmids.trixie` remains loadable for best-effort operations on existing VMs.
 New VM creation validates the concrete core-selected release during preflight and fails before the
 command's secret-resolution phase or Proxmox API authentication when that mapping is missing. After
-cloning and bootstrapping the mapped template, core verifies the live guest's `/etc/os-release`
-through the returned QEMU Guest Agent execution transport. A missing, non-Debian, or wrong-release
-observation retains an addressable failed VM row for explicit deletion. There is no configuration
-switch to skip the check.
+cloning and bootstrapping the mapped template, the platform returns the VM's Tailscale address, and
+core reads the live guest's `/etc/os-release` over SSH at that address as the first check of the VM
+contract. A missing, non-Debian, or wrong-release observation retains an addressable failed VM row
+for explicit deletion. There is no configuration switch to skip the check.
 
 For 0.13 configuration migration, see [Upgrading to 0.14](upgrading-to-0.14.md).
 
@@ -201,10 +201,12 @@ agw vm delete test-vm
 ### Native recovery and interactive access
 
 Agentworks uses QEMU Guest Agent as the root channel that works without Tailscale: create's
-bootstrap and Tailscale join, `agw vm recover`, `vm rekey` and the logout during deletion run
-through it. A started VM that does not answer over Tailscale SSH fails `vm start` with a hint to run
-`agw vm recover`, which can also restart a broken SSH server here, since the guest agent does not
-depend on it.
+bootstrap and Tailscale join, `agw vm recover`, `vm rekey` and the logout during deletion run their
+root scripts through it. Before each script, Agentworks waits up to about two minutes for the guest
+agent to answer, since a VM that has just started has none running yet; a VM whose agent never
+answers fails with nothing dispatched. A started VM that does not answer over Tailscale SSH fails
+`vm start` with a hint to run `agw vm recover`, which can also restart a broken SSH server here,
+since the guest agent does not depend on it.
 
 QEMU Guest Agent does not provide an interactive terminal, so `vm shell --platform` is unavailable
 for Proxmox. Use the Proxmox web UI's serial console for interactive access. Normal Agentworks work
@@ -221,20 +223,23 @@ When you run `agw vm create <name> --site proxmox`:
    system packages and Tailscale and configures the admin user
 5. Joins Tailscale through QEMU Guest Agent, with the auth key on the script's stdin, and reads the
    VM's Tailscale address the same way
-6. Returns the QGA execution transport to core, which verifies the live Debian release
-7. Switches to Tailscale SSH and completes initialization
+6. Returns that address to core, which connects over Tailscale SSH, records the VM's host key,
+   checks the VM contract (the live Debian release first), and completes initialization
 
 After provisioning, normal operations use Tailscale SSH, as they do on Lima and Azure VMs.
 
 ## Troubleshooting
 
-### "Timed out waiting for guest agent"
+### The guest agent does not answer
 
-The QEMU guest agent is not responding. Check:
+Create reports `Timed out waiting for guest agent IP` when the agent never reports the VM's address,
+and a root script fails with
+`the QEMU guest agent of Proxmox VM <vmid>@<node> did not answer, so no script was dispatched` when
+the agent does not answer within about two minutes. Check:
 
 - The guest agent is installed in the template (the setup script handles this via `virt-customize`)
 - The guest agent is enabled in the VM config (`qm set <vmid> --agent enabled=1`)
-- The VM has finished booting -- connect via `qm terminal <vmid>` to check
+- The VM has finished booting: connect with `qm terminal <vmid>` to check
 
 ### The token secret won't resolve
 

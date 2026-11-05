@@ -4,9 +4,12 @@
 installed OpenSSH client at the VM's tailnet address, and every request is sent on the client's
 stdin, never on a command line or in the environment. The commands that use it today are `vm exec`,
 `vm shell`, `agent exec`, `agent shell`, `vm verify-connection` and `vm port-forward`, plus create's
-first contact (Phase A), the VM contract (`agentworks.vms.contract`) that create and reinit run, and
-`vm confirm-release`. Everything else still reaches VMs through the transport stack it will replace,
-which this package must never import.
+first contact (Phase A), the VM contract (`agentworks.vms.contract`) that create and reinit run,
+`vm confirm-release`, and the wait for a VM to answer (`reachability.wait`) after `vm start`, the
+activation gate's automatic start, `vm rekey` and `vm recover`. Everything else still reaches VMs
+through the legacy transport stack (`agentworks.transports`), which this package must never import.
+A platform's own channel is not part of either: core reaches it through `VMPlatform.run_as_root` and
+`native_shell`.
 
 ## Use
 
