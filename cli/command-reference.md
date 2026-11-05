@@ -847,13 +847,13 @@ rather than as a VM that does not answer. The VM's firewall denies all inbound t
 for the duration of the session a temporary SSH allow rule scoped to your detected public IP is
 created (one per session, so concurrent sessions never tear down each other's access) and removed
 again on exit, including, on macOS and Linux, when the session is ended by `SIGTERM` or a closed
-terminal. On Windows, closing the console window or killing `agw` runs no cleanup and leaves the
-rule in place until you delete it from the VM's firewall in the provider's console, so end the
-session by exiting the shell. If your SSH traffic egresses through a different address than the
-detection sees (VPN split tunnel, proxy, CGNAT), set `ssh_allow_cidrs` in the config's `[operator]`
-section to a list of IPv4 addresses and/or CIDRs to allow additionally; if detection fails entirely,
-those entries are used alone. A shell that ends with status 255 gets a notice that the connection
-may have dropped.
+terminal. The same holds for the routes `vm recover`, `vm rekey` and `vm delete` open on a cloud VM.
+On Windows, closing the console window or killing `agw` runs no cleanup and leaves the rule in place
+until you delete it from the VM's firewall in the provider's console, so end the session by exiting
+the shell. If your SSH traffic egresses through a different address than the detection sees (VPN
+split tunnel, proxy, CGNAT), set `ssh_allow_cidrs` in the config's `[operator]` section to a list of
+IPv4 addresses and/or CIDRs to allow additionally; if detection fails entirely, those entries are
+used alone. A shell that ends with status 255 gets a notice that the connection may have dropped.
 
 #### Host keys
 

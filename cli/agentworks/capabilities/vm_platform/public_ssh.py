@@ -30,6 +30,7 @@ from agentworks.errors import ConnectivityError, StateError
 from agentworks.execution import client, envelope, root_script, ssh_process, trust
 from agentworks.execution.errors import TrustMismatch
 from agentworks.execution.trust import TrustBinding, TrustMode
+from agentworks.interrupts import termination_as_interrupt
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -247,8 +248,13 @@ class PublicAddressPlatform(VMPlatform):
 
     @contextlib.contextmanager
     def _public_ssh(self, vm: VMRow, ctx: RunContext, binding: TrustBinding) -> Iterator[PublicSSH]:
-        """An answering :class:`PublicSSH` to the VM under ``binding``, for as long as the route is open."""
-        with self._transient_route(vm, ctx):
+        """An answering :class:`PublicSSH` to the VM under ``binding``, for as long as the route is open.
+
+        ``SIGTERM`` and ``SIGHUP`` unwind like Ctrl-C for as long as the route
+        may be open, so ending any command that reaches a cloud VM this way
+        still closes its allow.
+        """
+        with termination_as_interrupt(), self._transient_route(vm, ctx):
             address = self._public_address(vm, ctx)
             if not address:
                 raise StateError(

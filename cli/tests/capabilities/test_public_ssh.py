@@ -5,7 +5,9 @@ from __future__ import annotations
 import contextlib
 import os
 import shutil
+import signal
 import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
@@ -414,6 +416,29 @@ def test_an_interrupted_native_shell_still_closes_its_route(
         cloud.platform.native_shell(_vm(), _ctx())
 
     assert cloud.events == ["route-open", "probe", "shell", "route-close"]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="os.kill delivery is POSIX")
+@pytest.mark.parametrize("factory", CLOUDS, ids=["aws", "azure", "gcp"])
+@pytest.mark.parametrize("signal_name", ["SIGTERM", "SIGHUP"])
+def test_a_termination_during_a_root_script_still_closes_its_route(
+    monkeypatch: pytest.MonkeyPatch, factory: Callable[[], Any], signal_name: str
+) -> None:
+    """Recover, rekey and delete reach a cloud VM through run_as_root; a SIGTERM there must not leave the allow open."""
+    cloud = _Cloud(monkeypatch, factory, "203.0.113.7")
+    seed_vm_trust("box")
+
+    def terminated(access: PublicSSH, script: bytes, deadline: float) -> RawRun:
+        cloud._ran("script")
+        os.kill(os.getpid(), getattr(signal, signal_name))
+        raise AssertionError(f"{signal_name} did not interrupt the script")
+
+    monkeypatch.setattr(PublicSSH, "run_as_root", terminated)
+
+    with pytest.raises(KeyboardInterrupt):
+        cloud.platform.run_as_root(_vm(), _ctx(), b"true\n", 5)
+
+    assert cloud.events == ["route-open", "probe", "script", "route-close"]
 
 
 @pytest.mark.parametrize("factory", CLOUDS, ids=["aws", "azure", "gcp"])

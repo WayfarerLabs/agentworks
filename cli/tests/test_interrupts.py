@@ -91,3 +91,21 @@ def test_a_second_termination_does_not_cut_an_outer_unwind_short() -> None:
                 pytest.fail("a second termination interrupted the outer unwind")
 
     assert signal.getsignal(signal.SIGHUP) == before
+
+
+def test_a_block_off_the_main_thread_changes_nothing() -> None:
+    """Only the main thread may set handlers; a worker that reaches a cloud route must not raise for it."""
+    import threading
+
+    before = signal.getsignal(signal.SIGTERM)
+    seen: list[object] = []
+
+    def worker() -> None:
+        with termination_as_interrupt():
+            seen.append(signal.getsignal(signal.SIGTERM))
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    thread.join()
+
+    assert seen == [before]

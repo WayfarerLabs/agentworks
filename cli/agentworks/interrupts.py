@@ -5,7 +5,8 @@ no ``finally`` runs: a cloud's temporary firewall allow, or any other state a
 command holds open, would outlive it. :func:`termination_as_interrupt` raises
 ``KeyboardInterrupt`` for them instead, as Ctrl-C does, for the span of a
 command that waits on something the operator ends (an interactive shell, a
-port forward), and restores the previous handlers afterwards. Once one has
+port forward) or holds a cloud route open, and restores the previous handlers
+afterwards. Once one has
 arrived, further ones are ignored until the block exits, so a second signal
 cannot cut short the cleanup the first one started. A signal the
 process already ignores stays ignored, so a command started under ``nohup``
@@ -16,6 +17,7 @@ from __future__ import annotations
 
 import contextlib
 import signal
+import threading
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -38,9 +40,13 @@ def _interrupt(_signal: int, _frame: object) -> None:
 def termination_as_interrupt() -> Iterator[None]:
     """Raise ``KeyboardInterrupt`` on ``SIGTERM``, and ``SIGHUP`` where it exists, inside the block, unless ignored.
 
-    Inside an enclosing block it changes nothing, so the outermost block owns
-    the handlers and their restoration.
+    Inside an enclosing block, or off the main thread, it changes nothing: the
+    outermost block owns the handlers and their restoration.
     """
+    if threading.current_thread() is not threading.main_thread():
+        # Only the main thread may set handlers, and only it receives signals.
+        yield
+        return
     previous = {
         number: signal.signal(number, _interrupt)
         for number in _TERMINATIONS
