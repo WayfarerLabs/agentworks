@@ -208,9 +208,8 @@ def _path_failure(subject: str, destination: str, returncode: int) -> StateError
         return StateError(
             f"{subject} '{destination}' is a symlink",
             hint=(
-                "Agentworks owns this file and never reads or writes through a link. Remove the link on the VM, "
-                "stop whatever installs it (commonly a dotfiles install script) from claiming this path, and "
-                "express those values through the integration's settings mapping instead."
+                "Agentworks never reads or writes through a link at this destination. Inspect the path and "
+                "its owning source, then use a regular file or directory appropriate for this operation."
             ),
         )
     if returncode == _NON_DIRECTORY_PATH:

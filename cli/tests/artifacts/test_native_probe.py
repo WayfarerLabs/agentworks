@@ -86,7 +86,7 @@ def probe(
     result = subprocess.run(
         [sys.executable, "-c", program], input=json.dumps(request), env=env, capture_output=True, text=True, check=True
     )
-    observed = json.loads(result.stdout.removeprefix("AGW_ARTIFACT_PROBE="))
+    observed = json.loads(result.stdout.strip().removeprefix("AGW_ARTIFACT_PROBE="))
     assert isinstance(observed, dict)
     observed["problems"].extend(
         problem.code for problem in _inventory_problems(observed["inventory"], identities, entries or {})

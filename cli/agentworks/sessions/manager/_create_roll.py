@@ -596,7 +596,13 @@ def _roll_forward(
         # exception handler still prints the canonical 'Error: ...' line
         # with the typed hint at the very end; this warn just bridges
         # the silence between "thing X created" and the rollback output.
-        output.warn(f"Session create '{plan.name}' failed; rolling back. Reason: {e}")
+        from agentworks.errors import AgentworksError
+        from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic, sanitize_setup_error
+
+        if isinstance(e, AgentworksError):
+            sanitize_setup_error(e, redactions=secret_values.values())
+        diagnostic = sanitize_setup_diagnostic(str(e), redactions=secret_values.values())
+        output.warn(f"Session create '{plan.name}' failed; rolling back. Reason: {diagnostic}")
         log.unwind()
         _render_retained_overlay_outcomes(db, plan, graph)
         raise

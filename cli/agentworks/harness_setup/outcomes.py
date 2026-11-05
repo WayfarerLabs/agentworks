@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import re
+import shlex
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from agentworks.errors import StateError
+from agentworks.errors import AgentworksError, StateError
 from agentworks.resources.render import sanitize_fact_line
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable
 
 # Remove complete terminal strings and escape sequences before the shared scalar
 # boundary strips remaining controls, including truncated or malformed sequences.
@@ -25,24 +26,53 @@ _TRUNCATED = "... [truncated]"
 
 def normalize_setup_diagnostic(text: str) -> str:
     """Normalize diagnostic text and secret patterns without truncating either."""
-    text = _TERMINAL_SEQUENCES.sub("", text)
+    text = _TERMINAL_SEQUENCES.sub("", text).replace("\ufffd", "")
     return sanitize_fact_line(" ".join(text.split()))
 
 
-def sanitize_setup_diagnostic(text: str, *, redact: Callable[[str], str] | None = None) -> str:
+def sanitize_setup_diagnostic(
+    text: str,
+    *,
+    redactions: Iterable[str] = (),
+    redact: Callable[[str], str] | None = None,
+) -> str:
     """Bound a setup diagnostic to one terminal-safe line and 2 KiB of UTF-8.
 
     Callers can redact raw text first, then redact normalized representations
     through the callback before truncation. Render persisted older diagnostics
     through the same boundary without rewriting state.
     """
+    patterns = {form for value in redactions if value for form in (value, shlex.quote(value))}
+    for pattern in sorted(patterns, key=len, reverse=True):
+        text = text.replace(pattern, "[REDACTED]")
     text = normalize_setup_diagnostic(text)
+    normalized = {normalize_setup_diagnostic(pattern) for pattern in patterns}
+    for pattern in sorted(filter(None, normalized), key=len, reverse=True):
+        text = text.replace(pattern, "[REDACTED]")
     if redact is not None:
         text = redact(text)
     encoded = text.encode("utf-8")
     if len(encoded) > _DIAGNOSTIC_LIMIT:
         text = encoded[: _DIAGNOSTIC_LIMIT - len(_TRUNCATED)].decode("utf-8", errors="ignore") + _TRUNCATED
     return text
+
+
+def sanitize_setup_error(
+    error: AgentworksError,
+    *,
+    redactions: Iterable[str] = (),
+    redact: Callable[[str], str] | None = None,
+) -> None:
+    """Keep guest-derived error text safe without changing its type or identity."""
+    values = tuple(redactions)
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while isinstance(current, AgentworksError) and id(current) not in seen:
+        seen.add(id(current))
+        current.args = (sanitize_setup_diagnostic(str(current), redactions=values, redact=redact),)
+        if current.hint:
+            current.hint = sanitize_setup_diagnostic(current.hint, redactions=values, redact=redact)
+        current = current.__cause__
 
 
 @dataclass(frozen=True)

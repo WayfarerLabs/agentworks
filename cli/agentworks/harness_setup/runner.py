@@ -5,6 +5,8 @@ from __future__ import annotations
 import shlex
 from typing import TYPE_CHECKING
 
+from agentworks.errors import AgentworksError
+from agentworks.harness_setup.outcomes import sanitize_setup_error
 from agentworks.transports import Transport
 
 if TYPE_CHECKING:
@@ -55,19 +57,23 @@ class SetupRunner(Transport):
         if sudo:
             preserve = f" --preserve-env={shlex.quote(','.join(environment))}" if environment else ""
             command = f"sudo -n{preserve} bash -c {shlex.quote(command)}"
-        return self._target.run(
-            command,
-            sudo=False,
-            tty=tty,
-            check=check,
-            timeout=timeout,
-            env=environment,
-            input_text=input_text,
-            input_data=input_data,
-            discard_output=discard_output,
-            retries=retries,
-            on_retry=on_retry,
-        )
+        try:
+            return self._target.run(
+                command,
+                sudo=False,
+                tty=tty,
+                check=check,
+                timeout=timeout,
+                env=environment,
+                input_text=input_text,
+                input_data=input_data,
+                discard_output=discard_output,
+                retries=retries,
+                on_retry=on_retry,
+            )
+        except AgentworksError as error:
+            sanitize_setup_error(error, redactions=environment.values())
+            raise
 
     def _interactive(self, command: str, *, env: dict[str, str] | None = None) -> int:
         return self._target.interactive(command, env=self._env(env))

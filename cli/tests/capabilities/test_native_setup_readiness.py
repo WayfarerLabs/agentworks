@@ -155,6 +155,6 @@ def test_destination_probe_preserves_previously_recorded_identities(db, location
     vm = replace(db.insert_vm("fixture", site="local", hostname="fixture"), created_at="2026-01-01T00:00:00Z")
     runner = Mock()
     runner.run.side_effect = lambda command, **kwargs: Mock(
-        stdout="machine-fixture\n" if command == "cat /etc/machine-id" else "1:2:1000\n"
+        stdout="\nAGW_NATIVE_ID=" + ("machine-fixture\n" if "cat /etc/machine-id" in command else "1:2:1000\n")
     )
     assert destination_id(vm, runner, location=location, username=username) == recorded

@@ -11,6 +11,7 @@ from agentworks import output
 from agentworks.artifacts.application import ArtifactApplication, ArtifactDeferral, ArtifactFile
 from agentworks.artifacts.model import ArtifactInputs, ArtifactType
 from agentworks.errors import AgentworksError, ConfigError, StateError
+from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Mapping, Sequence
@@ -247,15 +248,16 @@ def json_text(value: object) -> str:
 
 
 @contextmanager
-def ancestor_diagnostics(integration: str) -> Iterator[None]:
+def ancestor_diagnostics(integration: str, *, environment: Mapping[str, str] | None = None) -> Iterator[None]:
     """Keep native checks of existing upstream placement advisory at session start."""
     try:
         yield
     except AgentworksError as error:
-        hint = f" {error.hint}" if error.hint else ""
-        output.warn(
-            f"Existing ancestor artifacts via {integration}: {error}.{hint} Continuing with existing placement."
+        diagnostic = sanitize_setup_diagnostic(
+            " ".join(part for part in (str(error), error.hint) if part),
+            redactions=() if environment is None else environment.values(),
         )
+        output.warn(f"Existing ancestor artifacts via {integration}: {diagnostic} Continuing with existing placement.")
 
 
 def validate_ancestor_names(context: SessionArtifactContext, application: ArtifactApplication) -> None:
@@ -376,7 +378,7 @@ def prepare_session_delivery(
         ),
     )
     if context.ancestor_files:
-        with ancestor_diagnostics(integration):
+        with ancestor_diagnostics(integration, environment=context.environment):
             if runner is None:
                 raise StateError("artifact delivery requires the actual native launch target")
             ancestor_root = probe_native(

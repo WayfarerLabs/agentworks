@@ -23,10 +23,15 @@ from agentworks.capabilities.harness_integration.setup import (
     VMSetupInvocation,
     WorkspaceSetupInvocation,
 )
-from agentworks.errors import ConfigError, ConnectivityError, ExternalError, StateError
+from agentworks.errors import AgentworksError, ConfigError, ConnectivityError, ExternalError, StateError
 from agentworks.harness_setup.locking import native_mutation_guard
 from agentworks.harness_setup.model import NativeClaim, NativeSetupState, SetupRecord
-from agentworks.harness_setup.outcomes import SetupFailure, normalize_setup_diagnostic, sanitize_setup_diagnostic
+from agentworks.harness_setup.outcomes import (
+    SetupFailure,
+    normalize_setup_diagnostic,
+    sanitize_setup_diagnostic,
+    sanitize_setup_error,
+)
 from agentworks.harness_setup.state import read_native_setup, replace_setup_record, write_native_setup
 from agentworks.native_files import ROOT_FILE_DIRECTORIES
 
@@ -49,26 +54,15 @@ class _SetupInfrastructureFailure(Exception):
 
 def _sanitize(invocation: SetupInvocation, text: str) -> str:
     """Redact diagnostics before they enter persisted state or the failure list."""
-    representations = {
-        representation
-        for value in invocation.secrets.values()
-        if value
-        for representation in (value, shlex.quote(value))
-    }
-    for value in sorted(representations, key=len, reverse=True):
-        text = text.replace(value, "[REDACTED]")
     if invocation.runner.logger is not None:
         text = invocation.runner.logger.sanitize(text)
 
     def redact_normalized(value: str) -> str:
-        patterns = {normalize_setup_diagnostic(item) for item in representations}
-        for pattern in sorted(filter(None, patterns), key=len, reverse=True):
-            value = value.replace(pattern, "[REDACTED]")
         if invocation.runner.logger is not None:
             value = invocation.runner.logger.sanitize(value, normalize=normalize_setup_diagnostic)
         return value
 
-    return sanitize_setup_diagnostic(text, redact=redact_normalized)
+    return sanitize_setup_diagnostic(text, redactions=invocation.secrets.values(), redact=redact_normalized)
 
 
 def destination_id(vm: VMRow, runner: Transport, *, location: str | None = None, username: str | None = None) -> str:
@@ -77,14 +71,35 @@ def destination_id(vm: VMRow, runner: Transport, *, location: str | None = None,
     Native filesystem identity distinguishes a recreated user home or workspace.
     This contains no env or resolved secret values and performs only probes.
     """
-    machine = runner.run("cat /etc/machine-id", timeout=15).stdout.strip()
-    if not machine:
-        raise StateError("native setup could not establish the VM identity")
+
+    def observe(command: str) -> str:
+        try:
+            result = runner.run(f"printf '\\nAGW_NATIVE_ID='; {command}", timeout=15)
+        except AgentworksError as error:
+            logger = runner.logger
+            sanitize_setup_error(
+                error,
+                redact=None
+                if logger is None
+                else lambda text: logger.sanitize(text, normalize=normalize_setup_diagnostic),
+            )
+            raise
+        values = [
+            line.removeprefix("AGW_NATIVE_ID=")
+            for line in result.stdout.splitlines()
+            if line.startswith("AGW_NATIVE_ID=")
+        ]
+        if len(values) != 1 or not values[0]:
+            raise StateError(
+                "native setup could not establish the destination identity",
+                hint="Check the target user's shell startup and the VM identity files, then retry this operation.",
+            )
+        return values[0]
+
+    machine = observe("cat /etc/machine-id")
     directory = None
     if location is not None:
-        directory = runner.run(f"stat -Lc '%d:%i:%u' -- {shlex.quote(location)}", timeout=15).stdout.strip()
-        if not directory:
-            raise StateError("native setup could not establish the destination identity")
+        directory = observe(f"stat -Lc '%d:%i:%u' -- {shlex.quote(location)}")
     payload = (vm.name, vm.site, vm.created_at, vm.platform_metadata, machine, username, location, directory)
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
@@ -292,7 +307,7 @@ def run_setup(
                 artifacts=artifacts,
             )
             try:
-                if routing.retain_previous:
+                if routing.unresolved_routes:
                     report_incomplete(
                         "Some ancestor artifact routes are unavailable; existing placement is retained until "
                         "the ancestor's setup and captured inputs are repaired."
