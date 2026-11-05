@@ -330,6 +330,19 @@ chose:]
 
 > Carry forward too (Recommended)
 
+### 2026-11-05
+
+[Told that agw cannot create a Debian 12 VM on any platform (create always uses the current release,
+by design under ADR 0025), so the carried Debian 12 cells can never be closed, and asked what should
+happen to them, the operator chose:]
+
+> Drop them (Recommended)
+
+[Asked what should happen to the OpenSSH 8.5 client cell, which only a shim faking the version
+string has exercised, the operator chose:]
+
+> Accept the shim (Recommended)
+
 ### Rulings carried forward
 
 These predecessor rulings still hold, quoted from the transport-improv FRD.
