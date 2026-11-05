@@ -198,6 +198,14 @@ agw vm describe test-vm
 agw vm delete test-vm
 ```
 
+On Proxmox, `vm stop` uses the platform's hard power-off operation. It does not request a graceful
+guest shutdown. Save and flush work before stopping; request shutdown inside the guest when a
+graceful shutdown is needed.
+
+Deleting a locked VM or losing API access is a failure, not evidence that the VM is gone. Resolve
+the lock or restore API access, then retry deletion. Agentworks retains its VM record when the
+backend VM's deletion cannot be confirmed. A previously deleted VM remains safe to delete again.
+
 ### Native recovery and interactive access
 
 Agentworks uses QEMU Guest Agent for Tailscale-independent administrative commands. Start-time
@@ -264,5 +272,10 @@ repository, then rerun the script. The script does not alter package sources.
 
 ### Self-signed certificate errors
 
-Set `verify_ssl: false` in the site's `platform` table. This is common for homelab setups without a
-trusted CA.
+Keep certificate verification enabled and trust your Proxmox certificate authority on the
+workstation. Python's TLS trust configuration also accepts `SSL_CERT_FILE` pointing to a PEM CA
+bundle; set it in the environment running Agentworks. The certificate must still match the site's
+API hostname.
+
+`verify_ssl: false` in the site's `platform` table disables certificate verification entirely. Use
+it only when that is the trust policy you intend for this site.

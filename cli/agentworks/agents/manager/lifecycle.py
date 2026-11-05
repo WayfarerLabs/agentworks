@@ -569,6 +569,7 @@ def reinit_agent(
 
         from agentworks.instance_specs import replace_agent_overlay, report_overlay_outcome
 
+        previous_template = agent.template
         with db.transaction():
             if update_template is not None:
                 db.update_agent_template(name, update_template)
@@ -578,6 +579,11 @@ def reinit_agent(
                 name,
                 parsed_overlay,
                 supplied=supplied_overlay,
+            )
+        if agent.template != previous_template:
+            output.info(
+                f"Agent '{name}' template binding saved as {agent.template!r} (previously {previous_template!r}). "
+                "The binding remains if setup fails; use --update-template to choose a different template."
             )
 
         try:
