@@ -405,7 +405,7 @@ no platform's private access imports a legacy module.
   - the harness setup dispatch, readiness and lifecycle, with `SetupInvocation.access`.
 - [ ] Delete `admin_target()`, `agent_target()`, `SetupInvocation.runner`, `SetupRunner` and
       `native_files.py` with their last readers, after re-proving their incident rows, and bump the
-      harness-integration contract to 8 and git-credential to 4.
+      harness-integration contract to 8, git-credential to 4 and secret-backend to 3.
 - [ ] Tests:
   - `write_if` and `remove_if` detect a concurrent writer;
   - a truncated stdin publishes nothing;
