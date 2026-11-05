@@ -74,6 +74,10 @@ class KeyRefused(ConnectivityError):
     """The VM answered at its public address and refused the configured SSH key."""
 
 
+class SudoRefused(StateError):
+    """The VM answered at its public address, and ``sudo -n`` refused to run the root script for its admin."""
+
+
 class PublicSSH:
     """Root scripts over SSH to one VM's public address, as its admin."""
 
@@ -180,7 +184,7 @@ class PublicSSH:
         if result.status is None and any(
             line.startswith(_SUDO_REFUSAL_PREFIX) for line in result.channel_tail.splitlines()
         ):
-            raise StateError(
+            raise SudoRefused(
                 f"VM '{self._vm_name}' answered at its public address {self._destination.host}, but its admin "
                 f"'{self._destination.user}' cannot run sudo without a password",
                 entity_kind="vm",

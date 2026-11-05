@@ -22,6 +22,7 @@ from agentworks.capabilities.vm_platform.tailscale_join import (
 )
 from agentworks.errors import ConnectivityError, ProvisioningError
 from agentworks.execution.errors import TrustMismatch
+from agentworks.execution.root_script import RawRun
 from agentworks.execution.trust import TrustBinding, TrustMode
 from tests._root_channel_fakes import ADDRESS, Answer, FakeGuest
 
@@ -297,6 +298,27 @@ def test_a_readiness_command_whose_channel_fails_keeps_the_channel_hint(
 
     assert caught.value.hint == dropped.hint
     assert guest.joins == 0
+
+
+def test_an_admin_without_passwordless_sudo_fails_the_create_with_create_s_own_guidance(
+    cloud: Callable[[FakeGuest], PublicSSH], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The rollback removes the VM, so the refusal's own advice (fix sudo on the VM, or recreate it) must not show."""
+    target = cloud(FakeGuest())
+    probes: list[bytes] = []
+
+    def refused(script: bytes, deadline: float) -> RawRun:
+        probes.append(script)
+        return RawRun(b"", b"sudo: a password is required\n")
+
+    monkeypatch.setattr(target, "run_as_root", refused)
+
+    with pytest.raises(ProvisioningError) as caught:
+        complete_cloud_bootstrap(target, KEY, node=NODE)
+
+    assert len(probes) == 1
+    assert caught.value.__cause__ is None
+    assert caught.value.hint
 
 
 def test_a_host_key_mismatch_ends_readiness_at_once(cloud: Callable[[FakeGuest], PublicSSH]) -> None:

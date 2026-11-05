@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.capabilities.vm_platform.base import parse_tailnet_address
+from agentworks.capabilities.vm_platform.public_ssh import SudoRefused
 from agentworks.errors import ConnectivityError, ProvisioningError
 from agentworks.execution import root_script
 
@@ -189,6 +190,13 @@ def complete_cloud_bootstrap(
     output.detail(f"Waiting for {readiness_label} bootstrap to complete (this may take several minutes)...")
     try:
         target.wait_until_answering(seconds=READINESS_WAIT_SECONDS, retry_refused_key=True)
+    except SudoRefused as error:
+        # Not chained: the refusal's own hint (fix sudo on the VM, or recreate it) does not fit a VM the
+        # create's rollback is about to remove.
+        raise ProvisioningError(
+            f"{error}, so create-time bootstrap cannot run",
+            hint="The image's admin account must have passwordless sudo; fix the image, then create the VM again.",
+        ) from None
     except ConnectivityError as error:
         # A refused key's hint (load an encrypted key into the agent) is the operator's next step.
         raise ProvisioningError("the VM did not answer over SSH for create-time bootstrap", hint=error.hint) from error
