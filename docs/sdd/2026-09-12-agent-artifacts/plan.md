@@ -1589,3 +1589,40 @@ passed 115 cases. Rolling back the target fails the real regression; rolling bac
 cases. Root integration passed 93 focused cases including the legacy file-preservation fixture. The
 lead independently verified all 19 reported worker test roots absent. Private reviewers will recheck
 this delta and the corrected fixture at one common final candidate.
+
+### Native test observation correction
+
+The next integrated run at `cfe250ce` passed 10,879 cases with 11 skips and one new real-tmux
+fixture failure. Its independent native query reported a dead pane with no exit status before
+calling the production helper. The runtime contract already permits an unavailable native status. A
+private diagnostic reproduced this with an inherited blocked child-exit signal, and an ordinary
+parallel repeat also observed absent status. The failed full-run worker's signal mask was not
+captured, so that run's cause is not asserted. Test-only correction `b317fb03` requires the intended
+exit marker, actual native death, no reported signal, and agreement with native status observations
+bracketing the helper. Explicit-status cases still require preserving status 23. Production code is
+unchanged. The corrected 115-case selection and the masked real-tool case pass; target and parser
+rollback controls still fail. The lead independently verified all 28 newly reported fixture and
+diagnostic roots absent. Final integrated acceptance and the independent backend report remain
+separate gates.
+
+### Final local validation for round 6
+
+All three private lanes cleared runtime candidate `cfe250ce` and final test correction `b317fb03`.
+Their final narrow selections passed 40 project cases, one real-tool Muntz case and four independent
+correctness cases. Earlier runtime selections passed 82, 82 and 78 respectively; these overlap. The
+final full pytest log reports 10,880 passed and 11 skipped in 581.11 seconds. Its execution receipt
+was lost during tool-output truncation, so no independently observed local process exit code is
+claimed for that run; the exact pushed head's required CI remains a handoff gate.
+
+Ruff lint and format returned 0 across 945 files, and CI-exact mypy returned 0 across all 909
+source/test files. File lint returned 0 after formatting this record and spelling out the child-exit
+signal name. Rulesync drift, locked-SDD validation, Typer isolation, source/wheel builds, Python
+website checks (160), Node website checks (103), deterministic builds for both site bases and five
+isolated CLI drives returned 0. The latter unchanged-source checks remain scoped to their recorded
+candidate; no backend or model acceptance is inferred. The operator contract is unchanged by the
+final test correction, and permanent collateral remains current.
+
+The 26-requirement source and permanent-promotion audit finds no material documentation gap. The
+remaining unchecked boxes retain actual-scope acceptance, final delivery, requirement reconciliation
+and locks. Historical handoff evidence does not close composite live obligations. Both locks remain
+absent pending the independent full report and final requirement-by-requirement reconciliation.
