@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import posixpath
+import re
 import shlex
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
@@ -57,6 +58,14 @@ fd = os.open(output_path, os.O_WRONLY|os.O_CREAT|os.O_EXCL, 0o600)
 with os.fdopen(fd, 'w') as output:
     json.dump({'executable': os.path.abspath(executable), 'path': path}, output)
 """
+
+_BOUND_STDERR = """import sys
+with open(sys.argv[1], 'rb') as source:
+    data = source.read(8192)
+with open(sys.argv[1], 'wb') as destination:
+    destination.write(data)
+"""
+_MARKETPLACE_ERROR = re.compile(r"\bmarketplaces\.([A-Za-z0-9][A-Za-z0-9_.-]{0,127})(?=[`'\s:]|$)")
 
 
 @dataclass(frozen=True)
@@ -113,11 +122,18 @@ def _command_description(tool: NativeTool, args: list[str]) -> str:
 
 def _claude_market(name: str, source: dict[str, object], declaration: object) -> NativeMarket:
     """Keep a named declaration gap local without guessing its full association."""
-    kind = _text(source["source"])
-    location_key = {"directory": "path", "github": "repo", "git": "url", "url": "url"}[kind]
-    _text(source[location_key])
-    if "ref" in source:
-        _text(source["ref"])
+    kind = source.get("source")
+    location_key = (
+        {"directory": "path", "file": "path", "github": "repo", "git": "url", "url": "url"}.get(kind)
+        if isinstance(kind, str)
+        else None
+    )
+    if location_key is None:
+        return NativeMarket(name, None, "its native source type cannot be compared safely")
+    if not isinstance(source.get(location_key), str) or not source[location_key]:
+        return NativeMarket(name, None, f"its native registration has no usable {location_key!r}")
+    if "ref" in source and (not isinstance(source["ref"], str) or not source["ref"]):
+        return NativeMarket(name, None, "its native registration has an invalid source ref")
     if not isinstance(declaration, dict):
         return NativeMarket(name, None, "its extraKnownMarketplaces user declaration is not an object")
     if "source" not in declaration:
@@ -217,15 +233,27 @@ class NativeCLI:
                 }
             )
         # Sensitive stdin keeps source URLs and all provider output out of the
-        # transport logger. Only the private stdout file is subsequently read.
+        # transport logger. On failure only a bounded private stderr prefix is
+        # inspected for a named marketplace, never rendered as provider prose.
+        stderr = remote + ".stderr"
         script = (
-            f"cd {shlex.quote(self.files.remote)} && "
-            f"{shlex.join([executable, *args])} > {shlex.quote(remote)} 2>/dev/null"
+            f"cd {shlex.quote(self.files.remote)} || exit 1\n"
+            f"{shlex.join([executable, *args])} > {shlex.quote(remote)} 2> {shlex.quote(stderr)}\n"
+            "native_status=$?\n"
+            'if [ "$native_status" -ne 0 ]; then\n'
+            f"{shlex.join(['python3', '-c', _BOUND_STDERR, stderr])}\n"
+            "fi\n"
+            'exit "$native_status"'
         )
         result = self.files.runner.run("bash", input_text=script, env=env, check=False, timeout=180)
         if not result.ok:
+            self.files.runner.copy_from(stderr, local)
+            diagnostic = local.read_bytes().decode("utf-8", errors="replace")
+            match = _MARKETPLACE_ERROR.search(diagnostic)
+            entry = "" if match is None else f" at native setting {'marketplaces.' + match[1]!r}"
             raise ExternalError(
-                f"{_command_description(self.tool, args)} failed; inspect its setup with the native CLI"
+                f"{_command_description(self.tool, args)} failed{entry}; "
+                f"inspect its setup in {self.config_root!r} with the native CLI"
             )
         if not structured:
             return None

@@ -349,8 +349,7 @@ def test_claude_invalid_named_declaration_retains_association_and_converges_inde
     "payload,declarations",
     [
         ({}, {}),
-        ([{"name": "one", "source": "directory"}], {}),
-        ([{"name": "one", "source": "directory", "path": 5}], {}),
+        ([{"source": "directory", "path": "/one"}], {}),
         ([{"name": "one", "source": "directory", "path": "/one"}], []),
         ([{"name": "one", "source": "directory", "path": "/one"}] * 2, {}),
     ],

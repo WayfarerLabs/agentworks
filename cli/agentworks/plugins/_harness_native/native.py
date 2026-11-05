@@ -77,7 +77,7 @@ def _simple_market_location(tool: NativeTool, market: NativeMarket) -> SettingsV
     kind = source.get("source")
     if not isinstance(kind, str):
         return None
-    location_key = {"directory": "path", "github": "repo", "git": "url", "url": "url"}.get(kind)
+    location_key = {"directory": "path", "file": "path", "github": "repo", "git": "url", "url": "url"}.get(kind)
     return source.get(location_key) if location_key and set(source) == {"source", location_key} else None
 
 
@@ -85,6 +85,26 @@ def _overlay_fields(existing: SettingsValue, desired: SettingsValue) -> Settings
     if isinstance(existing, dict) and isinstance(desired, dict):
         return {**existing, **desired}
     return desired
+
+
+def _preserve_entries(
+    document: SettingsObject, original: SettingsObject, protected: tuple[tuple[str, str], ...]
+) -> bool:
+    """Preserve entry-local skips without deriving an unobservable association."""
+    changed = False
+    for key, name in protected:
+        baseline = _table(original, key)
+        observed = _table(document, key)
+        if name in baseline:
+            if name not in observed or observed[name] != baseline[name]:
+                if key not in document:
+                    document[key] = {}
+                _table(document, key)[name] = baseline[name]
+                changed = True
+        elif name in observed:
+            observed.pop(name)
+            changed = True
+    return changed
 
 
 @dataclass
@@ -108,6 +128,7 @@ class _MappingPlan:
         overlays: tuple[tuple[tuple[str, str], SettingsValue], ...] = (),
         removed: tuple[tuple[str, str], ...] = (),
         protected: tuple[tuple[str, str], ...] = (),
+        original: SettingsObject | None = None,
     ) -> None:
         if self.skipped:
             return
@@ -129,13 +150,7 @@ class _MappingPlan:
             table = _table(document, key)
             baseline = _table(native, key).get(name)
             table[name] = _overlay_fields(_overlay_fields(baseline, table.get(name, baseline)), value)
-        for key, name in protected:
-            if name in _table(native, key):
-                if key not in document:
-                    document[key] = {}
-                _table(document, key)[name] = _table(native, key)[name]
-            else:
-                _table(document, key).pop(name, None)
+        _preserve_entries(document, native if original is None else original, protected)
         content = serialize_settings(document, format=self.prepared.format)
         if content != current:
             files.publish(destination, content, expected=_hash(current), group=group)
@@ -338,6 +353,10 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
                 updated.append(claim)
             invocation.checkpoint(tuple(updated))
             claims = updated
+            if force and claim is not None:
+                # These calls follow validated native mutations, not adoption.
+                # An initial absence cannot undo a registration just confirmed.
+                protected.discard(_native_key(tool, role, identifier))
 
         def skip(role: str, identifier: str, reason: str) -> None:
             protected.add(_native_key(tool, role, identifier))
@@ -562,31 +581,19 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
         removed_keys = tuple(_native_key(tool, old.role, old.identifier) for old in removed)
         # Confirmed removals take precedence over an earlier inventory snapshot.
         protected.difference_update(removed_keys)
-        if protected:
+        current = files.read(destination)
+        if protected and (plan is None or plan.skipped):
             # Unrelated native commands can discard malformed declarations.
             # Preserve the affected entries exactly as observed, without deriving
             # a source or adopting an association from that incomplete evidence.
-            current = files.read(destination)
             document = (
                 {}
                 if current is None
                 else parse_settings(current, format=_format(tool), location=f"guest destination {destination!r}")
             )
-            changed = False
-            for key, name in protected:
-                original = _table(initial_document, key)
-                observed = _table(document, key)
-                if name in original:
-                    if name not in observed or observed[name] != original[name]:
-                        if key not in document:
-                            document[key] = {}
-                        _table(document, key)[name] = original[name]
-                        changed = True
-                elif name in observed:
-                    observed.pop(name)
-                    changed = True
-            if changed:
-                files.publish(destination, serialize_settings(document, format=_format(tool)), expected=_hash(current))
+            if _preserve_entries(document, initial_document, tuple(sorted(protected))):
+                content = serialize_settings(document, format=_format(tool))
+                files.publish(destination, content, expected=_hash(current))
         if plan is not None:
             current = files.read(destination)
             overlays: tuple[tuple[tuple[str, str], SettingsValue], ...] = tuple(
@@ -605,4 +612,5 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
                 overlays=overlays,
                 removed=removed_keys,
                 protected=tuple(sorted(protected)),
+                original=initial_document,
             )
