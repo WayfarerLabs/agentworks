@@ -88,6 +88,7 @@ def test_real_remain_on_exit_pane_is_observed_alive_then_dead():
         root = Path(directory)
         socket = str(root / "tmux.sock")
         gate = root / "exit"
+        finished = root / "finished"
         environment = {
             "HOME": directory,
             "PATH": str(Path(executable).parent) + os.pathsep + os.defpath,
@@ -112,7 +113,10 @@ def test_real_remain_on_exit_pane_is_observed_alive_then_dead():
             return SSHResult(result.returncode, result.stdout, result.stderr)
 
         try:
-            script = f"while [ ! -e {shlex.quote(str(gate))} ]; do sleep 0.02; done; exit 23"
+            script = (
+                f"while [ ! -e {shlex.quote(str(gate))} ]; do sleep 0.02; done; "
+                f"printf 23 > {shlex.quote(str(finished))}; exit 23"
+            )
             subprocess.run(
                 [executable, "-f", "/dev/null", "-S", socket, "new-session", "-d", "-s", "probe", script],
                 capture_output=True,
@@ -124,15 +128,24 @@ def test_real_remain_on_exit_pane_is_observed_alive_then_dead():
             assert _probe_pane_liveness("probe", run_command=run, socket_path=socket) == ("alive", "")
             gate.touch()
             deadline = time.monotonic() + 5
-            observed = ""
-            while observed != "1 23" and time.monotonic() < deadline:
-                result = native("display-message", "-p", "-t", "=probe:", "#{pane_dead} #{pane_dead_status}")
+            observed = ["", "", ""]
+            native_format = "#{pane_dead}|#{pane_dead_status}|#{pane_dead_signal}"
+            while observed[0] != "1" and time.monotonic() < deadline:
+                result = native("display-message", "-p", "-t", "=probe:", native_format)
                 result.check_returncode()
-                observed = result.stdout.strip()
-                if observed != "1 23":
+                observed = result.stdout.strip().split("|")
+                if observed[0] != "1":
                     time.sleep(0.02)
-            assert observed == "1 23"
-            assert _probe_pane_liveness("probe", run_command=run, socket_path=socket) == ("dead", "23")
+            assert observed[0] == "1"
+            assert finished.read_bytes() == b"23"
+            assert observed[1] in ("", "23") and observed[2] == ""
+            actual = _probe_pane_liveness("probe", run_command=run, socket_path=socket)
+            after = native("display-message", "-p", "-t", "=probe:", native_format)
+            after.check_returncode()
+            latest = after.stdout.strip().split("|")
+            assert latest[0] == "1" and latest[1] in ("", "23") and latest[2] == ""
+            # Native wait-status availability may change between observations.
+            assert actual in {("dead", observed[1]), ("dead", latest[1])}
         finally:
             native("kill-server")
             assert native("display-message", "-p", "#{pid}").returncode != 0
