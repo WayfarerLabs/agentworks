@@ -28,6 +28,7 @@ from agentworks.errors import (
     UserAbort,
     ValidationError,
 )
+from agentworks.execution import trust
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
 from tests.conftest import CapturedOutput, ManifestDoc, pin_wsl2_unsupported, write_manifests
@@ -248,6 +249,8 @@ def test_create_vm_retains_platform_metadata_when_rollback_is_unconfirmed(
     assert row is not None
     assert row.platform_metadata == {"instance_name": "retained-backend", "create_incomplete": "true"}
     assert row.provisioning_status == ProvisioningStatus.FAILED.value
+    # A retained row keeps its store file, which delete removes with it.
+    assert trust.store_file("retained").exists()
     assert any(
         "retained-" in message and message.endswith("-vm-create.log")
         for _role, _level, message in captured_output.lines
@@ -332,6 +335,8 @@ def test_create_vm_preserves_typed_platform_failure(
 
     assert caught.value is failure
     assert db.get_vm("map-fail") is None
+    # The store file create reset for the name goes with the row.
+    assert not trust.store_file("map-fail").exists()
 
 
 @pytest.mark.parametrize(

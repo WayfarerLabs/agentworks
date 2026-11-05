@@ -440,8 +440,8 @@ def create_vm(
             # Reset the host-key store file now that the name is ours, so a
             # reused name never inherits a key: it is left empty and private,
             # and Phase A's first connection writes the VM's key into it.
-            # Nothing else writes it before then, so the unwinds below need no
-            # store cleanup.
+            # Every unwind below removes it with the row (the pending node's
+            # teardown); a retained or kept row keeps it, as delete removes it.
             try:
                 trust.begin_enrollment(vm_name)
             except BaseException:

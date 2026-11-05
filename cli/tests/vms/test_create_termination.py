@@ -14,6 +14,7 @@ import pytest
 
 from agentworks.config import load_config
 from agentworks.db import Database
+from agentworks.execution import trust
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
 from tests._aws_fakes import install_fakes, stub_egress
@@ -74,6 +75,7 @@ def test_a_termination_during_a_cloud_create_rolls_it_back(
     assert "terminate_instances" in calls
     assert "delete_security_group" in calls
     assert db.get_vm("dev") is None
+    assert not trust.store_file("dev").exists()
     assert signal.getsignal(getattr(signal, signal_name)) == before
 
 
