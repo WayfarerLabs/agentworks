@@ -292,7 +292,9 @@ def test_stdout_held_for_a_slow_consumer_is_delivered_before_a_stderr_departure_
     def gone_stderr(payload: bytes) -> None:
         raise BrokenPipeError
 
-    script = "start(); out.write(b'hello'); out.flush(); err.write(b'x'); err.flush(); time.sleep(30)"
+    # The pause lets the session read 'hello' and hold it before stderr's byte arrives: only output
+    # already held for the slow consumer is delivered once stderr's consumer leaves.
+    script = "start(); out.write(b'hello'); out.flush(); time.sleep(.2); err.write(b'x'); err.flush(); time.sleep(30)"
     session = leaving_session(script, stdout=slow_stdout, stderr=gone_stderr)
     with session:
         assert session.pump() is StopReason.STDERR_CONSUMER_LEFT
