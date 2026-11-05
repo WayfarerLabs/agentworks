@@ -117,10 +117,15 @@ Use typed domain structures and a versioned codec, following vms/applied_state.p
 known payloads without echoing raw contents. Preserve unknown versions and unrelated integrations;
 do not replace an unknown record with empty defaults. Core persists only what the integration
 reports as native evidence. Source snapshot contents and resolved secrets never enter the codec.
-Writer version 3 adds credential-free `incomplete_reasons`; readers accept versions 1, 2 and 3, with
-empty reasons for older records. The incomplete callback persists the current attempt's reasons
-through the existing record, and a new attempt clears prior reasons. A malformed driver association
-string cannot prove ownership; retain and diagnose that entry rather than treating it as removable.
+Writer version 4 retains the same fields and distinguishes confirmed routing from a partial file
+checkpoint. A nullable `artifact_inputs` means no confirmed routing result. Older incomplete records
+with no deferrals are ambiguous because earlier writers stored input IDs before successful
+application; readers normalize those records to unconfirmed. Complete or explicit-route older
+records remain usable. Readers accept versions 1 through 4 and canonical export preserves this
+normalization. Version 3 introduced credential-free `incomplete_reasons`, empty for earlier records.
+The incomplete callback persists the current attempt's reasons through the existing record, and a
+new attempt clears prior reasons. A malformed driver association string cannot prove ownership;
+retain and diagnose that entry rather than treating it as removable.
 
 Copy/rehome/restored applied-state records must match actual destination identity before satisfying
 readiness. An unknown version or different destination cannot bless setup. Backup export reads

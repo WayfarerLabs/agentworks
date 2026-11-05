@@ -332,12 +332,23 @@ still feed its readable old deferrals to sibling or descendant setup without aut
 though the declaration were empty.
 
 The internal routing result distinguishes known unresolved input IDs from unavailable routing
-without IDs. Unavailable capture or routing evidence remains unknown even when current bundle
-selection is empty; declarations alone cannot prove removal converged. If either prevents
-establishing the applicable inputs, publication holds all prior placements against removal or
-replacement, including generated sections and related packages. Native setup and independent new
-paths continue; the attempt remains incomplete with an explicit reason. This conservative hold is
-necessary because old content-dependent input IDs cannot be reversed to owners after capture
-replacement. Available inputs are never substituted for unknown old content. The existing
-applied-state IDs and claims carry pending work until the source is repaired; there is no new
-persisted ledger or artifact wire format.
+without IDs. A confirmed routing table with no routes to a receiver does not hold that receiver's
+own content merely because native setup is incomplete or the source capture is unavailable. Missing
+payload for an explicit applicable route remains unknown even when current bundle selection is
+empty. Inactive facets use core's fixed passthrough independently of opaque old active-facet state.
+
+When unknown applicable routes prevent establishing requested inputs, setup publication holds prior
+placements against removal or replacement, including generated sections and related packages.
+Native setup and independent new paths continue. Actual held paths or unavailable explicit inputs
+keep application incomplete; unrelated upstream uncertainty alone does not permanently fail a fresh
+workspace's successfully applied local work. The conservative hold is needed because old
+content-dependent IDs cannot be reversed to owners after capture replacement.
+
+The session join retains missing route IDs through inactive user/workspace passthrough. Known
+unavailable IDs become terminal unhandled metadata; unknown routing without IDs records its owner
+and repair reason. The session launches with reconstructable inputs and records incomplete delivery
+rather than calling the reduced set current. It does not fabricate missing canonical content or
+turn these optional inputs into prerequisites. Old private files remain usable until runtime
+teardown; afterward normal owned cleanup retires obsolete runs. Keeping unreferenced old files
+would not deliver missing content and does not justify accumulating run history. The existing
+applied-state fields carry the outcome; there is no new persisted ledger or artifact wire format.

@@ -1159,7 +1159,7 @@ ownership engine. Empty session/run directories may remain after owned-file reti
       loader.
 - [x] Complete all three private review lanes and integrated gates, then publish the exact head
       ready with the retained acceptance matrix and no checkpoint label.
-- [ ] Assess that ready handoff's full feedback batch. One authorized public fix round remains.
+- [x] Assess that ready handoff's full feedback batch. One authorized public fix round remains.
 - [ ] Audit final-head live evidence, close every retained requirement, promote remaining durable
       content and add both locks. No unit or fixture result alone closes a real-VM obligation.
 
@@ -1210,7 +1210,7 @@ belongs to the ready head, not the correction still under development.
 - [x] Strengthen missing-target coverage, remove redundant first-party identity-format checks,
       retain retry-progress guards and fix temporary-path-sensitive carrier assertions.
 - [x] Align permanent guidance, bounded progress messages and current plan status with the fixes.
-- [ ] Resolve the own-failure policy question through authenticated operator direction; retain
+- [x] Resolve the own-failure policy question through authenticated operator direction; retain
       today's fail-fast pipeline until that direction arrives. `awaiting-direction` tracks this
       ambiguity, not a second request for the already-authorized FRD amendments.
 - [x] Run all three private review lanes and full gates on the integrated head, then publish the
@@ -1296,13 +1296,13 @@ shared state failures and unexpected internal errors retain immediate failure be
 launch safety remains unchanged.
 
 - [x] Record the authenticated ruling and align the owned FRD, architecture and permanent guides.
-- [ ] Implement explicit operation-local failure collection, truthful partial records and
+- [x] Implement explicit operation-local failure collection, truthful partial records and
       independent continuation through VM/admin, agent, workspace and session-created ancestors.
-- [ ] Verify required prerequisites retain completed ancestors, recommended prerequisites remain
+- [x] Verify required prerequisites retain completed ancestors, recommended prerequisites remain
       advisory, and persistence/cancellation still abort without swallowed failures.
-- [ ] Complete the private project, complexity and correctness reviews, run required gates, and
+- [x] Complete the private project, complexity and correctness reviews, run required gates, and
       publish a coherent exact-head handoff.
-- [ ] Dispose the later published workspace permission/adoption and native status findings under
+- [x] Dispose the later published workspace permission/adoption and native status findings under
       authenticated direction; the exhausted feedback budget does not authorize another fix round.
 - [ ] Audit the expanded live evidence from PR comment `6575184960` against retained requirements
       and close remaining acceptance gaps before creating either lockfile.
@@ -1413,3 +1413,80 @@ The unrelated website browser witness once failed while heavy checks overlapped.
 assertion, timeout or test-selection weakening was used. The additional round is now consumed; new
 published findings require a later authenticated disposition rather than an automatic fifth
 correction round. Both locks still await the final requirement-by-requirement live acceptance audit.
+
+
+## Additional authorized feedback/fix round 1 of 2, 2026-11-05
+
+The operator authorized up to two further public correction rounds and allowed unrelated fixes with
+clear paths that do not conflict with ongoing Transport/SSH work. This is the fifth published
+correction round, not a reset of the earlier historical allowances. The batch is frozen at
+2026-11-05 16:32 UTC against `1e0d2fe`: critical reading PR comment `6651844728`, the final-head live
+report `6646701174`, the instance-spec followup `6650616936`, and the expanded Proxmox/workstation
+report `6652928141`. The start is recorded in PR comment `6663467162`.
+
+- [x] Distinguish confirmed empty routing from unknown results without holding unrelated local
+      application, including receiver-specific routes and inactive passthrough with opaque evidence.
+- [x] Carry unavailable session routes through inactive intermediate facets, record terminal
+      unhandled IDs/reasons and incomplete delivery, and keep optional inputs advisory. Preserve the
+      old runtime's files before teardown and retire obsolete private runs afterward; retaining
+      unused files would not deliver missing content and does not justify a history mechanism.
+- [x] Normalize ambiguous older incomplete zero-deferral setup records through domain codec v4,
+      using the same fields. Complete or explicit-route older records remain usable; early file
+      checkpoints do not certify routing. No database schema, journal or native version floor added.
+- [x] Support observed Claude file marketplaces, isolate named unknown native sources, preserve
+      confirmed current-operation native mutations during snapshot restoration, and bound private
+      native-error transfer even when its original stderr file is read-only.
+- [x] Redact normalized guest errors and warnings before bounding them, preserve typed errors,
+      frame native discovery and identity responses, and identify offending inventory paths.
+      Actual per-path publication holds supply their own incomplete evidence; an unrelated upstream
+      condition alone does not permanently fail a newly created workspace's local setup.
+- [x] Isolate Git clones in unique private attempt paths and publish only confirmed completed
+      checkouts. Preserve unexplained or occupied reservations instead of deleting them. Real Git
+      controls reproduce replacement-work loss on the prior head and preserve committed, untracked
+      and stashed work with the correction.
+- [x] Correct the adjacent admin session-create log redactions and exact-pane output capture, with
+      real command-log and local tmux checks. Explicit non-interactive confirmations decline without
+      reading input or granting default consent. Add useful binding/corruption diagnostics and update
+      permanent recovery guidance, including source changes needed before destructive recreation.
+- [x] Correct adjacent Proxmox deletion and rollback classification using the exact structured
+      provider missing-config response for the bound node/VMID. Locked, authentication, transport,
+      task and malformed responses remain failures; direct delete preserves the core VM row.
+      Rollback preserves its original failure/interrupt and warns. No Transport/SSH APIs changed.
+- [ ] Complete the three private reviews, required integrated gates and final collateral audit.
+- [ ] Publish the exact green ready handoff without `review-requested`, then assess the separate
+      full live result within the remaining one-round allowance.
+- [ ] Finish the requirement-by-requirement acceptance and promotion audit and create both locks
+      only after the remaining contracts are proven.
+
+### Scope and remaining evidence
+
+The integrated source before private review is `f0e6e39`. Local lane evidence is scoped: routing and
+artifact/capability checks passed 1,365 cases with four skips; the broader native selection passed
+327 cases, followed by 30 bounded-transfer/discovery cases; Proxmox/core-deletion checks passed
+180 cases; workspace/session checks passed 153 cases. Lead diagnostic/session checks passed
+166 cases, and a later bounded diagnostic/readiness/tmux selection passed 55. These selections
+overlap, do not constitute the full repository gate, and do not replace backend acceptance.
+
+The new live report materially confirms prior routing-loss, unsupported preflight, workspace ACL,
+native-only freshness, mapping and ref/sparse fixes. The subsequent report adds actual Proxmox 8/9
+and workstation cells, lifecycle/rekey and cleanup evidence. Their new contradictory findings still
+prevent a lock. Bookworm cannot currently be created by Agentworks, including through Proxmox,
+under the existing release policy; an unavailable test cell is not silently a passing one.
+
+Desired instance specs remain desired state rather than a last-known-good application snapshot.
+Capture availability is not a structural declaration guarantee. This round reports retained template
+bindings and keeps the existing desired-before-convergence policy; it adds no automatic rollback.
+Malformed saved captures are not destructively replaced: their hints identify explicit state
+recovery rather than an ineffective ordinary-reinit loop. Workspace copy/rehome lifecycle repair,
+global Windows terminal/database classification, generalized remote-process cancellation, raw SSH-log
+normalization/bounds and broader transport protocol cleanup remain outside this correction. They
+need their owning contracts and current platform evidence. Unsafe publication through a link remains
+a facet error; no-follow protection is retained. Proxmox hard-stop semantics remain unchanged and
+are now documented; changing shutdown behavior would be a separate platform decision. Certificate
+trust guidance now includes a verified CA path rather than offering only disabled verification.
+
+No final-head backend run or completion of either SDD is claimed by these local checks. The next
+ready handoff must emphasize unknown versus confirmed-empty routes, first checkpoints and legacy
+codec evidence, inactive passthrough, optional session omission/inspection, clone cancellation and
+name reuse, native registration protection, bounded diagnostics, actual resolved-value logs, real
+pane capture, and locked/outage/already-gone Proxmox deletion on both tested PVE generations.
