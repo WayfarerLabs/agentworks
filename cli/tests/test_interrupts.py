@@ -6,10 +6,15 @@ import io
 import os
 import signal
 import sys
+from typing import TYPE_CHECKING
 
 import pytest
 
 from agentworks.interrupts import termination_as_interrupt
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+    from pathlib import Path
 
 posix_only = pytest.mark.skipif(sys.platform == "win32", reason="SIGHUP and os.kill delivery are POSIX")
 # SIGBREAK, Ctrl-Break's signal, exists only on Windows.
@@ -54,19 +59,99 @@ def test_a_hangup_inside_the_block_is_an_interrupt_and_the_handler_is_restored()
     assert signal.getsignal(signal.SIGHUP) == before
 
 
-@posix_only
-@pytest.mark.usefixtures("standard_streams")
-def test_a_hangup_leaves_the_unwind_writing_to_the_null_device() -> None:
-    """The hangup's terminal is gone, so the unwind, and every process it starts, writes nowhere."""
-    sys.stdout = io.StringIO()  # a stream on no descriptor, as an embedding host may install
+@pytest.fixture
+def terminal() -> Iterator[int]:
+    """The far side of a pseudo-terminal, standing in for the terminal a hangup takes away."""
+    import pty
 
+    controller, terminal = pty.openpty()
+    try:
+        yield terminal
+    finally:
+        os.close(terminal)
+        os.close(controller)
+
+
+def _hang_up() -> None:
     with pytest.raises(KeyboardInterrupt), termination_as_interrupt():
         os.kill(os.getpid(), signal.SIGHUP)
 
-    null = os.stat(os.devnull)
-    assert all(os.path.samestat(os.fstat(descriptor), null) for descriptor in (1, 2))
+
+def _is_null(descriptor: int) -> bool:
+    return os.path.samestat(os.fstat(descriptor), os.stat(os.devnull))
+
+
+@posix_only
+@pytest.mark.usefixtures("standard_streams")
+def test_a_hangup_points_the_terminal_descriptors_at_the_null_device(terminal: int) -> None:
+    """The hangup's terminal is gone, so the unwind, and every process it starts, writes nowhere."""
+    os.dup2(terminal, 1)
+    os.dup2(terminal, 2)
+
+    _hang_up()
+
+    assert _is_null(1)
+    assert _is_null(2)
+
+
+@posix_only
+@pytest.mark.usefixtures("standard_streams")
+def test_a_hangup_redirects_a_terminal_that_has_already_hung_up() -> None:
+    """A hung-up terminal no longer answers ``isatty``, but every write to it still fails."""
+    import pty
+
+    controller, terminal = pty.openpty()
+    os.dup2(terminal, 1)
+    os.dup2(terminal, 2)
+    os.close(terminal)
+    os.close(controller)
+
+    _hang_up()
+
+    assert _is_null(1)
+    assert _is_null(2)
+
+
+@posix_only
+@pytest.mark.usefixtures("standard_streams")
+def test_a_hangup_leaves_output_to_a_file_where_it_goes(terminal: int, tmp_path: Path) -> None:
+    log = os.open(tmp_path / "out.log", os.O_WRONLY | os.O_CREAT)
+    os.dup2(log, 1)
+    os.close(log)
+    os.dup2(terminal, 2)
+
+    _hang_up()
+
+    assert os.path.samestat(os.fstat(1), os.stat(tmp_path / "out.log"))
+    assert _is_null(2)
+
+
+@posix_only
+@pytest.mark.usefixtures("standard_streams")
+def test_a_hangup_leaves_a_closed_descriptor_closed(terminal: int) -> None:
+    os.close(1)
+    os.dup2(terminal, 2)
+
+    _hang_up()
+
+    with pytest.raises(OSError):
+        os.fstat(1)
+    assert _is_null(2)
+
+
+@posix_only
+@pytest.mark.usefixtures("standard_streams")
+def test_a_hangup_replaces_a_stream_on_another_terminal_and_keeps_one_on_none(terminal: int) -> None:
+    on_terminal = open(terminal, "w", encoding="utf-8", closefd=False)  # noqa: SIM115 - the fixture puts the stream back
+    on_nothing = io.StringIO()
+    sys.stdout, sys.stderr = on_terminal, on_nothing
+
+    _hang_up()
+
+    assert sys.stdout is not on_terminal
     assert sys.stdout.name == os.devnull
-    print("after the hangup")
+    assert sys.stderr is on_nothing
+    on_terminal.close()
 
 
 @posix_only

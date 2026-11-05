@@ -14,8 +14,9 @@ running after its terminal closes.
 
 A hangup means the terminal is gone, and every write to it fails, so the
 first thing the cleanup printed would raise and end it. Before it raises the
-interrupt, the hangup's handler points standard output and standard error at
-the null device, so the cleanup runs to the end, silently.
+interrupt, the hangup's handler points whichever of standard output and
+standard error is a terminal at the null device, so the cleanup runs to the
+end, silently there. Output going to a file or a pipe is left where it goes.
 """
 
 from __future__ import annotations
@@ -23,6 +24,7 @@ from __future__ import annotations
 import contextlib
 import os
 import signal
+import stat
 import sys
 import threading
 from typing import TYPE_CHECKING
@@ -49,26 +51,65 @@ def _interrupt(signal_number: int, _frame: object) -> None:
 
 
 def _write_to_the_null_device() -> None:
-    """Point file descriptors 1 and 2, and the Python streams, at the null device.
+    """Point descriptors 1 and 2 that are terminals, and a Python stream on another terminal, at the null device.
 
     The descriptors cover what child processes inherit and the streams that
-    sit on them. A stream on another descriptor (an embedding host's, a test
-    runner's) is replaced, since its target may have gone with the terminal.
+    sit on them. A descriptor that is a file or a pipe keeps its target, and
+    a closed one stays closed. A stream on some other terminal (an embedding
+    host's) is replaced, since that terminal may have gone too. Everything is
+    decided before anything moves, since a redirected descriptor is no longer
+    a terminal.
     """
+    terminals = [descriptor for descriptor in (1, 2) if _is_terminal(descriptor)]
+    streams = [name for name in ("stdout", "stderr") if _on_another_terminal(getattr(sys, name))]
+    if terminals:
+        null = _null_descriptor()
+        try:
+            for descriptor in terminals:
+                os.dup2(null, descriptor)
+        finally:
+            os.close(null)
+    for name in streams:
+        setattr(sys, name, open(os.devnull, "w", encoding="utf-8"))  # noqa: SIM115 - lives as long as the process
+
+
+def _null_descriptor() -> int:
+    """The null device on a descriptor above 2.
+
+    With 1 or 2 closed, ``open`` would take that number, and closing the
+    null device after the copies would then close the standard descriptor.
+    """
+    import fcntl  # POSIX, as SIGHUP is
+
     null = os.open(os.devnull, os.O_WRONLY)
+    if null > 2:
+        return null
     try:
-        for descriptor in (1, 2):
-            os.dup2(null, descriptor)
+        return fcntl.fcntl(null, fcntl.F_DUPFD, 3)
     finally:
         os.close(null)
-    for name, descriptor in (("stdout", 1), ("stderr", 2)):
-        stream = getattr(sys, name)
-        try:
-            shared = stream.fileno() == descriptor
-        except (AttributeError, OSError, ValueError):
-            shared = False
-        if not shared:
-            setattr(sys, name, open(os.devnull, "w", encoding="utf-8"))  # noqa: SIM115 - lives as long as the process
+
+
+def _on_another_terminal(stream: object) -> bool:
+    try:
+        descriptor = getattr(stream, "fileno")()  # noqa: B009 - a stream may lack it
+    except (AttributeError, OSError, ValueError):
+        return False
+    return descriptor not in (1, 2) and _is_terminal(descriptor)
+
+
+def _is_terminal(descriptor: int) -> bool:
+    """Whether ``descriptor`` is open on a character device, as a terminal is.
+
+    ``os.isatty`` cannot tell: once the terminal has hung up it answers
+    no, since asking the terminal's settings fails, while every write
+    still fails. The null device is a character device too, which is
+    harmless to redirect.
+    """
+    try:
+        return stat.S_ISCHR(os.fstat(descriptor).st_mode)
+    except OSError:
+        return False
 
 
 @contextlib.contextmanager
