@@ -268,9 +268,9 @@ pass the static check, and the package's tests pass with the legacy modules bloc
     it `FAILED`, the gate refuses any VM that is not `COMPLETE`, and `COMPLETE` is written once the
     contract has passed;
   - `reachability.wait` stops at the first authentication failure.
-- [ ] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
+- [x] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
       issues and fix history); rows I22 to I28 are in the HLA inventory.
-- [ ] Collateral: platform author documentation for `tailnet_address` and contract version 2, and
+- [x] Collateral: platform author documentation for `tailnet_address` and contract version 2, and
       the command reference for create and reinit diagnoses.
 - [ ] Live evidence: create and reinit on every platform from at least one workstation each.
 
