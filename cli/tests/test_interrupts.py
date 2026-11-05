@@ -10,21 +10,33 @@ import pytest
 
 from agentworks.interrupts import termination_as_interrupt
 
-pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
+posix_only = pytest.mark.skipif(sys.platform == "win32", reason="SIGHUP and os.kill delivery are POSIX")
 
 
-@pytest.mark.parametrize("signal_name", ["SIGTERM", "SIGHUP"])
-def test_a_termination_inside_the_block_is_an_interrupt_and_the_handler_is_restored(signal_name: str) -> None:
-    number = getattr(signal, signal_name)
-    before = signal.getsignal(number)
+@pytest.mark.windows
+def test_a_sigterm_inside_the_block_is_an_interrupt_and_the_handler_is_restored() -> None:
+    """Windows has SIGTERM handlers but no external delivery to them, so the signal is raised in-process."""
+    before = signal.getsignal(signal.SIGTERM)
 
     with pytest.raises(KeyboardInterrupt), termination_as_interrupt():
-        os.kill(os.getpid(), number)
-        raise AssertionError(f"{signal_name} was not delivered as an interrupt")
+        signal.raise_signal(signal.SIGTERM)
+        raise AssertionError("SIGTERM was not delivered as an interrupt")
 
-    assert signal.getsignal(number) == before
+    assert signal.getsignal(signal.SIGTERM) == before
 
 
+@posix_only
+def test_a_hangup_inside_the_block_is_an_interrupt_and_the_handler_is_restored() -> None:
+    before = signal.getsignal(signal.SIGHUP)
+
+    with pytest.raises(KeyboardInterrupt), termination_as_interrupt():
+        os.kill(os.getpid(), signal.SIGHUP)
+        raise AssertionError("SIGHUP was not delivered as an interrupt")
+
+    assert signal.getsignal(signal.SIGHUP) == before
+
+
+@posix_only
 def test_an_ignored_hangup_stays_ignored_inside_the_block() -> None:
     """``nohup`` ignores SIGHUP so the command outlives its terminal; the block must not undo that."""
     before = signal.signal(signal.SIGHUP, signal.SIG_IGN)
