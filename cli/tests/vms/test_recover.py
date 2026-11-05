@@ -14,7 +14,7 @@ import pytest
 
 from agentworks.capabilities.vm_platform import tailscale_join
 from agentworks.db import ProvisioningStatus, VMStatus
-from agentworks.errors import ConnectivityError, StateError, UserAbort
+from agentworks.errors import ConnectivityError, StateError, UserAbort, ValidationError
 from agentworks.execution import reachability, trust
 from agentworks.execution.root_script import RawRun
 from agentworks.plugins.proxmox.api import ProxmoxAPIError
@@ -376,6 +376,24 @@ def test_a_vm_whose_power_state_is_unknown_is_refused_before_any_script(
     monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, vm, ctx: pytest.fail("an unknown VM was started"))
 
     with pytest.raises(StateError):
+        _recover(db, make_config())
+
+    assert guest.scripts == []
+
+
+@pytest.mark.parametrize("auth_key", ["", " \t "], ids=["empty", "whitespace"])
+def test_a_blank_auth_key_is_refused_before_any_script(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    auth_key: str,
+) -> None:
+    """A repair that joins with a blank key would wait for an interactive login nobody sees."""
+    _seed(db)
+    monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", auth_key)
+    guest = _guest(monkeypatch)
+
+    with pytest.raises(ValidationError):
         _recover(db, make_config())
 
     assert guest.scripts == []

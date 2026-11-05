@@ -39,7 +39,6 @@ from agentworks.errors import (
     StateError,
     TokenRejectedError,
     UserAbort,
-    ValidationError,
 )
 from agentworks.execution import trust
 from agentworks.naming import MAX_VM_NAME_LENGTH, validate_name
@@ -384,25 +383,12 @@ def create_vm(
             # own); lima and wsl2 have nothing to authenticate, so it is a
             # silent no-op for them. The credentials' write-step runup stays
             # deferred into initialization, under the skip-and-degrade policy.
-            from agentworks.secrets.line_safety import (
-                LineOrientedSecretUse,
-                require_line_safe_secret,
-            )
+            from .boundary import require_tailscale_auth_key
 
-            tailscale_auth_key = require_line_safe_secret(
+            tailscale_auth_key = require_tailscale_auth_key(
                 scoped_ctx(template_node.secret_refs()).secret(vm_tmpl.tailscale_auth_key),
-                use=LineOrientedSecretUse.TAILSCALE,
                 secret_name=vm_tmpl.tailscale_auth_key,
             )
-            if not tailscale_auth_key.strip():
-                # An empty key would leave the guest's join waiting for an interactive login.
-                raise ValidationError(
-                    f"secret {vm_tmpl.tailscale_auth_key!r} is empty or blank, so it cannot be used for "
-                    f"{LineOrientedSecretUse.TAILSCALE.value}",
-                    entity_kind="secret",
-                    entity_name=vm_tmpl.tailscale_auth_key,
-                    hint="Set the secret to a Tailscale auth key.",
-                )
             from agentworks.git_credentials import (
                 credential_redactions,
                 credential_requests,

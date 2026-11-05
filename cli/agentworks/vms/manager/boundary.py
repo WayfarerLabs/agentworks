@@ -52,6 +52,27 @@ def _platform_ops_ctx(
     )
 
 
+def require_tailscale_auth_key(value: str, *, secret_name: str) -> str:
+    """Return ``value`` as a usable Tailscale auth key, or raise naming ``secret_name``.
+
+    The key must be one line, and must not be blank: a guest's join with an
+    empty key waits for an interactive login nobody sees.
+    """
+    from agentworks.errors import ValidationError
+    from agentworks.secrets.line_safety import LineOrientedSecretUse, require_line_safe_secret
+
+    key = require_line_safe_secret(value, use=LineOrientedSecretUse.TAILSCALE, secret_name=secret_name)
+    if not key.strip():
+        raise ValidationError(
+            f"secret {secret_name!r} is empty or blank, so it cannot be used for "
+            f"{LineOrientedSecretUse.TAILSCALE.value}",
+            entity_kind="secret",
+            entity_name=secret_name,
+            hint="Set the secret to a Tailscale auth key.",
+        )
+    return key
+
+
 def _warn_legacy_release(vm: VMRow) -> None:
     """Warn without blocking before an ordinary operation touches a legacy VM."""
 
@@ -294,7 +315,6 @@ def _auth_key_boundary(
     from agentworks.orchestration.readiness import preflight_all
     from agentworks.orchestration.secrets import secret_union
     from agentworks.orchestration.walk import walk
-    from agentworks.secrets.line_safety import LineOrientedSecretUse, require_line_safe_secret
     from agentworks.secrets.resolver import Resolver
     from agentworks.vms.nodes import live_vm_node, vm_template_node
     from agentworks.vms.templates import resolve_live_template
@@ -318,9 +338,7 @@ def _auth_key_boundary(
             interaction=interaction,
         )
         resolver.resolve()
-    auth_key = require_line_safe_secret(
-        resolver.get(template.tailscale_auth_key),
-        use=LineOrientedSecretUse.TAILSCALE,
-        secret_name=template.tailscale_auth_key,
+    auth_key = require_tailscale_auth_key(
+        resolver.get(template.tailscale_auth_key), secret_name=template.tailscale_auth_key
     )
     return vm_node, resolver, _platform_ops_ctx(config, scope, vm_node, resolver), auth_key
