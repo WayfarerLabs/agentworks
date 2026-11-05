@@ -7,10 +7,13 @@ must be explicit, including when all configuration fields use defaults.
 
 Agentworks installs `python3` as a required system package on every VM during create and reinit.
 Native setup uses its standard library for guarded file access, atomic publication and artifact
-discovery; `python3-venv` and `python3-pip` are not required. Run `agw vm recover <vm-name>` to
-install it on an older VM missing the interpreter, then `agw vm reinit <vm-name>`. A missing
-interpreter is reported before staging or native mutation. The harness CLI itself must also be
-installed through the existing package or install-command configuration.
+discovery; `python3-venv` and `python3-pip` are not required. Artifact discovery runs
+`/usr/bin/python3` after the account's login and interactive startup files, so it sees the
+environment the harness gets whichever `python3` the login `PATH` finds first. Run
+`agw vm recover <vm-name>` to install it on an older VM missing the interpreter, then
+`agw vm reinit <vm-name>`. A missing interpreter is reported before staging or native mutation. The
+harness CLI itself must also be installed through the existing package or install-command
+configuration.
 
 ## Settings mappings
 

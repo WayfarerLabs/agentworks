@@ -217,7 +217,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
         )
         if plan.files:
             probe_native(
-                invocation.runner, tool="claude", environment=invocation.environment, files=plan.files, vm_only=True
+                invocation.access, tool="claude", environment=invocation.environment, files=plan.files, vm_only=True
             )
         return plan
 
@@ -225,7 +225,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
         """Apply native setup and return the user's artifact publication plan."""
         root = (
             probe_native(
-                invocation.runner,
+                invocation.access,
                 tool="claude",
                 environment=invocation.environment,
                 home=invocation.home,
@@ -252,7 +252,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
         setup_user("claude", config, setup_invocation)
         if plan.files:
             probe_native(
-                invocation.runner,
+                invocation.access,
                 tool="claude",
                 environment=invocation.environment,
                 home=invocation.home,
@@ -271,7 +271,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
         setup_workspace("claude", config, invocation)
         if plan.files:
             probe_native(
-                invocation.runner,
+                invocation.access,
                 tool="claude",
                 environment=invocation.environment,
                 workspace=invocation.root,
@@ -339,12 +339,12 @@ class ClaudeCodeIntegration(HarnessIntegration):
         if artifact_context is not None and (
             artifact_context.ancestor_files or self._artifact_plan.application.files or self._artifact_plan.argv
         ):
-            runner = ctx.admin_target() if self._admin else ctx.agent_target()
-            if runner is None:
+            access = ctx.admin_access() if self._admin else ctx.agent_access()
+            if access is None:
                 raise StateError("artifact delivery requires the actual native launch target")
             files = delivery_files(artifact_context, self._artifact_plan.application)
             native_root = probe_native(
-                runner,
+                access,
                 tool="claude",
                 environment=artifact_context.environment,
                 home=artifact_context.home,
@@ -360,7 +360,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
             if "--append-system-prompt-file" in self._artifact_plan.argv:
                 self._artifact_plan = replace(
                     self._artifact_plan,
-                    argv=self._artifact_plan.argv + session_prompt_snapshot(runner, artifact_context.environment),
+                    argv=self._artifact_plan.argv + session_prompt_snapshot(access, artifact_context.environment),
                 )
 
         command = self._resume_or_launch(ctx, intent=intent)

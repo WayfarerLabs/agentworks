@@ -26,14 +26,15 @@ from agentworks.artifacts.native.common import (
     validate_names,
     validate_native_argv,
 )
-from agentworks.ssh import SSHError
+from agentworks.errors import ConnectivityError
+from agentworks.execution.requests import Script, Shell
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
     from agentworks.artifacts.application import SessionArtifactContext
     from agentworks.artifacts.model import ArtifactInput, ArtifactInputs
-    from agentworks.transports import Transport
+    from agentworks.execution.access import VMAccess
 
 
 _OPTIONS = {"model": str, "tools": list, "disallowedTools": list, "maxTurns": int}
@@ -175,7 +176,14 @@ def session_artifacts(
     return NativeSessionArtifacts(application, tuple(argv))
 
 
-def session_prompt_snapshot(runner: Transport, environment: Mapping[str, str]) -> tuple[str, ...]:
+def version_probe(environment: Mapping[str, str]) -> Script:
+    """``claude --version`` in the launch target's login and interactive shell, where the pane finds it."""
+    return Script(
+        "claude --version", Shell.USER_DEFAULT, login=True, interactive=True, env=dict(environment), deadline=20
+    )
+
+
+def session_prompt_snapshot(access: VMAccess, environment: Mapping[str, str]) -> tuple[str, ...]:
     """Refresh appended guidance on Claude versions that otherwise snapshot it.
 
     Before 2.1.265, explicit system-prompt flags disabled recording automatically.
@@ -183,16 +191,14 @@ def session_prompt_snapshot(runner: Transport, environment: Mapping[str, str]) -
     """
     version = None
     try:
-        result = runner.run(
-            "\"$SHELL\" -lic 'claude --version'",
-            env=dict(environment),
-            tty=False,
-            check=False,
-            timeout=20,
-        )
-        if result.returncode == 0:
-            version = re.search(r"^\s*(\d+)\.(\d+)\.(\d+) \(Claude Code\)\s*$", result.stdout, re.MULTILINE)
-    except SSHError:
+        result = access.run(version_probe(environment))
+        if result.require_completed(access.vm_name) == 0:
+            version = re.search(
+                r"^\s*(\d+)\.(\d+)\.(\d+) \(Claude Code\)\s*$",
+                result.stdout.decode("utf-8", "replace"),
+                re.MULTILINE,
+            )
+    except ConnectivityError:
         pass
     if version is None:
         output.warn(

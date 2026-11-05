@@ -267,6 +267,12 @@ before they resolve the auth key.
   `vm shell --platform` session removes its own allow. A second signal during that cleanup is
   ignored, so it cannot cut the removal short.
 
+## Native harness setup
+
+Artifact discovery for Claude Code, Codex and Grok Build runs the VM's `/usr/bin/python3` after the
+account's login and interactive startup files. It no longer runs the first `python3` on the login
+`PATH`, so an interpreter a version manager puts first is not used for it.
+
 ## Third-party VM platforms
 
 The vm-platform capability is now contract version 2. Registration matches contract versions

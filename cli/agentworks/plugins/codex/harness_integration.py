@@ -467,7 +467,7 @@ class CodexIntegration(HarnessIntegration):
         plan = ArtifactApplication() if self.retiring else vm_artifacts(invocation.artifacts)
         if plan.files:
             probe_native(
-                invocation.runner, tool="codex", environment=invocation.environment, files=plan.files, vm_only=True
+                invocation.access, tool="codex", environment=invocation.environment, files=plan.files, vm_only=True
             )
         return plan
 
@@ -475,7 +475,7 @@ class CodexIntegration(HarnessIntegration):
         """Apply native setup and return the user's artifact publication plan."""
         root = (
             probe_native(
-                invocation.runner,
+                invocation.access,
                 tool="codex",
                 environment=invocation.environment,
                 home=invocation.home,
@@ -511,7 +511,7 @@ class CodexIntegration(HarnessIntegration):
         setup_user("codex", config, setup_invocation)
         if plan.files:
             probe_native(
-                invocation.runner,
+                invocation.access,
                 tool="codex",
                 environment=invocation.environment,
                 home=invocation.home,
@@ -542,7 +542,7 @@ class CodexIntegration(HarnessIntegration):
         setup_workspace("codex", config, invocation)
         if plan.files:
             probe_native(
-                invocation.runner,
+                invocation.access,
                 tool="codex",
                 environment=invocation.environment,
                 workspace=invocation.root,
@@ -607,12 +607,12 @@ class CodexIntegration(HarnessIntegration):
         if artifact_context is not None and (
             artifact_context.ancestor_files or self._artifact_plan.application.files or self._artifact_plan.argv
         ):
-            runner = ctx.admin_target() if self._admin else ctx.agent_target()
-            if runner is None:
+            access = ctx.admin_access() if self._admin else ctx.agent_access()
+            if access is None:
                 raise StateError("artifact delivery requires the actual native launch target")
             files = delivery_files(artifact_context, self._artifact_plan.application)
             native_root = probe_native(
-                runner,
+                access,
                 tool="codex",
                 environment=artifact_context.environment,
                 home=artifact_context.home,

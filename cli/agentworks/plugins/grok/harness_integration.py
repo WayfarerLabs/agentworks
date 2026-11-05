@@ -172,7 +172,7 @@ class GrokBuildIntegration(HarnessIntegration):
     def user_init(self, invocation: UserSetupInvocation) -> ArtifactApplication:
         root = (
             probe_native(
-                invocation.runner,
+                invocation.access,
                 tool="grok",
                 environment=invocation.environment,
                 home=invocation.home,
@@ -192,7 +192,7 @@ class GrokBuildIntegration(HarnessIntegration):
 
         if plan.files:
             probe_native(
-                invocation.runner,
+                invocation.access,
                 tool="grok",
                 environment=invocation.environment,
                 home=invocation.home,
@@ -208,7 +208,7 @@ class GrokBuildIntegration(HarnessIntegration):
         )
         if plan.files:
             probe_native(
-                invocation.runner,
+                invocation.access,
                 tool="grok",
                 environment=invocation.environment,
                 workspace=invocation.root,
@@ -239,12 +239,12 @@ class GrokBuildIntegration(HarnessIntegration):
         if artifact_context is not None and (
             artifact_context.ancestor_files or self._artifact_plan.application.files or self._artifact_plan.argv
         ):
-            runner = ctx.admin_target() if self._admin else ctx.agent_target()
-            if runner is None:
+            access = ctx.admin_access() if self._admin else ctx.agent_access()
+            if access is None:
                 raise StateError("artifact delivery requires the actual native launch target")
             files = delivery_files(artifact_context, self._artifact_plan.application)
             native_root = probe_native(
-                runner,
+                access,
                 tool="grok",
                 environment=artifact_context.environment,
                 home=artifact_context.home,

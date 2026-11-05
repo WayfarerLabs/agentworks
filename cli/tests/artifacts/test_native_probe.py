@@ -256,8 +256,6 @@ def test_ambiguous_native_inventory_refuses_instead_of_skipping_candidates(tmp_p
 
 @pytest.mark.parametrize("kind", [ArtifactType.SKILL, ArtifactType.AGENT])
 def test_launch_checks_unmanaged_workspace_collision_with_only_handled_ancestor(tmp_path, monkeypatch, kind):
-    import shlex
-    from types import SimpleNamespace
 
     from agentworks.artifacts.application import SessionArtifactContext
     from agentworks.artifacts.model import ArtifactInputs
@@ -268,6 +266,7 @@ def test_launch_checks_unmanaged_workspace_collision_with_only_handled_ancestor(
     from agentworks.plugins.claude.harness_integration import ClaudeCodeIntegration
     from tests.artifacts._fixtures import received
     from tests.artifacts.test_native_delivery import owned
+    from tests.vm_access_support import account_shell, local_vm_access
 
     home, workspace = tmp_path / "home", tmp_path / "workspace"
     item = artifact(kind)
@@ -289,23 +288,10 @@ def test_launch_checks_unmanaged_workspace_collision_with_only_handled_ancestor(
     }
     observed_requests = []
 
-    def run(command, *, env=None, **kwargs):
-        if "input_data" not in kwargs:
-            from agentworks.ssh import SSHResult
+    def log(request, result):
+        observed_requests.append(json.loads(request.stdin.data))
 
-            checked = subprocess.run(["bash", "-c", command], capture_output=True, text=True, check=False)
-            return SSHResult(checked.returncode, checked.stdout, checked.stderr)
-        argv = shlex.split(shlex.split(command)[-1])
-        observed_requests.append(json.loads(kwargs["input_data"]))
-        return subprocess.run(
-            argv,
-            input=kwargs["input_data"],
-            env={**os.environ, **(env or {})},
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-
+    access = local_vm_access(monkeypatch, home=home, shell=account_shell(tmp_path), log=log)
     prepared = SessionArtifactContext(
         inputs=ArtifactInputs(),
         home=str(home),
@@ -331,7 +317,7 @@ def test_launch_checks_unmanaged_workspace_collision_with_only_handled_ancestor(
         integration, "_resume_or_launch", lambda *args, **kwargs: pytest.fail("launch reached after collision")
     )
     with pytest.raises(StateError):
-        integration.start(RunContext(admin_target=SimpleNamespace(run=run)), intent=HarnessLaunchIntent.CREATE)
+        integration.start(RunContext(admin_access=access), intent=HarnessLaunchIntent.CREATE)
     assert len(observed_requests) == 1
     assert not prepared.inputs
     assert set(observed_requests[0]["entries"]) == {file.path for file in application.files if file.native_identity}
@@ -667,14 +653,10 @@ def test_user_setup_preflight_allows_retry_after_interrupted_skill_retirement(
     from agentworks.native_files import NativeFiles
     from agentworks.plugins.claude.harness_integration import ClaudeCodeIntegration
     from tests.artifacts._fixtures import received
-    from tests.native_setup_fixtures import LocalFixtureTransport
+    from tests.native_setup_fixtures import LocalFixtureTransport, fixture_access
 
     target = LocalFixtureTransport(tmp_path)
     probe(tmp_path, tool="claude", identities=())  # Provision the offline native executable.
-    login = tmp_path / "login-shell"
-    login.write_text(
-        login.read_text().replace('[ "$1" = "-lc" ] || exit 9', 'case "$1" in -lc|-lic) ;; *) exit 9 ;; esac')
-    )
     monkeypatch.setattr("agentworks.plugins.claude.harness_integration.setup_user", lambda *args: None)
     removed = artifact(ArtifactType.SKILL)
     kept = artifact(ArtifactType.SKILL, name="kept")
@@ -693,7 +675,7 @@ def test_user_setup_preflight_allows_retry_after_interrupted_skill_retirement(
     integration = ClaudeCodeIntegration.for_setup(owner_kind="agent", owner_name="worker", facet="user", config={})
     invocation = UserSetupInvocation(
         vm=db.insert_vm("vm", "lima", "vm"),
-        access=RecordingVMAccess([], Admin()),
+        access=fixture_access(monkeypatch, target),
         runner=target,
         prior=None,
         checkpoint=lambda claims: None,
@@ -854,16 +836,40 @@ def test_codex_counts_proposed_members_and_directories_before_first_publication(
     assert "unreadable-native-inventory" in probe(tmp_path, entries=entries)["problems"]
 
 
-def test_production_probe_streams_large_valid_package_through_login_shell(tmp_path):
+@pytest.mark.parametrize("startup", [".zprofile", ".zshrc"])
+def test_probe_sees_the_native_cli_that_login_or_interactive_startup_provides(tmp_path, monkeypatch, startup):
+    import shutil
+
+    from agentworks.artifacts.native.probe import probe_native
+    from tests.vm_access_support import local_vm_access
+
+    zsh = shutil.which("zsh")
+    if zsh is None:
+        pytest.skip("zsh is not installed")
+    probe(tmp_path, tool="claude", identities=())  # Provision only the offline native executable.
+    home = tmp_path / "home"
+    # zsh reads .zprofile only as a login shell and .zshrc only as an interactive one.
+    (home / startup).write_text(f'export PATH="{tmp_path / "bin"}:$PATH"\n')
+    access = local_vm_access(monkeypatch, home=home, shell=Path(zsh))
+
+    assert probe_native(access, tool="claude", environment={}, home=str(home)) == str(home / ".claude")
+
+
+def test_production_probe_streams_large_valid_package_through_login_shell(tmp_path, monkeypatch):
     from agentworks.artifacts.application import ArtifactFile
     from agentworks.artifacts.native.probe import probe_native
+    from agentworks.execution.requests import Bytes, PythonProgram
     from tests.native_setup_fixtures import LocalFixtureTransport
+    from tests.vm_access_support import account_shell, local_vm_access
 
     target = LocalFixtureTransport(tmp_path)
     probe(tmp_path, identities=())  # Provision only the offline native executable.
-    login = tmp_path / "login-shell"
-    login.write_text(
-        login.read_text().replace('[ "$1" = "-lc" ] || exit 9', 'case "$1" in -lc|-lic) ;; *) exit 9 ;; esac')
+    requests = []
+    access = local_vm_access(
+        monkeypatch,
+        home=target.home,
+        shell=account_shell(tmp_path),
+        log=lambda request, result: requests.append(request),
     )
     root = target.home / ".agents/skills/review"
     files = (
@@ -887,7 +893,7 @@ def test_production_probe_streams_large_valid_package_through_login_shell(tmp_pa
     )
     expected_home = str(target.home / ".codex")
     assert (
-        probe_native(target, tool="codex", environment=target.environment, home=str(target.home), files=files)
+        probe_native(access, tool="codex", environment=target.environment, home=str(target.home), files=files)
         == expected_home
     )
     for file in files:
@@ -895,15 +901,18 @@ def test_production_probe_streams_large_valid_package_through_login_shell(tmp_pa
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(file.data)
     assert (
-        probe_native(target, tool="codex", environment=target.environment, home=str(target.home), files=files)
+        probe_native(access, tool="codex", environment=target.environment, home=str(target.home), files=files)
         == expected_home
     )
-    assert all(files[-1].path not in command for command in target.commands)
+    assert len(requests) == 2
+    for request in requests:
+        assert isinstance(request, PythonProgram)
+        assert isinstance(request.stdin, Bytes)
+        assert files[-1].path.encode() in request.stdin.data
+        assert all(files[-1].path not in argument for argument in request.args)
 
 
-@pytest.mark.parametrize("operation", ["files", "probe"])
-def test_missing_python_refuses_before_staging_or_discovery(tmp_path, operation):
-    from agentworks.artifacts.native.probe import probe_native
+def test_missing_python_refuses_before_staging(tmp_path):
     from agentworks.errors import StateError
     from agentworks.native_files import NativeFiles
     from tests.native_setup_fixtures import LocalFixtureTransport
@@ -914,12 +923,8 @@ def test_missing_python_refuses_before_staging_or_discovery(tmp_path, operation)
     (binary / "bash").symlink_to("/bin/bash")
     target.environment["PATH"] = str(binary)
     before = set(tmp_path.rglob("*"))
-    with pytest.raises(StateError) as caught:
-        if operation == "files":
-            with NativeFiles(target):
-                pytest.fail("missing prerequisite allowed staging")
-        else:
-            probe_native(target, tool="claude", environment=target.environment)
+    with pytest.raises(StateError) as caught, NativeFiles(target):
+        pytest.fail("missing prerequisite allowed staging")
     assert caught.value.hint
     assert len(target.commands) == 1
     assert set(tmp_path.rglob("*")) == before
@@ -927,18 +932,15 @@ def test_missing_python_refuses_before_staging_or_discovery(tmp_path, operation)
 
 @pytest.mark.parametrize("returncode,stdout", [(127, ""), (1, "AGW_ARTIFACT_PROBE={}\n"), (0, "not-json")])
 def test_failed_native_probe_retains_external_diagnostic(returncode, stdout):
-    from unittest.mock import Mock
-
     from agentworks.artifacts.native.probe import probe_native
     from agentworks.errors import ExternalError
-    from agentworks.ssh import SSHResult
-    from agentworks.transports import Transport
+    from agentworks.execution.results import Completed, Result
 
-    target = Mock(spec=Transport)
+    access = RecordingVMAccess([], Admin())
     stderr = "fixture interpreter or login-shell failure"
-    target.run.side_effect = [SSHResult(0, "", ""), SSHResult(returncode, stdout, stderr)]
+    access.run_outcomes = [Result(Completed(returncode), stdout.encode(), stderr.encode())]
     with pytest.raises(ExternalError) as caught:
-        probe_native(target, tool="claude", environment={})
+        probe_native(access, tool="claude", environment={})
     assert stderr in str(caught.value) + (caught.value.hint or "")
     if returncode:
         assert str(returncode) in str(caught.value)
@@ -949,21 +951,19 @@ def test_failed_native_probe_retains_external_diagnostic(returncode, stdout):
 def test_native_probe_errors_redact_runtime_environment(returncode, padding):
     import shlex
     import traceback
-    from unittest.mock import Mock
 
     from agentworks.artifacts.native.probe import probe_native
     from agentworks.errors import ExternalError
-    from agentworks.ssh import SSHResult
-    from agentworks.transports import Transport
+    from agentworks.execution.results import Completed, Result
 
     short = "fixture-token"
     long = padding + ("padded-secret" if padding else short) + "-'long value'" + padding
     environment = {"API_TOKEN": short, "OTHER_TOKEN": long}
     stderr = f"{long}\nstartup failed: {shlex.quote(long)}; {short}\n{long}"
-    target = Mock(spec=Transport)
-    target.run.side_effect = [SSHResult(0, "", ""), SSHResult(returncode, "invalid", stderr)]
+    access = RecordingVMAccess([], Admin())
+    access.run_outcomes = [Result(Completed(returncode), b"invalid", stderr.encode())]
     with pytest.raises(ExternalError) as caught:
-        probe_native(target, tool="claude", environment=environment)
+        probe_native(access, tool="claude", environment=environment)
     exposed = str(caught.value) + (caught.value.hint or "") + "".join(traceback.format_exception(caught.value))
     assert short not in exposed
     assert long.strip() not in exposed

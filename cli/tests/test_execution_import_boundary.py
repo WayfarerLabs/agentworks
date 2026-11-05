@@ -62,6 +62,8 @@ MIGRATED_FILES = (
     "capabilities/harness_integration/shell.py",
     "capabilities/git_credential/github.py",
     "plugins/azure/azdo.py",
+    "artifacts/native/probe.py",
+    "plugins/claude/artifacts.py",
 )
 
 

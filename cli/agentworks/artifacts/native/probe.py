@@ -13,7 +13,7 @@ from agentworks.artifacts.application import ArtifactFile
 from agentworks.artifacts.frontmatter import parse_metadata
 from agentworks.artifacts.native.common import MAX_CODEX_PERSONA_BYTES
 from agentworks.errors import ExternalError, StateError
-from agentworks.native_files import require_python3
+from agentworks.execution.requests import Bytes, CaptureOutput, PythonProgram
 from agentworks.package_sources import CaptureLimits
 from agentworks.sources import SourceRefError
 
@@ -21,11 +21,11 @@ if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
     from agentworks.artifacts.application import OwnedArtifactFile
-    from agentworks.transports import Transport
+    from agentworks.execution.access import VMAccess
 
-# Executed in the same login-shell environment as the native workload. Only selected
-# bounded artifact frontmatter and discovery facts return for local identity checks.
-# Settings bodies and artifact instruction bodies are not returned.
+# Executed in the same login and interactive environment as the native workload. Only
+# selected bounded artifact frontmatter and discovery facts return for local identity
+# checks. Settings bodies and artifact instruction bodies are not returned.
 _PROBE = r"""
 import fnmatch, json, os, pathlib, shutil, subprocess, sys, tomllib
 request = json.load(sys.stdin)
@@ -367,8 +367,13 @@ def _proposed_sizes(files: Sequence[ArtifactFile | OwnedArtifactFile], tool: str
     return result
 
 
+# What the probe's stdout may hold: up to 1 MiB of frontmatter, which JSON can grow
+# sixfold, and 512 paths of up to 4096 bytes, with room for login-shell noise.
+_PROBE_OUTPUT_LIMIT = 16 * 1024 * 1024
+
+
 def probe_native(
-    runner: Transport,
+    access: VMAccess,
     *,
     tool: str,
     environment: Mapping[str, str],
@@ -380,8 +385,13 @@ def probe_native(
     vm_only: bool = False,
     check_policy: bool = True,
 ) -> str:
-    """Check the actual native home and relevant native policy without starting a model."""
-    require_python3(runner)
+    """Check the actual native home and relevant native policy without starting a model.
+
+    The probe is a Python program run by the system ``python3`` after the
+    account's login and interactive startup, so it sees the environment the
+    native workload gets. The request travels on its stdin, so a large
+    package needs no argument.
+    """
     entries = {file.path: file.native_identity for file in files if file.native_identity}
     identities = tuple(entries.values())
     request = {
@@ -399,28 +409,32 @@ def probe_native(
         "identities": identities,
         "check_policy": check_policy,
     }
-    command = shlex.join(["python3", "-c", _PROBE])
-    result = runner.run(
-        f'"$SHELL" -lic {shlex.quote(command)}',
-        env=dict(environment),
-        input_data=json.dumps(request),
-        tty=False,
-        check=False,
-        timeout=30,
+    result = access.run(
+        PythonProgram(
+            _PROBE,
+            login=True,
+            interactive=True,
+            env=dict(environment),
+            stdin=Bytes(json.dumps(request).encode()),
+            deadline=30,
+        ),
+        stdout=CaptureOutput(_PROBE_OUTPUT_LIMIT),
     )
+    status = result.require_completed(access.vm_name)
+    stdout = result.stdout.decode("utf-8", "replace")
     # Login startup scripts can echo the supplied runtime environment on failure.
     # Redact known values and their shell-quoted forms before publishing diagnostics.
-    diagnostic = result.stderr
+    diagnostic = result.stderr.decode("utf-8", "replace")
     redactions = {form for value in environment.values() if value for form in (value, shlex.quote(value))}
     for value in sorted(redactions, key=len, reverse=True):
         diagnostic = diagnostic.replace(value, "[REDACTED]")
     diagnostic = diagnostic.strip()
-    if result.returncode:
-        raise ExternalError(f"{tool} artifact discovery probe failed (exit {result.returncode}): {diagnostic}")
+    if status:
+        raise ExternalError(f"{tool} artifact discovery probe failed (exit {status}): {diagnostic}")
     try:
         lines = [
             line.removeprefix("AGW_ARTIFACT_PROBE=")
-            for line in result.stdout.splitlines()
+            for line in stdout.splitlines()
             if line.startswith("AGW_ARTIFACT_PROBE=")
         ]
         observed = json.loads(lines[-1])

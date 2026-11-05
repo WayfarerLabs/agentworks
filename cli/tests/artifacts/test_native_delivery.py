@@ -31,7 +31,8 @@ from agentworks.artifacts.session import validate_session_application
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.harness_integration import HarnessStart
 from agentworks.capabilities.harness_integration.shell import ShellIntegration
-from agentworks.errors import ConfigError, StateError
+from agentworks.errors import ConfigError, ConnectivityError, StateError
+from agentworks.execution.results import Result, Unknown, UnknownReason
 from agentworks.plugins.claude import artifacts as claude
 from agentworks.plugins.claude.harness_integration import ClaudeCodeIntegration
 from agentworks.plugins.codex import artifacts as codex
@@ -294,26 +295,20 @@ def test_native_home_override_is_used_instead_of_default():
 
 
 def test_native_probe_passes_environment_separately_and_rejects_policy_failures():
-    calls = []
+    from agentworks.execution.requests import PythonProgram
+    from agentworks.execution.results import Completed
 
-    def run(command, **kwargs):
-        calls.append((command, kwargs))
-        return SimpleNamespace(
-            returncode=0,
-            ok=True,
-            stderr="",
-            stdout="AGW_ARTIFACT_PROBE="
-            + json.dumps(
-                {"native_home": "/home/a/.claude", "problems": ["native-discovery-exclusions"], "inventory": []}
-            ),
-        )
+    observed = {"native_home": "/home/a/.claude", "problems": ["native-discovery-exclusions"], "inventory": []}
+    access = RecordingVMAccess([], Admin())
+    access.default_outcome = Result(Completed(0), f"AGW_ARTIFACT_PROBE={json.dumps(observed)}\n".encode())
 
     with pytest.raises(StateError):
-        probe_native(
-            SimpleNamespace(run=run), tool="claude", home="/home/a", environment={"API_TOKEN": "a-secret-value"}
-        )
-    assert "a-secret-value" not in calls[-1][0]
-    assert calls[-1][1]["env"]["API_TOKEN"] == "a-secret-value"
+        probe_native(access, tool="claude", home="/home/a", environment={"API_TOKEN": "a-secret-value"})
+    (request,) = access.requests()
+    assert isinstance(request, PythonProgram)
+    assert all("a-secret-value" not in part for part in (request.source, *request.args))
+    assert request.env["API_TOKEN"] == "a-secret-value"
+    assert request.deadline == 30
 
 
 @pytest.mark.parametrize("implementation", [CodexIntegration, GrokBuildIntegration])
@@ -365,7 +360,7 @@ def test_native_launch_carries_literal_artifact_guidance_on_new_and_resumed_thre
     method = "_transcript_exists" if implementation is ClaudeCodeIntegration else "_session_exists"
     monkeypatch.setattr(integration, method, lambda *_args: resume)
     result = integration.start(
-        RunContext(admin_target=_FakeTarget()),
+        RunContext(admin_target=_FakeTarget(), admin_access=RecordingVMAccess([], Admin())),
         intent=HarnessLaunchIntent.RESUME_OR_NEW if resume else HarnessLaunchIntent.CREATE,
     )
     assert "{{" not in result.command
@@ -750,17 +745,17 @@ def test_claude_snapshot_adjustment_is_narrow_and_unknown_versions_warn(
 ):
     from unittest.mock import Mock
 
-    from agentworks.ssh import SSHResult
-    from agentworks.transports import Transport
+    from agentworks.execution.results import Completed
 
-    target = Mock(spec=Transport)
-    target.run.return_value = SSHResult(returncode, version, "")
+    access = RecordingVMAccess([], Admin())
+    access.respond(claude.version_probe({}), Result(Completed(returncode), version.encode()))
     warning = Mock()
     monkeypatch.setattr(output, "warn", warning)
-    result = claude.session_prompt_snapshot(target, {})
+    result = claude.session_prompt_snapshot(access, {})
     assert result == (("--system-prompt-snapshot", "off") if snapshot else ())
     assert warning.called is warn
-    assert target.run.call_count == 1
+    assert access.requests() == [claude.version_probe({})]
+    assert access.requests()[0].deadline == 20
 
 
 @pytest.mark.parametrize(
@@ -783,18 +778,24 @@ def test_workaround_config_replaces_inherited_optins_and_refuses_unknown_names(c
         config.model_validate({"enabled_workarounds": ["unknown-workaround"]})
 
 
-def test_claude_snapshot_observation_timeout_warns_and_continues(monkeypatch):
+@pytest.mark.parametrize(
+    "outcome",
+    [
+        Result(Unknown(UnknownReason.DEADLINE)),
+        Result(Unknown(UnknownReason.CONNECTION)),
+        ConnectivityError("fixture unreachable"),
+    ],
+)
+def test_claude_snapshot_observation_failure_warns_and_continues(monkeypatch, outcome):
     from unittest.mock import Mock
 
-    from agentworks.ssh import SSHError
-    from agentworks.transports import Transport
-
-    target = Mock(spec=Transport)
-    target.run.side_effect = SSHError("fixture timed out")
+    access = RecordingVMAccess([], Admin())
+    access.run_outcomes = [outcome]
     warning = Mock()
     monkeypatch.setattr(output, "warn", warning)
-    assert claude.session_prompt_snapshot(target, {"TOKEN": "fixture-secret"}) == ()
+    assert claude.session_prompt_snapshot(access, {"TOKEN": "fixture-secret"}) == ()
     warning.assert_called_once()
+    assert "fixture-secret" not in str(warning.call_args)
 
 
 @pytest.mark.parametrize("workaround", [None, "session-skill-plugin", "session-agent-definitions", "session-prompt"])
@@ -804,7 +805,6 @@ def test_claude_observes_version_only_for_delivered_session_prompt(monkeypatch, 
     from agentworks.capabilities.base import RunContext
     from agentworks.capabilities.harness_integration import HarnessLaunchIntent
     from agentworks.plugins.claude import harness_integration as module
-    from tests.conftest import _FakeTarget
 
     snapshot = Mock(return_value=("--system-prompt-snapshot", "off"))
     monkeypatch.setattr(module, "session_prompt_snapshot", snapshot)
@@ -825,6 +825,6 @@ def test_claude_observes_version_only_for_delivered_session_prompt(monkeypatch, 
         ),
     )
     monkeypatch.setattr(integration, "_resume_or_launch", lambda *args, **kwargs: "native-command")
-    integration.start(RunContext(admin_target=_FakeTarget()), intent=HarnessLaunchIntent.CREATE)
+    integration.start(RunContext(admin_access=RecordingVMAccess([], Admin())), intent=HarnessLaunchIntent.CREATE)
     assert snapshot.called is (workaround == "session-prompt")
     assert ("--system-prompt-snapshot" in integration._artifact_plan.argv) is (workaround == "session-prompt")

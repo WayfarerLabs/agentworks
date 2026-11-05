@@ -19,8 +19,7 @@ from agentworks.plugins.claude.harness_integration import ClaudeCodeIntegration
 from tests.artifacts._fixtures import received
 from tests.artifacts.test_native_probe import probe
 from tests.conftest import requires_posix_shell
-from tests.native_setup_fixtures import LocalFixtureTransport
-from tests.vm_access_support import Admin, RecordingVMAccess
+from tests.native_setup_fixtures import LocalFixtureTransport, fixture_access
 
 pytestmark = requires_posix_shell
 
@@ -29,10 +28,6 @@ pytestmark = requires_posix_shell
 def large_skill_setup(tmp_path, db, monkeypatch):
     target = LocalFixtureTransport(tmp_path)
     probe(tmp_path, tool="claude", identities=())
-    login = tmp_path / "login-shell"
-    login.write_text(
-        login.read_text().replace('[ "$1" = "-lc" ] || exit 9', 'case "$1" in -lc|-lic) ;; *) exit 9 ;; esac')
-    )
     monkeypatch.setattr("agentworks.plugins.claude.harness_integration.setup_user", lambda *args: None)
     source = tmp_path / "source/review"
     (source / "support").mkdir(parents=True)
@@ -65,7 +60,7 @@ def large_skill_setup(tmp_path, db, monkeypatch):
     integration = ClaudeCodeIntegration.for_setup(owner_kind="agent", owner_name="worker", facet="user", config={})
     invocation = UserSetupInvocation(
         vm=db.insert_vm("vm", "lima", "vm"),
-        access=RecordingVMAccess([], Admin()),
+        access=fixture_access(monkeypatch, target),
         runner=target,
         prior=None,
         checkpoint=lambda claims: None,
