@@ -386,10 +386,13 @@ def remove_ssh_allow(
     the platform instance just to sharpen a warning string is not worth
     the coupling; the rule NAME, by contrast, is always known (fixed for
     bootstrap, returned by the poke), so it is always named.
+
+    It deletes before it prints: on a route closed by a hangup the
+    terminal is gone and a write to it can fail, so the rule must be
+    gone first.
     """
     from azure.core.exceptions import ResourceNotFoundError
 
-    output.info(f"Closing SSH route (removing allow rule '{rule_name}')...")
     try:
         network.security_rules.begin_delete(rg, f"{name}-nsg", rule_name).result()
     except ResourceNotFoundError:
@@ -402,6 +405,8 @@ def remove_ssh_allow(
             f"'{name}-nsg': {err.summary}. The VM's SSH port stays open to "
             f"{scope}; delete the rule manually to restore zero inbound exposure."
         )
+        return
+    output.info(f"Closed SSH route (removed allow rule '{rule_name}')")
 
 
 def ensure_public_ip(

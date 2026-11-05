@@ -273,8 +273,10 @@ def remove_ssh_allow(ec2: Any, security_group_id: str, prefixes: Sequence[str]) 
     Best-effort per prefix: a tuple already gone (a concurrent route's exit
     revoked a shared prefix, or the group is gone) is tolerated; any other
     failure warns naming the prefix and the residual exposure rather than
-    raising, because every call site must keep unwinding."""
-    output.info(f"Closing SSH route (revoking allow scoped to {', '.join(prefixes)})...")
+    raising, because every call site must keep unwinding. Every revoke runs
+    before anything is printed: on a route closed by a hangup the terminal is
+    gone and a write to it can fail, so the allows must be gone first."""
+    warnings: list[str] = []
     for prefix in prefixes:
         try:
             ec2.revoke_security_group_ingress(
@@ -286,11 +288,15 @@ def remove_ssh_allow(ec2: Any, security_group_id: str, prefixes: Sequence[str]) 
             if code == _PERMISSION_NOT_FOUND_CODE or code in _GROUP_NOT_FOUND_CODES:
                 continue
             err = wrap_ec2_error(exc)
-            output.warn(
+            warnings.append(
                 f"could not revoke the SSH allow for {prefix} on security group "
                 f"'{security_group_id}': {err}. The VM's SSH port stays open to "
                 f"{prefix}; revoke it manually to restore zero inbound exposure."
             )
+    for warning in warnings:
+        output.warn(warning)
+    if not warnings:
+        output.info(f"Closed SSH route (revoked allow scoped to {', '.join(prefixes)})")
 
 
 def cleanup_created_resources(ec2: Any, instance_id: str | None, security_group_id: str | None) -> None:

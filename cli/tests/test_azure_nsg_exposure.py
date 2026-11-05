@@ -23,6 +23,7 @@ no test hits the network.
 
 from __future__ import annotations
 
+import errno
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
@@ -30,6 +31,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from agentworks import output
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import ProvisionRequest, ssh_exposure
 from agentworks.debian import DebianRelease
@@ -130,6 +132,11 @@ def _assert_allow_shape(rule: Any, prefixes: list[str], *, name: str, priority: 
     assert rule.source_address_prefixes == prefixes
     assert rule.source_address_prefix is None
     assert rule.description.startswith(ALLOW_RULE_DESCRIPTION_MARKER)
+
+
+def _dead_terminal(*_args: object, **_kwargs: object) -> None:
+    """``output`` after a hangup: the terminal is gone and a write to it fails."""
+    raise OSError(errno.EIO, "Input/output error")
 
 
 def test_public_ip_lookup_reads_nested_sdk_response() -> None:
@@ -396,6 +403,19 @@ class TestTransientRoute:
             DENY_ALL_INBOUND_RULE_NAME,
             transient[0],
         ]
+
+    def test_a_dead_terminal_cannot_keep_the_allow_open(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A route closed by a hangup deletes its rule before printing anything."""
+        network = _install_fakes(monkeypatch).network
+        vm: VMRow = _fake_vm()  # type: ignore[assignment]
+
+        with pytest.raises(OSError), _platform()._transient_route(vm, RunContext()):
+            monkeypatch.setattr(output, "info", _dead_terminal)
+            monkeypatch.setattr(output, "warn", _dead_terminal)
+            raise KeyboardInterrupt
+
+        (transient,) = network.security_rules.transient_names()
+        assert ("rg1", "vm1-nsg", transient) in network.security_rules.deletes()
 
     def test_convergence_tolerates_absent_legacy_rule(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A 404 on the legacy SSH delete (an already-converged or
