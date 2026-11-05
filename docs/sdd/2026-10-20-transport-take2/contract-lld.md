@@ -718,12 +718,15 @@ stays slice 4's with the port off `ExecTransport`; this slice leaves the key-bea
 
 ### Result
 
-Audited at PR B's final-review code. The unit half of each proof is below; no live cell has yet run
-against PR B's Phase A, so I25's live half (a WSL2 create whose hold is all that keeps the distro up
-through Phase A) has no evidence. It belongs to slice 3's open live-evidence box.
+Audited at PR B's final-review code. Phase A moved into `vms/initializer/phase_a.py` in this slice,
+so HLA row I16 (a failed or interrupted Phase A secures the VM) is re-proved here too. The unit half
+of each proof is below; no live cell has yet run against PR B's Phase A, so I25's live half (a WSL2
+create whose hold is all that keeps the distro up through Phase A) has no evidence. It belongs to
+slice 3's open live-evidence box.
 
 | Row | Where it holds now                                                                                                                                                                                        | Proof                                                                                                                                                                                                                                             |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| I16 | Phase A's failure arm marks the row `FAILED` and runs `_secure`, and its interrupt arm runs `_secure`, each before the error propagates (`vms/initializer/phase_a.py:116-131`)                            | `test_a_failure_before_the_contract_passes_marks_failed_and_secures`, `test_an_interrupt_before_the_contract_passes_secures_and_leaves_the_vm_gated`, `test_a_secure_hook_failure_does_not_mask_the_phase_a_failure`                              |
 | I22 | Phase A's `except BaseException` arm runs `_secure`, then re-raises (`vms/initializer/phase_a.py:127-131`)                                                                                                | `test_an_interrupt_before_the_contract_passes_secures_and_leaves_the_vm_gated`, `test_a_secure_hook_failure_does_not_mask_the_interrupt`                                                                                                          |
 | I23 | After the first contact, a store with no record raises `ProvisioningError` with delete guidance (`vms/initializer/phase_a.py:98-106`)                                                                     | `test_a_failure_before_the_contract_passes_marks_failed_and_secures` (its `_no_key_recorded` case)                                                                                                                                                |
 | I24 | `join_tailscale` runs once and never retries; the settle reads the address, and when the reads run out logs the node out and never joins again (`capabilities/vm_platform/tailscale_join.py:65`, `:133`)  | `test_a_failed_join_raises_once_without_the_key`, `test_exhaustion_logs_out_once_and_gives_the_rerun_hint`, `test_exhausted_reads_after_the_join_log_out_without_joining_again`, `test_a_failed_join_or_address_rolls_back_without_a_second_join` |
