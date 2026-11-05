@@ -446,12 +446,12 @@ seconds until it reports exit or the deadline passes. Dispatch and status failur
 which raises `TokenRejectedError`; a status failure of either kind says the script may still be
 running. A `_TruncatedQGAOutput` report raises `ConnectivityError` saying the script exited with its
 output cut short. No failure chains the API error, whose request quotes the script. `create` waits
-for cloud-init through it (`cloud-init status --wait`, 300 s, status 2 a warning), with no separate
-wait for a guest IP, then runs the bootstrap through it with `run_bootstrap` and today's 600-second
-deadline (`platform.py:600`), then joins and settles; `guest_agent_exec_wait` and
-`guest_agent_network` leave the API client. `out-data` and `err-data` are encoded with
-`errors="replace"`, since the API's JSON can carry a lone surrogate, and `_request` types
-`http.client.HTTPException` as `ProxmoxAPIError` like any transport failure.
+for cloud-init through it (`cloud-init status --wait`, 420 s, which covers the agent ping's 120 and
+cloud-init's 300, status 2 a warning), with no separate wait for a guest IP, then runs the bootstrap
+through it with `run_bootstrap` and today's 600-second deadline (`platform.py:600`), then joins and
+settles; `guest_agent_exec_wait` and `guest_agent_network` leave the API client. `out-data` and
+`err-data` are encoded with `errors="replace"`, since the API's JSON can carry a lone surrogate, and
+`_request` types `http.client.HTTPException` as `ProxmoxAPIError` like any transport failure.
 `_run_bootstrap_via_agent` (`platform.py:566-636`), `native_transport` (`:488-502`) and
 `transport.py` go. No `native_shell` override. `recovery_needs_guest_sshd = False`.
 

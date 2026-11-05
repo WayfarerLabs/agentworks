@@ -42,7 +42,8 @@ if TYPE_CHECKING:
     from agentworks.execution.root_script import RawRun
 
 BOOTSTRAP_DEADLINE_SECONDS = 600
-CLOUD_INIT_DEADLINE_SECONDS = 300
+CLOUD_INIT_DEADLINE_SECONDS = guest_agent.AGENT_WAIT_SECONDS + 300
+"""The guest agent's wait, then cloud-init's own 300 s: the one root-channel call draws on both."""
 
 
 class ProxmoxConfig(AgwModel):
