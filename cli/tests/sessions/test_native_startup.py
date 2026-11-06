@@ -84,6 +84,8 @@ class NativeTarget:
 
 @pytest.fixture
 def native(monkeypatch):
+    if os.name != "posix" or not Path("/proc/self/stat").exists():
+        pytest.skip("requires Linux guest process identity observations")
     # pytest's nested tmp_path is longer than sun_path on some hosts.
     with tempfile.TemporaryDirectory(prefix="agw-r8-sessions-native-", dir="/tmp") as directory:
         root = Path(directory)

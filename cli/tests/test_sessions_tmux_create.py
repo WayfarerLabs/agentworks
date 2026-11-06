@@ -422,7 +422,7 @@ def test_existing_socket_is_untouched_when_server_probe_is_indeterminate(
 
     def run(command: str, **kwargs: object) -> _SpyResult:
         calls.append(command)
-        if command.startswith(("test -e ", "test -S ")):
+        if command.startswith(("test -e ", "test -S ", "test ! -L ")):
             return _SpyResult()
         if "list-sessions" in command:
             return _SpyResult(returncode=255)
@@ -856,6 +856,8 @@ def test_confirmed_death_outweighs_expected_sharing_capture_and_cleanup_failures
 
     def run(command: str, **kwargs: object) -> _SpyResult:
         calls.append(command)
+        if command.startswith("test ! -L "):
+            return _SpyResult()
         if stage == "server-access" and "chmod" in command:
             return _SpyResult()
         if "#{pane_dead}" in command:

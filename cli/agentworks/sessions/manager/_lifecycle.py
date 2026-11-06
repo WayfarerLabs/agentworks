@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shlex
 from contextlib import contextmanager
+from functools import partial
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
@@ -276,6 +277,7 @@ def _teardown_session(
         ProbeStatus,
         capture_tmux_server_fingerprint,
         kill_server,
+        require_socket_path,
     )
 
     if session.socket_path is None:
@@ -291,6 +293,7 @@ def _teardown_session(
         return
 
     socket_path = _validated_socket_path(db, session)
+    require_socket_path(socket_path, run_command=partial(target.run, sudo=not target_owns_session))
     probe = capture_tmux_server_fingerprint(
         target=target,
         socket_path=socket_path,
@@ -884,12 +887,34 @@ def _launch_existing_session(
                 session_run_command = admin_target.run
 
             if recovered_startup and status is SessionStatus.RUNNING and not replace_running:
-                from agentworks.sessions.tmux import finalize_session_start
+                from agentworks.sessions.tmux import (
+                    ProbeStatus,
+                    capture_tmux_server_fingerprint,
+                    finalize_session_start,
+                    require_socket_path,
+                )
+
+                socket_path = _validated_socket_path(db, session)
+                require_socket_path(socket_path, run_command=session_run_command)
+                probe = capture_tmux_server_fingerprint(target=session_target, socket_path=socket_path)
+                observed = probe.fingerprint
+                if (
+                    probe.status is not ProbeStatus.PRESENT
+                    or observed is None
+                    or (observed.pid, observed.boot_id, observed.start_ticks)
+                    != (session.pid, session.boot_id, session.tmux_server_start_ticks)
+                ):
+                    raise StateError(
+                        f"session '{name}' runtime identity changed before startup recovery",
+                        entity_kind="session",
+                        entity_name=name,
+                        hint="Inspect the current runtime; no startup settings were changed.",
+                    )
 
                 finalize_session_start(
                     name,
                     run_command=session_run_command,
-                    socket_path=_validated_socket_path(db, session),
+                    socket_path=socket_path,
                     is_admin=is_admin,
                     redactions=redactions,
                 )

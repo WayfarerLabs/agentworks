@@ -540,21 +540,41 @@ def exact_tmux_target(name: str) -> str:
     return "'" + ("=" + name).replace("'", "'\"'\"'") + "'"
 
 
-def _launch_pane_command(command: str, session_name: str, socket_path: str | None) -> str:
+def _launch_pane_command(
+    command: str, session_name: str, socket_path: str | None, *, legacy_active: bool = False
+) -> str:
     """Target the pane returned by new-session, independent of the active window."""
     if socket_path is None:
         return tmux_cmd(command.replace("AGW_LAUNCH_PANE", exact_tmux_target(session_name + ":")), None)
     observe = tmux_cmd("show-option -gqv @agentworks-launch-pane", socket_path)
-    legacy = tmux_cmd(f"list-panes -s -t {exact_tmux_target(session_name)} -F '#{{pane_id}}'", socket_path)
+    entry = tmux_cmd("show-option -gq @agentworks-launch-pane", socket_path)
+    legacy = (
+        tmux_cmd(f"display-message -p -t {exact_tmux_target(session_name + ':')} '#{{pane_id}}'", socket_path)
+        if legacy_active
+        else tmux_cmd(f"list-panes -s -t {exact_tmux_target(session_name)} -F '#{{pane_id}}'", socket_path)
+    )
     pane_session = tmux_cmd("display-message -p -t \"$agw_launch_pane\" '#{session_name}'", socket_path)
     return (
         f"agw_launch_pane=$({observe}) || exit $?; "
-        f'if [ -z "$agw_launch_pane" ]; then agw_launch_pane=$({legacy}) || exit $?; fi; '
+        'if [ -z "$agw_launch_pane" ]; then '
+        f'agw_pane_entry=$({entry}) || exit $?; test -z "$agw_pane_entry" || exit 1; '
+        f"agw_launch_pane=$({legacy}) || exit $?; fi; "
         'case "$agw_launch_pane" in %*) ;; *) exit 1;; esac; '
         'case "${agw_launch_pane#%}" in ""|*[!0-9]*) exit 1;; esac; '
         f'test "$({pane_session})" = {shlex.quote(session_name)} || exit 1; '
         + tmux_cmd(command.replace("AGW_LAUNCH_PANE", '"$agw_launch_pane"'), socket_path)
     )
+
+
+def require_socket_path(socket_path: str, *, run_command: RunCommand) -> None:
+    """Reject a native socket address redirected through a link or another file type."""
+    q_socket = shlex.quote(socket_path)
+    result = run_command(f"test ! -L {q_socket} && {{ test ! -e {q_socket} || test -S {q_socket}; }}", check=False)
+    if _test_presence_from_result(result) is not ProbeStatus.PRESENT:
+        raise StateError(
+            f"managed tmux socket path '{socket_path}' is unsafe or could not be inspected",
+            hint="Preserve the unexpected path and inspect it before retrying runtime recovery.",
+        )
 
 
 def _grant_server_access(
@@ -636,17 +656,18 @@ def _trim_captured_output(
     workload's own error message lands), and caps each line to
     ``max_line_chars`` characters.
     """
-    from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
+    from agentworks.harness_setup.outcomes import normalize_setup_diagnostic
     from agentworks.secrets.redaction import secret_redaction_forms
 
     values = tuple(redactions)
-    for pattern in sorted({form for value in values for form in secret_redaction_forms(value)}, key=len, reverse=True):
+    patterns = {form for value in values for form in secret_redaction_forms(value)}
+    for pattern in sorted(patterns, key=len, reverse=True):
         text = text.replace(pattern, "[REDACTED]")
-    nonempty = [
-        sanitize_setup_diagnostic(line, redactions=values)[:max_line_chars]
-        for line in text.splitlines()
-        if line.strip()
-    ]
+    text = normalize_setup_diagnostic(text, preserve_lines=True)
+    normalized = {normalize_setup_diagnostic(pattern, preserve_lines=True) for pattern in patterns}
+    for pattern in sorted(filter(None, normalized), key=len, reverse=True):
+        text = text.replace(pattern, "[REDACTED]")
+    nonempty = [line[:max_line_chars] for line in text.splitlines() if line.strip()]
     return "\n".join(nonempty[-max_lines:])
 
 
@@ -860,6 +881,7 @@ def create_session(
         ensure_agent_socket_dir(target, linux_user)
         sock = agent_socket_path(linux_user, session_name)
     q_sock = shlex.quote(sock)
+    require_socket_path(sock, run_command=run_command)
 
     # Stale-socket handling: if a socket file exists but no server is alive
     # behind it, remove it before creating the new session. An active server
@@ -933,6 +955,7 @@ def finalize_session_start(
     redactions: Iterable[str] = (),
 ) -> None:
     """Finish startup only after the caller persisted the server fingerprint."""
+    require_socket_path(socket_path, run_command=run_command)
     grant_error: Exception | None = None
     if not is_admin:
         try:
@@ -966,7 +989,14 @@ def finalize_session_start(
 
 def startup_protection_enabled(session_name: str, *, run_command: RunCommand, socket_path: str) -> bool | None:
     """Observe whether the launch pane still needs startup completion."""
-    command = _launch_pane_command("show-option -wAqv -t AGW_LAUNCH_PANE remain-on-exit", session_name, socket_path)
+    observe = tmux_cmd("show-option -gq @agentworks-launch-pane", socket_path)
+    pane_command = _launch_pane_command(
+        "show-option -wAqv -t AGW_LAUNCH_PANE remain-on-exit", session_name, socket_path
+    )
+    command = (
+        f"agw_startup_pane=$({observe}) || exit $?; "
+        f'if [ -z "$agw_startup_pane" ]; then printf off; else {pane_command}; fi'
+    )
     result = run_command(runtime_probe_command(command, "STARTUP"), check=False)
     payload = runtime_probe_payload(getattr(result, "stdout", "") or "", "STARTUP")
     if getattr(result, "returncode", None) != 0 or runtime_probe_stderr(getattr(result, "stderr", "") or "") != "":
@@ -1067,7 +1097,9 @@ def capture_output(
         raise ValidationError("session log line count must be positive")
     flags = "-p -J" if join_wrapped else "-p"
     result = run_command(
-        _launch_pane_command(f"capture-pane -t AGW_LAUNCH_PANE {flags} -S -{lines}", session_name, socket_path),
+        _launch_pane_command(
+            f"capture-pane -t AGW_LAUNCH_PANE {flags} -S -{lines}", session_name, socket_path, legacy_active=True
+        ),
         check=False,
     )
     if getattr(result, "returncode", None) != 0:

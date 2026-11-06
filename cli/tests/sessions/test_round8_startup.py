@@ -124,7 +124,7 @@ def test_unknown_launch_can_recover_after_reboot_without_destroying_vm(tmp_path,
     db, _ = _restart_fixture(tmp_path, monkeypatch, status=SessionStatus.STOPPED)
     socket = "/run/agentworks/agent-tmux-sockets/agt-a1/s1.sock"
     db.update_session_runtime("s1", socket_path=socket, pid=None, boot_id=None, tmux_server_start_ticks=None)
-    target = SimpleNamespace(run=lambda *a, **k: None)
+    target = SimpleNamespace(run=lambda *a, **k: SimpleNamespace(returncode=0, ok=True, stdout="", stderr=""))
     monkeypatch.setattr(
         tmux, "capture_tmux_server_fingerprint", lambda **k: tmux.FingerprintProbe(tmux.ProbeStatus.ABSENT)
     )
@@ -317,6 +317,9 @@ def test_parent_cleanup_does_not_treat_unknown_probe_as_stopped_absence(tmp_path
                 legacy_running_authorized=True,
             )
         assert db.get_session("s1") == row
-        assert not native.calls
+        assert all(
+            "kill-server" not in command and "rm -f " not in command and "chmod " not in command
+            for command, _ in native.calls
+        )
     finally:
         db.close()

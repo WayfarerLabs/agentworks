@@ -487,7 +487,7 @@ def test_create_session_rolls_back_on_keyboard_interrupt(tmp_path: Path, monkeyp
     def _explode(*args: object, **kwargs: object) -> tuple[None, None]:
         raise KeyboardInterrupt
 
-    monkeypatch.setattr(tmux_mod, "create_session", _explode)
+    monkeypatch.setattr(tmux_mod, "deploy_restricted_config", _explode)
 
     stub_session_resolvers(monkeypatch)
 
@@ -569,7 +569,7 @@ def test_create_session_releases_group_membership_on_keyboard_interrupt(
     def _explode(*args: object, **kwargs: object) -> tuple[None, None]:
         raise KeyboardInterrupt
 
-    monkeypatch.setattr(tmux_mod, "create_session", _explode)
+    monkeypatch.setattr(tmux_mod, "deploy_restricted_config", _explode)
 
     stub_session_resolvers(monkeypatch)
 
@@ -635,7 +635,7 @@ def test_create_session_rollback_failure_does_not_mask_keyboard_interrupt(
     def _explode(*args: object, **kwargs: object) -> tuple[None, None]:
         raise KeyboardInterrupt
 
-    monkeypatch.setattr(tmux_mod, "create_session", _explode)
+    monkeypatch.setattr(tmux_mod, "deploy_restricted_config", _explode)
 
     # Poison the rollback: db.delete_session raises during cleanup.
     cleanup_attempts: list[str] = []

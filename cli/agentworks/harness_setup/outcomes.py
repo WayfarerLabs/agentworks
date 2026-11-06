@@ -27,9 +27,11 @@ _DIAGNOSTIC_LIMIT = 2048
 _TRUNCATED = "... [truncated]"
 
 
-def normalize_setup_diagnostic(text: str) -> str:
+def normalize_setup_diagnostic(text: str, *, preserve_lines: bool = False) -> str:
     """Normalize diagnostic text and secret patterns without truncating either."""
     text = _TERMINAL_SEQUENCES.sub("", text).replace("\ufffd", "")
+    if preserve_lines:
+        return "\n".join(sanitize_fact_line(" ".join(line.split())) for line in text.splitlines())
     return sanitize_fact_line(" ".join(text.split()))
 
 

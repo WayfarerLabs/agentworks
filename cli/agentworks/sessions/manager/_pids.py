@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from functools import partial
 from typing import TYPE_CHECKING
 
 import agentworks.sessions.manager as _mgr
@@ -96,7 +97,12 @@ def _repair_session_pid(
     Raises StateError if the session is alive but PID/boot_id can't be recovered,
     or ConnectivityError if the VM is unreachable.
     """
-    from agentworks.sessions.tmux import ProbeStatus, capture_tmux_server_fingerprint, probe_tmux_session
+    from agentworks.sessions.tmux import (
+        ProbeStatus,
+        capture_tmux_server_fingerprint,
+        probe_tmux_session,
+        require_socket_path,
+    )
 
     sock = session.socket_path
     if sock is None:
@@ -126,6 +132,7 @@ def _repair_session_pid(
             )
     else:
         sudo = session.mode == SessionMode.AGENT.value
+        require_socket_path(sock, run_command=partial(target.run, sudo=sudo))
         probe = capture_tmux_server_fingerprint(target=target, socket_path=sock, sudo=sudo)
         if probe.status is ProbeStatus.PRESENT:
             fingerprint = probe.fingerprint
