@@ -67,36 +67,24 @@ def _write_to_the_null_device() -> None:
     closed one stays closed. A stream on some other descriptor (an embedding
     host's) is replaced on the same test, since what it writes to may have
     gone too. Everything is decided before anything moves, so the decision
-    is about where output went, not the null device.
+    is about where output went, not the null device. A closed 1 or 2 is
+    where ``open`` may put the null device, and closing it afterwards
+    leaves that descriptor closed again. It is best effort: an error, such
+    as no null device to open, leaves the rest as it is, since it must not
+    replace the interrupt or reach code the signal arrived in.
     """
-    outputs = [descriptor for descriptor in (1, 2) if _open_and_not_a_file(descriptor)]
-    streams = [name for name in ("stdout", "stderr") if _on_another_output(getattr(sys, name))]
-    if outputs:
-        null = _null_descriptor()
-        try:
-            for descriptor in outputs:
-                os.dup2(null, descriptor)
-        finally:
-            os.close(null)
-    for name in streams:
-        setattr(sys, name, open(os.devnull, "w", encoding="utf-8"))  # noqa: SIM115 - lives as long as the process
-
-
-def _null_descriptor() -> int:
-    """The null device on a descriptor above 2.
-
-    With 1 or 2 closed, ``open`` would take that number, and closing the
-    null device after the copies would then close the standard descriptor.
-    """
-    import fcntl  # POSIX, as SIGHUP is
-
-    null = os.open(os.devnull, os.O_WRONLY)
-    if null > 2:
-        return null
-    try:
-        return fcntl.fcntl(null, fcntl.F_DUPFD, 3)
-    finally:
-        os.close(null)
+    with contextlib.suppress(OSError):
+        outputs = [descriptor for descriptor in (1, 2) if _open_and_not_a_file(descriptor)]
+        streams = [name for name in ("stdout", "stderr") if _on_another_output(getattr(sys, name))]
+        if outputs:
+            null = os.open(os.devnull, os.O_WRONLY)
+            try:
+                for descriptor in outputs:
+                    os.dup2(null, descriptor)
+            finally:
+                os.close(null)
+        for name in streams:
+            setattr(sys, name, open(os.devnull, "w", encoding="utf-8"))  # noqa: SIM115 - lives as long as the process
 
 
 def _on_another_output(stream: object) -> bool:

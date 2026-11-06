@@ -157,6 +157,20 @@ def test_a_hangup_leaves_a_closed_descriptor_closed(terminal: int) -> None:
 
 @posix_only
 @pytest.mark.usefixtures("standard_streams")
+def test_a_redirect_that_fails_still_interrupts(terminal: int, monkeypatch: pytest.MonkeyPatch) -> None:
+    """With no null device to open, the hangup still unwinds the command rather than raising the redirect's error."""
+
+    def no_null_device(*_args: object, **_kwargs: object) -> int:
+        raise OSError("no null device")
+
+    os.dup2(terminal, 1)
+    monkeypatch.setattr(os, "open", no_null_device)
+
+    _hang_up()
+
+
+@posix_only
+@pytest.mark.usefixtures("standard_streams")
 def test_a_hangup_replaces_a_stream_on_another_terminal_and_keeps_one_on_none(terminal: int) -> None:
     on_terminal = open(terminal, "w", encoding="utf-8", closefd=False)  # noqa: SIM115 - the fixture puts the stream back
     on_nothing = io.StringIO()
