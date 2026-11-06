@@ -164,7 +164,12 @@ leftovers.
 
 Cleanup of the attempt and the final reservation proceeds independently. Before confirmed clone
 publication, cleanup removes only an empty final reservation, including for a workspace without a
-repository. A lost reservation or publication response, or a reservation that gained content, leaves
+repository. A failed non-repository create first retires its confirmed, unchanged generated
+tmuxinator file; its matching discovery link is removed with the reservation. Modified files,
+replacement links and unrelated contents are preserved. Existing tmuxinator discovery entries are
+not overwritten by workspace creation.
+
+A lost reservation or publication response, or a reservation that gained content, leaves
 that path and its group for inspection. An absent database row does not establish that a leftover
 directory is empty or safe to remove.
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import shlex
 from pathlib import PurePosixPath
@@ -90,6 +91,7 @@ def create_vm_workspace(
         raise
     attempt: str | None = None
     clone_published = False
+    generated_config: tuple[str, str] | None = None
     try:
         # Create workspace group (idempotent), add admin, and set up directory with setgid
         target.run(f"sh -c 'getent group {ws_group} >/dev/null 2>&1 || /usr/sbin/groupadd {ws_group}'", sudo=True)
@@ -131,7 +133,9 @@ def create_vm_workspace(
                 error.entity_kind = "workspace"
                 error.entity_name = ws_name
                 error.hint = (
-                    "Check the repository address and VM network/DNS access. "
+                    "Inspect the SSH log for the clone's failure. A timed-out or interrupted guest Git process "
+                    "may still be running in its private attempt directory. "
+                    "Check the repository address, authentication and VM network access as appropriate. "
                     "For private repositories, declare the cloning admin's Git credential on the admin template "
                     "and reinitialize the VM. Managed Git credentials use HTTPS; "
                     "SSH URLs need separately configured SSH access."
@@ -170,12 +174,14 @@ def create_vm_workspace(
         # Tmuxinator config (no tasks yet at workspace creation time)
         if template.tmuxinator:
             tmux_config = generate_config(ws_name, workspace_path)
-            target.write_file(f"{workspace_path}/.tmuxinator.yml", tmux_config)
+            config_path = f"{workspace_path}/.tmuxinator.yml"
+            target.write_file(config_path, tmux_config)
+            generated_config = (config_path, hashlib.sha256(tmux_config.encode()).hexdigest())
             # Symlink so tmuxinator can find it by console session name
             session = console_session_name(ws_name)
             target.run("mkdir -p ~/.config/tmuxinator", timeout=10)
             target.run(
-                f"ln -sf {workspace_path}/.tmuxinator.yml ~/.config/tmuxinator/{session}.yml",
+                f"ln -s -- {shlex.quote(config_path)} ~/.config/tmuxinator/{session}.yml",
                 timeout=10,
             )
 
@@ -198,6 +204,17 @@ def create_vm_workspace(
                 )
         # Cleanup steps are independent: an unreachable private attempt must not
         # prevent reclaiming an empty final reservation and its group.
+        if not clone_published and generated_config is not None:
+            from agentworks.native_files import NativeFiles
+
+            try:
+                with NativeFiles(target) as files:
+                    files.remove(generated_config[0], expected=generated_config[1])
+            except BaseException:
+                output.warn(
+                    f"Generated workspace config {generated_config[0]!r} could not be safely removed. "
+                    "Any changed content was retained."
+                )
         try:
             delete_vm_workspace(
                 vm,
@@ -266,7 +283,13 @@ def delete_vm_workspace(
         else:
             target.run(f"rm -rf {quoted}", sudo=True, timeout=30)
         session = console_session_name(ws_name)
-        target.run(f"rm -f ~/.config/tmuxinator/{session}.yml", check=False, timeout=10)
+        link = f"~/.config/tmuxinator/{session}.yml"
+        target.run(
+            f'if test -L {link} && test "$(readlink -- {link})" = '
+            f"{shlex.quote(workspace_path + '/.tmuxinator.yml')}; then rm -- {link}; fi",
+            check=False,
+            timeout=10,
+        )
         # Remove the workspace's Linux group. check=False so a group that
         # is already gone (or, defensively, one groupdel refuses to remove)
         # is tolerated rather than failing the delete, mirroring the
