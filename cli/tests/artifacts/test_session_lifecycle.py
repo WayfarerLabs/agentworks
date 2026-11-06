@@ -60,6 +60,9 @@ def lifecycle(tmp_path, monkeypatch):
     db, events = _restart_fixture(tmp_path, monkeypatch)
     target = LocalFixtureTransport(tmp_path / "native")
     _patch_transports(monkeypatch, target, target)
+    # The shared lifecycle fixture simulates a completed runtime without
+    # creating tmux. Keep its startup observation on that same runtime seam.
+    monkeypatch.setattr("agentworks.sessions.tmux.startup_protection_enabled", lambda *a, **k: False)
     bundle = ArtifactBundle(name="team", hints={"setup": HintArtifactSpec(text="Use the project tools.\n")})
     template = ResolvedSessionTemplate(
         name="shell-artifacts",
