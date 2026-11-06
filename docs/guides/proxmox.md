@@ -133,7 +133,7 @@ spec:
     storage: data
     bridge: vmbr0
     pool: agentworks
-    verify_ssl: false
+    verify_ssl: true
 ```
 
 `agw resource explain vm-platform/proxmox` documents every field above with its type, whether it is
@@ -202,15 +202,31 @@ On Proxmox, `vm stop` uses the platform's hard power-off operation. It does not 
 guest shutdown. Save and flush work before stopping; request shutdown inside the guest when a
 graceful shutdown is needed.
 
-Deleting a locked VM or losing API access is a failure, not evidence that the VM is gone. Resolve
-the lock or restore API access, then retry deletion. Agentworks retains its VM record when the
-backend VM's deletion cannot be confirmed. A previously deleted VM remains safe to delete again.
+Deletion checks the recorded node, VMID and hostname before stopping an existing guest. A different
+or unobservable provider name is refused rather than treated as the recorded VM. Changing the
+current system slug does not change that stored binding. These checks do not discover migrated VMs
+or establish an immutable provider incarnation.
+
+A completed Proxmox destroy task confirms removal. Agentworks does not require another status read
+after that task, because a pool-scoped token loses its access to the removed guest. Guest sessions
+and Tailscale state are left alone before provider deletion, so a locked VM or failed API request
+does not first disconnect a surviving guest. Binding or deletion failure retains the VM record and
+its children. Resolve the lock or restore the site's configuration and API access, then retry.
+
+For an already-removed guest, a pool-scoped token may return a permission error instead of proving
+absence. Inspect the exact recorded node and VMID in Proxmox and restore appropriately scoped read
+access before retrying; a permission failure is never evidence that the guest is gone. A confirmed
+missing-configuration response needs no further backend mutation.
+
+`--force` permits deleting dependent workspaces, agents and sessions; it does not authorize the
+confirmation prompt or bypass a backend refusal. Use `--yes` separately when deletion is intended
+without a prompt.
 
 ### Native recovery and interactive access
 
 Agentworks uses QEMU Guest Agent for Tailscale-independent administrative commands. Start-time
-Tailscale rejoin, `vm rekey`, logout during deletion, and create-time release verification therefore
-remain available when Tailscale SSH is unavailable.
+Tailscale rejoin, `vm rekey` and create-time release verification therefore remain available when
+Tailscale SSH is unavailable.
 
 QEMU Guest Agent does not provide an interactive terminal, so `vm shell --platform` is unavailable
 for Proxmox. Use the Proxmox web UI's serial console for interactive access. Normal Agentworks work

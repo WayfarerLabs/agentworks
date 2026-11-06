@@ -12,7 +12,8 @@ import contextlib
 from typing import TYPE_CHECKING
 
 from agentworks import output
-from agentworks.plugins.proxmox.api import ProxmoxAPIError, ProxmoxVMNotFoundError
+from agentworks.errors import StateError
+from agentworks.plugins.proxmox.api import ProxmoxVMNotFoundError
 
 if TYPE_CHECKING:
     from agentworks.plugins.proxmox.api import ProxmoxAPI
@@ -24,35 +25,30 @@ if TYPE_CHECKING:
 _SETTLE_TIMEOUT = 60
 
 
-def _vm_is_absent(api: ProxmoxAPI, node: str, vmid: int) -> bool:
-    try:
-        api.vm_status(node, vmid)
-    except ProxmoxVMNotFoundError:
-        return True
-    return False
-
-
-def stop_and_delete_vm(api: ProxmoxAPI, node: str, vmid: int) -> None:
+def stop_and_delete_vm(api: ProxmoxAPI, node: str, vmid: int, *, expected_name: str | None = None) -> None:
     """Delete the bound VM or raise when its removal cannot be confirmed.
 
-    Only the API's exact missing-configuration response establishes absence.
-    Permission, lock, transport and task failures remain failures even when an
-    HTTP status happens to match the missing-configuration response.
+    A completed destroy task confirms removal. Before mutation, only the API's
+    exact missing-configuration response establishes absence. A bound resource
+    also requires the observed provider name to match its recorded hostname;
+    create rollback instead targets the VMID allocated by its own attempt.
     """
     try:
-        status = api.vm_status(node, vmid)
+        status = api.vm_status(node, vmid, timeout=10)
     except ProxmoxVMNotFoundError:
         return
+    if expected_name is not None:
+        observed_name = status.get("name")
+        if not expected_name.strip() or not isinstance(observed_name, str) or observed_name != expected_name:
+            raise StateError(
+                f"Proxmox VM {vmid} on node '{node}' does not match recorded hostname {expected_name!r}",
+                hint="Inspect the VM's recorded node, VMID and hostname against Proxmox before retrying deletion.",
+            )
     if status["status"] == "running":
         upid = api.stop_vm(node, vmid)
         api.wait_for_task(node, upid)
     upid = api.delete_vm(node, vmid)
     api.wait_for_task(node, upid)
-    if not _vm_is_absent(api, node, vmid):
-        raise ProxmoxAPIError(
-            f"Proxmox VM {vmid} still exists on node '{node}' after deletion",
-            hint="Inspect this VM in Proxmox, then retry deletion; its Agentworks record is retained.",
-        )
 
 
 def _settle_and_teardown(api: ProxmoxAPI, node: str, vmid: int, pending_upid: str | None) -> None:

@@ -90,15 +90,14 @@ class FakeProxmoxAPI:
     wait, the escalation re-entry, the orphan-backstop probe); a
     ``None`` entry in ``status_errors`` means "this call succeeds",
     letting a test target a later status call (e.g. the probe, the
-    second status call in a teardown flow) without failing the first.
-    A deleted VM is modeled: ``delete_vm`` marks it gone and
-    ``vm_status`` then raises the API error a real PVE returns, which
-    is what keeps the post-teardown existence probe quiet on the happy
-    paths."""
+    subsequent observation) without failing the first. A deleted VM is
+    modeled: ``delete_vm`` marks it gone and ``vm_status`` then raises
+    the typed missing-configuration error."""
 
     def __init__(self) -> None:
         self.calls: list[tuple[Any, ...]] = []
         self.running = False
+        self.provider_name: object = "agw-vm1"
         self.vm_deleted = False
         self.next_id_error: BaseException | None = None
         self.configure_error: BaseException | None = None
@@ -159,7 +158,7 @@ class FakeProxmoxAPI:
         self.vm_deleted = True
         return "UPID:pve1:delete"
 
-    def vm_status(self, node: str, vmid: int) -> dict[str, Any]:
+    def vm_status(self, node: str, vmid: int, *, timeout: float | None = None) -> dict[str, Any]:
         if self.status_errors:
             err = self.status_errors.pop(0)
             if err is not None:
@@ -167,7 +166,7 @@ class FakeProxmoxAPI:
         self.calls.append(("vm_status", node, vmid))
         if self.vm_deleted:
             raise ProxmoxVMNotFoundError(f"Configuration file 'nodes/{node}/qemu-server/{vmid}.conf' does not exist")
-        return {"status": "running" if self.running else "stopped"}
+        return {"status": "running" if self.running else "stopped", "name": self.provider_name}
 
     # -- tasks -----------------------------------------------------------------
 
@@ -564,41 +563,38 @@ class TestTransportFailureDuringRollback:
         assert exc.value is failure
         assert any("Rollback incomplete" in w and "node 'pve1'" in w for w in captured_output.warnings)
 
-    # The following cases fail the final absence check after a successful
-    # mutation. An unknown confirmation must not become a silent success.
-
-    def test_failure_path_probe_blip_still_warns_via_containment(
+    def test_failure_path_needs_no_read_after_confirmed_destroy(
         self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
     ) -> None:
         platform, fake = _platform_with_fake(monkeypatch)
         failure = ProxmoxAPIError("config exploded")
         fake.configure_error = failure
-        # First status call (teardown) succeeds; the probe hits the blip.
-        fake.status_errors = [None, OSError("network blip")]
+        denied_after_destroy = ProxmoxAPIError("VM.Audit denied")
+        fake.status_errors = [None, denied_after_destroy]
 
         with pytest.raises(ProxmoxAPIError) as exc:
             platform.create(_request(tailscale=False), RunContext())
 
         assert exc.value is failure
-        assert ("delete_vm", "pve1", _NEWID) in fake.calls
-        assert any("Rollback incomplete" in w and "node 'pve1'" in w for w in captured_output.warnings)
+        assert fake.vm_deleted
+        assert fake.status_errors == [denied_after_destroy]
+        assert captured_output.warnings == []
 
-    def test_interrupt_path_probe_blip_still_warns_via_containment(
+    def test_interrupt_path_needs_no_read_after_confirmed_destroy(
         self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
     ) -> None:
         platform, fake = _platform_with_fake(monkeypatch)
         interrupt = _interrupt_the_bootstrap(monkeypatch)
-        # First status call (teardown) succeeds; the probe hits the blip.
-        fake.status_errors = [None, OSError("network blip")]
+        denied_after_destroy = ProxmoxAPIError("VM.Audit denied")
+        fake.status_errors = [None, denied_after_destroy]
 
         with pytest.raises(KeyboardInterrupt) as exc:
             platform.create(_request(tailscale=True), RunContext())
 
         assert exc.value is interrupt
-        assert ("delete_vm", "pve1", _NEWID) in fake.calls
-        (abandoned,) = [w for w in captured_output.warnings if "Cleanup abandoned" in w]
-        assert f"VM {_NEWID}" in abandoned
-        assert "node 'pve1'" in abandoned
+        assert fake.vm_deleted
+        assert fake.status_errors == [denied_after_destroy]
+        assert len(captured_output.warnings) == 1
 
 
 class TestPlainFailure:
@@ -665,7 +661,7 @@ class TestDeleteOp:
     def _vm_row() -> VMRow:
         return cast(
             "VMRow",
-            SimpleNamespace(name="vm1", platform_metadata={"vmid": str(_NEWID), "node": "pve1"}),
+            SimpleNamespace(name="vm1", hostname="agw-vm1", platform_metadata={"vmid": str(_NEWID), "node": "pve1"}),
         )
 
     def test_running_vm_is_stopped_then_deleted(self, monkeypatch: pytest.MonkeyPatch) -> None:
