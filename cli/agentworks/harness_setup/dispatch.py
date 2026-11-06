@@ -28,7 +28,6 @@ from agentworks.harness_setup.locking import native_mutation_guard
 from agentworks.harness_setup.model import NativeClaim, NativeSetupState, SetupRecord
 from agentworks.harness_setup.outcomes import (
     SetupFailure,
-    normalize_setup_diagnostic,
     sanitize_setup_diagnostic,
     sanitize_setup_error,
 )
@@ -54,15 +53,7 @@ class _SetupInfrastructureFailure(Exception):
 
 def _sanitize(invocation: SetupInvocation, text: str) -> str:
     """Redact diagnostics before they enter persisted state or the failure list."""
-    if invocation.runner.logger is not None:
-        text = invocation.runner.logger.sanitize(text)
-
-    def redact_normalized(value: str) -> str:
-        if invocation.runner.logger is not None:
-            value = invocation.runner.logger.sanitize(value, normalize=normalize_setup_diagnostic)
-        return value
-
-    return sanitize_setup_diagnostic(text, redactions=invocation.secrets.values(), redact=redact_normalized)
+    return sanitize_setup_diagnostic(text, redactions=invocation.secrets.values(), logger=invocation.runner.logger)
 
 
 def destination_id(vm: VMRow, runner: Transport, *, location: str | None = None, username: str | None = None) -> str:
@@ -76,13 +67,7 @@ def destination_id(vm: VMRow, runner: Transport, *, location: str | None = None,
         try:
             result = runner.run(f"printf '\\nAGW_NATIVE_ID='; {command}", timeout=15)
         except AgentworksError as error:
-            logger = runner.logger
-            sanitize_setup_error(
-                error,
-                redact=None
-                if logger is None
-                else lambda text: logger.sanitize(text, normalize=normalize_setup_diagnostic),
-            )
+            sanitize_setup_error(error, logger=runner.logger)
             raise
         values = [
             line.removeprefix("AGW_NATIVE_ID=")

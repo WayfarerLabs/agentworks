@@ -224,7 +224,12 @@ class ClaudeCodeIntegration(HarnessIntegration):
                 plan,
                 invocation,
                 lambda files: probe_native(
-                    invocation.runner, tool="claude", environment=invocation.environment, files=files, vm_only=True
+                    invocation.runner,
+                    tool="claude",
+                    environment=invocation.environment,
+                    redactions=invocation.secrets.values(),
+                    files=files,
+                    vm_only=True,
                 ),
             )
         return plan
@@ -236,6 +241,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
                 invocation.runner,
                 tool="claude",
                 environment=invocation.environment,
+                redactions=invocation.secrets.values(),
                 home=invocation.home,
                 check_policy=False,
             )
@@ -269,6 +275,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
                     invocation.runner,
                     tool="claude",
                     environment=invocation.environment,
+                    redactions=invocation.secrets.values(),
                     home=invocation.home,
                     files=files,
                 ),
@@ -294,6 +301,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
                     invocation.runner,
                     tool="claude",
                     environment=invocation.environment,
+                    redactions=invocation.secrets.values(),
                     workspace=invocation.root,
                     files=files,
                     workspace_only=True,

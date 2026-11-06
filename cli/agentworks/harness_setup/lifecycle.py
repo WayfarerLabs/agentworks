@@ -178,7 +178,7 @@ def apply_vm_setup(
             vm_name=vm.name, platform=site_platform_name(vm.site, registry), site=vm.site, user=vm.admin_username
         )
         environment = item.environment(values, context)
-        runner = SetupRunner(target, environment)
+        runner = SetupRunner(target, environment, redactions=values.values())
         if item.component == "vm":
             invocation: SetupInvocation = VMSetupInvocation(
                 vm=vm,
@@ -228,7 +228,9 @@ def apply_agent_setup(
         agent_name=inputs.name,
     )
     environment = inputs.environment(values, context)
-    runner = SetupRunner(transport_for_user(vm, config, user=username, logger=logger), environment)
+    runner = SetupRunner(
+        transport_for_user(vm, config, user=username, logger=logger), environment, redactions=values.values()
+    )
     invocation = UserSetupInvocation(
         vm=vm,
         runner=runner,
@@ -272,7 +274,7 @@ def apply_workspace_setup(
         workspace_dir=root,
     )
     environment = inputs.environment(values, context)
-    runner = SetupRunner(transport(vm, config, logger=logger), environment)
+    runner = SetupRunner(transport(vm, config, logger=logger), environment, redactions=values.values())
     invocation = WorkspaceSetupInvocation(
         vm=vm,
         runner=runner,

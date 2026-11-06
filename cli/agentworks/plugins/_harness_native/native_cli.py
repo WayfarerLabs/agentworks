@@ -138,9 +138,7 @@ def _claude_market(name: str, source: dict[str, object], declaration: object) ->
     if not isinstance(declaration, dict):
         return NativeMarket(name, None, "its extraKnownMarketplaces user declaration is not an object")
     if "source" not in declaration:
-        if kind in ("git", "github"):
-            return NativeMarket(name, None, "its full git source is unavailable without a usable user declaration")
-        return NativeMarket(name, identity({"source": source}))
+        return NativeMarket(name, None, "its source is unavailable without a usable user declaration")
     declared_source = declaration["source"]
     if not isinstance(declared_source, dict):
         return NativeMarket(name, None, "its user declaration has no object-valued source")

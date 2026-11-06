@@ -27,7 +27,7 @@ def hostile_text() -> tuple[str, str]:
 
 
 def assert_safe(text: str, secret: str) -> None:
-    assert secret not in text
+    assert all(fragment not in text for fragment in (secret, secret[: len(secret) // 2], secret[len(secret) // 2 :]))
     assert "\x1b" not in text and "\x07" not in text and "\n" not in text and "\r" not in text
     assert len(text.encode()) <= 2048
 
@@ -54,7 +54,7 @@ def test_session_probe_sanitizes_raised_and_returned_guest_failures(stage):
     else:
         runner.run.side_effect = [python, SSHResult(19 if stage == "probe-status" else 0, "invalid", payload)]
     with pytest.raises((SSHError, ExternalError)) as caught:
-        probe_native(runner, tool="grok", environment={"TOKEN": secret})
+        probe_native(runner, tool="grok", environment={"TOKEN": secret}, redactions=(secret,))
     assert_safe(str(caught.value), secret)
     if caught.value.hint:
         assert_safe(caught.value.hint, secret)
@@ -64,7 +64,7 @@ def test_session_probe_sanitizes_raised_and_returned_guest_failures(stage):
 
 def test_advisory_ancestor_warning_redacts_normalized_runtime_values():
     secret, payload = hostile_text()
-    with patch("agentworks.output.warn") as warn, ancestor_diagnostics("grok-build", environment={"TOKEN": secret}):
+    with patch("agentworks.output.warn") as warn, ancestor_diagnostics("grok-build", redactions=(secret,)):
         raise ExternalError(payload, hint=payload)
     message = warn.call_args.args[0]
     assert secret not in message and "\x1b" not in message and "\x07" not in message
@@ -79,7 +79,7 @@ def test_setup_runner_preserves_error_identity_and_sanitizes_environment():
     failure = SSHError(payload, hint=payload)
     target.run.side_effect = failure
     with pytest.raises(SSHError) as caught:
-        SetupRunner(target, {"TOKEN": secret}).run("fixture")
+        SetupRunner(target, {"TOKEN": secret}, redactions=(secret,)).run("fixture")
     assert caught.value is failure
     assert_safe(str(failure), secret)
     assert failure.hint is not None

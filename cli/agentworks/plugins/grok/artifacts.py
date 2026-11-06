@@ -1,4 +1,4 @@
-"""Grok Build artifact placement for its interactive native discovery contract."""
+"""Grok Build native discovery and explicitly enabled session carriers."""
 
 from __future__ import annotations
 
@@ -99,7 +99,17 @@ def session_artifacts(
 ) -> NativeSessionArtifacts:
     if context is None or not has_artifacts(context):
         return NativeSessionArtifacts()
-    inputs, deferred = select_session_artifacts(context.inputs, enabled_workarounds, _SESSION_WORKAROUNDS)
+    mode_args = extra_args[: extra_args.index("--")] if "--" in extra_args else extra_args
+    headless = any(
+        token.split("=", 1)[0] in {"--single", "--prompt-json", "--prompt-file"} or token.startswith("-p")
+        for token in mode_args
+    )
+    workarounds = {
+        artifact_type: workaround
+        for artifact_type, workaround in _SESSION_WORKAROUNDS.items()
+        if artifact_type is not ArtifactType.AGENT or headless
+    }
+    inputs, deferred = select_session_artifacts(context.inputs, enabled_workarounds, workarounds)
     if not inputs and not context.ancestor_files:
         return NativeSessionArtifacts(ArtifactApplication(deferred=deferred))
     validate_names(inputs)

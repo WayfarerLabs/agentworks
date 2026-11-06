@@ -409,17 +409,9 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
         # Claude's user-scoped removal requires the current user declaration,
         # even when list still reports a registration. Check before uninstalling
         # any dependencies; never fall back to removal across all scopes.
-        relevant_markets = (
-            {market.name for market in desired}
-            | {
-                claim.identifier if claim.role == "marketplace" else claim.identifier.rpartition("@")[2]
-                for claim in native_claims
-            }
-            | {selector.rpartition("@")[2] for selector in selectors}
-        )
         for market in markets:
-            if market.name in relevant_markets and market.unavailable_reason is not None:
-                skip("marketplace", market.name, market.unavailable_reason)
+            if market.source is None:
+                skip("marketplace", market.name, market.unavailable_reason or "its native source cannot be observed")
 
         retiring_markets = {
             claim.identifier

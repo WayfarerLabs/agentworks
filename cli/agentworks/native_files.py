@@ -292,10 +292,19 @@ class NativeFiles(AbstractContextManager["NativeFiles"]):
 
     def __enter__(self) -> NativeFiles:
         require_python3(self.runner)
-        result = self.runner.run("mktemp -d -t agentworks-native-XXXXXXXXXX", check=False)
-        if not result.ok or not PurePosixPath(result.stdout.strip()).name.startswith("agentworks-native-"):
+        result = self.runner.run(
+            "agw_native_staging=$(mktemp -d -t agentworks-native-XXXXXXXXXX) && "
+            "printf '\\nAGW_NATIVE_STAGING=%s\\n' \"$agw_native_staging\"",
+            check=False,
+        )
+        paths = [
+            line.removeprefix("AGW_NATIVE_STAGING=")
+            for line in result.stdout.splitlines()
+            if line.startswith("AGW_NATIVE_STAGING=")
+        ]
+        if not result.ok or len(paths) != 1 or not PurePosixPath(paths[0]).name.startswith("agentworks-native-"):
             raise ExternalError("could not create native setup staging directory")
-        self.remote = native_path(result.stdout.strip())
+        self.remote = native_path(paths[0])
         try:
             self._local = tempfile.TemporaryDirectory(prefix="agentworks-native-")
         except Exception:

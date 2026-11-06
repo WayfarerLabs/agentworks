@@ -3,17 +3,18 @@
 from __future__ import annotations
 
 import re
-import shlex
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from agentworks.errors import AgentworksError, StateError
+from agentworks.secrets.redaction import secret_redaction_forms
 from agentworks.terminal import sanitize_fact_line
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable
+    from collections.abc import Iterable
 
     from agentworks.harness_setup.model import NativeSetupState
+    from agentworks.ssh import SSHLogger
 
 # Remove complete terminal strings and escape sequences before the shared scalar
 # boundary strips remaining controls, including truncated or malformed sequences.
@@ -36,23 +37,25 @@ def sanitize_setup_diagnostic(
     text: str,
     *,
     redactions: Iterable[str] = (),
-    redact: Callable[[str], str] | None = None,
+    logger: SSHLogger | None = None,
 ) -> str:
     """Bound a setup diagnostic to one terminal-safe line and 2 KiB of UTF-8.
 
-    Callers can redact raw text first, then redact normalized representations
-    through the callback before truncation. Render persisted older diagnostics
-    through the same boundary without rewriting state.
+    Only explicit resolved values and the operation logger's registered secrets
+    are redacted. Match raw and normalized representations before truncation.
+    Render persisted older diagnostics through the same boundary without rewriting state.
     """
-    patterns = {form for value in redactions if value for form in (value, shlex.quote(value))}
+    if logger is not None:
+        text = logger.sanitize(text)
+    patterns = {form for value in redactions for form in secret_redaction_forms(value)}
     for pattern in sorted(patterns, key=len, reverse=True):
         text = text.replace(pattern, "[REDACTED]")
     text = normalize_setup_diagnostic(text)
     normalized = {normalize_setup_diagnostic(pattern) for pattern in patterns}
     for pattern in sorted(filter(None, normalized), key=len, reverse=True):
         text = text.replace(pattern, "[REDACTED]")
-    if redact is not None:
-        text = redact(text)
+    if logger is not None:
+        text = logger.sanitize(text, normalize=normalize_setup_diagnostic)
     encoded = text.encode("utf-8")
     if len(encoded) > _DIAGNOSTIC_LIMIT:
         text = encoded[: _DIAGNOSTIC_LIMIT - len(_TRUNCATED)].decode("utf-8", errors="ignore") + _TRUNCATED
@@ -63,7 +66,7 @@ def sanitize_setup_error(
     error: AgentworksError,
     *,
     redactions: Iterable[str] = (),
-    redact: Callable[[str], str] | None = None,
+    logger: SSHLogger | None = None,
 ) -> None:
     """Keep guest-derived error text safe without changing its type or identity."""
     values = tuple(redactions)
@@ -71,9 +74,9 @@ def sanitize_setup_error(
     current: BaseException | None = error
     while isinstance(current, AgentworksError) and id(current) not in seen:
         seen.add(id(current))
-        current.args = (sanitize_setup_diagnostic(str(current), redactions=values, redact=redact),)
+        current.args = (sanitize_setup_diagnostic(str(current), redactions=values, logger=logger),)
         if current.hint:
-            current.hint = sanitize_setup_diagnostic(current.hint, redactions=values, redact=redact)
+            current.hint = sanitize_setup_diagnostic(current.hint, redactions=values, logger=logger)
         # Provider exception attributes can embed SSH argv and resolved values.
         # Keep safe domain causes, but do not expose raw provider chains in logs
         # or --debug output after sanitizing only their outer message.

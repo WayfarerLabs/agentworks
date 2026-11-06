@@ -1626,3 +1626,25 @@ The 26-requirement source and permanent-promotion audit finds no material docume
 remaining unchecked boxes retain actual-scope acceptance, final delivery, requirement reconciliation
 and locks. Historical handoff evidence does not close composite live obligations. Both locks remain
 absent pending the independent full report and final requirement-by-requirement reconciliation.
+
+
+## Integration-report correction round 7, 2026-11-06
+
+The operator directed continuation after full report `6676063798`, with up to six hours for the next
+integration report after its ready handoff and earlier assessment on arrival. The joint batch,
+implementation obligations and evidence record live in the companion
+[round 7 plan](../2026-09-06-harness-scope-framework/plan.md#integration-report-correction-round-7-2026-11-06).
+Start comment `6676418997` freezes the batch against `b14302bc`; the PR is draft before edits.
+
+Artifact-specific corrections cover routing-table coverage after capture changes, missing upstream
+payload identities, honest new-receiver and inspection health, session ownership and secret-safe
+failure recovery, preservation of malformed native entries, truthful Grok persona support and
+private clone attempts. Confirmed empty routing remains distinct from unknown; unrelated native
+failure does not invalidate confirmed routing. No persisted format change or ancestor freshness gate
+is introduced. The report's actual-scope positive evidence is retained at its stated head/config;
+it does not establish the failing paths or authorize either lock.
+
+- [ ] Complete the joint correction, private review and exact-head validation in the companion plan,
+      updating this effort's permanent guides and support matrix with the corrected behavior.
+- [ ] Reconcile the subsequent full report against R1-R10 and the predecessor's retained obligations,
+      then finish permanent promotion and create both locks only when the evidence proves completion.

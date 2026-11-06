@@ -176,6 +176,7 @@ class GrokBuildIntegration(HarnessIntegration):
                 invocation.runner,
                 tool="grok",
                 environment=invocation.environment,
+                redactions=invocation.secrets.values(),
                 home=invocation.home,
                 check_policy=False,
             )
@@ -202,6 +203,7 @@ class GrokBuildIntegration(HarnessIntegration):
                     invocation.runner,
                     tool="grok",
                     environment=invocation.environment,
+                    redactions=invocation.secrets.values(),
                     home=invocation.home,
                     files=files,
                 ),
@@ -222,6 +224,7 @@ class GrokBuildIntegration(HarnessIntegration):
                     invocation.runner,
                     tool="grok",
                     environment=invocation.environment,
+                    redactions=invocation.secrets.values(),
                     workspace=invocation.root,
                     files=files,
                     workspace_only=True,

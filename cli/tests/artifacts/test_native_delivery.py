@@ -218,7 +218,12 @@ def test_claude_session_plugin_uses_native_namespace_and_private_directory():
 @pytest.mark.parametrize("render", [codex.session_artifacts, grok.session_artifacts])
 def test_private_skills_stay_unhandled_when_native_cli_cannot_discover_them(render):
     item = artifact(ArtifactType.SKILL)
-    result = render(enabled_workarounds=enabled(render), context=context(item), configured=None, extra_args=[])
+    result = render(
+        enabled_workarounds=enabled(render),
+        context=context(item),
+        configured=None,
+        extra_args=["--single", "task"] if render is grok.session_artifacts else [],
+    )
     assert result.application.files == ()
     assert result.application.deferred[0].input_id == item.identity
     assert result.application.deferred[0].destination == "session"
@@ -234,7 +239,12 @@ def test_native_persona_options_do_not_enable_hooks_or_unknown_native_fields(ren
     }[render]
     item = artifact(ArtifactType.AGENT, options={name: {"hooks": {}}})
     with pytest.raises(ConfigError):
-        render(enabled_workarounds=enabled(render), context=context(item), configured=None, extra_args=[])
+        render(
+            enabled_workarounds=enabled(render),
+            context=context(item),
+            configured=None,
+            extra_args=["--single", "task"] if render is grok.session_artifacts else [],
+        )
 
 
 @pytest.mark.parametrize(
@@ -312,7 +322,7 @@ def test_native_probe_passes_environment_separately_and_rejects_policy_failures(
 
     with pytest.raises(StateError):
         probe_native(
-            SimpleNamespace(run=run), tool="claude", home="/home/a", environment={"API_TOKEN": "a-secret-value"}
+            SimpleNamespace(run=run, logger=None), tool="claude", home="/home/a", environment={"API_TOKEN": "a-secret-value"}
         )
     assert "a-secret-value" not in calls[-1][0]
     assert calls[-1][1]["env"]["API_TOKEN"] == "a-secret-value"
@@ -475,7 +485,12 @@ def test_large_native_argument_artifacts_fail_before_publication(render, type):
     item = artifact(type)
     item = replace(item, content=replace(item.content, text="x" * (128 * 1024)))
     with pytest.raises(ConfigError):
-        render(enabled_workarounds=enabled(render), context=context(item), configured=None, extra_args=[])
+        render(
+            enabled_workarounds=enabled(render),
+            context=context(item),
+            configured=None,
+            extra_args=["--single", "task"] if render is grok.session_artifacts else [],
+        )
 
 
 def test_large_claude_context_uses_private_file_without_an_argument_size_penalty():
@@ -676,7 +691,12 @@ def test_workaround_selects_only_its_types_including_deferred_ancestors(render, 
     items = tuple(sorted(items, key=lambda item: item.origin.component == "session"))
     received_context = context(*items)
     assert received_context.inputs.deferred
-    result = render(received_context, configured=None, extra_args=[], enabled_workarounds=[workaround])
+    result = render(
+        received_context,
+        configured=None,
+        extra_args=["--single", "task"] if render is grok.session_artifacts and ArtifactType.AGENT in selected else [],
+        enabled_workarounds=[workaround],
+    )
     assert flag in result.argv
     assert {item.input_id for item in result.application.deferred} == {
         item.identity for item in items if item.content.type not in selected
@@ -692,6 +712,8 @@ def test_workaround_selects_only_its_types_including_deferred_ancestors(render, 
     ],
 )
 def test_unselected_guidance_does_not_restrict_native_guidance_flags(render, workaround, args):
+    if render is grok.session_artifacts:
+        args = [*args, "--single", "task"]
     result = render(
         context(artifact(ArtifactType.RULE), artifact(ArtifactType.AGENT)),
         configured=None,
@@ -1032,6 +1054,6 @@ def test_new_carrier_cannot_choose_one_of_competing_ancestor_origins(render, mat
         render(
             context=context(selected, ancestors=tuple(owned(file) for file in earlier)),
             configured=None,
-            extra_args=[],
+            extra_args=["--single", "task"] if render is grok.session_artifacts else [],
             enabled_workarounds=enabled(render),
         )

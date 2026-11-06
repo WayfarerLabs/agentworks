@@ -20,7 +20,7 @@ from agentworks.package_sources import CaptureLimits
 from agentworks.sources import SourceRefError
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Iterable, Mapping, Sequence
 
     from agentworks.artifacts.application import OwnedArtifactFile
     from agentworks.transports import Transport
@@ -398,6 +398,7 @@ def probe_native(
     *,
     tool: str,
     environment: Mapping[str, str],
+    redactions: Iterable[str] = (),
     home: str | None = None,
     workspace: str = "",
     files: Sequence[ArtifactFile | OwnedArtifactFile] = (),
@@ -412,10 +413,11 @@ def probe_native(
     Recognized files do not widen the proposed paths, selected identities or policy
     checks. Their actual native name must still agree before inventory accepts them.
     """
+    secret_values = tuple(redactions)
     try:
         require_python3(runner)
     except AgentworksError as error:
-        sanitize_setup_error(error, redactions=environment.values())
+        sanitize_setup_error(error, redactions=secret_values, logger=runner.logger)
         raise
     entries = {file.path: file.native_identity for file in files if file.native_identity}
     recognized_entries = {file.path: file.native_identity for file in recognized_files if file.native_identity}
@@ -446,7 +448,7 @@ def probe_native(
             timeout=30,
         )
     except AgentworksError as error:
-        sanitize_setup_error(error, redactions=environment.values())
+        sanitize_setup_error(error, redactions=secret_values, logger=runner.logger)
         raise
     # Login startup scripts can echo the supplied runtime environment on failure.
     # Redact known values and their shell-quoted forms before publishing diagnostics.
@@ -454,7 +456,8 @@ def probe_native(
         raise ExternalError(
             sanitize_setup_diagnostic(
                 f"{tool} artifact discovery probe failed (exit {result.returncode}): {result.stderr}",
-                redactions=environment.values(),
+                redactions=secret_values,
+                logger=runner.logger,
             )
         )
     try:
@@ -482,7 +485,7 @@ def probe_native(
     except (ValueError, KeyError, IndexError, TypeError):
         raise ExternalError(
             f"{tool} artifact discovery probe returned an invalid response",
-            hint=sanitize_setup_diagnostic(result.stderr, redactions=environment.values()) or None,
+            hint=sanitize_setup_diagnostic(result.stderr, redactions=secret_values, logger=runner.logger) or None,
         ) from None
     inventory_problems = _inventory_problems(
         observed.get("inventory"), identities, entries, recognized_entries=recognized_entries
@@ -504,13 +507,14 @@ def probe_native(
         message = f"{tool} artifact delivery: " + "; ".join(
             [*(_PROBLEM_MESSAGES[problem].format(tool=tool) for problem in problems), *details]
         )
-        message = sanitize_setup_diagnostic(message, redactions=environment.values())
+        message = sanitize_setup_diagnostic(message, redactions=secret_values, logger=runner.logger)
         paths = [*problem_paths, *(problem.path for problem in inventory_problems if problem.path)]
         hint = sanitize_setup_diagnostic(
             "Inspect native paths: " + ", ".join(repr(path) for path in dict.fromkeys(paths))
             if paths
             else f"Native configuration directory: {root!r}",
-            redactions=environment.values(),
+            redactions=secret_values,
+            logger=runner.logger,
         )
         if all(problem in ("native-artifact-collision", "native-artifact-identity-mismatch") for problem in problems):
             raise NativeArtifactConflictError(

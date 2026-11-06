@@ -1091,3 +1091,45 @@ The 26-requirement source and permanent-promotion audit finds no material docume
 remaining unchecked boxes retain actual-scope acceptance, final delivery, requirement reconciliation
 and locks. Historical handoff evidence does not close composite live obligations. Both locks remain
 absent pending the independent full report and final requirement-by-requirement reconciliation.
+
+
+## Integration-report correction round 7, 2026-11-06
+
+The operator directed continuation after report `6676063798` and increased the next integration
+report window to six hours from its ready handoff. A report arriving earlier may be assessed and
+acted on immediately. Start comment `6676418997` freezes the batch at 2026-11-06 03:53:58 UTC,
+against `b14302bc`; main remains `c8d4dfb3`. The PR returned to draft before production edits.
+This is new authenticated direction following the earlier exhausted allowance.
+
+The report supplies the missing exact-head pytest exit receipt: 10,880 passed, 11 skipped, exit 0.
+It also establishes substantial actual-scope acceptance across the reported Linux, macOS and Windows
+beds. Unchanged positive cells retain their exact head/config; they do not certify changed failure
+paths or waive remaining acceptance. Three blockers and the additional material findings prevent
+both locks. The artifact companion tracks this same joint correction through this section.
+
+- [ ] Correct routing evidence coverage for restored, added and unreadable routed inputs, and
+      receiving-facet/inspection health without an ancestor freshness gate or new codec.
+- [ ] Preserve recoverable managed session ownership after post-spawn uncertainty, keep socket and
+      identity recovery coherent, and protect resolved secrets on create/start/restart diagnostics.
+- [ ] Use definitive Proxmox destroy-task acknowledgement, refuse a different recorded guest name,
+      and remove pre-delete guest mutations. Binding failure retains the row; force does not imply
+      consent. Preserve the ongoing execution effort's separate trust and HTTP-error work.
+- [ ] Preserve unavailable native entries, name durable diagnostic locations, and report unsupported
+      interactive Grok personas as unhandled rather than claiming application.
+- [ ] Make clone cleanup independent, retain occupied reservations and keep private attempts private
+      during ACL repair. Surface residual-attempt recovery limits without automatic destructive
+      reclamation or a new journal.
+- [ ] Disposition every reported should-fix and incidental finding against its current caller,
+      including exact Transport/SSH overlap, and update permanent collateral with actual behavior.
+- [ ] Strengthen the identified behavioral regression boundaries and native CI prerequisite, run all
+      three private lanes and required integrated gates, and publish one exact green ready handoff.
+- [ ] Wait up to six hours for the next full integration report, assess earlier arrival promptly,
+      and reconcile every retained requirement before final promotion and either lock.
+
+Independent scouts confirm that input IDs include content digests, so an old non-null input table is
+not confirmation of a changed capture. They also reproduce the dead-socket permission wedge and
+unverified-create record removal. Proxmox's successful destroy task already confirms the operation;
+its pool-scoped token can legitimately lose audit permission immediately afterwards. Existing
+provider name evidence can guard different-name VMID reuse, but is not an immutable incarnation or
+race-free identity promise. These scoped facts guide the corrections; local reproductions alone do
+not complete the real-backend acceptance requirements.

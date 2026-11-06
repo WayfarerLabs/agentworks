@@ -471,7 +471,12 @@ class CodexIntegration(HarnessIntegration):
                 plan,
                 invocation,
                 lambda files: probe_native(
-                    invocation.runner, tool="codex", environment=invocation.environment, files=files, vm_only=True
+                    invocation.runner,
+                    tool="codex",
+                    environment=invocation.environment,
+                    redactions=invocation.secrets.values(),
+                    files=files,
+                    vm_only=True,
                 ),
             )
         return plan
@@ -483,6 +488,7 @@ class CodexIntegration(HarnessIntegration):
                 invocation.runner,
                 tool="codex",
                 environment=invocation.environment,
+                redactions=invocation.secrets.values(),
                 home=invocation.home,
                 check_policy=False,
             )
@@ -522,6 +528,7 @@ class CodexIntegration(HarnessIntegration):
                     invocation.runner,
                     tool="codex",
                     environment=invocation.environment,
+                    redactions=invocation.secrets.values(),
                     home=invocation.home,
                     files=files,
                 ),
@@ -557,6 +564,7 @@ class CodexIntegration(HarnessIntegration):
                     invocation.runner,
                     tool="codex",
                     environment=invocation.environment,
+                    redactions=invocation.secrets.values(),
                     workspace=invocation.root,
                     files=files,
                     workspace_only=True,

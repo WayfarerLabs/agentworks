@@ -474,6 +474,7 @@ class _FakeTarget:
         *,
         model: _SupportsDispatch | None = None,
     ) -> None:
+        self.logger = None
         self.commands: list[str] = []
         # Substring -> response. First matching substring wins; default = ok.
         self.responses = responses or {}
