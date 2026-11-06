@@ -112,8 +112,8 @@ def test_incomplete_or_differing_git_source_survives_mapping(transport, tool, de
         cli = NativeCLI(tool, files, home=str(transport.home), config_root=str(root))
         observed = cli.markets()
         assert next(item for item in observed if item.name == "fixture-market") == before[0]
-        expected = {"one@fixture-market"} | ({"two@independent"} if tool == "codex" else set())
-        assert {item.identifier for item in cli.plugins(observed)} == expected
+        expected_plugin_identifiers = {"one@fixture-market"} | ({"two@independent"} if tool == "codex" else set())
+        assert {item.identifier for item in cli.plugins(observed)} == expected_plugin_identifiers
 
 
 @pytest.mark.parametrize("source_kind", ["local", "git"])

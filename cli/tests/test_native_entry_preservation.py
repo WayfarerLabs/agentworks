@@ -116,7 +116,7 @@ def test_active_reinit_reports_missing_claude_user_source_without_reconstructing
 def test_unmanaged_inventory_without_a_source_does_not_poison_reinit(transport, tool, add_plugin, monkeypatch):
     market = market_fixture(transport, tool)
     config = NativeUserConfig(marketplaces=[str(market)], plugins=["one@fixture-market"])
-    claims = []
+    claims: list[tuple[NativeClaim, ...]] = []
     setup_user(tool, config, invocation(transport, claims))
     previous = record(claims[-1], tool)
     original = NativeCLI.markets
@@ -125,7 +125,7 @@ def test_unmanaged_inventory_without_a_source_does_not_poison_reinit(transport, 
         return (*original(self), NativeMarket("native-built-in", None, settings_conflict=True))
 
     monkeypatch.setattr(NativeCLI, "markets", builtin)
-    reasons = []
+    reasons: list[str] = []
     if add_plugin:
         config = config.model_copy(update={"plugins": ["one@fixture-market", "two@fixture-market"]})
     setup_user(tool, config, replace(invocation(transport, claims, prior=previous), report_incomplete=reasons.append))
@@ -137,7 +137,7 @@ def test_unmanaged_inventory_without_a_source_does_not_poison_reinit(transport, 
 @pytest.mark.parametrize("strategy", ["replace", "merge-overwrite", "merge-preserve", "skip-existing"])
 def test_mapping_can_repair_an_unrelated_unobservable_entry(transport, strategy):
     market = market_fixture(transport, "claude")
-    claims = []
+    claims: list[tuple[NativeClaim, ...]] = []
     config = NativeUserConfig(marketplaces=[str(market)])
     setup_user("claude", config, invocation(transport, claims))
     settings = transport.home / ".claude/settings.json"
@@ -147,7 +147,7 @@ def test_mapping_can_repair_an_unrelated_unobservable_entry(transport, strategy)
     source = transport.root / "mapped-settings.json"
     corrected = {"source": {"source": "directory", "path": str(market)}}
     source.write_text(json.dumps({"extraKnownMarketplaces": {"operator-odd": corrected}}))
-    reasons = []
+    reasons: list[str] = []
     setup_user(
         "claude",
         config.model_copy(update={"settings": SettingsMapping(source=str(source), strategy=strategy)}),
@@ -165,7 +165,7 @@ def test_native_publication_does_not_restore_a_stale_skipped_entry(
     transport, monkeypatch, remove, failure_type, mapped
 ):
     market = market_fixture(transport, "claude")
-    claims = []
+    claims: list[tuple[NativeClaim, ...]] = []
     setup_user(
         "claude",
         NativeUserConfig(marketplaces=[str(market)], plugins=["one@fixture-market"]),
@@ -213,7 +213,7 @@ def test_native_publication_does_not_restore_a_stale_skipped_entry(
 @pytest.mark.parametrize("failure_type", [ExternalError, KeyboardInterrupt])
 def test_confirmed_uninstall_is_not_resurrected_after_a_later_add_failure(transport, monkeypatch, failure_type):
     market = market_fixture(transport, "claude")
-    claims = []
+    claims: list[tuple[NativeClaim, ...]] = []
     setup_user(
         "claude",
         NativeUserConfig(marketplaces=[str(market)], plugins=["one@fixture-market"]),
@@ -242,7 +242,7 @@ def test_confirmed_uninstall_is_not_resurrected_after_a_later_add_failure(transp
 
 def test_mapping_repair_allows_a_later_native_retry_without_losing_the_repair(transport):
     market = market_fixture(transport, "claude")
-    claims = []
+    claims: list[tuple[NativeClaim, ...]] = []
     setup_user("claude", NativeUserConfig(marketplaces=[str(market)]), invocation(transport, claims))
     other = market.with_name("other-market")
     shutil.copytree(market, other)
@@ -261,7 +261,7 @@ def test_mapping_repair_allows_a_later_native_retry_without_losing_the_repair(tr
         marketplaces=[str(market), str(other)],
         settings=SettingsMapping(source=str(source), strategy="merge-overwrite"),
     )
-    reasons = []
+    reasons: list[str] = []
     for attempt in range(2):
         reasons.clear()
         setup_user(
