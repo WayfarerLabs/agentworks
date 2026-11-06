@@ -29,20 +29,23 @@ def apply_workspace_acls(target: Transport, path: str) -> None:
     conditional X also sees masked inherited execute entries and would turn
     non-executable files into executable ones.
     """
+    # VM initialization repairs the parent recursively while clones may still
+    # be running. Never share a private attempt or any of its descendants.
     quoted = shlex.quote(path)
+    find = f"find {quoted} -type d -name '*.agentworks-clone-*' -prune -o"
     target.run(
-        f"find {quoted} -type d -exec setfacl -d -m g::rwx -m m::rwx -m o::--- {{}} +",
+        f"{find} -type d -exec setfacl -d -m g::rwx -m m::rwx -m o::--- {{}} +",
         sudo=True,
         timeout=120,
     )
     target.run(
-        rf"find {quoted} \( -type d -o \( -type f -perm /111 \) \) "
+        rf"{find} \( -type d -o \( -type f -perm /111 \) \) "
         "-exec setfacl -m g::rwx -m m::rwx -m o::--- {} +",
         sudo=True,
         timeout=120,
     )
     target.run(
-        f"find {quoted} -type f ! -perm /111 -exec setfacl -m g::rwx -m m::rw -m o::--- {{}} +",
+        f"{find} -type f ! -perm /111 -exec setfacl -m g::rwx -m m::rw -m o::--- {{}} +",
         sudo=True,
         timeout=120,
     )

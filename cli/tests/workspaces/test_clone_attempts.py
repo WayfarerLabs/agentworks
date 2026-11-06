@@ -324,3 +324,80 @@ def test_failure_after_confirmed_publication_reclaims_its_checkout_and_group(bac
         )
     assert not final.exists() and not target.groups
     assert list(final.parent.glob("*.agentworks-clone-*")) == []
+
+
+@pytest.mark.parametrize("cancel", [False, True])
+@pytest.mark.parametrize("cleanup_cancel", [False, True])
+def test_attempt_cleanup_failure_still_cleans_empty_reservation_and_group(backend, monkeypatch, cancel, cleanup_cancel):
+    target, vm, config, final = backend
+    original = KeyboardInterrupt() if cancel else SSHError("clone failed")
+    warnings: list[str] = []
+    monkeypatch.setattr("agentworks.workspaces.backends.vm.output.warn", warnings.append)
+
+    def before(command: str) -> None:
+        if command.startswith("git clone "):
+            raise original
+        if command.startswith("rm -rf -- "):
+            raise (
+                KeyboardInterrupt()
+                if cleanup_cancel
+                else SSHError("cleanup transport failed with private provider details")
+            )
+
+    target.before = before
+    with pytest.raises(type(original)) as caught:
+        create_vm_workspace(vm, config, "project", ResolvedTemplate(name="repo", repo="https://example.invalid/repo"))
+    assert caught.value is original
+    attempts = list(final.parent.glob("*.agentworks-clone-*"))
+    assert len(attempts) == 1
+    assert not final.exists() and not target.groups
+    assert any(str(attempts[0]) in warning for warning in warnings)
+    assert not any("private provider details" in warning for warning in warnings)
+
+
+@pytest.mark.parametrize("occupied", [False, True])
+def test_unpublished_nonrepo_failure_only_removes_empty_reservation(backend, occupied):
+    target, vm, config, final = backend
+    original = SSHError("setup failed")
+
+    def before(command: str) -> None:
+        if command.startswith("chmod 2770 "):
+            if occupied:
+                (final / "operator-work").write_text("precious\n")
+            raise original
+
+    target.before = before
+    with pytest.raises(SSHError) as caught:
+        create_vm_workspace(vm, config, "project", ResolvedTemplate(name="empty"))
+    assert caught.value is original
+    if occupied:
+        assert (final / "operator-work").read_text() == "precious\n"
+        assert target.groups == {"ws-project"}
+    else:
+        assert not final.exists() and not target.groups
+
+
+@pytest.mark.parametrize(
+    "repo", ["git@example.invalid:private/repo", "https://user:fixture-secret@example.invalid/repo"]
+)
+def test_clone_failure_has_safe_structured_context_without_changing_identity(backend, monkeypatch, repo):
+    target, vm, config, final = backend
+    original = SSHError(f"git clone {repo}: fixture-provider-blob")
+    original.__cause__ = RuntimeError("fixture-provider-blob")
+    messages: list[str] = []
+    monkeypatch.setattr("agentworks.workspaces.backends.vm.output.info", messages.append)
+
+    def before(command: str) -> None:
+        if command.startswith("git clone "):
+            raise original
+
+    target.before = before
+    with pytest.raises(SSHError) as caught:
+        create_vm_workspace(vm, config, "project", ResolvedTemplate(name="repo", repo=repo))
+    assert caught.value is original
+    assert original.entity_kind == "workspace" and original.entity_name == "project"
+    assert original.hint
+    rendered = " ".join([str(original), original.hint, *messages])
+    assert "fixture-secret" not in rendered and "fixture-provider-blob" not in rendered
+    assert original.__cause__ is None and original.__suppress_context__
+    assert not final.exists() and not target.groups

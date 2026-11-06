@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from agentworks import output
 from agentworks.errors import AlreadyExistsError
+from agentworks.ssh import SSHError
 from agentworks.transports import transport
 from agentworks.workspaces.acls import apply_workspace_acls
 from agentworks.workspaces.tmuxinator import console_session_name, generate_config
@@ -102,7 +103,7 @@ def create_vm_workspace(
 
         # Git clone if repo is set
         if template.repo:
-            output.info(f"Cloning {template.repo}...")
+            output.info(f"Cloning repository for workspace {ws_name!r}...")
             candidate = f"{workspace_path}.agentworks-clone-{uuid4().hex}"
             quoted_attempt = shlex.quote(candidate)
             try:
@@ -118,10 +119,27 @@ def create_vm_workspace(
             checkout = shlex.quote(f"{candidate}/checkout")
             # `--` stops option parsing so a repo URL beginning with `-` can
             # never be read as a git flag; both operands are quoted for spaces.
-            target.run(
-                f"git clone -- {shlex.quote(template.repo)} {checkout}",
-                timeout=300,
-            )
+            try:
+                target.run(
+                    f"git clone -- {shlex.quote(template.repo)} {checkout}",
+                    timeout=300,
+                )
+            except SSHError as error:
+                # Guest stderr and the command can contain URL credentials.
+                # Keep the error's identity while supplying safe operation context.
+                error.args = (f"Repository clone failed for workspace {ws_name!r} on VM {vm.name!r}.",)
+                error.entity_kind = "workspace"
+                error.entity_name = ws_name
+                error.hint = (
+                    "Check the repository address and VM network/DNS access. "
+                    "For private repositories, declare the cloning admin's Git credential on the admin template "
+                    "and reinitialize the VM. Managed Git credentials use HTTPS; "
+                    "SSH URLs need separately configured SSH access."
+                )
+                error.__cause__ = None
+                error.__context__ = None
+                error.__suppress_context__ = True
+                raise
             target.run(f"chgrp -R {ws_group} {checkout}", sudo=True)
             target.run(f"find {checkout} -type d -exec chmod g+s {{}} +", sudo=True, timeout=120)
             target.run(f"chmod 2770 {checkout}", sudo=True)
@@ -170,9 +188,17 @@ def create_vm_workspace(
         # A guest clone may survive the controller's cancellation or timeout.
         # Only its unique attempt path is recursively removed until publication
         # is confirmed. Preserve an occupied or unconfirmed final directory.
-        try:
-            if attempt is not None:
+        if attempt is not None:
+            try:
                 target.run(f"rm -rf -- {shlex.quote(attempt)}", sudo=True, timeout=30)
+            except BaseException:
+                output.warn(
+                    f"Private clone attempt {attempt!r} could not be removed. "
+                    "Inspect it and any surviving Git process before manual cleanup."
+                )
+        # Cleanup steps are independent: an unreachable private attempt must not
+        # prevent reclaiming an empty final reservation and its group.
+        try:
             delete_vm_workspace(
                 vm,
                 config,
@@ -180,12 +206,12 @@ def create_vm_workspace(
                 workspace_path,
                 ws_group,
                 logger=logger,
-                empty_only=bool(template.repo) and not clone_published,
+                empty_only=not clone_published,
             )
-        except BaseException as cleanup_err:
+        except BaseException:
             output.warn(
-                f"cleanup after failed workspace create '{ws_name}' failed: {cleanup_err}. "
-                f"VM may have a residual directory ({workspace_path}) or group ({ws_group})."
+                f"Cleanup after failed workspace create {ws_name!r} was not confirmed. "
+                f"Inspect directory {workspace_path!r} and group {ws_group!r} before retrying."
             )
         raise
 
@@ -218,8 +244,6 @@ def delete_vm_workspace(
     caller has removed the agent members; ``groupdel`` removes the group
     regardless of remaining supplementary members (the admin's included).
     """
-    from agentworks.ssh import SSHError
-
     assert vm.tailscale_host is not None
     target = transport(vm, config, logger=logger)
 
@@ -235,7 +259,7 @@ def delete_vm_workspace(
             if not removed.ok:
                 output.warn(
                     f"Workspace directory {workspace_path!r} and group {linux_group!r} were retained because "
-                    "the clone's publication was not confirmed and the path could not be confirmed empty. "
+                    "workspace publication was not confirmed and the path could not be confirmed empty. "
                     "Inspect and preserve its contents before retrying."
                 )
                 return
@@ -248,8 +272,11 @@ def delete_vm_workspace(
         # is tolerated rather than failing the delete, mirroring the
         # best-effort group-membership teardown in agents/grants.py.
         target.run(f"/usr/sbin/groupdel {linux_group}", sudo=True, check=False, timeout=10)
-    except SSHError as e:
-        output.warn(f"remote cleanup failed: {e}")
+    except SSHError:
+        output.warn(
+            f"Remote cleanup of workspace directory {workspace_path!r} and group {linux_group!r} was not confirmed. "
+            "Inspect them before retrying."
+        )
 
 
 def generate_vscode_workspace(

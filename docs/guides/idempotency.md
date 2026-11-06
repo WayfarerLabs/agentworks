@@ -151,12 +151,26 @@ access was restored.
 Workspace creation reserves its destination exclusively. Repository clones run in private, unique
 attempt directories beside that destination; only a confirmed successful clone is published into the
 workspace. An old guest clone may survive a controller timeout or cancellation, but its attempt path
-is separate from any later workspace using the same name.
+is separate from any later workspace using the same name. Recursive workspace ACL repair skips these
+private attempt trees.
 
-Cleanup removes confirmed resources. A lost reservation or publication response can leave a named
-path for inspection; cleanup also preserves a reservation that gained other content. Inspect and
-preserve any valuable contents before manual cleanup or choosing another name. An absent database
-row does not establish that a leftover directory is empty or safe to remove.
+The attempt path is `<workspace-path>.agentworks-clone-<32-hex-digits>`, with the clone inside its
+`checkout` child. For example, a workspace at `/workspaces/project` can leave a sibling named
+`/workspaces/project.agentworks-clone-0123456789abcdef0123456789abcdef`. This naming pattern is
+reserved for private clone attempts. Cleanup failures report the actual attempt path. Killing the
+controller without allowing cleanup can leave an attempt without a warning; inspect the workspace's
+parent directory on the VM for this pattern. Agentworks does not automatically collect these
+leftovers.
+
+Cleanup of the attempt and the final reservation proceeds independently. Before confirmed clone
+publication, cleanup removes only an empty final reservation, including for a workspace without a
+repository. A lost reservation or publication response, or a reservation that gained content, leaves
+that path and its group for inspection. An absent database row does not establish that a leftover
+directory is empty or safe to remove.
+
+Inspect and preserve valuable contents before manual cleanup or choosing another name. Check for a
+surviving Git process using the exact attempt path and stop it before removing that attempt. Do not
+recursively delete the final workspace path based on the naming pattern or a failed create alone.
 
 ## Workspace repair
 

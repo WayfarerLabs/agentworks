@@ -155,3 +155,34 @@ def test_workspace_acl_does_not_follow_a_link_outside_the_tree(tmp_path):
     (workspace / "link").symlink_to(outside)
     apply_workspace_acls(target, str(workspace))
     assert outside.stat().st_mode & 0o777 == 0o644
+
+
+def test_parent_acl_repair_prunes_private_clone_attempt_trees(tmp_path):
+    target = LocalFixtureTransport(tmp_path / "target")
+    parent = target.home / "workspaces"
+    parent.mkdir()
+    apply_workspace_acls(target, str(parent))
+    workspace = parent / "project"
+    workspace.mkdir()
+    ordinary = workspace / "tracked"
+    ordinary.write_bytes(b"shared")
+    ordinary.chmod(0o600)
+    attempt = parent / ("project.agentworks-clone-" + "a" * 32)
+    attempt.mkdir(mode=0o700)
+    checkout = attempt / "checkout"
+    checkout.mkdir(mode=0o700)
+    private = checkout / "private"
+    private.write_bytes(b"private")
+    private.chmod(0o600)
+    executable = checkout / "tool"
+    executable.write_bytes(b"#!/bin/sh\n")
+    executable.chmod(0o700)
+    before = snapshot(attempt)
+
+    apply_workspace_acls(target, str(parent))
+
+    assert snapshot(attempt) == before
+    assert attempt.stat().st_mode & 0o077 == 0
+    assert private.stat().st_mode & 0o077 == 0
+    assert ordinary.stat().st_mode & 0o770 == 0o660
+    assert "default:group::rwx" in snapshot(workspace)
