@@ -66,9 +66,12 @@ class RoutingResult:
     ancestor_files: tuple[OwnedArtifactFile, ...] = ()
     active_facets: tuple[ArtifactFacet, ...] = ()
     unresolved_routes: frozenset[str] = frozenset()
-    retain_previous: bool = False
     unavailable_reasons: tuple[str, ...] = ()
     routing_unknown: bool = False
+
+    @property
+    def retain_previous(self) -> bool:
+        return bool(self.unresolved_routes) or self.routing_unknown
 
 
 def inspect_owner_artifacts(
@@ -390,7 +393,6 @@ def setup_inherited_inputs(view: ArtifactOwnerView, destination: ArtifactFacet, 
     return RoutingResult(
         ArtifactInputs(deferred=inherited),
         unresolved_routes=unresolved,
-        retain_previous=bool(unresolved) or unknown,
         unavailable_reasons=unavailable,
         routing_unknown=unknown,
     )
@@ -446,7 +448,6 @@ def session_artifacts(
         tuple(files),
         tuple(active),
         unresolved_routes=routed.unresolved_routes,
-        retain_previous=routed.retain_previous,
         unavailable_reasons=routed.unavailable_reasons,
         routing_unknown=routed.routing_unknown,
     )
@@ -566,7 +567,6 @@ def session_inherited_inputs(
     return RoutingResult(
         ArtifactInputs(deferred=result),
         unresolved_routes=unresolved,
-        retain_previous=bool(reasons),
         unavailable_reasons=tuple(reasons),
         routing_unknown=any(unknown for _, _, unknown in routes),
     )
