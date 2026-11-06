@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import re
-import secrets
 import shlex
 from typing import TYPE_CHECKING
 
 from agentworks.errors import ExternalError
+from agentworks.execution.envelope import new_nonce
 from agentworks.execution.requests import DiscardOutput, Script, Shell
 
 if TYPE_CHECKING:
@@ -19,11 +19,6 @@ STATUS_PREFIX = "agentworks-command-status:"
 _MISSING_STATUS = 20
 
 
-def new_nonce() -> str:
-    """A fresh value for one probe's status line, which no startup file can know in advance."""
-    return secrets.token_hex(16)
-
-
 def user_shell_probe(command: str, *, nonce: str, deadline: float | None = None) -> Script:
     """The request :func:`run_user_shell_command` sends for ``command``.
 
@@ -32,9 +27,12 @@ def user_shell_probe(command: str, *, nonce: str, deadline: float | None = None)
     on a line of its own, after a newline in case startup output left one
     unterminated. The script is sourced by the account's login and
     interactive shell, so its startup files have run first, as they do for
-    the user's own workloads. They do not know the nonce, so nothing they
-    print, an ``EXIT`` trap included, passes for the status. The streams are
-    not logged.
+    the user's own workloads. The nonce is fresh for each request, so
+    startup output that does not know it, an ``EXIT`` trap or a line left
+    unterminated included, cannot pass for the status. A startup file that
+    redefines the probe's own commands (a ``printf`` function, say) can
+    still forge it: a command check is a diagnostic, not a security
+    boundary. The streams are not logged.
     """
     source = f"(\n{command}\n) >/dev/null 2>&1\nprintf '\\n{STATUS_PREFIX}{nonce}:%s\\n' \"$?\"\n"
     return Script(source, Shell.USER_DEFAULT, login=True, interactive=True, deadline=deadline, log_streams=False)
