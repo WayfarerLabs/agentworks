@@ -112,13 +112,12 @@ def start_vm(
                 )
             finally:
                 values.clear()
-    # Only emit "is ready" on the path that actually started the VM. When
+    # Confirm a start only on the path that actually started the VM. When
     # status was already RUNNING we already said so above, and Tailscale
     # verification is usually a no-op (handshake already valid), so an
-    # extra "is ready" line is just noise. On the real-work path it
-    # confirms tailscaled finished its handshake.
+    # extra line is just noise. Starting does not reconcile native setup.
     if status != VMStatus.RUNNING:
-        output.info(f"VM '{name}' is ready")
+        output.info(f"VM '{name}' started")
 
 
 def stop_vm(
