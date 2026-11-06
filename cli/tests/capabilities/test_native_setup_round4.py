@@ -260,8 +260,11 @@ def test_truncated_control_sequences_cannot_reach_failure_output(raw):
     assert "\x1b" not in result and not any(unicodedata.category(char).startswith("C") for char in result)
 
 
-def test_changed_capture_failure_cannot_erase_placements_or_unresolved_deferrals(routed_setup):
+@pytest.mark.parametrize("capture", ["changed", "missing"])
+def test_unavailable_capture_cannot_erase_placements_or_unresolved_deferrals(routed_setup, capture):
     from agentworks.artifacts.model import ArtifactGroup
+    from agentworks.artifacts.state import encode_captures, read_captures
+    from agentworks.db import AppliedStateKey
 
     case = routed_setup
     fixture = case.fixture
@@ -283,6 +286,12 @@ def test_changed_capture_failure_cannot_erase_placements_or_unresolved_deferrals
         operation="vm-reinit",
     )
     assert len(failures) == 1
+    if capture == "missing":
+        captures = read_captures(fixture.db, "vm", "vm")
+        captures.pop("vm")
+        fixture.db.instance_state.replace_applied_slices(
+            "vm", "vm", "fixture", {AppliedStateKey.ARTIFACT_INPUTS: encode_captures(captures)}
+        )
     old_ids = set(case.previous.artifact_inputs)
     assert old_ids.isdisjoint(item.identity for item in changed)
     for component, call in case.calls.items():
@@ -299,7 +308,12 @@ def test_changed_capture_failure_cannot_erase_placements_or_unresolved_deferrals
         )
         record = next(item for item in state.records if item.component == component)
         assert not record.complete and record.incomplete_reasons and record.skipped
-        assert set(record.artifact_inputs) == old_ids
+        if capture == "changed":
+            # The old route IDs remain explicit, but cannot acknowledge the
+            # unseen identities in the producer's newer full input set.
+            assert record.artifact_inputs is None
+        else:
+            assert record.artifact_inputs is not None and set(record.artifact_inputs) == old_ids
         assert {item.input_id for item in record.deferred} == old_ids
         assert {item.destination for item in record.deferred} == {"session"}
         assert record.artifact_files == before.artifact_files

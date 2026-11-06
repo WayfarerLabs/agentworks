@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from agentworks import output
@@ -228,9 +228,9 @@ def inspect_artifacts(
 ) -> ArtifactInspection:
     """Project declarations and recorded application without acquiring or applying anything."""
     from agentworks.artifacts.routing import (
-        available_deferred_inputs,
         inspect_owner_artifacts,
         session_inherited_inputs,
+        setup_inherited_inputs,
     )
 
     with db.snapshot():
@@ -272,17 +272,19 @@ def inspect_artifacts(
                 inherited: dict[ArtifactOwner, ArtifactGroup] = {}
                 unavailable_reasons: tuple[str, ...] = ()
                 if owner.component in ("admin", "agent", "workspace"):
-                    inherited = available_deferred_inputs(
+                    routed = setup_inherited_inputs(
                         views["vm"], "workspace" if owner.component == "workspace" else "user", name
                     )
+                    inherited = dict(routed.inputs.deferred)
+                    unavailable_reasons = routed.unavailable_reasons
                 elif owner.component == "session":
                     ancestors = (views["vm"], views["admin" if context.admin else "agent"], views["workspace"])
                     routed = session_inherited_inputs(*ancestors, integration_name=name)
                     inherited = dict(routed.inputs.deferred)
                     unavailable_reasons = routed.unavailable_reasons
-                view = inspect_owner_artifacts(db, registry, owner, name, inherited=inherited)
-                if unavailable_reasons and view.status == "current":
-                    view = replace(view, status="incomplete", reason=" ".join(unavailable_reasons))
+                view = inspect_owner_artifacts(db, registry, owner, name, inherited=inherited).with_unavailable_routes(
+                    unavailable_reasons
+                )
                 views[owner.component] = view
                 integrations[owner.component].append(_integration_metadata(owner, name, view))
         projected = []

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from dataclasses import dataclass
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Literal
 
@@ -49,6 +49,16 @@ class ArtifactOwnerView:
     def diagnostic(self) -> str:
         return " ".join(value for value in (self.reason, self.repair_hint) if value)
 
+    def with_unavailable_routes(self, reasons: tuple[str, ...]) -> ArtifactOwnerView:
+        """Include unavailable incoming routes in this owner's artifact health."""
+        if not reasons:
+            return self
+        return replace(
+            self,
+            status="incomplete" if self.status == "current" else self.status,
+            reason=" ".join(dict.fromkeys(value for value in (self.reason, *reasons) if value)),
+        )
+
 
 @dataclass(frozen=True)
 class RoutingResult:
@@ -58,6 +68,7 @@ class RoutingResult:
     unresolved_routes: frozenset[str] = frozenset()
     retain_previous: bool = False
     unavailable_reasons: tuple[str, ...] = ()
+    routing_unknown: bool = False
 
 
 def inspect_owner_artifacts(
@@ -243,8 +254,9 @@ def inspect_owner_artifacts(
 
 def _brief(names: tuple[str, ...]) -> str:
     """Keep drift diagnostics bounded without exposing values or artifact bodies."""
-    selected = names if len(names) <= 3 else (*names[:2], "...")
-    return sanitize_setup_diagnostic(", ".join(sanitize_setup_diagnostic(name).rstrip(".") for name in selected))
+    selected = names if len(names) <= 3 else names[:2]
+    rendered = ", ".join(sanitize_setup_diagnostic(name).rstrip(".") for name in selected)
+    return sanitize_setup_diagnostic(rendered if len(names) <= 3 else rendered + ", ...")
 
 
 def _changed_keys(before: object, after: object) -> tuple[str, ...]:
@@ -340,12 +352,48 @@ def _routing_unknown(view: ArtifactOwnerView, destination: ArtifactFacet, integr
         item.destination not in ALLOWED_DEFERRALS[view.owner.facet] for item in record.deferred
     ):
         return True
-    has_inputs = (
-        bool(view.prepared)
-        if view.captured is not None
-        else bool(view.owner.artifacts.bundles) or view.capture_status == "unavailable"
+    has_inputs = bool(view.prepared) or (
+        view.captured is None and (bool(view.owner.artifacts.bundles) or view.capture_status == "unavailable")
     )
-    return has_inputs and (record is None or record.artifact_inputs is None)
+    return has_inputs and not _covers_inputs(
+        record, (() if view.prepared is None else (item.identity for item in view.prepared.items()))
+    )
+
+
+def _covers_inputs(record: SetupRecord | None, identities: Iterable[str]) -> bool:
+    """An acknowledgement covers only the captured identities it actually observed."""
+    return (
+        record is not None and record.artifact_inputs is not None and set(identities).issubset(record.artifact_inputs)
+    )
+
+
+def setup_inherited_inputs(view: ArtifactOwnerView, destination: ArtifactFacet, integration_name: str) -> RoutingResult:
+    """Project known ancestor inputs and unknown-route evidence for setup or inspection."""
+    inherited = available_deferred_inputs(view, destination, integration_name)
+    known = {item.identity for group in inherited.values() for item in group.items()}
+    recorded = frozenset(_recorded_routes(view, destination, integration_name))
+    unresolved = recorded - known
+    unknown = _routing_unknown(view, destination, integration_name)
+    detail = (
+        f"have no readable captured source ({_brief(tuple(identity[:12] for identity in sorted(unresolved)))})"
+        if unresolved
+        else "have no confirmed routing result"
+    )
+    unavailable = (
+        (
+            f"Artifact inputs via {integration_name} from {view.owner.component}/{view.owner.name} {detail}. "
+            + owner_remediation(view),
+        )
+        if unresolved or unknown
+        else ()
+    )
+    return RoutingResult(
+        ArtifactInputs(deferred=inherited),
+        unresolved_routes=unresolved,
+        retain_previous=bool(unresolved) or unknown,
+        unavailable_reasons=unavailable,
+        routing_unknown=unknown,
+    )
 
 
 def setup_artifacts(
@@ -363,30 +411,8 @@ def setup_artifacts(
     ancestor = _vm_inputs(db, registry, vm)
     view = inspect_owner_artifacts(db, registry, ancestor, integration_name)
     report_ancestor(view, integration_name)
-    inherited = available_deferred_inputs(view, inputs.facet, integration_name)
-    known = {item.identity for group in inherited.values() for item in group.items()}
-    recorded = frozenset(_recorded_routes(view, inputs.facet, integration_name))
-    unresolved = recorded - known
-    unknown = _routing_unknown(view, inputs.facet, integration_name)
-    detail = (
-        f"have no readable captured source ({_brief(tuple(identity[:12] for identity in sorted(unresolved)))})"
-        if unresolved
-        else "have no confirmed routing result"
-    )
-    unavailable = (
-        (
-            f"Artifact inputs via {integration_name} from {view.owner.component}/{view.owner.name} {detail}. "
-            + owner_remediation(view),
-        )
-        if unresolved or unknown
-        else ()
-    )
-    return RoutingResult(
-        ArtifactInputs(local=prepared.local, deferred=inherited),
-        unresolved_routes=unresolved,
-        retain_previous=bool(unresolved) or unknown,
-        unavailable_reasons=unavailable,
-    )
+    routed = setup_inherited_inputs(view, inputs.facet, integration_name)
+    return replace(routed, inputs=ArtifactInputs(local=prepared.local, deferred=routed.inputs.deferred))
 
 
 def session_artifacts(
@@ -422,6 +448,7 @@ def session_artifacts(
         unresolved_routes=routed.unresolved_routes,
         retain_previous=routed.retain_previous,
         unavailable_reasons=routed.unavailable_reasons,
+        routing_unknown=routed.routing_unknown,
     )
 
 
@@ -439,21 +466,23 @@ def session_ancestor_views(
     vm_inputs = _vm_inputs(db, registry, vm)
     vm_view = inspect_owner_artifacts(db, registry, vm_inputs, integration_name)
     user_inputs = _user_inputs(db, registry, vm, vm_inputs, agent_name)
+    user_routes = setup_inherited_inputs(vm_view, "user", integration_name)
     user_view = inspect_owner_artifacts(
         db,
         registry,
         user_inputs,
         integration_name,
-        inherited=available_deferred_inputs(vm_view, "user", integration_name),
-    )
+        inherited=user_routes.inputs.deferred,
+    ).with_unavailable_routes(user_routes.unavailable_reasons)
     workspace_inputs = _workspace_inputs(db, registry, workspace, vm_inputs)
+    workspace_routes = setup_inherited_inputs(vm_view, "workspace", integration_name)
     workspace_view = inspect_owner_artifacts(
         db,
         registry,
         workspace_inputs,
         integration_name,
-        inherited=available_deferred_inputs(vm_view, "workspace", integration_name),
-    )
+        inherited=workspace_routes.inputs.deferred,
+    ).with_unavailable_routes(workspace_routes.unavailable_reasons)
     return vm_view, user_view, workspace_view
 
 
@@ -471,8 +500,9 @@ def _session_routes(
         unknown = _routing_unknown(view, "session", integration_name)
         if view is not vm and integration_name in view.owner.activations:
             destination: ArtifactFacet = "user" if view is user else "workspace"
-            if (view.record is None or view.record.artifact_inputs is None) and _recorded_routes(
-                vm, destination, integration_name
+            incoming = _recorded_routes(vm, destination, integration_name)
+            if not _covers_inputs(view.record, incoming) and (
+                incoming or _routing_unknown(vm, destination, integration_name)
             ):
                 unknown = True
         routes.append((view, identities, unknown))
@@ -538,6 +568,7 @@ def session_inherited_inputs(
         unresolved_routes=unresolved,
         retain_previous=bool(reasons),
         unavailable_reasons=tuple(reasons),
+        routing_unknown=any(unknown for _, _, unknown in routes),
     )
 
 

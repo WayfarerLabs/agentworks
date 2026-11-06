@@ -106,6 +106,26 @@ def test_completed_record_cannot_carry_incomplete_reasons():
         decode_native_setup(_slice(VersionedPayload(3, payload)))
 
 
+@pytest.mark.parametrize("inputs", [None, [], ["b" * 64]])
+@pytest.mark.parametrize("duplicate", [False, True])
+def test_known_partial_deferral_boundary_with_known_or_unknown_full_table(inputs, duplicate):
+    payload = _state().model_dump(mode="json")
+    record = payload["records"][0]
+    record["artifact_inputs"] = inputs
+    route = {"input_id": "b" * 64, "destination": "session", "reason": "fixture later delivery"}
+    record["deferred"] = [route, route] if duplicate else [route]
+    encoded = _slice(VersionedPayload(3, payload))
+    if duplicate or inputs == []:
+        with pytest.raises(StateError):
+            decode_native_setup(encoded)
+    else:
+        decoded = decode_native_setup(encoded)
+        actual = decoded.records[0]
+        assert actual.artifact_inputs == (None if inputs is None else tuple(inputs))
+        assert tuple(item.input_id for item in actual.deferred) == ("b" * 64,)
+        assert decode_native_setup(_slice(encode_native_setup(decoded))) == decoded
+
+
 def test_malformed_known_payload_has_safe_error():
     with pytest.raises(StateError) as caught:
         decode_native_setup(_slice(VersionedPayload(1, {"records": "private-input"})))

@@ -49,8 +49,8 @@ class SetupRecord(AgwModel):
     claims: Annotated[tuple[NativeClaim, ...], Field(strict=False)] = ()
 
     artifact_files: Annotated[tuple[OwnedArtifactFile, ...], Field(strict=False)] = ()
-    # None means no confirmed artifact routing result, including a first
-    # attempt that checkpointed some files but did not finish publication.
+    # None means the full artifact input set has not been confirmed. Explicit
+    # routes for known inputs may still be retained while other input is unknown.
     artifact_inputs: Annotated[tuple[_Hash, ...], Field(strict=False)] | None = None
     deferred: Annotated[tuple[ArtifactDeferral, ...], Field(strict=False)] = ()
     skipped: Annotated[tuple[ArtifactSkip, ...], Field(strict=False)] = ()
@@ -68,7 +68,9 @@ class SetupRecord(AgwModel):
         if len(skipped) != len(set(skipped)):
             raise ValueError("native setup contains duplicate skipped artifact paths")
         deferred = [item.input_id for item in self.deferred]
-        if len(deferred) != len(set(deferred)) or not set(deferred) <= set(self.artifact_inputs or ()):
+        if len(deferred) != len(set(deferred)) or (
+            self.artifact_inputs is not None and not set(deferred) <= set(self.artifact_inputs)
+        ):
             raise ValueError("native setup contains invalid artifact deferrals")
         if self.artifact_inputs is not None and len(self.artifact_inputs) != len(set(self.artifact_inputs)):
             raise ValueError("native setup contains duplicate artifact inputs")

@@ -12,6 +12,7 @@ from agentworks.capabilities.harness_integration.setup import (
 )
 from agentworks.errors import StateError
 from agentworks.harness_setup.dispatch import destination_id
+from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
 from agentworks.harness_setup.state import read_native_setup
 from agentworks.ssh import SSHError
 
@@ -47,7 +48,10 @@ def evaluate_setup(
     """
 
     def result(status: SetupStatus, record: SetupRecord | None = None) -> SetupEvidence:
-        return SetupEvidence(status, inputs.kind, inputs.name, remediation, record)
+        hint = remediation
+        if status == "incomplete" and record is not None and record.incomplete_reasons:
+            hint = f"{sanitize_setup_diagnostic(' '.join(record.incomplete_reasons))} {hint}"
+        return SetupEvidence(status, inputs.kind, inputs.name, hint, record)
 
     try:
         state = read_native_setup(db, inputs.kind, inputs.name)

@@ -17,6 +17,7 @@ from agentworks.artifacts.application import (
 )
 from agentworks.artifacts.declarations import ArtifactsConfig
 from agentworks.artifacts.publication import publish_artifacts
+from agentworks.artifacts.state import capture_owner, write_capture
 from agentworks.capabilities.harness_integration import ShellIntegration
 from agentworks.capabilities.harness_integration.kinds import HarnessIntegrationEntry
 from agentworks.capabilities.harness_integration.setup import UserSetupInvocation, VMSetupInvocation
@@ -122,6 +123,65 @@ def _activate_producer(case: SimpleNamespace) -> tuple[SetupInputs, SetupRecord]
 def test_fresh_producer_cannot_acknowledge_inputs_before_publication_finishes(fallback_placements):
     _, record = _activate_producer(fallback_placements)
     assert record.artifact_inputs is None
+
+
+@pytest.mark.parametrize("removed_count", [1, 2])
+def test_failed_producer_restoring_inputs_preserves_existing_user_files(
+    fallback_placements, monkeypatch, removed_count
+):
+    case = fallback_placements
+    inputs = replace(case.fixture.owners["vm"], activations={"shell": CapabilityConfig()})
+    case.control["template"] = ResolvedVMTemplate(
+        "vm", artifacts=inputs.artifacts, harness_integrations=dict(inputs.activations)
+    )
+    monkeypatch.setattr(
+        ShellIntegration,
+        "vm_init",
+        lambda self, call: ArtifactApplication(
+            deferred=tuple(
+                ArtifactDeferral(input_id=item.identity, destination="user", reason="fixture user route")
+                for item in call.artifacts.items()
+            )
+        ),
+    )
+    case.control["fail"] = False
+    run_setup(case.fixture.db, case.fixture.registry, inputs, case.machine, failures=[], operation="vm-reinit")
+    run_setup(
+        case.fixture.db,
+        case.fixture.registry,
+        case.fixture.owners["agent"],
+        case.user,
+        failures=[],
+        operation="agent-reinit",
+    )
+    hints = case.fixture.registry.lookup("artifact-bundle", "vm-bundle").hints
+    removed = {name: hints.pop(name) for name in tuple(hints)[-removed_count:]}
+
+    def recapture() -> None:
+        captured = capture_owner(case.fixture.registry, "vm", "vm", "vm", inputs.artifacts)
+        write_capture(case.fixture.db, "vm", "vm", "vm", captured, operation="vm-reinit")
+
+    recapture()
+    run_setup(case.fixture.db, case.fixture.registry, inputs, case.machine, failures=[], operation="vm-reinit")
+    hints.update(removed)
+    recapture()
+    case.control["fail"] = True
+    failures: list[SetupFailure] = []
+    run_setup(case.fixture.db, case.fixture.registry, inputs, case.machine, failures=failures, operation="vm-reinit")
+    assert len(failures) == 1
+    state = run_setup(
+        case.fixture.db,
+        case.fixture.registry,
+        case.fixture.owners["agent"],
+        case.user,
+        failures=[],
+        operation="agent-reinit",
+    )
+    for path, content in case.files.items():
+        assert path.is_file() and path.read_bytes() == content
+    (record,) = state.records
+    assert not record.complete and record.incomplete_reasons
+    assert record.artifact_files == case.original.artifact_files
 
 
 @pytest.mark.parametrize("legacy_marker", [False, True])

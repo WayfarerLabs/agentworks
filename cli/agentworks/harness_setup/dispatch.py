@@ -307,7 +307,7 @@ def run_setup(
                 artifacts=artifacts,
             )
             try:
-                if routing.unresolved_routes:
+                if routing.retain_previous:
                     for reason in routing.unavailable_reasons or (
                         "Some ancestor artifact routes have no readable captured content; repair their owning setup.",
                     ):
@@ -330,17 +330,6 @@ def run_setup(
                     root=isinstance(call, VMSetupInvocation),
                     retain_previous=routing.retain_previous,
                 )
-                if (
-                    routing.retain_previous
-                    and not routing.unresolved_routes
-                    and previous is not None
-                    and previous.destination_id == destination
-                    and {item.path for item in publication.skipped}.intersection(
-                        file.path for file in previous.artifact_files
-                    )
-                ):
-                    for reason in routing.unavailable_reasons:
-                        report_incomplete(reason)
             except _SetupInfrastructureFailure as error:
                 raise error.original from None
             except (ConfigError, StateError, ExternalError, ConnectivityError) as error:
@@ -398,7 +387,7 @@ def run_setup(
             current = current.model_copy(
                 update={
                     "artifact_files": owned,
-                    "artifact_inputs": artifact_inputs,
+                    "artifact_inputs": None if routing.routing_unknown else artifact_inputs,
                     "deferred": deferred,
                     "skipped": publication.skipped,
                 }
