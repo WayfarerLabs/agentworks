@@ -86,7 +86,7 @@ def test_new_session_delivery_keeps_cross_origin_names_strict(adapter, artifact_
         module.session_artifacts(
             context=context(outer, local),
             configured=None,
-            extra_args=[],
+            extra_args=["--single", "fixture task"] if adapter == "grok" else [],
             enabled_workarounds=enabled(module.session_artifacts),
         )
 

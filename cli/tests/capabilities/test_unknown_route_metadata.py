@@ -151,7 +151,7 @@ def test_unreadable_explicit_input_is_forwarded_even_without_previous_result(
 
 
 @pytest.mark.parametrize("previous", [False, True])
-def test_unknown_without_ids_only_records_source_repair_when_old_placement_is_held(db, tmp_path, previous):
+def test_unknown_input_set_records_source_repair_for_fresh_and_existing_receivers(db, tmp_path, previous):
     fixture = graph(db, active=("agent",), counts={"workspace": 0})
     _registry(fixture)
     target = LocalFixtureTransport(tmp_path / "guest")
@@ -168,12 +168,13 @@ def test_unknown_without_ids_only_records_source_repair_when_old_placement_is_he
     assert expected.retain_previous and not expected.unresolved_routes and expected.unavailable_reasons
     actual = run_setup(db, fixture.registry, inputs, invocation, failures=failures, operation="retry-setup").records[0]
     assert failures == []
+    assert not actual.complete and actual.artifact_inputs is None
+    assert actual.incomplete_reasons == expected.unavailable_reasons
     if previous:
-        assert before is not None and not actual.complete and actual.skipped
+        assert before is not None and actual.skipped
         assert actual.artifact_files == before.artifact_files
-        assert actual.incomplete_reasons == expected.unavailable_reasons
     else:
-        assert actual.complete and actual.artifact_files and not actual.incomplete_reasons
+        assert actual.artifact_files and not actual.skipped
 
 
 def test_saved_unavailable_route_reason_is_terminal_safe_and_does_not_rewrite_state(db, captured_output):
