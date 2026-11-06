@@ -96,6 +96,7 @@ def _wire(
     *,
     errors: dict[str, BaseException] | None = None,
     listed: str = "",
+    listing_stderr: str = "",
     statuses: dict[str, int] | None = None,
 ) -> _Calls:
     """Mock the backend seams; return the recorded calls.
@@ -103,8 +104,9 @@ def _wire(
     ``errors`` maps a substring (of the joined wsl args or the
     PowerShell script) to the exception the seam raises when it sees it
     (the call is still recorded first, so tests can pin exactly-once
-    attempts). ``listed`` is what ``wsl --list`` prints, and ``statuses``
-    maps the first wsl argument (``--unregister``, ``--list``) to its
+    attempts). ``listed`` is what ``wsl --list`` prints on stdout and
+    ``listing_stderr`` what it prints on stderr, and ``statuses`` maps
+    the first wsl argument (``--unregister``, ``--list``) to its
     exit status, 0 when absent. ``_wsl`` itself runs for real over the
     faked process.
     """
@@ -120,7 +122,9 @@ def _wire(
         calls.events.append(("wsl", joined))
         _raise_if_matched(joined)
         status = (statuses or {}).get(args[0], 0)
-        return subprocess.CompletedProcess(args, status, listed if args[:1] == ["--list"] else "", "")
+        if args[:1] == ["--list"]:
+            return subprocess.CompletedProcess(args, status, listed, listing_stderr)
+        return subprocess.CompletedProcess(args, status, "", "")
 
     def _fake_powershell(script: str, *, check: bool = True, timeout: int = 120) -> str:
         calls.events.append(("ps", script))
@@ -444,12 +448,11 @@ def test_a_delete_that_leaves_the_distro_registered_raises_so_core_keeps_the_row
         (0, 0, "Debian\n", True),
         (1, 0, "Debian\n", True),  # never registered: the unregister fails, the listing does not name it
         (0, 1, "", True),  # the last distro went: the listing fails, but the unregister succeeded
-        (1, 1, "Error code: Wsl/WSL_E_DEFAULT_DISTRO_NOT_FOUND\n", True),  # WSL has no distro at all
         (1, 1, "", False),  # neither succeeded, so nothing shows it gone
         (1, 1, "The operation was aborted.\n", False),
         (0, 0, "vm1\n", False),
     ],
-    ids=["clean", "never-registered", "last-distro", "no-distributions", "both-failed", "listing-failed", "listed"],
+    ids=["clean", "never-registered", "last-distro", "both-failed", "listing-failed", "listed"],
 )
 def test_the_delete_counts_the_distro_gone_only_on_evidence(
     monkeypatch: pytest.MonkeyPatch,
@@ -468,6 +471,23 @@ def test_the_delete_counts_the_distro_gone_only_on_evidence(
     else:
         with pytest.raises(StateError):
             WSL2Platform("wsl2", {}).delete(vm, RunContext())  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("stream", ["stdout", "stderr"])
+def test_the_delete_reads_an_empty_wsl_from_either_stream(
+    monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput, stream: str
+) -> None:
+    """With no distro installed both steps fail, and the listing's error code is the evidence, on either stream."""
+    no_distributions = "Error code: Wsl/WSL_E_DEFAULT_DISTRO_NOT_FOUND\n"
+    _wire(
+        monkeypatch,
+        listed=no_distributions if stream == "stdout" else "",
+        listing_stderr=no_distributions if stream == "stderr" else "",
+        statuses={"--unregister": 1, "--list": 1},
+    )
+    vm = SimpleNamespace(name="vm1", platform_metadata={"distro_name": "vm1"})
+
+    WSL2Platform("wsl2", {}).delete(vm, RunContext())  # type: ignore[arg-type]
 
 
 def test_a_rollback_whose_listing_fails_retains_the_row(

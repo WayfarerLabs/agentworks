@@ -68,6 +68,7 @@ def wsl_program(*, windows: bool, environ: Mapping[str, str]) -> str:
 _WSL = wsl_program(windows=sys.platform == "win32", environ=os.environ)
 # The error code wsl.exe prints with an empty listing, whose status is non-zero
 # and whose text is localized; the one token of its output this module reads.
+# It is looked for on both streams, as wsl.exe prints its own errors on stdout.
 _NO_DISTRIBUTIONS = "WSL_E_DEFAULT_DISTRO_NOT_FOUND"
 
 # The root channel's program inside the distro: Bash in a session of its own, with no controlling terminal.
