@@ -435,7 +435,6 @@ def test_unconfirmed_new_runtime_keeps_its_run_and_artifacts(lifecycle, monkeypa
     previous = lifecycle.db.get_session("s1")
     assert previous is not None
     monkeypatch.setattr(tmux, "capture_tmux_server_fingerprint", lambda **kwargs: FingerprintProbe(ProbeStatus.UNKNOWN))
-    monkeypatch.setattr(tmux, "kill_server_and_probe", lambda **kwargs: ProbeStatus.UNKNOWN)
     with pytest.raises(ExternalError):
         lifecycle.restart()
     current = lifecycle.db.get_session("s1")
