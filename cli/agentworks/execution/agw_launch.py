@@ -61,7 +61,8 @@ def main(f: int, g: bytes) -> None:
     program_interpreter = "/usr/bin/python3"
     # The lowest descriptor a staged source may take. Startup files close or
     # reuse low descriptors (3 to 9 are the shell's own redirection range), so
-    # the source sits above them for as long as the payload runs.
+    # the source sits above them for as long as the payload runs. A
+    # precondition: the soft RLIMIT_NOFILE exceeds it.
     staged_source_floor = 100
 
     # -- 1. Read: the envelope and the passwd entry. Every failure before the
@@ -207,7 +208,14 @@ def main(f: int, g: bytes) -> None:
             if error.errno != errno.EINVAL:
                 raise
             script_fd = os.memfd_create("agw-script", os.MFD_CLOEXEC)
-        staged = fcntl.fcntl(script_fd, fcntl.F_DUPFD_CLOEXEC, staged_source_floor)
+        try:
+            staged = fcntl.fcntl(script_fd, fcntl.F_DUPFD_CLOEXEC, staged_source_floor)
+        except OSError as error:
+            if error.errno != errno.EINVAL:
+                raise
+            sys.exit(
+                f"agw-launch: staging a source needs a soft open-file limit (RLIMIT_NOFILE) above {staged_source_floor}"
+            )
         os.close(script_fd)
         script_fd = staged
         remaining = source
@@ -224,10 +232,12 @@ def main(f: int, g: bytes) -> None:
             run_source = [b"-c", b'. "$0"'] if request["interactive"] else []
             arguments = [enc(interpreter), *startup, *run_source, source_path]
         elif startup:
-            # The startup shell runs its startup files, reopens the source
-            # (staged above the descriptors they touch) as descriptor 9, and
-            # becomes the interpreter. A redirect-only exec can return a stale
-            # status in zsh, which is why the line uses ";" and not "&&".
+            # The startup shell runs its startup files, reopens the source as
+            # descriptor 9 and becomes the interpreter. It reopens the source
+            # itself because the shell may mark an inherited descriptor
+            # close-on-exec (bash -l -i does for 3 to 19). A redirect-only exec
+            # can return a stale status in zsh, which is why the line uses ";"
+            # and not "&&".
             line = b'exec 9<"$0"; exec ' + enc(program_interpreter) + b' -I -S /dev/fd/9 "$@"'
             arguments = [enc(shell), *startup, b"-c", line, source_path, *program_arguments]
         else:

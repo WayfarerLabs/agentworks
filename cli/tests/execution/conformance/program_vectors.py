@@ -1,9 +1,9 @@
-"""The vectors for the request vocabulary slice 5 adds, F1 to F5 and F8 in the files LLD.
+"""The vectors for the request vocabulary slice 5 adds, F1 to F5, F8 and F9 in the files LLD.
 
 They join :mod:`vectors`' list, so the same lanes run them: finite stdin and
 the operation log (F1, F2), core-owned Python programs and their startup (F3,
-F4), an interactive script (F5), a startup file that closes low descriptors,
-the run sinks, and the environment of an elevated request (F8). Each asserts
+F4), an interactive script (F5), a startup file that closes low descriptors
+(F9), the run sinks, and the environment of an elevated request (F8). Each asserts
 observable behavior only.
 """
 
@@ -281,7 +281,7 @@ ENTRIES: list[tuple[str, str, Callable[..., None]]] = [
     ("F4-program-under-login-and-interactive-startup", "LV", program_under_login_and_interactive_startup),
     ("F5-interactive-script", "LV", interactive_script_sees_its_startup_and_owns_its_status),
     (
-        "startup-closes-low-descriptors",
+        "F9-startup-closes-low-descriptors",
         "LV",
         a_startup_file_that_closes_low_descriptors_leaves_the_source,
     ),

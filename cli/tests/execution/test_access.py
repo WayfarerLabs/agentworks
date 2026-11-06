@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import getpass
 import io
 import shutil
 import subprocess
@@ -36,8 +37,9 @@ from agentworks.execution.results import (
     Unknown,
     UnknownReason,
 )
-from tests.conftest import seed_vm_trust
+from tests.conftest import requires_posix_shell, seed_vm_trust
 from tests.ssh_fixtures import TEST_SSH_PUBLIC_KEY, write_test_ssh_keypair
+from tests.vm_access_support import local_remote_argv, run_requests_locally
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -727,3 +729,30 @@ def test_with_nothing_in_flight_the_closing_flush_tries_both_streams_then_raises
 
     assert caught.value is failure
     assert stderr.flushes == 1
+
+
+@requires_posix_shell
+def test_a_staged_source_needs_an_open_file_limit_above_its_descriptor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Staging a script or program needs a soft RLIMIT_NOFILE above 100; a plain command does not."""
+    run_requests_locally(
+        monkeypatch,
+        lambda command: [
+            "/bin/sh",
+            "-c",
+            'ulimit -n 64 && exec "$@"',
+            "sh",
+            *local_remote_argv(command, home=tmp_path, shell="/bin/sh", python=ssh_process.DEFAULT_PYTHON),
+        ],
+    )
+    access = VMAccess(
+        vm_name="local",
+        host="127.0.0.1",
+        user=getpass.getuser(),
+        identity=Admin(),
+        identity_file=tmp_path / "identity",
+    )
+
+    assert access.run(Command(("true",))).completion == Completed(0)
+    assert access.run(Script("true\n", Shell.SH)).completion == NotDelivered(NotDeliveredReason.LAUNCHER_FAILED)
