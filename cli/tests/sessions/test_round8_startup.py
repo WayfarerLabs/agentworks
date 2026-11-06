@@ -38,6 +38,7 @@ def bind_native_runtime(db, monkeypatch, native: NativeTarget) -> None:
     native.socket = str(native.root / "agt-a1" / "s1.sock")
     Path(native.socket).parent.mkdir()
     monkeypatch.setattr(_lifecycle, "AGENT_SOCKET_ROOT", str(native.root))
+    monkeypatch.setattr(_lifecycle, "_teardown_session", manager._teardown_session)
     _patch_transports(monkeypatch, native, native)
     _requiring_template(monkeypatch, "sh")
     monkeypatch.setattr(manager, "_ensure_pid", _pids._ensure_pid)
@@ -260,5 +261,62 @@ def test_native_retry_completes_protected_runtime_with_known_fingerprint(tmp_pat
         assert Path(native.socket).stat().st_mode & 0o070 == 0o070
         assert tmux.startup_protection_enabled("s1", run_command=native.run, socket_path=native.socket) is False
         assert sum("new-session" in command for command, _ in native.calls) == 1
+    finally:
+        db.close()
+
+
+@pytest.mark.parametrize("target_owns_session", [False, True])
+def test_parent_cleanup_accepts_stopped_child_with_proven_server_absence(
+    tmp_path, monkeypatch, native, target_owns_session
+):
+    db, _ = _restart_fixture(tmp_path, monkeypatch, status=SessionStatus.STOPPED)
+    bind_native_runtime(db, monkeypatch, native)
+    db.update_session_runtime(
+        "s1", socket_path=native.socket, pid=PID_STOPPED, boot_id=None, tmux_server_start_ticks=None
+    )
+    row = db.get_session("s1")
+    assert row is not None
+    try:
+        # Agent/workspace deletion calls this directly for every child, including
+        # stopped children. It does not take singular delete's status shortcut.
+        _lifecycle._teardown_session(
+            row,
+            target=native,
+            target_owns_session=target_owns_session,
+            db=db,
+            force=True,
+            legacy_running_authorized=True,
+        )
+        stopped = db.get_session("s1")
+        assert stopped is not None and stopped.pid == PID_STOPPED
+        assert not Path(native.socket).exists()
+        assert all("kill-server" not in command for command, _ in native.calls)
+    finally:
+        db.close()
+
+
+def test_parent_cleanup_does_not_treat_unknown_probe_as_stopped_absence(tmp_path, monkeypatch, native):
+    db, _ = _restart_fixture(tmp_path, monkeypatch, status=SessionStatus.STOPPED)
+    bind_native_runtime(db, monkeypatch, native)
+    db.update_session_runtime(
+        "s1", socket_path=native.socket, pid=PID_STOPPED, boot_id=None, tmux_server_start_ticks=None
+    )
+    row = db.get_session("s1")
+    assert row is not None
+    monkeypatch.setattr(
+        tmux, "capture_tmux_server_fingerprint", lambda **k: tmux.FingerprintProbe(tmux.ProbeStatus.UNKNOWN)
+    )
+    try:
+        with pytest.raises(StateError):
+            _lifecycle._teardown_session(
+                row,
+                target=native,
+                target_owns_session=False,
+                db=db,
+                force=True,
+                legacy_running_authorized=True,
+            )
+        assert db.get_session("s1") == row
+        assert not native.calls
     finally:
         db.close()

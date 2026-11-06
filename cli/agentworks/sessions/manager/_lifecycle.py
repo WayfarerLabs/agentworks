@@ -296,6 +296,9 @@ def _teardown_session(
         socket_path=socket_path,
         sudo=not target_owns_session,
     )
+    if session.pid == PID_STOPPED and probe.status is ProbeStatus.ABSENT:
+        _remove_stale_socket_and_mark_stopped(session, target=target, target_owns_session=target_owns_session, db=db)
+        return
     if probe.status is not ProbeStatus.PRESENT:
         try:
             _recover_broken_session(
