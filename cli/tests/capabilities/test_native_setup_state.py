@@ -126,6 +126,27 @@ def test_known_partial_deferral_boundary_with_known_or_unknown_full_table(inputs
         assert decode_native_setup(_slice(encode_native_setup(decoded))) == decoded
 
 
+@pytest.mark.parametrize("deferred", [False, True])
+def test_completed_record_with_unknown_full_table_requires_no_partial_routes(deferred):
+    payload = _state().model_dump(mode="json")
+    record = payload["records"][0]
+    record["complete"] = True
+    record["incomplete_reasons"] = []
+    record["artifact_inputs"] = None
+    if deferred:
+        record["deferred"] = [{"input_id": "b" * 64, "destination": "session", "reason": "fixture later delivery"}]
+    encoded = _slice(VersionedPayload(3, payload))
+    if deferred:
+        with pytest.raises(StateError):
+            decode_native_setup(encoded)
+    else:
+        decoded = decode_native_setup(encoded)
+        assert decoded.records[0].complete
+        assert decoded.records[0].artifact_inputs is None
+        assert decoded.records[0].deferred == ()
+        assert decode_native_setup(_slice(encode_native_setup(decoded))) == decoded
+
+
 def test_malformed_known_payload_has_safe_error():
     with pytest.raises(StateError) as caught:
         decode_native_setup(_slice(VersionedPayload(1, {"records": "private-input"})))

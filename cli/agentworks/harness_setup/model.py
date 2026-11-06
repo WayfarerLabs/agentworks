@@ -78,6 +78,8 @@ class SetupRecord(AgwModel):
             raise ValueError("pending cleanup cannot be complete setup")
         if self.complete and self.incomplete_reasons:
             raise ValueError("incomplete reasons cannot be complete setup")
+        if self.complete and self.artifact_inputs is None and self.deferred:
+            raise ValueError("unconfirmed artifact routing cannot be complete setup")
         return self
 
 
