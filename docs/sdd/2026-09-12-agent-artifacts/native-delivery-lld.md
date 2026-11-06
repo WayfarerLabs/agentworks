@@ -240,10 +240,13 @@ accepts `session-prompt`, `session-skill-plugin`, and `session-agent-definitions
 `session-developer-instructions` and `session-agent-config`; Grok accepts `session-rules` and
 `session-agent-definitions`, with persona delivery restricted to native headless arguments
 (`--single`, `-p`, `--prompt-json` or `--prompt-file`). Interactive Grok leaves those personas
-unhandled rather than claiming its ignored `--agents` argument delivered them. Shell publishes
-directly without a workaround. Codex/Grok session skills have no workaround. These names opt into
-the existing carriers in the table above. Hooks, automatic fallbacks and release-by-release
-compatibility tables are not part of this correction.
+unhandled rather than claiming its ignored `--agents` argument delivered them. This restriction
+follows Grok's
+[official headless-mode guide](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/14-headless-mode.md)
+and the integration report's observed interactive request bodies. Shell publishes directly without a
+workaround. Codex/Grok session skills have no workaround. These names opt into the existing carriers
+in the table above. Hooks, automatic fallbacks and release-by-release compatibility tables are not
+part of this correction.
 
 Native-name conflicts in enabled session delivery leave the identified inputs terminally unhandled.
 The shared session pipeline rerenders complete files and arguments for the remaining inputs and

@@ -1106,19 +1106,19 @@ beds. Unchanged positive cells retain their exact head/config; they do not certi
 paths or waive remaining acceptance. Three blockers and the additional material findings prevent
 both locks. The artifact companion tracks this same joint correction through this section.
 
-- [ ] Correct routing evidence coverage for restored, added and unreadable routed inputs, and
+- [x] Correct routing evidence coverage for restored, added and unreadable routed inputs, and
       receiving-facet/inspection health without an ancestor freshness gate or new codec.
-- [ ] Preserve recoverable managed session ownership after post-spawn uncertainty, keep socket and
+- [x] Preserve recoverable managed session ownership after post-spawn uncertainty, keep socket and
       identity recovery coherent, and protect resolved secrets on create/start/restart diagnostics.
-- [ ] Use definitive Proxmox destroy-task acknowledgement, refuse a different recorded guest name,
+- [x] Use definitive Proxmox destroy-task acknowledgement, refuse a different recorded guest name,
       and remove pre-delete guest mutations. Binding failure retains the row; force does not imply
       consent. Preserve the ongoing execution effort's separate trust and HTTP-error work.
-- [ ] Preserve unavailable native entries, name durable diagnostic locations, and report unsupported
+- [x] Preserve unavailable native entries, name durable diagnostic locations, and report unsupported
       interactive Grok personas as unhandled rather than claiming application.
-- [ ] Make clone cleanup independent, retain occupied reservations and keep private attempts private
+- [x] Make clone cleanup independent, retain occupied reservations and keep private attempts private
       during ACL repair. Surface residual-attempt recovery limits without automatic destructive
       reclamation or a new journal.
-- [ ] Disposition every reported should-fix and incidental finding against its current caller,
+- [x] Disposition every reported should-fix and incidental finding against its current caller,
       including exact Transport/SSH overlap, and update permanent collateral with actual behavior.
 - [ ] Strengthen the identified behavioral regression boundaries and native CI prerequisite, run all
       three private lanes and required integrated gates, and publish one exact green ready handoff.
@@ -1169,3 +1169,21 @@ The unchanged positive live cells retain the report's exact head and configurati
 routing, runtime, native preservation and Proxmox paths require new live checks before closeout. The
 next handoff specifically carries the known node-migration and immutable-identity limitations, the
 native-version and real-private-repository coverage gaps, and the six-hour report deadline.
+
+### Integrated round 7 source
+
+Routing corrections are integrated in `ddc9830b` and `2b63e574`, runtime corrections in `8b7a807a`
+and `f72107c5`, Proxmox/deletion in `8f4f1382`, clone/privacy cleanup in `78011cce`, and native
+preservation/framing in `bc1dd4b4`. The shared redaction helper and setup-secret plumbing are in
+`9b4e19a6` and `9a66bded`. Detached-input and recovery collateral are in `64b6cd4f`;
+retained-session inspection is in `2c9931c3`.
+
+Scoped delegated checks passed 225 routing cases, 534 runtime/privacy cases, 213 deletion cases and
+105 clone/ACL cases. These selections overlap and are not a full-suite total. Native checks include
+190 delivery/privacy cases, 52 preservation cases and measured failure-path restoration controls.
+The lead independently observed all 24 reported runtime temporary roots absent. The added sibling-
+route boundary passes both cases with the corrected source; removing its routing guard causes a
+failure, after which the exact source bytes were restored. Detached-input, routing and completion
+checks passed 33 cases; CI-exact whole-tree mypy passed 921 source/test files before the final
+native integration. Full integrated gates and independent review of the combined candidate remain
+pending.
