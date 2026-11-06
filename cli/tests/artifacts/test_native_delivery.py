@@ -322,7 +322,10 @@ def test_native_probe_passes_environment_separately_and_rejects_policy_failures(
 
     with pytest.raises(StateError):
         probe_native(
-            SimpleNamespace(run=run, logger=None), tool="claude", home="/home/a", environment={"API_TOKEN": "a-secret-value"}
+            SimpleNamespace(run=run, logger=None),
+            tool="claude",
+            home="/home/a",
+            environment={"API_TOKEN": "a-secret-value"},
         )
     assert "a-secret-value" not in calls[-1][0]
     assert calls[-1][1]["env"]["API_TOKEN"] == "a-secret-value"
