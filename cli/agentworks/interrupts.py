@@ -7,8 +7,8 @@ other state a command holds open, would outlive it.
 instead, as Ctrl-C does, for the span of a command that waits on something
 the operator ends (an interactive shell, a port forward) or holds a cloud
 route open, and restores the previous handlers afterwards. Once one has
-arrived, further ones are ignored until the block exits, so a second signal
-cannot cut short the cleanup the first one started. A signal the process
+arrived, further ones no longer interrupt until the block exits, so a second
+signal cannot cut short the cleanup the first one started. A signal the process
 already ignores stays ignored, so a command started under ``nohup`` keeps
 running after its terminal closes.
 
@@ -18,7 +18,9 @@ pipe into a program in the closed terminal's session (``| tee create.log``),
 which the hangup ends too. Before it raises the interrupt, the hangup's
 handler points whichever of standard output and standard error is not a
 regular file at the null device, so the cleanup runs to the end, silently
-there. Output going to a file is left where it goes.
+there. Output going to a file is left where it goes. A hangup that arrives
+after another signal started the cleanup still does this, without
+interrupting it.
 """
 
 from __future__ import annotations
@@ -46,10 +48,15 @@ _TERMINATIONS = tuple(
 def _interrupt(signal_number: int, _frame: object) -> None:
     for number in _TERMINATIONS:
         if signal.getsignal(number) is _interrupt:
-            signal.signal(number, signal.SIG_IGN)
+            signal.signal(number, _redirect_without_interrupting if number == _HANGUP else signal.SIG_IGN)
     if signal_number == _HANGUP:
         _write_to_the_null_device()
     raise KeyboardInterrupt
+
+
+def _redirect_without_interrupting(_signal_number: int, _frame: object) -> None:
+    """A hangup during the unwind another signal started: the terminal is gone all the same."""
+    _write_to_the_null_device()
 
 
 def _write_to_the_null_device() -> None:
@@ -130,7 +137,7 @@ def termination_as_interrupt() -> Iterator[None]:
     previous = {
         number: signal.signal(number, _interrupt)
         for number in _TERMINATIONS
-        if signal.getsignal(number) not in (signal.SIG_IGN, _interrupt)
+        if signal.getsignal(number) not in (signal.SIG_IGN, _interrupt, _redirect_without_interrupting)
     }
     try:
         yield

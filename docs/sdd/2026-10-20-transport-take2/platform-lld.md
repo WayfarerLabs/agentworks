@@ -507,7 +507,7 @@ interrupt rollback too. The C runtime is believed to deliver a console window's 
 too, so closing the window may start the same unwind, but Windows ends the process within seconds,
 so nothing may rely on it finishing, and the docs tell the operator to remove a rule a closed window
 left; a kill runs nothing at all. The hangup's null-device redirect is not applied to `SIGBREAK`.
-Once one arrives, all of them are ignored until the outermost block exits, so a second cannot cut
+Once one arrives, none of them interrupts until the outermost block exits, so a second cannot cut
 the route's close short; a block nested in another, or off the main thread, changes nothing, and a
 signal already ignored (`nohup`) stays ignored. A hangup's terminal fails every write, as does a
 pipe into a program the hangup ended too (`| tee create.log`), and the first line a rollback printed
@@ -515,10 +515,12 @@ would end it, so the hangup's handler points whichever of file descriptors 1 and
 file, and a Python stream on another such descriptor, at the null device before it raises; the
 cleanup then runs to the end, silently there. Nothing narrower can be told by asking, since `isatty`
 answers no for a terminal that has hung up while every write to it still fails, and a pipe's reader
-may die after any check; output to a file keeps its target, and a closed descriptor stays closed.
-Each cloud's close also deletes its allow before printing, and Azure's poke removes a rule whose
-create was interrupted, by the name it chose. `_transient_route` is an abstract member of the base,
-which each cloud supplies and nothing outside the cloud calls. Then:
+may die after any check; output to a file keeps its target, and a closed descriptor stays closed. A
+hangup after another signal started the unwind gets the same redirect without an interrupt, so
+`SIGTERM` followed by a closed terminal still rolls back. Each cloud's close also deletes its allow
+before printing, and Azure's poke removes a rule whose create was interrupted, by the name it chose.
+`_transient_route` is an abstract member of the base, which each cloud supplies and nothing outside
+the cloud calls. Then:
 
 - `run_as_root`: `trust.require_record(vm.name)` first, so a VM with no record opens no firewall
   rule, then `run_as_root(script, deadline)` inside `_public_ssh` under VM trust.

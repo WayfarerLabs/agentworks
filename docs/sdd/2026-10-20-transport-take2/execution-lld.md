@@ -546,14 +546,14 @@ above and waits for the client, polling `Popen.wait(timeout=0.2)` so Ctrl-C is d
   started under `nohup` outlives its terminal); a hangup first points whichever of descriptors 1 and
   2 is not a regular file at the null device, so the unwind's own writes cannot fail on the dead
   terminal or a pipe into it, while output to a file keeps its target; once one signal has arrived,
-  further ones are ignored until the block exits, so a second cannot cut the cleanup short; and a
-  block inside another, or off the main thread, changes nothing (`agentworks/interrupts.py`).
-  `port_forward_vm` owns the 0 on an operator stop and returns the client's status for any other
-  end. The clouds' route context opens the same block around every route (`public_ssh.py:272`), so a
-  cloud's firewall allow for a root script or a native shell is removed when the command is ended by
-  either signal. `create_vm` opens one too, first in the stack that spans provisioning and
-  initialization, so either signal runs create's interrupt arms: a cloud's create rolls back its
-  bootstrap allow and its partial VM.
+  further ones no longer interrupt until the block exits, so a second cannot cut the cleanup short,
+  though a later hangup still gets the redirect; and a block inside another, or off the main thread,
+  changes nothing (`agentworks/interrupts.py`). `port_forward_vm` owns the 0 on an operator stop and
+  returns the client's status for any other end. The clouds' route context opens the same block
+  around every route (`public_ssh.py:272`), so a cloud's firewall allow for a root script or a
+  native shell is removed when the command is ended by either signal. `create_vm` opens one too,
+  first in the stack that spans provisioning and initialization, so either signal runs create's
+  interrupt arms: a cloud's create rolls back its bootstrap allow and its partial VM.
 
 ## Errors
 

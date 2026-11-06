@@ -212,6 +212,39 @@ def test_a_second_termination_does_not_cut_the_unwind_short() -> None:
 
 @posix_only
 @pytest.mark.usefixtures("standard_streams")
+def test_a_hangup_after_another_termination_still_redirects_the_unwind() -> None:
+    """``SIGTERM`` starts a rollback, then the terminal closes: the rollback's writes must not fail on it."""
+    import pty
+
+    before = {number: signal.getsignal(number) for number in (signal.SIGTERM, signal.SIGHUP)}
+    unwound = False
+
+    with pytest.raises(KeyboardInterrupt), termination_as_interrupt():
+        try:
+            os.kill(os.getpid(), signal.SIGTERM)
+            raise AssertionError("SIGTERM was not delivered as an interrupt")
+        finally:
+            controller, terminal = pty.openpty()
+            os.dup2(terminal, 1)
+            os.dup2(terminal, 2)
+            os.close(terminal)
+            os.close(controller)
+            try:
+                os.kill(os.getpid(), signal.SIGHUP)
+            except KeyboardInterrupt:
+                pytest.fail("a hangup interrupted the unwind")
+            os.write(1, b"rolling back\n")
+            os.write(2, b"rolling back\n")
+            unwound = True
+
+    assert unwound
+    assert _is_null(1)
+    assert _is_null(2)
+    assert {number: signal.getsignal(number) for number in before} == before
+
+
+@posix_only
+@pytest.mark.usefixtures("standard_streams")
 def test_a_second_termination_does_not_cut_an_outer_unwind_short() -> None:
     """An inner block's exit must not re-arm the handler while the outer block is still unwinding the first signal."""
     before = signal.getsignal(signal.SIGHUP)
@@ -228,6 +261,22 @@ def test_a_second_termination_does_not_cut_an_outer_unwind_short() -> None:
                 pytest.fail("a second termination interrupted the outer unwind")
 
     assert signal.getsignal(signal.SIGHUP) == before
+
+
+@posix_only
+@pytest.mark.usefixtures("standard_streams")
+def test_a_block_opened_during_the_unwind_does_not_re_arm_a_hangup() -> None:
+    """A rollback that opens a cloud route opens a block of its own; a hangup in it must not interrupt the rollback."""
+    with pytest.raises(KeyboardInterrupt), termination_as_interrupt():
+        try:
+            os.kill(os.getpid(), signal.SIGTERM)
+            raise AssertionError("SIGTERM was not delivered as an interrupt")
+        finally:
+            try:
+                with termination_as_interrupt():
+                    os.kill(os.getpid(), signal.SIGHUP)
+            except KeyboardInterrupt:
+                pytest.fail("a hangup inside a block the unwind opened interrupted it")
 
 
 def test_a_block_off_the_main_thread_changes_nothing() -> None:
