@@ -34,8 +34,8 @@ import pytest
 
 from agentworks.artifacts.declarations import ArtifactsConfig
 from agentworks.db import Database, SessionMode, SessionStatus
-from agentworks.execution.requests import Script
 from agentworks.execution.results import Completed, Result
+from agentworks.plugins.codex.harness_integration import discovery_probe, recorder_probe, rollout_probe
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.tmux import FingerprintProbe, ProbeStatus, TmuxServerFingerprint
 from tests.vm_access_support import check_result, install_access_recorder, is_command_check
@@ -79,9 +79,11 @@ class _CodexTarget:
     readiness ``command -v codex`` check and the three op-time probes (the
     recorder read, the ``*-<sid>.jsonl`` rollout presence probe, and the
     source-filtered discovery probe), recording each into a shared event
-    log. ``recorded`` seeds the recorder file with a codex-reported thread
-    id; ``rollout_present`` decides the bound-id fork; ``discovered``
-    (rollout paths, one per line) drives discovery."""
+    log. Each probe is matched by its builder, for session ``s1`` in
+    workspace ``/home/me/ws1``. ``recorded`` seeds the recorder file with a
+    codex-reported thread id; ``rollout_present`` decides the fork for the
+    ``bound`` id's rollout; ``discovered`` (rollout paths, one per line)
+    drives discovery."""
 
     def __init__(
         self,
@@ -90,11 +92,13 @@ class _CodexTarget:
         recorded: str | None = None,
         rollout_present: bool = False,
         discovered: str | None = None,
+        bound: str = _SID,
     ) -> None:
         self._events = events
         self._recorded = recorded
         self._present = rollout_present
         self._discovered = discovered
+        self._bound = bound
 
     def run(self, cmd: str, **kwargs: object) -> _Result:
         return _Result()
@@ -103,16 +107,15 @@ class _CodexTarget:
         if is_command_check(call.request):
             self._events.append("probe")
             return check_result(call.request, 0)
-        source = call.request.source if isinstance(call.request, Script) else ""
-        if ".thread" in source:
+        if call.request == recorder_probe("s1"):
             self._events.append("read_recorder")
             if self._recorded is None:
                 return Result(Completed(1))  # no recorder file: nothing bound
             return Result(Completed(0), f"{self._recorded}\n".encode())
-        if "-exec awk" in source:
+        if call.request == discovery_probe("/home/me/ws1"):
             self._events.append("discover")
             return Result(Completed(0), (self._discovered or "").encode())
-        if ".jsonl" in source:
+        if call.request == rollout_probe(self._bound):
             self._events.append("detect")
             return Result(Completed(0 if self._present else 1))
         return None

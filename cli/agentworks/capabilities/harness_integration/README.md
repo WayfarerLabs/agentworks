@@ -710,8 +710,10 @@ The session layers, with the shipped tests as templates:
   rather than in a pane.
 - **Orchestrated:** `cli/tests/sessions/test_claude_code_orchestrated.py`. Real create/restart
   through the orchestrator with a launch-target double whose `answer` the recording access asks for
-  each probe: state persisted to the row, pre-existing blob read back, substitution does not mangle
-  the returned snippet.
+  each probe. The double matches each probe by equality with its builder's request for the session's
+  seeded id (`transcript_probe(sid)`), so a probe for the wrong id goes unanswered and the test
+  fails. Cover: state persisted to the row, pre-existing blob read back, substitution does not
+  mangle the returned snippet.
 - **Plugin end-to-end:** `cli/tests/plugins/test_claude.py`. Through `build_registry`:
   present-but-disabled row with `system-plugin` origin, gate refusal with the enable hint,
   enablement via `[plugins] system`.

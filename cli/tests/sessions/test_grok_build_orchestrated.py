@@ -10,8 +10,8 @@ import pytest
 
 from agentworks.artifacts.declarations import ArtifactsConfig
 from agentworks.db import Database, SessionMode, SessionStatus
-from agentworks.execution.requests import Script
 from agentworks.execution.results import Completed, Result
+from agentworks.plugins.grok.harness_integration import session_probe
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.tmux import FingerprintProbe, ProbeStatus, TmuxServerFingerprint
 from tests.vm_access_support import check_result, install_access_recorder, is_command_check
@@ -42,8 +42,15 @@ class _Result:
 
 
 class _GrokTarget:
-    def __init__(self, events: list[str], *, session_present: bool) -> None:
+    """Launch-target double: its access answers the readiness check and ``session_probe(sid)``.
+
+    ``sid`` is the id the op is expected to probe (``None`` when it should
+    probe none); ``session_present`` decides resume-vs-launch.
+    """
+
+    def __init__(self, events: list[str], *, sid: str | None, session_present: bool) -> None:
         self._events = events
+        self._sid = sid
         self._present = session_present
 
     def run(self, command: str, **kwargs: object) -> _Result:
@@ -54,7 +61,7 @@ class _GrokTarget:
         if is_command_check(call.request):
             self._events.append("probe")
             return check_result(call.request, 0)
-        if isinstance(call.request, Script) and "summary.json" in call.request.source:
+        if self._sid is not None and call.request == session_probe(self._sid):
             self._events.append("detect")
             return Result(Completed(0 if self._present else 1))
         return None
@@ -132,7 +139,7 @@ def test_create_persists_minted_uuid_and_launches_fresh(tmp_path: Path, monkeypa
     db = _seed_db(tmp_path)
     events: list[str] = []
     captured: dict[str, str] = {}
-    _common_stubs(monkeypatch, _GrokTarget(events, session_present=False))
+    _common_stubs(monkeypatch, _GrokTarget(events, sid=None, session_present=False))
     _capture_tmux(monkeypatch, events, captured)
 
     create_session(
@@ -162,7 +169,7 @@ def test_substitution_preserves_workload_values_and_substitutes_extra_args(
     db = _seed_db(tmp_path)
     events: list[str] = []
     captured: dict[str, str] = {}
-    target = _GrokTarget(events, session_present=False)
+    target = _GrokTarget(events, sid=None, session_present=False)
     _common_stubs(monkeypatch, target)
     _template(
         monkeypatch,
@@ -225,7 +232,7 @@ def test_restart_reads_uuid_and_detects_before_killing_old_workload(
 
     events: list[str] = []
     captured: dict[str, str] = {}
-    _common_stubs(monkeypatch, _GrokTarget(events, session_present=True))
+    _common_stubs(monkeypatch, _GrokTarget(events, sid=sid, session_present=True))
     _capture_tmux(monkeypatch, events, captured)
     monkeypatch.setattr(session_manager, "_ensure_pid", lambda session, **kwargs: session)
     monkeypatch.setattr(session_manager, "check_session_status", lambda *args, **kwargs: SessionStatus.RUNNING)
