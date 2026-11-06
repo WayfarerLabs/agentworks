@@ -54,12 +54,17 @@ descriptor 100 or above, clear of the low descriptors a startup file may close o
 `run`'s sinks are `CaptureOutput(limit=1 MiB)`, the default, which keeps up to `limit` bytes and
 makes more `Unknown(OUTPUT_LIMIT)`, and `DiscardOutput()`, which keeps nothing while the stream is
 still read to its closing marker. A caller whose output can exceed 1 MiB sets the limit per call.
+Plugins hold an access, so `run` checks what their types promise: input that is neither `NoInput()`
+nor `Bytes` of `bytes`, any other sink, or a limit that is not a positive `int` is a
+`ValidationError` before anything resolves.
 
 `Command`, `Script` and `PythonProgram` take the payload's input as `stdin`: `NoInput()`, the
 default, or `Bytes(data)`, which the client writes after the request and then closes, so the payload
-reads it from its first byte. Nothing bounds it but memory. `stream` takes the operator's stdin as
-its own argument instead, and refuses a request that carries input with a `ValidationError`. Input
-is never formatted into a log record or an error, and `Bytes` keeps `data` out of its `repr`.
+reads it from its first byte. Its size is bounded only by memory; the pump writes it to ssh in 64
+KiB pieces, as fast as ssh takes them, and the request's `deadline` bounds how long that takes.
+`stream` takes the operator's stdin as its own argument instead, and refuses a request that carries
+input with a `ValidationError`. Input is never formatted into a log record or an error, and `Bytes`
+keeps `data` out of its `repr`.
 
 They also take `elevated`, which runs the whole operation as root under `sudo -n`: it is the prefix
 of the constant first-stage command (below), not part of the request message, and the launcher

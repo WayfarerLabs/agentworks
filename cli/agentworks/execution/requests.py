@@ -70,7 +70,8 @@ class Bytes:
     """Input the client writes after the request and then closes: the payload's stdin, at its first byte.
 
     ``data`` is not in the ``repr``, and no operation log record or error
-    holds it. Nothing bounds it but memory.
+    holds it. Its size is bounded only by memory; the pump writes it as fast
+    as ssh takes it, within the request's deadline.
     """
 
     data: bytes = field(repr=False)
@@ -127,10 +128,11 @@ class PythonProgram(BoundedRequestOptions):
     """Core's own Python source, run by the guest's ``/usr/bin/python3 -I -S`` from a file descriptor.
 
     The source is in no argument vector, and ``args`` are the program's
-    arguments, ``sys.argv[1:]``. ``login`` and ``interactive`` run the
-    identity's default shell with that startup first, which then execs the
-    interpreter, so the program sees the environment a login or interactive
-    shell builds.
+    arguments, ``sys.argv[1:]``. The operation log records ``args``, so they
+    must never carry a secret; pass one on ``stdin``. ``login`` and
+    ``interactive`` run the identity's default shell with that startup first,
+    which then execs the interpreter, so the program sees the environment a
+    login or interactive shell builds.
     """
 
     source: str = field(repr=False)

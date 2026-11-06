@@ -27,7 +27,7 @@ from agentworks.execution.errors import (
     TrustMissing,
     VMNotReady,
 )
-from agentworks.execution.requests import Bytes, Command, LoginShell, Script, Shell
+from agentworks.execution.requests import Bytes, CaptureOutput, Command, LoginShell, NoInput, Script, Shell
 from agentworks.execution.results import (
     Completed,
     NotDelivered,
@@ -200,6 +200,46 @@ def test_stream_refuses_a_request_that_carries_its_own_input_before_anything_res
 
     with pytest.raises(ValidationError):
         access.stream(Command(("cat",), stdin=Bytes(b"data")), stdin=None, stdout=io.BytesIO(), stderr=io.BytesIO())  # type: ignore[arg-type]
+
+    assert resolved == []
+    assert no_spawn == []
+
+
+@pytest.mark.parametrize(
+    ("stdin", "sink"),
+    [
+        ("data", CaptureOutput()),
+        (Bytes("data"), CaptureOutput()),  # type: ignore[arg-type]
+        (Bytes(bytearray(b"data")), CaptureOutput()),  # type: ignore[arg-type]
+        (NoInput(), CaptureOutput(0)),
+        (NoInput(), CaptureOutput(-1)),
+        (NoInput(), CaptureOutput(True)),
+        (NoInput(), CaptureOutput(1.5)),  # type: ignore[arg-type]
+        (NoInput(), "discard"),
+    ],
+    ids=[
+        "str-stdin",
+        "str-bytes",
+        "bytearray-bytes",
+        "zero-limit",
+        "negative-limit",
+        "bool-limit",
+        "float-limit",
+        "str-sink",
+    ],
+)
+def test_run_refuses_input_its_types_rule_out_before_anything_resolves(
+    monkeypatch: pytest.MonkeyPatch, no_spawn: list[object], tmp_path: Path, stdin: object, sink: object
+) -> None:
+    resolved: list[bool] = []
+    monkeypatch.setattr(client, "resolve_ssh", lambda: resolved.append(True))  # type: ignore[func-returns-value]
+    access = vm_access(vm(), config(tmp_path / "key"), Admin())
+    request = Command(("cat",), stdin=stdin)  # type: ignore[arg-type]
+
+    with pytest.raises(ValidationError):
+        access.run(request, stdout=sink)  # type: ignore[arg-type]
+    with pytest.raises(ValidationError):
+        access.run(request, stderr=sink)  # type: ignore[arg-type]
 
     assert resolved == []
     assert no_spawn == []

@@ -21,7 +21,7 @@ from agentworks.execution import attach as attach_module
 from agentworks.execution import client, envelope, forwarding, pump, ssh_process
 from agentworks.execution.agw_launch import refusal_status
 from agentworks.execution.errors import CommandFailed, ExecutionIncomplete, PermissionDenied, describe_refusal
-from agentworks.execution.requests import Bytes, CaptureOutput, NoInput
+from agentworks.execution.requests import Bytes, CaptureOutput, DiscardOutput, NoInput
 from agentworks.execution.results import Completed, NotDelivered, NotDeliveredReason, Result, Unknown, UnknownReason
 from agentworks.execution.trust import TrustBinding, TrustMode
 
@@ -111,7 +111,14 @@ class VMAccess:
         reaches an outcome, before raising for a bad one. A request that
         raises before it is dispatched (no client, no trust record) is not
         logged.
+
+        Plugins hold an access and call this directly, so it validates what
+        the type checker cannot promise them: ``stdin`` is ``NoInput()`` or
+        ``Bytes`` of ``bytes``, and each sink is a ``DiscardOutput`` or a
+        ``CaptureOutput`` with a positive ``int`` limit. Anything else is a
+        ``ValidationError`` before anything resolves.
         """
+        _check_run_inputs(request, (stdout, stderr))
         kept_stdout, kept_stderr = _capture(stdout), _capture(stderr)
         with self._passphrase_hint_on_connection_failure():
             result = self._execute(
@@ -282,6 +289,22 @@ class VMAccess:
                 stop = session.pump()
                 session.end()
             return ssh_process.outcome(session, stop, log)
+
+
+def _check_run_inputs(request: RunRequest, sinks: tuple[OutputSink, OutputSink]) -> None:
+    """Refuse ``run`` input a plugin's untyped code could pass (see :meth:`VMAccess.run`)."""
+    stdin = request.stdin
+    if not isinstance(stdin, NoInput | Bytes):
+        raise ValidationError(f"a request's stdin is NoInput() or Bytes(data), not {type(stdin).__name__}")
+    if isinstance(stdin, Bytes) and type(stdin.data) is not bytes:
+        raise ValidationError(f"Bytes data is bytes, not {type(stdin.data).__name__}")
+    for sink in sinks:
+        if isinstance(sink, DiscardOutput):
+            continue
+        if not isinstance(sink, CaptureOutput):
+            raise ValidationError(f"a run sink is CaptureOutput or DiscardOutput, not {type(sink).__name__}")
+        if type(sink.limit) is not int or sink.limit <= 0:
+            raise ValidationError("a CaptureOutput limit is a positive int")
 
 
 def _capture(sink: OutputSink) -> pump.Capture | None:
