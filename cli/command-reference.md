@@ -707,6 +707,11 @@ provider-recovery boundary.
 
 `vm delete` requires `--force` if the VM has workspaces, agents, or sessions. The confirmation
 message shows what will be deleted. Pass `--yes` to skip the prompt.
+If backend binding fails, the command warns and removes local state without attempting remote
+deletion. A bound platform's delete exception aborts local removal. Check the provider's cleanup
+result; local removal alone does not prove the remote VM is gone. Whole-VM deletion does not first
+stop individual workloads or log out of Tailscale, so an external tailnet entry can remain for
+separate removal in the Tailscale admin console.
 
 `vm backup` exports the VM row and exact owner tree of agents, workspaces, sessions, events, grants,
 desired instance specs, and workspace files. It does not create or copy a provider VM snapshot,

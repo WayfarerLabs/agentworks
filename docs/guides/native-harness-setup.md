@@ -185,6 +185,12 @@ actual platform deletion failure still aborts as before. Agent and workspace rem
 its existing best-effort warnings. Files deliberately configured outside the removed parent remain
 outside that filesystem cleanup; setup does not introduce a new forget command or force option.
 
+Whole-VM deletion does not first log out of Tailscale or stop individual guest sessions. An external
+tailnet entry can remain after the guest is gone; remove a retired node from the Tailscale admin
+console separately. A binding-failure warning means remote deletion was not attempted, so inspect
+and clean up the provider resource as well. Platform-specific best-effort deletion may also leave
+remote resources; a removed local row alone does not prove provider removal.
+
 Setup and parent deletion share a VM-family mutation guard so they cannot race. This serializes
 mutating operations on the same VM, including owners without harness activations; contention refuses
 with retry guidance. It does not require native applied-state record discovery before parent

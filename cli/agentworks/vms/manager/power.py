@@ -175,9 +175,9 @@ def delete_vm(
     """Delete the backend VM before removing its managed local resources.
 
     Child-count and confirmation checks run before binding or secret resolution.
-    Binding and provider failures retain the row and its children for repair and
-    retry. Deletion never starts the guest or tears down individual workloads:
-    confirmed backend removal takes all guest state with it.
+    Binding failures warn and continue local cleanup, including stranded sites.
+    A bound provider delete that raises retains local state for retry. Deletion
+    never starts the guest or tears down individual workloads.
     """
     require_exact_tty_interaction_policy(interaction)
     vm = _require_vm(db, name)
@@ -216,11 +216,25 @@ def delete_vm(
     from agentworks.harness_setup.locking import native_mutation_guard
 
     with native_mutation_guard(db.path, vm.name):
-        vm_node, ops_ctx = _live_vm_boundary(db, config, vm, interaction=interaction)
-        # Confirm backend removal before local cleanup. Guest logout or session
-        # teardown would damage a VM whose provider refuses deletion, and may
-        # target a different guest if the persisted provider identifier was reused.
-        vm_node.site.platform.delete(vm, ops_ctx)
+        try:
+            vm_node, ops_ctx = _live_vm_boundary(db, config, vm, interaction=interaction)
+        except UserAbort:
+            raise
+        except Exception:
+            # Preserve the existing local retirement path for an unavailable
+            # binding. Provider errors after a successful binding still raise.
+            output.warn(
+                "Backend binding failed; remote VM deletion was not attempted. "
+                "Removing local state only. Inspect and remove any remaining backend resources manually."
+            )
+        else:
+            # Whole-VM removal does not depend on guest workload cleanup.
+            vm_node.site.platform.delete(vm, ops_ctx)
+        if vm.tailscale_host:
+            output.warn(
+                "The external Tailscale node entry may remain. "
+                "Remove the retired node from the Tailscale admin console."
+            )
 
         # Clean up logs
         from agentworks.ssh import LOG_DIR

@@ -466,7 +466,7 @@ class ProxmoxPlatform(VMPlatform):
     def delete(self, vm: VMRow, ctx: RunContext) -> None:
         # The stop-then-delete sequence lives in the teardown module,
         # shared with create's rollback arms.
-        stop_and_delete_vm(self._api(ctx), self._vm_node(vm), self._vmid(vm), expected_name=vm.hostname)
+        stop_and_delete_vm(self._api(ctx), self._vm_node(vm), self._vmid(vm))
 
     def status(self, vm: VMRow, ctx: RunContext) -> VMStatus:
         try:

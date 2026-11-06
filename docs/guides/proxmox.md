@@ -202,26 +202,20 @@ On Proxmox, `vm stop` uses the platform's hard power-off operation. It does not 
 guest shutdown. Save and flush work before stopping; request shutdown inside the guest when a
 graceful shutdown is needed.
 
-Deletion checks the recorded node, VMID and hostname before stopping an existing guest. A different
-or unobservable provider name is refused rather than treated as the recorded VM. Changing the
-current system slug does not change that stored binding. These checks do not discover migrated VMs
-or establish an immutable provider incarnation.
+Deletion targets the recorded node and VMID. Verify that binding in Proxmox before operating on a
+VM whose provider identity may have changed. The current Proxmox implementation treats API and task
+failures during stop and delete as best-effort: a successful Agentworks command alone does not prove
+that the guest was removed. Inspect Proxmox and finish any remaining cleanup there. A protected VM
+can be powered off before its deletion fails.
 
-A completed Proxmox destroy task confirms removal. Agentworks does not require another status read
-after that task, because a pool-scoped token loses its access to the removed guest. Guest sessions
-and Tailscale state are left alone before provider deletion, so a locked VM or failed API request
-does not first disconnect a surviving guest. Binding or deletion failure retains the VM record and
-its children. Resolve the lock or restore the site's configuration and API access, then retry.
-External tailnet records and workstation SSH known-hosts entries can remain after guest deletion.
-
-For an already-removed guest, a pool-scoped token may return a permission error instead of proving
-absence. Inspect the exact recorded node and VMID in Proxmox and restore appropriately scoped read
-access before retrying; a permission failure is never evidence that the guest is gone. A confirmed
-missing-configuration response needs no further backend mutation.
+Whole-VM deletion does not first tear down guest sessions or log out of Tailscale. External tailnet
+records and workstation SSH known-hosts entries can remain after guest deletion. Remove a retired
+node from the Tailscale admin console separately.
 
 `--force` permits deleting dependent workspaces, agents and sessions; it does not authorize the
-confirmation prompt or bypass a backend refusal. Use `--yes` separately when deletion is intended
-without a prompt.
+confirmation prompt. Use `--yes` separately when deletion is intended without a prompt. A backend
+binding failure warns and removes local state without attempting remote deletion. An exception
+raised by a bound platform's delete operation retains local state for retry.
 
 ### Native recovery and interactive access
 

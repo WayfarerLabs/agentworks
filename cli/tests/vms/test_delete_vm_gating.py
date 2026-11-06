@@ -1,4 +1,4 @@
-"""VM deletion confirms backend removal before changing managed local state.
+"""VM deletion keeps the existing binding-failure local retirement path.
 
 The real registry/resolver boundary runs against fake provider operations.
 Selected corrupt-name tests prebind before injecting their invalid inventory so
@@ -306,18 +306,18 @@ def test_delete_skips_a_name_alias_targeting_another_vm_artifact(
     assert captured_output.warnings
 
 
-def test_stranded_site_retains_row_and_children(
+def test_stranded_site_warns_and_removes_local_row_and_children(
     db: Database, make_config, resolve_counter, captured_output: CapturedOutput
 ):
     _seed(db, site="gone")
     db.insert_workspace("kept", "/srv/kept", "dvm", "ws-kept")
 
-    with pytest.raises(ConfigError):
-        vm_manager.delete_vm(db, make_config(), "dvm", force=True, yes=True, interaction=TtyInteractionPolicy.REFUSE)
+    vm_manager.delete_vm(db, make_config(), "dvm", force=True, yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
-    assert db.get_vm("dvm") is not None
-    assert db.get_workspace("kept") is not None
+    assert db.get_vm("dvm") is None
+    assert db.get_workspace("kept") is None
     assert resolve_counter == []
+    assert captured_output.warnings
 
 
 def _failing_backend_delete(monkeypatch: pytest.MonkeyPatch, counts: dict[str, int]) -> AuthorizationError:
@@ -546,7 +546,7 @@ def test_refused_backend_delete_never_mutates_guest_state(db: Database, make_con
 
 
 @pytest.mark.parametrize("failure", [ConfigError("site could not bind"), RuntimeError("unexpected boundary failure")])
-def test_binding_failure_preserves_managed_resources(db: Database, make_config, monkeypatch, failure):
+def test_binding_failure_warns_and_retires_local_resources(db: Database, make_config, monkeypatch, failure):
     _seed(db)
     db.insert_workspace("kept", "/srv/kept", "dvm", "ws-kept")
     counts = _fake_backend(monkeypatch)
@@ -557,40 +557,9 @@ def test_binding_failure_preserves_managed_resources(db: Database, make_config, 
         raise failure
 
     monkeypatch.setattr("agentworks.vms.manager.power._live_vm_boundary", refuse)
-    with pytest.raises(type(failure)) as caught:
-        vm_manager.delete_vm(db, make_config(), "dvm", force=True, yes=True, interaction=TtyInteractionPolicy.REFUSE)
+    vm_manager.delete_vm(db, make_config(), "dvm", force=True, yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
-    assert caught.value is failure
-    assert db.get_vm("dvm") is not None
-    assert db.get_workspace("kept") is not None
+    assert db.get_vm("dvm") is None
+    assert db.get_workspace("kept") is None
     assert counts["delete"] == 0
-    assert synced == []
-
-
-def test_reused_proxmox_binding_preserves_local_children_and_guest(db: Database, make_config, monkeypatch):
-    from agentworks.db import SessionMode
-    from agentworks.sessions import manager as session_manager
-    from tests.plugins.test_proxmox_create_interrupt import FakeProxmoxAPI
-
-    _seed(db)
-    db.update_vm_platform_metadata("dvm", {"node": "pve1", "vmid": "100"})
-    db.insert_workspace("ws1", "/srv/ws1", "dvm", "ws-ws1")
-    db.insert_session("s1", "ws1", "default", SessionMode.ADMIN)
-    fake = FakeProxmoxAPI()
-    fake.running = True
-    fake.provider_name = "replacement-guest"
-    monkeypatch.setattr(ProxmoxPlatform, "_api", lambda self, ctx: fake)
-    guest_calls = []
-    monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *args, **kwargs: guest_calls.append("logout"))
-    monkeypatch.setattr(session_manager, "_teardown_session", lambda *args, **kwargs: guest_calls.append("session"))
-    monkeypatch.setattr("agentworks.transports.transport", lambda *args, **kwargs: guest_calls.append("transport"))
-
-    with pytest.raises(StateError):
-        vm_manager.delete_vm(db, make_config(), "dvm", force=True, yes=True, interaction=TtyInteractionPolicy.REFUSE)
-
-    assert guest_calls == []
-    assert fake.ops() == ["vm_status"]
-    assert not fake.vm_deleted and fake.running
-    assert db.get_vm("dvm") is not None
-    assert db.get_workspace("ws1") is not None
-    assert db.get_session("s1") is not None
+    assert len(synced) == 1

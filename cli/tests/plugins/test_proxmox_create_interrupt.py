@@ -35,7 +35,7 @@ from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import ProvisionRequest
 from agentworks.debian import DebianRelease
 from agentworks.errors import ProvisioningError
-from agentworks.plugins.proxmox.api import ProxmoxAPIError, ProxmoxVMNotFoundError
+from agentworks.plugins.proxmox.api import ProxmoxAPIError
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.plugins.proxmox.transport import ProxmoxExecTransport
 
@@ -90,14 +90,15 @@ class FakeProxmoxAPI:
     wait, the escalation re-entry, the orphan-backstop probe); a
     ``None`` entry in ``status_errors`` means "this call succeeds",
     letting a test target a later status call (e.g. the probe, the
-    subsequent observation) without failing the first. A deleted VM is
-    modeled: ``delete_vm`` marks it gone and ``vm_status`` then raises
-    the typed missing-configuration error."""
+    second status call in a teardown flow) without failing the first.
+    A deleted VM is modeled: ``delete_vm`` marks it gone and
+    ``vm_status`` then raises the API error a real PVE returns, which
+    is what keeps the post-teardown existence probe quiet on the happy
+    paths."""
 
     def __init__(self) -> None:
         self.calls: list[tuple[Any, ...]] = []
         self.running = False
-        self.provider_name: object = "agw-vm1"
         self.vm_deleted = False
         self.next_id_error: BaseException | None = None
         self.configure_error: BaseException | None = None
@@ -158,15 +159,15 @@ class FakeProxmoxAPI:
         self.vm_deleted = True
         return "UPID:pve1:delete"
 
-    def vm_status(self, node: str, vmid: int, *, timeout: float | None = None) -> dict[str, Any]:
+    def vm_status(self, node: str, vmid: int) -> dict[str, Any]:
         if self.status_errors:
             err = self.status_errors.pop(0)
             if err is not None:
                 raise err
         self.calls.append(("vm_status", node, vmid))
         if self.vm_deleted:
-            raise ProxmoxVMNotFoundError(f"Configuration file 'nodes/{node}/qemu-server/{vmid}.conf' does not exist")
-        return {"status": "running" if self.running else "stopped", "name": self.provider_name}
+            raise ProxmoxAPIError(f"Configuration file 'qemu-server/{vmid}.conf' does not exist")
+        return {"status": "running" if self.running else "stopped"}
 
     # -- tasks -----------------------------------------------------------------
 
@@ -490,8 +491,14 @@ class TestEscalationFromFailureRollback:
         _assert_template_untouched(fake)
 
 
-class TestUnconfirmedRollbackWarning:
-    """Both rollback wrappers report surviving VMs without masking the cause."""
+class TestOrphanBackstopWarning:
+    """The post-teardown existence check: stop_and_delete_vm suppresses
+    a failed delete silently (delete()'s pinned contract), so both
+    rollback wrappers probe the VMID afterwards and warn when it still
+    exists (the likeliest cause: still locked by a clone that did not
+    settle within the bound). Proxmox has no azure-style tag sweep to
+    catch the orphan later. The happy-path tests pin the quiet side (VM
+    gone, no warning)."""
 
     def test_interrupt_path_warns_when_the_vm_survives_the_delete(
         self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
@@ -507,8 +514,10 @@ class TestUnconfirmedRollbackWarning:
         (remains,) = [w for w in captured_output.warnings if "may remain" in w]
         assert f"VM {_NEWID}" in remains
         assert "node 'pve1'" in remains
-        assert not fake.vm_deleted
-        assert len(captured_output.warnings) == 2
+        # The teardown itself completed (the failed delete was
+        # suppressed inside it), so this is the backstop, not the
+        # abandon path.
+        assert not any("Cleanup abandoned" in w for w in captured_output.warnings)
 
     def test_failure_path_warns_when_the_vm_survives_the_delete(
         self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
@@ -525,8 +534,9 @@ class TestUnconfirmedRollbackWarning:
         (remains,) = [w for w in captured_output.warnings if "may remain" in w]
         assert f"VM {_NEWID}" in remains
         assert "node 'pve1'" in remains
-        assert not fake.vm_deleted
-        assert len(captured_output.warnings) == 1
+        # The teardown itself completed, so this is the backstop, not
+        # the rollback-incomplete containment.
+        assert not any("Rollback incomplete" in w for w in captured_output.warnings)
 
 
 class TestTransportFailureDuringRollback:
@@ -563,38 +573,46 @@ class TestTransportFailureDuringRollback:
         assert exc.value is failure
         assert any("Rollback incomplete" in w and "node 'pve1'" in w for w in captured_output.warnings)
 
-    def test_failure_path_needs_no_read_after_confirmed_destroy(
+    # The two tests above inject at the FIRST status call, inside
+    # stop_and_delete_vm, short-circuiting before the orphan-backstop
+    # probe. The two below target the PROBE itself (the second status
+    # call): the delete has already failed silently as a suppressed
+    # ProxmoxAPIError, so if the probe's transport failure were
+    # swallowed in the helper, this scenario would produce ZERO warning
+    # and the silent orphan would just have moved one layer up.
+
+    def test_failure_path_probe_blip_still_warns_via_containment(
         self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
     ) -> None:
         platform, fake = _platform_with_fake(monkeypatch)
         failure = ProxmoxAPIError("config exploded")
         fake.configure_error = failure
-        denied_after_destroy = ProxmoxAPIError("VM.Audit denied")
-        fake.status_errors = [None, denied_after_destroy]
+        fake.delete_error = ProxmoxAPIError(f"VM {_NEWID} is locked (clone)")
+        # First status call (teardown) succeeds; the probe hits the blip.
+        fake.status_errors = [None, OSError("network blip")]
 
         with pytest.raises(ProxmoxAPIError) as exc:
             platform.create(_request(tailscale=False), RunContext())
 
         assert exc.value is failure
-        assert fake.vm_deleted
-        assert fake.status_errors == [denied_after_destroy]
-        assert captured_output.warnings == []
+        assert any("Rollback incomplete" in w and "node 'pve1'" in w for w in captured_output.warnings)
 
-    def test_interrupt_path_needs_no_read_after_confirmed_destroy(
+    def test_interrupt_path_probe_blip_still_warns_via_containment(
         self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
     ) -> None:
         platform, fake = _platform_with_fake(monkeypatch)
         interrupt = _interrupt_the_bootstrap(monkeypatch)
-        denied_after_destroy = ProxmoxAPIError("VM.Audit denied")
-        fake.status_errors = [None, denied_after_destroy]
+        fake.delete_error = ProxmoxAPIError(f"VM {_NEWID} is locked (clone)")
+        # First status call (teardown) succeeds; the probe hits the blip.
+        fake.status_errors = [None, OSError("network blip")]
 
         with pytest.raises(KeyboardInterrupt) as exc:
             platform.create(_request(tailscale=True), RunContext())
 
         assert exc.value is interrupt
-        assert fake.vm_deleted
-        assert fake.status_errors == [denied_after_destroy]
-        assert len(captured_output.warnings) == 1
+        (abandoned,) = [w for w in captured_output.warnings if "Cleanup abandoned" in w]
+        assert f"VM {_NEWID}" in abandoned
+        assert "node 'pve1'" in abandoned
 
 
 class TestPlainFailure:
@@ -654,14 +672,15 @@ class TestProvisionResultTransport:
         assert target.admin_username == "agentworks"
 
 
-class TestDeleteOp:
-    """Deletion stops the exact bound VM and accepts only confirmed absence."""
+class TestDeleteOpUnchanged:
+    """The delete op now composes the shared teardown; its observable
+    behavior is byte-for-byte the pre-#340 sequence."""
 
     @staticmethod
     def _vm_row() -> VMRow:
         return cast(
             "VMRow",
-            SimpleNamespace(name="vm1", hostname="agw-vm1", platform_metadata={"vmid": str(_NEWID), "node": "pve1"}),
+            SimpleNamespace(name="vm1", platform_metadata={"vmid": str(_NEWID), "node": "pve1"}),
         )
 
     def test_running_vm_is_stopped_then_deleted(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -675,12 +694,13 @@ class TestDeleteOp:
         assert fake.ops().index("stop_vm") < fake.ops().index("delete_vm")
         assert "stop_task" not in fake.ops()
 
-    def test_already_gone_vm_succeeds_without_another_mutation(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """A provider-confirmed absent VM needs no further backend mutation."""
+    def test_already_gone_vm_deletes_best_effort_without_raising(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The idempotency contract: a status read that fails (VM gone)
+        skips the stop, and the delete is still attempted best-effort."""
         platform, fake = _platform_with_fake(monkeypatch)
-        fake.vm_deleted = True
+        fake.status_errors = [ProxmoxAPIError("does not exist")]
+        fake.delete_error = ProxmoxAPIError("does not exist")
 
         platform.delete(self._vm_row(), RunContext())  # no raise
 
         assert "stop_vm" not in fake.ops()
-        assert "delete_vm" not in fake.ops()
