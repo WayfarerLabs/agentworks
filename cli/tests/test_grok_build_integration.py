@@ -257,8 +257,11 @@ def test_repeated_start_uses_the_same_state_based_decision() -> None:
 
 
 def test_a_failed_find_status_refuses_to_guess() -> None:
-    with pytest.raises(StateError):
+    with pytest.raises(StateError) as find_failed:
         _integration().start(_op_ctx(_launch_target(summary=6)))
+    with pytest.raises(StateError) as undefined:
+        _integration().start(_op_ctx(_launch_target(summary=255)))
+    assert find_failed.value.hint != undefined.value.hint  # a failed find and the shell around it are told apart
 
 
 @requires_posix_shell

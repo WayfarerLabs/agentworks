@@ -1275,8 +1275,9 @@ class CodexIntegration(HarnessIntegration):
         printed match exits 0 (a found rollout is definitive even if find
         also stumbled elsewhere); a find that FAILED without printing one
         exits with the find-failed code rather than folding into "no
-        rollout". Any other exit (that code, a shell that could not start)
-        raises, and so does a probe that may not have run, with its typed
+        rollout". Any other exit (that code, or a status from a startup file
+        that exits or fails before the probe's own command) raises, and so
+        does a probe that may not have run, with its typed
         execution error: guessing "fresh" would drop the bound id and
         orphan a resumable conversation."""
         status = access.run(rollout_probe(sid)).require_completed(access.vm_name)

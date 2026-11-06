@@ -127,6 +127,7 @@ class GrokBuildConfig(AgwModel):
 # ``xai-grok-home`` crate: a non-empty ``GROK_HOME`` verbatim, otherwise
 # ``$HOME/.grok``. Sessions are stored below that same root.
 _SESSIONS_DIR = "${GROK_HOME:-$HOME/.grok}/sessions"
+_FIND_FAILED_EXIT = 6  # find itself failed (not a mere no-match): raise
 
 
 def session_probe(sid: str) -> Script:
@@ -142,7 +143,7 @@ def session_probe(sid: str) -> Script:
         f'[ -d "{_SESSIONS_DIR}" ] || exit 1; '
         f'out=$(find "{_SESSIONS_DIR}" -mindepth 3 -maxdepth 3 -type f '
         f"-path {summary_path} -print -quit 2>/dev/null); rc=$?; "
-        f'[ -n "$out" ] && exit 0; [ "$rc" -eq 0 ] || exit 6; exit 1'
+        f'[ -n "$out" ] && exit 0; [ "$rc" -eq 0 ] || exit {_FIND_FAILED_EXIT}; exit 1'
     )
     return Script(inner, Shell.USER_DEFAULT, login=True, interactive=True)
 
@@ -405,7 +406,13 @@ class GrokBuildIntegration(HarnessIntegration):
             "refusing to guess resume-vs-launch.",
             entity_kind="session",
             entity_name=self._session_name,
-            hint="Retry once the launch target and its Grok session directory are readable.",
+            hint=(
+                "Check that the Grok session directory ($GROK_HOME/sessions, by default ~/.grok/sessions) "
+                "is readable by the launch user, then retry."
+                if status == _FIND_FAILED_EXIT
+                else "Check that the launch user's login and interactive shell startup files run to "
+                "completion without exiting or failing, then retry."
+            ),
         )
 
     def _probe_target(self, access: VMAccess) -> None:

@@ -284,8 +284,8 @@ def test_an_unreadable_projects_dir_raises_rather_than_launching_fresh(
 
 
 def test_probe_that_could_not_execute_raises_rather_than_guessing() -> None:
-    """A non-{0,1} exit (a shell that could not start, say) means the probe
-    gave no answer. Guessing "fresh" would launch ``--session-id`` over a
+    """A non-{0,1} exit (from a startup file that exits before the probe's
+    own command, say) means the probe gave no answer. Guessing "fresh" would launch ``--session-id`` over a
     reserved id and the pane would fail; the op raises a typed error naming
     the target instead."""
     target = _launch_target(transcript=255)

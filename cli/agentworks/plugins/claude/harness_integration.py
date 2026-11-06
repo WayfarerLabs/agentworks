@@ -529,8 +529,9 @@ class ClaudeCodeIntegration(HarnessIntegration):
         printed match exits 0 (a found transcript is definitive even if
         find also stumbled elsewhere); a find that FAILED without printing
         one (an unreadable subdir, not a mere no-match) exits 6 rather
-        than folding into "no transcript". Any other exit (the 6, a shell
-        that could not start) raises, and a probe that may not have run
+        than folding into "no transcript". Any other exit (the 6, or a
+        status from a startup file that exits or fails before the probe's
+        own command) raises, and a probe that may not have run
         raises its typed execution error: guessing "fresh" would launch
         ``--session-id <reserved-uuid>``, which Claude rejects as
         already-in-use on a real session's restart and the pane fails to

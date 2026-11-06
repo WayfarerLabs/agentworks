@@ -679,8 +679,8 @@ def test_gone_rollout_drops_the_id_and_falls_through_to_a_fresh_launch() -> None
 
 
 def test_rollout_probe_that_could_not_execute_raises_rather_than_guessing() -> None:
-    """A non-{0,1} exit (a shell that could not start, say) means the probe
-    gave no answer. Guessing "gone" would drop the bound id and orphan a
+    """A non-{0,1} exit (from a startup file that exits before the probe's
+    own command, say) means the probe gave no answer. Guessing "gone" would drop the bound id and orphan a
     resumable conversation; the op raises a typed error naming the target
     instead."""
     with pytest.raises(StateError, match="could not probe") as exc:
