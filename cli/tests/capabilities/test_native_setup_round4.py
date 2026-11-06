@@ -307,13 +307,10 @@ def test_unavailable_capture_cannot_erase_placements_or_unresolved_deferrals(rou
             fixture.db, fixture.registry, fixture.owners[component], call, failures=failures, operation="fixture-reinit"
         )
         record = next(item for item in state.records if item.component == component)
-        assert not record.complete and record.incomplete_reasons and record.skipped
-        if capture == "changed":
-            # The old route IDs remain explicit, but cannot acknowledge the
-            # unseen identities in the producer's newer full input set.
-            assert record.artifact_inputs is None
-        else:
-            assert record.artifact_inputs is not None and set(record.artifact_inputs) == old_ids
+        assert not record.complete and not record.incomplete_reasons and record.skipped
+        # Known route metadata survives without certifying the unknown incoming
+        # input set, whose current health is evaluated from the producer lazily.
+        assert record.artifact_inputs is not None and set(record.artifact_inputs) == old_ids
         assert {item.input_id for item in record.deferred} == old_ids
         assert {item.destination for item in record.deferred} == {"session"}
         assert record.artifact_files == before.artifact_files

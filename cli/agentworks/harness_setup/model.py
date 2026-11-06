@@ -49,8 +49,9 @@ class SetupRecord(AgwModel):
     claims: Annotated[tuple[NativeClaim, ...], Field(strict=False)] = ()
 
     artifact_files: Annotated[tuple[OwnedArtifactFile, ...], Field(strict=False)] = ()
-    # None means the full artifact input set has not been confirmed. Explicit
-    # routes for known inputs may still be retained while other input is unknown.
+    # None means this invocation never confirmed handling of its supplied inputs.
+    # Incoming ancestor route health is computed lazily from the owning records;
+    # it is not a permanent failure of this facet's completed local application.
     artifact_inputs: Annotated[tuple[_Hash, ...], Field(strict=False)] | None = None
     deferred: Annotated[tuple[ArtifactDeferral, ...], Field(strict=False)] = ()
     skipped: Annotated[tuple[ArtifactSkip, ...], Field(strict=False)] = ()

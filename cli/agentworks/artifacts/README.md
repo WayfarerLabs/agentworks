@@ -318,14 +318,26 @@ inventory checks existing entries in known machine, user and direct workspace di
 reads native metadata names, including Codex configuration registrations, rather than assuming
 filenames are names. Conflicts identify the native name and competing paths. During setup,
 conflicting artifacts are deferred individually to the next supported facet while independent
-artifacts continue. During VM, user and workspace setup, unresolved inherited routes protect
-affected prior placements and related packages against replacement and removal until their source
-evidence is available. New independent paths can still apply. Ordinary safe retirement removes prior
-owned placements no longer in that plan; modified or unowned files remain protected. If session
-delivery still has a native-name conflict, the affected inputs are reported as unhandled and
-excluded from both files and launch arguments; independent delivery and launch continue. A
-non-conflicting native namespace can allow a later facet to handle a previously deferred input.
-Problems solely in existing ancestor placement also warn without blocking launch.
+artifacts continue. During VM, user and workspace setup, missing, unreadable or stale ancestor
+captures cannot authorize retirement. Unresolved inherited origins protect affected prior placements
+and related packages against replacement and removal until their source evidence is current.
+Independently attributable local updates, removals and additions still converge. Attribution uses
+the prior and current local captures; shared files and old placements whose origins can no longer be
+classified remain held. Repairing the upstream owner and retrying the receiving owner's supported
+setup removes that hold. Ordinary safe retirement removes prior owned placements no longer in that
+plan; modified or unowned files remain protected. If session delivery still has a native-name
+conflict, the affected inputs are reported as unhandled and excluded from both files and launch
+arguments; independent delivery and launch continue. A non-conflicting native namespace can allow a
+later facet to handle a previously deferred input. Problems solely in existing ancestor placement
+also warn without blocking launch.
+
+Local setup completion records the known inputs actually supplied to its invocation. Unknown
+incoming-route health is calculated lazily from the ancestor records, rather than saved as a
+permanent local failure. A workspace created while its upstream routing is unknown can become
+current without another setup invocation when the repaired upstream handles its own inputs. If the
+repaired upstream instead routes new content to that workspace, its artifact placement remains
+noncurrent until that content is actually applied. Explicit required/recommended native setup
+prerequisites retain their separate configuration, destination and local completion checks.
 
 Inventory covers selected skill/persona types, with at most 512 directory entries, YAML headers up
 to 32 KiB each and 1 MiB combined, and an Agentworks rendered-TOML budget for Codex personas of 32

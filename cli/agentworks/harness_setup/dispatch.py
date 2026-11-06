@@ -15,7 +15,7 @@ from agentworks.artifacts.application import ArtifactDeferral
 from agentworks.artifacts.model import ArtifactInputs
 from agentworks.artifacts.publication import publish_artifacts, validate_application
 from agentworks.artifacts.reporting import report_applied, report_deferrals
-from agentworks.artifacts.state import write_capture
+from agentworks.artifacts.state import read_captures, write_capture
 from agentworks.capabilities.harness_integration import ensure_harness_integration_enabled, harness_integration_for
 from agentworks.capabilities.harness_integration.setup import (
     SetupInvocation,
@@ -134,6 +134,13 @@ def run_setup(
                 raise StateError("native setup received an unresolved config secret")
 
         state = read_native_setup(db, inputs.kind, inputs.name)
+        previous_capture = read_captures(db, inputs.kind, inputs.name).get(inputs.component)
+        local_origins = {
+            item.origin_identity
+            for capture in (previous_capture, inputs.artifact_snapshot)
+            if capture is not None
+            for item in capture.inputs.items()
+        }
         if inputs.artifact_snapshot is not None and not buffered:
             write_capture(db, inputs.kind, inputs.name, inputs.component, inputs.artifact_snapshot, operation=operation)
         prior = {record.integration: record for record in state.records if record.component == inputs.component}
@@ -292,11 +299,6 @@ def run_setup(
                 artifacts=artifacts,
             )
             try:
-                if routing.retain_previous:
-                    for reason in routing.unavailable_reasons or (
-                        "Some ancestor artifact routes have no readable captured content; repair their owning setup.",
-                    ):
-                        report_incomplete(reason)
                 if isinstance(call, VMSetupInvocation):
                     application = integration.vm_init(call)
                 elif isinstance(call, UserSetupInvocation):
@@ -313,7 +315,14 @@ def run_setup(
                     roots=roots,
                     group=call.linux_group if isinstance(call, WorkspaceSetupInvocation) else "",
                     root=isinstance(call, VMSetupInvocation),
-                    retain_previous=routing.retain_previous,
+                    retain_origins=frozenset(
+                        origin
+                        for file in current.artifact_files
+                        for origin in file.origins
+                        if origin not in local_origins
+                    )
+                    if routing.retain_previous
+                    else frozenset(),
                 )
             except _SetupInfrastructureFailure as error:
                 raise error.original from None
@@ -372,7 +381,10 @@ def run_setup(
             current = current.model_copy(
                 update={
                     "artifact_files": owned,
-                    "artifact_inputs": None if routing.routing_unknown else artifact_inputs,
+                    # Acknowledge the known inputs actually supplied to this
+                    # invocation. Unknown incoming routing is inspected lazily;
+                    # it is not a permanent failure of this owner's local setup.
+                    "artifact_inputs": artifact_inputs,
                     "deferred": deferred,
                     "skipped": publication.skipped,
                 }

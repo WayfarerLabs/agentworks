@@ -32,7 +32,9 @@ def test_unresolved_routes_hold_previous_files_and_sections_without_inspecting_t
     desired = () if plan == "absent" else (replace(item, data=b"changed" if plan == "changed" else item.data),)
     checkpoint = Mock()
     monkeypatch.setattr("agentworks.artifacts.publication.NativeFiles", Mock(side_effect=AssertionError("no I/O")))
-    result = publish_artifacts(target, desired, previous, checkpoint, roots=(str(target.home),), retain_previous=True)
+    result = publish_artifacts(
+        target, desired, previous, checkpoint, roots=(str(target.home),), retain_origins=frozenset({"a" * 64, "b" * 64})
+    )
     assert result.files == previous and len(result.skipped) == 1
     assert result.skipped[0].path == str(path) and result.skipped[0].origins == item.origins
     assert path.read_bytes() == before and path.stat().st_ino == metadata.st_ino
@@ -65,7 +67,7 @@ def test_unresolved_routes_hold_package_updates_and_new_members_but_allow_indepe
         previous,
         checkpoints.append,
         roots=(str(target.home),),
-        retain_previous=True,
+        retain_origins=frozenset({"a" * 64, "b" * 64}),
     )
     assert result.files[: len(previous)] == previous
     assert {file.path for file in result.files} == {file.path for file in previous} | {independent.path}
@@ -104,7 +106,7 @@ def test_retained_aggregate_section_does_not_drop_unresolved_members_when_new_in
         previous,
         lambda files: None,
         roots=(str(target.home),),
-        retain_previous=True,
+        retain_origins=frozenset({"a" * 64, "b" * 64}),
     )
     assert path.read_bytes() == before
     assert BEGIN in before and END in before

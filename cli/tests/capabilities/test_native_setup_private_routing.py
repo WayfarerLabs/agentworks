@@ -180,7 +180,7 @@ def test_failed_producer_restoring_inputs_preserves_existing_user_files(
     for path, content in case.files.items():
         assert path.is_file() and path.read_bytes() == content
     (record,) = state.records
-    assert not record.complete and record.incomplete_reasons
+    assert not record.complete and record.skipped
     assert record.artifact_files == case.original.artifact_files
 
 
@@ -262,12 +262,8 @@ def test_unknown_vm_payload_after_clearing_bundles_cannot_retire_user_files(
         assert path.is_file() and path.read_bytes() == before
     (record,) = state.records
     assert record.artifact_files == case.original.artifact_files
-    if future == "native":
-        # Inactive VM passthrough only needs the readable capture; no ownership
-        # or cleanup decision is taken from the opaque old integration slice.
-        assert record.complete and not record.incomplete_reasons and not record.skipped
-    else:
-        assert not record.complete and record.skipped
+    # Even a readable but stale capture cannot authorize retirement.
+    assert not record.complete and record.skipped
     assert captured_output.warnings
     retained = {item.key: item.payload for item in case.fixture.db.instance_state.get_applied_slices("vm", "vm")}
     assert all(retained[key] == value for key, value in payloads.items())

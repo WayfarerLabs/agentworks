@@ -77,15 +77,15 @@ def publish_artifacts(
     roots: tuple[str, ...],
     group: str = "",
     root: bool = False,
-    retain_previous: bool = False,
+    retain_origins: frozenset[str] = frozenset(),
 ) -> ArtifactPublication:
     """Preflight all destinations, then checkpoint each confirmed file change.
 
     Modified obsolete whole files remain owned for later cleanup. Matching files
     can be adopted; differing unowned files skip their artifact without blocking
     independent entries. Generated sections preserve all surrounding content.
-    Unresolved inherited routes hold every prior placement and its related
-    package against retirement or replacement until the inputs can be resolved.
+    Unresolved inherited origins hold their prior placement and related package
+    against retirement or replacement. Independent local origins still converge.
     """
     if not desired and not previous:
         return ArtifactPublication()
@@ -106,13 +106,14 @@ def publish_artifacts(
     if len(planned) != len(desired) or len(current) != len(previous):
         raise StateError("artifact publication contains duplicate destinations")
     skipped: list[ArtifactSkip] = []
-    held_paths = set(current) if retain_previous else set()
+    held_paths = {path for path, item in current.items() if retain_origins.intersection(item.origins)}
     if held_paths:
-        prior_origins = {origin for prior in previous for origin in prior.origins}
-        prior_identities = {prior.native_identity for prior in previous if prior.native_identity is not None}
+        retained = tuple(current[path] for path in held_paths)
+        prior_origins = {origin for prior in retained for origin in prior.origins}
+        prior_identities = {prior.native_identity for prior in retained if prior.native_identity is not None}
         package_roots = {
             package
-            for prior in previous
+            for prior in retained
             if (package := prior.package_root or _skill_entrypoint_directory(prior)) is not None
         }
         for item in desired:

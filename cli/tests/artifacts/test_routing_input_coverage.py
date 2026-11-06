@@ -86,7 +86,7 @@ def test_upstream_failure_cannot_make_stale_receiver_current(db, receiver):
 @pytest.mark.skipif(sys.platform != "linux", reason="isolated Linux user filesystem execution")
 @pytest.mark.parametrize("producer", ["active", "inactive"])
 @pytest.mark.parametrize("previous_receiver", [False, True])
-def test_receiver_records_unknown_full_input_set_without_confirming_partial_inputs(
+def test_receiver_acknowledges_known_inputs_without_certifying_incoming_routes(
     db, tmp_path, monkeypatch, producer, previous_receiver
 ):
     fixture = graph(db, active=("vm", "agent") if producer == "active" else ("agent",), counts={"agent": 0})
@@ -125,15 +125,15 @@ def test_receiver_records_unknown_full_input_set_without_confirming_partial_inpu
     )
     state = run_setup(db, fixture.registry, fixture.owners["agent"], invocation, failures=[], operation="agent-init")
     (record,) = state.records
-    assert not record.complete and record.incomplete_reasons
+    assert record.complete and not record.incomplete_reasons
     assert not record.artifact_files and not record.skipped
-    assert record.artifact_inputs is None
+    assert record.artifact_inputs == ()
     monkeypatch.setattr(
         "agentworks.harness_setup.readiness.destination_id", lambda *args, **kwargs: record.destination_id
     )
     assert (
         evaluate_setup(db, fixture.owners["agent"], "shell", vm=fixture.vm, runner=runner, remediation="fixture").status
-        == "incomplete"
+        == "current"
     )
     routed = fixture.route()
     assert routed.retain_previous and routed.unavailable_reasons

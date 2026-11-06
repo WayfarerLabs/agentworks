@@ -123,11 +123,11 @@ def test_unreadable_explicit_input_is_forwarded_even_without_previous_result(
     assert expected_routing.unresolved_routes == {missing.identity}
     actual = run_setup(db, fixture.registry, inputs, invocation, failures=failures, operation="retry-setup")
     record = actual.records[0]
-    assert failures == [] and not record.complete
+    assert failures == [] and record.complete
     assert record.artifact_inputs is not None and missing.identity in record.artifact_inputs
     assert [item.input_id for item in record.deferred] == [missing.identity]
     assert record.deferred[0].destination == "session"
-    assert record.deferred[0].reason in record.incomplete_reasons
+    assert not record.incomplete_reasons
     assert expected_routing.unavailable_reasons[0] in record.deferred[0].reason
     if own_inputs:
         assert any(
@@ -168,8 +168,9 @@ def test_unknown_input_set_records_source_repair_for_fresh_and_existing_receiver
     assert expected.retain_previous and not expected.unresolved_routes and expected.unavailable_reasons
     actual = run_setup(db, fixture.registry, inputs, invocation, failures=failures, operation="retry-setup").records[0]
     assert failures == []
-    assert not actual.complete and actual.artifact_inputs is None
-    assert actual.incomplete_reasons == expected.unavailable_reasons
+    assert actual.complete is (not previous)
+    assert actual.artifact_inputs is not None
+    assert not actual.incomplete_reasons
     if previous:
         assert before is not None and actual.skipped
         assert actual.artifact_files == before.artifact_files

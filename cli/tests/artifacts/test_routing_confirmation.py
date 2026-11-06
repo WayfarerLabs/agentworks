@@ -63,14 +63,14 @@ def test_confirmed_empty_deferrals_do_not_hold_receiver_content(db, tmp_path, re
         previous,
         lambda _: None,
         roots=(str(transport.home),),
-        retain_previous=routed.retain_previous,
+        retain_origins=frozenset(),
     )
     assert path.read_bytes() == b"new rule" and not retired.exists()
     assert len(updated.files) == 1 and not updated.skipped
 
 
 @pytest.mark.parametrize("destination", ["user", "workspace", "session", None])
-def test_unreadable_capture_only_holds_recorded_receiver_routes(db, destination):
+def test_unreadable_capture_does_not_certify_unrecorded_receiver_routes(db, destination):
     fixture = graph(db, active=("vm", "agent", "workspace"))
     record = fixture.save("vm", routes={} if destination is None else {"vm-0": destination}, complete=False)
     db._conn.execute(
@@ -80,7 +80,7 @@ def test_unreadable_capture_only_holds_recorded_receiver_routes(db, destination)
     db._conn.commit()
     for component, facet in (("agent", "user"), ("workspace", "workspace")):
         result = setup_artifacts(db, fixture.registry, fixture.owners[component], fixture.vm, "shell")
-        assert result.retain_previous == (destination == facet)
+        assert result.retain_previous and result.routing_unknown
         assert result.unresolved_routes == frozenset(
             route.input_id for route in record.deferred if route.destination == facet
         )
@@ -131,7 +131,7 @@ def test_unknown_session_route_survives_inactive_passthrough(db, destination, ca
     assert any("vm/vm" in reason and original[:12] in reason for reason in result.unavailable_reasons)
 
 
-def test_confirmed_user_table_does_not_propagate_opaque_inactive_vm_capture(db):
+def test_receiver_acknowledgement_cannot_certify_an_unreadable_current_vm_capture(db):
     fixture = graph(db, active=("agent",))
     fixture.save("agent", inherited=fixture.captures["vm"].inputs)
     db._conn.execute(
@@ -140,7 +140,8 @@ def test_confirmed_user_table_does_not_propagate_opaque_inactive_vm_capture(db):
     )
     db._conn.commit()
     result = fixture.route()
-    assert not result.retain_previous and not result.unresolved_routes
+    assert result.retain_previous and not result.unresolved_routes
+    assert result.unavailable_reasons
 
 
 def test_unconfirmed_session_graph_is_visible_in_read_only_inspection(db):

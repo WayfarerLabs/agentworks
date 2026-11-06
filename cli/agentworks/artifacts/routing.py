@@ -344,10 +344,15 @@ def _routing_unknown(view: ArtifactOwnerView, destination: ArtifactFacet, integr
     if integration_name not in view.owner.activations:
         return destination == inactive_destination(view.owner.facet) and view.capture_status in (
             "missing",
+            "stale",
             "unavailable",
         )
     if destination not in ALLOWED_DEFERRALS[view.owner.facet]:
         return False
+    # An old or unreadable capture cannot authorize retirement, even when the
+    # previous handling record has no deferrals or the readable input set is empty.
+    if view.capture_status != "current":
+        return True
     record = view.record
     if record is None and view.status == "unavailable":
         return True
@@ -355,10 +360,7 @@ def _routing_unknown(view: ArtifactOwnerView, destination: ArtifactFacet, integr
         item.destination not in ALLOWED_DEFERRALS[view.owner.facet] for item in record.deferred
     ):
         return True
-    has_inputs = bool(view.prepared) or (
-        view.captured is None and (bool(view.owner.artifacts.bundles) or view.capture_status == "unavailable")
-    )
-    return has_inputs and not _covers_inputs(
+    return bool(view.prepared) and not _covers_inputs(
         record, (() if view.prepared is None else (item.identity for item in view.prepared.items()))
     )
 
@@ -502,8 +504,8 @@ def _session_routes(
         if view is not vm and integration_name in view.owner.activations:
             destination: ArtifactFacet = "user" if view is user else "workspace"
             incoming = _recorded_routes(vm, destination, integration_name)
-            if not _covers_inputs(view.record, incoming) and (
-                incoming or _routing_unknown(vm, destination, integration_name)
+            if _routing_unknown(vm, destination, integration_name) or (
+                incoming and not _covers_inputs(view.record, incoming)
             ):
                 unknown = True
         routes.append((view, identities, unknown))
