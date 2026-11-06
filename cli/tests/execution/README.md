@@ -76,8 +76,8 @@ distribution's default sudoers on a fresh VM, is V only.
 `conformance/program_vectors.py` holds the vectors for the request vocabulary the files LLD adds,
 which join the list in `vectors.py`:
 
-- F1 (L, S and V): a request's `Bytes` input reaches no log record or error, and `log_streams=False`
-  keeps its streams out of the record.
+- F1 (L, S and V): a request's `Bytes` input reaches no record of a real `SSHLogger` and no error,
+  and `log_streams=False` keeps its streams out of the record.
 - F2 and F3 (L, S and V): every input byte reaches a `PythonProgram` from its first byte, its
   arguments arrive exactly, and its source is in no argument.
 - F4 (L and V): a `PythonProgram` with `login`, `interactive` and both, under startup files that
@@ -85,7 +85,8 @@ which join the list in `vectors.py`:
   lane's own (`LocalLane.use_lane_shell_as_account_shell`), so the four shells are each covered; on
   V it is the admin's.
 - F5 (L and V): an interactive `Script` under `sh`, `bash` and the default shell sees its
-  interactive startup and returns its own `exit` status.
+  interactive startup, returns its own `exit` status and prints none of the prompts its startup
+  sets, which a shell reading the script as its input would.
 - A startup file that closes descriptors 3 to 9 (L and V) still leaves a login and interactive
   `PythonProgram` and an interactive `Script` their source.
 - F8 (L and V): an elevated request keeps its environment; on L it needs `sudo -n`, as the elevation

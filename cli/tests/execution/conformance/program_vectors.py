@@ -11,13 +11,16 @@ from __future__ import annotations
 
 import ast
 import json
+import tempfile
 import uuid
+from pathlib import Path
 from typing import TYPE_CHECKING
+from unittest import mock
 
 import pytest
 
+from agentworks import ssh
 from agentworks.execution.errors import CommandFailed
-from agentworks.execution.oplog import format_record
 from agentworks.execution.requests import (
     Bytes,
     CaptureOutput,
@@ -29,6 +32,7 @@ from agentworks.execution.requests import (
     Shell,
 )
 from agentworks.execution.results import Completed, Unknown, UnknownReason
+from agentworks.ssh import SSHLogger
 from tests.execution.conformance.lanes import LocalLane, needs_sudo
 
 if TYPE_CHECKING:
@@ -55,38 +59,42 @@ def python(source: str, *, stdin: bytes | None = None, log_streams: bool = True)
 
 def stdin_reaches_no_record_and_no_error(lane: Lane) -> None:
     secret = f"agw-f1-{uuid.uuid4().hex}"
-    records: list[str] = []
+    with tempfile.TemporaryDirectory() as logs, mock.patch.object(ssh, "LOG_DIR", Path(logs)):
+        # The operation log a command really keeps, in a directory of its own.
+        logger = SSHLogger("conformance", "F1")
+        records: list[None] = []
 
-    def log(request: RunRequest, result: Result) -> None:
-        records.append(format_record(request, result, label="F1"))
+        def log(request: RunRequest, result: Result) -> None:
+            records.append(None)
+            logger.record(request, result)
 
-    access = lane.access_with_log(log)
-    reads = "import sys; sys.stdin.buffer.read()"
-    for log_streams in (True, False):
-        request = python(reads, stdin=secret.encode(), log_streams=log_streams)
+        access = lane.access_with_log(log)
+        reads = "import sys; sys.stdin.buffer.read()"
+        for log_streams in (True, False):
+            request = python(reads, stdin=secret.encode(), log_streams=log_streams)
 
-        result = access.run(request)
+            result = access.run(request)
 
-        assert result.completion == Completed(0)
-        assert secret not in repr(request) + repr(result)
-    echoes = (
-        "import sys; data = sys.stdin.buffer.read(); "
-        "sys.stdout.buffer.write(data); sys.stderr.buffer.write(data); sys.exit(3)"
-    )
-    withheld = python(echoes, stdin=secret.encode(), log_streams=False)
+            assert result.completion == Completed(0)
+            assert secret not in repr(request) + repr(result)
+        echoes = (
+            "import sys; data = sys.stdin.buffer.read(); "
+            "sys.stdout.buffer.write(data); sys.stderr.buffer.write(data); sys.exit(3)"
+        )
+        withheld = python(echoes, stdin=secret.encode(), log_streams=False)
 
-    with pytest.raises(CommandFailed) as raised:
-        access.run(withheld, check=True)
+        with pytest.raises(CommandFailed) as raised:
+            access.run(withheld, check=True)
 
-    error = raised.value
-    assert error.result.stdout == error.result.stderr == secret.encode()  # the payload did echo it
-    assert all(secret not in text for text in (str(error), repr(error), error.hint or ""))
-    assert len(records) == 3
-    assert all(secret not in record for record in records)
+        error = raised.value
+        assert error.result.stdout == error.result.stderr == secret.encode()  # the payload did echo it
+        assert all(secret not in text for text in (str(error), repr(error), error.hint or ""))
+        assert len(records) == 3
+        assert secret not in logger.path.read_text()
 
-    with pytest.raises(CommandFailed):
-        access.run(python(echoes, stdin=secret.encode()), check=True)
-    assert secret in records[-1]  # the streams are logged unless the request withholds them
+        with pytest.raises(CommandFailed):
+            access.run(python(echoes, stdin=secret.encode()), check=True)
+        assert secret in logger.path.read_text()  # the streams are logged unless the request withholds them
 
 
 # -- F2 and F3: a program's input and arguments arrive exactly ---------------------------
@@ -178,7 +186,8 @@ def program_under_login_and_interactive_startup(lane: Lane) -> None:
 
 def interactive_script_sees_its_startup_and_owns_its_status(lane: Lane) -> None:
     account_shell_name(lane)
-    function = "agw_f5() { echo f5-called; }\n"
+    # A shell that read the script as its input would prompt for each line with these.
+    function = "agw_f5() { echo f5-called; }\nPS1='agw-f5-prompt '\nPS2='agw-f5-prompt '\n"
     home = lane.make_dir(
         {
             ".shrc": function,  # sh and dash read $ENV when interactive
@@ -202,6 +211,7 @@ def interactive_script_sees_its_startup_and_owns_its_status(lane: Lane) -> None:
 
             assert result.completion == Completed(7), (shell, login, result.stderr)
             assert b"f5-called\n" in result.stdout, (shell, login, result.stdout, result.stderr)
+            assert b"agw-f5-prompt" not in result.stdout + result.stderr, (shell, login, result.stderr)
 
 
 def a_startup_file_that_closes_low_descriptors_leaves_the_source(lane: Lane) -> None:
