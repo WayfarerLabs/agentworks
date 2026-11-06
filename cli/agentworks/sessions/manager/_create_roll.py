@@ -495,8 +495,12 @@ def _start_session_slice(
     # rollback (a completed session itself is never rolled back).
     mode_label = f"agent: {resolved_agent_name}" if resolved_agent_name else "admin"
     started = f"Session '{name}' started ({mode_label}, template: {template.name})"
-    if setup_incomplete:
-        output.info(f"{started}; harness setup incomplete")
+    from agentworks.harness_setup.outcomes import setup_completion_suffix
+    from agentworks.harness_setup.state import read_native_setup
+
+    suffix = setup_completion_suffix(read_native_setup(db, "session", name))
+    if setup_incomplete or suffix:
+        output.info(f"{started}{suffix or '; harness setup incomplete'}")
     else:
         output.result(started)
 
@@ -570,11 +574,13 @@ def _roll_forward(
         if graph.pending_workspace is not None:
             retained.append(
                 f"Workspace '{plan.workspace_name}' was retained; "
-                f"retry with --workspace {plan.workspace_name} instead of --new-workspace."
+                f"replace --new-workspace with --workspace {plan.workspace_name} and remove any "
+                "--workspace-name, --workspace-template and --workspace-spec options."
             )
         if graph.pending_agent is not None:
             retained.append(
-                f"Agent '{plan.agent_name}' was retained; retry with --agent {plan.agent_name} instead of --new-agent."
+                f"Agent '{plan.agent_name}' was retained; replace --new-agent with --agent {plan.agent_name} "
+                "and remove any --agent-name, --agent-template and --agent-spec options."
             )
         summary = describe_setup_failures(setup_failures)
         error.hint = "\n".join(part for part in (error.hint, *retained, summary) if part)

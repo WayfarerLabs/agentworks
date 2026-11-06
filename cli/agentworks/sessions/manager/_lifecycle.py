@@ -1012,7 +1012,11 @@ def _launch_existing_session(
                     is_admin=is_admin,
                 )
 
-            output.result(f"Session '{name}' {operation}ed")
+            from agentworks.harness_setup.outcomes import setup_completion_suffix
+            from agentworks.harness_setup.state import read_native_setup
+
+            suffix = setup_completion_suffix(read_native_setup(db, "session", name))
+            output.result(f"Session '{name}' {operation}ed{suffix}")
 
             _mgr._regenerate_tmuxinator(db, config, vm, ws)
 

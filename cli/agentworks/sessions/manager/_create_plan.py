@@ -240,7 +240,10 @@ def _validate_flag_new_agent(db: Database, draft: _PlanDraft, name: str) -> None
             f"agent '{draft.agent_name}' already exists",
             entity_kind="agent",
             entity_name=draft.agent_name,
-            hint=f"To use this existing agent, retry with '--agent {draft.agent_name}' instead of '--new-agent'.",
+            hint=(
+                f"To use this existing agent, replace --new-agent with --agent {draft.agent_name} and remove any "
+                "--agent-name, --agent-template and --agent-spec options."
+            ),
         )
 
 
@@ -286,8 +289,8 @@ def _validate_names_and_existence(db: Database, draft: _PlanDraft, name: str) ->
             entity_kind="workspace",
             entity_name=draft.workspace_name,
             hint=(
-                f"To use this existing workspace, retry with '--workspace {draft.workspace_name}' "
-                "instead of '--new-workspace'."
+                f"To use this existing workspace, replace --new-workspace with --workspace {draft.workspace_name} "
+                "and remove any --workspace-name, --workspace-template and --workspace-spec options."
             ),
         )
 
