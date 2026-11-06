@@ -86,7 +86,7 @@ def _build_session_target(
     return agent_target
 
 
-def _identity_access(vm: VMRow, config: Config, agent: AgentRow | None, *, logger: SSHLogger | None) -> VMAccess:
+def _identity_access(vm: VMRow, config: Config, agent: AgentRow | None, *, logger: SSHLogger) -> VMAccess:
     """The admin's ``VMAccess``, or ``agent``'s, logging to the operation's own ``logger``.
 
     Building it connects to nothing, so it adds no probe to what the
@@ -96,12 +96,10 @@ def _identity_access(vm: VMRow, config: Config, agent: AgentRow | None, *, logge
     from agentworks.execution.access import Admin, Agent
 
     identity = Admin() if agent is None else Agent(agent.name, agent.linux_user)
-    return execution.vm_access(vm, config, identity, log=None if logger is None else logger.record)
+    return execution.vm_access(vm, config, identity, log=logger.record)
 
 
-def _session_access(
-    session: SessionRow, *, vm: VMRow, config: Config, db: Database, logger: SSHLogger | None
-) -> VMAccess:
+def _session_access(session: SessionRow, *, vm: VMRow, config: Config, db: Database, logger: SSHLogger) -> VMAccess:
     """The ``VMAccess`` of the session's owning identity: the admin for an admin-mode session, else its agent."""
     if session.mode == SessionMode.ADMIN.value:
         return _identity_access(vm, config, None, logger=logger)
