@@ -128,13 +128,15 @@ fresh access token as password. The helper neither selects nor mutates Azure ten
 state.
 
 If a CLI is not visible at this point in initialization, or its authentication check fails or is
-indeterminate, initialization warns but still installs the helper. Later user-install/profile steps
-may make a CLI visible, so verify again after initialization when applicable. If it is absent,
-unauthenticated, times out, or returns malformed output at Git runtime, the wrapper suppresses its
-stdout and stderr and prints only the provider's fixed recovery hint. Authenticate or repair the
-target user's CLI identity and retry Git; reinitialization is needed only when the manifest or
-generated helper changes. Setting `defaults.runup_git_credentials = false` skips both secret-source
-verification and these CLI readiness checks, not helper installation.
+indeterminate, initialization warns but still installs the helper; a VM without `python3` counts as
+indeterminate. A host-key or other state error is not indeterminate and fails initialization as it
+would for any other request. Later user-install/profile steps may make a CLI visible, so verify
+again after initialization when applicable. If it is absent, unauthenticated, times out, or returns
+malformed output at Git runtime, the wrapper suppresses its stdout and stderr and prints only the
+provider's fixed recovery hint. Authenticate or repair the target user's CLI identity and retry Git;
+reinitialization is needed only when the manifest or generated helper changes. Setting
+`defaults.runup_git_credentials = false` skips both secret-source verification and these CLI
+readiness checks, not helper installation.
 
 ## Scope and selection
 

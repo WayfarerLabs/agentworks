@@ -19,6 +19,7 @@ from agentworks.capabilities.git_credential.base import (
 from agentworks.capabilities.git_credential.github import _GH_AUTH_CHECK, GitHubCredentialProvider
 from agentworks.command_checks import run_user_shell_command
 from agentworks.errors import StateError, TokenRejectedError, ValidationError
+from agentworks.execution.errors import RequestRefused, TrustMismatch, TrustMissing
 from agentworks.execution.results import (
     Completed,
     NotDelivered,
@@ -210,6 +211,37 @@ def test_cli_runup_warns_without_quoting_an_indeterminate_check(
     provider.runup(RunContext(agent_access=access, secrets=ScopedSecrets({}, ())))
     assert len(warnings) == 1
     assert "untrusted" not in warnings[0]
+
+
+@pytest.mark.parametrize(
+    "provider",
+    [
+        GitHubCredentialProvider("gh", {"source": {"mode": "gh-cli"}}),
+        AzDOCredentialProvider("ado", {"org": "my-org", "source": {"mode": "az-cli"}}),
+    ],
+)
+@pytest.mark.parametrize(
+    ("outcome", "error"),
+    [
+        (Result(Unknown(UnknownReason.HOST_KEY)), TrustMismatch),
+        (TrustMissing("box"), TrustMissing),
+        (Result(NotDelivered(NotDeliveredReason.REFUSED, "cwd")), RequestRefused),
+    ],
+    ids=["host-key-mismatch", "no-host-key-record", "refused"],
+)
+def test_cli_runup_lets_a_state_error_propagate(
+    monkeypatch: pytest.MonkeyPatch,
+    provider: GitCredentialProvider,
+    outcome: Result | BaseException,
+    error: type[Exception],
+) -> None:
+    access = RecordingVMAccess([], Agent("dev", "agent-dev"))
+    access.default_outcome = outcome
+    warnings: list[str] = []
+    monkeypatch.setattr("agentworks.output.warn", warnings.append)
+    with pytest.raises(error):
+        provider.runup(RunContext(agent_access=access, secrets=ScopedSecrets({}, ())))
+    assert warnings == []
 
 
 @pytest.mark.parametrize(

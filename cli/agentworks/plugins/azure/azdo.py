@@ -139,6 +139,7 @@ class AzDOCredentialProvider(GitCredentialProvider):
     def _check_cli_readiness(self, ctx: RunContext) -> None:
         from agentworks import output
         from agentworks.errors import ConnectivityError, ExternalError, StateError
+        from agentworks.execution.errors import VMNotReady
 
         access = ctx.admin_access() or ctx.agent_access()
         if access is None:
@@ -153,8 +154,9 @@ class AzDOCredentialProvider(GitCredentialProvider):
                 )
                 return
             status = run_user_shell_command(_AZ_AUTH_CHECK, access, deadline=10)
-        except (ConnectivityError, ExternalError, StateError):
-            # Indeterminate, a VM without python3 (VMNotReady) included: warn, never block the helper.
+        except (ConnectivityError, ExternalError, VMNotReady):
+            # Indeterminate, a VM without python3 included: warn, never block the helper. A host-key
+            # or other state error is not indeterminate and propagates.
             output.warn(f"Could not determine Azure CLI readiness for git-credential/{self.owner_name}")
             return
         if status == 0:
