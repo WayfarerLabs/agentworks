@@ -32,7 +32,7 @@ if TYPE_CHECKING:
     from agentworks.artifacts.model import ArtifactInput, ArtifactInputs
 
 
-# Only options represented by the interactive JSON and Markdown agent surfaces.
+# Only options represented by the headless JSON and native Markdown agent surfaces.
 _OPTIONS = {"model": str, "tools": list}
 
 
