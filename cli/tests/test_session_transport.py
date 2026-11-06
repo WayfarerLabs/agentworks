@@ -102,6 +102,7 @@ def _patch_common(
         ),
     )
     monkeypatch.setattr("agentworks.sessions.tmux.finalize_session_start", lambda *a, **k: None)
+    monkeypatch.setattr("agentworks.sessions.manager._get_boot_id", lambda *a, **k: BOOT_ID)
     stub_vm_gates(monkeypatch)
     return targets
 
@@ -907,6 +908,7 @@ def test_restart_dead_workload_error_propagates(tmp_path: Path, monkeypatch: pyt
     stub_session_resolvers(monkeypatch)
 
     monkeypatch.setattr(session_manager, "_regenerate_tmuxinator", lambda *_a, **_kw: None)
+    monkeypatch.setattr(session_manager, "_get_boot_id", lambda *a, **k: BOOT_ID)
     monkeypatch.setattr(session_manager, "_resolve_session_linux_user", lambda *_a, **_kw: "admin")
     monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *_a, **_kw: None)
     monkeypatch.setattr(tmux_mod, "kill_session", lambda *_a, **_kw: True)

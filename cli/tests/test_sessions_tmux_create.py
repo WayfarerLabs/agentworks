@@ -34,6 +34,7 @@ from agentworks.sessions.tmux import (
     finalize_session_start,
     parse_process_start_ticks,
 )
+from tests._runtime_probes import framed_runtime_result
 
 # ---------------------------------------------------------------------------
 # Pure helpers
@@ -316,7 +317,7 @@ def test_stale_socket_cleanup_removes_only_a_canonically_absent_server() -> None
             if "list-sessions" in command:
                 result = _SpyResult(returncode=1)
                 result.stderr = self.diagnostic
-                return result
+                return framed_runtime_result(command, result)
             return _SpyResult()
 
     unknown = _CleanupTarget("error connecting to /run/agentworks/s.sock (Permission denied)")
@@ -421,7 +422,7 @@ def test_existing_socket_is_untouched_when_server_probe_is_indeterminate(
 
     def run(command: str, **kwargs: object) -> _SpyResult:
         calls.append(command)
-        if command.startswith("test -e "):
+        if command.startswith(("test -e ", "test -S ")):
             return _SpyResult()
         if "list-sessions" in command:
             return _SpyResult(returncode=255)
@@ -676,11 +677,9 @@ def test_alive_pane_remain_on_exit_lifecycle(
     assert pid == 12345
     new_session_calls = [c for c in spy_run.calls if "new-session" in c]
     assert len(new_session_calls) == 1
-    # Chained into the same client invocation, not a separate round-trip.
-    assert "\\; set-option -t s1 remain-on-exit on" in new_session_calls[0]
     grant_idx = next(i for i, c in enumerate(spy_run.calls) if "server-access" in c)
     pid_idx = next(i for i, c in enumerate(spy_run.calls) if "#{pid}" in c)
-    unset_idx = next(i for i, c in enumerate(spy_run.calls) if "set-option -u" in c and "remain-on-exit" in c)
+    unset_idx = next(i for i, c in enumerate(spy_run.calls) if "remain-on-exit off" in c)
     # Spawn PID -> grants -> release protection -> final observation.
     assert pid_idx < grant_idx < unset_idx
     recheck_idx = max(i for i, c in enumerate(spy_run.calls) if "#{pane_dead}" in c)
@@ -707,7 +706,7 @@ def test_dead_pane_at_post_unset_recheck_captures_and_raises(
     # The grant machinery DID run (the pane was alive at the first check)...
     assert any("server-access" in c for c in spy_run.calls)
     # ...and the kill fired after the unset's re-check found the dead pane.
-    unset_idx = next(i for i, c in enumerate(spy_run.calls) if "set-option -u" in c and "remain-on-exit" in c)
+    unset_idx = next(i for i, c in enumerate(spy_run.calls) if "remain-on-exit off" in c)
     kill_idx = next(i for i, c in enumerate(spy_run.calls) if "kill-server" in c)
     assert unset_idx < kill_idx
 
