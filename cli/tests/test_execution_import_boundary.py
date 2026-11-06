@@ -64,6 +64,10 @@ MIGRATED_FILES = (
     "plugins/azure/azdo.py",
     "artifacts/native/probe.py",
     "plugins/claude/artifacts.py",
+    "capabilities/base.py",
+    "plugins/claude/harness_integration.py",
+    "plugins/codex/harness_integration.py",
+    "plugins/grok/harness_integration.py",
 )
 
 
