@@ -94,10 +94,10 @@ Agentworks reconciles explicit plugin settings and mapped settings as one plan. 
 value that disables an explicitly requested plugin or changes its marketplace identity is a config
 error before writes. Source values discarded by `merge-preserve` or `skip-existing` create no such
 conflict. Plugin commands run first; the final mapping preserves their controlled native keys.
-`skip-existing` skips only the mapping, not separately requested plugin work.
-Native associations retained by an unresolved managed claim or ambiguous selection keep their
-existing overlay when the mapping omits them; omission does not bypass safe native retirement.
-Explicitly supplied mapped entries follow the selected settings policy.
+`skip-existing` skips only the mapping, not separately requested plugin work. Native associations
+retained by an unresolved managed claim or ambiguous selection keep their existing overlay when the
+mapping omits them; omission does not bypass safe native retirement. Explicitly supplied mapped
+entries follow the selected settings policy.
 
 Completed native mutations are observed and recorded individually. Repeat setup leaves matching
 owned installations in place and enables a requested owned plugin if it is disabled. A native

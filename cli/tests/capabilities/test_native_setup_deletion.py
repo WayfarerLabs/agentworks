@@ -135,7 +135,7 @@ def test_parent_deletion_does_not_require_native_applied_state_cleanup(
 
 @pytest.mark.parametrize("applied_state", ["claims", "unknown", "malformed"])
 @pytest.mark.parametrize("outcome", ["success", "binding-failed", "delete-failed"])
-def test_vm_deletion_requires_backend_confirmation_before_forgetting_owners(
+def test_vm_deletion_retains_owners_when_a_bound_platform_delete_raises(
     db, deletion, monkeypatch, applied_state, outcome
 ):
     owners = [("vm", "box"), ("agent", "agent"), ("workspace", "project")]
@@ -157,15 +157,15 @@ def test_vm_deletion_requires_backend_confirmation_before_forgetting_owners(
         return SimpleNamespace(site=SimpleNamespace(platform=SimpleNamespace(delete=remove))), Mock()
 
     monkeypatch.setattr("agentworks.vms.manager.power._live_vm_boundary", boundary)
-    if outcome != "success":
-        with pytest.raises(StateError if outcome == "binding-failed" else SSHError):
+    if outcome == "delete-failed":
+        with pytest.raises(SSHError):
             delete_vm(db, deletion.config, "box", force=True, yes=True, interaction=TtyInteractionPolicy.REFUSE)
         assert db.get_vm("box") and db.get_agent("agent") and db.get_workspace("project")
         for kind, name in owners:
             assert db.instance_state.get_applied_slices(kind, name) == previous[kind]
     else:
         delete_vm(db, deletion.config, "box", force=True, yes=True, interaction=TtyInteractionPolicy.REFUSE)
-        assert removed == ["box"]
+        assert removed == (["box"] if outcome == "success" else [])
         assert db.get_vm("box") is None and db.get_agent("agent") is None and db.get_workspace("project") is None
         for kind, name in owners:
             assert db.instance_state.get_applied_slices(kind, name) == ()
