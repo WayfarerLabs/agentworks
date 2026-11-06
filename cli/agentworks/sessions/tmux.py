@@ -353,22 +353,46 @@ def cleanup_stale_admin_sockets(target: Transport, admin_username: str) -> int:
 
 
 def _cleanup_stale_sockets_under(target: Transport, dir_path: str) -> int:
-    """Shared implementation for cleanup_stale_{agent,admin}_sockets."""
+    """Remove only observed direct sockets whose native server is confirmed absent."""
+    from agentworks.native_files import native_path
+
+    dir_path = native_path(dir_path)
     q_dir = shlex.quote(dir_path)
-    result = target.run(f"find {q_dir} -name '*.sock' -type s 2>/dev/null", sudo=True, check=False)
-    if not result.stdout.strip():
+    begin, end = "\nAGW_STALE_SOCKETS_BEGIN\0", "AGW_STALE_SOCKETS_END\0"
+    result = target.run(
+        "printf '\\nAGW_STALE_SOCKETS_BEGIN\\0'; "
+        f"find {q_dir} -maxdepth 1 -name '*.sock' -type s -print0 2>/dev/null "
+        "&& printf 'AGW_STALE_SOCKETS_END\\0'",
+        sudo=True,
+        check=False,
+    )
+    if not result.ok or result.stdout.count(begin) != 1 or result.stdout.count(end) != 1:
+        return 0
+    _, _, payload = result.stdout.partition(begin)
+    payload, _, trailing = payload.partition(end)
+    if trailing or (payload and not payload.endswith("\0")):
+        return 0
+    paths = payload.split("\0")[:-1] if payload else []
+    if len(paths) != len(set(paths)):
+        return 0
+    try:
+        if any(
+            native_path(path) != path or path.rpartition("/")[0] != dir_path or not path.endswith(".sock")
+            for path in paths
+        ):
+            return 0
+    except StateError:
         return 0
 
     removed = 0
-    for sock_path in result.stdout.strip().splitlines():
-        sock_path = sock_path.strip()
-        if not sock_path:
-            continue
+    for sock_path in paths:
         q_sock = shlex.quote(sock_path)
-        check = target.run(f"tmux -S {q_sock} list-sessions", sudo=True, check=False)
+        socket_guard = f"test -S {q_sock} && ! test -L {q_sock}"
+        check = target.run(f"{socket_guard} && tmux -S {q_sock} list-sessions", sudo=True, check=False)
         if _tmux_presence_from_result(check, missing_target_is_absent=False) is ProbeStatus.ABSENT:
-            target.run(f"rm -f {q_sock}", sudo=True, check=False)
-            removed += 1
+            result = target.run(f"{socket_guard} && rm -f -- {q_sock}", sudo=True, check=False)
+            if result.ok:
+                removed += 1
     return removed
 
 

@@ -311,8 +311,8 @@ def test_stale_socket_cleanup_removes_only_a_canonically_absent_server() -> None
 
         def run(self, command: str, **kwargs: object) -> _SpyResult:
             self.commands.append(command)
-            if command.startswith("find "):
-                return _SpyResult(stdout="/run/agentworks/s.sock\n")
+            if "find " in command:
+                return _SpyResult(stdout="\nAGW_STALE_SOCKETS_BEGIN\0/run/agentworks/s.sock\0AGW_STALE_SOCKETS_END\0")
             if "list-sessions" in command:
                 result = _SpyResult(returncode=1)
                 result.stderr = self.diagnostic
@@ -321,11 +321,11 @@ def test_stale_socket_cleanup_removes_only_a_canonically_absent_server() -> None
 
     unknown = _CleanupTarget("error connecting to /run/agentworks/s.sock (Permission denied)")
     assert _cleanup_stale_sockets_under(unknown, "/run/agentworks") == 0  # type: ignore[arg-type]
-    assert not any(command.startswith("rm -f ") for command in unknown.commands)
+    assert not any("rm -f -- " in command for command in unknown.commands)
 
     absent = _CleanupTarget("no server running on /run/agentworks/s.sock")
     assert _cleanup_stale_sockets_under(absent, "/run/agentworks") == 1  # type: ignore[arg-type]
-    assert sum(command.startswith("rm -f ") for command in absent.commands) == 1
+    assert sum("rm -f -- " in command for command in absent.commands) == 1
 
 
 def test_post_teardown_probe_retries_one_indeterminate_transition() -> None:
