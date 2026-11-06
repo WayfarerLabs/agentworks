@@ -161,6 +161,22 @@ def _repair_session_pid(
                 entity_name=session.name,
                 hint="Investigate the tmux server manually.",
             )
+        if session.boot_id is None:
+            boot_id = _mgr._get_boot_id(target)
+            if boot_id is not None:
+                db.update_session_runtime(
+                    session.name,
+                    socket_path=sock,
+                    pid=None,
+                    boot_id=boot_id,
+                    tmux_server_start_ticks=None,
+                )
+            raise StateError(
+                f"session '{session.name}' has no recorded launch identity",
+                entity_kind="session",
+                entity_name=session.name,
+                hint="Stop and start its VM, then retry this operation to prove the old workload is gone.",
+            )
         if not _prove_stored_runtime_absent(session, target=target, sudo=sudo):
             raise StateError(
                 f"session '{session.name}' runtime absence could not be proved",
@@ -234,7 +250,7 @@ def _prove_stored_runtime_absent(
     """Prove the stored process incarnation absent without signaling its PID."""
     from agentworks.sessions.tmux import ProbeStatus, probe_process_start_ticks
 
-    if session.pid is None or session.pid <= 0 or session.boot_id is None:
+    if session.boot_id is None:
         raise StateError(
             f"session '{session.name}' lacks the stored identity required to prove runtime absence",
             entity_kind="session",
@@ -251,6 +267,14 @@ def _prove_stored_runtime_absent(
         )
     if current_boot != stored_boot_id:
         return True
+
+    if session.pid is None or session.pid <= 0:
+        raise StateError(
+            f"session '{session.name}' has an uncertain launch from the current VM boot",
+            entity_kind="session",
+            entity_name=session.name,
+            hint="Stop and start its VM, then retry this operation to prove the old workload is gone.",
+        )
 
     pid_presence = _mgr._pid_presence(session.pid, target=target, sudo=sudo)
     if pid_presence is ProbeStatus.ABSENT:

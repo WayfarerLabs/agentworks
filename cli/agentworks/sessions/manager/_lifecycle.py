@@ -142,13 +142,13 @@ def _mark_stopped(db: Database, session: SessionRow) -> None:
     )
 
 
-def _mark_runtime_unknown(db: Database, session: SessionRow, *, socket_path: str) -> None:
+def _mark_runtime_unknown(db: Database, session: SessionRow, *, socket_path: str, boot_id: str) -> None:
     """Persist an addressable runtime whose process identity is not yet known."""
     db.update_session_runtime(
         session.name,
         socket_path=socket_path,
         pid=None,
-        boot_id=None,
+        boot_id=boot_id,
         tmux_server_start_ticks=None,
     )
 
@@ -166,7 +166,12 @@ def _remove_stale_socket_and_mark_stopped(
     if session.socket_path is not None:
         socket_path = _validated_socket_path(db, session)
         q_socket = shlex.quote(socket_path)
-        removed = target.run(f"rm -f {q_socket}", sudo=not target_owns_session, check=False)
+        removed = target.run(
+            f"if test -L {q_socket} || {{ test -e {q_socket} && ! test -S {q_socket}; }}; then exit 2; fi; "
+            f"if test -S {q_socket}; then rm -f -- {q_socket}; fi",
+            sudo=not target_owns_session,
+            check=False,
+        )
         if _test_presence_from_result(removed) is not ProbeStatus.PRESENT:
             raise ExternalError(
                 f"failed to remove stale tmux socket for session '{session.name}'",
@@ -273,9 +278,9 @@ def _teardown_session(
         kill_server,
     )
 
-    if session.pid == PID_STOPPED:
-        return
     if session.socket_path is None:
+        if session.pid == PID_STOPPED:
+            return
         _teardown_legacy_session(
             session,
             target=target,
@@ -312,6 +317,19 @@ def _teardown_session(
     observed = probe.fingerprint
     assert observed is not None
     observed_boot_id = _mgr._validated_observed_boot_id(observed.boot_id, session=session)
+    if session.pid == PID_STOPPED:
+        # Older unacknowledged launches left the stopped sentinel behind.
+        # Adopt only the observed server at this row's validated dedicated path.
+        db.update_session_runtime(
+            session.name,
+            socket_path=socket_path,
+            pid=observed.pid,
+            boot_id=observed_boot_id,
+            tmux_server_start_ticks=observed.start_ticks,
+        )
+        refreshed = db.get_session(session.name)
+        assert refreshed is not None
+        session = refreshed
     stored_boot_id = _mgr._validated_stored_boot_id(session)
     if observed.pid != session.pid or observed_boot_id != stored_boot_id:
         raise BrokenStateError(
@@ -660,6 +678,7 @@ def _launch_existing_session(
         with output.section("Preflight"):
             is_legacy = session.socket_path is None and session.pid is not None and session.pid > 0
             session_target: Transport | None = None
+            recovered_startup = not is_legacy and _mgr._needs_repair(session)
             if not is_legacy:
                 session = _mgr._ensure_pid(session, target=admin_target, db=db)
 
@@ -718,8 +737,26 @@ def _launch_existing_session(
                         entity_name=name,
                         hint=f"Run `agw session restart {name} --force-new` to replace it.",
                     )
-                output.result(f"Session '{name}' is already running")
-                return
+                if not recovered_startup:
+                    from agentworks.sessions.tmux import startup_protection_enabled
+
+                    def inspect_run(command: str, *, check: bool = True, env: dict[str, str] | None = None) -> object:
+                        return admin_target.run(command, sudo=not is_admin, check=check, env=env)
+
+                    protection = startup_protection_enabled(
+                        name, run_command=inspect_run, socket_path=_validated_socket_path(db, session)
+                    )
+                    if protection is None:
+                        raise StateError(
+                            f"could not verify startup completion for session '{name}'",
+                            entity_kind="session",
+                            entity_name=name,
+                            hint="Inspect the session runtime; retry or restart only after its state is understood.",
+                        )
+                    recovered_startup = protection
+                if not recovered_startup:
+                    output.result(f"Session '{name}' is already running")
+                    return
             if status == SessionStatus.RUNNING and replace_running and running_restart_authorized is False:
                 raise StateError(
                     f"session '{name}' was not observed running before lifecycle preparation",
@@ -843,6 +880,19 @@ def _launch_existing_session(
                 session_target = admin_target
                 session_run_command = admin_target.run
 
+            if recovered_startup and status is SessionStatus.RUNNING and not replace_running:
+                from agentworks.sessions.tmux import finalize_session_start
+
+                finalize_session_start(
+                    name,
+                    run_command=session_run_command,
+                    socket_path=_validated_socket_path(db, session),
+                    is_admin=is_admin,
+                    redactions=redactions,
+                )
+                output.result(f"Session '{name}' startup recovered")
+                return
+
             from agentworks.artifacts.session import (
                 commit_session_artifacts,
                 prepare_session_artifacts,
@@ -874,6 +924,7 @@ def _launch_existing_session(
                 agent_name=session.agent_name,
                 runner=session_target,
                 environment=session_env,
+                redactions=redactions,
                 session_uuid=session.session_uuid,
                 linux_user=linux_user,
                 secret_target=_mgr._session_secret_target(
@@ -949,6 +1000,19 @@ def _launch_existing_session(
                 # session's, whether or not the pane came up).
                 db.update_session_harness_integration_state(name, session_node.harness_integration_state)
 
+                launch_boot = _mgr._get_boot_id(session_target)
+                if launch_boot is None:
+                    raise ExternalError(
+                        f"could not read the VM boot identity before launching session '{name}'",
+                        entity_kind="session",
+                        entity_name=name,
+                    )
+                from agentworks.sessions.tmux import admin_socket_path, agent_socket_path
+
+                expected_socket = (
+                    admin_socket_path(linux_user, name) if is_admin else agent_socket_path(linux_user, name)
+                )
+                _mark_runtime_unknown(db, session, socket_path=expected_socket, boot_id=launch_boot)
                 try:
                     new_sock, pid = create_tmux_session(
                         name,
@@ -976,7 +1040,6 @@ def _launch_existing_session(
                     finalize_session_start,
                 )
 
-                _mark_runtime_unknown(db, session, socket_path=new_sock)
                 db.record_session_started(name)
 
                 fingerprint_probe = capture_tmux_server_fingerprint(
@@ -1010,6 +1073,7 @@ def _launch_existing_session(
                     run_command=session_run_command,
                     socket_path=new_sock,
                     is_admin=is_admin,
+                    redactions=redactions,
                 )
 
             from agentworks.harness_setup.outcomes import setup_completion_suffix
@@ -1062,11 +1126,11 @@ def stop_all_sessions(
     # held-active anchor (a no-op hold on other platforms).
     distinct_vms = _mgr._distinct_vms_for_sessions(db, sessions)
     with _mgr._batch_vm_boundary(db, config, distinct_vms, interaction=interaction):
-        # Auto-repair NULL-PID sessions, then batch check
+        # Recover runtime identity before batch teardown needs its ownership proof.
         sessions = _mgr.ensure_pids_batch(sessions, db=db, config=config)
         status_map = _mgr.observe_session_statuses(sessions, db=db, config=config)
 
-        # Error if any actionable sessions are still unknown after auto-repair.
+        # Refuse unknown observed runtimes before preparing individual launches.
         # The observer reports PID_STOPPED rows too; lifecycle omits them from
         # this refusal set because it does not need to act on them.
         legacy_names = {
@@ -1079,17 +1143,13 @@ def stop_all_sessions(
             for s in sessions
             if s.pid != PID_STOPPED
             and s.name not in legacy_names
-            and (
-                s.pid is None
-                or s.boot_id is None
-                or status_map.get(s.name, SessionStatus.UNKNOWN) is SessionStatus.UNKNOWN
-            )
+            and (status_map.get(s.name, SessionStatus.UNKNOWN) is SessionStatus.UNKNOWN)
         ]
         if unknown:
             names = ", ".join(s.name for s in unknown)
             raise StateError(
-                f"{len(unknown)} session(s) have unknown status after auto-repair ({names}).",
-                hint="Resolve the listed sessions manually before retrying.",
+                f"{len(unknown)} session(s) have unknown runtime status ({names}).",
+                hint=f"Run 'agw session start {unknown[0].name}' for its specific recovery requirements.",
             )
 
         broken = [s for s in sessions if status_map.get(s.name) == SessionStatus.BROKEN]
@@ -1223,11 +1283,11 @@ def _launch_all_sessions(
             ]
 
         restart_guards.enter_context(_mgr._batch_vm_boundary(db, config, distinct_vms, interaction=interaction))
-        # Auto-repair NULL-PID sessions, then batch check
-        sessions = _mgr.ensure_pids_batch(sessions, db=db, config=config)
+        # Observe first; the singular launch repairs identity and completes startup
+        # after resolving the secrets needed to sanitize recovered diagnostics.
         status_map = _mgr.observe_session_statuses(sessions, db=db, config=config)
 
-        # Error if any actionable sessions are still unknown after auto-repair.
+        # Refuse unknown observed runtimes before preparing individual launches.
         # The observer reports PID_STOPPED rows too; lifecycle omits them from
         # this refusal set because it does not need to act on them.
         # Legacy sessions remain UNKNOWN in batch observation. Exclude them
@@ -1239,17 +1299,13 @@ def _launch_all_sessions(
             for s in sessions
             if s.pid != PID_STOPPED
             and s.socket_path is not None
-            and (
-                s.pid is None
-                or s.boot_id is None
-                or status_map.get(s.name, SessionStatus.UNKNOWN) is SessionStatus.UNKNOWN
-            )
+            and (status_map.get(s.name, SessionStatus.UNKNOWN) is SessionStatus.UNKNOWN)
         ]
         if unknown:
             names = ", ".join(s.name for s in unknown)
             raise StateError(
-                f"{len(unknown)} session(s) have unknown status after auto-repair ({names}).",
-                hint="Resolve the listed sessions manually before retrying.",
+                f"{len(unknown)} session(s) have unknown runtime status ({names}).",
+                hint=f"Run 'agw session start {unknown[0].name}' for its specific recovery requirements.",
             )
 
         if not replace_running:
@@ -1258,7 +1314,12 @@ def _launch_all_sessions(
                 start_statuses.add(SessionStatus.BROKEN)
             if force_new:
                 start_statuses.add(SessionStatus.RUNNING)
-            sessions = [s for s in sessions if status_map.get(s.name) in start_statuses]
+            sessions = [
+                s
+                for s in sessions
+                if status_map.get(s.name) in start_statuses
+                or (status_map.get(s.name) is SessionStatus.RUNNING and _mgr._needs_repair(s))
+            ]
 
         if not sessions:
             output.info("No matching sessions to start.")

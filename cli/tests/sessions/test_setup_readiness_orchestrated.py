@@ -330,14 +330,14 @@ def test_optional_setup_failure_does_not_disable_core_failure_unwind(
         db_.delete_workspace(name)
 
     def fail_session(*args: Any, **kwargs: Any) -> None:
-        events.append("tmux_fail")
+        events.append("config_fail")
         raise core_error
 
     monkeypatch.setattr("agentworks.agents.realize.realize_agent", realize)
     monkeypatch.setattr("agentworks.workspaces.realize.realize_workspace", realize)
     monkeypatch.setattr("agentworks.agents.manager.delete_agent", delete_agent)
     monkeypatch.setattr("agentworks.workspaces.manager.delete_workspace", delete_workspace)
-    monkeypatch.setattr("agentworks.sessions.tmux.create_session", fail_session)
+    monkeypatch.setattr("agentworks.sessions.tmux.deploy_restricted_config", fail_session)
     try:
         with pytest.raises(failure_type) as caught:
             manager.create_session(
@@ -359,7 +359,7 @@ def test_optional_setup_failure_does_not_disable_core_failure_unwind(
             "realize_agent",
             "probe",
             "setup",
-            "tmux_fail",
+            "config_fail",
             "delete_agent",
             "delete_workspace",
         ]

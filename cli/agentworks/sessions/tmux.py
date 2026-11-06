@@ -20,7 +20,7 @@ from agentworks.errors import ConnectivityError, ExternalError, StateError
 from agentworks.naming import LINUX_USERNAME_MAX_LENGTH
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable
 
     from agentworks.transports import Transport
 
@@ -146,7 +146,7 @@ def _normalized_probe_streams(result: object) -> tuple[str, str]:
 
 def runtime_probe_command(command: str, fact: str) -> str:
     """Put this observation after a distinct line boundary in startup output."""
-    return f"printf '\\nAGW_RUNTIME_{fact}='; {command}"
+    return f"printf '\\nAGW_RUNTIME_{fact}='; printf '\\nAGW_RUNTIME_STDERR=' >&2; {command}"
 
 
 def runtime_probe_payload(stdout: str, fact: str) -> str | None:
@@ -159,6 +159,14 @@ def runtime_probe_payload(stdout: str, fact: str) -> str | None:
     return "".join(lines[starts[0] :])[len(prefix) :]
 
 
+def runtime_probe_stderr(stderr: str) -> str | None:
+    """Separate command diagnostics from preceding SSH startup stderr."""
+    if "AGW_RUNTIME_STDERR=" not in stderr:
+        return stderr.strip()
+    payload = runtime_probe_payload(stderr, "STDERR")
+    return payload.strip() if payload is not None else None
+
+
 def _tmux_presence_from_result(
     result: object, *, missing_target_is_absent: bool, stdout: str | None = None
 ) -> ProbeStatus:
@@ -166,12 +174,16 @@ def _tmux_presence_from_result(
     returncode = getattr(result, "returncode", None)
     if returncode is None:
         return ProbeStatus.PRESENT if getattr(result, "ok", False) else ProbeStatus.UNKNOWN
+    original_stdout, stderr = _normalized_probe_streams(result)
+    native_stderr = runtime_probe_stderr(stderr)
+    if native_stderr is None:
+        return ProbeStatus.UNKNOWN
     if returncode == 0:
         return ProbeStatus.PRESENT
     if returncode != 1:
         return ProbeStatus.UNKNOWN
 
-    original_stdout, stderr = _normalized_probe_streams(result)
+    stderr = native_stderr
     stdout = original_stdout if stdout is None else stdout.strip()
     streams = [value for value in (stdout, stderr) if value]
     # A canonical tmux diagnostic is a single line on exactly one stream. The
@@ -388,8 +400,13 @@ def _cleanup_stale_sockets_under(target: Transport, dir_path: str) -> int:
     for sock_path in paths:
         q_sock = shlex.quote(sock_path)
         socket_guard = f"test -S {q_sock} && ! test -L {q_sock}"
-        check = target.run(f"{socket_guard} && tmux -S {q_sock} list-sessions", sudo=True, check=False)
-        if _tmux_presence_from_result(check, missing_target_is_absent=False) is ProbeStatus.ABSENT:
+
+        def run(
+            command: str, *, check: bool = True, env: dict[str, str] | None = None, guard: str = socket_guard
+        ) -> object:
+            return target.run(f"{guard} && {command}", sudo=True, check=check, env=env or {})
+
+        if probe_tmux_server(run_command=run, socket_path=sock_path) is ProbeStatus.ABSENT:
             result = target.run(f"{socket_guard} && rm -f -- {q_sock}", sudo=True, check=False)
             if result.ok:
                 removed += 1
@@ -448,6 +465,9 @@ if-shell "test -f ~/.tmux.conf" "source-file ~/.tmux.conf"
 
 # Large scrollback buffer (override user config)
 set -g history-limit {history_limit}
+
+# Preserve the launch pane until its caller records the runtime identity.
+set -g remain-on-exit on
 
 # Size windows based on the most recently active client, not the smallest.
 # Sessions are created detached (default geometry) then attached from
@@ -520,6 +540,23 @@ def exact_tmux_target(name: str) -> str:
     return "'" + ("=" + name).replace("'", "'\"'\"'") + "'"
 
 
+def _launch_pane_command(command: str, session_name: str, socket_path: str | None) -> str:
+    """Target the pane returned by new-session, independent of the active window."""
+    if socket_path is None:
+        return tmux_cmd(command.replace("AGW_LAUNCH_PANE", exact_tmux_target(session_name + ":")), None)
+    observe = tmux_cmd("show-option -gqv @agentworks-launch-pane", socket_path)
+    legacy = tmux_cmd(f"list-panes -s -t {exact_tmux_target(session_name)} -F '#{{pane_id}}'", socket_path)
+    pane_session = tmux_cmd("display-message -p -t \"$agw_launch_pane\" '#{session_name}'", socket_path)
+    return (
+        f"agw_launch_pane=$({observe}) || exit $?; "
+        f'if [ -z "$agw_launch_pane" ]; then agw_launch_pane=$({legacy}) || exit $?; fi; '
+        'case "$agw_launch_pane" in %*) ;; *) exit 1;; esac; '
+        'case "${agw_launch_pane#%}" in ""|*[!0-9]*) exit 1;; esac; '
+        f'test "$({pane_session})" = {shlex.quote(session_name)} || exit 1; '
+        + tmux_cmd(command.replace("AGW_LAUNCH_PANE", '"$agw_launch_pane"'), socket_path)
+    )
+
+
 def _grant_server_access(
     run_command: RunCommand,
     socket_path: str,
@@ -589,6 +626,8 @@ def _trim_captured_output(
     text: str,
     max_lines: int = DEAD_WORKLOAD_OUTPUT_LINES,
     max_line_chars: int = DEAD_WORKLOAD_OUTPUT_LINE_CHARS,
+    *,
+    redactions: Iterable[str] = (),
 ) -> str:
     """Trim captured pane output for embedding in an error message.
 
@@ -597,7 +636,17 @@ def _trim_captured_output(
     workload's own error message lands), and caps each line to
     ``max_line_chars`` characters.
     """
-    nonempty = [line.rstrip()[:max_line_chars] for line in text.splitlines() if line.strip()]
+    from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
+    from agentworks.secrets.redaction import secret_redaction_forms
+
+    values = tuple(redactions)
+    for pattern in sorted({form for value in values for form in secret_redaction_forms(value)}, key=len, reverse=True):
+        text = text.replace(pattern, "[REDACTED]")
+    nonempty = [
+        sanitize_setup_diagnostic(line, redactions=values)[:max_line_chars]
+        for line in text.splitlines()
+        if line.strip()
+    ]
     return "\n".join(nonempty[-max_lines:])
 
 
@@ -627,9 +676,10 @@ def _probe_pane_liveness(
     Both facts ride one round trip: ``#{pane_dead}`` and
     ``#{pane_dead_status}`` in a single display-message.
     """
-    q_session = exact_tmux_target(session_name + ":")
     cmd = (
-        tmux_cmd(f"display-message -p -t {q_session} '#{{pane_dead}} #{{pane_dead_status}}'", socket_path)
+        _launch_pane_command(
+            "display-message -p -t AGW_LAUNCH_PANE '#{pane_dead} #{pane_dead_status}'", session_name, socket_path
+        )
         + " 2>/dev/null"
     )
     for _attempt in range(2):  # retry once: a single blip must not condemn the create
@@ -654,6 +704,7 @@ def _raise_workload_died(
     run_command: RunCommand,
     socket_path: str,
     exit_status: str = "",
+    redactions: Iterable[str] = (),
 ) -> NoReturn:
     """Capture a dead pane's output, kill its server, and raise a typed error.
 
@@ -670,15 +721,15 @@ def _raise_workload_died(
     # Normal capture is the active screen; -a reads its saved counterpart.
     # Either may contain useful output even when the active pane has tmux's
     # generated dead-pane overlay, so neither capture substitutes for the other.
-    q_session = exact_tmux_target(session_name + ":")
     with suppress(ConnectivityError, ExternalError, OSError, subprocess.SubprocessError):
         alt = run_command(
-            tmux_cmd(f"capture-pane -t {q_session} -p -J -a", socket_path) + " 2>/dev/null",
+            _launch_pane_command("capture-pane -t AGW_LAUNCH_PANE -p -J -a", session_name, socket_path)
+            + " 2>/dev/null",
             check=False,
         )
         if getattr(alt, "ok", False):
             captures.append(getattr(alt, "stdout", "") or "")
-    captured = _trim_captured_output("\n".join(dict.fromkeys(captures)))
+    captured = _trim_captured_output("\n".join(dict.fromkeys(captures)), redactions=redactions)
     with suppress(ConnectivityError, ExternalError, OSError, subprocess.SubprocessError):
         run_command(tmux_cmd("kill-server", socket_path) + " 2>/dev/null", check=False)
     status_note = f" (status {exit_status})" if exit_status else ""
@@ -719,6 +770,7 @@ def _ensure_workload_alive(
     run_command: RunCommand,
     socket_path: str,
     prior_error: Exception | None = None,
+    redactions: Iterable[str] = (),
 ) -> None:
     """Liveness gate: return only if the pane is verifiably alive.
 
@@ -733,7 +785,13 @@ def _ensure_workload_alive(
             raise prior_error from None
         raise
     if liveness == "dead":
-        _raise_workload_died(session_name, run_command=run_command, socket_path=socket_path, exit_status=exit_status)
+        _raise_workload_died(
+            session_name,
+            run_command=run_command,
+            socket_path=socket_path,
+            exit_status=exit_status,
+            redactions=redactions,
+        )
     if prior_error is not None:
         raise prior_error
     if liveness == "unverified":
@@ -815,6 +873,13 @@ def create_session(
             entity_name=session_name,
         )
     if socket_presence is ProbeStatus.PRESENT:
+        socket_type = run_command(f"test -S {q_sock} && ! test -L {q_sock}", check=False)
+        if _test_presence_from_result(socket_type) is not ProbeStatus.PRESENT:
+            raise StateError(
+                f"managed tmux socket path {sock} contains a non-socket or symlink",
+                entity_kind="session",
+                entity_name=session_name,
+            )
         server_presence = probe_tmux_server(run_command=run_command, socket_path=sock)
         if server_presence is ProbeStatus.PRESENT:
             raise RuntimeError(
@@ -830,26 +895,24 @@ def create_session(
         from agentworks import output as _output
 
         _output.detail(f"Removing stale socket: {sock}")
-        run_command(f"rm -f {q_sock}", check=False)
+        run_command(f"test -S {q_sock} && ! test -L {q_sock} && rm -f -- {q_sock}")
 
-    # Create the session. SetEnv vars travel with run_command; tmux's -e
-    # flags add them to the session-environment table. remain-on-exit is
-    # chained into the SAME tmux client invocation so it lands microseconds
-    # after the pane spawns: a workload that dies instantly (e.g. a CLI
-    # rejecting an invalid flag value in milliseconds) then leaves a dead
-    # pane holding the server and its scrollback alive, instead of taking
-    # both down before anything can read the error. The healthy path
-    # unsets it after the caller records the server identity. Residual window: a death in the
-    # microseconds BEFORE the chained set-option lands fails this whole
-    # check=True invocation as a raw transport error, which is correct: a
-    # genuine new-session failure must not be misread as workload death.
+    # The generated config protects new panes before their workloads execute.
+    # Keep the pane ID returned by new-session, since user config and the
+    # workload itself can create or select other windows on this server.
     cmd = (
         f"tmux -f {shlex.quote(RESTRICTED_CONFIG_PATH)} -S {q_sock}"
-        f" new-session -d -s {q_session} -c {q_path}{env_flags}"
+        f" new-session -d -P -F '#{{pane_id}}' -s {q_session} -c {q_path}{env_flags}"
     )
     if pane_cmd:
         cmd += f" {shlex.quote(pane_cmd)}"
-    cmd += f" \\; set-option -t {q_session} remain-on-exit on \\; display-message -p '#{{pid}}'"
+    cmd = (
+        f"agw_launch_pane=$({cmd}) || exit $?; "
+        'case "$agw_launch_pane" in %*) ;; *) exit 1;; esac; '
+        'case "${agw_launch_pane#%}" in ""|*[!0-9]*) exit 1;; esac; '
+        + tmux_cmd('set-option -g @agentworks-launch-pane "$agw_launch_pane"', sock)
+        + " \\; set-option -t \"$agw_launch_pane\" remain-on-exit on \\; display-message -p '#{pid}'"
+    )
     result = run_command(cmd, env=env)
     try:
         pid = _parse_pid(getattr(result, "stdout", "") or "", context="after session create")
@@ -867,6 +930,7 @@ def finalize_session_start(
     run_command: RunCommand,
     socket_path: str,
     is_admin: bool,
+    redactions: Iterable[str] = (),
 ) -> None:
     """Finish startup only after the caller persisted the server fingerprint."""
     grant_error: Exception | None = None
@@ -876,16 +940,38 @@ def finalize_session_start(
         except (ConnectivityError, ExternalError, OSError, subprocess.SubprocessError) as error:
             grant_error = error
     # A confirmed workload failure outranks auxiliary socket-sharing failure.
-    _ensure_workload_alive(session_name, run_command=run_command, socket_path=socket_path, prior_error=grant_error)
+    redactions = tuple(redactions)
+    _ensure_workload_alive(
+        session_name, run_command=run_command, socket_path=socket_path, prior_error=grant_error, redactions=redactions
+    )
     if not is_admin:
         try:
             _grant_server_access(run_command, socket_path)
         except (ConnectivityError, ExternalError, OSError, subprocess.SubprocessError) as error:
             grant_error = error
-    _ensure_workload_alive(session_name, run_command=run_command, socket_path=socket_path, prior_error=grant_error)
-    q_session = exact_tmux_target(session_name + ":")
-    run_command(tmux_cmd(f"set-option -u -t {q_session} remain-on-exit", socket_path))
-    _ensure_workload_alive(session_name, run_command=run_command, socket_path=socket_path)
+    _ensure_workload_alive(
+        session_name, run_command=run_command, socket_path=socket_path, prior_error=grant_error, redactions=redactions
+    )
+    try:
+        run_command(_launch_pane_command("set-option -t AGW_LAUNCH_PANE remain-on-exit off", session_name, socket_path))
+    except (ConnectivityError, ExternalError, OSError, subprocess.SubprocessError) as error:
+        raise ExternalError(
+            f"could not finish startup for session '{session_name}'",
+            entity_kind="session",
+            entity_name=session_name,
+            hint=f"Its managed runtime was retained. Run 'agw session start {session_name}' to retry completion.",
+        ) from error
+    _ensure_workload_alive(session_name, run_command=run_command, socket_path=socket_path, redactions=redactions)
+
+
+def startup_protection_enabled(session_name: str, *, run_command: RunCommand, socket_path: str) -> bool | None:
+    """Observe whether the launch pane still needs startup completion."""
+    command = _launch_pane_command("show-option -wAqv -t AGW_LAUNCH_PANE remain-on-exit", session_name, socket_path)
+    result = run_command(runtime_probe_command(command, "STARTUP"), check=False)
+    payload = runtime_probe_payload(getattr(result, "stdout", "") or "", "STARTUP")
+    if getattr(result, "returncode", None) != 0 or runtime_probe_stderr(getattr(result, "stderr", "") or "") != "":
+        return None
+    return {"on": True, "off": False}.get(payload.strip()) if payload is not None else None
 
 
 def kill_session(
@@ -907,12 +993,6 @@ def kill_server(*, run_command: RunCommand, socket_path: str) -> bool:
     """Destroy the complete dedicated tmux server behind ``socket_path``."""
     result = run_command(tmux_cmd("kill-server", socket_path), check=False)
     return getattr(result, "ok", True)
-
-
-def kill_server_and_probe(*, run_command: RunCommand, socket_path: str) -> ProbeStatus:
-    """Request dedicated-server teardown and return its verified presence."""
-    kill_server(run_command=run_command, socket_path=socket_path)
-    return probe_tmux_server_after_teardown(run_command=run_command, socket_path=socket_path)
 
 
 def probe_tmux_session(
@@ -981,10 +1061,13 @@ def capture_output(
     longer than the pane width survives later per-line trimming as one
     line; off by default to keep other callers' output shape unchanged.
     """
-    q_session = exact_tmux_target(session_name + ":")
+    if lines < 1:
+        from agentworks.errors import ValidationError
+
+        raise ValidationError("session log line count must be positive")
     flags = "-p -J" if join_wrapped else "-p"
     result = run_command(
-        tmux_cmd(f"capture-pane -t {q_session} {flags} -S -{lines}", socket_path),
+        _launch_pane_command(f"capture-pane -t AGW_LAUNCH_PANE {flags} -S -{lines}", session_name, socket_path),
         check=False,
     )
     if getattr(result, "returncode", None) != 0:
@@ -992,9 +1075,10 @@ def capture_output(
             f"Could not capture output for session '{session_name}'.",
             hint="Check that the session's tmux server and pane are reachable, then retry session logs.",
         )
-    return "\n".join((getattr(result, "stdout", "") or "").splitlines()[-lines:]) + (
-        "\n" if getattr(result, "stdout", "") else ""
-    )
+    captured = (getattr(result, "stdout", "") or "").splitlines()
+    while captured and not captured[-1].strip():
+        captured.pop()
+    return "\n".join(captured[-lines:]) + ("\n" if captured else "")
 
 
 def _parse_pid(raw: str, context: str) -> int:
@@ -1030,7 +1114,7 @@ def probe_tmux_server_pid(
     if presence is not ProbeStatus.PRESENT:
         return IntegerProbe(presence)
     pid_str = payload.strip()
-    if not re.fullmatch(r"[0-9]+", pid_str, re.ASCII) or bool(result.stderr):
+    if not re.fullmatch(r"[0-9]+", pid_str, re.ASCII) or runtime_probe_stderr(result.stderr) != "":
         return IntegerProbe(ProbeStatus.UNKNOWN)
     try:
         pid = int(pid_str)
@@ -1072,7 +1156,7 @@ def probe_process_start_ticks(
     if payload is None:
         return IntegerProbe(ProbeStatus.UNKNOWN)
     payload = payload.strip()
-    if "\n" in payload or "\r" in payload or bool(result.stderr):
+    if "\n" in payload or "\r" in payload or runtime_probe_stderr(result.stderr) != "":
         return IntegerProbe(ProbeStatus.UNKNOWN)
     try:
         return IntegerProbe(ProbeStatus.PRESENT, parse_process_start_ticks(payload))
@@ -1085,7 +1169,7 @@ def read_boot_id(target: Transport) -> str | None:
     result = target.run(runtime_probe_command("cat /proc/sys/kernel/random/boot_id", "BOOT"), check=False)
     if getattr(result, "returncode", 0 if getattr(result, "ok", False) else 1) != 0:
         return None
-    if getattr(result, "stderr", ""):
+    if runtime_probe_stderr(result.stderr) != "":
         return None
     return canonical_boot_id(runtime_probe_payload(getattr(result, "stdout", "") or "", "BOOT"))
 

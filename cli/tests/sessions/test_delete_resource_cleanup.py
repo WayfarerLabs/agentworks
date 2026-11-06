@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.agents.manager import agent_has_grants, agent_has_sessions, agent_is_unused
-from agentworks.db import PID_STOPPED, Database, SessionMode, SessionRow
+from agentworks.db import PID_STOPPED, Database, SessionMode, SessionRow, SessionStatus
 from agentworks.errors import ConnectivityError
 from agentworks.output import Role
 from agentworks.secrets.policy import TtyInteractionPolicy
@@ -750,6 +750,7 @@ def _prep_delete_session(db: Database, monkeypatch: pytest.MonkeyPatch, *, creat
     if created_workspace:
         db._conn.execute("UPDATE sessions SET created_workspace = 1 WHERE name = 's'")
         db._conn.commit()
+    monkeypatch.setattr(manager_mod, "check_session_status", lambda *a, **k: SessionStatus.STOPPED)
     monkeypatch.setattr(manager_mod, "_regenerate_tmuxinator", lambda *a, **k: None)
     monkeypatch.setattr("agentworks.sessions.multi_console.kill_session_windows", lambda *a, **k: None)
 

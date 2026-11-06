@@ -1,7 +1,6 @@
 """Session logging preserves secrets and captures the actual pane."""
 
 import os
-import shlex
 import shutil
 import subprocess
 import tempfile
@@ -84,14 +83,14 @@ def test_admin_session_launch_redacts_resolved_values_in_actual_command_log(tmp_
 
 @pytest.mark.skipif(os.name != "posix" or shutil.which("tmux") is None, reason="requires Unix tmux")
 def test_real_tmux_capture_targets_the_exact_session_pane():
-    with tempfile.TemporaryDirectory(prefix="agw-r7-capture-", dir="/tmp") as directory:
+    with tempfile.TemporaryDirectory(prefix="agw-r8-sessions-capture-", dir="/tmp") as directory:
         socket = os.path.join(directory, "capture.sock")
         marker = uuid4().hex
         environment = {"HOME": directory, "PATH": os.defpath, "SHELL": "/bin/sh", "TERM": "xterm"}
 
         def run(command, **kwargs):
             completed = subprocess.run(
-                shlex.split(command), capture_output=True, text=True, timeout=10, env=environment
+                ["/bin/sh", "-c", command], capture_output=True, text=True, timeout=10, env=environment
             )
             return SSHResult(completed.returncode, completed.stdout, completed.stderr)
 

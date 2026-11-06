@@ -125,7 +125,7 @@ def test_post_spawn_failure_retains_new_owners_and_original_outcome(
     assert row is not None and row.socket_path is not None
     assert db.get_agent("s1") is not None and db.get_workspace("s1") is not None
     if stage == "fingerprint":
-        assert row.pid is None and row.boot_id is None
+        assert row.pid is None and row.boot_id == BOOT_ID
     else:
         assert row.pid == 4243 and row.boot_id == BOOT_ID
     db.close()

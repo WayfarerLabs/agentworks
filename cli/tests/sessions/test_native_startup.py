@@ -49,16 +49,25 @@ class NativeTarget:
         self.socket = str(root / "s")
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.banner = ""
+        self.stderr_banner = ""
         self.environment = {"HOME": str(root), "PATH": os.defpath, "SHELL": "/bin/sh", "TERM": "xterm"}
 
     def run(self, command: str, *, check: bool = True, **kwargs: Any) -> SSHResult:
         self.calls.append((command, kwargs))
+        input_data = kwargs.get("input_data")
+        if isinstance(input_data, bytes):
+            input_data = input_data.decode()
         result = subprocess.run(
-            ["/bin/sh", "-c", command], capture_output=True, text=True, timeout=10, env=self.environment
+            ["/bin/sh", "-c", command],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            env=self.environment,
+            input=input_data,
         )
         if check and result.returncode:
             raise ExternalError(result.stderr or result.stdout)
-        return SSHResult(result.returncode, self.banner + result.stdout, result.stderr)
+        return SSHResult(result.returncode, self.banner + result.stdout, self.stderr_banner + result.stderr)
 
     def native(self, command: str) -> SSHResult:
         return self.run(tmux.tmux_cmd(command, self.socket), check=False)
@@ -76,7 +85,7 @@ class NativeTarget:
 @pytest.fixture
 def native(monkeypatch):
     # pytest's nested tmp_path is longer than sun_path on some hosts.
-    with tempfile.TemporaryDirectory(prefix="agw-r7-session-fixtures-", dir="/tmp") as directory:
+    with tempfile.TemporaryDirectory(prefix="agw-r8-sessions-native-", dir="/tmp") as directory:
         root = Path(directory)
         target = NativeTarget(root)
         config = root / "tmux.conf"
@@ -232,6 +241,7 @@ def test_native_unverified_checkpoint_recovers_still_private_socket(tmp_path, mo
     db, _ = _restart_fixture(tmp_path, monkeypatch, status=SessionStatus.STOPPED)
     _patch_transports(monkeypatch, native, native)
     _requiring_template(monkeypatch, "sh")
+    monkeypatch.setattr(manager, "_get_boot_id", tmux.read_boot_id)
     monkeypatch.setattr(tmux, "create_session", lambda *a, **k: launch(native, "sleep 30", is_admin=False))
     monkeypatch.setattr(
         tmux, "capture_tmux_server_fingerprint", lambda **k: tmux.FingerprintProbe(tmux.ProbeStatus.UNKNOWN)
@@ -257,10 +267,14 @@ def test_native_unverified_checkpoint_recovers_still_private_socket(tmp_path, mo
         db.close()
 
 
-def test_real_fingerprint_and_presence_ignore_pre_frame_login_stdout(native):
-    native.banner = "harmless login stdout without a newline"
+@pytest.mark.parametrize("stream", ["stdout", "stderr"])
+def test_real_fingerprint_and_presence_ignore_pre_frame_login_stdout(native, stream):
+    if stream == "stdout":
+        native.banner = "harmless login stdout without a newline"
+    else:
+        native.stderr_banner = "harmless login stderr without a newline"
     socket, pid = launch(native, "sleep 30")
-    assert pid is None
+    assert (pid is None) is (stream == "stdout")
     fingerprint = _NATIVE_CAPTURE(target=native, socket_path=socket)
     assert fingerprint.status is tmux.ProbeStatus.PRESENT
     assert fingerprint.fingerprint is not None and fingerprint.fingerprint.pid > 0
@@ -343,7 +357,7 @@ def test_failed_native_startup_release_retains_checkpointed_runtime(tmp_path, mo
     real_run = native.run
 
     def reject_release(command, *, check=True, **kwargs):
-        if "set-option -u" in command:
+        if "remain-on-exit off" in command:
             # Make the actual native command fail. NativeTarget.run enforces
             # check=True exactly as the production Transport does.
             command = command.replace("remain-on-exit", "agentworks-invalid-release-option")

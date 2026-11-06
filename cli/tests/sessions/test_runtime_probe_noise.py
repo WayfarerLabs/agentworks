@@ -47,3 +47,16 @@ def test_successful_has_session_requires_one_empty_native_payload(payload):
         tmux.probe_tmux_session("s", run_command=lambda *a, **k: result("AGW_RUNTIME_SESSION=" + payload))
         is tmux.ProbeStatus.UNKNOWN
     )
+
+
+@pytest.mark.parametrize("returncode", [0, 1])
+def test_duplicate_stderr_frame_does_not_authorize_presence_or_absence(returncode):
+    target = SimpleNamespace(
+        run=lambda *a, **k: SimpleNamespace(
+            returncode=returncode,
+            ok=returncode == 0,
+            stdout="\nAGW_RUNTIME_SERVER=",
+            stderr="\nAGW_RUNTIME_STDERR=\nAGW_RUNTIME_STDERR=no server running on /tmp/owned\n",
+        )
+    )
+    assert tmux.probe_tmux_server(run_command=target.run, socket_path="/tmp/owned") is tmux.ProbeStatus.UNKNOWN

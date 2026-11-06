@@ -23,7 +23,7 @@ pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="executes Linux 
 
 @pytest.fixture
 def target() -> Iterator[LocalFixtureTransport]:
-    with tempfile.TemporaryDirectory(prefix="agw-r7-native-sockets-") as location:
+    with tempfile.TemporaryDirectory(prefix="agw-r8-sessions-sockets-") as location:
         fixture = LocalFixtureTransport(Path(location))
         yield fixture
 
@@ -51,8 +51,9 @@ def observe(
 
 
 @pytest.mark.parametrize("banner", ["Welcome\n", "Welcome"])
+@pytest.mark.parametrize("stream", ["stdout", "stderr"])
 def test_native_cleanup_retains_banner_file_and_live_server_but_removes_stale_socket(
-    target: LocalFixtureTransport, monkeypatch: pytest.MonkeyPatch, banner: str
+    target: LocalFixtureTransport, monkeypatch: pytest.MonkeyPatch, banner: str, stream: str
 ) -> None:
     binary = shutil.which("tmux")
     assert binary is not None, "tmux must be installed for native runtime safety coverage"
@@ -75,9 +76,11 @@ def test_native_cleanup_retains_banner_file_and_live_server_but_removes_stale_so
 
     def run(command: str, **kwargs: Any) -> SSHResult:
         result = original(command, **kwargs)
-        if "find " in command:
-            return SSHResult(result.returncode, banner + result.stdout, result.stderr)
-        return result
+        return SSHResult(
+            result.returncode,
+            (banner if stream == "stdout" else "") + result.stdout,
+            (banner if stream == "stderr" else "") + result.stderr,
+        )
 
     monkeypatch.setattr(target, "run", run)
     try:

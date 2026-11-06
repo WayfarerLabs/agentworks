@@ -38,7 +38,7 @@ def test_dead_workload_keeps_status_and_attempts_cleanup_after_external_failure(
     assert secondary not in "".join(traceback.format_exception(caught.value))
     assert any("kill-server" in tokens for tokens in calls)
     captures = [tokens for tokens in calls if "capture-pane" in tokens]
-    assert all(tokens[tokens.index("-t") + 1] == "=probe:" for tokens in captures)
+    assert all(tokens[tokens.index("-t") + 1] == "=probe" for tokens in captures)
     assert (output in str(caught.value)) is (stage != "alternate")
 
 

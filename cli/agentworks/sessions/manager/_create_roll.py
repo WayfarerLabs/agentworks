@@ -289,6 +289,7 @@ def _start_session_slice(
                 agent_name=resolved_agent_name,
                 runner=agent_target or target,
                 environment=session_env,
+                redactions=tuple(secret_values.values()),
                 linux_user=linux_user,
                 secret_target=_mgr._session_secret_target(
                     registry,
@@ -395,6 +396,19 @@ def _start_session_slice(
                 session_run_command = run_command
             from agentworks.sessions.tmux import finalize_session_start
 
+            fingerprint_target = agent_target if mode == SessionMode.AGENT else target
+            assert fingerprint_target is not None
+            launch_boot = _mgr._get_boot_id(fingerprint_target)
+            if launch_boot is None:
+                raise ExternalError(
+                    f"could not read the VM boot identity before launching session '{name}'",
+                    entity_kind="session",
+                    entity_name=name,
+                )
+            retain_unknown_runtime = True
+            db.update_session_runtime(
+                name, socket_path=expected_socket, pid=None, boot_id=launch_boot, tmux_server_start_ticks=None
+            )
             sock, pid = create_tmux_session(
                 name,
                 ws.workspace_path,
@@ -406,13 +420,9 @@ def _start_session_slice(
                 is_admin=(mode == SessionMode.ADMIN),
                 env=session_env,
             )
-            retain_unknown_runtime = True
-            db.update_session_runtime(name, socket_path=sock, pid=None, boot_id=None, tmux_server_start_ticks=None)
             db.record_session_started(name)
             from agentworks.sessions.tmux import ProbeStatus, capture_tmux_server_fingerprint
 
-            fingerprint_target = agent_target if mode == SessionMode.AGENT else target
-            assert fingerprint_target is not None
             fingerprint_probe = capture_tmux_server_fingerprint(target=fingerprint_target, socket_path=sock)
             fingerprint = fingerprint_probe.fingerprint
             if (
@@ -441,6 +451,7 @@ def _start_session_slice(
                 run_command=session_run_command,
                 socket_path=sock,
                 is_admin=mode == SessionMode.ADMIN,
+                redactions=tuple(secret_values.values()),
             )
             retain_unknown_runtime = False
         except (KeyboardInterrupt, Exception) as error:

@@ -40,3 +40,21 @@ def test_unavailable_stdin_does_not_enable_interaction(stdin_setup: str) -> None
         check=False,
     )
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("stdin_setup", ["sys.stdin = None", "sys.stdin.close()"])
+def test_ordinary_operation_tty_authority_handles_unavailable_stdin(stdin_setup: str) -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            f"import sys; {stdin_setup}; "
+            "from agentworks.cli._helpers import ordinary_tty_interaction_access; "
+            "access = ordinary_tty_interaction_access(); print(type(access).__name__)",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr

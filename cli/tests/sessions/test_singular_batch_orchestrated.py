@@ -941,6 +941,7 @@ def test_stop_session_stopped_vm_gate_burst_seeds_the_boundary(
     _seed_singular(db)
     events: list[str] = []
     _stop_the_vms(monkeypatch, events)
+    monkeypatch.setattr(session_manager, "check_session_status", lambda *a, **k: SessionStatus.STOPPED)
 
     session_manager.stop_session(db, config, name="s1", interaction=TtyInteractionPolicy.REFUSE)
 

@@ -22,6 +22,7 @@ from agentworks.sessions.tmux import (
     probe_tmux_session,
     runtime_probe_command,
     runtime_probe_payload,
+    runtime_probe_stderr,
 )
 from agentworks.status_observation import (
     GUEST_OBSERVATION_ATTEMPTS,
@@ -70,11 +71,9 @@ def _pid_presence_from_fact(returncode: object, fact: object, *, stderr: object 
 
 def _pid_presence(pid: int, *, target: Transport, sudo: bool = False) -> ProbeStatus:
     """Probe a PID without treating a transport failure as process absence."""
-    from agentworks.sessions.tmux import _normalized_probe_streams
-
     result = target.run(runtime_probe_command(_pid_probe_script(pid), "PRESENT"), sudo=sudo, check=False)
-    _, stderr = _normalized_probe_streams(result)
     stdout = runtime_probe_payload(getattr(result, "stdout", "") or "", "PRESENT")
+    stderr = runtime_probe_stderr(getattr(result, "stderr", "") or "")
     return _pid_presence_from_fact(getattr(result, "returncode", None), stdout, stderr=stderr)
 
 
@@ -154,7 +153,7 @@ def _check_dedicated_session(session: SessionRow, *, target: Transport) -> Sessi
         return SessionStatus.STOPPED
 
     # has-session failed: STOPPED or BROKEN?
-    if session.pid is None or session.pid <= 0 or session.boot_id is None:
+    if session.boot_id is None:
         return SessionStatus.UNKNOWN
     current_boot = _mgr._get_boot_id(target)
     if current_boot is None:
@@ -162,6 +161,8 @@ def _check_dedicated_session(session: SessionRow, *, target: Transport) -> Sessi
     stored_boot_id = _mgr._validated_stored_boot_id(session)
     if stored_boot_id != current_boot:
         return SessionStatus.STOPPED  # stale boot, PID is meaningless
+    if session.pid is None or session.pid <= 0:
+        return SessionStatus.UNKNOWN
     pid_presence = _pid_presence(
         session.pid,
         target=target,
@@ -187,7 +188,7 @@ def batch_check_status(
     identity can prove more. Persisted-stopped rows are still probed so a
     manually resurrected exact session cannot be hidden by stale evidence.
     """
-    from agentworks.sessions.tmux import _normalized_probe_streams, canonical_boot_id
+    from agentworks.sessions.tmux import canonical_boot_id
 
     checkable = [s for s in sessions if s.socket_path is not None]
     if not checkable:
@@ -203,14 +204,19 @@ def batch_check_status(
         input_data=_batch_probe_data(checkable),
     )
     stdout = runtime_probe_payload(getattr(result, "stdout", "") or "", "BATCH")
-    _, stderr = _normalized_probe_streams(result)
 
     status_map: dict[str, SessionStatus] = {
         session.name: SessionStatus.UNKNOWN for session in checkable if session.socket_path is not None
     }
     sessions_by_key = {_encoded_probe_field(session.name): session for session in checkable}
 
-    if result.returncode != 0 or stderr or stdout is None or "\x00" in stdout or "\r" in stdout:
+    if (
+        result.returncode != 0
+        or runtime_probe_stderr(result.stderr) != ""
+        or stdout is None
+        or "\x00" in stdout
+        or "\r" in stdout
+    ):
         return status_map
 
     frames: dict[str, list[str]] = {}
@@ -251,7 +257,7 @@ def batch_check_status(
             status_map[name] = SessionStatus.STOPPED
             continue
 
-        if session.pid is None or session.pid <= 0 or session.boot_id is None:
+        if session.boot_id is None:
             continue
 
         try:
@@ -267,6 +273,8 @@ def batch_check_status(
             continue
         if stored_boot != current_boot:
             status_map[name] = SessionStatus.STOPPED
+            continue
+        if session.pid is None or session.pid <= 0:
             continue
         pid_presence = _pid_presence_from_fact(pid_returncode, pid_fact)
         if pid_presence is ProbeStatus.UNKNOWN:
