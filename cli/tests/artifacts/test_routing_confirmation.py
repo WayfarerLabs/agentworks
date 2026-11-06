@@ -97,6 +97,16 @@ def test_unavailable_inactive_vm_only_flows_to_user(db):
     assert not setup_artifacts(db, fixture.registry, fixture.owners["workspace"], fixture.vm, "shell").retain_previous
 
 
+@pytest.mark.parametrize("owner,destination", [("agent", "workspace"), ("workspace", "user")])
+def test_persisted_route_to_a_sibling_does_not_confirm_session_inputs(db, owner, destination):
+    fixture = graph(db, active=(owner,))
+    fixture.save(owner, routes={f"{owner}-0": destination})
+    result = fixture.route()
+    assert result.routing_unknown and result.retain_previous
+    assert result.unavailable_reasons
+    assert all(item.origin.component != owner for item in result.inputs.items())
+
+
 @pytest.mark.parametrize("destination", ["user", "workspace", "session"])
 @pytest.mark.parametrize("capture", ["changed", "missing"])
 def test_unknown_session_route_survives_inactive_passthrough(db, destination, capture):
