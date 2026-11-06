@@ -134,8 +134,11 @@ def program_arguments_arrive_exactly_and_the_source_is_in_no_argument(lane: Lane
 # -- F4 and F5: startup under the account's default shell -------------------------------
 
 
-def account_shell_name(lane: Lane) -> str:
-    """The default shell's name: the lane's own on L, whose runner's account shell is its own business."""
+def use_account_shell(lane: Lane) -> str:
+    """Rewrite the L lane's launcher to make the lane's shell the account's default, and return that shell's name.
+
+    On S and V nothing is rewritten: the name is the account's own default shell's.
+    """
     if isinstance(lane, LocalLane):
         lane.use_lane_shell_as_account_shell()
         return lane.shell_name
@@ -163,7 +166,7 @@ def startup_markers(shell: str, *, login: bool, interactive: bool) -> list[str]:
 
 
 def program_under_login_and_interactive_startup(lane: Lane) -> None:
-    shell = account_shell_name(lane)
+    shell = use_account_shell(lane)
     home = lane.make_dir({name: startup_content(marker) for name, marker in STARTUP_FILES.items()})
     items = ("", "a b", "$HOME", "'", "-c", "--")
     source = (
@@ -185,7 +188,7 @@ def program_under_login_and_interactive_startup(lane: Lane) -> None:
 
 
 def interactive_script_sees_its_startup_and_owns_its_status(lane: Lane) -> None:
-    account_shell_name(lane)
+    use_account_shell(lane)
     # A shell that read the script as its input would prompt for each line with these.
     function = "agw_f5() { echo f5-called; }\nPS1='agw-f5-prompt '\nPS2='agw-f5-prompt '\n"
     home = lane.make_dir(
@@ -215,7 +218,7 @@ def interactive_script_sees_its_startup_and_owns_its_status(lane: Lane) -> None:
 
 
 def a_startup_file_that_closes_low_descriptors_leaves_the_source(lane: Lane) -> None:
-    account_shell_name(lane)
+    use_account_shell(lane)
     closes = "exec 3<&- 4<&- 5<&- 6<&- 7<&- 8<&- 9<&-\n"
     home = lane.make_dir({name: closes for name in (*STARTUP_FILES, ".shrc")})
     env = {"HOME": home, "ENV": f"{home}/.shrc"}
