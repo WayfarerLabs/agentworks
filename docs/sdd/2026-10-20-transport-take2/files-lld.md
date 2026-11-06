@@ -114,13 +114,14 @@ with the bounded options. `source` and `args` are `repr=False`, as `Script.sourc
   validates `args` as it does argv (no NUL, each element at most 131,071 bytes once encoded) and
   `source` as script text.
 - **agw-launch** writes the source to the same sealed memfd a script uses (`execution-lld.md`,
-  agw-launch step 5) and runs, with `N` the memfd's descriptor:
+  agw-launch step 5), staged at descriptor 100 or above so that no startup file closes or reuses it
+  (a startup file that closes descriptors 3 to 9 is a vector), and runs, with `N` the memfd's
+  descriptor:
   - neither flag: `/usr/bin/python3 -I -S /dev/fd/N *args`;
   - either flag: `<passwd shell> [-l] [-i] -c '<line>' /dev/fd/N *args`, with `<line>` the constant
     `exec 9<"$0"; exec /usr/bin/python3 -I -S /dev/fd/9 "$@"`. The shell reopens the memfd as
-    descriptor 9 itself, so whatever startup does to inherited descriptors, the program's source is
-    open when python3 starts. The `-c` string is constant and the arguments are positional, so
-    nothing is quoted (D5).
+    descriptor 9 after its startup files have run, so the program's source is open when python3
+    starts. The `-c` string is constant and the arguments are positional, so nothing is quoted (D5).
 - **Measured** on the baseline host (Debian 12.15: bash 5.2.15, dash 0.5.12 as `/bin/sh` and `dash`,
   zsh 5.9, python3 3.11.2), with the program in an inherited memfd and each of `-c` alone, `-l`,
   `-i` and `-l -i`, under the host's own startup files (oh-my-zsh, mise) and under an empty home:
@@ -657,6 +658,7 @@ on every platform's V lane.
 | F3 `PythonProgram` arguments: empty, whitespace and shell characters arrive exactly; the source is absent from `/proc/<pid>/cmdline`                                                                                                                                                                                                                                   | L S V |
 | F4 `PythonProgram` with `login`, `interactive` and both, under `sh`, `dash`, `bash` and `zsh`, with startup files that export, print and run a failing command substitution (`x=$(false)`) in `.profile`, `.zprofile` and `.zshrc`: the export is visible, the arguments are intact, the program runs, so a return to `&&` fails the vector under zsh                  | L V   |
 | F5 `Script.interactive` under each shell: an interactive startup file's function is callable, and the sourced script's `exit N` is the status                                                                                                                                                                                                                          | L V   |
+| A startup file that closes descriptors 3 to 9 leaves a login and interactive `PythonProgram` and an interactive `Script` their source                                                                                                                                                                                                                                  | L V   |
 | F6 The lock under the image's `protected_regular`: created by the agent, then taken by the admin unelevated and elevated, and the reverse; a `write_if` by each in turn completes                                                                                                                                                                                      | V     |
 | F7 Elevated `write_if` and `read` of a root-owned file, and an agent's elevated `write_if` refused before dispatch                                                                                                                                                                                                                                                     | S V   |
 | F8 An elevated `Command(("env",), env={"AGW_F8": "a b"})` prints `AGW_F8=a b`                                                                                                                                                                                                                                                                                          | L V   |

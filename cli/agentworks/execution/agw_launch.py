@@ -44,6 +44,7 @@ def main(f: int, g: bytes) -> None:
     try:
         import contextlib
         import errno
+        import fcntl
         import json
         import pwd
         import select
@@ -58,6 +59,10 @@ def main(f: int, g: bytes) -> None:
     fixed_path = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/games:/usr/games"
     handover_wait_seconds = 30
     program_interpreter = "/usr/bin/python3"
+    # The lowest descriptor a staged source may take. Startup files close or
+    # reuse low descriptors (3 to 9 are the shell's own redirection range), so
+    # the source sits above them for as long as the payload runs.
+    staged_source_floor = 100
 
     # -- 1. Read: the envelope and the passwd entry. Every failure before the
     # start marker is an uncaught exception (exit 1) or the status above.
@@ -202,6 +207,9 @@ def main(f: int, g: bytes) -> None:
             if error.errno != errno.EINVAL:
                 raise
             script_fd = os.memfd_create("agw-script", os.MFD_CLOEXEC)
+        staged = fcntl.fcntl(script_fd, fcntl.F_DUPFD_CLOEXEC, staged_source_floor)
+        os.close(script_fd)
+        script_fd = staged
         remaining = source
         while remaining:
             remaining = remaining[os.write(script_fd, remaining) :]
@@ -216,8 +224,8 @@ def main(f: int, g: bytes) -> None:
             run_source = [b"-c", b'. "$0"'] if request["interactive"] else []
             arguments = [enc(interpreter), *startup, *run_source, source_path]
         elif startup:
-            # The startup shell reopens the source as descriptor 9 itself, so
-            # nothing its startup files close can take it away, and then
+            # The startup shell runs its startup files, reopens the source
+            # (staged above the descriptors they touch) as descriptor 9, and
             # becomes the interpreter. A redirect-only exec can return a stale
             # status in zsh, which is why the line uses ";" and not "&&".
             line = b'exec 9<"$0"; exec ' + enc(program_interpreter) + b' -I -S /dev/fd/9 "$@"'

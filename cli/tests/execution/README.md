@@ -86,6 +86,8 @@ which join the list in `vectors.py`:
   V it is the admin's.
 - F5 (L and V): an interactive `Script` under `sh`, `bash` and the default shell sees its
   interactive startup and returns its own `exit` status.
+- A startup file that closes descriptors 3 to 9 (L and V) still leaves a login and interactive
+  `PythonProgram` and an interactive `Script` their source.
 - F8 (L and V): an elevated request keeps its environment; on L it needs `sudo -n`, as the elevation
   vectors do.
 - The `run` sinks capture to their limit or discard (L and S).

@@ -2,8 +2,9 @@
 
 They join :mod:`vectors`' list, so the same lanes run them: finite stdin and
 the operation log (F1, F2), core-owned Python programs and their startup (F3,
-F4), an interactive script (F5), the run sinks, and the environment of an
-elevated request (F8). Each asserts observable behavior only.
+F4), an interactive script (F5), a startup file that closes low descriptors,
+the run sinks, and the environment of an elevated request (F8). Each asserts
+observable behavior only.
 """
 
 from __future__ import annotations
@@ -203,6 +204,30 @@ def interactive_script_sees_its_startup_and_owns_its_status(lane: Lane) -> None:
             assert b"f5-called\n" in result.stdout, (shell, login, result.stdout, result.stderr)
 
 
+def a_startup_file_that_closes_low_descriptors_leaves_the_source(lane: Lane) -> None:
+    account_shell_name(lane)
+    closes = "exec 3<&- 4<&- 5<&- 6<&- 7<&- 8<&- 9<&-\n"
+    home = lane.make_dir({name: closes for name in (*STARTUP_FILES, ".shrc")})
+    env = {"HOME": home, "ENV": f"{home}/.shrc"}
+
+    ran = lane.run(program("print('agw-source-ran')", login=True, interactive=True, env=env))
+    sourced = lane.run(
+        Script(
+            "echo agw-source-ran\nexit 4\n",
+            Shell.USER_DEFAULT,
+            login=True,
+            interactive=True,
+            env=env,
+            deadline=REQUEST_DEADLINE,
+        )
+    )
+
+    assert ran.completion == Completed(0), ran.stderr
+    assert b"agw-source-ran\n" in ran.stdout
+    assert sourced.completion == Completed(4), sourced.stderr
+    assert b"agw-source-ran\n" in sourced.stdout
+
+
 # -- F8: an elevated request's environment ---------------------------------------------
 
 
@@ -242,6 +267,11 @@ ENTRIES: list[tuple[str, str, Callable[..., None]]] = [
     ),
     ("F4-program-under-login-and-interactive-startup", "LV", program_under_login_and_interactive_startup),
     ("F5-interactive-script", "LV", interactive_script_sees_its_startup_and_owns_its_status),
+    (
+        "startup-closes-low-descriptors",
+        "LV",
+        a_startup_file_that_closes_low_descriptors_leaves_the_source,
+    ),
     ("F8-elevated-request-keeps-its-environment", "LV", elevated_request_keeps_its_environment),
     ("run-sinks", "LS", run_sinks_capture_to_their_limit_or_discard),
 ]

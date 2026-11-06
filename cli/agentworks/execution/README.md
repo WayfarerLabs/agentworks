@@ -48,8 +48,8 @@ script's source and a program's source travel in the request and reach the guest
 file, never as an argument. An interactive `Script` is sourced by an interactive shell
 (`<shell> [-l] -i -c '. "$0"' <file>`). A `PythonProgram` runs as
 `/usr/bin/python3 -I -S <file> <args>`, the system interpreter with no Python startup; with either
-flag the identity's default shell runs that startup first and then execs it, reopening the file as
-descriptor 9 itself, so nothing a startup file closes takes the source away.
+flag the identity's default shell runs that startup first and then execs it. The source is staged at
+descriptor 100 or above, clear of the low descriptors a startup file may close or reuse.
 
 `run`'s sinks are `CaptureOutput(limit=1 MiB)`, the default, which keeps up to `limit` bytes and
 makes more `Unknown(OUTPUT_LIMIT)`, and `DiscardOutput()`, which keeps nothing while the stream is
