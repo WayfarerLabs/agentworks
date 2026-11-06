@@ -19,14 +19,14 @@ from __future__ import annotations
 import getpass
 import re
 import shlex
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from agentworks.execution import client, envelope, ssh_process, trust
 from agentworks.execution.access import Admin, Agent, Identity, VMAccess
 from agentworks.execution.client import SSHClient
-from agentworks.execution.requests import CaptureOutput
+from agentworks.execution.requests import CaptureOutput, DiscardOutput
 from agentworks.execution.results import Completed, Result
 from agentworks.execution.trust import TrustMode
 from tests.ssh_fixtures import fake_host_key
@@ -59,7 +59,8 @@ class RecordingVMAccess(VMAccess):
     several probes. A request given an answer with :meth:`respond` gets it
     every time it is asked. Any other ``run`` consumes ``run_outcomes`` in
     order, then gets ``default_outcome``, ``Completed(0)`` unless a test sets
-    it. An outcome that is an exception is raised.
+    it. An outcome that is an exception is raised. A stream ``run`` was asked
+    to discard comes back empty, as it does from a real access.
     ``stream_status``, ``attach_status`` and ``forward_status`` are returned
     (or raised) by their operation.
     """
@@ -109,6 +110,10 @@ class RecordingVMAccess(VMAccess):
             outcome = self.run_outcomes.pop(0) if self.run_outcomes else self.default_outcome
         if isinstance(outcome, BaseException):
             raise outcome
+        if isinstance(stdout, DiscardOutput):
+            outcome = replace(outcome, stdout=b"")
+        if isinstance(stderr, DiscardOutput):
+            outcome = replace(outcome, stderr=b"")
         enrolls = self.trust_mode is TrustMode.ENROLL and isinstance(outcome.completion, Completed)
         if enrolls and not trust.has_record(self.vm_name):
             # What accept-new does when a connection reaches sshd and none is recorded.
@@ -220,28 +225,36 @@ def is_command_check(request: object) -> bool:
     return isinstance(request, Script) and STATUS_PREFIX in request.source
 
 
+def _check_nonce(source: str) -> str | None:
+    """The nonce of the command check whose script is ``source``, or ``None`` when it is not one."""
+    from agentworks.command_checks import STATUS_PREFIX
+
+    match = re.search(re.escape(STATUS_PREFIX) + r"([0-9a-f]+):", source)
+    return None if match is None else match[1]
+
+
 def check_result(request: Any, status: int) -> Result:
     """What the command check ``request`` reports for a command that exited ``status``, with its own nonce."""
     from agentworks.command_checks import STATUS_PREFIX
 
-    match = re.search(re.escape(STATUS_PREFIX) + r"([0-9a-f]+):", request.source)
-    assert match is not None, "not a command check"
-    return Result(Completed(0), f"\n{STATUS_PREFIX}{match[1]}:{status}\n".encode())
+    nonce = _check_nonce(request.source)
+    assert nonce is not None, "not a command check"
+    return Result(Completed(0), f"\n{STATUS_PREFIX}{nonce}:{status}\n".encode())
 
 
 def presence_check(request: object) -> str | None:
     """The command ``request`` checks for, when it is exactly ``presence_probe``'s request for it; else ``None``."""
-    from agentworks.command_checks import STATUS_PREFIX, presence_probe
+    from agentworks.command_checks import presence_probe
     from agentworks.execution.requests import Script
 
     if not isinstance(request, Script):
         return None
-    nonce = re.search(re.escape(STATUS_PREFIX) + r"([0-9a-f]+):", request.source)
+    nonce = _check_nonce(request.source)
     command = re.search(r"^command -v (.+) >/dev/null 2>&1 \|\| exit \d+$", request.source, re.MULTILINE)
     if nonce is None or command is None:
         return None
     (name,) = shlex.split(command[1])
-    return name if request == presence_probe(name, nonce=nonce[1], deadline=request.deadline) else None
+    return name if request == presence_probe(name, nonce=nonce, deadline=request.deadline) else None
 
 
 def answer_command_checks(*, missing: Collection[str] = (), status: int | None = 0) -> Callable[[Call], Result | None]:
@@ -339,6 +352,10 @@ def run_requests_locally(monkeypatch: pytest.MonkeyPatch, remote_argv: Callable[
     monkeypatch.setattr(ssh_process, "build_argv", build_argv)
 
 
+_ORIGINAL_LAUNCHER = envelope.launcher_source()
+"""The launcher as the package ships it, before any test rewrites it."""
+
+
 def rewrite_launcher(monkeypatch: pytest.MonkeyPatch, old: bytes, new: bytes) -> None:
     """Send a launcher whose source has ``old`` replaced by ``new``; the replacement must apply."""
     source = envelope.launcher_source()
@@ -366,7 +383,7 @@ def local_vm_access(
     Build it once per test and reuse it: the launcher rewrite it installs
     holds for the rest of the test, so a second build raises.
     """
-    if b"home = entry.pw_dir" not in envelope.launcher_source():
+    if envelope.launcher_source() != _ORIGINAL_LAUNCHER:
         raise RuntimeError("local_vm_access was already built in this test; reuse that access")
     run_requests_locally(
         monkeypatch,
