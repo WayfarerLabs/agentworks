@@ -189,10 +189,11 @@ plugins inside it. There is no separate native plugin retirement step before par
 applied-state records, including unreadable or unknown versions, do not add deletion prerequisites.
 The existing database deletion removes the owner's records and any affected child records together.
 
-Backend binding failures retain the existing warning-and-local-cleanup behavior of VM deletion. An
-actual platform deletion failure still aborts as before. Agent and workspace remote cleanup retains
-its existing best-effort warnings. Files deliberately configured outside the removed parent remain
-outside that filesystem cleanup; setup does not introduce a new forget command or force option.
+Backend binding failures warn and continue local cleanup without attempting remote deletion. An
+exception raised by a bound platform's delete operation aborts local removal. Agent and workspace
+remote cleanup retains its existing best-effort warnings. Files deliberately configured outside the
+removed parent remain outside that filesystem cleanup; setup does not introduce a new forget command
+or force option.
 
 Whole-VM deletion does not first log out of Tailscale or stop individual guest sessions. An external
 tailnet entry can remain after the guest is gone; remove a retired node from the Tailscale admin

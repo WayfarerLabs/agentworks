@@ -1282,13 +1282,13 @@ positives remain evidence only for their actual head, configuration and scope.
 - [x] Reclaim only the failed non-repository create's confirmed unchanged generated tmuxinator file
       before empty-reservation cleanup. Preserve modified files, unrelated work, ordinary discovery
       files and replaced links; exercise a real filesystem retry after cleanup.
-- [ ] Correct native inventory relevance and settings authorization; remove stale snapshot replay in
+- [x] Correct native inventory relevance and settings authorization; remove stale snapshot replay in
       favor of conservative refusal of unsafe native rewrites, without a transaction journal.
-- [ ] Separate known local setup completion from lazy incoming-route health. Unknown/stale captures
+- [x] Separate known local setup completion from lazy incoming-route health. Unknown/stale captures
       cannot authorize retirement; independently attributable local changes continue, while shared
       unknown-dependent files remain held. A healthy workspace must not need destructive recreation
       merely to clear a recovered ancestor's transient warning.
-- [ ] Correct uncertain session startup and supported recovery using existing identity fields;
+- [x] Correct uncertain session startup and supported recovery using existing identity fields;
       complete recovered startup, address the actual launch pane and preserve unknown ownership. Fix
       actual caller redaction before truncation and the adjacent observation/input boundaries.
 - [ ] Complete common-candidate independent project, complexity and correctness reviews, required
@@ -1303,3 +1303,27 @@ the open Muntz items remain accounted for. Inherited Lima/EC2/Proxmox provider l
 broader VM create rollback and unsupported-platform test gaps are not silently reclassified as
 facet/artifact correction requirements. No new recovery API, workspace reinit command, provenance
 store, journal or Transport interface is introduced by this round.
+
+### Private quality loop for round 8
+
+The first combined candidate `cd6d70b3` returned 11,138 passed, 11 skipped and eight failed cases.
+The failures exposed stale binding-policy, pre-spawn cancellation, nullable transport-env and TTY
+fixture assumptions; corrected controls retain the actual behavioral boundaries. The whole-tree
+typing gate also caught ten native test annotations, now corrected. Required mypy then returned 0
+across 924 files. File lint found formatting in two changed guides; other collateral gates passed.
+
+Independent project, complexity and correctness passes found four material session issues: healthy
+legacy multi-pane start/log behavior, pathname redirection before runtime adoption, startup
+completion without a fresh match to the recorded process identity, and multiline ANSI output
+escaping redaction through a line cap. All were reproduced before correction. The corrected source
+uses the existing socket type checks and runtime fingerprint, preserves harmless legacy operations,
+and normalizes whole captured text and secret forms before truncation without flattening lines. The
+source owner's broader correction selection returned 0 with 708 cases; focused controls returned 0
+with 135 cases. The original ANSI reproduction now reports no marker disclosure.
+
+The first generic correctness pass was interrupted after its completed observations and supplied a
+partial written report; its uncollected final experiment is not acceptance evidence. The lead
+verified its process absent, checked 24 recorded native fixture roots absent, and removed the
+remaining isolated scratch and test file. All three lanes must review the corrected common candidate
+before clearance. Source-owner tests, private local fixtures and green gates do not replace the
+separate integration report or the retained requirement-level closeout audit.

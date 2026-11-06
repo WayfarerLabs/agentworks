@@ -1661,7 +1661,7 @@ This session retains ownership of both SDDs through closeout. An intermediate me
 correction does not close either effort or discard its pending acceptance requirements. Both locks
 remain absent until requirement-level evidence and permanent promotion establish completion.
 
-- [ ] Complete unknown/stale capture retirement protection, independent local-origin convergence,
+- [x] Complete unknown/stale capture retirement protection, independent local-origin convergence,
       lazy workspace routing-health recovery and actual-caller secret redaction. Keep native
       required/recommended setup prerequisites distinct from advisory incoming artifact health.
 - [ ] Complete native settings and session-startup corrections with the companion effort, then run
