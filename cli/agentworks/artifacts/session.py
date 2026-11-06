@@ -28,6 +28,8 @@ from agentworks.native_files import native_path
 from agentworks.schema import CapabilityConfig
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from agentworks.db import Database, SessionRow, VMRow, WorkspaceRow
     from agentworks.resources.registry import Registry
     from agentworks.secrets.orchestration import SecretTarget
@@ -82,6 +84,7 @@ def prepare_session_artifacts(
     secret_target: SecretTarget,
     linux_user: str,
     session_uuid: str | None = None,
+    redactions: Iterable[str] = (),
 ) -> PreparedSessionArtifacts:
     """Capture local inputs and report ancestor state before runtime teardown."""
     from agentworks.artifacts.routing import session_artifacts
@@ -123,6 +126,7 @@ def prepare_session_artifacts(
         run_id=run_id,
         ancestor_files=routed.ancestor_files,
         environment=dict(environment),
+        redactions=tuple(redactions),
     )
     setup_inputs = SetupInputs(
         "session",

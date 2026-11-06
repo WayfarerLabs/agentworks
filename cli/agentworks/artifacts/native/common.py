@@ -345,6 +345,7 @@ def prepare_session_delivery(
                     runner,
                     tool=tool,
                     environment=current.environment,
+                    redactions=current.redactions,
                     home=current.home,
                     workspace=workspace,
                     files=plan.application.files,
@@ -381,13 +382,14 @@ def prepare_session_delivery(
         ),
     )
     if context.ancestor_files:
-        with ancestor_diagnostics(integration, runner=runner):
+        with ancestor_diagnostics(integration, runner=runner, redactions=context.redactions):
             if runner is None:
                 raise StateError("artifact delivery requires the actual native launch target")
             ancestor_root = probe_native(
                 runner,
                 tool=tool,
                 environment=context.environment,
+                redactions=context.redactions,
                 home=context.home,
                 workspace=workspace,
                 files=context.ancestor_files,
