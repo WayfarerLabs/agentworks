@@ -19,7 +19,6 @@ import pytest
 from agentworks.capabilities.base import OperationScope, RunContext, ScopeLevel
 from agentworks.capabilities.config import capability_config_references, validate_capability_config
 from agentworks.capabilities.harness_integration import HarnessLaunchIntent, HarnessStart
-from agentworks.command_checks import presence_probe
 from agentworks.errors import ConfigError, StateError
 from agentworks.execution.errors import ExecutionIncomplete
 from agentworks.execution.requests import Script
@@ -27,7 +26,14 @@ from agentworks.execution.results import Completed, Result, Unknown, UnknownReas
 from agentworks.plugins.claude.harness_integration import ClaudeCodeConfig, ClaudeCodeIntegration, transcript_probe
 from agentworks.schema import RefOwner, merge_model
 from tests.conftest import requires_posix_shell
-from tests.vm_access_support import Admin, RecordingVMAccess, account_shell, command_check_access, local_vm_access
+from tests.vm_access_support import (
+    Admin,
+    RecordingVMAccess,
+    account_shell,
+    command_check_access,
+    local_vm_access,
+    presence_check,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -610,7 +616,7 @@ def test_readiness_probes_claude() -> None:
     harness_integration = _harness_integration()
     access = command_check_access()
     harness_integration.preflight(RunContext(operation_scope=_session_scope(), admin_access=access))
-    assert access.requests() == [presence_probe("claude")]
+    assert [presence_check(request) for request in access.requests()] == ["claude"]
 
 
 def test_readiness_missing_claude_is_a_typed_error() -> None:

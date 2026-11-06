@@ -38,7 +38,7 @@ from agentworks.execution.requests import Script
 from agentworks.execution.results import Completed, Result
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.tmux import FingerprintProbe, ProbeStatus, TmuxServerFingerprint
-from tests.vm_access_support import command_status, install_access_recorder, is_command_check
+from tests.vm_access_support import check_result, install_access_recorder, is_command_check
 
 from ..conftest import stub_build_registry, stub_session_resolvers, stub_vm_gates
 
@@ -102,7 +102,7 @@ class _CodexTarget:
     def answer(self, call: Call) -> Result | None:
         if is_command_check(call.request):
             self._events.append("probe")
-            return command_status(0)
+            return check_result(call.request, 0)
         source = call.request.source if isinstance(call.request, Script) else ""
         if ".thread" in source:
             self._events.append("read_recorder")

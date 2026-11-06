@@ -23,7 +23,7 @@ from agentworks.db import Database
 from agentworks.execution.access import Agent
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.tmux import FingerprintProbe, ProbeStatus, TmuxServerFingerprint
-from tests.vm_access_support import command_status, is_command_check
+from tests.vm_access_support import check_result, is_command_check, presence_check
 
 from .conftest import (
     stub_build_registry,
@@ -476,7 +476,6 @@ def test_create_session_aborts_on_missing_required_command(
     leaving the operator with the cryptic downstream tmux server-access failure.
     """
     from agentworks.agents import manager as agent_mgr
-    from agentworks.command_checks import presence_probe
     from agentworks.errors import StateError
     from agentworks.sessions import manager as session_manager
 
@@ -489,7 +488,7 @@ def test_create_session_aborts_on_missing_required_command(
         if not is_command_check(call.request):
             return None
         seen_probes.append(call)
-        return command_status(20)
+        return check_result(call.request, 20)
 
     vm_access_recorder.answer = answer
     monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: _Target("admin", []))
@@ -541,7 +540,7 @@ def test_create_session_aborts_on_missing_required_command(
     # The agent's own check, with the startup `tmux._pane_command` gives the
     # pane: login and interactive (presence_probe), so PATH additions behind
     # interactive-only shell config count.
-    assert [(call.identity, call.request) for call in seen_probes] == [(Agent("a1", "aw-a1"), presence_probe("claude"))]
+    assert [(call.identity, presence_check(call.request)) for call in seen_probes] == [(Agent("a1", "aw-a1"), "claude")]
     db.close()
 
 

@@ -8,16 +8,18 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.command_checks import check_required_commands, presence_probe, run_user_shell_command
+from agentworks.command_checks import check_required_commands, run_user_shell_command
 from agentworks.errors import ExternalError
 from agentworks.execution.errors import ExecutionIncomplete
 from agentworks.execution.results import Completed, Result, Unknown, UnknownReason
 from tests.conftest import requires_posix_shell
-from tests.vm_access_support import Admin, RecordingVMAccess, account_shell, command_status, local_vm_access
+from tests.vm_access_support import Admin, RecordingVMAccess, account_shell, check_result, local_vm_access
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from agentworks.execution.access import VMAccess
-    from agentworks.execution.requests import RunRequest
+    from agentworks.execution.requests import RunRequest, Script
 
 MARKER = "untrusted-output-6d2f"
 
@@ -84,6 +86,28 @@ def test_startup_output_cannot_forge_a_status(tmp_path: Path, monkeypatch: pytes
     assert run_user_shell_command("exit 20", access) == 20
 
 
+@requires_posix_shell
+def test_startup_output_without_a_final_newline_leaves_the_status_readable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    access, _, _ = _account(tmp_path, monkeypatch, profile="printf hello\n")
+
+    assert run_user_shell_command("exit 3", access) == 3
+
+
+@pytest.mark.parametrize("shell", ["bash", "zsh", "dash"])
+def test_a_startup_exit_trap_cannot_forge_a_status(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shell: str) -> None:
+    path = shutil.which(shell)
+    if path is None:
+        pytest.skip(f"{shell} is not installed")
+    # bash and dash read .profile as login shells; zsh reads .zshrc as an interactive one.
+    for startup in (".profile", ".zshrc"):
+        (tmp_path / startup).write_text("trap 'echo agentworks-command-status:0' EXIT\n")
+    access = local_vm_access(monkeypatch, home=tmp_path, shell=Path(path))
+
+    assert run_user_shell_command("exit 7", access) == 7
+
+
 def test_required_command_sees_interactive_startup_in_real_zsh(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     zsh = shutil.which("zsh")
     if zsh is None:
@@ -104,14 +128,16 @@ def test_required_command_sees_interactive_startup_in_real_zsh(tmp_path: Path, m
 @pytest.mark.parametrize(
     "outcome",
     [
-        Result(Completed(0), b"secret-stdout\n", b""),
-        Result(Completed(0), b"agentworks-command-status:256\n", b""),
-        command_status(7),
+        lambda request: Result(Completed(0), b"secret-stdout\n", b""),
+        lambda request: Result(Completed(0), b"agentworks-command-status:0\n", b""),
+        lambda request: check_result(request, 256),
+        lambda request: check_result(request, 7),
     ],
+    ids=["no-status", "status-without-the-nonce", "out-of-range", "neither-present-nor-absent"],
 )
-def test_an_indeterminate_check_fails_without_quoting_what_it_read(outcome: Result) -> None:
+def test_an_indeterminate_check_fails_without_quoting_what_it_read(outcome: Callable[[Script], Result]) -> None:
     access = RecordingVMAccess([], Admin())
-    access.respond(presence_probe("gh"), outcome)
+    access.answer = lambda call: outcome(call.request)
 
     with pytest.raises(ExternalError) as raised:
         check_required_commands(("gh",), access)
@@ -121,7 +147,7 @@ def test_an_indeterminate_check_fails_without_quoting_what_it_read(outcome: Resu
 
 def test_a_check_that_may_not_have_run_raises_its_execution_error() -> None:
     access = RecordingVMAccess([], Admin())
-    access.respond(presence_probe("gh"), Result(Unknown(UnknownReason.CONNECTION)))
+    access.default_outcome = Result(Unknown(UnknownReason.CONNECTION))
 
     with pytest.raises(ExecutionIncomplete):
         check_required_commands(("gh",), access)

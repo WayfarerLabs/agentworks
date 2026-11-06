@@ -14,7 +14,7 @@ from agentworks.execution.requests import Script
 from agentworks.execution.results import Completed, Result
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.tmux import FingerprintProbe, ProbeStatus, TmuxServerFingerprint
-from tests.vm_access_support import command_status, install_access_recorder, is_command_check
+from tests.vm_access_support import check_result, install_access_recorder, is_command_check
 
 from ..conftest import stub_build_registry, stub_session_resolvers, stub_vm_gates
 
@@ -53,7 +53,7 @@ class _GrokTarget:
         """Its access finds the grok command and answers the persisted-session probe."""
         if is_command_check(call.request):
             self._events.append("probe")
-            return command_status(0)
+            return check_result(call.request, 0)
         if isinstance(call.request, Script) and "summary.json" in call.request.source:
             self._events.append("detect")
             return Result(Completed(0 if self._present else 1))

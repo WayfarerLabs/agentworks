@@ -31,7 +31,6 @@ from agentworks.artifacts.declarations import ArtifactsConfig
 from agentworks.bootstrap import build_registry as _real_build_registry
 from agentworks.bootstrap import load_request_registry as _real_load_request_registry
 from agentworks.capabilities.harness_integration import HarnessLaunchIntent, HarnessStart, ShellIntegration
-from agentworks.command_checks import presence_probe
 from agentworks.db import Database, InitStatus, SessionMode, SessionStatus
 from agentworks.errors import NotFoundError, StateError, UserAbort, ValidationError
 from agentworks.execution.access import Admin
@@ -43,7 +42,7 @@ from agentworks.sessions.manager._scope import _regenerate_tmuxinator as _real_r
 from agentworks.sessions.tmux import FingerprintProbe, ProbeStatus, TmuxServerFingerprint
 from agentworks.vms import manager as vm_manager
 from tests.conftest import seed_vm_trust
-from tests.vm_access_support import command_status, install_access_recorder, is_command_check
+from tests.vm_access_support import check_result, install_access_recorder, is_command_check, presence_check
 
 from ..conftest import (
     ManifestDoc,
@@ -103,7 +102,7 @@ class _Target:
         if not is_command_check(call.request):
             return None
         self._events.append("probe")
-        return command_status(20 if any(call.request == presence_probe(m) for m in self._missing) else 0)
+        return check_result(call.request, 20 if presence_check(call.request) in self._missing else 0)
 
     def write_file(self, remote_path: str, content: str, **kwargs: object) -> None:
         self._events.append(f"tmuxinator_write:{remote_path}")

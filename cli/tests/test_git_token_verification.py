@@ -32,7 +32,14 @@ from agentworks.orchestration.secrets import ScopedSecrets
 from agentworks.plugins.azure.azdo import _AZ_AUTH_CHECK, AzDOCredentialProvider
 from agentworks.schema import AgwModel, NonEmptyStr, SecretRef
 from tests.conftest import requires_posix_shell
-from tests.vm_access_support import Admin, Agent, RecordingVMAccess, account_shell, command_status, local_vm_access
+from tests.vm_access_support import (
+    Admin,
+    Agent,
+    RecordingVMAccess,
+    account_shell,
+    answer_command_checks,
+    local_vm_access,
+)
 
 if TYPE_CHECKING:
     from agentworks.execution.access import VMAccess
@@ -187,7 +194,7 @@ def test_cli_runup_checks_current_target_without_forwarding_process_output(
     [
         (Result(Unknown(UnknownReason.CONNECTION), b"", b"", "untrusted transport detail"),),
         (Result(NotDelivered(NotDeliveredReason.PYTHON_MISSING), b"untrusted stdout", b"untrusted stderr"),),
-        (command_status(0), Result(Completed(0), b"untrusted stdout", b"untrusted stderr")),
+        (Result(Completed(0), b"untrusted stdout", b"untrusted stderr"),),
     ],
 )
 def test_cli_runup_warns_without_quoting_an_indeterminate_check(
@@ -196,6 +203,7 @@ def test_cli_runup_warns_without_quoting_an_indeterminate_check(
     outcomes: tuple[Result, ...],
 ) -> None:
     access = RecordingVMAccess([], Agent("dev", "agent-dev"))
+    access.answer = answer_command_checks(status=None)  # the CLI is present; its auth check gets ``outcomes``
     access.run_outcomes = list(outcomes)
     warnings: list[str] = []
     monkeypatch.setattr("agentworks.output.warn", warnings.append)
@@ -213,7 +221,7 @@ def test_cli_runup_warns_without_quoting_an_indeterminate_check(
 )
 def test_cli_runup_checks_are_bounded_by_a_ten_second_deadline(provider: GitCredentialProvider) -> None:
     access = RecordingVMAccess([], Agent("dev", "agent-dev"))
-    access.default_outcome = command_status(0)
+    access.answer = answer_command_checks()
     provider.runup(RunContext(agent_access=access, secrets=ScopedSecrets({}, ())))
     assert access.requests()
     assert all(request.deadline == 10 for request in access.requests())

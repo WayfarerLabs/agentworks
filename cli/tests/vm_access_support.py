@@ -17,20 +17,22 @@ against files the test controls. It needs a POSIX host.
 from __future__ import annotations
 
 import getpass
-from dataclasses import dataclass, field, replace
+import re
+import shlex
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from agentworks.execution import client, envelope, ssh_process, trust
 from agentworks.execution.access import Admin, Agent, Identity, VMAccess
 from agentworks.execution.client import SSHClient
-from agentworks.execution.requests import CaptureOutput, DiscardOutput
+from agentworks.execution.requests import CaptureOutput
 from agentworks.execution.results import Completed, Result
 from agentworks.execution.trust import TrustMode
 from tests.ssh_fixtures import fake_host_key
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Collection, Sequence
     from typing import BinaryIO
 
     import pytest
@@ -57,8 +59,7 @@ class RecordingVMAccess(VMAccess):
     several probes. A request given an answer with :meth:`respond` gets it
     every time it is asked. Any other ``run`` consumes ``run_outcomes`` in
     order, then gets ``default_outcome``, ``Completed(0)`` unless a test sets
-    it. An outcome that is an exception is raised. A stream ``run`` was asked
-    to discard comes back empty, as it would from a real access.
+    it. An outcome that is an exception is raised.
     ``stream_status``, ``attach_status`` and ``forward_status`` are returned
     (or raised) by their operation.
     """
@@ -78,7 +79,7 @@ class RecordingVMAccess(VMAccess):
         self.answer: Callable[[Call], Result | BaseException | None] | None = None
         self.run_outcomes: list[Result | BaseException] = []
         self.responses: list[tuple[RunRequest, Result | BaseException]] = []
-        self.default_outcome: Result = Result(Completed(0))
+        self.default_outcome: Result | BaseException = Result(Completed(0))
         self.stream_status: int | BaseException = 0
         self.attach_status: int | BaseException = 0
         self.forward_status: int | BaseException = 0
@@ -108,10 +109,6 @@ class RecordingVMAccess(VMAccess):
             outcome = self.run_outcomes.pop(0) if self.run_outcomes else self.default_outcome
         if isinstance(outcome, BaseException):
             raise outcome
-        if isinstance(stdout, DiscardOutput):
-            outcome = replace(outcome, stdout=b"")
-        if isinstance(stderr, DiscardOutput):
-            outcome = replace(outcome, stderr=b"")
         enrolls = self.trust_mode is TrustMode.ENROLL and isinstance(outcome.completion, Completed)
         if enrolls and not trust.has_record(self.vm_name):
             # What accept-new does when a connection reaches sshd and none is recorded.
@@ -163,8 +160,6 @@ class AccessRecorder:
         self._accesses: dict[Identity, RecordingVMAccess] = {}
         self._enrollment: RecordingVMAccess | None = None
         self.enrolled: list[str] = []
-        self.default_outcome: Result = Result(Completed(0))
-        """What each access it builds answers an unscripted ``run`` with; set it before the command runs."""
         self.answer: Callable[[Call], Result | BaseException | None] | None = None
         """Asked first by every access it builds, as ``RecordingVMAccess.answer`` is."""
 
@@ -192,7 +187,6 @@ class AccessRecorder:
         identity = identity or Admin()
         if identity not in self._accesses:
             access = RecordingVMAccess(self.calls, identity, vm_name=vm_name)
-            access.default_outcome = self.default_outcome
             access.answer = lambda call: self.answer(call) if self.answer is not None else None
             self._accesses[identity] = access
         return self._accesses[identity]
@@ -218,13 +212,6 @@ def install_access_recorder(monkeypatch: pytest.MonkeyPatch) -> AccessRecorder:
     return recorder
 
 
-def command_status(status: int) -> Result:
-    """What a command check's probe reports for a command that exited ``status`` (``command_checks``)."""
-    from agentworks.command_checks import STATUS_PREFIX
-
-    return Result(Completed(0), f"{STATUS_PREFIX}{status}\n".encode())
-
-
 def is_command_check(request: object) -> bool:
     """Whether ``request`` is a ``command_checks`` probe."""
     from agentworks.command_checks import STATUS_PREFIX
@@ -233,14 +220,56 @@ def is_command_check(request: object) -> bool:
     return isinstance(request, Script) and STATUS_PREFIX in request.source
 
 
-def command_check_access(*, missing: Sequence[str] = (), identity: Identity | None = None) -> RecordingVMAccess:
-    """An access on which every required-command check finds its command, except those in ``missing``."""
-    from agentworks.command_checks import presence_probe
+def check_result(request: Any, status: int) -> Result:
+    """What the command check ``request`` reports for a command that exited ``status``, with its own nonce."""
+    from agentworks.command_checks import STATUS_PREFIX
 
+    match = re.search(re.escape(STATUS_PREFIX) + r"([0-9a-f]+):", request.source)
+    assert match is not None, "not a command check"
+    return Result(Completed(0), f"\n{STATUS_PREFIX}{match[1]}:{status}\n".encode())
+
+
+def presence_check(request: object) -> str | None:
+    """The command ``request`` checks for, when it is exactly ``presence_probe``'s request for it; else ``None``."""
+    from agentworks.command_checks import STATUS_PREFIX, presence_probe
+    from agentworks.execution.requests import Script
+
+    if not isinstance(request, Script):
+        return None
+    nonce = re.search(re.escape(STATUS_PREFIX) + r"([0-9a-f]+):", request.source)
+    command = re.search(r"^command -v (.+) >/dev/null 2>&1 \|\| exit \d+$", request.source, re.MULTILINE)
+    if nonce is None or command is None:
+        return None
+    (name,) = shlex.split(command[1])
+    return name if request == presence_probe(name, nonce=nonce[1], deadline=request.deadline) else None
+
+
+def answer_command_checks(*, missing: Collection[str] = (), status: int | None = 0) -> Callable[[Call], Result | None]:
+    """An ``answer`` for command checks: each presence check finds its command unless it is in ``missing``.
+
+    Any other command check reports ``status``; with ``None`` it is left to
+    the access's other outcomes, as is every request that is not a check.
+    """
+
+    def answer(call: Call) -> Result | None:
+        command = presence_check(call.request)
+        if command is not None:
+            return check_result(call.request, 20 if command in missing else 0)
+        if status is not None and is_command_check(call.request):
+            return check_result(call.request, status)
+        return None
+
+    return answer
+
+
+def command_check_access(*, missing: Collection[str] = (), identity: Identity | None = None) -> RecordingVMAccess:
+    """An access on which every required-command check finds its command, except those in ``missing``.
+
+    Any request that is not a command check fails the test.
+    """
     access = RecordingVMAccess([], identity or Admin())
-    access.default_outcome = command_status(0)
-    for command in missing:
-        access.respond(presence_probe(command), command_status(20))
+    access.answer = answer_command_checks(missing=missing)
+    access.default_outcome = AssertionError("an unscripted request reached the access")
     return access
 
 
@@ -364,8 +393,11 @@ __all__ = [
     "Call",
     "RecordingVMAccess",
     "account_shell",
+    "answer_command_checks",
+    "check_result",
     "command_check_access",
-    "command_status",
+    "is_command_check",
+    "presence_check",
     "local_remote_argv",
     "local_vm_access",
     "rewrite_launcher",
