@@ -239,8 +239,9 @@ removed: updating an ancestor alone does not retire effects previously applied b
 Recreation is destructive. Preserve tracked edits, untracked files, commits not yet pushed and
 stashes outside the workspace first. Correct and push the repository content the next clone needs,
 or correct the configured workstation source/template. Editing only the old guest checkout does not
-update the next workspace's inputs. A newly created workspace whose own applicable setup completed
-does not acquire a permanent setup failure solely from an ancestor's uncertainty.
+update the next workspace's inputs. An unknown applicable input set keeps a receiving facet
+incomplete even if its local files apply. An unrelated ancestor native failure with a confirmed
+routing table covering the current inputs does not make a completed receiver incomplete.
 
 Applied config records identify files and registrations owned by the integration. Refresh removes
 obsolete owned effects where supported. Retired skill files also prune empty parents up to their
@@ -265,7 +266,7 @@ current. Deleting a VM retains the ordinary VM deletion behavior: its filesystem
 | Shell       | All types under `/opt/agentworks/artifacts/`     | All types as files                               | All types as files, without an opt-in                                  |
 | Claude Code | Managed instructions, skills and agents          | Native rules, skills and agents                  | Opt-in appended context, skill plugin and agent definitions            |
 | Codex       | Native machine skills; other types defer to user | Generated instructions, native skills and agents | Opt-in developer instructions and agents; skills need earlier handling |
-| Grok Build  | Defer to user                                    | Native rules, skills and agents                  | Opt-in rules and agents; skills need earlier handling                  |
+| Grok Build  | Defer to user                                    | Native rules, skills and agents                  | Opt-in rules; headless-only agents; skills need earlier handling       |
 
 The map key supplies the native name, with a native namespace where required, such as Claude's
 session skill plugin. Inspection shows recorded names and locations. Shell uses scope directories
@@ -399,13 +400,18 @@ activations do not enable session workarounds.
 | Codex       | `session-developer-instructions` | Compose rules and hints into the session's developer instructions.                   |
 | Codex       | `session-agent-config`           | Select private agent configuration files through launch overrides.                   |
 | Grok Build  | `session-rules`                  | Supply rules and hints through the native rules argument.                            |
-| Grok Build  | `session-agent-definitions`      | Supply agent personas through native launch JSON.                                    |
+| Grok Build  | `session-agent-definitions`      | Supply agent personas through native launch JSON in headless mode only.              |
 
 Shell requires no workaround. It publishes files at every activated facet, using the VM directory
 above, `~/.agentworks-artifacts/user/`, `<workspace>/.agentworks-artifacts/`, and the private
 session/run directory. Session publication exposes its index through `AGENTWORKS_ARTIFACTS_DIR`.
 Remove `enabled_workarounds` from shell configurations; `session-artifact-files` is no longer
 needed.
+
+Grok's `session-agent-definitions` applies only when the native arguments select headless mode
+(`--single`, `-p`, `--prompt-json` or `--prompt-file`). Interactive Grok ignores its `--agents`
+argument, so Agentworks leaves those session personas unhandled and warns even when this workaround
+is enabled. Native user/workspace persona files remain available in interactive mode.
 
 Codex and Grok Build have no session skill workaround. Apply those skills at a supported user or
 workspace facet. Unhandled warnings name the relevant workaround when one exists; enabling a

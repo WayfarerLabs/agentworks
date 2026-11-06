@@ -118,10 +118,14 @@ known payloads without echoing raw contents. Preserve unknown versions and unrel
 do not replace an unknown record with empty defaults. Core persists only what the integration
 reports as native evidence. Source snapshot contents and resolved secrets never enter the codec.
 Writer version 3 adds credential-free `incomplete_reasons` and distinguishes confirmed routing from
-a partial file checkpoint. A nullable `artifact_inputs` means no confirmed routing result. Older
-incomplete records with no deferrals are ambiguous because earlier writers stored input IDs before
-successful application; readers normalize those records to unconfirmed. Complete or explicit-route
-older records remain usable. Readers accept versions 1 through 3 and canonical export preserves this
+a partial file checkpoint. A nullable `artifact_inputs` means the full routing input set is unknown.
+An incomplete record may retain known partial deferrals alongside that null value; those routes
+preserve obligations without confirming the full set. A complete record cannot contain partial
+deferrals with unknown inputs. Non-null tables prove routing only for current input identities they
+cover, including explicit incoming routes whose payload is unavailable. Older incomplete records
+with no deferrals are ambiguous because earlier writers stored input IDs before successful
+application; readers normalize those records to unconfirmed. Complete or explicit-route older
+records remain usable. Readers accept versions 1 through 3 and canonical export preserves this
 normalization. Missing `incomplete_reasons` defaults to empty for earlier records. The incomplete
 callback persists the current attempt's reasons through the existing record, and a new attempt
 clears prior reasons. A malformed driver association string cannot prove ownership; retain and

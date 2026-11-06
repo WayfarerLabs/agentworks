@@ -620,7 +620,10 @@ def is_interactive() -> bool:
     """
     if _non_interactive:
         return False
-    return sys.stdin.isatty()
+    try:
+        return sys.stdin.isatty()
+    except (AttributeError, OSError, ValueError):
+        return False
 
 
 def non_interactive() -> bool:

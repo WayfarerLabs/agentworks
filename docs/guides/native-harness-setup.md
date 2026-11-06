@@ -72,7 +72,10 @@ absent from the catalog is a configuration error.
 
 Claude marketplace paths can select a directory or its `marketplace.json` file. A named entry with a
 source form Agentworks cannot establish is preserved and reported locally rather than invalidating
-unrelated marketplace entries. Malformed overall inventory still fails that facet.
+unrelated marketplace entries when the native CLI can read the inventory. If the CLI itself refuses
+the inventory, that facet fails without rewriting the configuration. The diagnostic names the entry
+and durable native configuration root; repair the unsupported declaration with the native tool or
+configuration before retrying. Malformed overall inventory still fails that facet.
 
 Tool discovery reads the actual user's login-shell PATH once per setup invocation. An explicit PATH
 in the prepared setup environment takes precedence. Native commands use that resolved executable and
@@ -115,15 +118,16 @@ native conflict before retrying setup.
 
 Claude's git and GitHub list entries do not expose every source option. A missing or malformed user
 source declaration, or one inconsistent with native inventory, makes that entry unobservable.
-Agentworks retains and names affected selected or owned entries while independent entries continue.
-Restore a valid native association before retrying setup. Marketplace retirement or replacement also
-retains dependent plugins when the user declaration needed for removal is absent. Agentworks does
-not broaden user-scoped removal to all scopes or write a guessed source. Explicitly protected named
-operator entries are retained through unrelated native rewrites and mapped-settings publication;
-other incomplete placeholders can follow the native CLI's own normalization. Entry preservation
-respects native registrations and removals confirmed earlier in the same operation. For example, an
-ambiguous plugin selection does not undo a newly registered marketplace; qualify the plugin name
-before retrying.
+Agentworks retains and names all affected entries, including unrelated operator entries, while
+independent entries continue where the native CLI permits. Restore a valid native association before
+retrying setup. Marketplace retirement or replacement also retains dependent plugins when the user
+declaration needed for removal is absent. Agentworks does not broaden user-scoped removal to all
+scopes or write a guessed source. Explicitly protected named operator entries are restored through
+unrelated native rewrites and mapped-settings publication. A setup failure also attempts restoration
+while preserving the primary failure; a restoration failure is reported for operator repair. Entry
+preservation respects native registrations and removals confirmed earlier in the same operation. For
+example, an ambiguous plugin selection does not undo a newly registered marketplace; qualify the
+plugin name before retrying.
 
 Current-attempt incomplete reasons are retained with setup evidence. `agw artifact show` and managed
 session-start warnings identify the retained entry and its reason. Resolve that native or file
@@ -138,10 +142,14 @@ garbage collection owns orphaned cache cleanup. Agentworks does not delete guess
 
 An independently removed marketplace can hide a surviving plugin from native inventory. When the
 remaining evidence cannot prove the plugin's ownership, cleanup stays pending with its prior
-applied-state record. Repair or remove the association using the native CLI, then retry. A failure
-after a native mutation but before its checkpoint heals on retry when the resulting native entry
-matches the declaration; adoption is recorded and reported. Settings retention is intentional and is
-separate from pending plugin cleanup.
+applied-state record. Inspect the installed plugin and native registration first. Restore the
+matching original marketplace registration with the native CLI when it is still intended, or
+explicitly remove the remaining plugin using its native scope after confirming that removal is
+appropriate, then retry the owning setup. Reinit does not reinstall an externally removed
+registration solely because an old owned record exists, and cannot prove a hidden plugin was
+removed. A failure after a native mutation but before its checkpoint heals on retry when the
+resulting native entry matches the declaration; adoption is recorded and reported. Settings
+retention is intentional and is separate from pending plugin cleanup.
 
 A native setup error stops that facet while independent facets and the owner's remaining setup
 continue. The command reports the collected failures at the end and returns a failing exit status;
@@ -185,3 +193,8 @@ deletion.
 Rehome moves project settings with the workspace and holds the same guard across the move. Setup
 records do not block rehome. Their old destination makes readiness stale until owning setup runs
 successfully at the new destination; rehome itself does not run harness setup.
+
+The VM description's initialization field records the last initialization run. It is separate from
+per-integration lifecycle evidence: a run can finish while a native entry is skipped. Read the
+integration's incomplete reasons in that description or `agw artifact show` before concluding that
+its requested artifacts or native associations were applied.

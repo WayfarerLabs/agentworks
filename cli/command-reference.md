@@ -773,7 +773,8 @@ and destination can be the same VM (a clone) or different VMs.
 the filter is an error, not an empty result.
 
 `workspace delete` requires `--force` if the workspace has sessions. Running sessions are killed
-during deletion. Pass `--yes` to skip the confirmation prompt.
+during deletion. Its confirmation warns that workspace files, uncommitted changes, stashes and
+commits not pushed elsewhere will be lost. Pass `--yes` to skip the confirmation prompt.
 
 There is deliberately no `workspace shell`: a shell rooted in a workspace is always _somebody's_
 shell. Use `agw vm shell <vm> --workspace <ws>` for an admin shell or

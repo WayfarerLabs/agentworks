@@ -42,7 +42,7 @@ rendering must preserve every surviving contribution or explicitly refuse the co
 | Shell       | `~/.agentworks-artifacts/user/` and `<workspace>/.agentworks-artifacts/`, containing typed files and an index            | Same layout in the private run directory; `AGENTWORKS_ARTIFACTS_DIR` points there when the run has inputs                           |
 | Claude Code | `.claude/rules/agentworks-rule-<name>.md`, one hints rule, complete `.claude/skills/<name>/`, `.claude/agents/<name>.md` | Additive prompt file, private generated plugin for skills, inline `--agents` JSON                                                   |
 | Codex       | Complete `.agents/skills/<name>/`, `.codex/agents/<name>.toml` and a generated AGENTS instruction section                | Composed `developer_instructions`; private role config files selected through `agents.<name>.config_file` and description overrides |
-| Grok Build  | Flat `.grok/rules/`, complete `.grok/skills/<name>/`, `.grok/agents/<name>.md`                                           | Composed `--rules` text and inline `--agents` JSON                                                                                  |
+| Grok Build  | Flat `.grok/rules/`, complete `.grok/skills/<name>/`, `.grok/agents/<name>.md`                                           | Composed `--rules` text; inline `--agents` JSON in headless mode only                                                               |
 
 User native roots honor `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and `GROK_HOME`. Codex's standard user
 skills remain under the actual user's `.agents/skills`, independently of `CODEX_HOME`. Workspace
@@ -238,9 +238,12 @@ this adjustment. No helper flags or version checks are added for skipped session
 `enabled_workarounds` is a default-empty, replacing list in each native session config. Claude
 accepts `session-prompt`, `session-skill-plugin`, and `session-agent-definitions`; Codex accepts
 `session-developer-instructions` and `session-agent-config`; Grok accepts `session-rules` and
-`session-agent-definitions`. Shell publishes directly without a workaround. Codex/Grok session
-skills have no workaround. These names opt into the existing carriers in the table above. Hooks,
-automatic fallbacks and release-by-release compatibility tables are not part of this correction.
+`session-agent-definitions`, with persona delivery restricted to native headless arguments
+(`--single`, `-p`, `--prompt-json` or `--prompt-file`). Interactive Grok leaves those personas
+unhandled rather than claiming its ignored `--agents` argument delivered them. Shell publishes
+directly without a workaround. Codex/Grok session skills have no workaround. These names opt into
+the existing carriers in the table above. Hooks, automatic fallbacks and release-by-release
+compatibility tables are not part of this correction.
 
 Native-name conflicts in enabled session delivery leave the identified inputs terminally unhandled.
 The shared session pipeline rerenders complete files and arguments for the remaining inputs and
@@ -327,10 +330,13 @@ not be reported as proof that a model consumed an artifact.
 
 ## Failed routing and conservative publication
 
-A setup attempt starts incomplete while retaining its prior confirmed input IDs and deferrals. Only
-a validated successful application replaces that routing result. A failed outer facet can therefore
-still feed its readable old deferrals to sibling or descendant setup without authorizing removal as
-though the declaration were empty.
+A setup attempt starts incomplete while retaining its prior input IDs and deferrals. A recorded
+routing table is confirmed only for the current prepared inputs it covers, including explicit
+incoming routes whose payload is unreadable. Content changes create new input identities. An old
+non-null table, including an empty table, cannot establish handling for added or changed inputs. A
+native-only failure can leave a fully covered routing result usable; completeness alone is not the
+routing test. A failed outer facet can still feed readable old deferrals to descendants without
+authorizing retirement as though an unknown declaration were empty.
 
 The internal routing result distinguishes known unresolved input IDs from unavailable routing
 without IDs. A confirmed routing table with no routes to a receiver does not hold that receiver's
@@ -340,10 +346,11 @@ empty. Inactive facets use core's fixed passthrough independently of opaque old 
 
 When unknown applicable routes prevent establishing requested inputs, setup publication holds prior
 placements against removal or replacement, including generated sections and related packages. Native
-setup and independent new paths continue. Actual held paths or unavailable explicit inputs keep
-application incomplete; unrelated upstream uncertainty alone does not permanently fail a fresh
-workspace's successfully applied local work. The conservative hold is needed because old
-content-dependent IDs cannot be reversed to owners after capture replacement.
+setup and independent new paths continue. Actual held paths, unavailable explicit inputs or an
+unknown applicable input set keep application incomplete, including a fresh receiver with no old
+placements. An unrelated native failure with a confirmed, fully covered routing table does not make
+the receiving facet incomplete. The conservative hold is needed because old content-dependent IDs
+cannot be reversed to owners after capture replacement.
 
 Missing explicit route IDs survive active receivers, including their first application, and inactive
 user/workspace passthrough. An integration receives only readable inputs; core appends the missing
