@@ -1155,13 +1155,13 @@ operator authorized bounded incidental corrections that do not conflict with Tra
 | Should-fix 10                                                                    | Include recorded, sanitized upstream failure causes and their owning repair hints before the consumer's own repair operation. Repeating agent reinit does not repair an unresolved VM owner.                                                                                                                                                                                                   |
 | Should-fix 11; 12 early-death item                                               | Retain the pane until identity is recorded, capture both active and saved native buffers, and describe unavailable capture honestly. A tmux death overlay is diagnostic state, not claimed workload output.                                                                                                                                                                                    |
 | Should-fix 12 truncation, session completion and reuse items                     | Preserve the bounded-list truncation marker. Qualify session start/restart/create success from persisted incomplete setup. Reuse hints remove all corresponding creation-only name/template/spec options; inspect a possibly retained session before retrying creation.                                                                                                                        |
-| Should-fix 12 workspace confirmation and TLS sample                              | Disclose loss of untracked edits, stashes and commits not pushed elsewhere in workspace deletion confirmation. Keep TLS verification enabled in the ordinary Proxmox sample.                                                                                                                                                                                                                               |
+| Should-fix 12 workspace confirmation and TLS sample                              | Disclose loss of untracked edits, stashes and commits not pushed elsewhere in workspace deletion confirmation. Keep TLS verification enabled in the ordinary Proxmox sample.                                                                                                                                                                                                                   |
 | Should-fix 12 bare abort                                                         | Existing CLI entry handling deliberately renders every `UserAbort` as a bare cancellation. Changing that global presentation is outside this correction; refusal still performs no mutation and returns failure. Explicit required confirmation uses the existing actionable validation path.                                                                                                  |
 | Should-fix 12 Git inode                                                          | Isolated Git observations show byte-identical converged configuration with a replaced inode. Idempotency promises the intended configuration and ownership, not stable inode identity or zero physical writes. Treat inode preservation as an optional optimization, not a correctness gate.                                                                                                   |
 | Should-fix 12 describe summary                                                   | The initialization field is the recorded initialization-run status; the same description separately exposes per-integration incomplete lifecycle evidence. Clarify that distinction in permanent guidance rather than add another aggregate status contract.                                                                                                                                   |
 | Should-fix 13                                                                    | Add boundary regressions for current routing coverage, unreadable routes, fresh-receiver health, actual managed runtime ownership, escaped/split-secret diagnostics and framed native responses. Install tmux in CI so the actual liveness guard runs. Review remaining guards by reachable behavior instead of pinning implementation text or demanding every redundant branch kill a mutant. |
 | Incidental binding failure, tmux config, force consent and log count             | Correct the bounded existing-contract defects: fail closed on binding, use tmux's global config option, keep force separate from consent, and honor the requested log tail count.                                                                                                                                                                                                              |
-| Incidental closed stdin                                                          | Detached commands must not crash during completion detection or interactivity observation. Missing/closed input remains non-interactive without granting consent.                                                                                                                                                                                                                               |
+| Incidental closed stdin                                                          | Detached commands must not crash during completion detection or interactivity observation. Missing/closed input remains non-interactive without granting consent.                                                                                                                                                                                                                              |
 | Incidental piped consent                                                         | Ordinary confirmation deliberately delegates to Click unless `--non-interactive` is explicit. Database restore has a stronger TTY gate. Changing all piped-input consent would change the shared interaction contract; preserve it here.                                                                                                                                                       |
 | Incidental WSL cancellation, resize task, locked database and Codex notification | Defer with evidence to their console/Transport, provider execution, persistence and native-session owners. The WSL cause and real-model notification race remain unproven. Do not add competing protocols or mask shared persistence failures.                                                                                                                                                 |
 
@@ -1187,3 +1187,39 @@ failure, after which the exact source bytes were restored. Detached-input, routi
 checks passed 33 cases; CI-exact whole-tree mypy passed 921 source/test files before the final
 native integration. Full integrated gates and independent review of the combined candidate remain
 pending.
+
+### Private review and whole-suite integration corrections
+
+The first combined full suite returned 1 with 18 failures, 11,035 passes and 11 skips. Thirteen
+failures were older assertions/fixtures for the deliberately changed force-consent, failed-binding,
+unknown-input health, Grok headless and source path contracts. The corrected 102-case selection
+passes while preserving ownership, native-name collision and failure-identity checks. The remaining
+session cases require framed probe fixtures and independently observed native exit facts; absence
+and ownership checks are not weakened. A native teardown observation can briefly show the old PID
+before it exits, so real-tool tests wait for the observed final state rather than require an atomic
+kernel transition.
+
+Private project review at `d0bf6e00` found one material artifact-owned banner path that the report's
+helper checks had missed: session preparation and cleanup still consumed raw HOME stdout. `77a9ebed`
+shares strict JSON-framed discovery between them. Its worker measured six baseline failures, then 37
+corrected passes; duplicate-frame and invalid-path deletion controls fail. Muntz found the stored
+`retain_previous` flag derivable from known missing routes and the unknown-input fact. `b1e3a074`
+makes that an invariant property and removes three caller assignments; 18 input- coverage cases pass
+with the simpler representation. Its three safety deletion controls each fail four cases. These are
+private findings and corrections within the same authorized round.
+
+The generic correctness lane also established two concrete owned-helper defects. Existing stale
+socket cleanup interpreted an intermittent startup banner as a relative filename and could remove an
+ordinary file after tmux reported no server. Bound its inventory protocol and candidate paths to the
+expected socket directory, require a real non-symlink socket before unlinking, and retain live or
+uncertain servers. Startup finalization also ignored failure to release temporary tmux protection;
+require confirmed release before success, preserving the managed session through the existing
+post-checkpoint failure path. Both corrections use the existing command APIs and are included under
+the operator's bounded incidental-fix authorization. No Transport protocol or additional journal is
+introduced.
+
+The first collateral pass returned 1 for section spacing and two plan spelling issues; those are
+corrected. Its locked-SDD, Rulesync, package build, 160 Python website tests, 103 Node website tests
+and both deterministic site-base comparisons returned 0. These receipts are preliminary; final
+changed-file checks and the corrected combined source still need their own observed green gates and
+common-candidate private re-review before ready.
