@@ -297,15 +297,15 @@ for it can register. Beyond the version and the accessors:
   passes it to `require_commands(commands, access, ...)`. A setup facet's invocation carries
   `access` beside `runner`. `probe_native` takes a `VMAccess` first. `check_required_commands` and
   `run_user_shell_command` take a `VMAccess` and an optional `deadline` in seconds, and
-  `run_user_shell_command` returns the command's exit status. An indeterminate check raises
-  `ExternalError`, and a request that may not have run raises its typed execution error, so code
-  that only warns catches `ConnectivityError`, `ExternalError` and `VMNotReady`, as the shipped
-  providers do, and lets every other error propagate.
-- **Git credential providers.** A provider's runup check reads the access the same way. An
-  indeterminate check raises `ExternalError`, and a request that may not have run raises its typed
-  execution error, so code that only warns catches `ConnectivityError`, `ExternalError` and
-  `VMNotReady`, as the shipped providers do, and lets every other error propagate.
+  `run_user_shell_command` returns the command's exit status.
+- **Git credential providers.** A provider's runup check reads the access the same way.
 - **Secret backends.** Nothing else changes.
+
+For a harness integration's or a Git credential provider's command checks, an indeterminate check
+raises `ExternalError` and a request that may not have run raises its typed execution error. Code
+that only warns catches `ConnectivityError`, `ExternalError` and `VMNotReady`, as the shipped
+providers do, and lets every other error propagate; `VMNotReady` is on the list because a VM without
+`python3` counts as indeterminate.
 
 The capability READMEs under `cli/agentworks/capabilities/` describe each contract in full.
 
