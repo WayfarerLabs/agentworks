@@ -326,7 +326,9 @@ def test_existing_ancestor_collision_is_diagnosed_without_blocking_launch(tmp_pa
         artifact_context=prepared,
     )
     monkeypatch.setattr(integration, "_resume_or_launch", lambda *args, **kwargs: "fixture-launch")
-    result = integration.start(RunContext(admin_target=SimpleNamespace(run=run)), intent=HarnessLaunchIntent.CREATE)
+    result = integration.start(
+        RunContext(admin_target=SimpleNamespace(run=run, logger=None)), intent=HarnessLaunchIntent.CREATE
+    )
     assert result.command == "fixture-launch"
     assert len(observed_requests) == 1
     assert not prepared.inputs
@@ -946,6 +948,7 @@ def test_failed_native_probe_retains_external_diagnostic(returncode, stdout):
     from agentworks.transports import Transport
 
     target = Mock(spec=Transport)
+    target.logger = None
     stderr = "fixture interpreter or login-shell failure"
     target.run.side_effect = [SSHResult(0, "AGW_PYTHON3=available\n", ""), SSHResult(returncode, stdout, stderr)]
     with pytest.raises(ExternalError) as caught:
@@ -972,9 +975,10 @@ def test_native_probe_errors_redact_runtime_environment(returncode, padding):
     environment = {"API_TOKEN": short, "OTHER_TOKEN": long}
     stderr = f"{long}\nstartup failed: {shlex.quote(long)}; {short}\n{long}"
     target = Mock(spec=Transport)
+    target.logger = None
     target.run.side_effect = [SSHResult(0, "AGW_PYTHON3=available\n", ""), SSHResult(returncode, "invalid", stderr)]
     with pytest.raises(ExternalError) as caught:
-        probe_native(target, tool="claude", environment=environment)
+        probe_native(target, tool="claude", environment=environment, redactions=environment.values())
     exposed = str(caught.value) + (caught.value.hint or "") + "".join(traceback.format_exception(caught.value))
     assert short not in exposed
     assert long.strip() not in exposed

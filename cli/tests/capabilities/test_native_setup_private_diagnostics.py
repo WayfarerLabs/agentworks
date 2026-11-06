@@ -1,5 +1,6 @@
 """Normalization cannot reconstruct a credential after setup redaction."""
 
+import shlex
 from dataclasses import replace
 from unittest.mock import Mock
 from uuid import uuid4
@@ -17,7 +18,12 @@ from tests.capabilities.test_native_setup_dispatch import setup_case as setup_ca
 
 def _secret(label: str, representation: str) -> tuple[str, str, str]:
     value = label + "-" + uuid4().hex
-    if representation == "whitespace":
+    if representation == "quoted":
+        value += "'quoted line\nsecond part"
+        rendered = shlex.quote("TOKEN=" + value)
+    elif representation == "raw-csi-prefix":
+        rendered = "\x1b[" + value
+    elif representation == "whitespace":
         value += "\nline two\twords"
         rendered = value.replace("\n", " \r\n\t").replace("\twords", "  \nwords")
     else:
@@ -29,7 +35,7 @@ def _secret(label: str, representation: str) -> tuple[str, str, str]:
     return value, rendered, " ".join(value.split())
 
 
-@pytest.mark.parametrize("representation", ["ansi", "osc", "whitespace", "long"])
+@pytest.mark.parametrize("representation", ["ansi", "osc", "whitespace", "long", "quoted", "raw-csi-prefix"])
 @pytest.mark.parametrize("with_logger", [False, True])
 @pytest.mark.parametrize("report_incomplete", [False, True])
 def test_dispatch_redacts_canonicalized_invocation_and_logger_patterns_before_bounding(
@@ -74,8 +80,8 @@ def test_dispatch_redacts_canonicalized_invocation_and_logger_patterns_before_bo
     surfaces = [persisted.model_dump_json(), describe_setup_failures(failures)]
     if logger is not None:
         surfaces += [logger.path.read_text(), str(logger.warnings)]
-    patterns = [canonical, canonical[:16]]
+    patterns = [canonical, canonical[:16], canonical[-16:]]
     if with_logger:
-        patterns += [log_canonical, log_canonical[:16]]
+        patterns += [log_canonical, log_canonical[:16], log_canonical[-16:]]
     assert all(pattern not in surface for surface in surfaces for pattern in patterns)
     assert all("\x1b" not in surface for surface in surfaces)

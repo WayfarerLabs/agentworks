@@ -65,7 +65,7 @@ def guest(tmp_path: Path, tool: str) -> tuple[SimpleNamespace, Path, Path, Path,
         )
         return SSHResult(result.returncode, result.stdout, result.stderr)
 
-    return SimpleNamespace(run=run), home, workspace, native, environment
+    return SimpleNamespace(run=run, logger=None), home, workspace, native, environment
 
 
 def launch(
@@ -91,7 +91,10 @@ def launch(
     )
     integration = implementation(
         implementation.name,
-        {"enabled_workarounds": enabled(adapter.session_artifacts)},
+        {
+            "enabled_workarounds": enabled(adapter.session_artifacts),
+            "extra_args": ["--single", "fixture prompt"] if implementation.name == "grok-build" else [],
+        },
         session_name="session",
         vm_name="vm",
         workspace_name="workspace",

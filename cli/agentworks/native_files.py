@@ -7,7 +7,7 @@ import shlex
 import tempfile
 from contextlib import AbstractContextManager
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from agentworks import output
 from agentworks.errors import ExternalError, StateError
@@ -25,6 +25,8 @@ import errno, grp, hashlib, json, os, secrets, stat, sys
 op, destination, staging, expected, group, executable = sys.argv[1:7]
 public = len(sys.argv) > 7 and sys.argv[7] == '1'
 preserve = len(sys.argv) > 8 and sys.argv[8] == '1'
+def observe(value):
+    print('\nAGW_NATIVE_FILE=' + json.dumps(value))
 parts = destination.split('/')[1:]
 if not destination.startswith('/') or any(p in ('', '.', '..') for p in parts):
     sys.exit(1)
@@ -89,7 +91,7 @@ try:
             next_fd = os.open(component, traverse, dir_fd=fd)
         except FileNotFoundError:
             if op in ('read', 'fingerprint', 'delete', 'directory'):
-                print(json.dumps({'exists': False}))
+                observe({'exists': False})
                 sys.exit(0)
             os.mkdir(component, 0o755 if public else (0o700 if not group else 0o2770), dir_fd=fd)
             next_fd = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
@@ -101,7 +103,7 @@ try:
         os.close(fd)
         fd = next_fd
     if op in ('directory', 'mkdir'):
-        print(json.dumps({'exists': True}))
+        observe({'exists': True})
         sys.exit(0)
     content = None
     actual = '-'
@@ -128,7 +130,7 @@ try:
             if preserve:
                 attributes = {key: os.getxattr(source.fileno(), key) for key in os.listxattr(source.fileno())}
     if op == 'fingerprint':
-        print(json.dumps({'exists': actual != '-', 'sha256': actual, 'mode': mode}))
+        observe({'exists': True, 'sha256': actual, 'mode': mode} if actual != '-' else {'exists': False})
         sys.exit(0)
     if op == 'read':
         if content is not None:
@@ -138,7 +140,7 @@ try:
                     staging_owner = os.stat(os.path.dirname(staging), follow_symlinks=False)
                     os.fchown(output.fileno(), staging_owner.st_uid, staging_owner.st_gid)
                 output.write(content)
-        print(json.dumps({'exists': content is not None}))
+        observe({'exists': content is not None})
     else:
         if actual != expected:
             sys.exit(2)
@@ -190,6 +192,29 @@ except OSError as error:
 finally:
     os.close(fd)
 """
+
+
+def _observation(stdout: str) -> dict[str, object]:
+    """Accept one framed guest observation, apart from shell startup output."""
+    frames = [
+        line.removeprefix("AGW_NATIVE_FILE=") for line in stdout.splitlines() if line.startswith("AGW_NATIVE_FILE=")
+    ]
+    if len(frames) != 1:
+        raise ValueError
+
+    def unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        value = dict(pairs)
+        if len(value) != len(pairs):
+            raise ValueError
+        return value
+
+    observed = json.loads(frames[0], object_pairs_hook=unique_object)
+    if not isinstance(observed, dict) or type(observed.get("exists")) is not bool:
+        raise ValueError
+    fields = {"exists", "sha256", "mode"} if observed["exists"] and "sha256" in observed else {"exists"}
+    if observed.keys() != fields:
+        raise ValueError
+    return cast("dict[str, object]", observed)
 
 
 # Shared by every integration. These are directory boundaries, never file targets.
@@ -361,7 +386,10 @@ class NativeFiles(AbstractContextManager["NativeFiles"]):
         if not result.ok:
             raise _path_failure("native config directory", destination, result.returncode)
         try:
-            exists = json.loads(result.stdout)["exists"]
+            observed = _observation(result.stdout)
+            if observed.keys() != {"exists"}:
+                raise ValueError
+            exists = observed["exists"]
             if not isinstance(exists, bool):
                 raise ValueError
             return exists
@@ -377,7 +405,10 @@ class NativeFiles(AbstractContextManager["NativeFiles"]):
         if not result.ok:
             raise _path_failure("native settings file", destination, result.returncode)
         try:
-            exists = json.loads(result.stdout)["exists"]
+            observed = _observation(result.stdout)
+            if observed.keys() != {"exists"}:
+                raise ValueError
+            exists = observed["exists"]
             if not isinstance(exists, bool):
                 raise ValueError
         except (ValueError, KeyError, TypeError):
@@ -467,7 +498,7 @@ class NativeFiles(AbstractContextManager["NativeFiles"]):
         if not result.ok:
             raise _path_failure("artifact destination", destination, result.returncode)
         try:
-            observed = json.loads(result.stdout)
+            observed = _observation(result.stdout)
             if observed["exists"] is False:
                 return None
             digest, mode = observed["sha256"], observed["mode"]
@@ -475,7 +506,9 @@ class NativeFiles(AbstractContextManager["NativeFiles"]):
                 observed["exists"] is not True
                 or not isinstance(digest, str)
                 or len(digest) != 64
+                or any(character not in "0123456789abcdef" for character in digest)
                 or type(mode) is not int
+                or not 0 <= mode <= 0o7777
             ):
                 raise ValueError
             return digest, mode

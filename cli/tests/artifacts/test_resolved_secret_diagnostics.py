@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import Any
 from unittest.mock import Mock
 from uuid import uuid4
 
@@ -15,6 +16,7 @@ from agentworks.harness_setup.runner import SetupRunner
 from agentworks.native_files import NativeFiles
 from agentworks.ssh import SSHError, SSHLogger, SSHResult
 from agentworks.transports import Transport
+from tests.native_setup_fixtures import LocalFixtureTransport
 from tests.test_native_harness_setup import transport as transport
 
 
@@ -59,16 +61,26 @@ def test_logger_only_secret_is_removed_before_terminal_normalization(
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="executes Linux guest native-file helpers")
-def test_native_staging_ignores_a_startup_banner_and_cleans_its_directory(transport, monkeypatch):
+def test_native_staging_ignores_a_startup_banner_and_cleans_its_directory(
+    transport: LocalFixtureTransport, monkeypatch: pytest.MonkeyPatch
+) -> None:
     original = transport.run
 
-    def with_banner(command, **kwargs):
+    def with_banner(command: str, **kwargs: Any) -> SSHResult:
         result = original(command, **kwargs)
         return SSHResult(result.returncode, "fixture welcome" + result.stdout, result.stderr)
 
     monkeypatch.setattr(transport, "run", with_banner)
     with NativeFiles(transport) as files:
         destination = str(transport.home / "settings.json")
+        assert not files.directory(str(transport.home / "config"))
+        assert files.directory(str(transport.home / "config"), create=True)
+        assert files.read(destination) is None
+        assert files.fingerprint(destination) is None
         files.publish(destination, b"{}", expected=None)
         assert files.read(destination) == b"{}"
+        observed = files.fingerprint(destination)
+        assert observed is not None
+        files.remove(destination, expected=observed[0])
+        assert files.read(destination) is None
     assert not list((transport.root / "tmp").iterdir())

@@ -176,7 +176,7 @@ def test_inactive_facet_replays_known_persona_without_reusing_old_policy_paths(
     )
     integration = implementation(
         implementation.name,
-        {"enabled_workarounds": [workaround]},
+        {"enabled_workarounds": [workaround], "extra_args": ["--single", "fixture prompt"] if tool == "grok" else []},
         session_name="session",
         vm_name="vm",
         workspace_name="workspace",
@@ -190,7 +190,7 @@ def test_inactive_facet_replays_known_persona_without_reusing_old_policy_paths(
     warnings: list[str] = []
     monkeypatch.setattr("agentworks.output.warn", warnings.append)
     result = integration.start(
-        RunContext(admin_target=SimpleNamespace(run=run)), intent=HarnessLaunchIntent.RESUME_OR_NEW
+        RunContext(admin_target=SimpleNamespace(run=run, logger=None)), intent=HarnessLaunchIntent.RESUME_OR_NEW
     )
     assert result.command == "fixture-launch"
     assert warnings

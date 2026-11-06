@@ -67,6 +67,12 @@ with open(sys.argv[2], 'xb') as destination:
     destination.write(data)
 """
 _MARKETPLACE_ERROR = re.compile(r"\bmarketplaces\.([A-Za-z0-9][A-Za-z0-9_.-]{0,127})(?=[`'\s:]|$)")
+_CODEX_MARKETPLACE_LOAD_ERROR = re.compile(
+    r"^- `([A-Za-z0-9][A-Za-z0-9_.-]{0,127})` at <invalid source>:", re.MULTILINE
+)
+_CLAUDE_MARKETPLACE_ERROR = re.compile(
+    r"Marketplace configuration file is corrupted: ([A-Za-z0-9][A-Za-z0-9_.-]{0,127}?)\.source(?:\.[a-zA-Z_]+)*:"
+)
 
 
 @dataclass(frozen=True)
@@ -170,11 +176,13 @@ class NativeCLI:
         config_root: str,
         isolated: bool = False,
         environment: Mapping[str, str] | None = None,
+        diagnostic_root: str | None = None,
     ):
         self.tool = tool
         self.files = files
         self.home = home
         self.config_root = config_root
+        self.diagnostic_root = diagnostic_root or config_root
         self.isolated = isolated
         self.environment = dict(environment or {})
         self._resolved: tuple[str, str] | None = None
@@ -254,9 +262,17 @@ class NativeCLI:
                 diagnostic = ""
             match = _MARKETPLACE_ERROR.search(diagnostic)
             entry = "" if match is None else f" at native setting {'marketplaces.' + match[1]!r}"
+            if match is None and self.tool == "codex":
+                match = _CODEX_MARKETPLACE_LOAD_ERROR.search(diagnostic)
+                if match is not None:
+                    entry = f" at native setting {'marketplaces.' + match[1]!r}"
+            elif match is None and self.tool == "claude":
+                match = _CLAUDE_MARKETPLACE_ERROR.search(diagnostic)
+                if match is not None:
+                    entry = f" at native marketplace {match[1]!r} in plugins/known_marketplaces.json"
             raise ExternalError(
                 f"{_command_description(self.tool, args)} failed{entry}; "
-                f"inspect its setup in {self.config_root!r} with the native CLI"
+                f"inspect its setup in {self.diagnostic_root!r} with the native CLI"
             )
         if not structured:
             return None
@@ -412,7 +428,13 @@ class NativeCLI:
         if not result.ok:
             raise ExternalError("could not create isolated native marketplace discovery directory")
         staged = NativeCLI(
-            self.tool, self.files, home=self.home, config_root=root, isolated=True, environment=self.environment
+            self.tool,
+            self.files,
+            home=self.home,
+            config_root=root,
+            isolated=True,
+            environment=self.environment,
+            diagnostic_root=self.diagnostic_root,
         )
         staged._resolved = self._resolve_command()
         staged.add_market(self.home + source[1:] if source.startswith("~/") else source)

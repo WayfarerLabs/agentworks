@@ -56,7 +56,7 @@ def test_disallowed_root_operations_do_not_stage_or_dispatch(path, operation, mo
 def test_allowed_trees_accept_directories_and_descendants_but_not_boundary_files(boundary):
     runner = Mock(spec=Transport)
     runner.run.return_value.ok = True
-    runner.run.return_value.stdout = '{"exists": false}'
+    runner.run.return_value.stdout = 'AGW_NATIVE_FILE={"exists": false}'
     files = native.NativeFiles(runner, root=True)
     assert not files.directory(boundary)
     assert not files.directory(boundary, create=True)

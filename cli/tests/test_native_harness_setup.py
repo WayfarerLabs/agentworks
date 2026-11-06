@@ -143,7 +143,10 @@ def test_guest_program_still_reports_a_regular_file(tmp_path: Path) -> None:
     result = _run_guest("fingerprint", root / "settings.json", tmp_path / "staging")
 
     assert result.returncode == 0
-    assert json.loads(result.stdout)["sha256"] == hashlib.sha256(b"{}").hexdigest()
+    assert (
+        json.loads(result.stdout.strip().removeprefix("AGW_NATIVE_FILE="))["sha256"]
+        == hashlib.sha256(b"{}").hexdigest()
+    )
 
 
 @pytest.mark.parametrize("tool", ["codex", "claude"])
@@ -828,3 +831,43 @@ def test_marketplace_only_repeat_does_not_read_available_catalog(transport, monk
 
     monkeypatch.setattr(NativeCLI, "available", unexpected_catalog)
     setup_user("codex", config, invocation(transport, claims, prior=record(claims[-1], "codex")))
+
+
+@pytest.mark.parametrize("operation", ["directory", "read", "fingerprint"])
+@pytest.mark.parametrize(
+    "payload",
+    [
+        '{"exists":true}',  # Unframed observations are not protocol replies.
+        'AGW_NATIVE_FILE={"exists":true}\nAGW_NATIVE_FILE={"exists":false}',
+        'AGW_NATIVE_FILE={"exists":true,"exists":false}',
+        'AGW_NATIVE_FILE={"exists":1}',
+        "AGW_NATIVE_FILE=[]",
+        'AGW_NATIVE_FILE={"exists":false,"extra":true}',
+        'AGW_NATIVE_FILE={"exists":true,"sha256":"' + "z" * 64 + '","mode":384}',
+        'AGW_NATIVE_FILE={"exists":true,"sha256":"' + "a" * 64 + '","mode":true}',
+        'AGW_NATIVE_FILE={"exists":true,"sha256":"' + "a" * 64 + '","mode":4096}',
+    ],
+)
+def test_native_observations_fail_closed_on_ambiguous_or_malformed_frames(
+    transport: LocalFixtureTransport, monkeypatch: pytest.MonkeyPatch, operation: str, payload: str
+) -> None:
+    destination = transport.home / "settings.json"
+    destination.write_bytes(b"operator content")
+    original = transport.run
+
+    def corrupt_observation(command: str, **kwargs):
+        result = original(command, **kwargs)
+        if "AGW_NATIVE_FILE=" in result.stdout:
+            return replace(result, stdout=payload)
+        return result
+
+    monkeypatch.setattr(transport, "run", corrupt_observation)
+    with NativeFiles(transport) as files, pytest.raises(ExternalError):
+        if operation == "directory":
+            files.directory(str(transport.home))
+        elif operation == "read":
+            files.read(str(destination))
+        else:
+            files.fingerprint(str(destination))
+    assert destination.read_bytes() == b"operator content"
+    assert not list((transport.root / "tmp").iterdir())

@@ -414,7 +414,8 @@ def test_unknown_unclaimed_market_does_not_block_unrelated_qualified_plugin(tran
         NativeUserConfig(marketplaces=[str(independent)], plugins=["two@independent"]),
         replace(invocation(transport, claims), report_incomplete=incomplete.append),
     )
-    assert not incomplete
+    assert any("fixture-market" in reason for reason in incomplete)
+    assert json.loads(destination.read_bytes())["extraKnownMarketplaces"]["fixture-market"] == declaration
     assert {(item.role, item.identifier) for item in claims[-1]} == {
         ("marketplace", "independent"),
         ("plugin", "two@independent"),

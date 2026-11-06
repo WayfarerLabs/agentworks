@@ -433,15 +433,16 @@ def test_claude_missing_native_settings_table_does_not_abort_mapping(transport, 
     )
     result = json.loads(settings.read_bytes())
     assert result["mapped"] is True
-    assert "fixture-market" in result["extraKnownMarketplaces"]
     if missing == "enabledPlugins":
+        assert "fixture-market" in result["extraKnownMarketplaces"]
         assert len(incomplete) == 1
         assert not result.get("enabledPlugins", {})
         assert {item.role for item in claims[-1]} == {"marketplace"}
     else:
-        assert not incomplete
+        assert any("fixture-market" in reason for reason in incomplete)
+        assert not result.get("extraKnownMarketplaces", {})
         assert result["enabledPlugins"]["one@fixture-market"] is True
-        assert {item.role for item in claims[-1]} == {"marketplace", "plugin"}
+        assert not claims
 
 
 @pytest.mark.parametrize("tool", ["codex", "claude"])

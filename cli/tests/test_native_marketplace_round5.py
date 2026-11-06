@@ -140,7 +140,16 @@ def test_new_marketplace_survives_ambiguous_plugin_protection_and_later_retireme
 def test_unobservable_named_source_is_local_and_never_invents_an_association(transport, monkeypatch, source):
     root = transport.home / ".claude"
     root.mkdir()
-    (root / "settings.json").write_text(json.dumps({"extraKnownMarketplaces": {"unobservable": {"source": source}}}))
+    (root / "settings.json").write_text(
+        json.dumps(
+            {
+                "extraKnownMarketplaces": {
+                    "unobservable": {"source": source},
+                    "independent": {"source": {"source": "directory", "path": "/independent"}},
+                }
+            }
+        )
+    )
     payload = [
         {"name": "unobservable", **source},
         {"name": "independent", "source": "directory", "path": "/independent"},
