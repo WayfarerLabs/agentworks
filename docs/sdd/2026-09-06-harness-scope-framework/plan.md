@@ -1223,3 +1223,11 @@ corrected. Its locked-SDD, Rulesync, package build, 160 Python website tests, 10
 and both deterministic site-base comparisons returned 0. These receipts are preliminary; final
 changed-file checks and the corrected combined source still need their own observed green gates and
 common-candidate private re-review before ready.
+
+The finalizer correction is integrated in `3a79f857`. Actual tmux also established that the prior
+unchecked command used a session-only target for a window option; the corrected exact window target
+and checked release pass 46 focused cases. Reverting checked execution fails three manager-boundary
+cases, and reverting the target fails the native healthy-start release check. The socket correction
+in `4a64820d` passes 25 focused cases, including real Unix sockets, an ordinary banner-named file
+and a live private server. Removing type, path-scope or native-absence guards fails the respective
+controls. The full corrected source now proceeds to common-candidate re-review and integrated gates.
