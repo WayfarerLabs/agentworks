@@ -114,6 +114,8 @@ class SSHLogger:
     ) -> None:
         from datetime import UTC, datetime
 
+        from agentworks.secrets.redaction import secret_redaction_forms
+
         timestamp = datetime.now(tz=UTC).strftime("%Y%m%dT%H%M%SZ")
         self.vm_name = vm_name
         self.path = LOG_DIR / f"{vm_name}-{timestamp}-{command_stem}.log"
@@ -123,7 +125,7 @@ class SSHLogger:
         for secret in redactions:
             if not secret:
                 continue
-            for representation in (secret, shlex.quote(secret)):
+            for representation in secret_redaction_forms(secret):
                 if representation not in normalized:
                     normalized.append(representation)
         # Prefer the longest representation so an overlapping shorter token
