@@ -282,6 +282,11 @@ def _validate_names_and_existence(db: Database, draft: _PlanDraft, name: str) ->
             f"session '{name}' already exists",
             entity_kind="session",
             entity_name=name,
+            hint=(
+                f"Inspect it with 'agw session describe {name}' before retrying. "
+                "A previous create can retain a running session despite a setup failure; "
+                "use the existing session's lifecycle commands rather than creating it again."
+            ),
         )
     if draft.new_workspace and db.get_workspace(draft.workspace_name) is not None:
         raise AlreadyExistsError(
