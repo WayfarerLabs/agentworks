@@ -13,10 +13,12 @@ already ignores stays ignored, so a command started under ``nohup`` keeps
 running after its terminal closes.
 
 A hangup means the terminal is gone, and every write to it fails, so the
-first thing the cleanup printed would raise and end it. Before it raises the
-interrupt, the hangup's handler points whichever of standard output and
-standard error is a terminal at the null device, so the cleanup runs to the
-end, silently there. Output going to a file or a pipe is left where it goes.
+first thing the cleanup printed would raise and end it. The same goes for a
+pipe into a program in the closed terminal's session (``| tee create.log``),
+which the hangup ends too. Before it raises the interrupt, the hangup's
+handler points whichever of standard output and standard error is not a
+regular file at the null device, so the cleanup runs to the end, silently
+there. Output going to a file is left where it goes.
 """
 
 from __future__ import annotations
@@ -51,21 +53,21 @@ def _interrupt(signal_number: int, _frame: object) -> None:
 
 
 def _write_to_the_null_device() -> None:
-    """Point descriptors 1 and 2 that are terminals, and a Python stream on another terminal, at the null device.
+    """Point descriptors 1 and 2 that are not files, and a Python stream on another such descriptor, at the null device.
 
     The descriptors cover what child processes inherit and the streams that
-    sit on them. A descriptor that is a file or a pipe keeps its target, and
-    a closed one stays closed. A stream on some other terminal (an embedding
-    host's) is replaced, since that terminal may have gone too. Everything is
-    decided before anything moves, since a redirected descriptor is no longer
-    a terminal.
+    sit on them. A descriptor on a regular file keeps its target, and a
+    closed one stays closed. A stream on some other descriptor (an embedding
+    host's) is replaced on the same test, since what it writes to may have
+    gone too. Everything is decided before anything moves, so the decision
+    is about where output went, not the null device.
     """
-    terminals = [descriptor for descriptor in (1, 2) if _is_terminal(descriptor)]
-    streams = [name for name in ("stdout", "stderr") if _on_another_terminal(getattr(sys, name))]
-    if terminals:
+    outputs = [descriptor for descriptor in (1, 2) if _open_and_not_a_file(descriptor)]
+    streams = [name for name in ("stdout", "stderr") if _on_another_output(getattr(sys, name))]
+    if outputs:
         null = _null_descriptor()
         try:
-            for descriptor in terminals:
+            for descriptor in outputs:
                 os.dup2(null, descriptor)
         finally:
             os.close(null)
@@ -90,24 +92,26 @@ def _null_descriptor() -> int:
         os.close(null)
 
 
-def _on_another_terminal(stream: object) -> bool:
+def _on_another_output(stream: object) -> bool:
     try:
         descriptor = getattr(stream, "fileno")()  # noqa: B009 - a stream may lack it
     except (AttributeError, OSError, ValueError):
         return False
-    return descriptor not in (1, 2) and _is_terminal(descriptor)
+    return descriptor not in (1, 2) and _open_and_not_a_file(descriptor)
 
 
-def _is_terminal(descriptor: int) -> bool:
-    """Whether ``descriptor`` is open on a character device, as a terminal is.
+def _open_and_not_a_file(descriptor: int) -> bool:
+    """Whether ``descriptor`` is open on something a hangup can take away: anything but a regular file.
 
-    ``os.isatty`` cannot tell: once the terminal has hung up it answers
-    no, since asking the terminal's settings fails, while every write
-    still fails. The null device is a character device too, which is
-    harmless to redirect.
+    A terminal and a pipe or socket into the terminal's session both fail
+    every write once it has gone. Neither can be told by asking:
+    ``os.isatty`` answers no once a terminal has hung up, and a pipe's
+    reader may die after the check. Redirecting one that would have kept
+    working (the null device, a pipe into a logger outside the session)
+    only silences the cleanup.
     """
     try:
-        return stat.S_ISCHR(os.fstat(descriptor).st_mode)
+        return not stat.S_ISREG(os.fstat(descriptor).st_mode)
     except OSError:
         return False
 

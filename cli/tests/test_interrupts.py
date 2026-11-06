@@ -114,6 +114,22 @@ def test_a_hangup_redirects_a_terminal_that_has_already_hung_up() -> None:
 
 @posix_only
 @pytest.mark.usefixtures("standard_streams")
+def test_a_hangup_redirects_a_pipe_whose_reader_has_gone() -> None:
+    """``agw vm create 2>&1 | tee create.log``: closing the terminal ends ``tee`` too, so the pipe fails every write."""
+    reader, writer = os.pipe()
+    os.dup2(writer, 1)
+    os.dup2(writer, 2)
+    os.close(writer)
+    os.close(reader)
+
+    _hang_up()
+
+    assert _is_null(1)
+    assert _is_null(2)
+
+
+@posix_only
+@pytest.mark.usefixtures("standard_streams")
 def test_a_hangup_leaves_output_to_a_file_where_it_goes(terminal: int, tmp_path: Path) -> None:
     log = os.open(tmp_path / "out.log", os.O_WRONLY | os.O_CREAT)
     os.dup2(log, 1)
