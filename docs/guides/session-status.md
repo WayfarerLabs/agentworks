@@ -7,7 +7,9 @@ Linux process start time captured when the server is created.
 The persisted PID has three meanings:
 
 - `NULL`: runtime identity evidence is incomplete. Exact tmux presence can still prove the session
-  `RUNNING`; absence stays `UNKNOWN` until a lifecycle operation can safely repair or replace it.
+  `RUNNING`. A boot ID can be recorded before launch without a process fingerprint; the same boot
+  with no PID remains `UNKNOWN` when the socket is absent, while a confirmed different boot proves
+  that the earlier runtime cannot survive.
 - `-1` (`PID_STOPPED`): supporting evidence for stopped after the exact session and its dedicated
   server are authoritatively absent. It never overrides a resurrected live runtime.
 - A positive PID paired with a boot ID and process start time: the last observed tmux server
@@ -37,11 +39,27 @@ running status when the session has a known start time. A running session withou
 rendering its configured facts. A stopped or unreachable VM remains stopped and yields `UNKNOWN`
 rather than being started for inspection.
 
-A lifecycle command that needs teardown or replacement may repair an incomplete reachable row from
+A launch records the current boot before attempting to spawn, so a lost acknowledgement does not
+turn an uncertain running workload into a stopped row. A lifecycle command that needs teardown or
+replacement may repair an incomplete reachable row from
 the server's reported PID and a stable double-read of its boot ID and process start time. A provably
 absent server can be recorded as stopped. Indeterminate or mismatched live identity fails closed.
 This keeps ordinary inspection bounded while preserving the stronger identity required for a
 destructive decision.
+
+`session start` can finish an interrupted startup on the existing runtime after recovering its
+identity. It completes access sharing, checks the recorded launch pane and releases startup
+protection; it does not create a second workload. Native launch-pane metadata identifies that pane
+even when the workload opens another window. An older runtime without that metadata is usable only
+when its named session has exactly one unambiguous pane.
+
+If no process identity can be recovered and the same VM boot is still running, preserve the row and
+inspect the guest. `--force` cannot turn missing identity into evidence of absence. A mutating repair
+attempt can record the observed boot for an older row that lacks one. An actual VM reboot followed
+by a lifecycle retry can then establish absence from the changed boot. Rebooting interrupts every
+workload on the VM and requires the operator's approval; when that impact is unsuitable, leave the
+row intact and investigate the runtime instead. Deleting the whole VM is not required for this
+recovery.
 
 Reachable dedicated runtimes stop with tmux `kill-server`, which removes the canonical session and
 any operator-added sessions, windows, or panes on that dedicated server. Older shared-server rows

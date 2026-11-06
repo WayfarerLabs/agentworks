@@ -379,7 +379,7 @@ def test_unpublished_nonrepo_failure_only_removes_empty_reservation(backend, occ
 
 
 @pytest.mark.parametrize("cancel", [False, True])
-@pytest.mark.parametrize("changed", ["none", "config", "link", "other-file"])
+@pytest.mark.parametrize("changed", ["none", "config", "config-symlink", "link", "other-file"])
 def test_late_nonrepo_failure_reclaims_only_unchanged_generated_files(backend, monkeypatch, cancel, changed):
     target, vm, config, final = backend
     original = KeyboardInterrupt() if cancel else SSHError("fixture ACL failure")
@@ -392,6 +392,9 @@ def test_late_nonrepo_failure_reclaims_only_unchanged_generated_files(backend, m
         assert link.is_symlink()
         if changed == "config":
             (final / ".tmuxinator.yml").write_text("operator config\n")
+        elif changed == "config-symlink":
+            (final / ".tmuxinator.yml").unlink()
+            (final / ".tmuxinator.yml").symlink_to(preserved)
         elif changed == "link":
             link.unlink()
             link.symlink_to(preserved)
@@ -404,8 +407,12 @@ def test_late_nonrepo_failure_reclaims_only_unchanged_generated_files(backend, m
         create_vm_workspace(vm, config, "project", ResolvedTemplate(name="empty", tmuxinator=True))
     assert caught.value is original
     assert preserved.read_text() == "operator content\n"
-    if changed in {"config", "other-file"}:
+    if changed in {"config", "config-symlink", "other-file"}:
         assert final.is_dir() and target.groups
+        if changed == "config-symlink":
+            assert (final / ".tmuxinator.yml").is_symlink()
+            assert (final / ".tmuxinator.yml").resolve() == preserved
+            return
         expected = final / (".tmuxinator.yml" if changed == "config" else "operator-work")
         assert expected.read_text() == ("operator config\n" if changed == "config" else "precious\n")
     else:
