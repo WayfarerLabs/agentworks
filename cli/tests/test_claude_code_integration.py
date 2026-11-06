@@ -295,6 +295,9 @@ def test_probe_that_could_not_execute_raises_rather_than_guessing() -> None:
         _harness_integration().start(_op_ctx(target))
     assert "exit 255" in str(exc.value)
     assert exc.value.entity_name == "s1"
+    with pytest.raises(StateError) as find_failed:
+        _harness_integration().start(_op_ctx(_launch_target(transcript=6)))
+    assert find_failed.value.hint != exc.value.hint  # a failed find and the shell around it are told apart
 
 
 def test_probe_that_may_not_have_run_raises_its_execution_error() -> None:

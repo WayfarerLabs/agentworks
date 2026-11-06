@@ -161,6 +161,7 @@ class ClaudeCodeConfig(AgwModel):
 # is ``$HOME/.claude``. Expanded by the target-side shell inside the
 # find probe, never here.
 _PROJECTS_DIR = "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects"
+_FIND_FAILED_EXIT = 6  # find itself failed (not a mere no-match): raise
 
 
 def transcript_probe(sid: str) -> Script:
@@ -174,7 +175,7 @@ def transcript_probe(sid: str) -> Script:
     inner = (
         f'[ -d "{_PROJECTS_DIR}" ] || exit 1; '
         f'out=$(find "{_PROJECTS_DIR}" -name {needle} -print -quit 2>/dev/null); rc=$?; '
-        f'[ -n "$out" ] && exit 0; [ "$rc" -eq 0 ] || exit 6; exit 1'
+        f'[ -n "$out" ] && exit 0; [ "$rc" -eq 0 ] || exit {_FIND_FAILED_EXIT}; exit 1'
     )
     return Script(inner, Shell.USER_DEFAULT, login=True, interactive=True)
 
@@ -545,7 +546,13 @@ class ClaudeCodeIntegration(HarnessIntegration):
             f"refusing to guess resume-vs-launch.",
             entity_kind="session",
             entity_name=self._session_name,
-            hint="Retry once the launch target is reachable.",
+            hint=(
+                "Check that the Claude projects directory ($CLAUDE_CONFIG_DIR/projects, by default "
+                "~/.claude/projects) is readable by the launch user, then retry."
+                if status == _FIND_FAILED_EXIT
+                else "Check that the launch user's login and interactive shell startup files run to "
+                "completion without exiting or failing, then retry."
+            ),
         )
 
     def _probe_target(self, access: VMAccess) -> None:

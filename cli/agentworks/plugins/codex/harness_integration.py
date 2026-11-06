@@ -355,22 +355,34 @@ _UNREADABLE_SENTINEL = "?agw-unreadable-rollout"
 _LEGACY_MARKER_RE = re.compile(r"^\.agentworks/codex/[A-Za-z0-9_.-]+\.launch$")
 
 
+_STARTUP_HINT = (
+    "Check that the launch user's login and interactive shell startup files run to completion "
+    "without exiting or failing, then retry."
+)
+"""The hint for a probe that completed with a status it does not define.
+
+The probe reached the target and its shell ran, so reachability is not the
+problem; a startup file that exits or fails before the probe's own command
+is the usual cause."""
+
+
 def _probe_hint(returncode: int) -> str:
-    """The recovery hint for a probe that could not answer, forked on WHY.
+    """The recovery hint for a probe that completed without an answer, forked on WHY.
 
     A hint that names an action the operator cannot take is worse than no
     hint: ``_FIND_FAILED_EXIT`` means ``find`` ran and failed against the
-    on-disk sessions tree, so telling them to wait for the target to
-    become reachable would point at a healthy component. Everything else
-    in the non-{0,1} band (a shell that would not start) really is
-    reachability.
+    on-disk sessions tree, so the sessions directory is what to check. Any
+    other status the probe does not define comes from the shell around it,
+    so the hint points at the launch user's startup files. A probe that may
+    not have run raises its typed execution error instead and reaches no
+    hint here.
     """
     if returncode == _FIND_FAILED_EXIT:
         return (
             f"Check that the codex sessions directory ({_SESSIONS_DIR_DISPLAY}) is readable by the "
             f"launch user and not damaged, then retry."
         )
-    return "Retry once the launch target is reachable."
+    return _STARTUP_HINT
 
 
 def _awk_string(value: str) -> str:
@@ -1234,7 +1246,7 @@ class CodexIntegration(HarnessIntegration):
                     f"the next resume identifies the conversation from codex's own state instead, "
                     f"so nothing is orphaned."
                     if status == _READ_FAILED_EXIT
-                    else "Retry once the launch target is reachable."
+                    else _STARTUP_HINT
                 ),
             )
         stdout = result.stdout.decode("utf-8", "replace")

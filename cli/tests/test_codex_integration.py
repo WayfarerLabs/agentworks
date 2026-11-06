@@ -537,10 +537,9 @@ def test_raise_hints_name_a_recovery_the_operator_can_actually_take() -> None:
     """Hint accuracy is the point of this integration, so the hints fork on
     WHY the probe could not answer.
 
-    A file that exists and will not read is not a reachability problem, and
-    neither is a ``find`` that failed against the on-disk sessions tree:
-    "retry once the target is reachable" would point at a healthy
-    component. The recorder case gets the recovery that is actually safe,
+    A file that exists and will not read, a ``find`` that failed against
+    the on-disk sessions tree and an exit the probe does not define each
+    get their own recovery. The recorder case gets the recovery that is actually safe,
     deleting the recording, which costs determinism for one op and orphans
     nothing because resume then falls through to discovery."""
     with pytest.raises(StateError) as unreadable:
@@ -554,10 +553,10 @@ def test_raise_hints_name_a_recovery_the_operator_can_actually_take() -> None:
         _harness_integration().start(_op_ctx(_target(rollout=5)))
     assert "codex sessions directory" in (find_failed.value.hint or "")
 
-    # Any other exit (a shell that would not start) is treated as reachability.
-    with pytest.raises(StateError) as unreachable:
+    # Any other exit comes from the shell around the probe, which has its own hint.
+    with pytest.raises(StateError) as undefined:
         _harness_integration().start(_op_ctx(_target(rollout=255)))
-    assert (unreachable.value.hint or "") == "Retry once the launch target is reachable."
+    assert len({hint, find_failed.value.hint, undefined.value.hint}) == 3
 
 
 # -- layer 2: source-filtered discovery --------------------------------------
