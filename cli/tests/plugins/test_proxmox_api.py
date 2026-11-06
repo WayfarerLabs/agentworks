@@ -349,6 +349,21 @@ class TestErrorHandling:
         with pytest.raises(ProxmoxAPIError):
             api.next_id()
 
+    @pytest.mark.parametrize("listing", [None, {"vmid": 100, "name": "dev"}, "dev"])
+    @patch("urllib.request.urlopen")
+    def test_a_malformed_vm_listing_is_typed(self, mock_urlopen: MagicMock, api: ProxmoxAPI, listing: Any) -> None:
+        """A listing that is not a list is the typed API error, not a crash in the code that reads its entries."""
+        mock_urlopen.return_value = _mock_response(listing)
+
+        with pytest.raises(ProxmoxAPIError):
+            api.list_vms("pve")
+
+    @patch("urllib.request.urlopen")
+    def test_a_vm_listing_is_returned(self, mock_urlopen: MagicMock, api: ProxmoxAPI) -> None:
+        mock_urlopen.return_value = _mock_response([{"vmid": 100, "name": "dev"}])
+
+        assert api.list_vms("pve") == [{"vmid": 100, "name": "dev"}]
+
     @patch("urllib.request.urlopen")
     def test_task_failure_raises(self, mock_urlopen: MagicMock, api: ProxmoxAPI) -> None:
         task_data = {"status": "stopped", "exitstatus": "ERROR: clone failed"}
