@@ -138,6 +138,7 @@ def _target(
     line). The ``*_exit`` forms force a raw exit code for the failure forks.
     """
     access = RecordingVMAccess([], Admin())
+    access.default_outcome = AssertionError("an unscripted request reached the launch target")
     if recorder_exit is not None:
         recorder = Result(Completed(recorder_exit))
     elif recorded is not None:
@@ -1176,7 +1177,7 @@ def test_session_name_needing_quotes_stays_one_recorder_path_word() -> None:
     quoting is ``shlex.quote``d into the path token rather than splitting
     it (session names are validated to a safe charset, so this is defense
     in depth for both the shell word and the TOML string)."""
-    command = _harness_integration(state={}, session_name="s one").start(_op_ctx(_target()))
+    command = _harness_integration(state={}, session_name="s one").start(_op_ctx(_target(session_name="s one")))
     assert "\"$HOME\"/'.agentworks/codex/s one.thread'" in _inner(command)
     assert _notify_token(command).endswith('","/home/me/.agentworks/codex/s one.thread"]')
 

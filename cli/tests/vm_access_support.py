@@ -362,7 +362,12 @@ def local_vm_access(
     startup file it reads are the test's. The guest's python3 is
     ``/usr/bin/python3``. The access never elevates: root's passwd entry would
     get the same home and shell.
+
+    Build it once per test and reuse it: the launcher rewrite it installs
+    holds for the rest of the test, so a second build raises.
     """
+    if b"home = entry.pw_dir" not in envelope.launcher_source():
+        raise RuntimeError("local_vm_access was already built in this test; reuse that access")
     run_requests_locally(
         monkeypatch,
         lambda command: local_remote_argv(command, home=home, shell=str(shell), python=ssh_process.DEFAULT_PYTHON),

@@ -57,8 +57,12 @@ def _integration(
 
 
 def _launch_target(*, summary: int | None = None) -> RecordingVMAccess:
-    """The admin's access, answering the stored id's persisted-session probe with exit ``summary``."""
+    """The admin's access, answering the stored id's persisted-session probe with exit ``summary``.
+
+    Any other request fails the test.
+    """
     access = RecordingVMAccess([], Admin())
+    access.default_outcome = AssertionError("an unscripted request reached the launch target")
     if summary is not None:
         access.respond(session_probe(_SID), Result(Completed(summary)))
     return access
@@ -292,7 +296,12 @@ def test_a_probe_that_may_not_have_run_refuses_to_guess() -> None:
 
 def test_first_start_mints_and_records_a_uuid() -> None:
     state: dict[str, object] = {}
-    command = _integration(state=state).start(_op_ctx(_launch_target(summary=1))).command
+    target = _launch_target()
+    # The op mints an id and then probes for its persisted session.
+    target.answer = lambda call: (
+        Result(Completed(1)) if call.request == session_probe(str(state["session_id"])) else None
+    )
+    command = _integration(state=state).start(_op_ctx(target)).command
     sid = state["session_id"]
     assert isinstance(sid, str) and len(sid) == 36
     assert sid in command
@@ -300,7 +309,12 @@ def test_first_start_mints_and_records_a_uuid() -> None:
 
 def test_wrong_typed_session_id_is_replaced_with_a_canonical_uuid() -> None:
     state: dict[str, object] = {"session_id": 7}
-    _integration(state=state).start(_op_ctx(_launch_target(summary=1)))
+    target = _launch_target()
+    # The op mints an id and then probes for its persisted session.
+    target.answer = lambda call: (
+        Result(Completed(1)) if call.request == session_probe(str(state["session_id"])) else None
+    )
+    _integration(state=state).start(_op_ctx(target))
     sid = state["session_id"]
     assert isinstance(sid, str)
     assert str(uuid.UUID(sid)) == sid

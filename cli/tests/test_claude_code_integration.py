@@ -67,9 +67,10 @@ def _harness_integration(
 def _launch_target(*, transcript: int | None = None) -> RecordingVMAccess:
     """The admin's access, answering the stored id's transcript probe with exit ``transcript``.
 
-    Any other request completes with exit 0, as an unanswered one does on the fake.
+    Any other request fails the test.
     """
     access = RecordingVMAccess([], Admin())
+    access.default_outcome = AssertionError("an unscripted request reached the launch target")
     if transcript is not None:
         access.respond(transcript_probe(_SID), Result(Completed(transcript)))
     return access
@@ -331,7 +332,11 @@ def test_probe_executes_against_the_projects_dir_login_startup_names(
 def test_first_start_mints_and_records_the_session_id() -> None:
     state: dict[str, object] = {}
     harness_integration = _harness_integration(state=state)
-    target = _launch_target()  # empty state means no id yet; the probe's default is found
+    target = _launch_target()
+    # Empty state means no id yet: the op mints one and then probes for its transcript.
+    target.answer = lambda call: (
+        Result(Completed(1)) if call.request == transcript_probe(str(state["session_id"])) else None
+    )
     command = harness_integration.start(_op_ctx(target)).command
 
     minted = state["session_id"]
