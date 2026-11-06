@@ -108,11 +108,10 @@ def invocation(
     *,
     prior=None,
     env=None,
-    access: VMAccess | None = None,
 ):
     return UserSetupInvocation(
         vm=cast(VMRow, object()),
-        access=access or RecordingVMAccess([], Admin()),
+        access=RecordingVMAccess([], Admin()),
         runner=transport,
         prior=prior,
         checkpoint=claims.append,

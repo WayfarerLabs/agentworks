@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shlex
 import uuid
 from typing import TYPE_CHECKING, cast
@@ -13,7 +14,6 @@ from agentworks.capabilities.config import capability_config_references, validat
 from agentworks.capabilities.harness_integration import HarnessLaunchIntent, HarnessStart
 from agentworks.errors import ConfigError, StateError
 from agentworks.execution.errors import ExecutionIncomplete
-from agentworks.execution.requests import Script
 from agentworks.execution.results import Completed, Result, Unknown, UnknownReason
 from agentworks.plugins.grok.harness_integration import GrokBuildConfig, GrokBuildIntegration, session_probe
 from agentworks.schema import RefOwner, merge_model
@@ -256,29 +256,30 @@ def test_repeated_start_uses_the_same_state_based_decision() -> None:
     assert integration.start(_op_ctx(target)) == integration.start(_op_ctx(target))
 
 
-def test_probe_uses_grok_home_and_the_persisted_summary_boundary() -> None:
-    target = _launch_target(summary=0)
-    _integration().start(_op_ctx(target))
-    (request,) = target.requests()
-    assert isinstance(request, Script)
-    probe = request.source
-    assert "GROK_HOME" in probe
-    assert f"{_SID}/summary.json" in probe
-    assert "-mindepth 3 -maxdepth 3" in probe
-    assert "-type f" in probe
-
-
-def test_missing_session_root_is_clean_absence_but_find_failure_is_not() -> None:
-    target = _launch_target(summary=0)
-    _integration().start(_op_ctx(target))
-    (request,) = target.requests()
-    assert isinstance(request, Script)
-    probe = request.source
-    assert "[ -d " in probe
-    assert "exit 6" in probe
-
+def test_a_failed_find_status_refuses_to_guess() -> None:
     with pytest.raises(StateError):
         _integration().start(_op_ctx(_launch_target(summary=6)))
+
+
+@requires_posix_shell
+def test_an_unreadable_session_root_refuses_rather_than_launching_fresh(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    if os.geteuid() == 0:
+        pytest.skip("root reads an unreadable directory")
+    grok_home = tmp_path / "grok-home"
+    unreadable = grok_home / "sessions" / "unreadable"
+    unreadable.mkdir(parents=True)
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".profile").write_text(f'export GROK_HOME="{grok_home}"\n')
+    target = local_vm_access(monkeypatch, home=home, shell=account_shell(tmp_path))
+    unreadable.chmod(0)
+    try:
+        with pytest.raises(StateError):
+            _integration().start(_op_ctx(target))
+    finally:
+        unreadable.chmod(0o755)
 
 
 def test_an_undefined_probe_exit_refuses_to_guess() -> None:
@@ -353,6 +354,18 @@ def test_probe_executes_against_groks_real_filesystem_boundary(tmp_path: Path, m
     incomplete = _integration().start(_op_ctx(target))
     assert _grok_argv(incomplete)[:2] == ["--session-id", _SID]
 
+    # Only a regular summary.json, exactly one encoded directory down, is a persisted session.
+    (stub / "summary.json").mkdir()
+    (grok_home / "sessions" / _SID).mkdir()
+    (grok_home / "sessions" / _SID / "summary.json").write_text("{}")
+    (grok_home / "sessions" / "a" / "encoded-cwd" / _SID).mkdir(parents=True)
+    (grok_home / "sessions" / "a" / "encoded-cwd" / _SID / "summary.json").write_text("{}")
+    (grok_home / "sessions" / "encoded-cwd" / "0a18a04b-d083-4dc8-961a-07f2151c9b35").mkdir()
+    (grok_home / "sessions" / "encoded-cwd" / "0a18a04b-d083-4dc8-961a-07f2151c9b35" / "summary.json").write_text("{}")
+    lookalikes = _integration().start(_op_ctx(target))
+    assert _grok_argv(lookalikes)[:2] == ["--session-id", _SID]
+
+    (stub / "summary.json").rmdir()
     (stub / "summary.json").write_text("{}")
     persisted = _integration().start(_op_ctx(target))
     assert _grok_argv(persisted)[:2] == ["--resume", _SID]

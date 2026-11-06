@@ -54,6 +54,7 @@ from agentworks.plugins.codex.harness_integration import (
     rollout_probe,
 )
 from agentworks.schema import RefOwner, merge_model
+from tests.conftest import requires_posix_shell
 from tests.vm_access_support import (
     Admin,
     RecordingVMAccess,
@@ -704,29 +705,11 @@ def test_a_probe_that_may_not_have_run_raises_its_execution_error(probe: str) ->
         _harness_integration(state=state).start(_op_ctx(access))
 
 
-def test_rollout_probe_keeps_find_failure_distinct_from_a_clean_no_match() -> None:
-    """The inner command's structure: a missing sessions dir short-circuits
-    to the clean no-match exit (1, not resumable), while a find that
-    FAILED without printing a match exits 5, which the exit-code fork
+def test_a_failed_find_status_raises_rather_than_dropping_the_id() -> None:
+    """A find that FAILED without printing a match exits 5, which the fork
     raises on rather than folding into "no rollout"."""
-    target = _target(rollout=0)
-    _harness_integration().start(_op_ctx(target))
-    assert rollout_probe(_SID) in target.requests()
-    probe_cmd = rollout_probe(_SID).source
-    assert "[ -d " in probe_cmd  # dir-missing is a clean no-match, not a find failure
-    assert "exit 5" in probe_cmd  # find failure stays distinguishable
     with pytest.raises(StateError, match="could not probe"):
         _harness_integration().start(_op_ctx(_target(rollout=5)))
-
-
-def test_rollout_probe_is_rooted_at_codex_home_and_finds_by_the_bound_id() -> None:
-    target = _target(rollout=0)
-    _harness_integration().start(_op_ctx(target))
-    assert rollout_probe(_SID) in target.requests()
-    probe_cmd = rollout_probe(_SID).source
-    assert "find" in probe_cmd
-    # Rooted at the CLI's state dir with its documented override.
-    assert "CODEX_HOME" in probe_cmd
 
 
 # -- state hygiene -----------------------------------------------------------
@@ -1243,6 +1226,49 @@ def _write_rollout(
     }
     path.write_text(json.dumps(meta, separators=(",", ":")) + "\n")
     return path
+
+
+def test_sh_rollout_probe_follows_codex_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The bound id's rollout under ``$CODEX_HOME``, which login startup sets, resumes it."""
+    _skip_without_posix_paths()
+    home = tmp_path / "home"
+    codex_root = tmp_path / "codex-home"
+    (codex_root / "sessions/2026/08/01").mkdir(parents=True)
+    home.mkdir()
+    (home / ".profile").write_text(f'export CODEX_HOME="{codex_root}"\n')
+    (tmp_path / "ws1").mkdir()
+    sessions = codex_root / "sessions/2026/08/01"
+    (sessions / f"rollout-2026-08-01T12-05-00-{_OTHER_SID}.jsonl").write_text("{}\n")  # another session's
+    access = _shell_access(monkeypatch, home)
+
+    unbound = _sh_harness_integration(tmp_path, {"session_id": _SID}).start(_op_ctx(access)).command
+    (sessions / f"rollout-2026-08-01T12-00-00-{_SID}.jsonl").write_text("{}\n")
+    bound = _sh_harness_integration(tmp_path, {"session_id": _SID}).start(_op_ctx(access)).command
+
+    assert f"resume {_SID}" not in unbound
+    assert f"resume {_SID}" in bound
+
+
+@requires_posix_shell
+def test_sh_unreadable_sessions_dir_raises_rather_than_dropping_the_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    if os.geteuid() == 0:
+        pytest.skip("root reads an unreadable directory")
+    _skip_without_posix_paths()
+    home = tmp_path / "home"
+    unreadable = home / ".codex/sessions/unreadable"
+    unreadable.mkdir(parents=True)
+    (tmp_path / "ws1").mkdir()
+    access = _shell_access(monkeypatch, home)
+    state: dict[str, object] = {"session_id": _SID}
+    unreadable.chmod(0)
+    try:
+        with pytest.raises(StateError, match="could not probe"):
+            _sh_harness_integration(tmp_path, state).start(_op_ctx(access))
+    finally:
+        unreadable.chmod(0o755)
+    assert state == {"session_id": _SID}  # the bound id was not dropped as gone
 
 
 def _sh_harness_integration(tmp_path: Path, state: dict[str, object]) -> CodexIntegration:

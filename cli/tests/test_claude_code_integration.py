@@ -11,6 +11,7 @@ stored session id (``claude-code-lld.md`` "Test double").
 from __future__ import annotations
 
 import json
+import os
 import shlex
 from typing import TYPE_CHECKING, cast
 
@@ -21,7 +22,6 @@ from agentworks.capabilities.config import capability_config_references, validat
 from agentworks.capabilities.harness_integration import HarnessLaunchIntent, HarnessStart
 from agentworks.errors import ConfigError, StateError
 from agentworks.execution.errors import ExecutionIncomplete
-from agentworks.execution.requests import Script
 from agentworks.execution.results import Completed, Result, Unknown, UnknownReason
 from agentworks.plugins.claude.harness_integration import ClaudeCodeConfig, ClaudeCodeIntegration, transcript_probe
 from agentworks.schema import RefOwner, merge_model
@@ -254,36 +254,33 @@ def test_repeated_start_uses_the_same_state_based_decision() -> None:
     assert harness_integration.start(_op_ctx(target)) == harness_integration.start(_op_ctx(target))
 
 
-def test_probe_is_slug_independent_and_finds_by_stored_id() -> None:
-    target = _launch_target(transcript=0)
-    _harness_integration().start(_op_ctx(target))
-    (probe,) = target.requests()
-    assert isinstance(probe, Script)
-    probe_cmd = probe.source
-    assert f"{_SID}.jsonl" in probe_cmd
-    assert "find" in probe_cmd
-    # Rooted at the CLI's config dir with its documented override.
-    assert "CLAUDE_CONFIG_DIR" in probe_cmd
-
-
-def test_probe_keeps_find_failure_distinct_from_a_clean_no_match() -> None:
-    """The inner command's structure: a missing projects dir short-circuits
-    to the clean no-match exit (1, fresh), while a find that FAILED without
-    printing a match exits 6, which the exit-code fork raises on rather
-    than folding into "no transcript". Pinned here because the fake target
-    answers by exit code alone; the structure is what guarantees those
-    codes mean what the fork thinks they mean."""
-    target = _launch_target(transcript=0)
-    _harness_integration().start(_op_ctx(target))
-    (probe,) = target.requests()
-    assert isinstance(probe, Script)
-    probe_cmd = probe.source
-    assert "[ -d " in probe_cmd  # dir-missing is a clean no-match, not a find failure
-    assert "exit 6" in probe_cmd  # find failure stays distinguishable
-    # And the fork raises on that distinct code.
+def test_a_failed_find_status_raises_rather_than_launching_fresh() -> None:
+    """A find that FAILED without printing a match exits 6, which the fork
+    raises on rather than folding into "no transcript"."""
     failing = _launch_target(transcript=6)
     with pytest.raises(StateError, match="could not probe"):
         _harness_integration().start(_op_ctx(failing))
+
+
+@requires_posix_shell
+def test_an_unreadable_projects_dir_raises_rather_than_launching_fresh(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    if os.geteuid() == 0:
+        pytest.skip("root reads an unreadable directory")
+    config_dir = tmp_path / "claude-config"
+    unreadable = config_dir / "projects" / "unreadable"
+    unreadable.mkdir(parents=True)
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".profile").write_text(f'export CLAUDE_CONFIG_DIR="{config_dir}"\n')
+    access = local_vm_access(monkeypatch, home=home, shell=account_shell(tmp_path))
+    unreadable.chmod(0)
+    try:
+        with pytest.raises(StateError, match="could not probe"):
+            _harness_integration().start(_op_ctx(access))
+    finally:
+        unreadable.chmod(0o755)
 
 
 def test_probe_that_could_not_execute_raises_rather_than_guessing() -> None:
@@ -322,6 +319,10 @@ def test_probe_executes_against_the_projects_dir_login_startup_names(
     assert "--session-id" in _claude_argv(_harness_integration().start(_op_ctx(access)))
     transcript = config_dir / "projects" / "-srv-ws1" / f"{_SID}.jsonl"
     transcript.parent.mkdir(parents=True)
+    (transcript.parent / "0a18a04b-d083-4dc8-961a-07f2151c9b35.jsonl").write_text(
+        "{}\n"
+    )  # another session's transcript
+    assert "--session-id" in _claude_argv(_harness_integration().start(_op_ctx(access)))
     transcript.write_text("{}\n")
     assert "--resume" in _claude_argv(_harness_integration().start(_op_ctx(access)))
 
