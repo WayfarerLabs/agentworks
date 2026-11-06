@@ -343,17 +343,20 @@ authorizing retirement as though an unknown declaration were empty.
 
 The internal routing result distinguishes known unresolved input IDs from unavailable routing
 without IDs. A confirmed routing table with no routes to a receiver does not hold that receiver's
-own content merely because native setup is incomplete or the source capture is unavailable. Missing
+own content merely because unrelated native setup is incomplete. Missing, unavailable or stale
+capture evidence cannot authorize retirement, even when an older table has no deferrals. Missing
 payload for an explicit applicable route remains unknown even when current bundle selection is
 empty. Inactive facets use core's fixed passthrough independently of opaque old active-facet state.
 
 When unknown applicable routes prevent establishing requested inputs, setup publication holds prior
-placements against removal or replacement, including generated sections and related packages. Native
-setup and independent new paths continue. Actual held paths, unavailable explicit inputs or an
-unknown applicable input set keep application incomplete, including a fresh receiver with no old
-placements. An unrelated native failure with a confirmed, fully covered routing table does not make
-the receiving facet incomplete. The conservative hold is needed because old content-dependent IDs
-cannot be reversed to owners after capture replacement.
+placements against removal or replacement, including generated sections and related packages. Prior
+and current local captures identify independently attributable local files, which can still update
+or retire; a shared file containing unknown ancestor content remains held. Actual held paths keep
+local publication incomplete. Temporary incoming-route health is recomputed lazily and does not
+become a permanent local native failure on a fresh workspace. A healed VM that handles all inputs
+can clear that warning without workspace recreation; genuinely new workspace placement still needs
+application. The receiving record acknowledges known supplied inputs only, while inspection and the
+session join retain the separate unknown incoming-route health. No codec or history store is added.
 
 Missing explicit route IDs survive active receivers, including their first application, and inactive
 user/workspace passthrough. An integration receives only readable inputs; core appends the missing

@@ -1260,3 +1260,46 @@ retains seven prior pure-contract/transfer dispositions and 19 pending obligatio
 merely by these local gates. Both SDDs stay unlocked until those retained live obligations and
 permanent-promotion checks are reconciled. The next full-report window is six hours from the new
 ready handoff, with earlier assessment when the full report arrives.
+
+## Integration-report correction round 8, 2026-11-06
+
+The operator authorized two additional rounds after report `6688937883` and critical reading
+`6689997796`. This is the first of those rounds, answering the report already received at
+`41bc36fe`; start comment `6692382891` freezes the joint batch. A subsequent round must wait for a
+new integration report. Main remains `c8d4dfb3`, and PR #862 is draft before edits.
+
+An intermediate merge delivers the bounded correction; it does not discharge either SDD. This
+session continues to own both through requirement-level acceptance, permanent promotion and locks.
+The late report is partial and supplies no full requirement mapping. Artifact R10 excludes model
+calls from acceptance; model-consumption proof is not an extra closeout requirement. Its measured
+positives remain evidence only for their actual head, configuration and scope.
+
+- [x] Restore the existing provider-specific deletion implementation and binding-failure local
+      retirement contract. Keep whole-VM deletion independent of guest artifact/session teardown,
+      disclose external tailnet/provider cleanup limits, and leave provider identity/retirement
+      redesign with its owning effort. Focused workspace, VM deletion and Proxmox rollback controls
+      return 0 with 80 cases; they are local tests, not provider acceptance.
+- [x] Reclaim only the failed non-repository create's confirmed unchanged generated tmuxinator file
+      before empty-reservation cleanup. Preserve modified files, unrelated work, ordinary discovery
+      files and replaced links; exercise a real filesystem retry after cleanup.
+- [ ] Correct native inventory relevance and settings authorization; remove stale snapshot replay in
+      favor of conservative refusal of unsafe native rewrites, without a transaction journal.
+- [ ] Separate known local setup completion from lazy incoming-route health. Unknown/stale captures
+      cannot authorize retirement; independently attributable local changes continue, while shared
+      unknown-dependent files remain held. A healthy workspace must not need destructive recreation
+      merely to clear a recovered ancestor's transient warning.
+- [ ] Correct uncertain session startup and supported recovery using existing identity fields;
+      complete recovered startup, address the actual launch pane and preserve unknown ownership. Fix
+      actual caller redaction before truncation and the adjacent observation/input boundaries.
+- [ ] Complete common-candidate independent project, complexity and correctness reviews, required
+      gates, collateral review and exact green ready handoff. Await the next integration report
+      before spending the remaining authorized round.
+- [ ] Finish the retained R1-R16 and companion R1-R10 acceptance reconciliation after the bounded
+      correction, including remaining live gaps and permanent promotion. Publish both SDD locks only
+      when that evidence establishes completion, in a follow-up if the correction merges first.
+
+The batch disposition is recorded in critical reading `6689997796`: all numbered report findings and
+the open Muntz items remain accounted for. Inherited Lima/EC2/Proxmox provider lifecycle defects,
+broader VM create rollback and unsupported-platform test gaps are not silently reclassified as
+facet/artifact correction requirements. No new recovery API, workspace reinit command, provenance
+store, journal or Transport interface is introduced by this round.

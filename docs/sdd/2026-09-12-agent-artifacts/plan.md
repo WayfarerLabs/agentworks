@@ -1648,3 +1648,23 @@ does not establish the failing paths or authorize either lock.
 - [ ] Reconcile the subsequent full report against R1-R10 and the predecessor's retained
       obligations, then finish permanent promotion and create both locks only when the evidence
       proves completion.
+
+## Integration-report correction round 8, 2026-11-06
+
+The operator authorized two additional rounds after partial report `6688937883` and critical reading
+`6689997796`. The first answers that report; the next must wait for a fresh integration report.
+Start comment `6692382891` freezes this batch at `41bc36fe`, with the PR verified draft before
+edits. The joint implementation and evidence record is in the companion
+[round 8 plan](../2026-09-06-harness-scope-framework/plan.md#integration-report-correction-round-8-2026-11-06).
+
+This session retains ownership of both SDDs through closeout. An intermediate merge of the bounded
+correction does not close either effort or discard its pending acceptance requirements. Both locks
+remain absent until requirement-level evidence and permanent promotion establish completion.
+
+- [ ] Complete unknown/stale capture retirement protection, independent local-origin convergence,
+      lazy workspace routing-health recovery and actual-caller secret redaction. Keep native
+      required/recommended setup prerequisites distinct from advisory incoming artifact health.
+- [ ] Complete native settings and session-startup corrections with the companion effort, then run
+      common-candidate private reviews, gates and the proper exact-head handoff.
+- [ ] Reconcile R1-R10 and the companion R1-R16 obligations with the next live evidence, preserving
+      all missing cells explicitly, and finish both locks in the final closeout PR.

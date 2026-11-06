@@ -195,10 +195,11 @@ implying an existing workspace reinit command.
 Core captures owner inputs even when no integration is activated. This is one common snapshot, not
 bookkeeping for every inactive integration. An old owner with no artifact declarations has an empty
 contribution. An owner with declared artifacts but no usable capture has unknown content: report its
-owning repair operation without blocking descendants or inventing payloads. Readable prior captures
-remain available even when declarations have changed; this is existing captured content, not a
-successful refresh. A session never initializes or refreshes an ancestor. Inspection preserves the
-distinction between current declarations, readable captures and unavailable content.
+owning repair operation without blocking descendants or inventing payloads. Missing or stale capture
+evidence does not authorize retirement of its existing placements. Readable prior captures remain
+available even when declarations have changed; this is existing captured content, not a successful
+refresh. A session never initializes or refreshes an ancestor. Inspection preserves the distinction
+between current declarations, readable captures and unavailable content.
 
 ## Normalized representation
 
@@ -343,10 +344,12 @@ routing changes. Missing handling or unresolvable identities are reported; unava
 omitted from integration calls. After validating the integration's result against its readable
 inputs, core preserves the missing explicit identities as metadata in the receiver's recorded inputs
 and onward deferrals. This applies to fresh active receivers as well as inactive passthrough; it
-does not fabricate content or acknowledge delivery. The incomplete result retains the source owner's
-repair reason. Inactive facets use core's default routes. Unavailable branches do not discard known
-contributions from healthy ones. This projection never reruns an ancestor integration during session
-start.
+does not fabricate content or acknowledge delivery. Incoming-route health retains the source owner's
+repair reason separately from a successfully completed local invocation. Inspection recalculates
+that health lazily, so a temporary ancestor outage does not permanently fail a new workspace. Actual
+held local placements remain incomplete; independent local-origin changes can converge. Inactive
+facets use core's default routes. Unavailable branches do not discard known contributions from
+healthy ones. This projection never reruns an ancestor integration during session start.
 
 ## Applied state and file ownership
 

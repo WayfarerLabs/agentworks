@@ -243,17 +243,26 @@ A routing result is usable only when its recorded input identities cover the app
 inputs, including incoming routes whose payload is unavailable. An old empty table cannot confirm
 new or changed inputs. A confirmed empty set of deferrals remains usable when the ancestor has an
 unrelated unfinished native entry. It does not hold a descendant's own updates or removals. An
-unknown applicable input set keeps the receiving facet incomplete, even when its own local files
-apply and there are no prior placements to hold. An unrelated ancestor failure with a fully covered
-routing table is reported separately and does not make otherwise completed descendant setup
-incomplete. Saved incomplete evidence that cannot establish whether routing finished remains
-unknown; use the reported owning operation to confirm it.
+unknown applicable input set is reported by artifact inspection and session routing, separately from
+the receiving facet's completed local setup. It does not permanently fail a fresh workspace merely
+because its VM was temporarily unavailable. Incoming route health is recalculated from the available
+ancestor evidence; local completion acknowledges only the known inputs actually supplied to that
+invocation. An unrelated ancestor failure with a fully covered routing table is reported separately.
+Saved interrupted evidence that cannot establish whether local routing finished remains unknown; use
+the reported owning operation to confirm it.
+
+A missing, unreadable or stale ancestor capture does not authorize retirement of its existing
+placements. Independently attributable local files can still update or retire. A shared generated
+file that needs unknown ancestor content remains held. Required/recommended prerequisites retain
+their native setup contract; optional incoming artifact health is advisory.
 
 Workspace setup runs only at creation. There is no workspace reinit, and workspace repair does not
-refresh artifacts. An existing workspace cannot adopt changed workspace-routed inputs in place;
-recreation is a separate lifecycle decision. Setup warns about deferred application without scanning
-or changing descendants. Removal has the same timing boundary: ancestor refresh does not remove
-files previously applied by a descendant.
+refresh artifacts. If a VM recovers and confirms that nothing further needs workspace placement,
+artifact inspection clears the temporary upstream warning without recreating the workspace. An
+existing workspace cannot adopt genuinely new workspace-routed inputs in place; recreation is a
+separate lifecycle decision. Setup warns about deferred application without scanning or changing
+descendants. Removal has the same timing boundary: ancestor refresh does not remove files previously
+applied by a descendant.
 
 See `agw guide show concept-agent-artifacts` for bundle examples, source capture, native support,
 and inspection. `agw artifact show` includes upstream handling even when handled payloads no longer

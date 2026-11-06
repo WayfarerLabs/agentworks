@@ -108,7 +108,8 @@ Descendant session launches still proceed and can repeat the incomplete-setup wa
 owning setup resolves the retained conflict. Resolve a conflicting association with the native CLI
 before retrying its owning setup. Unrelated built-in or remote entries whose source cannot be
 established are preserved; Agentworks cannot claim or remove those entries without observable source
-identity.
+identity. An unrelated built-in marketplace without an observable source does not make Agentworks
+setup incomplete. Only a declared or previously managed association needs to converge or retire.
 
 Matching uses the native tool's reported association, including the full marketplace source and any
 ref or sparse-path options. Agentworks does not authenticate the historical origin of cached plugin
@@ -122,12 +123,17 @@ Agentworks retains and names all affected entries, including unrelated operator 
 independent entries continue where the native CLI permits. Restore a valid native association before
 retrying setup. Marketplace retirement or replacement also retains dependent plugins when the user
 declaration needed for removal is absent. Agentworks does not broaden user-scoped removal to all
-scopes or write a guessed source. Explicitly protected named operator entries are restored through
-unrelated native rewrites and mapped-settings publication. A setup failure also attempts restoration
-while preserving the primary failure; a restoration failure is reported for operator repair. Entry
-preservation respects native registrations and removals confirmed earlier in the same operation. For
-example, an ambiguous plugin selection does not undo a newly registered marketplace; qualify the
-plugin name before retrying.
+scopes or write a guessed source. If the native CLI could discard an unsupported operator settings
+entry while rewriting its configuration, Agentworks skips that native mutation and reports the
+affected association. Independent file and settings work continues. Correct the named entry before
+retrying the skipped native work. An explicitly mapped settings contribution follows its selected
+strategy and can replace that entry; no initial snapshot is restored over the mapping, later
+operator edits or confirmed removals. A mapping repair can therefore require a second reinit for the
+previously skipped native command.
+
+Native commands and Agentworks ownership checkpoints are separate operations. Abrupt termination can
+leave a native mutation without a checkpoint; retry observes and adopts a matching association.
+Agentworks does not promise transactional rollback of the native executable's work.
 
 Current-attempt incomplete reasons are retained with setup evidence. `agw artifact show` and managed
 session-start warnings identify the retained entry and its reason. Resolve that native or file

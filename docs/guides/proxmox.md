@@ -202,8 +202,8 @@ On Proxmox, `vm stop` uses the platform's hard power-off operation. It does not 
 guest shutdown. Save and flush work before stopping; request shutdown inside the guest when a
 graceful shutdown is needed.
 
-Deletion targets the recorded node and VMID. Verify that binding in Proxmox before operating on a
-VM whose provider identity may have changed. The current Proxmox implementation treats API and task
+Deletion targets the recorded node and VMID. Verify that binding in Proxmox before operating on a VM
+whose provider identity may have changed. The current Proxmox implementation treats API and task
 failures during stop and delete as best-effort: a successful Agentworks command alone does not prove
 that the guest was removed. Inspect Proxmox and finish any remaining cleanup there. A protected VM
 can be powered off before its deletion fails.

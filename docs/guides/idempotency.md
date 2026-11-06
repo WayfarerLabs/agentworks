@@ -169,9 +169,9 @@ tmuxinator file; its matching discovery link is removed with the reservation. Mo
 replacement links and unrelated contents are preserved. Existing tmuxinator discovery entries are
 not overwritten by workspace creation.
 
-A lost reservation or publication response, or a reservation that gained content, leaves
-that path and its group for inspection. An absent database row does not establish that a leftover
-directory is empty or safe to remove.
+A lost reservation or publication response, or a reservation that gained content, leaves that path
+and its group for inspection. An absent database row does not establish that a leftover directory is
+empty or safe to remove.
 
 Inspect and preserve valuable contents before manual cleanup or choosing another name. Check for a
 surviving Git process using the exact attempt path and stop it before removing that attempt. Do not
