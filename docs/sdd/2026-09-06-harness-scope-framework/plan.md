@@ -1291,9 +1291,9 @@ positives remain evidence only for their actual head, configuration and scope.
 - [x] Correct uncertain session startup and supported recovery using existing identity fields;
       complete recovered startup, address the actual launch pane and preserve unknown ownership. Fix
       actual caller redaction before truncation and the adjacent observation/input boundaries.
-- [ ] Complete common-candidate independent project, complexity and correctness reviews, required
-      gates, collateral review and exact green ready handoff. Await the next integration report
-      before spending the remaining authorized round.
+- [x] Complete common-candidate independent project, complexity and correctness reviews, required
+      gates and collateral review. Publish the exact green ready handoff with the evidence below;
+      await the next integration report before spending the remaining authorized round.
 - [ ] Finish the retained R1-R16 and companion R1-R10 acceptance reconciliation after the bounded
       correction, including remaining live gaps and permanent promotion. Publish both SDD locks only
       when that evidence establishes completion, in a follow-up if the correction merges first.
@@ -1327,3 +1327,32 @@ verified its process absent, checked 24 recorded native fixture roots absent, an
 remaining isolated scratch and test file. All three lanes must review the corrected common candidate
 before clearance. Source-owner tests, private local fixtures and green gates do not replace the
 separate integration report or the retained requirement-level closeout audit.
+
+### Final local validation for round 8
+
+All three independent lanes cleared common candidate `26a4904a` and the final fixture correction
+`b696bd1e`. Their corrected-source selections passed 93 project cases, 83 complexity cases and 257
+correctness cases; the narrower fixture follow-ups passed 33, 38 and 52 cases respectively. These
+selections overlap. The complexity lane's removal controls caught whole-text redaction, socket-type
+checks and the fresh runtime-identity comparison. Its original multiline ANSI reproduction now
+passes, and the shared normalizer retains its default behavior across 1,000 compared samples.
+
+The second full run exposed one remaining artifact lifecycle fixture mismatch: the fixture simulates
+completed tmux startup but had begun inspecting a server it never creates. The final correction
+stubs that runtime observation at the existing fixture boundary, preserving real artifact files,
+state and no-op assertions. Separate real-tmux startup and identity controls remain active.
+Production source is unchanged from the independently cleared candidate.
+
+At `b696bd1e`, the full CI-selected local suite returned 0 with 11,165 passed and 11 skipped in
+369.58 seconds. Ruff lint, format and mypy returned 0; all 14 CI checks passed. File lint,
+locked-SDD validation, Rulesync drift, source/wheel builds, Typer isolation, 103 Node website cases,
+deterministic double builds at both site bases and six isolated CLI drives returned 0. The 160-case
+Python website suite initially had an unchanged browser timing failure, then returned 0 on the full
+rerun; CI's website job also passed. No website source was changed. Final plan-only edits preserve
+the reviewed and tested production/test bytes; final collateral checks and CI remain delivery gates.
+
+The ready handoff requests the separate full integration pipeline, emphasizing the corrected native
+inventory/settings, missing-capture routing, uncertain-start recovery, actual-caller redaction and
+owned workspace cleanup boundaries. One authorized round remains after this one and requires a fresh
+integration report. These local results do not complete the retained live acceptance audit or
+authorize either SDD lock. An intermediate merge leaves both closeouts with this session.

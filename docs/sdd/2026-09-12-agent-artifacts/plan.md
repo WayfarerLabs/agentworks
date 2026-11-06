@@ -1664,7 +1664,16 @@ remain absent until requirement-level evidence and permanent promotion establish
 - [x] Complete unknown/stale capture retirement protection, independent local-origin convergence,
       lazy workspace routing-health recovery and actual-caller secret redaction. Keep native
       required/recommended setup prerequisites distinct from advisory incoming artifact health.
-- [ ] Complete native settings and session-startup corrections with the companion effort, then run
-      common-candidate private reviews, gates and the proper exact-head handoff.
+- [x] Complete native settings and session-startup corrections with the companion effort and run
+      common-candidate private reviews and gates. The companion final validation record supplies the
+      exact source heads and scoped evidence for the ready handoff.
 - [ ] Reconcile R1-R10 and the companion R1-R16 obligations with the next live evidence, preserving
       all missing cells explicitly, and finish both locks in the final closeout PR.
+
+All three private lanes cleared `26a4904a` and the final simulated-runtime fixture correction
+`b696bd1e`. The final full CI-selected local suite returned 0 with 11,165 passed and 11 skipped; all
+14 CI checks passed. The companion
+[final round 8 validation record](../2026-09-06-harness-scope-framework/plan.md#final-local-validation-for-round-8)
+records the remaining gates, actual prior failures, correction evidence and source-byte continuity.
+These results establish the bounded correction's local validation, not the retained live acceptance
+or either SDD's completion. The separate integration report must arrive before the remaining round.
