@@ -80,9 +80,9 @@ checks remain unchanged for skills, personas and separate native rule files.
 Skill members retain their captured bytes and executable intent. Adapters neither flatten skills
 into prompts nor omit supporting files. The Claude session plugin is named `agentworks-artifacts`;
 its skills use the native `agentworks-artifacts:<name>` namespace. Its manifest contains only the
-generated plugin identity, with no hook or MCP configuration. Codex and Grok Build have
-no supported private session skill carrier in this implementation; those inputs remain deferred and
-core warns and records them as unhandled while allowing launch.
+generated plugin identity, with no hook or MCP configuration. Codex and Grok Build have no supported
+private session skill carrier in this implementation; those inputs remain deferred and core warns
+and records them as unhandled while allowing launch.
 
 Native names are checked across local/deferred owner groups and persisted ancestor ownership
 metadata, with supported native discovery locations checked for existing entries that can shadow

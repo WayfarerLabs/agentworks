@@ -212,6 +212,7 @@ after that task, because a pool-scoped token loses its access to the removed gue
 and Tailscale state are left alone before provider deletion, so a locked VM or failed API request
 does not first disconnect a surviving guest. Binding or deletion failure retains the VM record and
 its children. Resolve the lock or restore the site's configuration and API access, then retry.
+External tailnet records and workstation SSH known-hosts entries can remain after guest deletion.
 
 For an already-removed guest, a pool-scoped token may return a permission error instead of proving
 absence. Inspect the exact recorded node and VMID in Proxmox and restore appropriately scoped read

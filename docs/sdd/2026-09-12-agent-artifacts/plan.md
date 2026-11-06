@@ -1640,10 +1640,11 @@ payload identities, honest new-receiver and inspection health, session ownership
 failure recovery, preservation of malformed native entries, truthful Grok persona support and
 private clone attempts. Confirmed empty routing remains distinct from unknown; unrelated native
 failure does not invalidate confirmed routing. No persisted format change or ancestor freshness gate
-is introduced. The report's actual-scope positive evidence is retained at its stated head/config;
-it does not establish the failing paths or authorize either lock.
+is introduced. The report's actual-scope positive evidence is retained at its stated head/config; it
+does not establish the failing paths or authorize either lock.
 
 - [ ] Complete the joint correction, private review and exact-head validation in the companion plan,
       updating this effort's permanent guides and support matrix with the corrected behavior.
-- [ ] Reconcile the subsequent full report against R1-R10 and the predecessor's retained obligations,
-      then finish permanent promotion and create both locks only when the evidence proves completion.
+- [ ] Reconcile the subsequent full report against R1-R10 and the predecessor's retained
+      obligations, then finish permanent promotion and create both locks only when the evidence
+      proves completion.

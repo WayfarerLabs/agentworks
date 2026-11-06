@@ -1224,10 +1224,39 @@ and both deterministic site-base comparisons returned 0. These receipts are prel
 changed-file checks and the corrected combined source still need their own observed green gates and
 common-candidate private re-review before ready.
 
-The finalizer correction is integrated in `3a79f857`. Actual tmux also established that the prior
-unchecked command used a session-only target for a window option; the corrected exact window target
-and checked release pass 46 focused cases. Reverting checked execution fails three manager-boundary
-cases, and reverting the target fails the native healthy-start release check. The socket correction
-in `4a64820d` passes 25 focused cases, including real Unix sockets, an ordinary banner-named file
-and a live private server. Removing type, path-scope or native-absence guards fails the respective
-controls. The full corrected source now proceeds to common-candidate re-review and integrated gates.
+The startup release correction is integrated in `3a79f857`. Actual tmux also established that the
+prior unchecked command used a session-only target for a window option; the corrected exact window
+target and checked release pass 46 focused cases. Reverting checked execution fails three
+manager-boundary cases, and reverting the target fails the native healthy-start release check. The
+socket correction in `4a64820d` passes 25 focused cases, including real Unix sockets, an ordinary
+banner-named file and a live private server. Removing type, path-scope or native-absence guards
+fails the respective controls. The full corrected source now proceeds to common-candidate re-review
+and integrated gates.
+
+### Final combined validation for round 7
+
+All three private lanes cleared the common source candidate `2cdb6855`. Their final narrow passes
+returned 0: project eight cases, Muntz eight cases and generic correctness 28 cases. The latter also
+reran both original reproductions with the real framing and checked-command contract; ordinary files
+survive cleanup, failed startup release raises with managed ownership retained, and healthy release
+is observed off. The lead independently checked the additional 11 reported runtime scratch roots
+absent. No private review or local fixture result substitutes for backend acceptance.
+
+The exact combined-source full suite returned 0 with 11,113 passed and 11 skipped in 384.96 seconds.
+Ruff lint and formatting returned 0, as did CI-exact mypy across 923 source/test files. Locked-SDD
+validation, Rulesync drift, the package build, 160 Python website tests, 103 Node website tests and
+two deterministic builds for each site base returned 0. Six isolated CLI help, guide, resource and
+config-init drives returned 0 on their unchanged command paths; Typer isolation also returned 0. The
+collateral pass identified one remaining plan spelling issue, now corrected. The final file- quality
+pass and exact pushed-head CI are required before ready. The final documentation record and
+external-tailnet qualification do not change the reviewed production or test trees.
+
+The renewed live handoff must emphasize routing coverage for current inputs, truthful status for
+fresh receivers, prerequisites for the actual user, recovery and secrecy for dead or uncertain
+runtimes, successful and failed native protection release, home/socket helpers that tolerate startup
+output, preservation of malformed native entries, Grok personas limited to headless mode, private
+clone cleanup, and Proxmox task completion and recorded name checks. The 26-row acceptance audit
+retains seven prior pure-contract/transfer dispositions and 19 pending obligations; none is promoted
+merely by these local gates. Both SDDs stay unlocked until those retained live obligations and
+permanent-promotion checks are reconciled. The next full-report window is six hours from the new
+ready handoff, with earlier assessment when the full report arrives.
