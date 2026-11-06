@@ -883,8 +883,8 @@ def finalize_session_start(
         except (ConnectivityError, ExternalError, OSError, subprocess.SubprocessError) as error:
             grant_error = error
     _ensure_workload_alive(session_name, run_command=run_command, socket_path=socket_path, prior_error=grant_error)
-    q_session = exact_tmux_target(session_name)
-    run_command(tmux_cmd(f"set-option -u -t {q_session} remain-on-exit", socket_path), check=False)
+    q_session = exact_tmux_target(session_name + ":")
+    run_command(tmux_cmd(f"set-option -u -t {q_session} remain-on-exit", socket_path))
     _ensure_workload_alive(session_name, run_command=run_command, socket_path=socket_path)
 
 

@@ -43,6 +43,7 @@ from agentworks.sessions.multi_console import (
 )
 from agentworks.sessions.multi_console._status import ConsoleStatus
 from tests._consoles_support import _seed_sessions, _seed_vm, _stub_build_registry, _StubConfig  # noqa: F401
+from tests._runtime_probes import framed_runtime_result
 from tests.conftest import _FakeResult, _FakeTarget
 from tests.console_helpers import create_console_record as create_console
 
@@ -188,7 +189,9 @@ def test_running_session_names_includes_incomplete_live_identity_without_repair(
 
     def stub_run(command: str, **kwargs: object) -> _FakeResult:
         fake_target.commands.append(command)
-        return _FakeResult(returncode=0, stdout=f"S:{_encoded_probe_field('alpha')}:0::0::1::1:\n")
+        return framed_runtime_result(
+            command, _FakeResult(returncode=0, stdout=f"S:{_encoded_probe_field('alpha')}:0::0::1::1:\n")
+        )
 
     fake_target.run = stub_run  # type: ignore[assignment]
 
@@ -246,13 +249,16 @@ def test_running_session_names_uses_live_status_check(db: Database, fake_target:
             boot_hex = BOOT_ID.encode().hex()
             present_hex = b"present".hex()
             absent_hex = b"absent".hex()
-            return _FakeResult(
-                returncode=0,
-                stdout=(
-                    f"S:{_encoded_probe_field('alpha')}:0::0::0:{boot_hex}:0:{present_hex}\n"
-                    f"S:{_encoded_probe_field('beta')}:0::0::0:{boot_hex}:0:{present_hex}\n"
-                    f"S:{_encoded_probe_field('gamma')}:1:{missing_session}:1:{missing_server}:"
-                    f"0:{boot_hex}:0:{absent_hex}\n"
+            return framed_runtime_result(
+                command,
+                _FakeResult(
+                    returncode=0,
+                    stdout=(
+                        f"S:{_encoded_probe_field('alpha')}:0::0::0:{boot_hex}:0:{present_hex}\n"
+                        f"S:{_encoded_probe_field('beta')}:0::0::0:{boot_hex}:0:{present_hex}\n"
+                        f"S:{_encoded_probe_field('gamma')}:1:{missing_session}:1:{missing_server}:"
+                        f"0:{boot_hex}:0:{absent_hex}\n"
+                    ),
                 ),
             )
         return _FakeResult()

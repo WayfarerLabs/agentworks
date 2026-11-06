@@ -76,7 +76,7 @@ class NativeTarget:
 @pytest.fixture
 def native(monkeypatch):
     # pytest's nested tmp_path is longer than sun_path on some hosts.
-    with tempfile.TemporaryDirectory(prefix="agw-r7-", dir="/tmp") as directory:
+    with tempfile.TemporaryDirectory(prefix="agw-r7-session-fixtures-", dir="/tmp") as directory:
         root = Path(directory)
         target = NativeTarget(root)
         config = root / "tmux.conf"
@@ -120,6 +120,7 @@ def test_native_global_config_and_last_n_log_lines(native):
     )
     socket, _pid = launch(native, f"/bin/sh {shlex.quote(str(script))}")
     _NATIVE_FINALIZE("s1", run_command=native.run, socket_path=socket, is_admin=True)
+    assert native.native("show-option -wAqv -t =s1: remain-on-exit").stdout.strip() == "off"
     assert native.native("show-option -gqv @agentworks-native-config").stdout.strip() == "loaded"
     gate.touch()
     deadline = time.monotonic() + 5
@@ -142,11 +143,23 @@ def test_native_dead_pane_captures_saved_screen_and_active_overlay(native):
     socket, _pid = launch(native, f"/bin/sh {shlex.quote(str(script))}")
     gate.touch()
     native.wait_dead()
+    observations = []
+
+    def observed_run(command, **kwargs):
+        result = native.run(command, **kwargs)
+        if "#{pane_dead}" in command:
+            observations.append(result.stdout.removeprefix("\nAGW_RUNTIME_PANE=").strip())
+        return result
+
     with pytest.raises(StateError) as caught:
-        _NATIVE_FINALIZE("s1", run_command=native.run, socket_path=socket, is_admin=False)
+        _NATIVE_FINALIZE("s1", run_command=observed_run, socket_path=socket, is_admin=False)
     assert "saved-marker" in str(caught.value)
     assert "active-marker" in str(caught.value)
-    assert "23" in str(caught.value)
+    # tmux can observe death before a wait status is available. Preserve the
+    # status actually returned by the native probe without inferring one.
+    assert len(observations) == 1 and observations[0] in ("1", "1 23")
+    if observations[0] == "1 23":
+        assert "23" in str(caught.value)
     chmod = next(index for index, (cmd, _) in enumerate(native.calls) if "chmod g+rwx" in cmd)
     finished = chmod + 1
     check = next(index for index, (cmd, _) in enumerate(native.calls[finished:], finished) if "#{pane_dead}" in cmd)
@@ -190,7 +203,15 @@ def test_native_death_during_identity_capture_keeps_recoverable_fingerprint(tmp_
         row = db.get_session("s1")
         assert row is not None and row.pid is not None and row.boot_id is not None
         assert row.tmux_server_start_ticks is not None
-        assert check_session_status(row, target=native) is SessionStatus.STOPPED
+        # kill-server acknowledgement can precede process teardown. Keep the
+        # stored-identity guard in force until that process is actually absent.
+        deadline = time.monotonic() + 5
+        status = check_session_status(row, target=native)
+        while status is not SessionStatus.STOPPED and time.monotonic() < deadline:
+            assert status is SessionStatus.BROKEN
+            time.sleep(0.02)
+            status = check_session_status(row, target=native)
+        assert status is SessionStatus.STOPPED
         monkeypatch.setattr(tmux, "create_session", lambda *a, **k: launch(native, "sleep 30", is_admin=False))
         monkeypatch.setattr(tmux, "capture_tmux_server_fingerprint", _NATIVE_CAPTURE)
         # A subsequent managed launch removes the observed stale socket and recovers.
@@ -294,5 +315,62 @@ def test_native_create_failure_keeps_live_runtime_and_new_dependencies(tmp_path,
         else:
             assert row.pid is not None and row.boot_id is not None and row.tmux_server_start_ticks is not None
         assert native.native("show-option -wqv -t =s1: remain-on-exit").stdout.strip() == "on"
+    finally:
+        db.close()
+
+
+@pytest.mark.parametrize("operation", ["create_session", "start_session", "restart_session"])
+def test_failed_native_startup_release_retains_checkpointed_runtime(tmp_path, monkeypatch, native, operation):
+    if operation == "create_session":
+        db = _create_stubs(tmp_path, monkeypatch, [])
+        _fake_owner_realizers(monkeypatch)
+        options = {
+            "new_workspace": True,
+            "workspace_spec": '{"tmuxinator":false}',
+            "new_agent": True,
+            "agent_spec": '{"shell":"zsh"}',
+            "vm_name": "vm1",
+        }
+    else:
+        db, _ = _restart_fixture(tmp_path, monkeypatch, status=SessionStatus.STOPPED)
+        options = {}
+    _patch_transports(monkeypatch, native, native)
+    _requiring_template(monkeypatch, "sh")
+    monkeypatch.setattr(manager, "_get_boot_id", tmux.read_boot_id)
+    monkeypatch.setattr(tmux, "create_session", lambda *a, **k: launch(native, "sleep 30", is_admin=False))
+    monkeypatch.setattr(tmux, "capture_tmux_server_fingerprint", _NATIVE_CAPTURE)
+    monkeypatch.setattr(tmux, "finalize_session_start", _NATIVE_FINALIZE)
+    real_run = native.run
+
+    def reject_release(command, *, check=True, **kwargs):
+        if "set-option -u" in command:
+            # Make the actual native command fail. NativeTarget.run enforces
+            # check=True exactly as the production Transport does.
+            command = command.replace("remain-on-exit", "agentworks-invalid-release-option")
+        return real_run(command, check=check, **kwargs)
+
+    monkeypatch.setattr(native, "run", reject_release)
+    try:
+        with pytest.raises(ExternalError):
+            getattr(manager, operation)(
+                db,
+                SimpleNamespace(session=SimpleNamespace(history_limit=1), paths=SimpleNamespace(vm_workspaces="/srv")),
+                name="s1",
+                interaction=TtyInteractionPolicy.REFUSE,
+                **options,
+            )
+        row = db.get_session("s1")
+        assert row is not None and row.socket_path == native.socket
+        observed = _NATIVE_CAPTURE(target=native, socket_path=native.socket).fingerprint
+        assert observed is not None
+        assert (row.pid, row.boot_id, row.tmux_server_start_ticks) == (
+            observed.pid,
+            observed.boot_id,
+            observed.start_ticks,
+        )
+        assert check_session_status(row, target=native) is SessionStatus.RUNNING
+        assert native.native("show-option -wqv -t =s1: remain-on-exit").stdout.strip() == "on"
+        if operation == "create_session":
+            assert db.get_agent("s1") is not None and db.get_workspace("s1") is not None
     finally:
         db.close()
