@@ -468,6 +468,8 @@ class _FakeTarget:
     existing test is unaffected.
     """
 
+    logger = None
+
     def __init__(
         self,
         responses: dict[str, _FakeResult] | None = None,
@@ -481,13 +483,15 @@ class _FakeTarget:
         self.model = model
 
     def run(self, command: str, **kwargs: object) -> _FakeResult:
+        from tests._runtime_probes import framed_runtime_result
+
         self.commands.append(command)
         for needle, response in self.responses.items():
             if needle in command:
-                return response
+                return framed_runtime_result(command, response)
         if self.model is not None:
             return self.model.dispatch(command)
-        return _FakeResult()
+        return framed_runtime_result(command, _FakeResult())
 
 
 class _StubPlatform:

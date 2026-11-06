@@ -144,7 +144,24 @@ def _normalized_probe_streams(result: object) -> tuple[str, str]:
     return stdout, stderr
 
 
-def _tmux_presence_from_result(result: object, *, missing_target_is_absent: bool) -> ProbeStatus:
+def runtime_probe_command(command: str, fact: str) -> str:
+    """Put this observation after a distinct line boundary in startup output."""
+    return f"printf '\\nAGW_RUNTIME_{fact}='; {command}"
+
+
+def runtime_probe_payload(stdout: str, fact: str) -> str | None:
+    """Accept one observation frame; duplicate or absent frames are unknown."""
+    prefix = f"AGW_RUNTIME_{fact}="
+    lines = stdout.splitlines(keepends=True)
+    starts = [index for index, line in enumerate(lines) if line.startswith(prefix)]
+    if len(starts) != 1:
+        return None
+    return "".join(lines[starts[0] :])[len(prefix) :]
+
+
+def _tmux_presence_from_result(
+    result: object, *, missing_target_is_absent: bool, stdout: str | None = None
+) -> ProbeStatus:
     """Classify one tmux presence probe from its exit and canonical diagnostic."""
     returncode = getattr(result, "returncode", None)
     if returncode is None:
@@ -154,7 +171,8 @@ def _tmux_presence_from_result(result: object, *, missing_target_is_absent: bool
     if returncode != 1:
         return ProbeStatus.UNKNOWN
 
-    stdout, stderr = _normalized_probe_streams(result)
+    original_stdout, stderr = _normalized_probe_streams(result)
+    stdout = original_stdout if stdout is None else stdout.strip()
     streams = [value for value in (stdout, stderr) if value]
     # A canonical tmux diagnostic is a single line on exactly one stream. The
     # direct probe transports fold CR to LF on capture (SSH via ``text=True``,
@@ -591,9 +609,12 @@ def _probe_pane_liveness(
         + " 2>/dev/null"
     )
     for _attempt in range(2):  # retry once: a single blip must not condemn the create
-        result = run_command(cmd, check=False)
+        result = run_command(runtime_probe_command(cmd, "PANE"), check=False)
         if getattr(result, "ok", False):
-            observed = re.fullmatch(r"([01])(?: ([0-9]+))?", (getattr(result, "stdout", "") or "").strip())
+            payload = runtime_probe_payload(getattr(result, "stdout", "") or "", "PANE")
+            if payload is None:
+                continue
+            observed = re.fullmatch(r"([01])(?: ([0-9]+))?", payload.strip())
             if observed is None:
                 continue
             flag, status = observed.groups()
@@ -617,31 +638,31 @@ def _raise_workload_died(
     workload failure. A surviving server either self-removes its socket or
     surfaces as the active-server conflict when the name is reused.
     """
-    captured = ""
+    captures = []
     with suppress(ConnectivityError, ExternalError, OSError, subprocess.SubprocessError):
-        captured = _trim_captured_output(
-            capture_output(session_name, run_command=run_command, socket_path=socket_path, join_wrapped=True),
+        captures.append(
+            capture_output(session_name, run_command=run_command, socket_path=socket_path, join_wrapped=True)
         )
-    if not captured:
-        # A TUI that crashed after entering the alternate screen leaves its
-        # message there, invisible to the main-screen capture. One
-        # best-effort attempt; tmux errors out when no alternate screen
-        # exists, hence check=False.
-        q_session = exact_tmux_target(session_name + ":")
-        with suppress(ConnectivityError, ExternalError, OSError, subprocess.SubprocessError):
-            alt = run_command(
-                tmux_cmd(f"capture-pane -t {q_session} -p -J -a", socket_path) + " 2>/dev/null",
-                check=False,
-            )
-            captured = _trim_captured_output(getattr(alt, "stdout", "") or "")
+    # Normal capture is the active screen; -a reads its saved counterpart.
+    # Either may contain useful output even when the active pane has tmux's
+    # generated dead-pane overlay, so neither capture substitutes for the other.
+    q_session = exact_tmux_target(session_name + ":")
+    with suppress(ConnectivityError, ExternalError, OSError, subprocess.SubprocessError):
+        alt = run_command(
+            tmux_cmd(f"capture-pane -t {q_session} -p -J -a", socket_path) + " 2>/dev/null",
+            check=False,
+        )
+        if getattr(alt, "ok", False):
+            captures.append(getattr(alt, "stdout", "") or "")
+    captured = _trim_captured_output("\n".join(dict.fromkeys(captures)))
     with suppress(ConnectivityError, ExternalError, OSError, subprocess.SubprocessError):
         run_command(tmux_cmd("kill-server", socket_path) + " 2>/dev/null", check=False)
     status_note = f" (status {exit_status})" if exit_status else ""
     if captured:
         indented = "\n".join(f"  {line}" for line in captured.splitlines())
-        detail = f"; its output:\n{indented}"
+        detail = f"; captured terminal output:\n{indented}"
     else:
-        detail = " and produced no output"
+        detail = "; no output could be captured"
     raise StateError(
         f"session workload exited immediately after launch{status_note}{detail}",
         entity_kind="session",
@@ -662,8 +683,8 @@ def _raise_workload_unverified(session_name: str, *, socket_path: str) -> NoRetu
         entity_kind="session",
         entity_name=session_name,
         hint=(
-            f"Inspect (attach) or kill the session's tmux server at {socket_path}; "
-            "note remain-on-exit may still be set on it."
+            f"The managed row and startup protection were retained for socket {socket_path}. "
+            "Restore reliable runtime observation, then retry session stop or restart."
         ),
     )
 
@@ -673,15 +694,24 @@ def _ensure_workload_alive(
     *,
     run_command: RunCommand,
     socket_path: str,
+    prior_error: Exception | None = None,
 ) -> None:
     """Liveness gate: return only if the pane is verifiably alive.
 
-    Dead panes raise the capture-and-kill error; an unverifiable probe
-    raises the honest could-not-verify error without touching the server.
+    Dead panes raise the capture-and-kill error. Without confirmed death,
+    preserve any earlier sharing error; otherwise an unverifiable observation
+    raises without touching the server. Cancellation and internal failures propagate.
     """
-    liveness, exit_status = _probe_pane_liveness(session_name, run_command=run_command, socket_path=socket_path)
+    try:
+        liveness, exit_status = _probe_pane_liveness(session_name, run_command=run_command, socket_path=socket_path)
+    except (ConnectivityError, ExternalError, OSError, subprocess.SubprocessError):
+        if prior_error is not None:
+            raise prior_error from None
+        raise
     if liveness == "dead":
         _raise_workload_died(session_name, run_command=run_command, socket_path=socket_path, exit_status=exit_status)
+    if prior_error is not None:
+        raise prior_error
     if liveness == "unverified":
         _raise_workload_unverified(session_name, socket_path=socket_path)
 
@@ -718,19 +748,12 @@ def create_session(
     2. ``-e KEY=VAL`` on ``tmux new-session`` seeds the session-environment
        table so per-session env stays scoped to this session.
 
-    A workload that exits immediately (e.g. its CLI rejects a flag value in
-    milliseconds) would take the fresh per-session tmux server down with it,
-    losing its error output and leaving the grant machinery to fail opaquely
-    against a dead socket. The session is therefore created with
-    ``remain-on-exit`` chained into the same tmux invocation, liveness-checked
-    before any socket grant work (and re-checked after the healthy path
-    unsets the option), and a dead pane's captured output and exit status are
-    raised as a typed ``StateError``. A transport failure while probing
-    raises a distinct could-not-verify ``StateError`` without killing
-    anything. Deliberate semantic change (2026-08-03): a workload that
-    legitimately exits (status 0 included) within the create window now fails
-    the create with its captured output, where it previously soft-succeeded
-    into a stopped session.
+    The new server holds a dead pane with ``remain-on-exit`` so its diagnostics
+    survive the caller's stable-identity checkpoint. This returns the acknowledged
+    socket and optional PID before any further remote work. The caller must
+    persist its fingerprint and call :func:`finalize_session_start` before
+    reporting success. An unacknowledged transport failure is not evidence that
+    startup completed.
 
     Returns (socket_path, tmux_server_pid).
     """
@@ -792,46 +815,53 @@ def create_session(
     # rejecting an invalid flag value in milliseconds) then leaves a dead
     # pane holding the server and its scrollback alive, instead of taking
     # both down before anything can read the error. The healthy path
-    # unsets it again below. Accepted residual window: a death in the
+    # unsets it after the caller records the server identity. Residual window: a death in the
     # microseconds BEFORE the chained set-option lands fails this whole
     # check=True invocation as a raw transport error, which is correct: a
     # genuine new-session failure must not be misread as workload death.
-    cmd = f"tmux -S {q_sock} new-session -d -s {q_session} -c {q_path} -f {RESTRICTED_CONFIG_PATH}{env_flags}"
+    cmd = (
+        f"tmux -f {shlex.quote(RESTRICTED_CONFIG_PATH)} -S {q_sock}"
+        f" new-session -d -s {q_session} -c {q_path}{env_flags}"
+    )
     if pane_cmd:
         cmd += f" {shlex.quote(pane_cmd)}"
-    cmd += f" \\; set-option -t {q_session} remain-on-exit on"
-    run_command(cmd, env=env)
-
-    # Liveness check BEFORE the socket grant machinery: a dead workload
-    # must surface as its own captured error, not as the grant loop's
-    # opaque SSH failure against a dead socket.
-    _ensure_workload_alive(session_name, run_command=run_command, socket_path=sock)
-
-    # Socket permissions + cross-user access only matter for agent sessions
-    # (admin has direct access to its own per-session socket).
-    if not is_admin:
-        run_command(f"chmod g+rwx {q_sock}")
-        _grant_server_access(run_command, sock)
-
-    # PID fetch while remain-on-exit still holds the server up: a death in
-    # this window cannot take the server down, so a failed fetch here is a
-    # transport hiccup (best-effort; auto-repair recovers on next access),
-    # not the original lost-output bug reborn.
+    cmd += f" \\; set-option -t {q_session} remain-on-exit on \\; display-message -p '#{{pid}}'"
+    result = run_command(cmd, env=env)
     try:
-        pid_out = run_command(tmux_cmd("display-message -p '#{pid}'", sock), check=False)
-        pid: int | None = _parse_pid(getattr(pid_out, "stdout", ""), context="after session create")
-    except (RuntimeError, ValueError):
+        pid = _parse_pid(getattr(result, "stdout", "") or "", context="after session create")
+    except RuntimeError:
         pid = None
-
-    # Healthy path: restore normal pane-exit semantics (pane exit ends
-    # session ends server), then re-check once as the LAST act before
-    # return. A workload that died since the first check left a
-    # dead-but-persisted pane; the re-check converts that into the same
-    # capture-and-raise instead of a zombie session. check=False on the
-    # unset: if the server itself vanished, the re-check is what reports it.
-    run_command(tmux_cmd(f"set-option -u -t {q_session} remain-on-exit", sock), check=False)
-    _ensure_workload_alive(session_name, run_command=run_command, socket_path=sock)
+    # The acknowledgement is returned before any further remote work. The
+    # caller now retains this runtime, records its identity, and only then
+    # finalizes startup. remain-on-exit protects diagnostics throughout.
     return (sock, pid)
+
+
+def finalize_session_start(
+    session_name: str,
+    *,
+    run_command: RunCommand,
+    socket_path: str,
+    is_admin: bool,
+) -> None:
+    """Finish startup only after the caller persisted the server fingerprint."""
+    grant_error: Exception | None = None
+    if not is_admin:
+        try:
+            run_command(f"chmod g+rwx {shlex.quote(socket_path)}")
+        except (ConnectivityError, ExternalError, OSError, subprocess.SubprocessError) as error:
+            grant_error = error
+    # A confirmed workload failure outranks auxiliary socket-sharing failure.
+    _ensure_workload_alive(session_name, run_command=run_command, socket_path=socket_path, prior_error=grant_error)
+    if not is_admin:
+        try:
+            _grant_server_access(run_command, socket_path)
+        except (ConnectivityError, ExternalError, OSError, subprocess.SubprocessError) as error:
+            grant_error = error
+    _ensure_workload_alive(session_name, run_command=run_command, socket_path=socket_path, prior_error=grant_error)
+    q_session = exact_tmux_target(session_name)
+    run_command(tmux_cmd(f"set-option -u -t {q_session} remain-on-exit", socket_path), check=False)
+    _ensure_workload_alive(session_name, run_command=run_command, socket_path=socket_path)
 
 
 def kill_session(
@@ -870,16 +900,24 @@ def probe_tmux_session(
     """Probe an exact tmux session without conflating failure with absence."""
     q_session = exact_tmux_target(session_name)
     result = run_command(
-        tmux_cmd(f"has-session -t {q_session}", socket_path),
+        runtime_probe_command(tmux_cmd(f"has-session -t {q_session}", socket_path), "SESSION"),
         check=False,
     )
-    return _tmux_presence_from_result(result, missing_target_is_absent=True)
+    payload = runtime_probe_payload(getattr(result, "stdout", "") or "", "SESSION")
+    if payload is None or (getattr(result, "ok", False) and payload.strip()):
+        return ProbeStatus.UNKNOWN
+    return _tmux_presence_from_result(result, missing_target_is_absent=True, stdout=payload)
 
 
 def probe_tmux_server(*, run_command: RunCommand, socket_path: str) -> ProbeStatus:
     """Probe a dedicated tmux server without conflating failure with absence."""
-    result = run_command(tmux_cmd("list-sessions", socket_path), check=False)
-    return _tmux_presence_from_result(result, missing_target_is_absent=False)
+    result = run_command(
+        runtime_probe_command(tmux_cmd("list-sessions", socket_path) + " >/dev/null", "SERVER"), check=False
+    )
+    payload = runtime_probe_payload(getattr(result, "stdout", "") or "", "SERVER")
+    if payload is None or (getattr(result, "ok", False) and payload.strip()):
+        return ProbeStatus.UNKNOWN
+    return _tmux_presence_from_result(result, missing_target_is_absent=False, stdout=payload)
 
 
 def _stable_absence_probe(probe: Callable[[], ProbeStatus]) -> ProbeStatus:
@@ -930,7 +968,9 @@ def capture_output(
             f"Could not capture output for session '{session_name}'.",
             hint="Check that the session's tmux server and pane are reachable, then retry session logs.",
         )
-    return getattr(result, "stdout", "") or ""
+    return "\n".join((getattr(result, "stdout", "") or "").splitlines()[-lines:]) + (
+        "\n" if getattr(result, "stdout", "") else ""
+    )
 
 
 def _parse_pid(raw: str, context: str) -> int:
@@ -957,13 +997,16 @@ def probe_tmux_server_pid(
     sudo: bool = False,
 ) -> IntegerProbe:
     """Probe the positive PID of a running tmux server."""
-    cmd = tmux_cmd("display-message -p '#{pid}'", socket_path)
+    cmd = runtime_probe_command(tmux_cmd("display-message -p '#{pid}'", socket_path), "PID")
     result = target.run(cmd, sudo=True, check=False) if sudo else target.run(cmd, check=False)
-    presence = _tmux_presence_from_result(result, missing_target_is_absent=False)
+    payload = runtime_probe_payload(result.stdout, "PID")
+    if payload is None:
+        return IntegerProbe(ProbeStatus.UNKNOWN)
+    presence = _tmux_presence_from_result(result, missing_target_is_absent=False, stdout=payload)
     if presence is not ProbeStatus.PRESENT:
         return IntegerProbe(presence)
-    pid_str = result.stdout.strip()
-    if not pid_str:
+    pid_str = payload.strip()
+    if not re.fullmatch(r"[0-9]+", pid_str, re.ASCII) or bool(result.stderr):
         return IntegerProbe(ProbeStatus.UNKNOWN)
     try:
         pid = int(pid_str)
@@ -998,13 +1041,29 @@ def probe_process_start_ticks(
     sudo: bool = False,
 ) -> IntegerProbe:
     """Probe one process start time without conflating failure with absence."""
-    result = target.run(f"cat /proc/{pid}/stat", sudo=sudo, check=False)
+    result = target.run(runtime_probe_command(f"cat /proc/{pid}/stat", "TICKS"), sudo=sudo, check=False)
     if getattr(result, "returncode", 0 if getattr(result, "ok", False) else 1) != 0:
         return IntegerProbe(ProbeStatus.UNKNOWN)
+    payload = runtime_probe_payload(result.stdout, "TICKS")
+    if payload is None:
+        return IntegerProbe(ProbeStatus.UNKNOWN)
+    payload = payload.strip()
+    if "\n" in payload or "\r" in payload or bool(result.stderr):
+        return IntegerProbe(ProbeStatus.UNKNOWN)
     try:
-        return IntegerProbe(ProbeStatus.PRESENT, parse_process_start_ticks(result.stdout.strip()))
+        return IntegerProbe(ProbeStatus.PRESENT, parse_process_start_ticks(payload))
     except ValueError:
         return IntegerProbe(ProbeStatus.UNKNOWN)
+
+
+def read_boot_id(target: Transport) -> str | None:
+    """Read a canonical boot UUID from this command's own observation frame."""
+    result = target.run(runtime_probe_command("cat /proc/sys/kernel/random/boot_id", "BOOT"), check=False)
+    if getattr(result, "returncode", 0 if getattr(result, "ok", False) else 1) != 0:
+        return None
+    if getattr(result, "stderr", ""):
+        return None
+    return canonical_boot_id(runtime_probe_payload(getattr(result, "stdout", "") or "", "BOOT"))
 
 
 def capture_tmux_server_fingerprint(
@@ -1019,9 +1078,7 @@ def capture_tmux_server_fingerprint(
         return FingerprintProbe(first_pid.status)
     assert first_pid.value is not None
     first_ticks = probe_process_start_ticks(first_pid.value, target=target, sudo=sudo)
-    boot = target.run("cat /proc/sys/kernel/random/boot_id", check=False)
-    boot_succeeded = getattr(boot, "returncode", 0 if getattr(boot, "ok", False) else 1) == 0
-    boot_id = canonical_boot_id(getattr(boot, "stdout", "")) if boot_succeeded else None
+    boot_id = read_boot_id(target)
     second_pid = probe_tmux_server_pid(target=target, socket_path=socket_path, sudo=sudo)
     second_ticks = probe_process_start_ticks(first_pid.value, target=target, sudo=sudo)
     if second_pid.status is ProbeStatus.ABSENT:

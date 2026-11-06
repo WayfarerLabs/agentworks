@@ -25,7 +25,7 @@ def test_explicit_native_pane_observation_is_accepted(observation, expected):
 
     def run(command, **kwargs):
         calls.append(command)
-        return SSHResult(0, observation, "")
+        return SSHResult(0, "AGW_RUNTIME_PANE=" + observation, "")
 
     assert _probe_pane_liveness("probe", run_command=run, socket_path="/tmp/unused.sock") == expected
     assert len(calls) == 1
@@ -37,7 +37,7 @@ def test_successful_blank_or_malformed_response_retries_without_asserting_alive(
 
     def run(command, **kwargs):
         calls.append(command)
-        return SSHResult(0, observation, "")
+        return SSHResult(0, "AGW_RUNTIME_PANE=" + observation, "")
 
     assert _probe_pane_liveness("probe", run_command=run, socket_path="/tmp/unused.sock") == ("unverified", "")
     assert len(calls) == 2
@@ -45,7 +45,7 @@ def test_successful_blank_or_malformed_response_retries_without_asserting_alive(
 
 @pytest.mark.parametrize("observation", ["0 \n", "1 23\n"])
 def test_valid_retry_can_resolve_a_successful_blank_first_response(observation):
-    answers = iter([SSHResult(0, "", ""), SSHResult(0, observation, "")])
+    answers = iter([SSHResult(0, "", ""), SSHResult(0, "AGW_RUNTIME_PANE=" + observation, "")])
 
     def run(command, **kwargs):
         return next(answers)

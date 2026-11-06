@@ -101,6 +101,7 @@ def _patch_common(
             TmuxServerFingerprint(pid=12345, boot_id=BOOT_ID, start_ticks=1),
         ),
     )
+    monkeypatch.setattr("agentworks.sessions.tmux.finalize_session_start", lambda *a, **k: None)
     stub_vm_gates(monkeypatch)
     return targets
 
@@ -885,11 +886,18 @@ def test_restart_dead_workload_error_propagates(tmp_path: Path, monkeypatch: pyt
             if cmd.startswith("test -e "):
                 return _ScriptedResult(ok=False)
             if "#{pane_dead}" in cmd:
-                return _ScriptedResult(ok=True, stdout="1 2\n")
+                return _ScriptedResult(ok=True, stdout="AGW_RUNTIME_PANE=1 2\n")
             if "capture-pane" in cmd:
                 return _ScriptedResult(ok=True, stdout=f"{clap_error}\n")
             return _ScriptedResult()
 
+    monkeypatch.setattr(
+        tmux_mod,
+        "capture_tmux_server_fingerprint",
+        lambda **kwargs: FingerprintProbe(
+            ProbeStatus.PRESENT, TmuxServerFingerprint(pid=12345, boot_id=BOOT_ID, start_ticks=1)
+        ),
+    )
     target = _DeadPaneTarget()
     factory = lambda *a, **k: target  # noqa: E731
     monkeypatch.setattr("agentworks.transports.transport", factory)

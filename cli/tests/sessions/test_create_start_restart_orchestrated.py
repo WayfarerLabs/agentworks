@@ -224,6 +224,7 @@ def _restart_fixture(
         lambda *args, **kwargs: events.append("kill"),
     )
     monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *a, **k: None)
+    monkeypatch.setattr(tmux_mod, "finalize_session_start", lambda *a, **k: None)
     monkeypatch.setattr(
         tmux_mod,
         "create_session",
@@ -578,7 +579,7 @@ def test_session_start_records_immediately_after_tmux_creation(
     db.close()
 
 
-def test_session_start_cleans_up_if_start_observation_cannot_be_recorded(
+def test_session_start_retains_runtime_if_start_observation_cannot_be_recorded(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -606,7 +607,7 @@ def test_session_start_cleans_up_if_start_observation_cannot_be_recorded(
             interaction=TtyInteractionPolicy.REFUSE,
         )  # type: ignore[arg-type]
 
-    assert cleaned == ["/run/agentworks/agent-tmux-sockets/agt-a1/s1.sock"]
+    assert cleaned == []
     db.close()
 
 
@@ -879,6 +880,7 @@ def _create_stubs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, events: list[
     monkeypatch.setattr(agent_mgr, "_assert_agent_ssh_works", lambda *a, **k: None)
     monkeypatch.setattr("agentworks.agents.grants.add_to_workspace_group", lambda *a, **k: None)
     monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *a, **k: None)
+    monkeypatch.setattr(tmux_mod, "finalize_session_start", lambda *a, **k: None)
     monkeypatch.setattr(
         tmux_mod,
         "create_session",
@@ -1692,6 +1694,7 @@ def _patch_session_ops(monkeypatch: pytest.MonkeyPatch, events: list[str], captu
 
     _patch_transports(monkeypatch, _Target(events), _Target(events))
     monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *a, **k: None)
+    monkeypatch.setattr(tmux_mod, "finalize_session_start", lambda *a, **k: None)
 
     def _capture_create(*a: object, env: dict[str, str] | None = None, **k: object):  # noqa: ANN202
         events.append("tmux_create")

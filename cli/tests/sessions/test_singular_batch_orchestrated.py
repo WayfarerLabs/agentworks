@@ -40,6 +40,7 @@ from agentworks.sessions import manager as session_manager
 from agentworks.sessions.manager._queries import session_listing_data
 from agentworks.vms import manager as vm_manager
 from agentworks.vms.applied_state import VMSSHIdentityPolicyError
+from tests._runtime_probes import framed_runtime_result
 from tests.conftest import stub_vm_ssh_identity
 
 if TYPE_CHECKING:
@@ -246,7 +247,7 @@ class _FakeTarget:
     """Transport double for the probe / kill / regenerate helpers."""
 
     def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
-        return SimpleNamespace(ok=True, returncode=0, stdout="", stderr="")
+        return framed_runtime_result(cmd, SimpleNamespace(ok=True, returncode=0, stdout="", stderr=""))
 
     def interactive(self, cmd: str, **kwargs: object) -> int:
         return 0
@@ -1341,16 +1342,18 @@ def test_describe_session_preserves_malformed_stored_boot_error(
         def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
             del kwargs
             if "has-session" in cmd:
-                return SimpleNamespace(ok=False, returncode=1, stdout="", stderr="can't find session: s1")
+                return framed_runtime_result(
+                    cmd, SimpleNamespace(ok=False, returncode=1, stdout="", stderr="can't find session: s1")
+                )
             if "list-sessions" in cmd:
                 return SimpleNamespace(
                     ok=False,
                     returncode=1,
-                    stdout="",
+                    stdout="AGW_RUNTIME_SERVER=",
                     stderr="no server running on /tmp/s1.sock",
                 )
             if "/proc/sys/kernel/random/boot_id" in cmd:
-                return SimpleNamespace(ok=True, returncode=0, stdout=f"{BOOT_ID}\n", stderr="")
+                return SimpleNamespace(ok=True, returncode=0, stdout=f"AGW_RUNTIME_BOOT={BOOT_ID}\n", stderr="")
             raise AssertionError(cmd)
 
     monkeypatch.setattr(session_manager, "transport", lambda *_args, **_kwargs: _AbsentTarget())

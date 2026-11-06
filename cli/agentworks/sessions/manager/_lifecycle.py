@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shlex
+from contextlib import contextmanager
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
@@ -11,6 +12,7 @@ from agentworks import output
 from agentworks.capabilities.harness_integration import HarnessLaunchIntent, require_implemented_start
 from agentworks.db import PID_STOPPED, SessionMode, SessionStatus
 from agentworks.errors import (
+    AgentworksError,
     BrokenStateError,
     ExternalError,
     NotFoundError,
@@ -21,6 +23,8 @@ from agentworks.errors import (
 from agentworks.sessions.tmux import ADMIN_SOCKET_ROOT, AGENT_SOCKET_ROOT
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable, Iterator
+
     from agentworks.agents.nodes import (
         LiveAgentNode,
     )
@@ -31,6 +35,19 @@ if TYPE_CHECKING:
     from agentworks.sessions.template import SessionTemplate
     from agentworks.sessions.tmux import RunCommand
     from agentworks.transports import Transport
+
+
+@contextmanager
+def _redacted_launch_errors(redactions: Iterable[str]) -> Iterator[None]:
+    """Sanitize operation failures before the CLI renders or logs them."""
+    from agentworks.harness_setup.outcomes import sanitize_setup_error
+
+    values = tuple(redactions)
+    try:
+        yield
+    except AgentworksError as error:
+        sanitize_setup_error(error, redactions=values)
+        raise
 
 
 def _requested_launch_intent(*, force_new: bool, resume_only: bool) -> HarnessLaunchIntent:
@@ -813,52 +830,30 @@ def _launch_existing_session(
                 interaction=interaction,
             )
 
-        logger = SSHLogger(
-            vm.name,
-            f"session-{operation}",
-            redactions=tuple(dict.fromkeys((*graph_secret_values.values(), *secret_values.values()))),
-        )
-        admin_target = _mgr.transport(vm, config, logger=logger)
-        run_command = admin_target.run
-        if is_admin:
-            session_target = admin_target
-            session_run_command = admin_target.run
+        redactions = tuple(dict.fromkeys((*graph_secret_values.values(), *secret_values.values())))
+        with _redacted_launch_errors(redactions):
+            logger = SSHLogger(
+                vm.name,
+                f"session-{operation}",
+                redactions=redactions,
+            )
+            admin_target = _mgr.transport(vm, config, logger=logger)
+            run_command = admin_target.run
+            if is_admin:
+                session_target = admin_target
+                session_run_command = admin_target.run
 
-        from agentworks.artifacts.session import (
-            commit_session_artifacts,
-            prepare_session_artifacts,
-            stage_session_artifacts,
-            validate_session_application,
-        )
+            from agentworks.artifacts.session import (
+                commit_session_artifacts,
+                prepare_session_artifacts,
+                stage_session_artifacts,
+                validate_session_application,
+            )
 
-        linux_user = _mgr._resolve_session_linux_user(db, session, vm)
-        session_env = _mgr._resolve_session_env(
-            registry,
-            values=secret_values,
-            db=db,
-            vm=vm,
-            ws=ws,
-            session_name=name,
-            session_template=template,
-            mode=SessionMode(session.mode),
-            agent_name=session.agent_name,
-            linux_user=linux_user,
-        )
-
-        prepared_artifacts = prepare_session_artifacts(
-            db,
-            registry,
-            name=name,
-            template=template,
-            vm=vm,
-            workspace=ws,
-            agent_name=session.agent_name,
-            runner=session_target,
-            environment=session_env,
-            session_uuid=session.session_uuid,
-            linux_user=linux_user,
-            secret_target=_mgr._session_secret_target(
+            linux_user = _mgr._resolve_session_linux_user(db, session, vm)
+            session_env = _mgr._resolve_session_env(
                 registry,
+                values=secret_values,
                 db=db,
                 vm=vm,
                 ws=ws,
@@ -866,143 +861,160 @@ def _launch_existing_session(
                 session_template=template,
                 mode=SessionMode(session.mode),
                 agent_name=session.agent_name,
-            ),
-        )
-        session_node.harness_integration.prepare_artifacts(prepared_artifacts.context)
-        # Ask the harness for its launch decision before any teardown. A
-        # strict resume failure or an unsupported intent therefore leaves an
-        # existing runtime intact. Stateful integrations decide from their
-        # durable target state, not from whether the old tmux process is live.
-        start_ctx = RunContext(
-            config=config,
-            operation_scope=scope,
-            admin_target=admin_target,
-            agent_target=None if is_admin else session_target,
-            secrets=ScopedSecrets(graph_secret_values, session_node.secret_refs()),
-        )
-        harness_start = require_implemented_start(
-            session_node.harness_integration.start(start_ctx, intent=intent),
-            intent=intent,
-            harness_integration_name=template.harness_integration,
-            session_name=name,
-        )
-        artifact_application = validate_session_application(
-            harness_start.artifacts, prepared_artifacts.context, integration=template.harness_integration
-        )
-        if artifact_application.artifacts_dir is not None:
-            session_env["AGENTWORKS_ARTIFACTS_DIR"] = artifact_application.artifacts_dir
-        stage_session_artifacts(
-            db, name, template.harness_integration, session_target, prepared_artifacts, artifact_application
-        )
-        command = _mgr._substitute_template_vars(
-            harness_start.command,
-            {"session_name": name, "workspace_name": session.workspace_name},
-        )
+                linux_user=linux_user,
+            )
 
-        with output.section("Starting Session"):
-            output.info(f"{operation.title()}ing session '{name}'...")
-
-            if is_legacy or status in {SessionStatus.RUNNING, SessionStatus.RESIDUAL, SessionStatus.BROKEN}:
-                _teardown_session(
-                    session,
-                    target=session_target,
-                    target_owns_session=True,
+            prepared_artifacts = prepare_session_artifacts(
+                db,
+                registry,
+                name=name,
+                template=template,
+                vm=vm,
+                workspace=ws,
+                agent_name=session.agent_name,
+                runner=session_target,
+                environment=session_env,
+                session_uuid=session.session_uuid,
+                linux_user=linux_user,
+                secret_target=_mgr._session_secret_target(
+                    registry,
                     db=db,
-                    force=force,
-                    legacy_running_authorized=(not replace_running or running_restart_authorized),
+                    vm=vm,
+                    ws=ws,
+                    session_name=name,
+                    session_template=template,
+                    mode=SessionMode(session.mode),
+                    agent_name=session.agent_name,
+                ),
+            )
+            session_node.harness_integration.prepare_artifacts(prepared_artifacts.context)
+            # Ask the harness for its launch decision before any teardown. A
+            # strict resume failure or an unsupported intent therefore leaves an
+            # existing runtime intact. Stateful integrations decide from their
+            # durable target state, not from whether the old tmux process is live.
+            start_ctx = RunContext(
+                config=config,
+                operation_scope=scope,
+                admin_target=admin_target,
+                agent_target=None if is_admin else session_target,
+                secrets=ScopedSecrets(graph_secret_values, session_node.secret_refs()),
+            )
+            harness_start = require_implemented_start(
+                session_node.harness_integration.start(start_ctx, intent=intent),
+                intent=intent,
+                harness_integration_name=template.harness_integration,
+                session_name=name,
+            )
+            artifact_application = validate_session_application(
+                harness_start.artifacts, prepared_artifacts.context, integration=template.harness_integration
+            )
+            if artifact_application.artifacts_dir is not None:
+                session_env["AGENTWORKS_ARTIFACTS_DIR"] = artifact_application.artifacts_dir
+            stage_session_artifacts(
+                db, name, template.harness_integration, session_target, prepared_artifacts, artifact_application
+            )
+            command = _mgr._substitute_template_vars(
+                harness_start.command,
+                {"session_name": name, "workspace_name": session.workspace_name},
+            )
+
+            with output.section("Starting Session"):
+                output.info(f"{operation.title()}ing session '{name}'...")
+
+                if is_legacy or status in {SessionStatus.RUNNING, SessionStatus.RESIDUAL, SessionStatus.BROKEN}:
+                    _teardown_session(
+                        session,
+                        target=session_target,
+                        target_owns_session=True,
+                        db=db,
+                        force=force,
+                        legacy_running_authorized=(not replace_running or running_restart_authorized),
+                    )
+
+                commit_session_artifacts(db, name, template.harness_integration, session_target, prepared_artifacts)
+                deploy_restricted_config(run_command, history_limit=config.session.history_limit)
+
+                if harness_start.note is not None:
+                    output.detail(harness_start.note)
+                # Persist the node's FULL namespaced harness_integration_state blob after the
+                # op (mirrors the create-path insert): the harness_integration mutated its own
+                # namespace in place, and persisting the full blob keeps foreign
+                # harness integrations' namespaces intact across a template's
+                # harness_integration switch.
+                # Usually a no-op (the value was stored on create), but a session
+                # predating the harness_integration_state column (backfilled to {}) mints its
+                # id on this first launch. Persisting BEFORE create_tmux_session
+                # is intentional: a stable id that survives a tmux-recreate retry
+                # beats re-minting a new one each attempt (the id is the
+                # session's, whether or not the pane came up).
+                db.update_session_harness_integration_state(name, session_node.harness_integration_state)
+
+                try:
+                    new_sock, pid = create_tmux_session(
+                        name,
+                        ws.workspace_path,
+                        command,
+                        linux_user,
+                        run_command=session_run_command,
+                        target=admin_target,
+                        admin_username=vm.admin_username,
+                        is_admin=is_admin,
+                        env=session_env,
+                    )
+                except RuntimeError as exc:
+                    if "already has an active tmux server" in str(exc):
+                        raise StateError(
+                            f"session '{name}' has an active tmux server that was not detected by the status check.",
+                            entity_kind="session",
+                            entity_name=name,
+                            hint="Use 'session stop --force' to kill it, then retry.",
+                        ) from exc
+                    raise
+                from agentworks.sessions.tmux import (
+                    ProbeStatus,
+                    capture_tmux_server_fingerprint,
+                    finalize_session_start,
                 )
 
-            commit_session_artifacts(db, name, template.harness_integration, session_target, prepared_artifacts)
-            deploy_restricted_config(run_command, history_limit=config.session.history_limit)
+                _mark_runtime_unknown(db, session, socket_path=new_sock)
+                db.record_session_started(name)
 
-            if harness_start.note is not None:
-                output.detail(harness_start.note)
-            # Persist the node's FULL namespaced harness_integration_state blob after the
-            # op (mirrors the create-path insert): the harness_integration mutated its own
-            # namespace in place, and persisting the full blob keeps foreign
-            # harness integrations' namespaces intact across a template's
-            # harness_integration switch.
-            # Usually a no-op (the value was stored on create), but a session
-            # predating the harness_integration_state column (backfilled to {}) mints its
-            # id on this first launch. Persisting BEFORE create_tmux_session
-            # is intentional: a stable id that survives a tmux-recreate retry
-            # beats re-minting a new one each attempt (the id is the
-            # session's, whether or not the pane came up).
-            db.update_session_harness_integration_state(name, session_node.harness_integration_state)
-
-            try:
-                new_sock, pid = create_tmux_session(
-                    name,
-                    ws.workspace_path,
-                    command,
-                    linux_user,
-                    run_command=session_run_command,
-                    target=admin_target,
-                    admin_username=vm.admin_username,
-                    is_admin=is_admin,
-                    env=session_env,
+                fingerprint_probe = capture_tmux_server_fingerprint(
+                    target=session_target,
+                    socket_path=new_sock,
                 )
-            except RuntimeError as exc:
-                if "already has an active tmux server" in str(exc):
-                    raise StateError(
-                        f"session '{name}' has an active tmux server that was not detected by the status check.",
+                fingerprint = fingerprint_probe.fingerprint
+                if (
+                    fingerprint_probe.status is not ProbeStatus.PRESENT
+                    or fingerprint is None
+                    or (pid is not None and fingerprint.pid != pid)
+                ):
+                    raise ExternalError(
+                        f"could not capture a stable tmux server fingerprint for session '{name}'",
                         entity_kind="session",
                         entity_name=name,
-                        hint="Use 'session stop --force' to kill it, then retry.",
-                    ) from exc
-                raise
-            from agentworks.sessions.tmux import (
-                ProbeStatus,
-                capture_tmux_server_fingerprint,
-                kill_server_and_probe,
-            )
-
-            try:
-                db.record_session_started(name)
-            except (KeyboardInterrupt, Exception):
-                cleanup = kill_server_and_probe(run_command=session_run_command, socket_path=new_sock)
-                if cleanup is not ProbeStatus.ABSENT:
-                    _mark_runtime_unknown(db, session, socket_path=new_sock)
-                    output.warn(f"session '{name}' may still have a runtime at socket {new_sock}")
-                raise
-
-            fingerprint_probe = capture_tmux_server_fingerprint(
-                target=session_target,
-                socket_path=new_sock,
-            )
-            fingerprint = fingerprint_probe.fingerprint
-            if (
-                fingerprint_probe.status is not ProbeStatus.PRESENT
-                or fingerprint is None
-                or (pid is not None and fingerprint.pid != pid)
-            ):
-                cleanup = kill_server_and_probe(run_command=session_run_command, socket_path=new_sock)
-                if cleanup is ProbeStatus.ABSENT:
-                    _mark_stopped(db, session)
-                else:
-                    _mark_runtime_unknown(db, session, socket_path=new_sock)
-                raise ExternalError(
-                    f"could not capture a stable tmux server fingerprint for session '{name}'",
-                    entity_kind="session",
-                    entity_name=name,
-                    hint=(
-                        f"The session row and socket {new_sock} were retained because "
-                        "runtime absence could not be proved."
-                        if cleanup is not ProbeStatus.ABSENT
-                        else None
-                    ),
+                        hint=(
+                            f"The session row and socket {new_sock} were retained because "
+                            "runtime absence could not be proved."
+                        ),
+                    )
+                db.update_session_runtime(
+                    name,
+                    socket_path=new_sock,
+                    pid=fingerprint.pid,
+                    boot_id=fingerprint.boot_id,
+                    tmux_server_start_ticks=fingerprint.start_ticks,
                 )
-            db.update_session_runtime(
-                name,
-                socket_path=new_sock,
-                pid=fingerprint.pid,
-                boot_id=fingerprint.boot_id,
-                tmux_server_start_ticks=fingerprint.start_ticks,
-            )
+                finalize_session_start(
+                    name,
+                    run_command=session_run_command,
+                    socket_path=new_sock,
+                    is_admin=is_admin,
+                )
 
-        output.result(f"Session '{name}' {operation}ed")
+            output.result(f"Session '{name}' {operation}ed")
 
-        _mgr._regenerate_tmuxinator(db, config, vm, ws)
+            _mgr._regenerate_tmuxinator(db, config, vm, ws)
 
 
 def stop_all_sessions(

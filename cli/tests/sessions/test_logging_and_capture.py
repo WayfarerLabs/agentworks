@@ -4,6 +4,7 @@ import os
 import shlex
 import shutil
 import subprocess
+import tempfile
 import time
 from types import SimpleNamespace
 from uuid import uuid4
@@ -81,37 +82,42 @@ def test_admin_session_launch_redacts_resolved_values_in_actual_command_log(tmp_
         db.close()
 
 
-@pytest.mark.skipif(shutil.which("tmux") is None, reason="requires the real tmux executable")
-def test_real_tmux_capture_targets_the_exact_session_pane(tmp_path):
-    socket = str(tmp_path / "capture.sock")
-    marker = uuid4().hex
-    environment = {"HOME": str(tmp_path), "PATH": os.defpath, "SHELL": "/bin/sh", "TERM": "xterm"}
+@pytest.mark.skipif(os.name != "posix" or shutil.which("tmux") is None, reason="requires Unix tmux")
+def test_real_tmux_capture_targets_the_exact_session_pane():
+    with tempfile.TemporaryDirectory(prefix="agw-r7-capture-", dir="/tmp") as directory:
+        socket = os.path.join(directory, "capture.sock")
+        marker = uuid4().hex
+        environment = {"HOME": directory, "PATH": os.defpath, "SHELL": "/bin/sh", "TERM": "xterm"}
 
-    def run(command, **kwargs):
-        completed = subprocess.run(shlex.split(command), capture_output=True, text=True, timeout=10, env=environment)
-        return SSHResult(completed.returncode, completed.stdout, completed.stderr)
+        def run(command, **kwargs):
+            completed = subprocess.run(
+                shlex.split(command), capture_output=True, text=True, timeout=10, env=environment
+            )
+            return SSHResult(completed.returncode, completed.stdout, completed.stderr)
 
-    try:
-        subprocess.run(
-            ["tmux", "-f", "/dev/null", "-S", socket, "new-session", "-d", "-s", "capture", "/bin/sh -i"],
-            check=True,
-            timeout=10,
-            env=environment,
-        )
-        subprocess.run(["tmux", "-S", socket, "set-buffer", marker], check=True, timeout=10, env=environment)
-        subprocess.run(
-            ["tmux", "-S", socket, "paste-buffer", "-t", "=capture:"], check=True, timeout=10, env=environment
-        )
-        deadline = time.monotonic() + 5
-        captured = ""
-        while marker not in captured and time.monotonic() < deadline:
-            captured = capture_output("capture", run_command=run, socket_path=socket)
-            if marker not in captured:
-                time.sleep(0.02)
-        assert marker in captured
-        with pytest.raises(ExternalError):
-            capture_output("missing", run_command=run, socket_path=socket)
-    finally:
-        subprocess.run(["tmux", "-S", socket, "kill-server"], capture_output=True, timeout=10, env=environment)
-        probe = subprocess.run(["tmux", "-S", socket, "has-session"], capture_output=True, timeout=10, env=environment)
-        assert probe.returncode != 0
+        try:
+            subprocess.run(
+                ["tmux", "-f", "/dev/null", "-S", socket, "new-session", "-d", "-s", "capture", "/bin/sh -i"],
+                check=True,
+                timeout=10,
+                env=environment,
+            )
+            subprocess.run(["tmux", "-S", socket, "set-buffer", marker], check=True, timeout=10, env=environment)
+            subprocess.run(
+                ["tmux", "-S", socket, "paste-buffer", "-t", "=capture:"], check=True, timeout=10, env=environment
+            )
+            deadline = time.monotonic() + 5
+            captured = ""
+            while marker not in captured and time.monotonic() < deadline:
+                captured = capture_output("capture", run_command=run, socket_path=socket)
+                if marker not in captured:
+                    time.sleep(0.02)
+            assert marker in captured
+            with pytest.raises(ExternalError):
+                capture_output("missing", run_command=run, socket_path=socket)
+        finally:
+            subprocess.run(["tmux", "-S", socket, "kill-server"], capture_output=True, timeout=10, env=environment)
+            probe = subprocess.run(
+                ["tmux", "-S", socket, "has-session"], capture_output=True, timeout=10, env=environment
+            )
+            assert probe.returncode != 0

@@ -27,7 +27,8 @@ from agentworks.sessions.manager._status import (
     _BoundedStatusTarget,
     _encoded_probe_field,
 )
-from agentworks.sessions.tmux import ProbeStatus, probe_tmux_server_pid
+from agentworks.sessions.tmux import ProbeStatus, probe_tmux_server_pid, runtime_probe_command
+from tests._runtime_probes import framed_runtime_result
 from tests.conftest import requires_posix_shell, requires_symlinks
 
 if TYPE_CHECKING:
@@ -69,8 +70,8 @@ class _FakeTarget:
         self.call_options.append((tty, timeout, retries))
         for pattern, result in self._responses.items():
             if pattern in command:
-                return result
-        return _FakeResult()
+                return framed_runtime_result(command, result)
+        return framed_runtime_result(command, _FakeResult())
 
 
 def _session(
@@ -252,7 +253,7 @@ def test_batch_fleet_uses_constant_argv_and_unbounded_stdin_data(
     completed = subprocess.CompletedProcess(
         [],
         0,
-        stdout=("\n".join(_batch_row(session.name) for session in sessions) + "\n").encode(),
+        stdout=("AGW_RUNTIME_BATCH=" + "\n".join(_batch_row(session.name) for session in sessions) + "\n").encode(),
         stderr=b"",
     )
     calls: list[tuple[list[str], dict[str, object]]] = []
@@ -267,7 +268,7 @@ def test_batch_fleet_uses_constant_argv_and_unbounded_stdin_data(
 
     assert len(calls) == 1
     argv, kwargs = calls[0]
-    assert argv[-1] == _batch_probe_command()
+    assert argv[-1] == runtime_probe_command(_batch_probe_command(), "BATCH")
     assert len(" ".join(argv).encode()) < 32_767
     payload = kwargs["input"]
     assert payload == _batch_probe_data(sessions).encode()
@@ -538,7 +539,10 @@ def test_agent_status_elevates_cross_user_pid_probe() -> None:
             if "test -d /proc/42" in command:
                 elevated = kwargs.get("sudo") is True
                 self.pid_sudo.append(elevated)
-                return _FakeResult(ok=elevated, returncode=0 if elevated else 2, stdout="present" if elevated else "")
+                return framed_runtime_result(
+                    command,
+                    _FakeResult(ok=elevated, returncode=0 if elevated else 2, stdout="present" if elevated else ""),
+                )
             return super().run(command, **kwargs)
 
     target = _ElevatedPidTarget()

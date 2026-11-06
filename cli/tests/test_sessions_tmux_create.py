@@ -31,6 +31,7 @@ from agentworks.sessions.tmux import (
     capture_tmux_server_fingerprint,
     create_session,
     exact_tmux_target,
+    finalize_session_start,
     parse_process_start_ticks,
 )
 
@@ -137,15 +138,15 @@ class _FingerprintTarget:
         if "display-message" in command:
             self.pid_reads += 1
             pid = 42 if self.pid_reads == 1 else self.second_pid
-            return _SpyResult(stdout=f"{pid}\n")
+            return _SpyResult(stdout=f"AGW_RUNTIME_PID={pid}\n")
         if "/proc/42/stat" in command:
             self.stat_reads += 1
             ticks = 98765 if self.stat_reads == 1 else self.second_ticks
             fields_after_comm = ["S", *[str(value) for value in range(4, 23)]]
             fields_after_comm[-1] = str(ticks)
-            return _SpyResult(stdout=f"42 (tmux: server) {' '.join(fields_after_comm)}\n")
+            return _SpyResult(stdout=f"AGW_RUNTIME_TICKS=42 (tmux: server) {' '.join(fields_after_comm)}\n")
         if "boot_id" in command:
-            return _SpyResult(stdout=f"{self.boot_id}\n", returncode=self.boot_returncode)
+            return _SpyResult(stdout=f"AGW_RUNTIME_BOOT={self.boot_id}\n", returncode=self.boot_returncode)
         raise AssertionError(command)
 
 
@@ -335,7 +336,7 @@ def test_post_teardown_probe_retries_one_indeterminate_transition() -> None:
 
     def run(command: str, **kwargs: object) -> _SpyResult:
         commands.append(command)
-        result = _SpyResult(returncode=1)
+        result = _SpyResult(stdout="AGW_RUNTIME_SERVER=", returncode=1)
         result.stderr = next(diagnostics)
         return result
 
@@ -377,7 +378,7 @@ class _SpyRunCommand:
         if command.startswith("test -e "):
             return _SpyResult(ok=False)
         if "#{pane_dead}" in command:
-            return _SpyResult(ok=True, stdout="0 \n")
+            return _SpyResult(ok=True, stdout="AGW_RUNTIME_PANE=0 \n")
         if "display-message" in command:
             return _SpyResult(ok=True, stdout="12345\n")
         return _SpyResult(ok=True)
@@ -462,7 +463,7 @@ def test_admin_create_session_passes_env_to_run_command(
         env=env,
     )
 
-    new_session_calls = [c for c in spy_run.calls if "tmux -S" in c[0] and "new-session" in c[0]]
+    new_session_calls = [c for c in spy_run.calls if "new-session" in c[0]]
     assert len(new_session_calls) == 1
     cmd, passed_env = new_session_calls[0]
     # SetEnv side: env passed straight through to run_command.
@@ -498,7 +499,7 @@ def test_agent_create_session_uses_dedicated_socket_and_env(
 
     # Socket path is under the agent socket root, per-session.
     assert sock == "/run/agentworks/agent-tmux-sockets/aw-claude/s1.sock"
-    new_session_calls = [c for c in spy_run.calls if "tmux -S" in c[0] and "new-session" in c[0]]
+    new_session_calls = [c for c in spy_run.calls if "new-session" in c[0]]
     assert len(new_session_calls) == 1
     cmd, passed_env = new_session_calls[0]
     assert passed_env == env
@@ -525,7 +526,7 @@ def test_admin_create_session_uses_admin_socket(
     )
 
     assert sock == "/run/agentworks/admin-tmux-sockets/agentworks/s1.sock"
-    new_session_calls = [c for c in spy_run.calls if "tmux -S" in c[0] and "new-session" in c[0]]
+    new_session_calls = [c for c in spy_run.calls if "new-session" in c[0]]
     assert len(new_session_calls) == 1
     cmd, _env = new_session_calls[0]
     assert sock in cmd
@@ -550,7 +551,7 @@ def test_create_session_with_no_env_omits_e_flags(
         env=None,
     )
 
-    new_session_calls = [c for c in spy_run.calls if "tmux -S" in c[0] and "new-session" in c[0]]
+    new_session_calls = [c for c in spy_run.calls if "new-session" in c[0]]
     cmd, passed_env = new_session_calls[0]
     assert passed_env is None
     assert " -e " not in cmd
@@ -609,7 +610,7 @@ class _ScriptedRunCommand:
             answer = self._probe_answers.pop(0)
             if answer is None:
                 return _SpyResult(ok=False)
-            return _SpyResult(ok=True, stdout=answer + "\n")
+            return _SpyResult(ok=True, stdout="AGW_RUNTIME_PANE=" + answer + "\n")
         if "capture-pane" in command:
             if " -a" in command:
                 return _SpyResult(ok=True, stdout=self._alt_capture_stdout)
@@ -621,7 +622,7 @@ class _ScriptedRunCommand:
 
 def _agent_create(spy_run: _ScriptedRunCommand, spy_target: _SpyTarget) -> tuple[str, int | None]:
     """Drive an agent-mode create_session against the scripted spy."""
-    return create_session(
+    created = create_session(
         session_name="s1",
         workspace_path="/home/aw-claude/ws",
         command="codex -a on-failure",
@@ -631,16 +632,15 @@ def _agent_create(spy_run: _ScriptedRunCommand, spy_target: _SpyTarget) -> tuple
         admin_username="agentworks",
         is_admin=False,
     )
+    finalize_session_start("s1", run_command=spy_run, socket_path=created[0], is_admin=False)
+    return created
 
 
 def test_dead_pane_at_first_check_captures_and_skips_grant(
     spy_target: _SpyTarget,
     stub_agent_socket_setup: None,
 ) -> None:
-    """A workload dead at the first liveness check: its output and exit
-    status are captured into the typed error, the server is killed, and the
-    grant machinery (chmod + server-access) is NEVER invoked against the
-    dead socket."""
+    """Make the socket observable before diagnosing death; skip server grants."""
     spy_run = _ScriptedRunCommand(probe_answers=["1 2"], capture_stdout=_CLAP_ERROR)
 
     with pytest.raises(StateError) as excinfo:
@@ -654,8 +654,8 @@ def test_dead_pane_at_first_check_captures_and_skips_grant(
     kill_idx = next(i for i, c in enumerate(spy_run.calls) if "kill-server" in c)
     assert capture_idx < kill_idx
     assert " -J " in spy_run.calls[capture_idx]
-    # The grant machinery never touched the dead socket.
-    assert not any("chmod g+rwx" in c for c in spy_run.calls)
+    # Permission repair precedes diagnosis, even if the server is dead.
+    assert any("chmod g+rwx" in c for c in spy_run.calls)
     assert not any("server-access" in c for c in spy_run.calls)
 
 
@@ -668,7 +668,7 @@ def test_alive_pane_remain_on_exit_lifecycle(
     server up, the unset lands after the grant machinery, the final re-check
     is the last tmux call, no capture happens, and the return value is
     unchanged."""
-    spy_run = _ScriptedRunCommand(probe_answers=["0 ", "0 "])
+    spy_run = _ScriptedRunCommand(probe_answers=["0 ", "0 ", "0 "])
 
     sock, pid = _agent_create(spy_run, spy_target)
 
@@ -677,12 +677,12 @@ def test_alive_pane_remain_on_exit_lifecycle(
     new_session_calls = [c for c in spy_run.calls if "new-session" in c]
     assert len(new_session_calls) == 1
     # Chained into the same client invocation, not a separate round-trip.
-    assert new_session_calls[0].endswith("\\; set-option -t s1 remain-on-exit on")
+    assert "\\; set-option -t s1 remain-on-exit on" in new_session_calls[0]
     grant_idx = next(i for i, c in enumerate(spy_run.calls) if "server-access" in c)
     pid_idx = next(i for i, c in enumerate(spy_run.calls) if "#{pid}" in c)
     unset_idx = next(i for i, c in enumerate(spy_run.calls) if "set-option -u" in c and "remain-on-exit" in c)
-    # grants -> PID fetch (server still guaranteed up) -> unset -> re-check.
-    assert grant_idx < pid_idx < unset_idx, "PID must be fetched after the grant, before the unset"
+    # Spawn PID -> grants -> release protection -> final observation.
+    assert pid_idx < grant_idx < unset_idx
     recheck_idx = max(i for i, c in enumerate(spy_run.calls) if "#{pane_dead}" in c)
     assert recheck_idx > unset_idx, "the final liveness re-check must follow the unset"
     assert recheck_idx == len(spy_run.calls) - 1, "the re-check must be the last call before return"
@@ -697,7 +697,7 @@ def test_dead_pane_at_post_unset_recheck_captures_and_raises(
     """A workload that dies between the first check and the unset leaves a
     dead-but-persisted pane; the re-check converts it into the same
     capture-and-raise path instead of a zombie session."""
-    spy_run = _ScriptedRunCommand(probe_answers=["0 ", "1 127"], capture_stdout=_CLAP_ERROR)
+    spy_run = _ScriptedRunCommand(probe_answers=["0 ", "0 ", "1 127"], capture_stdout=_CLAP_ERROR)
 
     with pytest.raises(StateError) as excinfo:
         _agent_create(spy_run, spy_target)
@@ -739,7 +739,7 @@ def test_probe_transient_blip_retries_and_succeeds(
 ) -> None:
     """One failed probe attempt followed by a clean 'alive' answer must not
     condemn the create: the retry absorbs a single transport blip."""
-    spy_run = _ScriptedRunCommand(probe_answers=[None, "0 ", "0 "])
+    spy_run = _ScriptedRunCommand(probe_answers=[None, "0 ", "0 ", "0 "])
 
     sock, pid = _agent_create(spy_run, spy_target)
 
@@ -765,13 +765,11 @@ def test_invalid_pane_observation_never_authorizes_capture_or_cleanup(
     assert not any("server-access" in command for command in spy_run.calls)
 
 
-def test_dead_pane_no_main_output_falls_back_to_alternate_screen(
+def test_dead_pane_saved_screen_is_captured(
     spy_target: _SpyTarget,
     stub_agent_socket_setup: None,
 ) -> None:
-    """A TUI that crashed after entering the alternate screen leaves its
-    message there; when the main-screen capture is empty, one best-effort
-    ``-a`` capture recovers it."""
+    """The saved screen can contain diagnostics absent from the active screen."""
     spy_run = _ScriptedRunCommand(
         probe_answers=["1 1"],
         capture_stdout="",
@@ -789,12 +787,13 @@ def test_dead_pane_with_no_output_at_all_says_so(
     spy_target: _SpyTarget,
     stub_agent_socket_setup: None,
 ) -> None:
-    """Both captures empty: the error still names the exit status and says
-    honestly that no output was produced."""
+    """Capture still attempts both buffers when no output is available."""
     spy_run = _ScriptedRunCommand(probe_answers=["1 0"])
 
-    with pytest.raises(StateError, match=r"exited immediately after launch \(status 0\) and produced no output"):
+    with pytest.raises(StateError) as caught:
         _agent_create(spy_run, spy_target)
+    assert caught.value.entity_kind == "session"
+    assert sum("capture-pane" in command for command in spy_run.calls) == 2
 
 
 # ---------------------------------------------------------------------------
@@ -827,3 +826,46 @@ def test_trim_captured_output_caps_line_length() -> None:
 def test_trim_captured_output_empty_input() -> None:
     assert _trim_captured_output("") == ""
     assert _trim_captured_output("\n\n   \n") == ""
+
+
+@pytest.mark.parametrize("observation", ["0 ", ""])
+def test_socket_sharing_failure_preserves_its_original_exception_when_death_is_not_observed(
+    spy_target: _SpyTarget, stub_agent_socket_setup: None, observation: str
+) -> None:
+    from agentworks.errors import ExternalError
+
+    failure = ExternalError("controlled sharing failure")
+    scripted = _ScriptedRunCommand(probe_answers=[observation, observation])
+
+    def run(command: str, **kwargs: object) -> _SpyResult:
+        if "chmod g+rwx" in command:
+            raise failure
+        return scripted(command, **kwargs)
+
+    with pytest.raises(ExternalError) as caught:
+        finalize_session_start("s1", run_command=run, socket_path="/tmp/owned", is_admin=False)
+    assert caught.value is failure
+    assert not any("kill-server" in command for command in scripted.calls)
+
+
+@pytest.mark.parametrize("stage", ["chmod", "server-access"])
+def test_confirmed_death_outweighs_expected_sharing_capture_and_cleanup_failures(stage: str) -> None:
+    from agentworks.errors import ExternalError
+
+    calls: list[str] = []
+    answers = iter(["0 ", "1 37"] if stage == "server-access" else ["1 37"])
+
+    def run(command: str, **kwargs: object) -> _SpyResult:
+        calls.append(command)
+        if stage == "server-access" and "chmod" in command:
+            return _SpyResult()
+        if "#{pane_dead}" in command:
+            return _SpyResult(stdout="AGW_RUNTIME_PANE=" + next(answers) + "\n")
+        raise ExternalError("controlled auxiliary failure")
+
+    with pytest.raises(StateError) as caught:
+        finalize_session_start("s1", run_command=run, socket_path="/tmp/owned", is_admin=False)
+    assert caught.value.entity_kind == "session" and caught.value.entity_name == "s1"
+    assert "37" in str(caught.value)
+    assert sum("capture-pane" in command for command in calls) == 2
+    assert any("kill-server" in command for command in calls)

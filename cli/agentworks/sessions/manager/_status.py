@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+from functools import partial
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
@@ -15,7 +16,13 @@ from agentworks.errors import (
     StateError,
     UserAbort,
 )
-from agentworks.sessions.tmux import ProbeStatus, probe_tmux_server, probe_tmux_session
+from agentworks.sessions.tmux import (
+    ProbeStatus,
+    probe_tmux_server,
+    probe_tmux_session,
+    runtime_probe_command,
+    runtime_probe_payload,
+)
 from agentworks.status_observation import (
     GUEST_OBSERVATION_ATTEMPTS,
     GUEST_OBSERVATION_TIMEOUT_SECONDS,
@@ -65,19 +72,17 @@ def _pid_presence(pid: int, *, target: Transport, sudo: bool = False) -> ProbeSt
     """Probe a PID without treating a transport failure as process absence."""
     from agentworks.sessions.tmux import _normalized_probe_streams
 
-    result = target.run(_pid_probe_script(pid), sudo=sudo, check=False)
-    stdout, stderr = _normalized_probe_streams(result)
+    result = target.run(runtime_probe_command(_pid_probe_script(pid), "PRESENT"), sudo=sudo, check=False)
+    _, stderr = _normalized_probe_streams(result)
+    stdout = runtime_probe_payload(getattr(result, "stdout", "") or "", "PRESENT")
     return _pid_presence_from_fact(getattr(result, "returncode", None), stdout, stderr=stderr)
 
 
 def _get_boot_id(target: Transport) -> str | None:
     """Read the current VM boot ID. Returns None on failure."""
-    from agentworks.sessions.tmux import canonical_boot_id
+    from agentworks.sessions.tmux import read_boot_id
 
-    result = target.run("cat /proc/sys/kernel/random/boot_id", check=False)
-    if getattr(result, "returncode", 0 if getattr(result, "ok", False) else 1) != 0:
-        return None
-    return canonical_boot_id(getattr(result, "stdout", ""))
+    return read_boot_id(target)
 
 
 def check_session_status(
@@ -127,13 +132,17 @@ def _check_dedicated_session(session: SessionRow, *, target: Transport) -> Sessi
     """
     socket_path = session.socket_path
     assert socket_path is not None
-    session_presence = probe_tmux_session(session.name, run_command=target.run, socket_path=socket_path)
+    # Match batch observation and fingerprint repair: admin inspection of an
+    # agent server uses the existing privileged read boundary, even before
+    # startup completed its shared socket permissions.
+    run_command = partial(target.run, sudo=session.mode == SessionMode.AGENT.value)
+    session_presence = probe_tmux_session(session.name, run_command=run_command, socket_path=socket_path)
     if session_presence is ProbeStatus.UNKNOWN:
         return SessionStatus.UNKNOWN
     if session_presence is ProbeStatus.PRESENT:
         return SessionStatus.RUNNING
 
-    server_presence = probe_tmux_server(run_command=target.run, socket_path=socket_path)
+    server_presence = probe_tmux_server(run_command=run_command, socket_path=socket_path)
     if server_presence is ProbeStatus.UNKNOWN:
         return SessionStatus.UNKNOWN
     if server_presence is ProbeStatus.PRESENT:
@@ -184,7 +193,7 @@ def batch_check_status(
     if not checkable:
         return {}
 
-    cmd = _batch_probe_command()
+    cmd = runtime_probe_command(_batch_probe_command(), "BATCH")
     result = target.run(
         cmd,
         check=False,
@@ -193,7 +202,7 @@ def batch_check_status(
         tty=False,
         input_data=_batch_probe_data(checkable),
     )
-    stdout = getattr(result, "stdout", "") or ""
+    stdout = runtime_probe_payload(getattr(result, "stdout", "") or "", "BATCH")
     _, stderr = _normalized_probe_streams(result)
 
     status_map: dict[str, SessionStatus] = {
@@ -201,7 +210,7 @@ def batch_check_status(
     }
     sessions_by_key = {_encoded_probe_field(session.name): session for session in checkable}
 
-    if result.returncode != 0 or stderr or "\x00" in stdout or "\r" in stdout:
+    if result.returncode != 0 or stderr or stdout is None or "\x00" in stdout or "\r" in stdout:
         return status_map
 
     frames: dict[str, list[str]] = {}
