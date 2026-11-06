@@ -182,8 +182,7 @@ def restore_session(
             # this case (the window is missing, so every pane is new).
             # Conditional-need exception to the one-boundary-resolve
             # contract: whether the window is missing is only knowable
-            # from live tmux state, post-bind (same class as the
-            # Tailscale rejoin).
+            # from live tmux state, post-bind.
             from agentworks.secrets import resolve_for_command
 
             all_indices = list(range(configured_count))

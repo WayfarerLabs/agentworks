@@ -10,7 +10,7 @@ from agentworks.capabilities.base import RunContext
 from agentworks.debian import DebianSupport, classify_release
 from agentworks.execution import trust
 
-from ._helpers import _vm_scope
+from ._helpers import _mask_env_var_backend_for, _vm_scope
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -36,9 +36,10 @@ def _platform_ops_ctx(
     secret names (the declare/receive contract), under the command's
     scope.
 
-    The ONE definition of that shape: both composition roots below use
-    it, and so does ``rekey_vm``, which assembles its own boundary
-    inline (its gate opens after the resolve, so it fits neither root).
+    The ONE definition of that shape: the composition roots below use
+    it, including :func:`_auth_key_boundary`, which ``rekey_vm`` and
+    ``recover_vm`` share (rekey's gate opens after the resolve, and
+    recover opens none).
     Every platform op in the VM manager is therefore handed a context
     built here, and they cannot drift.
     """
@@ -49,6 +50,27 @@ def _platform_ops_ctx(
         operation_scope=scope,
         secrets=ScopedSecrets(resolver.values, vm_node.site.secret_refs()),
     )
+
+
+def require_tailscale_auth_key(value: str, *, secret_name: str) -> str:
+    """Return ``value`` as a usable Tailscale auth key, or raise naming ``secret_name``.
+
+    The key must be one line, and must not be blank: a guest's join with an
+    empty key waits for an interactive login nobody sees.
+    """
+    from agentworks.errors import ValidationError
+    from agentworks.secrets.line_safety import LineOrientedSecretUse, require_line_safe_secret
+
+    key = require_line_safe_secret(value, use=LineOrientedSecretUse.TAILSCALE, secret_name=secret_name)
+    if not key.strip():
+        raise ValidationError(
+            f"secret {secret_name!r} is empty or blank, so it cannot be used for "
+            f"{LineOrientedSecretUse.TAILSCALE.value}",
+            entity_kind="secret",
+            entity_name=secret_name,
+            hint="Set the secret to a Tailscale auth key.",
+        )
+    return key
 
 
 def _warn_legacy_release(vm: VMRow) -> None:
@@ -190,26 +212,21 @@ def gated_vm_boundary(
 
 
 @contextlib.contextmanager
-def gated_vm_platform_recovery_boundary(
+def gated_vm_platform_channel_boundary(
     db: Database,
     config: Config,
     registry: Registry,
     vm: VMRow,
     *,
-    targets: Sequence[SecretTarget] = (),
-    scope: OperationScope | None = None,
     interaction: TtyInteractionPolicy,
 ) -> Iterator[tuple[LiveVMNode, Resolver, RunContext]]:
-    """Compose the explicit platform-native recovery gate without SSH proof."""
-    with _gated_vm_boundary(
-        db,
-        config,
-        registry,
-        vm,
-        targets=targets,
-        scope=scope,
-        interaction=interaction,
-    ) as boundary:
+    """Compose the VM gate for a command that reaches the VM through its platform's own channel.
+
+    It proves no SSH identity, since that channel does not use the
+    operator's key (``vm shell --platform`` is the command), and composes no
+    environment targets under the VM-level scope.
+    """
+    with _gated_vm_boundary(db, config, registry, vm, interaction=interaction) as boundary:
         yield boundary
 
 
@@ -266,3 +283,57 @@ def _live_vm_boundary(
     )
     resolver.resolve()
     return vm_node, _platform_ops_ctx(config, scope, vm_node, resolver)
+
+
+def _auth_key_boundary(
+    db: Database,
+    config: Config,
+    vm: VMRow,
+    *,
+    ignore_env: bool = False,
+    interaction: TtyInteractionPolicy,
+) -> tuple[LiveVMNode, Resolver, RunContext, str]:
+    """The composition root of a command whose planned op spends the VM template's
+    Tailscale auth key (``vm rekey``, ``agw vm recover``).
+
+    The walk roots the VM-template node beside the live VM node, so the auth
+    key is in the union: the sweep predicts it can resolve over the template's
+    declaration, and it resolves in the ONE boundary pass with the site's
+    secrets (proxmox's API token), in a single prompt session. The template
+    node roots first, so template readiness precedes the platform preflight.
+    ``ignore_env`` masks the env-var backend for the auth key across both the
+    preflight and the resolve, so the prompt backend takes over. Returns the
+    live node, the resolver (whose cache a later gate serves), the op-start
+    context and the line-safe auth key.
+    """
+    from agentworks.bootstrap import load_request_registry
+    from agentworks.orchestration.readiness import preflight_all
+    from agentworks.orchestration.secrets import secret_union
+    from agentworks.orchestration.walk import walk
+    from agentworks.secrets.resolver import Resolver
+    from agentworks.vms.nodes import live_vm_node, vm_template_node
+    from agentworks.vms.templates import resolve_live_template
+
+    registry = load_request_registry(config, live_database=db)
+    resolver = Resolver(config, registry, interaction=interaction)
+    vm_node = live_vm_node(db, config, registry, vm)
+    template = resolve_live_template(db, registry, vm.name, vm.template)
+    nodes = walk(vm_template_node(template), vm_node)
+    for secret_name in secret_union(nodes):
+        resolver.register_name(secret_name)
+    # A cache hit: the key is in the union already, and this only fetches the
+    # declaration the env-var mask needs.
+    declaration = resolver.register_name(template.tailscale_auth_key)
+    scope = _vm_scope(db, vm.name)
+    with _mask_env_var_backend_for(declaration, masked=ignore_env):
+        preflight_all(
+            nodes,
+            RunContext(config=config, operation_scope=scope),
+            registry=registry,
+            interaction=interaction,
+        )
+        resolver.resolve()
+    auth_key = require_tailscale_auth_key(
+        resolver.get(template.tailscale_auth_key), secret_name=template.tailscale_auth_key
+    )
+    return vm_node, resolver, _platform_ops_ctx(config, scope, vm_node, resolver), auth_key

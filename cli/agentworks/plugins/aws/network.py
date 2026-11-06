@@ -25,7 +25,7 @@ a route is needed and revoked after:
   its fixed-name bootstrap allow. Revoking the recorded tuples rather than
   sweeping all ingress is what lets a concurrent ``vm shell --platform`` route's
   distinct allow survive the close (nothing serializes commands per VM);
-- ``transient_route``'s per-operation poke, removed by revoking exactly the
+- ``_transient_route``'s per-operation poke, removed by revoking exactly the
   prefixes it authorized.
 
 EC2-native divergence from azure's per-operation nonce-named rules: an EC2
@@ -98,8 +98,8 @@ class EC2Error(ProvisioningError):
     The optional entity / hint keywords are the base ``AgentworksError`` ones,
     forwarded so a failure that KNOWS which resource it is about can say so (the
     explicit-credential build names its site and its secret). :func:`wrap_ec2_error`,
-    which converts an arbitrary SDK exception, has no such knowledge and passes
-    none.
+    which converts an arbitrary exception, has no such knowledge and passes
+    only the hint of an Agentworks error it wraps.
     """
 
     def __init__(
@@ -131,7 +131,8 @@ def error_code(exc: Exception) -> str | None:
 
 def wrap_ec2_error(exc: Exception) -> AgentworksError:
     """Map structured credential and permission codes to their domain types;
-    retain :class:`EC2Error` for other SDK and transport failures."""
+    retain :class:`EC2Error` for other SDK and transport failures, keeping a
+    wrapped Agentworks error's hint."""
     from botocore.exceptions import ClientError
 
     if isinstance(exc, (AuthorizationError, TokenRejectedError)):
@@ -146,7 +147,7 @@ def wrap_ec2_error(exc: Exception) -> AgentworksError:
         if code in _CREDENTIAL_REJECTION_CODES:
             return TokenRejectedError(f"AWS rejected the selected credential ({summary})")
         return EC2Error(summary, detail=str(exc))
-    return EC2Error(str(exc), detail=str(exc))
+    return EC2Error(str(exc), detail=str(exc), hint=exc.hint if isinstance(exc, AgentworksError) else None)
 
 
 def is_credential_rejection(exc: Exception) -> bool:
@@ -272,8 +273,10 @@ def remove_ssh_allow(ec2: Any, security_group_id: str, prefixes: Sequence[str]) 
     Best-effort per prefix: a tuple already gone (a concurrent route's exit
     revoked a shared prefix, or the group is gone) is tolerated; any other
     failure warns naming the prefix and the residual exposure rather than
-    raising, because every call site must keep unwinding."""
-    output.info(f"Closing SSH route (revoking allow scoped to {', '.join(prefixes)})...")
+    raising, because every call site must keep unwinding. Every revoke runs
+    before anything is printed: on a route closed by a hangup the terminal is
+    gone and a write to it can fail, so the allows must be gone first."""
+    warnings: list[str] = []
     for prefix in prefixes:
         try:
             ec2.revoke_security_group_ingress(
@@ -285,11 +288,15 @@ def remove_ssh_allow(ec2: Any, security_group_id: str, prefixes: Sequence[str]) 
             if code == _PERMISSION_NOT_FOUND_CODE or code in _GROUP_NOT_FOUND_CODES:
                 continue
             err = wrap_ec2_error(exc)
-            output.warn(
+            warnings.append(
                 f"could not revoke the SSH allow for {prefix} on security group "
                 f"'{security_group_id}': {err}. The VM's SSH port stays open to "
                 f"{prefix}; revoke it manually to restore zero inbound exposure."
             )
+    for warning in warnings:
+        output.warn(warning)
+    if not warnings:
+        output.info(f"Closed SSH route (revoked allow scoped to {', '.join(prefixes)})")
 
 
 def cleanup_created_resources(ec2: Any, instance_id: str | None, security_group_id: str | None) -> None:

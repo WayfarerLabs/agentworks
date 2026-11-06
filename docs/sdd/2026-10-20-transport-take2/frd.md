@@ -301,6 +301,19 @@ script source stays out of logs, the operator chose:]
 
 > Sensitive qualifies all three (Recommended)
 
+### 2026-11-01, latest
+
+[Asked whether each slice should move its own commands onto the new code as it lands, or whether
+everything should be built in parallel, unused, and switched over in one go at the end, the operator
+chose:]
+
+> Per slice (Recommended)
+
+[Asked how to handle a VM created with an ephemeral Tailscale auth key whose node expired while it
+was stopped, which under the `vm start` ruling no longer rejoins on start, the operator chose:]
+
+> Document it (Recommended)
+
 ### 2026-11-04
 
 [Asked how to treat the cells the integration tester could not cover for PR A (I4 live, Debian 12
@@ -316,6 +329,19 @@ but Linux against Remote Lima, and slice 2's conformance vectors against a live 
 chose:]
 
 > Carry forward too (Recommended)
+
+### 2026-11-05
+
+[Told that agw cannot create a Debian 12 VM on any platform (create always uses the current release,
+by design under ADR 0025), so the carried Debian 12 cells can never be closed, and asked what should
+happen to them, the operator chose:]
+
+> Drop them (Recommended)
+
+[Asked what should happen to the OpenSSH 8.5 client cell, which only a shim faking the version
+string has exercised, the operator chose:]
+
+> Accept the shim (Recommended)
 
 ### Rulings carried forward
 

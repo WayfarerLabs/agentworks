@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import signal
 from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.errors import StateError, ValidationError
+from agentworks.interrupts import termination_as_interrupt
 
-from ._helpers import _guard_failed_vm, _require_vm
+from ._helpers import _guard_incomplete_vm, _require_vm
 from .boundary import gated_vm_boundary
 
 if TYPE_CHECKING:
@@ -31,7 +31,7 @@ def port_forward_vm(
 ) -> int:
     """Forward one or more local ports to a VM via SSH tunnels.
 
-    Returns 0 when the operator stops the forward (Ctrl-C or SIGTERM) and the
+    Returns 0 when the operator stops the forward (Ctrl-C, SIGTERM or SIGHUP) and the
     SSH client's exit status for any other end, including a forward that could
     not be set up. The CLI layer owns the translation to process exit (this
     service function never calls ``sys.exit``). Mirrors ``exec_vm``'s
@@ -56,7 +56,7 @@ def port_forward_vm(
     # Before any database read or guard: an unsupported client refuses first.
     execution.resolve_ssh()
     vm = _require_vm(db, name)
-    _guard_failed_vm(vm)
+    _guard_incomplete_vm(vm)
     if vm.tailscale_host is None:
         raise StateError(
             f"VM '{name}' has no Tailscale IP",
@@ -82,22 +82,12 @@ def port_forward_vm(
 
 
 def _hold_forward(access: VMAccess, forwards: list[Forward], *, verbose: bool) -> int:
-    """Run the blocking forward, treating Ctrl-C and SIGTERM as the operator's stop.
-
-    SIGTERM is turned into the same ``KeyboardInterrupt`` as Ctrl-C for the
-    duration of the forward and the previous handler is restored afterwards.
-    """
-
-    def stop(_signal: int, _frame: object) -> None:
-        raise KeyboardInterrupt
-
-    previous = signal.signal(signal.SIGTERM, stop)
+    """Run the blocking forward, treating Ctrl-C, ``SIGTERM`` and ``SIGHUP`` as the operator's stop."""
     try:
-        return access.forward(forwards, verbose=verbose)
+        with termination_as_interrupt():
+            return access.forward(forwards, verbose=verbose)
     except KeyboardInterrupt:
         return 0
-    finally:
-        signal.signal(signal.SIGTERM, previous)
 
 
 def _parse_port_specs(name: str, ports: list[str]) -> list[tuple[int, int]]:

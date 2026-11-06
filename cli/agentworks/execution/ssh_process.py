@@ -18,9 +18,9 @@ import tempfile
 from dataclasses import dataclass
 from ipaddress import IPv6Address
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
-from agentworks.errors import ValidationError
+from agentworks.errors import ConnectivityError, ValidationError
 from agentworks.execution import trust
 from agentworks.execution.client import install_guidance
 from agentworks.execution.envelope import classify
@@ -58,18 +58,27 @@ SERVER_ALIVE_COUNT_MAX = 4
 CLIENT_LOG_TAIL_LINES = 20
 CLIENT_LOG_READ_BYTES = 65_536
 HOST_KEY_FAILURE = "Host key verification failed"
+# What the client logs when the server refused every key it offered, whatever follows the
+# parenthesis (a server that also allows other methods lists them there).
+AUTH_FAILURE = "Permission denied (publickey"
 
 _HOST = re.compile(r"[A-Za-z0-9_:][A-Za-z0-9_.:-]*")
 _USER = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]*\$?")
 
 
-def stage0_command(handover_socket: str | None = None, *, python: str = DEFAULT_PYTHON) -> str:
+def stage0_command(handover_socket: str | None = None, *, python: str = DEFAULT_PYTHON, elevated: bool = False) -> str:
     """The remote command: ``python3 -I -S -c '<stage 0>'``, plus the socket path for a handover.
 
     ``-I`` ignores Python's environment variables and the user site directory,
-    and ``-S`` skips site packages, so no Python startup applies.
+    and ``-S`` skips site packages, so no Python startup applies. ``elevated``
+    puts ``sudo -n`` in front, so the whole operation runs as root; the
+    launcher rebuilds the payload's environment from root's passwd entry, so
+    nothing has to survive ``sudo``'s ``env_reset``. Only a pipe request
+    elevates: the attach path never passes it.
     """
     command = f"{python} -I -S -c '{STAGE0_PROGRAM}'"
+    if elevated:
+        command = f"sudo -n {command}"
     return command if handover_socket is None else f"{command} {handover_socket}"
 
 
@@ -194,6 +203,37 @@ def build_argv(
     return argv
 
 
+def build_host_argv(
+    client: SSHClient,
+    host: str,
+    mode: Literal[ArgvMode.PIPE, ArgvMode.TERMINAL],
+    remote_command: str | None = None,
+) -> list[str]:
+    """The argv for a platform's own connection to its host (Remote Lima's), under the host policy.
+
+    Unlike a VM connection it honors the operator's SSH configuration (no
+    ``-F none``) and trusts the host through :data:`trust.HOST_TRUST`. It
+    adds the VM policy's connect timeout and keepalives, ``BatchMode`` in
+    ``PIPE`` mode only (an interactive hop may prompt), ``-T`` or ``-t``, and
+    the host after ``--``. ``host`` is operator configuration, refused at its
+    boundary when it holds whitespace or a control character. There is no
+    identity: the host's keys come from that configuration.
+    """
+    values = [
+        f"ConnectTimeout={CONNECT_TIMEOUT_SECONDS}",
+        f"ServerAliveInterval={SERVER_ALIVE_INTERVAL_SECONDS}",
+        f"ServerAliveCountMax={SERVER_ALIVE_COUNT_MAX}",
+    ]
+    if mode is ArgvMode.PIPE:
+        values.append("BatchMode=yes")
+    argv = [client.path, "-T" if mode is ArgvMode.PIPE else "-t", *trust.ssh_options(trust.HOST_TRUST)]
+    argv += [arg for value in values for arg in ("-o", value)]
+    argv += ["--", host]
+    if remote_command is not None:
+        argv.append(remote_command)
+    return argv
+
+
 # -- The client log -----------------------------------------------------------------------
 
 
@@ -261,19 +301,33 @@ def child_environment() -> dict[str, str] | None:
 def spawn(
     argv: Sequence[str], *, stdin: int | None, stdout: int | None, stderr: int | None, bufsize: int = -1
 ) -> subprocess.Popen[bytes]:
-    """Start the client, or raise :class:`ClientUnsupported` when the operating system cannot.
+    """Start the process, or raise a typed error naming what could not start.
 
     The one place a client process is started, so the environment strip and the
     error mapping exist once. ``None`` for a stream inherits the operator's.
+    The OpenSSH client that cannot start is :class:`ClientUnsupported`; any
+    other program (a platform's ``limactl`` or ``wsl.exe``) is a
+    ``ConnectivityError`` naming it.
     """
     try:
         return subprocess.Popen(
             list(argv), stdin=stdin, stdout=stdout, stderr=stderr, bufsize=bufsize, env=child_environment()
         )
     except OSError as error:
-        reason = error.strerror or error
-        guidance = install_guidance(windows=sys.platform == "win32")
-        raise ClientUnsupported(f"the OpenSSH client could not be started: {reason}\n{guidance}") from error
+        reason = error.strerror or str(error)
+        if _is_openssh_client(argv[0]):
+            guidance = install_guidance(windows=sys.platform == "win32")
+            raise ClientUnsupported(f"the OpenSSH client could not be started: {reason}\n{guidance}") from error
+        program = os.path.basename(argv[0])
+        raise ConnectivityError(
+            f"'{program}' could not be started: {reason}",
+            hint=f"Install '{program}' on this machine, or check that it is on PATH.",
+        ) from error
+
+
+def _is_openssh_client(program: str) -> bool:
+    """Whether ``program`` is an OpenSSH client: the resolver only ever yields one named ``ssh``."""
+    return os.path.basename(program).lower() in ("ssh", "ssh.exe")
 
 
 def exit_status(returncode: int) -> int:
@@ -282,7 +336,7 @@ def exit_status(returncode: int) -> int:
 
 
 def run_terminal(argv: Sequence[str]) -> int:
-    """Run the client on the operator's terminal and return its exit status."""
+    """Run ``argv`` (the client, or a platform's own shell program) on the operator's terminal; return its status."""
     process = spawn(argv, stdin=None, stdout=None, stderr=None)
     try:
         return exit_status(process.wait())
@@ -307,6 +361,7 @@ def outcome(session: PipeSession, stop: StopReason, log: Path) -> Result:
             session.stderr,
             session.exit_status,
             host_key_failed=HOST_KEY_FAILURE in text,
+            auth_failed=AUTH_FAILURE in text,
             stdout_abandoned=session.stdout_abandoned,
             stderr_abandoned=session.stderr_abandoned,
         )

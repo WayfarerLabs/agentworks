@@ -104,7 +104,7 @@ def test_platform_recovery_gate_does_not_require_canonical_ssh_identity(
     )
     monkeypatch.setattr(boundary, "_gated_vm_boundary", fake_boundary)
 
-    with boundary.gated_vm_platform_recovery_boundary(
+    with boundary.gated_vm_platform_channel_boundary(
         object(),
         object(),
         object(),

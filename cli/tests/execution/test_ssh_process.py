@@ -9,14 +9,19 @@ import signal
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Literal
 
 import pytest
 
 from agentworks.errors import ConfigError, ValidationError
 from agentworks.execution import ssh_process, trust
 from agentworks.execution.client import SSHClient
+from agentworks.execution.envelope import StreamFilter, new_nonce
 from agentworks.execution.errors import TrustMissing
+from agentworks.execution.pump import StopReason
 from agentworks.execution.requests import Forward
+from agentworks.execution.results import Unknown, UnknownReason
 from agentworks.execution.ssh_process import ArgvMode, Destination, VMPolicy, build_argv, stage0_command
 from agentworks.execution.trust import TrustBinding, TrustMode
 from tests.conftest import seed_vm_trust
@@ -122,6 +127,32 @@ def test_the_client_log_is_read_from_its_end(tmp_path: Path) -> None:
     assert text.endswith("last line\n")
     assert "first" not in text
     assert ssh_process.client_log_text(tmp_path / "missing") == ""
+
+
+@pytest.mark.parametrize(
+    ("log_text", "expected"),
+    [
+        ("agentworks@100.64.0.9: Permission denied (publickey).\n", UnknownReason.AUTH_FAILED),
+        ("agentworks@100.64.0.9: Permission denied (publickey,password).\n", UnknownReason.AUTH_FAILED),
+        ("ssh: connect to host 100.64.0.9 port 22: Connection refused\n", UnknownReason.CONNECTION),
+    ],
+)
+def test_a_refused_key_in_the_client_log_is_an_authentication_failure(
+    tmp_path: Path, log_text: str, expected: UnknownReason
+) -> None:
+    log = tmp_path / "log"
+    log.write_text(log_text)
+    session = SimpleNamespace(
+        stdout=StreamFilter(new_nonce()),
+        stderr=StreamFilter(new_nonce()),
+        exit_status=255,
+        stdout_abandoned=False,
+        stderr_abandoned=False,
+    )
+
+    result = ssh_process.outcome(session, StopReason.EOF, log)  # type: ignore[arg-type]
+
+    assert result.completion == Unknown(expected)
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="signal statuses are POSIX")
@@ -267,3 +298,47 @@ def test_stage0_is_one_short_line_that_no_account_shell_rewrites() -> None:
     assert command.startswith("/usr/bin/python3 -I -S -c '")
     assert command.endswith(f"{program}'")
     assert stage0_command("/tmp/agw-handover-ab/s").endswith("' /tmp/agw-handover-ab/s")
+
+
+# -- The host policy -------------------------------------------------------------------
+
+
+def host_argv(mode: Literal[ArgvMode.PIPE, ArgvMode.TERMINAL] = ArgvMode.PIPE) -> list[str]:
+    return ssh_process.build_host_argv(SSHClient(SSH or "/usr/bin/ssh", (9, 2)), "me@gpu-box", mode, "limactl list")
+
+
+def test_a_host_argv_puts_the_host_after_the_option_fence_and_the_command_last() -> None:
+    argv = host_argv()
+
+    assert argv[-3:] == ["--", "me@gpu-box", "limactl list"]
+    assert "-F" not in argv
+
+
+@needs_ssh
+def test_a_host_argv_honors_the_operators_configuration(tmp_path: Path) -> None:
+    operator_config = tmp_path / "config"
+    operator_config.write_text("Host gpu-box\n  ForwardAgent yes\n  Port 2222\n")
+    argv = host_argv()
+
+    config = effective_config([argv[0], "-F", str(operator_config), *argv[1:]])
+
+    assert config["forwardagent"] == ["yes"]
+    assert config["port"] == ["2222"]
+    assert config["stricthostkeychecking"] == ["accept-new"]
+    assert config["connecttimeout"] == ["30"]
+    assert config["serveraliveinterval"] == ["15"]
+    assert config["requesttty"] == ["false"]
+
+
+@needs_ssh
+def test_only_a_piped_host_connection_is_batch_mode(tmp_path: Path) -> None:
+    empty = tmp_path / "config"
+    empty.write_text("")
+
+    def config_for(mode: ArgvMode) -> dict[str, list[str]]:
+        argv = host_argv(mode)
+        return effective_config([argv[0], "-F", str(empty), *argv[1:]])
+
+    assert config_for(ArgvMode.PIPE)["batchmode"] == ["yes"]
+    assert config_for(ArgvMode.TERMINAL)["batchmode"] == ["no"]
+    assert config_for(ArgvMode.TERMINAL)["requesttty"] in (["yes"], ["true"])  # the rendering differs by version

@@ -1,5 +1,17 @@
 {
   "version": "0.2",
   "import": ["../../../.cspell.json"],
-  "words": ["HMAC", "MSYS", "autouse", "fileno", "improv", "memfd", "recalibrations", "worktrees"]
+  "words": [
+    "HMAC",
+    "MSYS",
+    "autouse",
+    "fileno",
+    "improv",
+    "memfd",
+    "recalibrations",
+    "redactions",
+    "tcsh",
+    "worktrees",
+    "zstd"
+  ]
 }

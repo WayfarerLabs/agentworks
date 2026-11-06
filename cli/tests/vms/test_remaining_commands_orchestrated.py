@@ -24,16 +24,16 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.capabilities.vm_platform.tailscale_join import TAILSCALE_JOIN_STDIN_COMMAND
-from agentworks.db import VMStatus
+from agentworks.capabilities.vm_platform.tailscale_join import JOIN_FRAGMENT
+from agentworks.db import ProvisioningStatus, VMStatus
 from agentworks.execution.requests import Forward
 from agentworks.execution.trust import HOST_TRUST
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
-from agentworks.ssh import SSHResult
 from agentworks.vms import manager as vm_manager
+from agentworks.vms.manager.tailscale import VMNotAnswering
+from tests._root_channel_fakes import Answer, FakeGuest
 from tests.conftest import seed_vm_trust, stub_vm_ssh_identity
-from tests.native_exec_support import ExecCall, ExecutionOnlyTransport
 
 if TYPE_CHECKING:
     from agentworks.capabilities.base import OperationScope, RunContext
@@ -46,9 +46,16 @@ def _stub_ssh_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     stub_vm_ssh_identity(monkeypatch)
 
 
+@pytest.fixture(autouse=True)
+def _on_tailscale(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The workstation is on Tailscale, whatever the test host is: rekey checks it first."""
+    monkeypatch.setattr(vm_manager, "verify_tailscale_available", lambda: None)
+
+
 def _seed_vm(db: Database, *, operator_stopped: bool = False) -> None:
     db.insert_vm("box", site="proxmox", hostname="box")
     db.update_vm_tailscale("box", "100.64.0.9")
+    db.update_vm_provisioning_status("box", ProvisioningStatus.COMPLETE)
     seed_vm_trust("box")
     if operator_stopped:
         db.set_operator_stopped("box", True)
@@ -68,8 +75,7 @@ def _fake_status(monkeypatch: pytest.MonkeyPatch, status: VMStatus) -> list[str]
         lambda self, row, ctx: events.append("status") or status,
     )
     monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: events.append("start"))
-    monkeypatch.setattr(vm_manager, "_tailscale_rejoin_required", lambda *a, **k: True)
-    monkeypatch.setattr(vm_manager, "_ensure_tailscale", lambda *a, **k: events.append("tailscale"))
+    monkeypatch.setattr("agentworks.vms.manager._await_tailnet", lambda *a, **k: events.append("tailscale"))
     return events
 
 
@@ -279,6 +285,57 @@ def test_rekey_without_a_host_key_record_raises_before_resolving_or_touching_the
     assert row is not None and row.tailscale_host == "100.64.0.9"
 
 
+def test_a_workstation_off_tailscale_refuses_rekey_before_resolving_or_touching_the_vm(
+    db: Database,
+    make_config,  # noqa: ANN001
+    _ts_key: None,
+    resolve_counter: list[list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The final wait reaches the VM over the tailnet, so the new key must not be spent first."""
+    from agentworks.errors import ConnectivityError
+
+    config = make_config()
+    _seed_vm(db)
+    events = _fake_status(monkeypatch, VMStatus.RUNNING)
+
+    def _off_tailscale() -> None:
+        raise ConnectivityError("not on Tailscale")
+
+    monkeypatch.setattr(vm_manager, "verify_tailscale_available", _off_tailscale)
+
+    with pytest.raises(ConnectivityError, match="not on Tailscale"):
+        vm_manager.rekey_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert resolve_counter == []
+    assert events == []
+
+
+def test_an_unsupported_client_refuses_rekey_before_resolving_or_touching_the_vm(
+    db: Database,
+    make_config,  # noqa: ANN001
+    _ts_key: None,
+    resolve_counter: list[list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.execution.errors import ClientUnsupported
+
+    config = make_config()
+    _seed_vm(db)
+    events = _fake_status(monkeypatch, VMStatus.RUNNING)
+
+    def _unsupported() -> object:
+        raise ClientUnsupported("no supported OpenSSH client")
+
+    monkeypatch.setattr("agentworks.execution.resolve_ssh", _unsupported)
+
+    with pytest.raises(ClientUnsupported):
+        vm_manager.rekey_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert resolve_counter == []
+    assert events == []
+
+
 def test_rekey_missing_key_fails_at_the_one_resolve_before_status(
     db: Database,
     make_config,  # noqa: ANN001
@@ -300,59 +357,64 @@ def test_rekey_missing_key_fails_at_the_one_resolve_before_status(
     assert events == []
 
 
-def test_rekey_rejects_multiline_key_before_status_or_daemon_action(
+@pytest.mark.parametrize(
+    "auth_key", ["tskey-prefix\ntskey-suffix\n", "", " \t "], ids=["multiline", "empty", "whitespace"]
+)
+def test_rekey_rejects_an_unusable_key_before_status_or_daemon_action(
     db: Database,
     make_config,
     monkeypatch: pytest.MonkeyPatch,
+    auth_key: str,
 ) -> None:
+    """A blank key would leave the join waiting for an interactive login after the logout."""
     from agentworks.errors import ValidationError
 
-    auth_key = "tskey-prefix\ntskey-suffix\n"
     config = make_config()
     monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", auth_key)
     _seed_vm(db)
     monkeypatch.setattr(
         ProxmoxPlatform,
         "status",
-        lambda *args, **kwargs: pytest.fail("status reached with a line-unsafe rekey secret"),
+        lambda *args, **kwargs: pytest.fail("status reached with an unusable rekey secret"),
     )
 
     with pytest.raises(ValidationError) as caught:
         vm_manager.rekey_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
 
-    assert auth_key not in repr((caught.value.args, vars(caught.value)))
+    assert not auth_key.strip() or auth_key not in repr((caught.value.args, vars(caught.value)))
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
 
 
-def _fake_rekey_transports(
+NEW_ADDRESS = "100.64.0.77"
+
+
+def _fake_rekey_channel(
     monkeypatch: pytest.MonkeyPatch,
-) -> list[ExecCall]:
-    """Fake the rekey body's out-of-band transport work: the native
-    transport records the tailscale commands, the Tailscale-side
-    verification succeeds, and the per-step stabilization sleeps cost
-    nothing."""
-    from agentworks.transports import SSHTransport
+    *,
+    rekey_status: int | None = 0,
+    answers: bool = True,
+    rekey: Answer | None = None,
+    read: Answer | None = None,
+) -> FakeGuest:
+    """Answer the platform's root channel from a fake guest (the rekey script, then the address read), let the
+    wait answer as ``answers`` says, and keep the SSH config untouched."""
+    from agentworks.execution import reachability
 
-    def _run(call: ExecCall) -> SSHResult:
-        stdout = "100.64.0.77\n" if call.command == "tailscale ip -4" else ""
-        return SSHResult(returncode=0, stdout=stdout, stderr="")
+    def respond(payload: str, seen: int) -> Answer:
+        if JOIN_FRAGMENT in payload:
+            return rekey if rekey is not None else Answer(status=rekey_status)
+        if payload == "tailscale ip -4":
+            return read if read is not None else Answer(stdout=f"{NEW_ADDRESS}\n".encode())
+        return Answer()
 
-    native = ExecutionOnlyTransport(_run)
+    guest = FakeGuest(respond=respond)
     monkeypatch.setattr(
-        "agentworks.transports.native_transport",
-        lambda vm, platform, config, *, ctx, stack: native,
+        ProxmoxPlatform, "run_as_root", lambda self, vm, ctx, script, deadline: guest.run_as_root(script, deadline)
     )
-    monkeypatch.setattr(
-        "agentworks.transports.transport",
-        lambda vm, config, **kwargs: SSHTransport(trust=HOST_TRUST, host="100.64.0.9"),
-    )
-    monkeypatch.setattr("agentworks.transports.wait_for_reconnect", lambda target: True)
+    monkeypatch.setattr(reachability, "wait", lambda access, *, wording: answers)
     monkeypatch.setattr("agentworks.ssh_config.sync_ssh_config", lambda config, db: None)
-    import time
-
-    monkeypatch.setattr(time, "sleep", lambda secs: None)
-    return native.calls
+    return guest
 
 
 def test_rekey_one_boundary_burst_covers_key_and_site_secret(
@@ -364,34 +426,71 @@ def test_rekey_one_boundary_burst_covers_key_and_site_secret(
     captured_output,  # noqa: ANN001
 ) -> None:
     """End to end on a running, reachable VM: ONE boundary burst covers
-    the new auth key AND the site's config secret (HEAD's single prompt
-    session), the gate's fast path costs nothing, the new key reaches
-    `tailscale up`, and the row records the new IP."""
+    the new auth key AND the site's config secret (one prompt session),
+    the gate's fast path costs nothing, one rekey script carries the new
+    key, the settle reads the address after it, and the row records it."""
     config = make_config()
     _seed_vm(db)
     _reachable(monkeypatch, True)
     events = _fake_status(monkeypatch, VMStatus.RUNNING)
-    calls = _fake_rekey_transports(monkeypatch)
+    guest = _fake_rekey_channel(monkeypatch)
 
     vm_manager.rekey_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
 
     assert len(resolve_counter) == 1
     assert sorted(resolve_counter[0]) == ["proxmox-token", "tailscale-auth-key"]
     assert events == ["status"]
-    sensitive = [call for call in calls if call.input_text is not None]
-    assert sensitive == [
-        ExecCall(
-            TAILSCALE_JOIN_STDIN_COMMAND,
-            True,
-            True,
-            30,
-            "tskey-new\n",
-        )
-    ]
-    assert all("tskey-new" not in call.command for call in calls)
+    assert [JOIN_FRAGMENT in payload for payload in guest.payloads] == [True, False]
+    assert guest.payloads[1] == "tailscale ip -4"
+    assert [b"tskey-new" in script for script in guest.scripts] == [True, False]
     row = db.get_vm("box")
-    assert row is not None and row.tailscale_host == "100.64.0.77"
-    assert any("rekeyed successfully" in m for m in captured_output.info)
+    assert row is not None and row.tailscale_host == NEW_ADDRESS
+
+
+@pytest.mark.parametrize("status", [1, None], ids=["failed", "unknown"])
+def test_a_rekey_script_that_does_not_succeed_records_nothing_and_reads_no_address(
+    db: Database,
+    make_config,  # noqa: ANN001
+    _ts_key: None,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+    status: int | None,
+) -> None:
+    from agentworks.errors import AgentworksError, ConnectivityError, StateError
+
+    config = make_config()
+    _seed_vm(db)
+    _reachable(monkeypatch, True)
+    _fake_status(monkeypatch, VMStatus.RUNNING)
+    guest = _fake_rekey_channel(monkeypatch, rekey_status=status)
+
+    with pytest.raises(AgentworksError) as caught:
+        vm_manager.rekey_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert type(caught.value) is (StateError if status is not None else ConnectivityError)
+    assert len(guest.scripts) == 1
+    row = db.get_vm("box")
+    assert row is not None and row.tailscale_host == "100.64.0.9"
+
+
+def test_a_rekeyed_vm_that_does_not_answer_raises_and_keeps_the_new_address(
+    db: Database,
+    make_config,  # noqa: ANN001
+    _ts_key: None,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    config = make_config()
+    _seed_vm(db)
+    _reachable(monkeypatch, True)
+    _fake_status(monkeypatch, VMStatus.RUNNING)
+    _fake_rekey_channel(monkeypatch, answers=False)
+
+    with pytest.raises(VMNotAnswering):
+        vm_manager.rekey_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
+
+    row = db.get_vm("box")
+    assert row is not None and row.tailscale_host == NEW_ADDRESS
 
 
 def test_rekey_gate_serves_the_boundary_cache(
@@ -411,7 +510,7 @@ def test_rekey_gate_serves_the_boundary_cache(
     _seed_vm(db)
     _reachable(monkeypatch, False)
     events = _fake_status(monkeypatch, VMStatus.RUNNING)
-    _fake_rekey_transports(monkeypatch)
+    _fake_rekey_channel(monkeypatch)
 
     vm_manager.rekey_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
 
@@ -433,7 +532,7 @@ def test_rekey_scope_reaches_node_readiness(
     _seed_vm(db)
     _reachable(monkeypatch, True)
     _fake_status(monkeypatch, VMStatus.RUNNING)
-    _fake_rekey_transports(monkeypatch)
+    _fake_rekey_channel(monkeypatch)
     scopes: list[OperationScope | None] = []
     real = ProxmoxPlatform.preflight
 
@@ -458,28 +557,23 @@ def test_rekey_wraps_steps_in_a_section(
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
-    """The rekey step sequence renders inside a 'Rekeying' section: the
-    tailnet steps are primary (BODY) lines one level deep, the read-back
-    IP is a subordinate DETAIL, and the terminal is a column-0 RESULT."""
+    """The rekey renders inside a section: its progress is a primary
+    (BODY) line one level deep, the read-back IP a subordinate DETAIL, and
+    the terminal a column-0 RESULT."""
     from agentworks.output import Role
 
     config = make_config()
     _seed_vm(db)
     _reachable(monkeypatch, True)
     _fake_status(monkeypatch, VMStatus.RUNNING)
-    _fake_rekey_transports(monkeypatch)
+    _fake_rekey_channel(monkeypatch)
 
     vm_manager.rekey_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
 
-    assert any(role is Role.HEADER and lvl == 0 and msg == "Rekeying 'box'" for role, lvl, msg in captured_output.lines)
-    body_l1 = [msg for role, lvl, msg in captured_output.lines if role is Role.BODY and lvl == 1]
-    assert "Joining new tailnet..." in body_l1
-    assert "Reading new Tailscale IP..." in body_l1
-    # The read-back IP is a subordinate detail of the read step, not a step.
+    assert any(role is Role.HEADER and lvl == 0 for role, lvl, _msg in captured_output.lines)
+    assert any(role is Role.BODY and lvl == 1 for role, lvl, _msg in captured_output.lines)
     assert any(role is Role.DETAIL and msg.startswith("Tailscale IP:") for role, lvl, msg in captured_output.lines)
-    assert any(
-        role is Role.RESULT and lvl == 0 and "rekeyed successfully" in msg for role, lvl, msg in captured_output.lines
-    )
+    assert any(role is Role.RESULT and lvl == 0 for role, lvl, _msg in captured_output.lines)
 
 
 # == port_forward_vm: a gated command =========================================
@@ -533,8 +627,7 @@ def test_port_forward_stopped_vm_gates_then_forwards(
         lambda self, row, ctx: events.append("status") or VMStatus.STOPPED,
     )
     monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: events.append("start"))
-    monkeypatch.setattr(vm_manager, "_tailscale_rejoin_required", lambda *a, **k: True)
-    monkeypatch.setattr(vm_manager, "_ensure_tailscale", lambda *a, **k: events.append("tailscale"))
+    monkeypatch.setattr("agentworks.vms.manager._await_tailnet", lambda *a, **k: events.append("tailscale"))
 
     assert vm_manager.port_forward_vm(db, config, "box", ["8080"], interaction=TtyInteractionPolicy.REFUSE) == 0
 
@@ -725,12 +818,7 @@ def test_backup_stopped_vm_gates_then_backs_up(
         lambda self, row, ctx: gate_events.append("status") or VMStatus.STOPPED,
     )
     monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: gate_events.append("start"))
-    monkeypatch.setattr(vm_manager, "_tailscale_rejoin_required", lambda *a, **k: True)
-    monkeypatch.setattr(
-        vm_manager,
-        "_ensure_tailscale",
-        lambda *a, **k: gate_events.append("tailscale"),
-    )
+    monkeypatch.setattr("agentworks.vms.manager._await_tailnet", lambda *a, **k: gate_events.append("tailscale"))
 
     backup_dir = vm_backup.backup_vm(db, backup_env, "box", interaction=TtyInteractionPolicy.REFUSE)
 
@@ -795,3 +883,35 @@ def test_backup_wraps_phases_in_a_section(
         role is Role.RESULT and lvl == 0 and msg.startswith("Backup complete:")
         for role, lvl, msg in captured_output.lines
     )
+
+
+@pytest.mark.parametrize("unreachable_at", ["rekey", "read"])
+def test_a_channel_that_cannot_reach_the_vm_ends_the_rekey_at_once_naming_recover(
+    db: Database,
+    make_config,  # noqa: ANN001
+    _ts_key: None,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+    unreachable_at: str,
+) -> None:
+    """A dead public sshd made each read and the logout wait two minutes, then advised removing a healthy node."""
+    from agentworks.capabilities.vm_platform.tailscale_join import LOGOUT_SCRIPT
+    from agentworks.execution.root_script import ChannelUnreachable
+
+    config = make_config()
+    _seed_vm(db)
+    _reachable(monkeypatch, True)
+    _fake_status(monkeypatch, VMStatus.RUNNING)
+    unreachable = Answer(raises=ChannelUnreachable("VM 'box' did not answer over SSH at its public address"))
+    guest = _fake_rekey_channel(monkeypatch, **{unreachable_at: unreachable})
+
+    with pytest.raises(ChannelUnreachable) as caught:
+        vm_manager.rekey_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert len(guest.scripts) == (1 if unreachable_at == "rekey" else 2)
+    assert guest.count(LOGOUT_SCRIPT) == 0
+    hint = caught.value.hint or ""
+    assert "agw vm recover box" in hint
+    assert "admin console" not in hint
+    row = db.get_vm("box")
+    assert row is not None and row.tailscale_host == "100.64.0.9"

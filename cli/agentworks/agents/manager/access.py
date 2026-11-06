@@ -14,6 +14,7 @@ import agentworks.agents.manager as _mgr
 import agentworks.execution as execution
 from agentworks.errors import ConnectivityError, NotFoundError, StateError
 from agentworks.execution.access import Admin, Agent, stream_to_operator
+from agentworks.execution.errors import ExecutionIncomplete
 from agentworks.execution.requests import Command, LoginShell, Script, Shell, shell_command_line
 from agentworks.execution.results import Completed, Unknown, UnknownReason
 from agentworks.vms.manager import gated_vm_boundary
@@ -46,18 +47,21 @@ def _assert_agent_access_works(access: VMAccess, admin: VMAccess, agent: AgentRo
     The direct-target-user-SSH rollout populates each agent's
     ``~/.ssh/authorized_keys`` with the operator's key set at agent create /
     reinit. An agent that existed before it has no such file, so ssh as the
-    agent is rejected (255). Run ``true`` as the agent; a ``Completed`` of any
-    status passes. Only an unknown connection failure is ambiguous, so only it
-    falls back to running ``true`` as the admin: if that completes, the VM is
-    fine and the agent is the problem (the reinit hint); otherwise the VM is
-    unreachable. Every other outcome (python3 missing, a host key mismatch, a
-    refusal, a truncated run) is not about the rollout and raises as it is.
+    agent is rejected (255, typed ``AUTH_FAILED`` when ssh logs the refusal).
+    Run ``true`` as the agent; a ``Completed`` of any status passes. Only a
+    connection or authentication failure is ambiguous, so only they fall back
+    to running ``true`` as the admin: if that completes, the VM is fine and
+    the agent is the problem (the reinit hint); an admin refused too means
+    the operator's key is (the key-refused error, with the passphrase hint);
+    otherwise the VM is unreachable. Every other outcome (python3 missing, a
+    host key mismatch, a refusal, a truncated run) is not about the rollout
+    and raises as it is.
     """
     result = access.run(Command(("true",), deadline=_PROBE_DEADLINE_SECONDS))
     completion = result.completion
     if isinstance(completion, Completed):
         return
-    if not (isinstance(completion, Unknown) and completion.reason is UnknownReason.CONNECTION):
+    if completion not in (Unknown(UnknownReason.CONNECTION), Unknown(UnknownReason.AUTH_FAILED)):
         result.require_completed(access.vm_name)
         return
     fallback = admin.run(Command(("true",), deadline=_ADMIN_PROBE_DEADLINE_SECONDS))
@@ -68,6 +72,13 @@ def _assert_agent_access_works(access: VMAccess, admin: VMAccess, agent: AgentRo
             entity_name=agent.name,
             hint=f"Run 'agw agent reinit {agent.name}' to populate its authorized_keys.",
         )
+    if fallback.completion == Unknown(UnknownReason.AUTH_FAILED):
+        # The admin was refused too, so the operator's key is the problem, not the agent.
+        try:
+            fallback.require_completed(admin.vm_name)
+        except ExecutionIncomplete as error:
+            error.add_hint(admin.passphrase_hint())
+            raise
     raise ConnectivityError(
         f"direct SSH probe to agent '{agent.name}' failed: VM '{agent.vm_name}' is unreachable",
         entity_kind="agent",

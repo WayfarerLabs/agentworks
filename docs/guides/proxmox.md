@@ -91,8 +91,8 @@ backups, migrate VMs, access the console, or manage users/nodes/cluster config.
 
 The `AgentworksVM` role uses `VM.Monitor` for QEMU Guest Agent access on Proxmox VE 8. On Proxmox VE
 9 it uses `VM.GuestAgent.Unrestricted`, which is required for guest exec and also authorizes the
-network inspection and file-write endpoints Agentworks uses. The setup script selects the matching
-role from the installed Proxmox VE major version and refuses unknown major versions.
+network inspection endpoint Agentworks uses. The setup script selects the matching role from the
+installed Proxmox VE major version and refuses unknown major versions.
 
 ### Manual setup
 
@@ -147,10 +147,10 @@ current Trixie creation.
 A site without `template_vmids.trixie` remains loadable for best-effort operations on existing VMs.
 New VM creation validates the concrete core-selected release during preflight and fails before the
 command's secret-resolution phase or Proxmox API authentication when that mapping is missing. After
-cloning and bootstrapping the mapped template, core verifies the live guest's `/etc/os-release`
-through the returned QEMU Guest Agent execution transport. A missing, non-Debian, or wrong-release
-observation retains an addressable failed VM row for explicit deletion. There is no configuration
-switch to skip the check.
+cloning and bootstrapping the mapped template, the platform returns the VM's Tailscale address, and
+core reads the live guest's `/etc/os-release` over SSH at that address as the first check of the VM
+contract. A missing, non-Debian, or wrong-release observation retains an addressable failed VM row
+for explicit deletion. There is no configuration switch to skip the check.
 
 For 0.13 configuration migration, see [Upgrading to 0.14](upgrading-to-0.14.md).
 
@@ -198,11 +198,22 @@ agw vm describe test-vm
 agw vm delete test-vm
 ```
 
+`agw vm delete` succeeds only once the node no longer lists the VM's ID. A delete that Proxmox
+refuses (a locked VM) or that gets no answer keeps the VM's row and its host-key record, so run it
+again once the cause is fixed. When a failed or interrupted create cannot remove its clone, it names
+the VM ID and node and keeps the VM in a failed state for `agw vm delete` to remove.
+
 ### Native recovery and interactive access
 
-Agentworks uses QEMU Guest Agent for Tailscale-independent administrative commands. Start-time
-Tailscale rejoin, `vm rekey`, logout during deletion, and create-time release verification therefore
-remain available when Tailscale SSH is unavailable.
+Agentworks uses QEMU Guest Agent as the root channel that works without Tailscale: create's
+bootstrap and Tailscale join, `agw vm recover`, `vm rekey` and the logout during deletion run their
+root scripts through it. Before each script, Agentworks waits up to about two minutes for the guest
+agent to answer, since a VM that has just started has none running yet; a VM whose agent never
+answers fails with nothing dispatched. Create's wait for cloud-init asks again for about seven
+minutes in all, since cloud-init can restart the agent, so a create from a template without the
+agent fails after about seven minutes. A started VM that does not answer over Tailscale SSH fails
+`vm start` with a hint to run `agw vm recover`, which can also restart a broken SSH server here,
+since the guest agent does not depend on it.
 
 QEMU Guest Agent does not provide an interactive terminal, so `vm shell --platform` is unavailable
 for Proxmox. Use the Proxmox web UI's serial console for interactive access. Normal Agentworks work
@@ -214,23 +225,37 @@ When you run `agw vm create <name> --site proxmox`:
 
 1. Clones the template into the `agentworks` pool via the Proxmox REST API
 2. Configures CPU, memory, cloud-init user/SSH keys, and DHCP networking
-3. Starts the VM and waits for the QEMU guest agent to report an IP
-4. Waits for cloud-init and runs the private bootstrap script through QEMU Guest Agent
-5. The bootstrap installs system packages, configures the admin user, and joins Tailscale
-6. Returns the QGA execution transport to core, which verifies the live Debian release
-7. Switches to Tailscale SSH and completes initialization
+3. Starts the VM
+4. Waits for cloud-init and runs the bootstrap script through QEMU Guest Agent, which installs
+   system packages and Tailscale and configures the admin user (the first of these waits for the
+   guest agent to answer)
+5. Joins Tailscale through QEMU Guest Agent, with the auth key on the script's stdin, and reads the
+   VM's Tailscale address the same way
+6. Returns that address to core, which connects over Tailscale SSH, records the VM's host key,
+   checks the VM contract (the live Debian release first), and completes initialization
 
 After provisioning, normal operations use Tailscale SSH, as they do on Lima and Azure VMs.
 
 ## Troubleshooting
 
-### "Timed out waiting for guest agent"
+### The guest agent does not answer
 
-The QEMU guest agent is not responding. Check:
+A root script fails with
+`the QEMU guest agent of Proxmox VM <vmid>@<node> did not answer, so no script was dispatched` when
+the agent does not answer within about two minutes; create's wait for cloud-init asks again until
+about seven minutes have passed. Check:
 
 - The guest agent is installed in the template (the setup script handles this via `virt-customize`)
 - The guest agent is enabled in the VM config (`qm set <vmid> --agent enabled=1`)
-- The VM has finished booting -- connect via `qm terminal <vmid>` to check
+- The VM has finished booting: connect with `qm terminal <vmid>` to check
+
+### Create fails with `QGA status failed` during the bootstrap
+
+A template whose `qemu-guest-agent` package has an upgrade pending fails every create: the bootstrap
+upgrades the package, the agent restarts mid-script and forgets the script, and the next status poll
+fails with the agent's own reason (`Agent error: PID <pid> does not exist`). Keep the template's
+cloud-init `ciupgrade` option on, as it is by default, so the upgrade happens during cloud-init,
+whose wait survives the restart, or build the template with its packages already upgraded.
 
 ### The token secret won't resolve
 

@@ -2,9 +2,9 @@
 
 Wraps a bootstrap script in a #cloud-config YAML that delivers and executes
 it via write_files + runcmd. This lets Azure VMs run the same bootstrap script
-that Lima uses via its provision block. Provider-retained cloud-init always
-renders the script with its Tailscale join deferred; the resolved key crosses
-a separate post-boot stdin boundary.
+that Lima uses via its provision block. The script holds no secret, so the
+provider may retain it; the platform joins Tailscale afterwards through the
+VM's root channel.
 """
 
 from __future__ import annotations
@@ -12,9 +12,12 @@ from __future__ import annotations
 import textwrap
 
 # Minimal packages needed during provisioning (cloud-init/bootstrap).
-# Only what is required to get the VM to a state where init can SSH in.
+# Only what is required to get the VM to a state where core can reach it over
+# SSH: every core request runs through agw-launch, which needs python3 and its
+# standard library (Debian's python3 package depends on it).
 PROVISIONING_PACKAGES = [
     "openssh-server",
+    "python3",
     "curl",
     "sudo",
     "ca-certificates",

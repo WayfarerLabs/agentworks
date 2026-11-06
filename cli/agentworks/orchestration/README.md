@@ -94,8 +94,7 @@ op-need would scatter prompts across the run. The invariant it buys is that all 
 happens before the work starts mutating anything (the walk-away point), and nothing is resolved or
 prompted twice in one command. Contiguity is not promised: an activation gate may prompt for a
 stopped VM's platform credential before the boundary pass does the rest, and both sit before the
-walk-away point. Conditional Tailscale repair is the deliberate lazy exception: a stopped VM may
-start before late repair-key delivery, then validation precedes every rejoin-specific action.
+walk-away point.
 
 Runup then runs post-resolve, but **deferred to right before the ops it gates**, not hoisted to the
 front with preflight. It reads the already-cached secrets and fires at the op boundary, so in a

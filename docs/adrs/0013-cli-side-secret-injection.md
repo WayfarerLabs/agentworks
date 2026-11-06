@@ -9,10 +9,11 @@ superseded by ADR 0016's configured `secret-source` model; the decision itself r
 injection with no VM-side secret storage.
 
 Amended for the commands that run through `agentworks.execution` (`vm exec`, `vm shell`,
-`agent exec`, `agent shell`; see the [transport take 2 SDD](../sdd/2026-10-20-transport-take2/)):
-secret environment travels in the request on the client's stdin, not as `-o SetEnv` arguments. The
-decision stands, and Negative 2's command-line exposure no longer applies to those commands, since
-no secret appears in any argument vector on either machine.
+`agent exec`, `agent shell`; see
+[`cli/agentworks/execution/README.md`](../../cli/agentworks/execution/README.md)): secret
+environment travels in the request on the client's stdin, not as `-o SetEnv` arguments. The decision
+stands, and Negative 2's command-line exposure no longer applies to those commands, since no secret
+appears in any argument vector on either machine.
 
 ## Context
 

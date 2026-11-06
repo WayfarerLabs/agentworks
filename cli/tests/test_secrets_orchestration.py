@@ -4,7 +4,6 @@ Pins:
 - compute_needed_secrets unions across targets and dedupes by name,
   preserving first-encounter order both within and across targets
 - secret-reference union is invariant under value substitution
-- extra_decls extends the union without target env-table membership
 - resolve_for_command returns the {secret: value} map AND populates
   the resolver cache so subsequent renders use cached values
 - resolve_for_command on an empty union does not call the resolver
@@ -15,7 +14,7 @@ Pins:
 from __future__ import annotations
 
 from textwrap import dedent
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -24,7 +23,6 @@ from agentworks.config import load_config
 from agentworks.env import EnvEntry
 from agentworks.errors import StateError, ValidationError
 from agentworks.secrets import (
-    SecretDecl,
     SecretTarget,
     compute_needed_secrets,
     resolve_for_command,
@@ -216,29 +214,6 @@ def test_walks_all_scopes_in_target(tmp_path: Path) -> None:
     ]
 
 
-def test_extra_decls_extend_union(tmp_path: Path) -> None:
-    """extra_decls includes secrets that aren't in any target's env chain
-    -- the hook for legacy tailscale / git-cred migration."""
-    cfg = _write_config(
-        tmp_path,
-        settings="""
-        [secret_config]
-        sources = ["env-var", "prompt"]
-        """,
-        manifests=[
-            ManifestDoc("secret", "from-env", description="in env table"),
-            ManifestDoc("secret", "external", description="not in any env table"),
-        ],
-    )
-    config = load_config(cfg, warn_issues=False)
-    registry = build_registry(config)
-
-    target = SecretTarget(vm={"K": EnvEntry({"secret": "from-env"})})
-    external_decl = registry.lookup("secret", "external")
-    decls = compute_needed_secrets([target], registry, extra_decls=[external_decl])
-    assert sorted(d.name for d in decls) == ["external", "from-env"]
-
-
 def test_secret_references_invariant_under_value_substitution(
     tmp_path: Path,
 ) -> None:
@@ -314,31 +289,6 @@ def test_cross_target_first_encounter_ordering(tmp_path: Path) -> None:
     # b-secret encountered first (target_b is first in the list), so
     # it leads the order even though a-secret sorts alphabetically before.
     assert [d.name for d in decls] == ["b-secret", "a-secret"]
-
-
-def test_extra_decls_dedupe_against_target_decls(tmp_path: Path) -> None:
-    """An extra_decl that's ALSO referenced by a target's env chain
-    appears once, not twice."""
-    cfg = _write_config(
-        tmp_path,
-        settings="""
-        [secret_config]
-        sources = ["env-var", "prompt"]
-        """,
-        manifests=[ManifestDoc("secret", "shared", description="shared")],
-    )
-    config = load_config(cfg, warn_issues=False)
-    registry = build_registry(config)
-
-    target = SecretTarget(vm={"K": EnvEntry({"secret": "shared"})})
-    shared = registry.lookup("secret", "shared")
-    decls = compute_needed_secrets([target], registry, extra_decls=[shared])
-    assert [d.name for d in decls] == ["shared"]
-
-
-# ---------------------------------------------------------------------------
-# resolve_for_command
-# ---------------------------------------------------------------------------
 
 
 def test_resolve_for_command_returns_resolved_values(
@@ -493,49 +443,6 @@ def test_resolve_for_command_skips_loop_when_no_secrets(
     plaintext_target = SecretTarget(vm={"K": EnvEntry({"value": "plain"})})
     resolve_for_command([plaintext_target], config, registry, interaction=TtyInteractionPolicy.REFUSE)
     assert called["count"] == 0
-
-
-def test_resolve_for_command_passes_extra_decls_through(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """extra_decls reach the resolve loop even when no target references
-    any secret -- pinning the legacy-migration hook."""
-    monkeypatch.setenv("AW_SECRET_EXTERNAL", "x")
-    cfg = _write_config(
-        tmp_path,
-        settings="""
-        [secret_config]
-        sources = ["env-var"]
-        """,
-        manifests=[ManifestDoc("secret", "external", description="external")],
-    )
-    config = load_config(cfg, warn_issues=False)
-    registry = build_registry(config)
-
-    from agentworks.secrets.resolve import resolve_batch as _real
-
-    calls: list[list[str]] = []
-
-    def _spy(decls: list[SecretDecl], sources: list[object], **kwargs: Any) -> ResolutionBatch:
-        calls.append([d.name for d in decls])
-        return _real(decls, sources, **kwargs)  # type: ignore[arg-type]
-
-    monkeypatch.setattr("agentworks.secrets.resolve.resolve_batch", _spy)
-
-    resolve_for_command(
-        [],
-        config,
-        registry,
-        extra_decls=[registry.lookup("secret", "external")],
-        interaction=TtyInteractionPolicy.REFUSE,
-    )
-    assert calls == [["external"]]
-
-
-# ---------------------------------------------------------------------------
-# SecretTarget shape
-# ---------------------------------------------------------------------------
 
 
 def test_label_excluded_from_equality() -> None:

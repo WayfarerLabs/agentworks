@@ -31,10 +31,12 @@ platform-specific transports), all subsequent access goes over SSH via Tailscale
   inbound traffic at baseline: no standing allow rule exists. SSH ingress happens only through
   ephemeral allow rules scoped to the operator's egress IP (plus the `operator.ssh_allow_cidrs`
   config extras): a fixed-name bootstrap allow created with the VM, and an independent per-operation
-  allow for each native-transport session, each deleted the moment it is no longer needed (Tailscale
-  confirmed, session ended, or the create failed or was interrupted).
-- Ephemeral key support: VMs can use ephemeral Tailscale keys that auto-deregister on stop, with
-  automatic rejoin on start.
+  allow for each root-channel script (`vm recover`, `vm rekey`, `vm delete`'s logout) or
+  `vm shell --platform` session, each deleted the moment it is no longer needed (Tailscale
+  confirmed, script or session ended, or the create failed or was interrupted).
+- Ephemeral key support: VMs can use ephemeral Tailscale keys that auto-deregister on stop. Nothing
+  rejoins on start: a VM whose node expired while it was offline fails `vm start` with a hint, and
+  `agw vm recover` rejoins it.
 - Cross-platform consistency: the same SSH workflow works for local Lima, remote Lima, Azure, and
   WSL2 VMs.
 - Dependency: requires Tailscale account and auth keys. This is a hard dependency for VM workspaces
@@ -55,3 +57,10 @@ also blocks direct inbound (hole-punched) UDP, so Tailscale peer-to-peer paths d
 bills continuously, including while the VM is deallocated. Accepted window: VMs created under the
 old scheme converge to this model only on their first native-route use, so a legacy VM whose old
 public-IP detach failed keeps its old posture until then.
+
+Amended 2026-11-04: this ADR said ephemeral-key VMs rejoin the tailnet automatically on start, and
+that native-transport sessions opened the per-operation allows. `vm start` and the automatic start
+now only wait for the VM to answer over SSH and name `agw vm recover` when it does not; recover runs
+one repair script through the platform's own channel, which rejoins a node that needs a login. The
+per-operation allows now open for each such script and each `vm shell --platform` session. The
+consequences above reflect the amended behavior; the decision stands.

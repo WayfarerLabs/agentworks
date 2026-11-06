@@ -3,51 +3,49 @@ via the Proxmox REST API."""
 
 from __future__ import annotations
 
-import sys
+import functools
 import time
 import urllib.parse
-import uuid
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal
 
 from pydantic import Field, model_validator
 
 from agentworks import output
 from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
-from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script
-from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
+from agentworks.capabilities.vm_platform.bootstrap_script import run_bootstrap
 from agentworks.capabilities.vm_platform.debian_release import (
     operator_owned_release_value,
 )
+from agentworks.capabilities.vm_platform.tailscale_join import (
+    CLOUD_INIT_RECOVERABLE_STATUS,
+    CREATE_RERUN_HINT,
+    join_tailscale,
+    settle_tailnet_address,
+)
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
-from agentworks.errors import ProvisioningError, StateError
+from agentworks.errors import ConnectivityError, ProvisioningError, StateError
+from agentworks.execution import root_script
+from agentworks.plugins.proxmox import guest_agent
 from agentworks.plugins.proxmox.api import ProxmoxAPI, ProxmoxAPIError
 from agentworks.plugins.proxmox.teardown import (
     rollback_create_on_interrupt,
     rollback_partial_create,
     stop_and_delete_vm,
 )
-from agentworks.plugins.proxmox.transport import ProxmoxExecTransport
 from agentworks.schema import AgwModel, NonEmptyStr, PositiveInt, SecretRef
 from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
 
     from agentworks.capabilities.base import RunContext
-    from agentworks.config import Config
     from agentworks.db import VMRow
+    from agentworks.execution.root_script import RawRun
 
-
-def _warn_bootstrap_file_residue() -> None:
-    """Warn about guest residue without replacing active control flow."""
-    try:  # noqa: SIM105 - warning failures must not replace the active provisioning failure
-        output.warn(
-            "could not verify removal of the Proxmox bootstrap staging file; "
-            "primary failure unchanged; plaintext may remain"
-        )
-    except (Exception, KeyboardInterrupt, SystemExit, GeneratorExit):
-        pass
+BOOTSTRAP_DEADLINE_SECONDS = 600
+CLOUD_INIT_DEADLINE_SECONDS = guest_agent.AGENT_WAIT_SECONDS + 300
+"""The guest agent's wait, then cloud-init's own 300 s: the one root-channel call draws on both."""
 
 
 class ProxmoxConfig(AgwModel):
@@ -121,7 +119,7 @@ class ProxmoxConfig(AgwModel):
 class ProxmoxPlatform(VMPlatform):
     """Runs VMs on a Proxmox VE cluster."""
 
-    contract_version: ClassVar[int] = 1
+    contract_version: ClassVar[int] = 2
     name: ClassVar[str] = "proxmox"
     description: ClassVar[str] = "Proxmox VE cluster VMs (clone + cloud-init)"
     config_model: ClassVar[type[ProxmoxConfig]] = ProxmoxConfig
@@ -141,16 +139,19 @@ class ProxmoxPlatform(VMPlatform):
         bootstrap and recovery. Interactive native shell remains unavailable; use the
         Proxmox web UI's serial console for manual access.
 
-        Creation passes the required Tailscale key through a private guest-agent staging
-        file and verifies removal of that file before returning the QGA execution transport.
-        Core checks the live Debian release through the returned transport. A bootstrap
-        failure rolls the cloned VM back; a later core mismatch retains an addressable failed
-        VM for explicit deletion.
+        Creation runs the bootstrap, the Tailscale join and the address read as root through
+        QEMU Guest Agent, with the auth key only on the join script's stdin. An address
+        that cannot be read logs the node out. Core then checks the live Debian release over
+        SSH at the returned address. A bootstrap, join or address failure rolls the
+        cloned VM back; a later core mismatch retains an addressable failed VM for explicit
+        deletion.
 
         Ships as the opt-in `proxmox` system plugin, so a site stays not-ready until
         `[plugins] system` lists it.
         """,
     )
+    # QGA reaches the guest without its sshd.
+    recovery_needs_guest_sshd: ClassVar[bool] = False
     native_shell_unavailable_hint: ClassVar[str] = (
         "Proxmox QEMU Guest Agent does not provide an interactive native shell. "
         "Use the Proxmox web UI's serial console "
@@ -281,14 +282,26 @@ class ProxmoxPlatform(VMPlatform):
         return str(node)
 
     def _vmid(self, vm: VMRow) -> int:
-        vmid = vm.platform_metadata.get("vmid")
+        # Typed as text, but the row's JSON is decoded without checking its values.
+        vmid: object = vm.platform_metadata.get("vmid")
         if not vmid:
             raise StateError(
                 f"VM '{vm.name}' has no proxmox vmid in its platform metadata; the DB row is incomplete",
                 entity_kind="vm",
                 entity_name=vm.name,
             )
-        return int(vmid)
+        # The row is persisted state, a trust boundary: backup, restore and
+        # legacy migration write it as well as create. Its JSON can carry the
+        # VMID as a number or as decimal text.
+        if type(vmid) is int and vmid >= 0:
+            return vmid
+        if isinstance(vmid, str) and vmid.isascii() and vmid.isdigit():
+            return int(vmid)
+        raise StateError(
+            f"VM '{vm.name}' has an invalid proxmox vmid in its platform metadata",
+            entity_kind="vm",
+            entity_name=vm.name,
+        )
 
     def _template_vmid(self, release: DebianRelease) -> int:
         return operator_owned_release_value(
@@ -387,52 +400,45 @@ class ProxmoxPlatform(VMPlatform):
                 self._api(ctx).wait_for_task(node, pending_upid)
                 pending_upid = None
 
-                # 6. Wait for guest agent and get VM IP
-                output.detail("Waiting for guest agent...")
-                ip = self._wait_for_guest_ip(node, newid, ctx)
-                output.detail(f"VM IP: {ip}")
-
-                # 7. Wait for cloud-init to finish (releases apt lock)
+                # 6. Wait for cloud-init to finish (releases apt lock), then run the
+                # bootstrap, join and read the address through the guest agent,
+                # the VM's root channel
+                run_as_root = functools.partial(guest_agent.run_as_root, self._api(ctx), node, newid)
                 output.detail("Waiting for cloud-init...")
-                self._wait_for_cloud_init(node, newid, ctx)
-
-                # 8. Run bootstrap script via guest agent
-                output.detail("Running bootstrap via guest agent...")
-                bootstrap = generate_bootstrap_script(
+                _wait_for_cloud_init(run_as_root, newid)
+                run_bootstrap(
+                    run_as_root,
                     admin_username=request.admin_username,
                     ssh_public_key=request.ssh_public_key,
-                    provisioning_packages=PROVISIONING_PACKAGES,
-                    tailscale_auth_key=request.tailscale_auth_key,
                     hostname=request.hostname,
                     swap=request.swap_gib,
+                    deadline=BOOTSTRAP_DEADLINE_SECONDS,
+                    progress=request.progress,
                 )
-                tailscale_ip = self._run_bootstrap_via_agent(node, newid, bootstrap, ctx)
-                if not tailscale_ip:
-                    raise ProvisioningError("Proxmox bootstrap did not return a Tailscale IP")
-                output.detail(f"Tailscale IP: {tailscale_ip}")
-
-                target = ProxmoxExecTransport(
-                    self._api(ctx),
-                    node=node,
-                    vmid=newid,
-                    admin_username=request.admin_username,
+                join_tailscale(run_as_root, request.tailscale_auth_key, node=request.hostname)
+                tailnet_address = settle_tailnet_address(
+                    run_as_root, node=request.hostname, rerun_hint=CREATE_RERUN_HINT
                 )
-            except Exception:
+            except Exception as failure:
                 # Re-raised unwrapped after rollback: the manager preserves
                 # typed configuration/state failures and maps other backend
                 # exceptions at the create boundary, so wrapping here would
-                # only add a redundant provider layer.
+                # only add a redundant provider layer. A rollback that cannot
+                # remove the VM raises the retained-row error instead.
                 output.detail("Cleaning up the partial VM...")
-                rollback_partial_create(self._api(ctx), node, newid, pending_upid=pending_upid)
+                rollback_partial_create(
+                    self._api(ctx), node, newid, vm_name=request.vm_name, failure=failure, pending_upid=pending_upid
+                )
                 raise
         except KeyboardInterrupt:
-            rollback_create_on_interrupt(self._api(ctx), node, newid, pending_upid=pending_upid)
+            rollback_create_on_interrupt(
+                self._api(ctx), node, newid, vm_name=request.vm_name, pending_upid=pending_upid
+            )
             raise
 
         return ProvisionResult(
-            native_transport=target,
             platform_metadata={"vmid": str(newid), "node": node},
-            tailscale_ip=tailscale_ip,
+            tailnet_address=tailnet_address,
         )
 
     def _name_exists(self, node: str, backend_name: str, ctx: RunContext) -> bool:
@@ -485,152 +491,35 @@ class ProxmoxPlatform(VMPlatform):
         node = vm.platform_metadata.get("node") or self.config.node
         return f"{vmid}@{node}"
 
-    def native_transport(
-        self,
-        vm: VMRow,
-        ctx: RunContext,
-        *,
-        config: Config | None = None,
-    ) -> ProxmoxExecTransport:
-        """Build the VM's Tailscale-independent QGA execution channel."""
-        del config
-        return ProxmoxExecTransport(
-            self._api(ctx),
-            node=self._vm_node(vm),
-            vmid=self._vmid(vm),
-            admin_username=vm.admin_username,
-        )
+    def run_as_root(self, vm: VMRow, ctx: RunContext, script: bytes, deadline: float) -> RawRun:
+        """Run ``script`` as root through the QEMU Guest Agent, which needs no guest sshd."""
+        return guest_agent.run_as_root(self._api(ctx), self._vm_node(vm), self._vmid(vm), script, deadline)
 
     # -- Helpers ---------------------------------------------------------------
 
-    def _wait_for_cloud_init(self, node: str, vmid: int, ctx: RunContext, *, timeout: float = 300) -> None:
-        """Wait for cloud-init to finish inside the VM."""
-        deadline = time.monotonic() + timeout
-        last_provider_error: ProxmoxAPIError | None = None
-        while (remaining := deadline - time.monotonic()) > 0:
-            try:
-                result = self._api(ctx).guest_agent_exec_wait(
-                    node,
-                    vmid,
-                    "/usr/bin/cloud-init",
-                    ["status", "--wait"],
-                    timeout=min(60, remaining),
-                )
-                if result is not None:
-                    exitcode = result.get("exitcode")
-                    if exitcode == 0:
-                        return
-                    if exitcode == 2:
-                        output.warn(
-                            f"cloud-init completed with recoverable warnings on Proxmox VMID {vmid}; continuing"
-                        )
-                        return
 
-                    status = f"exit {exitcode}" if exitcode is not None else f"signal {result.get('signal')}"
-                    raise ProvisioningError(f"cloud-init failed on Proxmox VMID {vmid} ({status})")
-            except ProxmoxAPIError as exc:
-                last_provider_error = exc
-            remaining = deadline - time.monotonic()
-            if remaining > 0:
-                time.sleep(min(5, remaining))
-        message = (
-            f"Timed out waiting for cloud-init on Proxmox VMID {vmid}; "
-            "the template must have cloud-init and the QEMU guest agent installed and enabled"
-        )
-        if last_provider_error is not None:
-            message = f"{message}; last Proxmox error: {last_provider_error}"
-        raise ProvisioningError(message) from last_provider_error
+def _wait_for_cloud_init(run_as_root: Callable[[bytes, float], RawRun], vmid: int) -> None:
+    """Wait for cloud-init to finish inside the VM; :data:`CLOUD_INIT_RECOVERABLE_STATUS` warns.
 
-    def _wait_for_guest_ip(self, node: str, vmid: int, ctx: RunContext, *, timeout: int = 120) -> str:
-        """Poll the guest agent until it reports a non-loopback IPv4 address."""
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            try:
-                interfaces = self._api(ctx).guest_agent_network(node, vmid)
-                for iface in interfaces:
-                    if iface.get("name") == "lo":
-                        continue
-                    for addr in iface.get("ip-addresses", []):
-                        if addr.get("ip-address-type") == "ipv4":
-                            ip = addr["ip-address"]
-                            if not ip.startswith("127."):
-                                return str(ip)
-            except ProxmoxAPIError:
-                pass  # guest agent not ready yet
-            time.sleep(3)
-        # ProvisioningError, not ProxmoxAPIError: every API call above
-        # succeeded (or was tolerated), so this is the backend VM failing
-        # to reach readiness during provisioning, not an API failure.
-        raise ProvisioningError(f"Timed out waiting for guest agent IP on VMID {vmid}")
-
-    def _run_bootstrap_via_agent(self, node: str, vmid: int, script: str, ctx: RunContext) -> str:
-        """Write and run the bootstrap script via the guest agent.
-
-        Returns the Tailscale IP if bootstrap succeeds. A timeout, unsuccessful
-        execution, or missing valid Tailscale IP raises so create rolls back.
-        """
-        from agentworks.capabilities.vm_platform.bootstrap_script import parse_bootstrap_output
-
-        script_path = f"/tmp/agentworks-bootstrap-{uuid.uuid4().hex}.sh"
-        api = self._api(ctx)
+    A channel failure is asked again until :data:`CLOUD_INIT_DEADLINE_SECONDS`
+    runs out: cloud-init can restart the guest agent mid-run (Proxmox's
+    ``ciupgrade``), and ``cloud-init status --wait`` changes nothing, so
+    running it again is safe.
+    """
+    expires = time.monotonic() + CLOUD_INIT_DEADLINE_SECONDS
+    while True:
         try:
-            prepared = api.guest_agent_exec_wait(
-                node,
-                vmid,
-                "/usr/bin/install",
-                ["-m", "600", "/dev/null", script_path],
+            result = root_script.run(
+                run_as_root, "cloud-init status --wait", deadline=max(expires - time.monotonic(), 0.1)
             )
-            if prepared is None or prepared.get("exitcode", -1) != 0:
-                raise ProvisioningError("could not create the private Proxmox bootstrap staging file")
-            write_failed = False
-            try:
-                api.guest_agent_file_write(node, vmid, script_path, script)
-            except ProxmoxAPIError:
-                write_failed = True
-            if write_failed:
-                raise ProxmoxAPIError("Proxmox guest-agent bootstrap file write failed") from None
-
-            # Bash is invoked explicitly so the private script does not need
-            # an executable bit. The path, never its content, is guest argv.
-            result = api.guest_agent_exec_wait(
-                node,
-                vmid,
-                "/bin/bash",
-                [script_path],
-                timeout=600,
-            )
-        finally:
-            active_failure = sys.exc_info()[1]
-            try:
-                removed = api.guest_agent_exec_wait(
-                    node,
-                    vmid,
-                    "/bin/sh",
-                    [
-                        "-c",
-                        'rm -f -- "$1" && test ! -e "$1"',
-                        "agentworks-bootstrap-cleanup",
-                        script_path,
-                    ],
-                )
-                if removed is None or removed.get("exitcode", -1) != 0:
-                    raise ProxmoxAPIError("Proxmox guest-agent bootstrap staging file removal failed")
-            except (ProxmoxAPIError, KeyboardInterrupt, SystemExit, GeneratorExit) as cleanup_failure:
-                if active_failure is None:
-                    if not isinstance(cleanup_failure, ProxmoxAPIError):
-                        raise
-                    raise ProxmoxAPIError("could not verify removal of the Proxmox bootstrap staging file") from None
-                _warn_bootstrap_file_residue()
-
-        if result is None:
-            raise ProvisioningError("Proxmox guest-agent bootstrap timed out")
-
-        exit_code = result.get("exitcode", -1)
-        stdout = result.get("out-data", "")
-        parsed = parse_bootstrap_output(stdout, exit_code)
-
-        if parsed.ok:
-            assert parsed.tailscale_ip is not None
-            return parsed.tailscale_ip
-
-        raise ProvisioningError(f"Proxmox guest-agent bootstrap failed (exit {exit_code})")
+            break
+        except ConnectivityError:
+            remaining = expires - time.monotonic()
+            if remaining <= 0:
+                raise
+            time.sleep(min(guest_agent.POLL_INTERVAL_SECONDS, remaining))
+    if result.status == CLOUD_INIT_RECOVERABLE_STATUS:
+        output.warn(f"cloud-init completed with recoverable errors on Proxmox VMID {vmid}; continuing")
+    elif result.status != 0:
+        outcome = "an unknown outcome" if result.status is None else f"exit {result.status}"
+        raise ProvisioningError(f"cloud-init did not complete on Proxmox VMID {vmid} ({outcome})")

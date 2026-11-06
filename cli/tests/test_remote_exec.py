@@ -164,51 +164,6 @@ def test_stale_status_reused_by_default(mock_time: MagicMock) -> None:
 
 
 @patch("agentworks.remote_exec.time")
-def test_stale_status_cleared_when_reuse_disabled(mock_time: MagicMock) -> None:
-    """One-shot operations (reuse_completed=False): a leftover status
-    file is stale garbage -- warn, clear, and start a fresh run instead
-    of silently reporting a phantom result (the ddvm1 failure shape)."""
-    mock_time.monotonic.return_value = 0
-    mock_time.sleep = MagicMock()
-
-    target = _mock_target(status_exists_after=0, exit_code="0")
-
-    from agentworks import output as _output
-    from agentworks.output import get_handler, set_handler
-
-    warnings: list[str] = []
-
-    from agentworks.output import Role
-
-    class _WarnCapture:
-        def emit(self, role: Role, message: str, level: int) -> None:
-            if role is Role.WARNING:
-                warnings.append(message)
-
-        def __getattr__(self, name: str):  # noqa: ANN204 - test stub
-            return lambda *a, **k: None
-
-    previous = get_handler()
-    set_handler(_WarnCapture())  # type: ignore[arg-type]
-    try:
-        result = run_detached(
-            target,
-            "echo hello",
-            base_path="/tmp/agentworks-test",
-            poll_interval=0,
-            reuse_completed=False,
-        )
-    finally:
-        set_handler(previous)
-    _ = _output  # keep import for the handler module
-
-    assert result.exit_code == 0
-    # A fresh run started: wrapper written, and the stale state warned.
-    target.write_file.assert_called_once()
-    assert any("stale result files" in w for w in warnings)
-
-
-@patch("agentworks.remote_exec.time")
 def test_run_detached_resume(mock_time: MagicMock) -> None:
     """Existing process detected, resume polling."""
     mock_time.monotonic.return_value = 0

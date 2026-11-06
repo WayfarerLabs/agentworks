@@ -184,6 +184,11 @@ class PipeSession:
     unless ``hold_stdin_open`` keeps it open for :meth:`close_stdin` (a parked
     launcher treats its closing as the client leaving).
 
+    ``nonce=None`` is for a process that speaks no marker protocol (a
+    platform's root channel): both streams pass through unfiltered, so the
+    session ends when the process exits and its pipes go quiet, at end of
+    file, at the deadline or at an output limit.
+
     A write that fails to the client's stdin is the consumer ending early, not a
     failure: the session stops sending and keeps reading. A sink that raises
     an error for which :func:`consumer_left` holds is the consumer of that
@@ -208,7 +213,7 @@ class PipeSession:
         argv: Sequence[str],
         *,
         request: bytes,
-        nonce: str,
+        nonce: str | None,
         stdin: BinaryIO | None = None,
         hold_stdin_open: bool = False,
         on_stdout: Sink,

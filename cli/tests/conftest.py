@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import os
 import sqlite3
+import sys
 import tempfile
 from collections.abc import Generator, Iterator
 from contextlib import AbstractContextManager, contextmanager
@@ -72,15 +73,6 @@ requires_posix_shell = pytest.mark.skipif(
     not Path("/bin/sh").exists(),
     reason="requires a POSIX shell (skipped on the Windows controller)",
 )
-
-
-@pytest.fixture
-def verified_debian_release(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Make offline manager creates observe the release they requested."""
-    monkeypatch.setattr(
-        "agentworks.vms.manager.lifecycle.probe_debian_release",
-        lambda transport, *, expected=None: expected,
-    )
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -269,6 +261,20 @@ def _isolate_inherited_aw_secrets(
     for name in tuple(os.environ):
         if name.startswith("AW_SECRET_"):
             monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture
+def standard_streams() -> Iterator[None]:
+    """Put back descriptors 1 and 2 and the Python streams, which a delivered hangup points at the null device."""
+    saved = {descriptor: os.dup(descriptor) for descriptor in (1, 2)}
+    streams = (sys.stdout, sys.stderr)
+    try:
+        yield
+    finally:
+        for descriptor, copy in saved.items():
+            os.dup2(copy, descriptor)
+            os.close(copy)
+        sys.stdout, sys.stderr = streams
 
 
 @pytest.fixture
@@ -518,13 +524,7 @@ class _StubPlatform:
 
         return VMStatus.RUNNING
 
-    def transient_route(self, vm: object, ctx: object, *, config: object | None = None) -> AbstractContextManager[None]:
-        return contextlib.nullcontext()
-
-    def post_tailscale_ready(self, vm: object, ctx: object) -> None:
-        return None
-
-    def secure_failed_vm(self, vm: object, ctx: object) -> None:
+    def close_provisioning_access(self, vm: object, ctx: object) -> None:
         return None
 
 
@@ -1037,11 +1037,12 @@ def ssh_enrolls_on_first_use(trust_binding: object) -> None:
 
 @pytest.fixture
 def vm_access_recorder(monkeypatch: pytest.MonkeyPatch) -> AccessRecorder:
-    """Route every ``execution.vm_access`` call to a recording fake, and resolve ssh without a client."""
+    """Route ``execution.vm_access`` and ``enrollment_access`` to a recording fake, and resolve ssh without a client."""
     from tests.vm_access_support import AccessRecorder
 
     recorder = AccessRecorder()
     monkeypatch.setattr("agentworks.execution.vm_access", recorder.vm_access)
+    monkeypatch.setattr("agentworks.execution.enrollment_access", recorder.enrollment_access)
     monkeypatch.setattr("agentworks.execution.resolve_ssh", lambda: recorder.client)
     return recorder
 

@@ -133,7 +133,6 @@ class LiveVMNode:
         self._row = row
         self._site = site
         self._observed: VMStatus | None = None
-        self._repair_refs: tuple[str, ...] | None = None
 
     @property
     def key(self) -> str:
@@ -178,30 +177,11 @@ class LiveVMNode:
 
     def _gate_ops_ctx(self, gate_secrets: SecretReader) -> RunContext:
         """The op-start context for gate-driven power ops: the gate's
-        scoped reader (eager gate values, lazy repair values, anything
-        else refused) behind the standard ``ctx.secret`` surface."""
+        scoped reader (its gate values, anything else refused) behind the
+        standard ``ctx.secret`` surface."""
         from agentworks.capabilities.base import RunContext
 
         return RunContext(config=self._config, secrets=gate_secrets)
-
-    def repair_secret_refs(self) -> tuple[str, ...]:
-        # The rejoin auth key comes from the VM's template row field.
-        # Resolved on FIRST call, not construction: the gate consults
-        # this only when the repair path actually reads a name, which
-        # keeps the healthy path free of template resolution, exactly
-        # like the imperative repair path (_ensure_tailscale resolves
-        # the template only after a failed reconnect). Memoized so the
-        # gate reader's authorization check and the node's own read
-        # share one template resolution.
-        if self._repair_refs is None:
-            from agentworks.vms.templates import resolve_live_template
-
-            # One ref, always: the resolved template's auth-key name is
-            # non-optional (the kind's default is "tailscale-auth-key"),
-            # so there is no absent case to fold to an empty tuple.
-            tmpl = resolve_live_template(self._db, self._registry, self._row.name, self._row.template)
-            self._repair_refs = (tmpl.tailscale_auth_key,)
-        return self._repair_refs
 
     def confirmed_active(self) -> bool:
         from agentworks.vms.manager import _is_tailscale_reachable
@@ -232,7 +212,7 @@ class LiveVMNode:
 
     def auto_start(self, gate_secrets: SecretReader) -> None:
         from agentworks import output
-        from agentworks.vms.manager import _ensure_tailscale, _tailscale_rejoin_required
+        from agentworks.vms.manager import _await_tailnet
 
         # Re-read the intent flag: the row this node was built from may
         # predate a concurrent `vm stop` / `vm start` in another
@@ -252,8 +232,8 @@ class LiveVMNode:
         # This is the last check ahead of the start for a gate opened without
         # that precondition: an earlier one would have to live in
         # confirmed_active, a boolean query, and the start is the first thing
-        # that spends anything (with no record the reconnect check could only
-        # fail and send the repair path to spend a Tailscale auth key).
+        # that spends anything (with no record the wait after it could only
+        # fail).
         trust.require_record(self._row.name)
         observed = self._observed.value if self._observed else "stopped"
         output.info(f"VM '{self._row.name}' is {observed}. Starting...")
@@ -262,24 +242,9 @@ class LiveVMNode:
         if self._observed in (VMStatus.STOPPED, VMStatus.DEALLOCATED):
             self._db.record_vm_started(self._row.name)
 
+        # A VM that does not answer fails naming 'agw vm recover'.
         with platform.vm_active(self._row, config=self._config):
-            if _tailscale_rejoin_required(
-                self._db,
-                self._config,
-                self._row,
-                already_running=False,
-            ):
-                auth_key_name = self.repair_secret_refs()[0]
-                _ensure_tailscale(
-                    self._db,
-                    self._config,
-                    self._row,
-                    platform,
-                    # The unchanged gate reader remains the only auth source.
-                    self._gate_ops_ctx(gate_secrets),
-                    auth_keys=gate_secrets,
-                    auth_key_name=auth_key_name,
-                )
+            _await_tailnet(self._db, self._config, self._row, already_running=False)
 
     def hold_active(self) -> AbstractContextManager[None]:
         return self._site.platform.vm_active(self._row, config=self._config)
@@ -364,8 +329,9 @@ class PendingVMNode:
     identity is complete while it is still pending; the orchestrator
     flips it through ``RealizationLog.mark_realized`` once its row
     exists, and ``teardown`` is today's rollback body (delete the row)
-    relocated onto the node. The row is the only artifact this node
-    unwinds: a provisioning failure means nothing usable was created
+    relocated onto the node. The row, and the host-key store file
+    create resets for the name right after it, are the only artifacts
+    this node unwinds: a provisioning failure means nothing usable was created
     remotely (or the remote was unreachable), today's stance, and
     initialization failures are deliberately NOT unwound (the VM
     exists and is debuggable; reinit retries).
@@ -428,6 +394,10 @@ class PendingVMNode:
                 entity_kind="vm",
                 entity_name=self._name,
             ) from exc
+        # The store file goes with the row, as at delete. Create reset it
+        # for this name (``trust.begin_enrollment``), so it holds nothing
+        # that predates this create, and a store error names the file.
+        trust.remove(self._name)
 
 
 # -- Factories: the translation rule applied to real declared resources ----

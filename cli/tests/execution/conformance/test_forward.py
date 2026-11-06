@@ -87,7 +87,7 @@ def test_a_client_killed_by_a_signal_is_128_plus_the_signal(tmp_path: Path) -> N
 
 def test_a_client_that_cannot_start_is_a_typed_refusal() -> None:
     with pytest.raises(ClientUnsupported):
-        forwarding.run_forward(["/nonexistent/agw-ssh"], vm_name="box", log=None)
+        forwarding.run_forward(["/nonexistent/bin/ssh"], vm_name="box", log=None)
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX signal delivery")

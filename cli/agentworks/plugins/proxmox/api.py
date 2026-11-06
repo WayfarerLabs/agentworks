@@ -6,6 +6,7 @@ is via PVEAPIToken (token ID + secret), not session cookies.
 
 from __future__ import annotations
 
+import http.client
 import json
 import ssl
 import time
@@ -15,6 +16,16 @@ import urllib.request
 from typing import Any
 
 from agentworks.errors import ProvisioningError
+
+
+def _error_body(error: urllib.error.HTTPError) -> str:
+    """An error response's body as text, or what of it could be read: callers branch on the HTTP code."""
+    if not error.fp:
+        return ""
+    try:
+        return error.read().decode("utf-8", errors="replace")
+    except (OSError, http.client.HTTPException):
+        return ""
 
 
 class ProxmoxAPIError(ProvisioningError):
@@ -41,6 +52,10 @@ _QGA_COMPLETION_FIELDS = {
 
 class _InvalidQGAExecStatus(ProxmoxAPIError):
     """A QGA exec-status response violates the provider contract."""
+
+
+class _TruncatedQGAOutput(_InvalidQGAExecStatus):
+    """A QGA exec-status reports the command exited but cut its output short."""
 
 
 def _invalid_qga_exec_status(reason: str, *, node: str, vmid: int, pid: int) -> _InvalidQGAExecStatus:
@@ -100,7 +115,9 @@ def _validate_qga_exec_status(
     if type(out_truncated) is not bool or type(err_truncated) is not bool:
         raise _invalid_qga_exec_status("has invalid truncation fields", node=node, vmid=vmid, pid=pid)
     if out_truncated or err_truncated:
-        raise _invalid_qga_exec_status("reports truncated output", node=node, vmid=vmid, pid=pid)
+        raise _TruncatedQGAOutput(
+            f"Proxmox guest-agent exec-status for VMID {vmid} on node '{node}' (PID {pid}) reports truncated output"
+        )
     return normalized
 
 
@@ -165,11 +182,10 @@ class ProxmoxAPI:
             with response as resp:
                 resp_body = resp.read().decode()
         except urllib.error.HTTPError as e:
-            err_body = e.read().decode() if e.fp else ""
-            err = ProxmoxAPIError(f"Proxmox API {method} {path} failed ({e.code}): {err_body}")
+            err = ProxmoxAPIError(f"Proxmox API {method} {path} failed ({e.code}): {_error_body(e)}")
             err.code = e.code
             raise err from e
-        except (OSError, UnicodeError) as e:
+        except (OSError, UnicodeError, http.client.HTTPException) as e:
             raise ProxmoxAPIError(f"Proxmox API {method} {path} failed: {e}") from e
 
         if not resp_body:
@@ -194,7 +210,9 @@ class ProxmoxAPI:
     def list_vms(self, node: str) -> list[dict[str, Any]]:
         """List the VMs on a node (GET /nodes/{node}/qemu)."""
         result = self._request("GET", f"/nodes/{node}/qemu")
-        return result if isinstance(result, list) else []
+        if not isinstance(result, list):
+            raise ProxmoxAPIError(f"Proxmox API GET /nodes/{node}/qemu returned a malformed listing")
+        return result
 
     def clone_vm(
         self,
@@ -284,57 +302,9 @@ class ProxmoxAPI:
 
     # -- Guest agent -----------------------------------------------------------
 
-    def guest_agent_network(self, node: str, vmid: int) -> list[dict[str, Any]]:
-        """Get network interfaces from the QEMU guest agent."""
-        result = self._request("GET", f"/nodes/{node}/qemu/{vmid}/agent/network-get-interfaces")
-        if result and "result" in result:
-            data = result["result"]
-            if isinstance(data, list):
-                return data
-            raise ProxmoxAPIError(f"unexpected network-get-interfaces shape: {type(data).__name__}")
-        return []
-
-    def guest_agent_exec_wait(
-        self,
-        node: str,
-        vmid: int,
-        command: str,
-        args: list[str] | None = None,
-        *,
-        timeout: float = 60,
-    ) -> dict[str, Any] | None:
-        """Run a command via the guest agent and wait for completion.
-
-        Uses exec then polls exec-status until finished or timeout.
-        Returns a validated completion status, or ``None`` at the deadline.
-
-        Proxmox 8 requires the command as a JSON array sent with
-        Content-Type: application/json.
-        """
-        deadline = time.monotonic() + timeout
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            return None
-        pid = self.guest_agent_exec(
-            node,
-            vmid,
-            command=[command, *(args or [])],
-            timeout=remaining,
-        )
-        while (remaining := deadline - time.monotonic()) > 0:
-            status = self.guest_agent_exec_status(
-                node,
-                vmid,
-                pid=pid,
-                timeout=remaining,
-            )
-            if status.get("exited") is True:
-                return status
-            remaining = deadline - time.monotonic()
-            if remaining > 0:
-                time.sleep(min(2, remaining))
-
-        return None
+    def guest_agent_ping(self, node: str, vmid: int, *, timeout: float | None = None) -> None:
+        """Ask the VM's guest agent to answer; raises ``ProxmoxAPIError`` while it does not."""
+        self._request("POST", f"/nodes/{node}/qemu/{vmid}/agent/ping", timeout=timeout)
 
     def guest_agent_exec(
         self,
@@ -377,16 +347,3 @@ class ProxmoxAPI:
         if not isinstance(result, dict):
             raise _invalid_qga_exec_status("returned a malformed response", node=node, vmid=vmid, pid=pid)
         return _validate_qga_exec_status(result, node=node, vmid=vmid, pid=pid)
-
-    def guest_agent_file_write(self, node: str, vmid: int, path: str, content: str) -> None:
-        """Write a file inside the VM via the guest agent.
-
-        Sends raw content and lets Proxmox handle base64 encoding
-        for the guest agent.
-        """
-        self._request(
-            "POST",
-            f"/nodes/{node}/qemu/{vmid}/agent/file-write",
-            {"file": path, "content": content},
-            json_body=True,
-        )

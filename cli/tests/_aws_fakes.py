@@ -40,7 +40,7 @@ class Controls:
     # STS get_caller_identity: None passes; an Exception is raised.
     identity_error: Exception | None = None
     account_id: str = "111122223333"
-    # describe_instances(InstanceIds=...) state name (status / native_transport).
+    # describe_instances(InstanceIds=...) state name (status and the public address read).
     instance_state: str = "running"
     instance_public_ip: str = "203.0.113.10"
     instance_backend_name: str = "dev"

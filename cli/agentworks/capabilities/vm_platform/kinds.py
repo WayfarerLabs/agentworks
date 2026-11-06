@@ -54,19 +54,19 @@ class _VMPlatformKind:
         A vm-platform knows how to create, start, stop, and delete VMs on one backend,
         and how to reach them over Tailscale SSH once they exist.
 
-        Every platform also provides native administrative command execution that works
-        independently of the VM's Tailscale state. Interactive native shell is optional;
-        Proxmox uses QEMU Guest Agent for execution and directs interactive access to its
-        provider console.
+        Every platform also runs core's root scripts through its own channel, which works
+        independently of the VM's Tailscale state; that is how recovery, rekey and the
+        logout at delete reach a VM. A native interactive shell is optional: Proxmox's QEMU
+        Guest Agent runs scripts but directs interactive access to its provider console.
 
-        Contract version 1 receives core's concrete current Debian release, resolves it
+        Contract version 2 receives core's concrete current Debian release, resolves it
         to a platform-owned artifact, and fails before backend mutation when the mapping is
-        missing. A platform completes its Tailscale join before returning transport and backend identity,
-        reports bootstrap through the manager-owned progress sink, and rolls back partial
-        backend state before propagating failure. Core verifies the returned
-        transport before persisting the observed release. A successful result may omit only
-        the Tailscale IP; the VM domain then retries IP discovery and verifies Tailscale SSH
-        without replaying bootstrap.
+        missing. A platform joins Tailscale and reads the node's address through its own
+        root channel before returning the address and backend identity, reports bootstrap
+        through the manager-owned progress sink, and rolls back partial backend state
+        before propagating failure; a node whose address cannot be read is logged out and
+        the create fails. Core validates the address, then reaches the VM over SSH there
+        and checks its live release before persisting it.
 
         Platforms are code, not config: a vm-site selects one by writing its name inside
         `spec.platform`, and the keys allowed beside that name are the platform's own,
@@ -132,12 +132,19 @@ def _readiness(name: str, impl: Any) -> Readiness:
 
 VM_PLATFORM_DESCRIPTOR = CapabilityKindDescriptor(
     kind="vm-platform",
-    contract_version=1,
+    contract_version=2,
     implementation_contract=VMPlatform,
     registry=_registry,
-    required_operations=frozenset({"create", "start", "stop", "delete", "status", "display_backend_name"}),
-    # Empty: VMPlatform supplies every non-operation member a subclass needs.
-    required_attributes=frozenset(),
+    required_operations=frozenset(
+        {"create", "start", "stop", "delete", "status", "display_backend_name", "run_as_root"}
+    ),
+    # VMPlatform supplies every other non-operation member a subclass needs.
+    required_attributes=frozenset({"recovery_needs_guest_sshd"}),
+    # Version 2 merged version 1's two Phase A hooks into one.
+    retired_members=(
+        ("post_tailscale_ready", "close_provisioning_access"),
+        ("secure_failed_vm", "close_provisioning_access"),
+    ),
     entry_factory=_entry,
     readiness=_readiness,
     publisher_source="agentworks.capabilities.vm_platform",

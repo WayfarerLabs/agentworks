@@ -209,6 +209,24 @@ def test_classifier_row(
 
 
 @pytest.mark.parametrize(
+    ("stdout", "ssh_status", "host_key", "expected"),
+    [
+        (StreamFilter(NONCE), 255, False, Unknown(UnknownReason.AUTH_FAILED)),
+        # A host-key failure ends the connection before authentication, so it is the one to report.
+        (StreamFilter(NONCE), 255, True, Unknown(UnknownReason.HOST_KEY)),
+        # Like the host key, the typing needs ssh's own 255 and no start marker.
+        (StreamFilter(NONCE), 1, False, NotDelivered(NotDeliveredReason.LAUNCHER_FAILED)),
+        (StreamFilter(NONCE), None, False, Unknown(UnknownReason.CONNECTION)),
+        (started(), 255, False, Unknown(UnknownReason.TRUNCATED)),
+    ],
+)
+def test_classifier_row_when_the_client_log_shows_an_authentication_failure(
+    stdout: StreamFilter, ssh_status: int | None, host_key: bool, expected: object
+) -> None:
+    assert classify(stdout, StreamFilter(NONCE), ssh_status, host_key_failed=host_key, auth_failed=True) == expected
+
+
+@pytest.mark.parametrize(
     ("code", "status"),
     [
         ("exec ENOENT", 127),

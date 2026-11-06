@@ -8,6 +8,7 @@ of "current".
 
 from __future__ import annotations
 
+import re
 import shlex
 from dataclasses import dataclass
 from enum import StrEnum
@@ -17,8 +18,6 @@ from agentworks.errors import StateError
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-
-    from agentworks.transports import ExecTransport
 
 
 class DebianRelease(StrEnum):
@@ -146,19 +145,6 @@ def parse_os_release(
     raise _observation_error(fields, "is not recognized by this Agentworks build")
 
 
-def probe_debian_release(
-    transport: ExecTransport,
-    *,
-    expected: DebianRelease | None = None,
-) -> DebianRelease:
-    """Read and validate a VM's live Debian release through its transport."""
-
-    return verify_os_release(
-        transport.run("cat /etc/os-release").stdout,
-        expected=expected,
-    )
-
-
 def verify_os_release(
     text: str,
     *,
@@ -177,8 +163,19 @@ def verify_os_release(
     return observed
 
 
+_SHOWN_VALUE = re.compile(r"[A-Za-z0-9._+~-]{1,40}")
+"""What a guest's ``os-release`` value may hold to reach an error and the event that records it."""
+
+
+def _shown(value: str | None) -> str:
+    if value is None:
+        return "<missing>"
+    return value if _SHOWN_VALUE.fullmatch(value) else "<not shown>"
+
+
 def _observation_error(fields: dict[str, str], reason: str) -> StateError:
-    observed = ", ".join(f"{key}={fields.get(key, '<missing>')}" for key in ("ID", "VERSION_ID", "VERSION_CODENAME"))
+    # The values come from the guest: only a plain token is quoted back.
+    observed = ", ".join(f"{key}={_shown(fields.get(key))}" for key in ("ID", "VERSION_ID", "VERSION_CODENAME"))
     return StateError(
         f"guest os-release {reason}: {observed}",
         entity_kind="debian-release",

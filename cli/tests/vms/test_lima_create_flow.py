@@ -2,7 +2,7 @@
 the arm64.nosve SVE mask.
 
 Exercised through ``create`` with the backend seams (limactl create/start,
-``_run_lima``, transport) mocked, so the test asserts the exact ``limactl``
+``LimaHost.run``, transport) mocked, so the test asserts the exact ``limactl``
 calls without a real VM.
 """
 
@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import MagicMock
 
@@ -25,10 +24,14 @@ from agentworks.capabilities.vm_platform.bootstrap_script import (
 from agentworks.capabilities.vm_platform.lima import (
     _REBOOT_CLEAR_MARKER,
     _REBOOT_PENDING_MARKER,
+    _TAILSCALED_WAIT_PAYLOAD,
     LimaPlatform,
 )
+from agentworks.capabilities.vm_platform.lima_host import LimaCommandFailed, LimaHost
+from agentworks.capabilities.vm_platform.tailscale_join import JOIN_FRAGMENT, LOGOUT_SCRIPT
 from agentworks.debian import DebianRelease
-from agentworks.ssh import SSHError
+from agentworks.errors import ConnectivityError, ProvisioningError
+from tests._root_channel_fakes import ADDRESS, Answer, FakeGuest, answer_by_payload, install_at_run_process
 from tests.conftest import provisioning_trust_for_tests
 
 
@@ -59,25 +62,23 @@ def _wire(
     *,
     sentinel_present: bool,
 ) -> list[str]:
-    """Mock the backend seams; return the ``_run_lima`` commands issued."""
+    """Mock the backend seams; return the ``LimaHost.run`` commands issued."""
     ran: list[str] = []
 
     monkeypatch.setattr(LimaPlatform, "_ensure_limactl", lambda self: None)
     monkeypatch.setattr(LimaPlatform, "_instance_exists", lambda self, name: False)
     monkeypatch.setattr(LimaPlatform, "_create_local", lambda self, name, yaml: None)
-    monkeypatch.setattr(LimaPlatform, "_transport_for", lambda self, name: SimpleNamespace())
+    install_at_run_process(monkeypatch, FakeGuest())
 
-    def _fake_run(self: LimaPlatform, cmd: str, **_kw: object) -> str:
+    def _fake_run(self: LimaHost, cmd: str, **_kw: object) -> str:
         ran.append(cmd)
         if REBOOT_SENTINEL_PATH in cmd:
             # The real probe exits 0 either way and reports on stdout.
             marker = _REBOOT_PENDING_MARKER if sentinel_present else _REBOOT_CLEAR_MARKER
             return f"{marker}\n"
-        if "tailscale ip" in cmd:
-            return "100.64.0.1"
         return ""
 
-    monkeypatch.setattr(LimaPlatform, "_run_lima", _fake_run)
+    monkeypatch.setattr(LimaHost, "run", _fake_run)
     return ran
 
 
@@ -101,7 +102,7 @@ def test_no_restart_when_sentinel_absent(monkeypatch: pytest.MonkeyPatch, captur
 def test_probe_failure_warns_and_does_not_restart(monkeypatch: pytest.MonkeyPatch, warnings: list[str]) -> None:
     """A genuine probe failure is reported, not read as an absent sentinel.
 
-    The probe exits 0 whether or not the sentinel is there, so an SSHError
+    The probe exits 0 whether or not the sentinel is there, so a LimaCommandFailed
     means the shell or transport actually broke. Create still completes (the
     VM exists, and Phase A bootstrap follows), but the operator is told.
     """
@@ -111,15 +112,15 @@ def test_probe_failure_warns_and_does_not_restart(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(LimaPlatform, "_ensure_limactl", lambda self: None)
     monkeypatch.setattr(LimaPlatform, "_instance_exists", lambda self, name: False)
     monkeypatch.setattr(LimaPlatform, "_create_local", lambda self, name, yaml: None)
-    monkeypatch.setattr(LimaPlatform, "_transport_for", lambda self, name: SimpleNamespace())
+    install_at_run_process(monkeypatch, FakeGuest())
 
-    def _fake_run(self: LimaPlatform, cmd: str, **_kw: object) -> str:
+    def _fake_run(self: LimaHost, cmd: str, **_kw: object) -> str:
         ran.append(cmd)
         if REBOOT_SENTINEL_PATH in cmd:
-            raise SSHError("connection reset")
+            raise LimaCommandFailed("connection reset")
         return ""
 
-    monkeypatch.setattr(LimaPlatform, "_run_lima", _fake_run)
+    monkeypatch.setattr(LimaHost, "run", _fake_run)
 
     platform.create(_request(), RunContext())
 
@@ -152,10 +153,10 @@ def test_submitted_lima_configuration_never_contains_tailscale_key(
     secret = "tskey-persistence-sentinel"
     submitted: list[str] = []
     calls: list[tuple[str, dict[str, object]]] = []
+    guest = install_at_run_process(monkeypatch, FakeGuest())
 
     monkeypatch.setattr(LimaPlatform, "_ensure_limactl", lambda self: None)
     monkeypatch.setattr(LimaPlatform, "_instance_exists", lambda self, name: False)
-    monkeypatch.setattr(LimaPlatform, "_transport_for", lambda self, name: SimpleNamespace())
 
     if create_method == "_create_local":
         monkeypatch.setattr(
@@ -167,25 +168,23 @@ def test_submitted_lima_configuration_never_contains_tailscale_key(
         monkeypatch.setattr(
             LimaPlatform,
             "_create_remote",
-            lambda self, name, lima_yaml, *, log_vm_name: submitted.append(lima_yaml),
+            lambda self, name, lima_yaml, *, progress: submitted.append(lima_yaml),
         )
 
-    def _fake_run(self: LimaPlatform, command: str, **kwargs: object) -> str:
+    def _fake_run(self: LimaHost, command: str, **kwargs: object) -> str:
         calls.append((command, kwargs))
         if REBOOT_SENTINEL_PATH in command:
             return f"{_REBOOT_CLEAR_MARKER}\n"
-        if "tailscale ip" in command:
-            return "100.64.0.1\n"
         return ""
 
-    monkeypatch.setattr(LimaPlatform, "_run_lima", _fake_run)
+    monkeypatch.setattr(LimaHost, "run", _fake_run)
 
     result = LimaPlatform("lima", {"placement": placement}).create(
         _request(tailscale_auth_key=secret),
         RunContext(),
     )
 
-    assert result.tailscale_ip == "100.64.0.1"
+    assert result.tailnet_address == ADDRESS
     assert submitted and len(submitted) == 1
     submitted_yaml = submitted[0]
     persisted_config = cast("dict[str, Any]", yaml.safe_load(submitted_yaml))
@@ -194,51 +193,88 @@ def test_submitted_lima_configuration_never_contains_tailscale_key(
     assert secret not in provider_list_render
     assert all(secret not in step["script"] for step in persisted_config["provision"])
 
-    sensitive_calls = [(command, kwargs) for command, kwargs in calls if kwargs.get("input_text") is not None]
-    assert sensitive_calls == [
-        (
-            "limactl shell myvm sudo -n /bin/bash -c "
-            '\'IFS= read -r TAILSCALE_AUTH_KEY && test -n "$TAILSCALE_AUTH_KEY" '
-            '&& tailscale up --auth-key "$TAILSCALE_AUTH_KEY"\'',
-            {"input_text": f"{secret}\n"},
-        )
-    ]
-    assert secret not in sensitive_calls[0][0]
+    # The key reaches the guest only in the join's script, on the root channel's stdin.
+    assert secret not in repr(calls)
+    assert [secret.encode() in script for script in guest.scripts] == [False, True, False]
+    assert guest.payloads == [_TAILSCALED_WAIT_PAYLOAD, JOIN_FRAGMENT, "tailscale ip -4"]
+    assert not any(secret in arg for argv in guest.argvs for arg in argv)
 
 
-def test_ip_probe_failure_returns_missing_ip_after_successful_join(
+def test_an_address_that_cannot_be_read_logs_the_node_out_and_removes_the_instance(
     monkeypatch: pytest.MonkeyPatch,
-    warnings: list[str],
 ) -> None:
     secret = "tskey-ip-probe-sentinel"
-    submitted: list[str] = []
-    calls: list[tuple[str, dict[str, object]]] = []
-
+    ran: list[str] = []
+    guest = install_at_run_process(
+        monkeypatch, FakeGuest(answer_by_payload(answers={"tailscale ip -4": Answer(status=1)}))
+    )
+    monkeypatch.setattr("agentworks.capabilities.vm_platform.tailscale_join.time.sleep", lambda seconds: None)
     monkeypatch.setattr(LimaPlatform, "_ensure_limactl", lambda self: None)
     monkeypatch.setattr(LimaPlatform, "_instance_exists", lambda self, name: False)
-    monkeypatch.setattr(
-        LimaPlatform,
-        "_create_local",
-        lambda self, name, lima_yaml: submitted.append(lima_yaml),
-    )
-    monkeypatch.setattr(LimaPlatform, "_transport_for", lambda self, name: SimpleNamespace())
+    monkeypatch.setattr(LimaPlatform, "_create_local", lambda self, name, lima_yaml: None)
 
-    def _fake_run(self: LimaPlatform, command: str, **kwargs: object) -> str:
-        calls.append((command, kwargs))
+    def _fake_run(self: LimaHost, command: str, **kwargs: object) -> str:
+        ran.append(command)
+        return f"{_REBOOT_CLEAR_MARKER}\n" if REBOOT_SENTINEL_PATH in command else ""
+
+    monkeypatch.setattr(LimaHost, "run", _fake_run)
+
+    with pytest.raises(ConnectivityError):
+        LimaPlatform("lima", {"placement": {"mode": "local"}}).create(
+            _request(tailscale_auth_key=secret),
+            RunContext(),
+        )
+
+    assert guest.joins == 1
+    assert guest.count(LOGOUT_SCRIPT) == 1
+    assert "limactl delete --force myvm" in ran
+
+
+def test_a_failed_restart_rolls_back_before_the_key_is_sent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The join follows the restart, so a restart failure leaves no joined node behind."""
+    ran: list[str] = []
+    guest = install_at_run_process(monkeypatch, FakeGuest())
+    monkeypatch.setattr(LimaPlatform, "_ensure_limactl", lambda self: None)
+    monkeypatch.setattr(LimaPlatform, "_instance_exists", lambda self, name: False)
+    monkeypatch.setattr(LimaPlatform, "_create_local", lambda self, name, lima_yaml: None)
+
+    def _fake_run(self: LimaHost, command: str, **kwargs: object) -> str:
+        ran.append(command)
         if REBOOT_SENTINEL_PATH in command:
-            return f"{_REBOOT_CLEAR_MARKER}\n"
-        if "tailscale ip" in command:
-            raise SSHError("temporary IP probe failure")
+            return f"{_REBOOT_PENDING_MARKER}\n"
+        if command.startswith("limactl restart"):
+            raise LimaCommandFailed("restart failed")
         return ""
 
-    monkeypatch.setattr(LimaPlatform, "_run_lima", _fake_run)
+    monkeypatch.setattr(LimaHost, "run", _fake_run)
 
-    result = LimaPlatform("lima", {"placement": {"mode": "local"}}).create(
-        _request(tailscale_auth_key=secret),
-        RunContext(),
+    with pytest.raises(LimaCommandFailed):
+        LimaPlatform("lima", {"placement": {"mode": "local"}}).create(_request(), RunContext())
+
+    assert guest.scripts == []
+    assert "limactl delete --force myvm" in ran
+
+
+def test_a_tailscaled_that_never_becomes_active_rolls_back_before_the_key_is_sent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ran: list[str] = []
+    guest = install_at_run_process(
+        monkeypatch, FakeGuest(answer_by_payload(answers={_TAILSCALED_WAIT_PAYLOAD: Answer(status=1)}))
     )
+    monkeypatch.setattr(LimaPlatform, "_ensure_limactl", lambda self: None)
+    monkeypatch.setattr(LimaPlatform, "_instance_exists", lambda self, name: False)
+    monkeypatch.setattr(LimaPlatform, "_create_local", lambda self, name, lima_yaml: None)
 
-    assert result.tailscale_ip is None
-    assert submitted and secret not in submitted[0]
-    assert sum(kwargs.get("input_text") == f"{secret}\n" for _command, kwargs in calls) == 1
-    assert "retry IP discovery without the auth key" in "\n".join(warnings)
+    def _fake_run(self: LimaHost, command: str, **kwargs: object) -> str:
+        ran.append(command)
+        return f"{_REBOOT_CLEAR_MARKER}\n" if REBOOT_SENTINEL_PATH in command else ""
+
+    monkeypatch.setattr(LimaHost, "run", _fake_run)
+
+    with pytest.raises(ProvisioningError):
+        LimaPlatform("lima", {"placement": {"mode": "local"}}).create(_request(), RunContext())
+
+    assert guest.payloads == [_TAILSCALED_WAIT_PAYLOAD]
+    assert b"AGW_SECRET" not in guest.scripts[0]
+    assert "limactl delete --force myvm" in ran

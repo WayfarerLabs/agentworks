@@ -10,10 +10,10 @@ module retains the small set of bare-``SSHTarget`` helpers that aren't
 - ``SSHTarget`` / ``SSHResult`` / ``SSHError`` / ``SSH_TRANSPORT_ERROR``:
   shared data shapes still used across the codebase (and by
   ``SSHTransport`` itself).
-- ``SSHLogger`` / ``LOG_DIR``: the unified command logger.
-- Module-level ``run``: called from ``capabilities/vm_platform/lima.py``
-  (the SSH-placed Lima control plane), where the caller has a bare
-  ``SSHTarget`` and doesn't want to construct a full ``SSHTransport``.
+- ``SSHLogger`` / ``LOG_DIR``: the unified command logger, whose ``record``
+  is the operation log ``agentworks.execution`` requests are written to.
+- Module-level ``run``: the bare-``SSHTarget`` command primitive that
+  ``SSHTransport`` runs its sensitive-stdin commands through.
 - Module-level ``copy_to``: retained as the bare-``SSHTarget`` scp primitive.
 """
 
@@ -32,6 +32,9 @@ from agentworks.subprocess_io import decode_stream, stdin_bytes
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from agentworks.execution.requests import RunRequest
+    from agentworks.execution.results import Result
 
 
 @dataclass(frozen=True)
@@ -136,6 +139,7 @@ class SSHLogger:
         # cannot rewrite part of it before the complete value is matched.
         self._redact = tuple(sorted(normalized, key=len, reverse=True))
         self._warnings: list[str] = []
+        self._label = command_stem
 
         ts = datetime.now(tz=UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
         self._write(f"# Log: {vm_name} ({command_stem})\n# Started: {ts}\n\n")
@@ -166,11 +170,26 @@ class SSHLogger:
         return text
 
     def step(self, name: str) -> None:
-        """Log the start of a named step."""
+        """Log the start of a named step, which labels the requests :meth:`record` writes after it."""
         from datetime import UTC, datetime
 
+        self._label = name
         ts = datetime.now(tz=UTC).strftime("%H:%M:%S")
         self._write(f"--- [{ts}] {name} ---\n")
+
+    def record(self, request: RunRequest, result: Result) -> None:
+        """Log one ``agentworks.execution`` request and its result, labeled with the latest step.
+
+        The callable a command hands ``VMAccess`` as its ``log``. The record
+        holds no environment value, script source or stdin, and goes through
+        the same redaction as every other line.
+        """
+        from datetime import UTC, datetime
+
+        from agentworks.execution.oplog import format_record
+
+        ts = datetime.now(tz=UTC).strftime("%H:%M:%S")
+        self._write(f"[{ts}] " + format_record(request, result, label=self._label))
 
     def output(self, text: str) -> None:
         """Log general output."""

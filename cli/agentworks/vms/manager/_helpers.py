@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from agentworks.resources import Registry
     from agentworks.secrets import SecretTarget
     from agentworks.secrets.base import SecretDecl
+    from agentworks.vms.initializer.phase_a import OperationLog
 
 
 class _VmAdminEnvScopes(NamedTuple):
@@ -210,8 +211,29 @@ def _init_log_hint(vm_name: str) -> str:
     return f" See log: {format_host_path(logs[0])}" if logs else ""
 
 
-def _guard_failed_vm(vm: VMRow, *, allow_failed_init: bool = False) -> None:
-    """Block operations on VMs with failed provisioning or initialization.
+@contextlib.contextmanager
+def _operation_log(vm_name: str, command_stem: str, *, redactions: tuple[str, ...]) -> Iterator[OperationLog]:
+    """An operation log for ``command_stem``, closed on exit, with ``redactions`` registered before its first write.
+
+    Typed by the small ``OperationLog`` protocol, never as ``SSHLogger``, so a
+    manager module that imports nothing legacy can use it.
+    """
+    from agentworks.ssh import SSHLogger
+
+    log = SSHLogger(vm_name, command_stem, redactions=redactions)
+    try:
+        yield log
+    finally:
+        log.close()
+
+
+def _guard_incomplete_vm(vm: VMRow, *, allow_failed_init: bool = False) -> None:
+    """Block operations on a VM whose provisioning never completed, or whose initialization failed.
+
+    Provisioning is complete only once create's Phase A passed the VM
+    contract, so any other status (failed, or a pending or in-progress row a
+    killed create left behind) is a VM that was never attested; only
+    ``vm delete`` is supported there, and that is never softened.
 
     When ``allow_failed_init`` is True, an init-status failure becomes
     a non-fatal warning instead of a hard block. Used by operations
@@ -219,9 +241,7 @@ def _guard_failed_vm(vm: VMRow, *, allow_failed_init: bool = False) -> None:
     diagnose or fix the cause of the init failure (e.g. ``vm shell``
     opening a session on a partially-initialized VM to apply a manual
     heal before re-running ``vm reinit``; ``vm exec`` running a one-shot
-    diagnostic command). Provisioning failure is never softened: the
-    VM may not even be reachable, and the project's stance there is
-    "delete and recreate."
+    diagnostic command).
     """
     from agentworks.db import InitStatus, ProvisioningStatus
     from agentworks.errors import StateError
@@ -232,6 +252,13 @@ def _guard_failed_vm(vm: VMRow, *, allow_failed_init: bool = False) -> None:
             entity_kind="vm",
             entity_name=vm.name,
             hint="Only 'vm delete' is supported on a failed-provisioning VM.",
+        )
+    if vm.provisioning_status != ProvisioningStatus.COMPLETE.value:
+        raise StateError(
+            f"VM '{vm.name}' has not completed provisioning.{_init_log_hint(vm.name)}",
+            entity_kind="vm",
+            entity_name=vm.name,
+            hint="Only 'vm delete' is supported on a VM whose provisioning did not complete.",
         )
     if vm.init_status == InitStatus.FAILED.value:
         if allow_failed_init:
@@ -291,28 +318,6 @@ def _mask_env_var_backend_for(
         yield
     finally:
         os.environ.update(saved)
-
-
-def _lookup_or_synthesize_secret(registry: Registry, name: str) -> SecretDecl:
-    """Return the ``SecretDecl`` for ``name`` from the framework
-    Registry, or synthesize a bare one matching the auto-declare shape
-    if no Resource was published or auto-declared under that name.
-
-    Used by ``start_vm``'s conditional standalone resolution and by operation
-    resolvers registering an undeclared repair name. A well-known name that no
-    manifest references has no registry row, so a strict lookup raises
-    ``KeyError``. Synthesizing a bare ``SecretDecl`` (the same shape
-    ``_SecretKind.synthesize`` would produce, minus ``origin`` which resolution
-    doesn't read) keeps the source chain callable.
-    """
-    from agentworks.secrets.base import SecretDecl
-    from agentworks.secrets.kinds import SECRET_KIND_NAME
-
-    try:
-        found: SecretDecl = registry.lookup(SECRET_KIND_NAME, name)
-        return found
-    except KeyError:
-        return SecretDecl(name=name, description="")
 
 
 def _query_live_resources(db: Database, vm: VMRow, config: Config) -> dict[str, str] | None:

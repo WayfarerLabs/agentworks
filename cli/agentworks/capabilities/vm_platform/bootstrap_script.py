@@ -1,8 +1,10 @@
-"""Create-time bootstrap script generation and output parsing.
+"""Create-time bootstrap script generation, its runner and its output parsing.
 
 Generates a self-contained bash script that a vm-platform runs during
-``create()`` on a fresh VM. The script uses structured markers in stdout so
-the platform can drive logging and console output.
+``create()`` on a fresh VM, either through a provider-side payload or
+through :func:`run_bootstrap` over its root channel. The script uses
+structured markers in stdout so the platform can drive logging and console
+output.
 
 Markers:
   ##STEP## <name>       - step boundary
@@ -13,11 +15,21 @@ Markers:
 
 from __future__ import annotations
 
-import ipaddress
 import shlex
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
+from agentworks import output
+from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
 from agentworks.capabilities.vm_platform.skel import BASHRC, ZSHRC
+from agentworks.errors import ProvisioningError
+from agentworks.execution import root_script
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from agentworks.capabilities.vm_platform.base import BootstrapProgress
+    from agentworks.execution.root_script import RawRun
 
 # Canonical cloud-init drop-in that stops host-key regeneration on stop/start.
 # By default cloud-init may delete and regenerate /etc/ssh/ssh_host_* on some
@@ -64,7 +76,6 @@ set -euo pipefail
 VM_USER={admin_username}
 SSH_PUBLIC_KEY={ssh_public_key}
 PROVISIONING_PACKAGES={provisioning_packages}
-TAILSCALE_AUTH_KEY={tailscale_auth_key}
 VM_HOSTNAME={vm_hostname}
 SWAP_GB={swap}
 
@@ -232,19 +243,6 @@ else
     curl -fsSL https://tailscale.com/install.sh | sh
     echo "##SUCCESS## tailscale installed"
 fi
-
-# -- Step 7: Join Tailscale --
-echo "##STEP## Tailscale join"
-if [ -n "$TAILSCALE_AUTH_KEY" ]; then
-    tailscale up --auth-key "$TAILSCALE_AUTH_KEY"
-    TS_IP=$(tailscale ip -4)
-    echo "##SUCCESS## tailscale-ip=$TS_IP"
-else
-    # Provider-retained bootstrap payloads embed this script without the
-    # resolved key. Their platform adapters deliver the key over a separate
-    # post-start stdin boundary.
-    echo "##SUCCESS## Tailscale join deferred to platform"
-fi
 """
 
 
@@ -253,16 +251,14 @@ def generate_bootstrap_script(
     admin_username: str,
     ssh_public_key: str,
     provisioning_packages: list[str],
-    tailscale_auth_key: str | None,
     hostname: str,
     swap: int,
 ) -> str:
     """Generate the create-time bootstrap script with parameters baked in.
 
-    ``tailscale_auth_key=None`` omits the join from the generated payload.
-    Provider adapters use this persistence-safe shape whenever their platform
-    retains the script, then deliver the required resolved key through their
-    declared ephemeral create-time boundary after the retained script has run.
+    The script holds no secret, so a provider may retain it. It installs
+    Tailscale and stops there: every platform joins afterwards through its
+    root channel (``tailscale_join``), the only script that carries the key.
 
     ``swap`` (GiB, 0 to disable) is required rather than defaulted: the
     vm-template layer resolves it and every caller has the resolved value
@@ -270,21 +266,10 @@ def generate_bootstrap_script(
     system default, free to disagree with the first. It did: this
     parameter defaulted to 0 while ``ResolvedVMTemplate.swap`` is 4.
     """
-    if tailscale_auth_key is not None:
-        from agentworks.secrets.line_safety import (
-            LineOrientedSecretUse,
-            require_line_safe_secret,
-        )
-
-        tailscale_auth_key = require_line_safe_secret(
-            tailscale_auth_key,
-            use=LineOrientedSecretUse.TAILSCALE,
-        )
     return SCRIPT_TEMPLATE.format(
         admin_username=shlex.quote(admin_username),
         ssh_public_key=shlex.quote(ssh_public_key),
         provisioning_packages=shlex.quote(" ".join(provisioning_packages)),
-        tailscale_auth_key=shlex.quote(tailscale_auth_key or ""),
         vm_hostname=shlex.quote(hostname),
         swap=swap,
         ssh_preserve_path=SSH_PRESERVE_KEYS_PATH,
@@ -307,43 +292,71 @@ class StepResult:
     error: str | None = None
 
 
-@dataclass
-class BootstrapResult:
-    exit_code: int
-    tailscale_ip: str | None = None
-    steps: list[StepResult] = field(default_factory=list)
-    raw_output: str = ""
-
-    @property
-    def ok(self) -> bool:
-        return self.exit_code == 0 and self.tailscale_ip is not None
-
-
-def parse_bootstrap_output(stdout: str, exit_code: int) -> BootstrapResult:
-    """Parse structured markers from bootstrap script output."""
-    result = BootstrapResult(exit_code=exit_code, raw_output=stdout)
-    current_step: StepResult | None = None
-
+def parse_bootstrap_steps(stdout: str) -> list[StepResult]:
+    """The steps a bootstrap reported through its structured markers, in order."""
+    steps: list[StepResult] = []
     for line in stdout.splitlines():
         if line.startswith("##STEP## "):
-            current_step = StepResult(name=line[9:])
-            result.steps.append(current_step)
+            steps.append(StepResult(name=line[9:]))
+        elif not steps:
+            continue
         elif line.startswith("##SUCCESS## "):
-            msg = line[12:]
-            if current_step is not None:
-                current_step.success_msg = msg
-            if msg.startswith("tailscale-ip="):
-                candidate = msg.split("=", 1)[1].strip()
-                try:
-                    ipaddress.ip_address(candidate)
-                except ValueError:
-                    continue
-                result.tailscale_ip = candidate
+            steps[-1].success_msg = line[12:]
         elif line.startswith("##WARN## "):
-            if current_step is not None:
-                current_step.warnings.append(line[9:])
+            steps[-1].warnings.append(line[9:])
         elif line.startswith("##ERROR## "):
-            if current_step is not None:
-                current_step.error = line[10:]
+            steps[-1].error = line[10:]
+    return steps
 
-    return result
+
+def run_bootstrap(
+    run_as_root: Callable[[bytes, float], RawRun],
+    *,
+    admin_username: str,
+    ssh_public_key: str,
+    hostname: str,
+    swap: int,
+    deadline: float,
+    progress: BootstrapProgress,
+) -> None:
+    """Run the generated bootstrap as root once through ``run_as_root``, raising unless it exits 0.
+
+    For a platform with no provider-side payload (WSL2, Proxmox): the script
+    holds no secret, so it travels on the channel's stdin like any root
+    script. Each reported step goes to the console and to ``progress``, the
+    create's log, followed by the sizes of the two streams and the streams
+    themselves. Nothing here retries or persists VM state.
+    """
+    script = generate_bootstrap_script(
+        admin_username=admin_username,
+        ssh_public_key=ssh_public_key,
+        provisioning_packages=PROVISIONING_PACKAGES,
+        hostname=hostname,
+        swap=swap,
+    )
+    output.detail("Running bootstrap script...")
+    result = root_script.run(run_as_root, script, deadline=deadline)
+    stdout = result.stdout.decode("utf-8", errors="replace")
+
+    for step in parse_bootstrap_steps(stdout):
+        progress.step(step.name)
+        if step.success_msg:
+            output.detail(f"{step.name}: {step.success_msg}")
+            progress.output(step.success_msg)
+        for warning in step.warnings:
+            output.warn(warning)
+            progress.warning(warning)
+        if step.error:
+            output.warn(f"Error: {step.error}")
+            progress.log_error(step.error)
+
+    progress.step("Bootstrap output")
+    progress.output(f"{len(result.stdout)} bytes on stdout, {len(result.stderr)} bytes on stderr")
+    for text in (stdout, result.stderr.decode("utf-8", errors="replace"), result.channel_tail):
+        if text:
+            progress.output(text)
+
+    if result.status is None:
+        raise ProvisioningError("the outcome of the bootstrap script is unknown")
+    if result.status != 0:
+        raise ProvisioningError(f"the bootstrap script failed (exit {result.status})")

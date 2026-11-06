@@ -226,8 +226,8 @@ Agentworks standardizes on a small set of integrated tools rather than abstracti
 interchangeable alternatives.
 
 - **SSH** is the control plane after provisioning: initialization, agent and session management,
-  file transfer, and command execution. Provisioning uses the platform's native transport (Lima
-  shell, SSH over a scoped Azure, EC2, or GCE public route, WSL2 exec, or Proxmox guest agent). The
+  file transfer, and command execution. Provisioning uses the platform's own channel (Lima shell,
+  SSH over a scoped Azure, EC2, or GCE public route, WSL2 exec, or Proxmox guest agent). The
   operator's key (configured in `[operator]`) is deployed during provisioning and is the sole SSH
   authentication mechanism thereafter. Once Tailscale is joined, routine access goes over the
   tailnet, and `~/.ssh/config` entries are managed automatically so standard clients (scp, ssh, VS
@@ -236,9 +236,10 @@ interchangeable alternatives.
   provisioning and routine SSH access rides it. Azure, EC2, and GCE temporarily open TCP/22 on their
   public interfaces to the operator's detected public IPv4 address (as a `/32`), plus configured
   allow-list CIDRs, during bootstrap or explicit native-platform access, then close it again. The
-  `tailscale-auth-key` secret resolves through the configured source chain on `vm create` (and
-  re-joins on `vm start`); ephemeral keys (append `?ephemeral=true`) are fully supported, with the
-  node removed from the tailnet when the VM goes offline. Generate auth keys at the
+  `tailscale-auth-key` secret resolves through the configured source chain on `vm create`,
+  `vm rekey` and `vm recover`. Ephemeral keys (append `?ephemeral=true`) are supported, with the
+  node removed from the tailnet when the VM goes offline: `vm start` does not rejoin, so such a VM
+  fails its start with a hint, and `agw vm recover` rejoins it. Generate auth keys at the
   [Tailscale admin console](https://login.tailscale.com/admin/settings/keys).
 - **[tmux](https://github.com/tmux/tmux)** is the persistence layer. Every session maps 1:1 to a
   tmux session on the VM with the same lifecycle (agent sessions on per-agent sockets for

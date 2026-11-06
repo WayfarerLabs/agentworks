@@ -235,10 +235,12 @@ Create resolves the project, zone, network, operator prefixes, live machine type
 balanced disk type, and every stable name before its first insert. The final instance request has an
 auto-deleted boot disk, no guest service account, an explicit IPv4-only interface, and one lifetime
 ephemeral external access config. The retained startup metadata contains no Tailscale or Google
-credential. After its durable success marker appears, Agentworks sends the Tailscale key once
-through fixed-command SSH stdin. The resulting VM row records the original canonical operator SSH
-source prefixes so later cleanup can reconstruct the create-time allow independently; it still does
-not store the VM's external IPv4.
+credential. After its durable success marker appears, Agentworks joins the VM to the tailnet once,
+as root over SSH to the external address, with the Tailscale key only on the join script's stdin
+(`tailscale up --auth-key=file:/dev/stdin`), and then reads the VM's Tailscale address the same way.
+If the address cannot be read, it logs the node out and the create fails and rolls back. The
+resulting VM row records the original canonical operator SSH source prefixes so later cleanup can
+reconstruct the create-time allow independently; it still does not store the VM's external IPv4.
 
 If Google Cloud reports insufficient zonal instance capacity, Agentworks treats that completed
 operation as a definitive failure, names the selected zone, and rolls back the partial create. Retry
@@ -251,9 +253,16 @@ provider's error message, details, or raw error code in either case.
 The external IPv4 is an outbound and recovery route, not standing inbound exposure. Agentworks reads
 it live after power transitions and never stores it. After Tailscale is ready, Agentworks closes the
 bootstrap allow; if closure cannot be proven, it retains and reports the rule. After a successful
-close only the priority-1 deny remains. `vm shell --platform` opens a fresh UUID-named scoped SSH
-allow for that command and removes only its own rule on exit; an unproven close is retained and
-reported rather than sweeping another rule.
+close only the priority-1 deny remains. Every script Agentworks runs over the external address
+(`vm recover`, `vm rekey`, and the Tailscale logout at `vm delete`) and every `vm shell --platform`
+session opens a fresh UUID-named scoped SSH allow and removes only its own rule when that script or
+session ends; an unproven close is retained and reported rather than sweeping another rule. Every
+one of these allows, create's bootstrap allow included, is also removed when the command is ended on
+macOS and Linux by `SIGTERM` or `SIGHUP`, or on Windows by Ctrl-Break; an interrupted create rolls
+back as it does on Ctrl-C. Closing the console window on Windows may start that cleanup, but Windows
+ends the process within seconds, so it cannot be relied on to finish: end the command with Ctrl-C or
+Ctrl-Break instead, and delete a rule a closed window left behind from the VM's firewall in the
+provider's console.
 
 ## Recovery and safe cleanup
 

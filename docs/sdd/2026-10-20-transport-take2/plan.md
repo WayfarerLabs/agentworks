@@ -1,7 +1,7 @@
 # Implementation Plan: Transport Take 2
 
-- Status: Slices 1 and 2 implemented in PR A (#863), with the live evidence cells listed below still
-  open; slices 3 to 8 not started
+- Status: Slices 1 and 2 implemented in PR A (#863) and slices 3 and 4 in PR B (#866), with the live
+  evidence cells listed below still open; slices 5 to 8 not started
 - Date: 2026-10-31
 - Requirements: [frd.md](./frd.md)
 - Architecture: [hla.md](./hla.md)
@@ -77,8 +77,9 @@ answer.
       the guest fingerprints matching after a stop and start on Remote Lima from Linux and Windows,
       local Lima from macOS, WSL2, AWS, Azure and GCP (heads `9327e02b` and `7b169591`;
       [comment 6571182125](https://github.com/WayfarerLabs/agentworks/pull/863#issuecomment-6571182125)).
-- [ ] Re-prove I9 on Proxmox. Carried forward to before closeout by the operator's 2026-11-04
-      ruling.
+- [x] Re-prove I9 on Proxmox: keys and trust held through stops, `qm reboot` and `qm reset` on PVE
+      8.4 and 9.2, and regenerated when `99-preserve-ssh-keys.cfg` was removed, at `5bbe5d09a`
+      ([comment 6654000489](https://github.com/WayfarerLabs/agentworks/pull/863#issuecomment-6654000489)).
 - [x] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
       issues and fix history), and add incident inventory rows before deleting anything.
 - [x] Collateral: update the command reference and completions, add an operator guide section on the
@@ -90,9 +91,15 @@ answer.
       byte-identical. Cells covered: Remote Lima from Linux and Windows, local Lima from macOS (all
       but import), WSL2 from Windows, and AWS, Azure and GCP from Linux. An encrypted key served by
       the agent was used from Linux against Remote Lima.
+- [x] Live evidence for the carried cells, at `5bbe5d09a`
+      ([comment 6654000489](https://github.com/WayfarerLabs/agentworks/pull/863#issuecomment-6654000489)):
+      Remote Lima from macOS, Proxmox (PVE 8 and 9), AWS from Windows (create, exec, stop and start,
+      delete), a real address change after rekey on Proxmox, import on local Lima from macOS, and an
+      encrypted key served by the agent from Linux against Proxmox and from macOS against local
+      Lima.
 - [ ] Live evidence still open, carried forward to before closeout by the operator's 2026-11-04
-      ruling: Remote Lima from macOS, Proxmox, a cloud from Windows, an address change after rekey,
-      import on local Lima from macOS, and an encrypted key served by the agent on every other cell.
+      ruling: an encrypted key served by the agent on the remaining cells. Windows cannot be covered
+      this way, because its agent refuses from a key-authenticated session.
 
 Definition of done: every core connection to a VM verifies against the store, the only acceptance of
 a new key is create's enrollment, and nothing in Agentworks writes the operator's `known_hosts` for
@@ -177,16 +184,19 @@ a VM connection.
   - payload stdout that does not end in a newline, and a `refused` trailer;
   - the deadline;
   - binary stdin and stdout on Windows.
-- [ ] Run the conformance vectors on a live Debian 12 target. Carried forward to before closeout by
-      the operator's 2026-11-04 ruling: agw creates Debian 12 only on Proxmox.
+
+Debian 12 targets are out of scope by the operator's 2026-11-05 ruling: agw creates only the current
+release on every platform (ADR 0025), so no live run can reach one.
+
 - [x] Unit-test the stream filters under every split and interleaving of the two streams, which
       covers stdout's last bytes arriving after the trailer.
 - [x] Re-prove incident rows I1, I2, I5, I6, I7, I12, I13, I14, I19 and I21 live, I3 on Debian 13
       guests, and I11 with a pipe and with no stdin
       ([comment 6571182125](https://github.com/WayfarerLabs/agentworks/pull/863#issuecomment-6571182125),
       which gives each row's head and workstation).
-- [ ] Re-prove I4 live, I3 on a Debian 12 guest, and I11 with a socket on stdin. Carried forward to
-      before closeout by the operator's 2026-11-04 ruling.
+- [x] Re-prove I4 live and I11 with a socket on stdin, on Proxmox PVE 9 from Linux, at `5bbe5d09a`
+      ([comment 6654000489](https://github.com/WayfarerLabs/agentworks/pull/863#issuecomment-6654000489)).
+      I3 on a Debian 12 guest is out of scope by the operator's 2026-11-05 ruling.
 - [x] Amend ADRs 0013 and 0014.
 - [x] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
       issues and fix history), and add incident inventory rows before deleting anything.
@@ -197,124 +207,209 @@ a VM connection.
       and the reports it links): Remote Lima from Linux and Windows, local Lima from macOS and WSL2
       from Windows, all on Debian 13 guests. AWS, Azure and GCP from Linux ran the exec surface
       only, not the V lane.
+- [x] Live evidence for the carried cells, at `5bbe5d09a`
+      ([comment 6654000489](https://github.com/WayfarerLabs/agentworks/pull/863#issuecomment-6654000489)):
+      Remote Lima from macOS, the V lane against AWS, Azure and GCP from Linux (18 of 18 each), and
+      the OpenSSH 8.5 floor through a version shim, which the operator's 2026-11-05 ruling accepts
+      in place of a real 8.5 client.
 - [ ] Live evidence still open, carried forward to before closeout by the operator's 2026-11-04
-      ruling: Remote Lima from macOS, local Lima from Linux (the Linux bed has no `/dev/kvm`), a
-      Debian 12 guest, an OpenSSH 8.5 client, and the V lane against a live cloud.
+      ruling: local Lima from Linux (the Linux bed has no `/dev/kvm`).
 
 Definition of done: the migrated commands reach VMs only through `agentworks.execution`, their files
 pass the static check, and the package's tests pass with the legacy modules blocked.
 
 ## Slice 3: First contact and the VM contract (HLA D10, D11 first half; PR B)
 
-- [ ] Write `contract-lld.md`. It covers:
+- [x] Write [`contract-lld.md`](./contract-lld.md). It covers:
   - the check table and diagnoses;
   - the provisioning bootstrap additions;
   - `tailnet_address`;
   - Phase A on `VMAccess`;
-  - `reachability`, including how its polling meets Debian 13 sshd's `PerSourcePenalties`, which
-    drops every connection from a client after repeated authentication failures;
-  - the operation log.
-- [ ] Add python3 to `PROVISIONING_PACKAGES`, which every platform's bootstrap already installs
+  - `reachability`, including how it ends a wait at an authentication failure instead of polling it
+    into Debian 13 sshd's `PerSourcePenalties`;
+  - the operation log record;
+  - the vm-platform `contract_version` bump.
+- [x] Add python3 to `PROVISIONING_PACKAGES`, which every platform's bootstrap already installs
       (`lima.py:391`, `wsl2_bootstrap.py:65`, and the AWS, Azure, GCP and Proxmox platforms).
-- [ ] Make `ProvisionResult.tailnet_address` required on every platform, with each platform retrying
-      the address read after a successful join so the key is never sent twice, and logging the node
-      out over the provisioning channel when the reads are exhausted (HLA D11), and delete
-      `ProvisionResult.native_transport` and Phase A's native `tailscale ip -4` fallback.
-- [ ] Move Phase A and release probing (`vms/manager/release.py`) onto `VMAccess`: the first
-      connection in Enroll mode, then the base checks (including Debian attestation), then
-      `reachability.wait` after `post_tailscale_ready`. Hand Phase B a legacy target as today.
-- [ ] Implement `reachability.py` and the `observation` request option it polls with.
-- [ ] Implement `oplog.py` with Phase A as its first writer: the `LOG_DIR` constant, `OperationLog`
-      and its redaction, and move the old `LOG_DIR` readers (`doctor_state.py`,
-      `vms/manager/lifecycle.py`, `vms/manager/_helpers.py`, `vms/manager/power.py`, `vm logs`) and
-      their test patch sites to it.
-- [ ] Add elevation, with its conformance vectors, for Phase A, its first consumer, including agent
-      elevation refused before dispatch and an elevated attach refused, and prove an elevated
-      request on a fresh, never-initialized Debian 12 and 13 VM.
-- [ ] Add `vms/contract.py`. Run the base checks first at reinit and the initialized checks at the
-      end of Phase B, moving slice 2's reinit pam_env warning into the base checks. Add
-      `vms/contract.py` to the package guard (HLA D14).
-- [ ] Amend ADR 0025.
-- [ ] Tests:
-  - a VM failing a base check is not reported ready;
-  - each diagnosis names reinit or recreation;
+- [x] Make `ProvisionResult.tailnet_address` required on every platform, and delete
+      `ProvisionResult.native_transport` and Phase A's native `tailscale ip -4` fallback:
+  - all six platforms settle the address through one shared helper, `settle_tailnet_address`, over
+    their own `run_as_root`, retrying so the key is never sent twice and logging the node out over
+    that channel when the reads are exhausted (HLA D11). Slice 4's `run_as_root` implementations
+    land first in PR B, so the settle is written once, over them;
+  - `parse_bootstrap_output` stops requiring an address, and the bootstrap script loses its key and
+    its join step in slice 4;
+  - `parse_tailnet_address` validates each read and core validates the value again before recording
+    it;
+  - the provisioning trust file's lifetime narrows to the platform's `create` call.
+- [x] Bump the vm-platform `contract_version` to 2 once, here, with slice 4 landing under the same
+      number in the same PR: the kind descriptor, the six platforms, the tests that assert it and
+      every "version 1" mention of this kind.
+- [x] Add `UnknownReason.AUTH_FAILED` and its classifier row, typed from
+      `Permission denied (publickey` in the client log, and widen the passphrase hint to
+      `CONNECTION` or `AUTH_FAILED`.
+- [x] Implement `reachability.py`: `wait(access, *, wording)` polls a fixed `true` probe, polls only
+      `CONNECTION`, `TRUNCATED` and `DEADLINE`, and raises every other outcome at once.
+- [x] Move Phase A and release probing onto `VMAccess`:
+  - Phase A gets its own module, `vms/initializer/phase_a.py`, holding the fail-closed span and the
+    sequence: record the address, first contact in Enroll mode through
+    `execution.enrollment_access`, the enrollment post-condition, then the base checks including
+    Debian attestation, then `reachability.wait` after `post_tailscale_ready`. `driver.bootstrap_vm`
+    stays as the thin caller that hands Phase B a legacy target as today;
+  - `COMPLETE` is written after the contract passes; a failure before then marks the VM `FAILED`
+    with delete guidance, and an interrupt leaves the row never complete, which the gate refuses;
+  - `vms/manager/release.py` splits into `contract.observe_release` and `reconcile_release`,
+    `vm confirm-release` runs on `VMAccess`, and `probe_debian_release` is deleted;
+  - `vms/contract.py`, `vms/initializer/phase_a.py` and `vms/manager/release.py` join the static
+    legacy-import check.
+- [x] Implement the operation log record: `oplog.format_record`, `VMAccess`'s optional `log`
+      callable and `SSHLogger.record`, with redaction left at the logger's one sink. `LOG_DIR`, its
+      readers and `SSHLogger` stay until slice 8.
+- [x] Add elevation, with its conformance vectors (E1, E2, E4 and E6), for the contract's sudo
+      check, its first consumer: `elevated` on `BoundedRequestOptions`, `stage0_command(elevated=)`,
+      and `PermissionDenied` for an agent-bound access, derived from the access's identity. An
+      elevated attach is excluded by the types.
+- [x] Prove an elevated request on a fresh, never-initialized Debian 13 VM: the contract's sudo
+      check runs elevated in every create's Phase A, which passed on all six platforms at
+      `d49f6f946`
+      ([comment 6656660451](https://github.com/WayfarerLabs/agentworks/pull/866#issuecomment-6656660451)).
+      Debian 12 is out of scope by the operator's 2026-11-05 ruling.
+- [x] Add `vms/contract.py`: the `(id, severity, probe)` table, the script protocol and its parser,
+      `observe_release`, `check_base` and `enforce`. Run the base checks first at reinit, moving
+      slice 2's reinit pam_env warning into them, and add `vms/contract.py` to the package guard
+      (HLA D14).
+- [x] Amend ADR 0025.
+- [x] Tests:
+  - a VM failing a base check is not reported ready, and a warning-only report does not fail;
   - a platform that cannot report the address logs the node out over its provisioning channel and
     fails create, without a second join, and names the node when the logout fails;
-  - a VM with pam_env settings gets a warning naming the file and still passes the contract.
-- [ ] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
-      issues and fix history), and add incident inventory rows before deleting anything.
-- [ ] Collateral: platform author documentation for `tailnet_address`, and the command reference for
-      create and reinit diagnoses.
+  - a VM with pam_env settings gets a warning naming the file and still passes the contract;
+  - Phase A secures the VM on a failure or an interrupt before the contract passes, a failure marks
+    it `FAILED`, the gate refuses any VM that is not `COMPLETE`, and `COMPLETE` is written once the
+    contract has passed;
+  - `reachability.wait` stops at the first authentication failure.
+- [x] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
+      issues and fix history); rows I22 to I28 are in the HLA inventory.
+- [x] Collateral: platform author documentation for `tailnet_address` and contract version 2, and
+      the command reference for create and reinit diagnoses.
 - [ ] Live evidence: create and reinit on every platform from at least one workstation each.
 
-Definition of done: core's work on a new VM starts over SSH at the reported address, and core's
-first operation there is the base contract check.
+Slice 3 does not merge without slice 4: between them a VM without python3 cannot be reinitialized
+and the `VMNotReady` hint is circular, and no stopgap wording is added in between.
+
+Definition of done: core's work on a new VM starts over SSH at the reported address, its first
+connection enrolls the host key, and the base contract check follows, release first.
 
 ## Slice 4: Recovery and the platform surface (HLA D11 second half; PR B)
 
-- [ ] Write `platform-lld.md`. It covers:
-  - `run_as_root`, and core's `run_recovery`, `RecoveryResult` and its marker wrapper;
-  - `read_host_keys` and its cloud overrides;
-  - `recovery_needs_guest_sshd`;
-  - `native_shell`;
-  - each platform's recovery channel and private access;
-  - `public_ssh.py`;
-  - the host policy;
-  - the recovery scripts;
-  - `vm recover`;
-  - each cloud's provider-side host-key fingerprint source;
-  - whether delete may log out a cloud VM that never enrolled a host key (a create that failed after
-    the join) under Unverified trust, since the logout carries no secret;
-  - `RawRun`, and how each channel bounds its output and its wait by the deadline.
-- [ ] Implement core's `run_recovery` in `vms/recovery.py`, `run_as_root` on every platform,
-      `read_host_keys` on the clouds, and `native_shell` where a platform offers one.
-- [ ] Implement the host policy (HLA D2) in `ssh_process.py`, for Remote Lima's host connection and
-      `public_ssh.py`, its first callers.
-- [ ] Rehome native code as plugin-private modules:
-  - Remote Lima's host connection, under the host policy, and its host-side detached create;
+Line numbers in this slice are at `60d347220`, the platform LLD's baseline.
+
+- [x] Write [`platform-lld.md`](./platform-lld.md). It covers:
+  - `run_as_root` and `RawRun`, and how each channel bounds its output and its wait by the deadline;
+  - core's `root_script` wrapper and `RootScriptResult`;
+  - `read_host_keys` and its cloud overrides, with no provider-side fingerprint source;
+  - `recovery_needs_guest_sshd` and `native_shell`;
+  - each platform's root channel and private access, `public_ssh.py` under the VM policy, and the
+    host policy for Remote Lima;
+  - the repair, rekey and logout scripts, and `vm recover`;
+  - delete's refusal to log out, under Unverified trust, a cloud VM that never enrolled a host key.
+- [x] Implement `execution/root_script.py`: `RawRun`, `RootScriptResult`, the wrapper with its one
+      embedded secret, `run` with its optional operation log, `run_process` over
+      `PipeSession(nonce=None)`, and `read_host_keys`. `spawn` raises `ConnectivityError` naming a
+      program other than OpenSSH that cannot start, and `trust.fingerprint` lands.
+- [x] Implement `run_as_root` on every platform before slice 3's address settle, so the settle is
+      written once over it:
+  - `lima_host.py` for Lima and Remote Lima, with Remote Lima's host-side detached create;
+  - WSL2 through `wsl --exec /bin/bash -s`, with a `_WSL` program constant shared with `_wsl`;
   - `plugins/proxmox/guest_agent.py`, replacing `plugins/proxmox/transport.py`;
-  - the Lima and WSL2 wrappers.
-- [ ] Port `tailscale_join.py` and `wsl2_bootstrap.py` off `ExecTransport`, keeping the auth key out
-      of command lines, logs, exceptions and retained provisioning artifacts, and re-prove incident
-      row I10 with a test.
-- [ ] Implement `capabilities/vm_platform/public_ssh.py` for the clouds. Make `transient_route` and
-      `probe_failure_hint` private to each platform's native code, and add `public_ssh.py` and
-      `vms/recovery.py` to the package guard once the rehome frees
-      `capabilities/vm_platform/__init__.py` of legacy imports (HLA D14).
-- [ ] Move rejoin, rekey and delete-time logout onto `run_recovery`, with rejoin run only by
-      `agw vm recover`. Make `vm start` and the activation gate start the VM, wait for Tailscale to
-      reconnect, and fail with a hint naming `agw vm recover` when it does not, as the operator
-      ruled on 2026-10-31 and 2026-11-01. Both waits use `reachability.wait`. Delete `vm start`'s
-      rejoin and its conditional auth-key read (`vms/manager/power.py:83-112`).
-- [ ] Add `agw vm recover <vm>`: host-key re-establishment first when the record is missing, then
-      access repair (installing python3 when it is missing), rejoin and SSH verification. Repoint
-      `VMNotReady` and `TrustMissing` guidance at it.
-- [ ] Delete the activation gate's lazy repair-secret protocol, which only its rejoin used:
-      `GateTarget.repair_secret_refs`, `_GateSecrets`, and the call sites in `vms/nodes.py` and
-      `sessions/manager/_scope.py`. Update the collateral that names it, including the
-      `agentworks-reviewer` persona's sanctioned conditional-repair shape.
-- [ ] Send cloud recovery's script on stdin rather than in `sudo -n /bin/sh` arguments (HLA D2).
-- [ ] Move `vm shell --platform` onto `native_shell` and delete `vms/manager/platform_shell.py`.
-- [ ] Delete `VMPlatform.native_transport`, the `transports.native_transport` factory and
-      `native_shell_unavailable_hint`.
-- [ ] Tests:
-  - each platform declares sshd dependence;
-  - recovery reports the script's status only when both closing markers arrive, otherwise unknown,
-    and never trusts a channel exit code;
-  - logout reports the script's status or unknown, and never checks SSH afterwards;
-  - a platform without a native shell refuses with `FeatureUnavailable` before credentials are
-    resolved;
-  - `vm start` on a VM whose Tailscale does not reconnect fails with the `agw vm recover` hint and
-    resolves no secret.
-- [ ] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
-      issues and fix history), and add incident inventory rows before deleting anything.
-- [ ] Collateral: platform author documentation, the command reference, completions, an operator
-      guide section on recovery, and the Proxmox guide's start-time rejoin note
-      (`docs/guides/proxmox.md:203-205`).
+  - `public_ssh.py` for the clouds under the VM policy, with each cloud's `read_host_keys`.
+    `run_as_root` and `recovery_needs_guest_sshd` become descriptor requirements, and
+    `ProvisionRequest.ssh_private_key` becomes `Path`.
+- [x] Implement `build_host_argv` (HLA D2) in `ssh_process.py` for Remote Lima's host connection,
+      its only caller, and refuse whitespace and control characters in `LimaSshPlacement.host`.
+- [x] Port `tailscale_join.py` onto `run_as_root`: `JOIN_FRAGMENT` through
+      `--auth-key=file:/dev/stdin`, `join_tailscale`, `read_tailnet_address`,
+      `settle_tailnet_address` with its `rerun_hint`, and `complete_cloud_bootstrap`. WSL2 and
+      Proxmox run the key-free bootstrap through `bootstrap_script.run_bootstrap` over `run_as_root`
+      and then join. Delete the bootstrap generator's key parameter and step 7, the staging files,
+      and `TAILSCALE_JOIN_STDIN_COMMAND` with its last callers (rekey and `vm start`'s rejoin), and
+      re-prove incident row I10 with a test.
+- [x] Make `transient_route` and `probe_failure_hint` private to each cloud. Add explicit imports of
+      `public_ssh.py` and `vms/recovery.py` to the package guard, and the plugin and migrated files
+      the platform LLD lists to the static check (HLA D14).
+- [x] Add `vms/recovery.py` with the repair, rekey and logout scripts, and move rekey and delete's
+      logout onto them, rekey with an operation log that registers the auth key. Make `vm start` and
+      the activation gate start the VM, wait for it to answer over SSH, and fail with a hint naming
+      `agw vm recover` when it does not, as the operator ruled on 2026-10-31 and 2026-11-01. Both
+      waits use `reachability.wait`. Delete `vm start`'s rejoin and its conditional auth-key read
+      (`vms/manager/power.py:85-120`), and `rejoin_tailscale` with its exports.
+- [x] Delete the legacy `TailscaleWait` and `wait_for_reconnect` (`transports/__init__.py:248`,
+      `:279`) with their last callers, which move to `reachability.wait` in this slice.
+- [x] Add `agw vm recover <vm>`, with its operation log:
+  - refuse a VM whose provisioning failed and a VM whose power state is unknown, and start a stopped
+    VM itself, with no wait, rather than refuse it;
+  - host-key re-establishment first when the record is missing;
+  - the repair script, then the address read, settling only when the repair joined, then one wait.
+    Repoint `VMNotReady` and `TrustMissing` guidance at it.
+- [x] Delete the activation gate's lazy repair-secret protocol, which only its rejoin used:
+      `GateTarget.repair_secret_refs`, `_GateSecrets`, `Resolver.resolve_late_repair`, and the call
+      sites in `vms/nodes.py` and `sessions/manager/_scope.py`. Update the collateral that names it,
+      including the `agentworks-reviewer` persona's sanctioned conditional-repair shape.
+- [x] Move `vm shell --platform` onto `native_shell`, with `FeatureUnavailable` for a platform that
+      has none and a refusal of `--workspace` with `--platform`, and delete
+      `vms/manager/platform_shell.py`.
+- [x] Delete `VMPlatform.native_transport`, the `transports.native_transport` factory, the legacy
+      platform transports (`transports/lima.py`, `remote_lima.py`, `wsl2.py`, `_shared.py`) and
+      `plugins/proxmox/transport.py`, with their tests.
+- [x] Tests, as the platform LLD lists them:
+  - the wrapper: the status only when both closing markers arrive, otherwise unknown, the secret in
+    no field, `repr`, error or log record, and one dispatch however it ends;
+  - `run_process`'s deadline, output limit and background child, and its error for a missing
+    program;
+  - the argv: `PublicSSH` ignoring operator configuration and the host argv honoring it;
+  - the address read and settle, including that only the settle logs out;
+  - the auth key in exactly one script on each of the six creates (I10);
+  - the commands: start and the gate failing with the recover hint and resolving no secret, recover,
+    rekey, delete's logout outcomes, and `vm shell --platform`'s refusals before the boundary;
+  - conformance vectors W1 to W9.
+- [x] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
+      issues and fix history); rows I29 to I34 are in the HLA inventory.
+- [x] Collateral, as the platform LLD lists it: ADRs 0003 and 0019, platform author documentation,
+      the command reference, the READMEs, the sample config, completions, the guides (including the
+      Proxmox guide's start-time rejoin note, `docs/guides/proxmox.md:201-205`, and the
+      troubleshooting topic), the reviewer persona, and the stale docstrings and comments.
+- [x] Consolidate after PR B's final private review:
+  - the clouds' probe-failure hint is one constant, `public_ssh.PROBE_FAILURE_HINT`, and create
+    waits through the same `PublicSSH.wait_until_answering` as every other root script;
+  - one logout, `tailscale_join.log_out` with `LOGOUT_SCRIPT`, serves the settle and delete, so
+    `vms/recovery.py` holds the repair and rekey scripts only;
+  - Proxmox waits for cloud-init through its root channel, and its root channel waits for the guest
+    agent to answer before it dispatches.
 - [ ] Live evidence:
-  - rejoin, rekey, delete and `vm recover` on every platform from at least one workstation each;
-  - recovery of a broken sshd on WSL2 and on Proxmox;
-  - recovery of a lost store record on one cloud and on Remote Lima.
+  - create on every platform, with the key-free bootstrap's output size recorded on WSL2 and
+    Proxmox;
+  - on Proxmox: `vm recover` of a stopped VM in one run, a create whose first-boot package upgrade
+    restarts the guest agent, and the guest agent's ping on each supported PVE major;
+  - rekey, delete's logout and `vm recover` on every platform from at least one workstation each;
+  - `vm start` after the node is removed, and after an ephemeral key's node expired;
+  - recovery of a broken sshd on WSL2, Proxmox and Lima, and W6's restart of `ssh.service` over
+    sshd's own channel on Lima, Remote Lima and a cloud;
+  - W7 on WSL2 with the `setsid` root channel;
+  - `vm recover` after the operator's key changes, then `vm exec`;
+  - `vm rekey` with a dead public sshd on a cloud: one wait, no node-removal advice;
+  - a closed terminal during a cloud `vm create`, and Ctrl-Break during a cloud command on Windows;
+  - the current-directory decoys for `tailscale` and PowerShell on Windows;
+  - I18: a failed backend delete keeps the row and the store record on Proxmox PVE 8 and 9 (a locked
+    VM, the API down) and on Remote Lima with its host unreachable;
+  - a failed create rollback keeping the row on Proxmox, Lima and WSL2, and `vm delete --force`
+    clearing the row a killed create left;
+  - a closed terminal during `vm create` on Remote Lima and Proxmox as well as the clouds;
+  - `vm recover` of a python3 that was removed but not purged;
+  - cloud-init's recoverable status 2 on AWS and Azure;
+  - that `wsl --list` on a workstation with no distro prints `WSL_E_DEFAULT_DISTRO_NOT_FOUND`, the
+    token WSL2's delete and rollback read as an empty listing;
+  - recovery of a lost store record on one cloud and on Remote Lima;
+  - the V cells of vectors W1 and W3 to W9.
 
 Definition of done: core reaches a native channel only through `run_as_root` or `native_shell`, and
 no platform's private access imports a legacy module.
@@ -329,6 +424,8 @@ no platform's private access imports a legacy module.
   - cleanup.
 - [ ] Implement `PythonProgram`, `files.py` and the file program, finite stdin for `run` with
       `Bytes(data, sensitive=)`, and `RunContext.admin_access()` and `agent_access()`.
+- [ ] Make the operation log keep the streams of a request with a sensitive stdin out entirely (HLA
+      D13), now that `Bytes(data, sensitive=)` gives it a first caller.
 - [ ] Migrate:
   - artifact publication and session artifacts;
   - native probing;
@@ -376,6 +473,9 @@ Definition of done: create and reinit run entirely on the new transport.
 ## Slice 7: Workspaces, sessions and backup (HLA D7; PR C)
 
 - [ ] Implement `detached.py`, and the `FromFile` and `ToFile` input and sink.
+- [ ] Add the `observation` request option (a caller's declaration that a request only reads, so it
+      may be dispatched again after `NotDelivered` or `Unknown`) with its first callers,
+      `detached.observe` and the sessions' status probes (HLA D5).
 - [ ] Migrate:
   - workspace backends, rehome and repair;
   - workspace copy, using `run` over an opaque tar stream;
@@ -404,6 +504,10 @@ Definition of done: create and reinit run entirely on the new transport.
 - [ ] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
       issues and fix history), and add incident inventory rows before deleting anything.
 - [ ] Collateral: guides for sessions, consoles and backup where behavior changes.
+- [ ] Settle with the operator the commented post-bind resolve in
+      `sessions/multi_console/restore.py` (it either runs or goes), and whether the workspace, agent
+      and session refusals of a VM with no recorded SSH identity
+      (`applied_state.require_vm_ssh_identity`) should hint at `agw vm reinit`.
 - [ ] Live evidence:
   - session and console create, attach, detach and restore on Remote Lima from all three
     workstations and on WSL2;
@@ -417,13 +521,22 @@ Definition of done: no workspace, session or backup module imports a legacy modu
 - [ ] Audit the legacy modules this slice deletes for incident-derived behavior (their ADRs, linked
       issues and fix history), and add incident inventory rows for anything not yet recorded.
 - [ ] Confirm that every incident inventory row has recorded evidence.
-- [ ] Delete the six legacy modules with their tests:
+- [ ] Move `LOG_DIR` and the operation log's readers (`doctor_state.py`, `vms/manager/lifecycle.py`,
+      `vms/manager/_helpers.py`, `vms/manager/power.py`, `vm logs`) and their test patch sites to
+      `execution/oplog.py` as `SSHLogger` is deleted, matching log files by the exact
+      `<vm>-<timestamp>-<stem>.log` shape so VM `dev` never matches VM `dev-2`'s logs, and update
+      the `LOG_DIR` mention in the `transports/ssh.py` docstring.
+- [ ] Once `SSHLogger` is replaced, pass create's operation log to the platforms' join through
+      `ProvisionRequest`, so `join_tailscale`'s `root_script.run` records `tailscale up`'s redacted
+      stderr, and have a failed join's error name the log. Deferred from slice 4's port, where it
+      would have widened the `BootstrapProgress` protocol every plugin implements.
+- [ ] Delete the remaining legacy modules with their tests (slice 4 deletes the sixth,
+      `agentworks.plugins.proxmox.transport`):
   - `agentworks.transports`
   - `agentworks.ssh`
   - `agentworks.remote_exec`
   - `agentworks.harness_setup.runner`
   - `agentworks.native_files`
-  - `agentworks.plugins.proxmox.transport`
 - [ ] Delete `RunContext.admin_target()` and `agent_target()`, and the `SSHError` special case in
       `cli/_entry.py`.
 - [ ] Delete doctor's `ssh` and `scp` `PATH` presence rows, which the resolver's verdict replaces.

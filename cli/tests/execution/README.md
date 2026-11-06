@@ -6,7 +6,7 @@ Run everything local from `cli/`:
 uv run pytest tests/execution
 ```
 
-The package's tests pass with the six legacy modules blocked: `conftest.py` here evicts them from
+The package's tests pass with the legacy modules blocked: `conftest.py` here evicts them from
 `sys.modules`, removes the attribute on their parent package and puts a finder that refuses them
 first on `sys.meta_path`, for every test. `test_independence.py` proves the same at import time in a
 fresh interpreter. Tests that exercise a migrated manager live elsewhere in `tests/` and use the
@@ -29,13 +29,22 @@ returns canned outcomes without ssh.
 - `test_access.py`, `test_launcher_source.py`, `test_stream_process.py`: passivity and ordering, the
   launcher's structure, and `stream` in a real process whose stdin stays open.
 - `test_trust.py`: the host-key store.
-- `legacy_modules.py`: the six legacy module names, shared by the conftest blocker, the fresh
+- `test_reachability.py`: what `reachability.wait` polls, what it raises on the first attempt, and
+  the confirming probe, over the recording fake.
+- `test_oplog.py`: the operation log record holds a request's shape and never its secrets.
+- `test_root_script.py`: the root-script wrapper over fabricated channel output (the status rule,
+  the secret in no field, one dispatch), `read_host_keys`, and `run_process` against a local Bash.
+- `test_run_process.py`: `run_process` over Python children (the deadline, the output limit, a
+  background child, end of file). Marked `windows`, since WSL2's root channel runs only there.
+- `legacy_modules.py`: the legacy module names, shared by the conftest blocker, the fresh
   interpreter guard and the static import check.
 
 ## Conformance vectors
 
 `conformance/vectors.py` is one list of vectors, each naming the lanes that run it, and
-`conformance/lanes.py` has the three lanes:
+`conformance/lanes.py` has the three lanes. L and S run agw-launch on this machine as the guest, and
+agw-launch is a Linux program (`os.memfd_create`, `/proc`), so both skip on macOS and Windows, CI
+included; the root channel's W3 skips on a local lane without `/proc`.
 
 - **L** runs `$SHELL -c <remote command>` locally through the real `VMAccess` and pump, with the
   account's startup files set per vector and `SSH_CLIENT` exported as sshd does. It runs under each
@@ -62,8 +71,24 @@ returns canned outcomes without ssh.
   it from each workstation the evidence matrix names; Windows is where binary stdin and early exit
   matter most. The lane is not part of the default run.
 
+The elevation vectors (E1, E2 and E6) run on L and V. On L they need the runner's passwordless
+`sudo -n`, skipping without it locally and failing without it when `CI` is set; E4, the
+distribution's default sudoers on a fresh VM, is V only.
+
 `conformance/test_attach_terminal.py` and `conformance/test_forward.py` cover what happens around
 the terminal half and a forward, on the same lanes.
+
+`conformance/root_vectors.py` holds the root channel's vectors (W1 to W9 in the platform LLD), on
+two lanes of their own. L runs `root_script.run_process(["/bin/bash", "-s"], ...)` locally, and
+again under `sudo -n` where the runner grants it (`conformance/test_root_vectors.py`). V runs
+through the platform `run_as_root` of the VM named by `AGW_CONFORMANCE_VM`, inside the same gated
+boundary `vm shell --platform` opens:
+
+```console
+AGW_CONFORMANCE_VM=my-vm uv run pytest tests/test_root_channel_live_vectors.py -m integration
+```
+
+That runner sits outside this directory because the platform boundary imports legacy modules.
 
 ## Writing a vector
 

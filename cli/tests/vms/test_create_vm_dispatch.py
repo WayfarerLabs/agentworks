@@ -5,6 +5,7 @@ config-secret resolve pass end to end (no env-read shadow path).
 
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 from textwrap import dedent
 from types import SimpleNamespace
@@ -19,6 +20,7 @@ from agentworks.debian import DebianRelease
 from agentworks.errors import (
     AuthorizationError,
     ConfigError,
+    ConnectivityError,
     NotFoundError,
     ProvisioningError,
     StateError,
@@ -26,13 +28,12 @@ from agentworks.errors import (
     UserAbort,
     ValidationError,
 )
+from agentworks.execution import trust
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
 from tests.conftest import CapturedOutput, ManifestDoc, pin_wsl2_unsupported, write_manifests
 from tests.orchestrated_fixtures import proxmox_site
 from tests.ssh_fixtures import TEST_SSH_PUBLIC_KEY, write_test_ssh_keypair
-
-pytestmark = pytest.mark.usefixtures("verified_debian_release")
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -98,28 +99,15 @@ def test_create_vm_request_shape_and_row(
     attested_release: list[DebianRelease] = []
     outcomes: list[OverlayOutcome] = []
     start_events: list[str] = []
-    native_transport = SimpleNamespace()
     monkeypatch.setattr("agentworks.instance_specs.render_overlay_outcome", outcomes.append)
-
-    def _verify_release(transport: object, *, expected: DebianRelease) -> DebianRelease:
-        assert transport is native_transport
-        start_events.append("attest")
-        attested_release.append(expected)
-        return expected
-
-    monkeypatch.setattr(
-        "agentworks.vms.manager.lifecycle.probe_debian_release",
-        _verify_release,
-    )
 
     def _fake_create(self: LimaPlatform, request: ProvisionRequest, ctx: object) -> ProvisionResult:
         start_events.append("provider-create")
         captured_platform.append(self)
         captured_request.append(request)
         return ProvisionResult(
-            native_transport=native_transport,  # type: ignore[arg-type]
             platform_metadata={"instance_name": "dvm"},
-            tailscale_ip="100.64.0.7",
+            tailnet_address="100.64.0.7",
         )
 
     monkeypatch.setattr(LimaPlatform, "create", _fake_create)
@@ -130,13 +118,17 @@ def test_create_vm_request_shape_and_row(
         record_vm_started(name)
 
     monkeypatch.setattr(db, "record_vm_started", _record_started)
-    # Phase A / Phase B are faked here: this suite pins the create()
-    # request shape and the persisted row, not the init sequence.
-    monkeypatch.setattr(
-        vm_manager,
-        "bootstrap_vm",
-        lambda *a, **k: (SimpleNamespace(), "/home/agentworks"),
-    )
+
+    # Phase A is faked here: it attests and records the release core asked
+    # for, which Phase B then receives. This suite pins the create() request
+    # shape and the persisted row, not the init sequence.
+    def _attest(*args: object, expected_release: DebianRelease, tailnet_address: str, **kwargs: object):
+        start_events.append("attest")
+        attested_release.append(expected_release)
+        db.update_vm_debian_release("dvm", expected_release)
+        return SimpleNamespace(), "/home/agentworks", expected_release
+
+    monkeypatch.setattr(vm_manager, "bootstrap_vm", _attest)
 
     def _fake_init(*args: object, **kwargs: object) -> None:
         del args
@@ -257,6 +249,8 @@ def test_create_vm_retains_platform_metadata_when_rollback_is_unconfirmed(
     assert row is not None
     assert row.platform_metadata == {"instance_name": "retained-backend", "create_incomplete": "true"}
     assert row.provisioning_status == ProvisioningStatus.FAILED.value
+    # A retained row keeps its store file, which delete removes with it.
+    assert trust.store_file("retained").exists()
     assert any(
         "retained-" in message and message.endswith("-vm-create.log")
         for _role, _level, message in captured_output.lines
@@ -279,9 +273,8 @@ def test_create_vm_metadata_failure_retains_owner_and_reports_once(
         LimaPlatform,
         "create",
         lambda *args, **kwargs: ProvisionResult(
-            native_transport=SimpleNamespace(),  # type: ignore[arg-type]
             platform_metadata={"instance_name": "metadata-fail"},
-            tailscale_ip="100.64.0.7",
+            tailnet_address="100.64.0.7",
         ),
     )
     monkeypatch.setattr(
@@ -342,29 +335,53 @@ def test_create_vm_preserves_typed_platform_failure(
 
     assert caught.value is failure
     assert db.get_vm("map-fail") is None
+    # The store file create reset for the name goes with the row.
+    assert not trust.store_file("map-fail").exists()
 
 
 @pytest.mark.parametrize(
-    ("failure", "wrapped"),
+    "failure",
+    [ConnectivityError("node did not report its address", hint="log in again"), RuntimeError("no hint here")],
+    ids=("agentworks-error", "other"),
+)
+def test_create_vm_wraps_an_untyped_platform_failure_with_its_hint(
+    db: Database,
+    make_config,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: object,
+    failure: Exception,
+) -> None:
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+
+    monkeypatch.setattr(LimaPlatform, "create", lambda *args, **kwargs: (_ for _ in ()).throw(failure))
+
+    with pytest.raises(ProvisioningError) as caught:
+        vm_manager.create_vm(db, make_config(), name="wrap-fail", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert caught.value.__cause__ is failure
+    assert caught.value.hint == getattr(failure, "hint", None)
+
+
+@pytest.mark.parametrize(
+    "failure",
     [
-        pytest.param(StateError("guest release mismatch"), True, id="mismatch"),
-        pytest.param(RuntimeError("private-transport-sentinel"), True, id="transport-failure"),
-        pytest.param(KeyboardInterrupt("stop"), False, id="interrupt"),
-        pytest.param(UserAbort("stop"), False, id="user-abort"),
+        pytest.param(StateError("guest release mismatch"), id="mismatch"),
+        pytest.param(RuntimeError("private-transport-sentinel"), id="phase-a-failure"),
+        pytest.param(KeyboardInterrupt("stop"), id="interrupt"),
+        pytest.param(UserAbort("stop"), id="user-abort"),
     ],
 )
-def test_create_vm_core_release_attestation_uses_core_release_and_retains_failed_row(
+def test_create_vm_attests_the_core_release_and_keeps_an_unattested_vm_gated(
     db: Database,
     make_config,
     monkeypatch: pytest.MonkeyPatch,
     captured_output: object,
     failure: BaseException,
-    wrapped: bool,
 ) -> None:
+    """Phase A attests the release core asked for, whatever the platform did to the request, and a VM
+    whose Phase A did not complete is kept for delete, refused by every ordinary command, with no release recorded."""
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
     from agentworks.db import InitStatus, ProvisioningStatus
-
-    native_transport = SimpleNamespace()
 
     def _create_with_mutated_request(
         _self: LimaPlatform,
@@ -373,57 +390,77 @@ def test_create_vm_core_release_attestation_uses_core_release_and_retains_failed
     ) -> ProvisionResult:
         request.debian_release = DebianRelease.BOOKWORM
         return ProvisionResult(
-            native_transport=native_transport,  # type: ignore[arg-type]
             platform_metadata={"instance_name": "unverified"},
-            tailscale_ip="100.64.0.7",
+            tailnet_address="100.64.0.7",
         )
+
+    monkeypatch.setattr(LimaPlatform, "create", _create_with_mutated_request)
+
+    def _failing_phase_a(*args: object, expected_release: DebianRelease, **kwargs: object) -> None:
+        assert expected_release is DebianRelease.TRIXIE
+        raise failure
+
+    monkeypatch.setattr(vm_manager, "bootstrap_vm", _failing_phase_a)
+    monkeypatch.setattr(
+        vm_manager, "run_initialization", lambda *a, **k: pytest.fail("Phase B reached after Phase A failed")
+    )
+
+    with pytest.raises((ProvisioningError, KeyboardInterrupt, UserAbort)) as caught:
+        vm_manager.create_vm(db, make_config(), name="unverified", interaction=TtyInteractionPolicy.REFUSE)
+
+    if isinstance(failure, Exception) and not isinstance(failure, UserAbort):
+        assert isinstance(caught.value, ProvisioningError)
+        assert caught.value.__cause__ is failure
+    else:
+        assert caught.value is failure
+    row = db.get_vm("unverified")
+    assert row is not None
+    assert row.platform_metadata == {"instance_name": "unverified"}
+    assert row.provisioning_status != ProvisioningStatus.COMPLETE.value
+    assert row.init_status == InitStatus.PENDING.value
+    assert row.debian_release is None
+    with pytest.raises(StateError):
+        vm_manager._guard_incomplete_vm(row)
+
+
+def test_an_interrupt_keeps_its_place_when_the_cancel_handler_cannot_read_the_row(
+    db: Database,
+    make_config,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """The cancel handler reads the row to choose its guidance; a failed read gives the delete guidance."""
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+    from agentworks.vms.manager import lifecycle
 
     monkeypatch.setattr(
         LimaPlatform,
         "create",
-        _create_with_mutated_request,
+        lambda *_a, **_k: ProvisionResult(platform_metadata={"instance_name": "box"}, tailnet_address="100.64.0.7"),
     )
+    interrupt = KeyboardInterrupt("stop")
+    read = db.get_vm
+    broken = False
 
-    def _fail_attestation(transport: object, *, expected: DebianRelease) -> DebianRelease:
-        assert transport is native_transport
-        assert expected is DebianRelease.TRIXIE
-        raise failure
+    def _get_vm(name: str) -> object:
+        if broken:
+            raise sqlite3.OperationalError("database is locked")
+        return read(name)
 
-    monkeypatch.setattr(
-        "agentworks.vms.manager.lifecycle.probe_debian_release",
-        _fail_attestation,
-    )
-    monkeypatch.setattr(
-        vm_manager,
-        "bootstrap_vm",
-        lambda *args, **kwargs: pytest.fail("Phase A reached after core release attestation failed"),
-    )
+    def _interrupted_phase_a(*_args: object, **_kwargs: object) -> None:
+        nonlocal broken
+        broken = True
+        raise interrupt
 
-    def _create() -> None:
-        vm_manager.create_vm(
-            db,
-            make_config(),
-            name="unverified",
-            interaction=TtyInteractionPolicy.REFUSE,
-        )
+    monkeypatch.setattr(db, "get_vm", _get_vm)
+    monkeypatch.setattr(vm_manager, "bootstrap_vm", _interrupted_phase_a)
+    monkeypatch.setattr(lifecycle, "_warn_init_cancel", lambda *_a: pytest.fail("reinit guidance for an unread row"))
 
-    if wrapped:
-        with pytest.raises(StateError) as wrapped_caught:
-            _create()
-        assert wrapped_caught.value.entity_kind == "vm"
-        assert wrapped_caught.value.entity_name == "unverified"
-        assert wrapped_caught.value.__cause__ is failure
-        assert "private-transport-sentinel" not in str(wrapped_caught.value)
-    else:
-        with pytest.raises((KeyboardInterrupt, UserAbort)) as control_caught:
-            _create()
-        assert control_caught.value is failure
-    row = db.get_vm("unverified")
-    assert row is not None
-    assert row.platform_metadata == {"instance_name": "unverified"}
-    assert row.provisioning_status == ProvisioningStatus.FAILED.value
-    assert row.init_status == InitStatus.PENDING.value
-    assert row.debian_release is None
+    with pytest.raises(KeyboardInterrupt) as caught:
+        vm_manager.create_vm(db, make_config(), name="box", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert caught.value is interrupt
+    assert len(captured_output.warnings) == 1
 
 
 def test_create_vm_logger_close_failure_retains_owner_and_reports_once(
@@ -443,15 +480,14 @@ def test_create_vm_logger_close_failure_retains_owner_and_reports_once(
         LimaPlatform,
         "create",
         lambda *args, **kwargs: ProvisionResult(
-            native_transport=SimpleNamespace(),  # type: ignore[arg-type]
             platform_metadata={"instance_name": "close-fail"},
-            tailscale_ip="100.64.0.7",
+            tailnet_address="100.64.0.7",
         ),
     )
     monkeypatch.setattr(
         vm_manager,
         "bootstrap_vm",
-        lambda *args, **kwargs: (SimpleNamespace(), "/home/agentworks"),
+        lambda *args, **kwargs: (SimpleNamespace(), "/home/agentworks", DebianRelease.TRIXIE),
     )
     monkeypatch.setattr(vm_manager, "run_initialization", lambda *args, **kwargs: None)
     monkeypatch.setattr(SSHLogger, "close", lambda self: (_ for _ in ()).throw(RuntimeError("close failed")))
@@ -497,9 +533,8 @@ def test_create_vm_stores_and_provisions_selected_admin_template(
     def _fake_create(self: LimaPlatform, request: ProvisionRequest, ctx: object) -> ProvisionResult:
         captured.append(request)
         return ProvisionResult(
-            native_transport=SimpleNamespace(),  # type: ignore[arg-type]
             platform_metadata={"instance_name": "wvm"},
-            tailscale_ip="100.64.0.9",
+            tailnet_address="100.64.0.9",
         )
 
     monkeypatch.setattr(LimaPlatform, "create", _fake_create)
@@ -508,7 +543,7 @@ def test_create_vm_stores_and_provisions_selected_admin_template(
     monkeypatch.setattr(
         vm_manager,
         "bootstrap_vm",
-        lambda *a, **k: (SimpleNamespace(), "/home/agentworks"),
+        lambda *a, **k: (SimpleNamespace(), "/home/agentworks", DebianRelease.TRIXIE),
     )
     monkeypatch.setattr(vm_manager, "run_initialization", lambda *a, **k: None)
 
@@ -661,9 +696,8 @@ def test_create_vm_composes_r11_hostname_with_slug(
     def _fake_create(self: LimaPlatform, request: ProvisionRequest, ctx: object) -> ProvisionResult:
         captured.append(request)
         return ProvisionResult(
-            native_transport=SimpleNamespace(),  # type: ignore[arg-type]
             platform_metadata={"instance_name": "team-a-svm"},
-            tailscale_ip="100.64.0.8",
+            tailnet_address="100.64.0.8",
         )
 
     monkeypatch.setattr(LimaPlatform, "create", _fake_create)
@@ -672,7 +706,7 @@ def test_create_vm_composes_r11_hostname_with_slug(
     monkeypatch.setattr(
         vm_manager,
         "bootstrap_vm",
-        lambda *a, **k: (SimpleNamespace(), "/home/agentworks"),
+        lambda *a, **k: (SimpleNamespace(), "/home/agentworks", DebianRelease.TRIXIE),
     )
     monkeypatch.setattr(vm_manager, "run_initialization", lambda *a, **k: None)
 
@@ -720,15 +754,18 @@ def test_slug_resolution_precedes_secrets_and_insert(
     assert db.get_vm("ovm") is None  # insert happens after the resolve
 
 
-def test_create_rejects_multiline_tailscale_key_before_runup_db_or_platform(
+@pytest.mark.parametrize(
+    "auth_key", ["tskey-prefix\r\ntskey-suffix\r\n", "", " \t "], ids=["multiline", "empty", "whitespace"]
+)
+def test_create_rejects_an_unusable_tailscale_key_before_runup_db_or_platform(
     db: Database,
     make_config,
     monkeypatch: pytest.MonkeyPatch,
     captured_output: object,
+    auth_key: str,
 ) -> None:
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
 
-    auth_key = "tskey-prefix\r\ntskey-suffix\r\n"
     monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", auth_key)
     monkeypatch.setattr(
         LimaPlatform,
@@ -745,7 +782,7 @@ def test_create_rejects_multiline_tailscale_key_before_runup_db_or_platform(
         vm_manager.create_vm(db, make_config(), name="unsafe-ts", interaction=TtyInteractionPolicy.REFUSE)
 
     assert db.get_vm("unsafe-ts") is None
-    assert auth_key not in repr((caught.value.args, vars(caught.value)))
+    assert not auth_key.strip() or auth_key not in repr((caught.value.args, vars(caught.value)))
 
 
 def test_r11_hostname_and_vnet_bound_by_construction() -> None:
@@ -841,3 +878,24 @@ def test_proxmox_missing_create_release_fails_before_resolve_and_runup(
     assert caught.value.entity_name == "proxmox"
     assert resolve_counter == []
     assert db.get_vm("missing-release") is None
+
+
+def test_an_unsupported_client_refuses_create_before_any_platform_secret_or_row(
+    db: Database, make_config, monkeypatch: pytest.MonkeyPatch, captured_output: object
+) -> None:
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+    from agentworks.execution.errors import ClientUnsupported
+    from agentworks.secrets.resolver import Resolver
+
+    def _unsupported() -> object:
+        raise ClientUnsupported("no supported OpenSSH client")
+
+    monkeypatch.setattr("agentworks.execution.resolve_ssh", _unsupported)
+    for method in ("runup", "create"):
+        monkeypatch.setattr(LimaPlatform, method, lambda *a, **k: pytest.fail("the platform was reached"))
+    monkeypatch.setattr(Resolver, "resolve", lambda self: pytest.fail("a secret was resolved"))
+
+    with pytest.raises(ClientUnsupported):
+        vm_manager.create_vm(db, make_config(), name="noclient", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert db.get_vm("noclient") is None

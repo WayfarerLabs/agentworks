@@ -1,17 +1,10 @@
-"""The execution-only and full transport abstract base classes.
+"""The legacy transport abstract base class.
 
-Every VM platform provides an :class:`ExecTransport` for bounded native
-administrative commands. Delivery mechanisms that also support interaction
-and file movement implement the full :class:`Transport` subtype. Callers
-obtain a transport via the factory functions in this package's
-``__init__.py``: ``transport(vm, config)`` for the canonical admin
-path, ``agent_transport(vm, config, agent)`` for the canonical agent
-path, ``native_transport(vm, platform, config, *, ctx, stack)`` for the
-platform-native bootstrap and recovery path.
-
-The canonical Tailscale path always returns the full type. The native path
-returns only the execution contract because some provider channels, notably
-Proxmox QEMU Guest Agent, are deliberately noninteractive.
+:class:`Transport` is execution, interaction and file movement over one
+channel; :class:`agentworks.transports.SSHTransport`, SSH to a VM's tailnet
+address, is its one implementation. Callers obtain one through the factories
+in this package's ``__init__.py``: ``transport(vm, config)`` for the admin and
+``agent_transport(vm, config, agent)`` for an agent.
 """
 
 from __future__ import annotations
@@ -33,8 +26,8 @@ if TYPE_CHECKING:
     from agentworks.ssh import SSHLogger
 
 
-class ExecTransport(abc.ABC):
-    """Tailscale-independent channel for bounded command execution.
+class Transport(abc.ABC):
+    """Full operator I/O channel: execution, interaction, and file movement.
 
     Concrete subclasses populate ``self.default_timeout`` and
     ``self.logger`` in their constructors; the ABC declares the
@@ -51,35 +44,11 @@ class ExecTransport(abc.ABC):
 
     @abc.abstractmethod
     def describe(self) -> str:
-        """Return a short ``<scheme>:<endpoint>`` label for log lines.
+        """Return a short ``<scheme>:<endpoint>`` label for log lines, such as ``ssh:100.64.0.1``.
 
-        Examples: ``ssh:100.64.0.1``, ``lima:myvm``,
-        ``remote_lima:myvm@host``, ``wsl2:Debian``. Used by
-        :mod:`agentworks.vms.initializer` to label transports in init
-        events without isinstance branching.
+        ``write_file``'s operation-log lines and the SSH transport's
+        dropped-connection notice name the transport with it.
         """
-
-    @abc.abstractmethod
-    def run(
-        self,
-        command: str,
-        *,
-        sudo: bool = False,
-        check: bool = True,
-        timeout: int | None = None,
-        input_text: str | None = None,
-    ) -> SSHResult:
-        """Run a command with captured output and finite sensitive stdin.
-
-        ``sudo=False`` means the VM admin identity and ``sudo=True`` means
-        root. With no ``input_text`` the guest command sees immediate EOF.
-        Sensitive input is byte-exact, absent from command arguments and
-        diagnostics, and suppresses returned and logged output.
-        """
-
-
-class Transport(ExecTransport):
-    """Full operator I/O channel: execution, interaction, and file movement."""
 
     @abc.abstractmethod
     def run(
@@ -102,9 +71,8 @@ class Transport(ExecTransport):
         ``sudo=True`` wraps the command in ``sudo -n bash -c '...'`` so
         compound commands run wholly as root. ``tty=None`` is transport
         default; ``tty=True``/``False`` overrides. ``check=True`` raises
-        on non-zero exit. ``env`` is the per-call env dict; SSH carries
-        it via ``-o SetEnv``, non-SSH transports prepend it as scoped
-        assignments to the bash payload. ``input_text`` streams sensitive
+        on non-zero exit. ``env`` is the per-call env dict, which SSH
+        carries via ``-o SetEnv``. ``input_text`` streams sensitive
         text to the command on stdin; transports omit it from argv, logs,
         returned output, and failure diagnostics, and deliver it byte-exact,
         so a guest ``read -r`` binds exactly the value that was sent. A
@@ -117,23 +85,17 @@ class Transport(ExecTransport):
         and returned. The two stdin modes are mutually exclusive.
 
         With neither payload, ``run`` closes the stdin of the process it
-        spawns (immediate EOF) rather than leaving it the caller's console:
-        SSH with ``-n``, the local transports with an empty stdin pipe. A
-        stdin-reading command then sees EOF, which is what stops a probe from
-        hanging on inherited input. A nested transport (remote Lima) closes its
-        outer ssh hop the same way and forwards that EOF inward; a guest command
-        reading stdin depends on the inner ``limactl`` hop passing EOF through.
+        spawns (immediate EOF) rather than leaving it the caller's console,
+        which SSH does with ``-n``. A stdin-reading command then sees EOF,
+        which is what stops a probe from hanging on inherited input.
 
         ``discard_output=True`` sends stdout and stderr directly to the null
         device and returns/logs empty streams while preserving the normal TTY
         choice and exit status. It cannot be combined with ``input_text``;
         sensitive stdin already has its own output-suppression contract.
 
-        ``retries`` and ``on_retry`` are best-effort across transports:
-        SSH retries on connection-level timeouts (default 1 attempt);
-        non-SSH transports treat ``retries`` as a no-op (the underlying
-        CLI doesn't surface a retryable timeout). Callers can rely on
-        the kwargs being accepted without isinstance narrowing.
+        ``retries`` and ``on_retry``: SSH retries on connection-level
+        timeouts (default 1 attempt).
         """
 
     def interactive(
@@ -145,11 +107,9 @@ class Transport(ExecTransport):
     ) -> int:
         """Run an interactive session with a TTY.
 
-        Empty ``command`` opens a login shell on the VM. ``env`` is
-        best-effort: SSH carries it via SetEnv; the non-SSH transports
-        drop it (``limactl shell`` and ``wsl.exe`` don't expose env
-        injection on their interactive APIs). Returns the process exit
-        code; does not raise on remote-command failure.
+        Empty ``command`` opens a login shell on the VM. ``env`` travels
+        via SetEnv. Returns the process exit code; does not raise on
+        remote-command failure.
 
         ``clear_screen_on_exit`` clears the visible screen after the
         attach ends (see :func:`agentworks.terminal.emit_clear`). Only
@@ -221,7 +181,7 @@ class Transport(ExecTransport):
         can still read it.
 
         No-op by default, because a non-zero exit is not in general an
-        error: for Lima, WSL2, or any login shell it is usually just the
+        error: for any login shell it is usually just the
         remote command's own exit status, and narrating that would be
         noise. Only a transport that can distinguish "the connection
         failed" from "the command exited non-zero" has anything worth
@@ -241,12 +201,7 @@ class Transport(ExecTransport):
         *,
         timeout: int | None = None,
     ) -> None:
-        """Copy a local file to the remote path on the VM.
-
-        ``timeout`` is best-effort: SSH honors it; transports whose
-        underlying CLI (limactl copy, wsl.exe) doesn't accept a timeout
-        silently drop it.
-        """
+        """Copy a local file to the remote path on the VM; SSH uses scp and honors ``timeout``."""
 
     @abc.abstractmethod
     def copy_from(
@@ -258,12 +213,8 @@ class Transport(ExecTransport):
     ) -> None:
         """Copy a remote file from the VM to a local path.
 
-        SSH uses scp; Lima uses ``limactl copy`` (reverse); WSL2 uses
-        ``wsl ... cat`` to stdout; RemoteLima two-hops through the VM
-        host. ``backup.py`` is the canonical consumer. ``timeout`` is
-        best-effort: SSH honors it; transports whose underlying CLI
-        (limactl copy, wsl.exe) doesn't accept a timeout silently drop
-        it.
+        SSH uses scp and honors ``timeout``. ``backup.py`` is the
+        canonical consumer.
         """
 
     @abc.abstractmethod

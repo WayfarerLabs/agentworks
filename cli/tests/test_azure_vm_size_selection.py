@@ -4,6 +4,7 @@ site's ``platform_config.vm_sizes`` override (issue #178)."""
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
@@ -13,7 +14,6 @@ import pytest
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.config import capability_config_references, validate_capability_config
 from agentworks.capabilities.vm_platform import ProvisionRequest
-from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
 from agentworks.debian import DebianRelease
 from agentworks.errors import ConfigError
 from agentworks.plugins.azure.config import (
@@ -174,7 +174,10 @@ class TestCreateProvisioningOutput:
         monkeypatch.setattr(AzureVMPlatform, "_compute_client", lambda self, az, ctx: fake_compute)
         monkeypatch.setattr(AzureVMPlatform, "_network_client", lambda self, az, ctx: fake_network)
         monkeypatch.setattr(AzureVMPlatform, "_vm_exists", lambda self, compute, rg, name: False)
-        monkeypatch.setattr(EphemeralTailscaleBootstrap, "complete", lambda self, auth_key: "100.64.0.5")
+        monkeypatch.setattr(
+            "agentworks.plugins.azure.platform.complete_cloud_bootstrap",
+            lambda run_as_root, auth_key, **kwargs: "100.64.0.5",
+        )
 
     @staticmethod
     def _request(*, cpus: int, memory: int, disk: int = 50, swap: int = 4) -> ProvisionRequest:
@@ -185,7 +188,7 @@ class TestCreateProvisioningOutput:
             system_slug=None,
             admin_username="agw",
             ssh_public_key="ssh-ed25519 AAAA test",
-            ssh_private_key=None,
+            ssh_private_key=Path("/dev/null"),
             provisioning_trust=provisioning_trust_for_tests("dev"),
             tailscale_auth_key="tskey-test",
             progress=MagicMock(),
@@ -295,7 +298,10 @@ class TestCreateOSDiskClamp:
         monkeypatch.setattr(AzureVMPlatform, "_compute_client", lambda self, az, ctx: fake_compute)
         monkeypatch.setattr(AzureVMPlatform, "_network_client", lambda self, az, ctx: fake_network)
         monkeypatch.setattr(AzureVMPlatform, "_vm_exists", lambda self, compute, rg, name: False)
-        monkeypatch.setattr(EphemeralTailscaleBootstrap, "complete", lambda self, auth_key: "100.64.0.5")
+        monkeypatch.setattr(
+            "agentworks.plugins.azure.platform.complete_cloud_bootstrap",
+            lambda run_as_root, auth_key, **kwargs: "100.64.0.5",
+        )
         request = ProvisionRequest(
             vm_name="dev",
             debian_release=DebianRelease.TRIXIE,
@@ -303,7 +309,7 @@ class TestCreateOSDiskClamp:
             system_slug=None,
             admin_username="agw",
             ssh_public_key="ssh-ed25519 AAAA test",
-            ssh_private_key=None,
+            ssh_private_key=Path("/dev/null"),
             provisioning_trust=provisioning_trust_for_tests("dev"),
             tailscale_auth_key="tskey-test",
             progress=MagicMock(),

@@ -92,33 +92,34 @@ policy ignores configuration.
   legacy builder raises `TrustMissing` itself, which is not an `SSHError`. A missing record is a
   state the operator must fix, not an unreachable VM, so no best-effort `except SSHError` handler
   swallows it: otherwise `agent delete` and `workspace delete` would delete their rows and orphan
-  the VM-side account and workspace, and `wait_for_reconnect`'s `False` would send `vm start` into a
-  Tailscale rejoin that spends the auth key. A loop that reports per VM across several VMs reports
-  it for that VM instead of aborting, and `vm delete`'s best-effort teardown carries on as it does
-  for any failure. `trust.py` imports nothing legacy.
+  the VM-side account and workspace. A loop that reports per VM across several VMs reports it for
+  that VM instead of aborting, and `vm delete`'s best-effort teardown carries on as it does for any
+  failure. `trust.py` imports nothing legacy.
 - **Preflight.** `require_vm_ssh_boundary` (`vms/manager/boundary.py:64`), the SSH precondition the
   session, agent and workspace commands already run before the gate and any secret, checks the
   record, so those commands refuse before any prompt or best-effort step. Backup checks it before it
-  starts. The commands that boot a VM or spend a Tailscale key before their first connection check
-  the store first too, before resolving a secret or touching the VM: `vm start`
-  (`vms/manager/power.py:50-58`, ahead of `_live_vm_boundary`), the activation gate's start
-  (`LiveVMNode.auto_start`, `vms/nodes.py:232`), and `vm rekey` (`vms/manager/power.py:344`), which
-  would otherwise spend the new key and record the new address before its reconnect check raised.
-  The check also covers a VM with no recorded tailnet address, which `_tailscale_rejoin_required`
-  sends to a rejoin without probing (`tailscale.py:268-269`).
-- **`ENROLL`** is bound only by create (below), and only to Phase A's verify connection.
-- **`UNVERIFIED`** uses a file the create owns, because the platform builds the transport inside
-  `create` and core keeps using it afterwards, for `probe_debian_release` and Phase A's fallback
-  (below).
+  starts. `vm rekey` checks the store first too, before resolving a secret or touching the VM
+  (`vms/manager/power.py:374`), since it would otherwise spend the new key and record the new
+  address before its final wait raised. The activation gate's start checks it just before it starts
+  the VM (`LiveVMNode.auto_start`, `vms/nodes.py:237`), for a gate opened without that precondition.
+  `vm start` does not: it boots the VM, and its wait raises `TrustMissing`, whose hint names
+  `agw vm recover`, which reads the keys through the platform (`vms/manager/power.py:54-56`).
+- **`ENROLL`** is bound only by create (below), and only to Phase A's first-contact connections: the
+  polled wait for the VM to answer, through the distinct factory `execution.enrollment_access`.
+- **`UNVERIFIED`** uses a file the create owns, because the platform builds its create-time
+  connection inside `create` and uses it only there, for the join and the address read.
   - `trust.provisioning_binding(vm_name)`, a context manager yielding the `UNVERIFIED` binding,
     creates it with `mkstemp` (0600, an unpredictable name) inside the private store directory,
     never a shared temporary directory, so no other local user can seed it with a key.
-  - Create enters it on its existing cleanup stack, so the file goes on success and on every failure
-    path.
+  - Create enters it around the platform's `create` call, so the file goes when `create` returns or
+    raises.
   - `ProvisionRequest` carries the binding, path included, so each cloud plugin builds its
-    create-time transport from it.
+    create-time `PublicSSH` from it.
   - A key is accepted once and then pinned for the rest of the create, which matches what
     provisioning does today against the operator's file, without writing that file.
+  - `vm recover`'s host-key read on a cloud VM with no record enters its own binding the same way
+    (`capabilities/vm_platform/public_ssh.py:261`), and nothing is recorded until the operator
+    confirms the fingerprints.
 
   The integration report on #856 showed that `StrictHostKeyChecking=no` with `/dev/null`, which D9
   named, re-accepts on every connection. HLA D9 is amended to this file.
@@ -130,7 +131,7 @@ policy ignores configuration.
 `accept-new` against the operator's configuration, which only host connections use. There is no
 default, so every construction site chooses (D9's "the code that builds a connection chooses one
 explicitly"), and a missed site fails to type-check rather than silently writing the operator's
-`known_hosts`. There are twelve sites (`grep SSHTransport(`).
+`known_hosts` (`grep SSHTransport(` lists the sites).
 
 One method, `_host_key_options()`, replaces the hard-coded option in `_ssh_base_args` (186),
 `_interactive` (357), `call_streaming` (440-447) and `_scp_base_args` (105). `SSHTarget` (`ssh.py`)
@@ -139,22 +140,24 @@ takes a plain, required `host_key_options: tuple[str, ...]`. The rebuild for `in
 `ssh.py`'s own `_scp_base_args` (479) has no VM caller; its module-level `copy_to` has no caller at
 all, which slice 8's removal covers.
 
-| Site                                                                                                                                  | Binding                                                |
-| ------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
-| `transport_for_user`, `transport()`, `agent_transport()` (`transports/__init__.py:58-118`)                                            | `VM`                                                   |
-| Phase A's verify connection (`vms/initializer/driver.py:404-423`), which only create runs                                             | `ENROLL`, then `VM` for Phase B (below)                |
-| Backup's scp (`vms/backup.py:464`) and workspace copy (`workspaces/manager/copy.py:116`)                                              | the transport's, through a public `host_key_options()` |
-| The port forward (`vms/manager/tailscale.py:154`)                                                                                     | `trust.ssh_options(VM binding)`                        |
-| Cloud create-time transports (`aws/platform.py:572`, `azure/platform.py:642`, `gcp/platform.py:410`)                                  | `UNVERIFIED`                                           |
-| Cloud native transports (`aws/platform.py:718`, `azure/platform.py:824`, `gcp/platform.py:591`)                                       | `VM`                                                   |
-| Remote Lima's host connections (`transports/remote_lima.py:59,66`) and Lima's host transport (`capabilities/vm_platform/lima.py:556`) | `HOST_TRUST`                                           |
+| Site                                                                                                                                                           | Binding                                                         |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| `transport_for_user`, `transport()`, `agent_transport()` (`transports/__init__.py:58-118`)                                                                     | `VM`                                                            |
+| Phase A's first contact (`vms/initializer/phase_a.py`), which only create runs                                                                                 | `ENROLL`, then `VM` for the contract checks and Phase B (below) |
+| Backup's scp (`vms/backup.py:464`) and workspace copy (`workspaces/manager/copy.py:116`)                                                                       | the transport's, through a public `host_key_options()`          |
+| The port forward (`vms/manager/port_forward.py`, through `VMAccess.forward`)                                                                                   | `VM`                                                            |
+| A cloud's create-time `PublicSSH` (`aws/platform.py:564`, `azure/platform.py:637`, `gcp/platform.py:405`)                                                      | `UNVERIFIED`, from `ProvisionRequest.provisioning_trust`        |
+| A cloud's root channel and native shell (`PublicAddressPlatform.run_as_root` and `native_shell`, `capabilities/vm_platform/public_ssh.py:227-245`)             | `VM`                                                            |
+| A cloud's host-key read for recovery (`PublicAddressPlatform.read_host_keys`, `public_ssh.py:247-262`)                                                         | `UNVERIFIED`, under a fresh provisioning file                   |
+| Lima's placement-host connections (`ssh_process.build_host_argv`, `execution/ssh_process.py:206-235`, called from `capabilities/vm_platform/lima_host.py:235`) | `HOST_TRUST`                                                    |
 
-**Clouds before enrollment.** A cloud's create-time transport is also `result.native_transport`, so
-until slice 3 moves attestation core uses it under `UNVERIFIED` for `probe_debian_release`
-(`vms/manager/lifecycle.py:591-594`) and for Phase A's `tailscale ip -4` fallback
-(`driver.py:394-396`). That is provisioning-time access to a VM not yet in the store, which D9's
-`UNVERIFIED` row covers, and it ends in slice 3. Enrollment happens over the tailnet, whose peer
-WireGuard already authenticates, rather than over the public internet.
+**Clouds before enrollment.** A cloud's create-time `PublicSSH` lives only inside the platform's
+`create`, under `UNVERIFIED`, for the bootstrap wait, the join, the address read and, when that read
+fails, the logout; core never receives it. Core's first contact and everything after it run over the
+tailnet, whose peer WireGuard already authenticates, rather than over the public internet, except
+the cloud's root channel and native shell, which reach the public address under `VM` and refuse a VM
+with no record before any route opens. Only recovery's host-key read runs unverified, and the
+operator confirms what it reads against the VM's console before anything is recorded.
 
 ## Enrollment and the other lifecycle hooks
 
@@ -163,23 +166,25 @@ WireGuard already authenticates, rather than over the public internet.
      (`vms/manager/lifecycle.py:421-438`), `trust.begin_enrollment(vm_name)` removes any stale
      record and creates the directory, so a reused name never inherits a key. A failure there
      unwinds the row.
-  2. Phase A's verify connection runs `ENROLL`, so its first success writes the key to the store and
-     nowhere else.
-  3. After the verify loop (`driver.py:413-423`), Phase A checks that the store now holds a key. If
-     it does not, create fails loudly, naming the store path and saying the host key could not be
-     recorded; the remedy is delete and recreate, not an import. Phase A then returns a `VM`-bound
-     transport for Phase B, so `ENROLL` covers exactly create's first core connection, as D9 says.
+  2. Phase A's first-contact connections run `ENROLL`, so the first to reach sshd writes the key to
+     the store and nowhere else; `accept-new` records a key only when none is known, so the later
+     ones verify against it.
+  3. After the wait, Phase A checks that the store now holds a key. If it does not, create fails
+     loudly, naming the store path and saying the host key could not be recorded; the remedy is
+     delete and recreate, not an import. The contract checks run on a `VM`-bound access and Phase B
+     receives a `VM`-bound transport, so `ENROLL` covers exactly create's first-contact connections.
   4. Nothing writes the store before Phase A, so the unwind path needs no store cleanup. The
-     provisioning file is removed by create's cleanup stack whatever happens (above).
-- **A create that fails before enrolling** is kept as failed (`lifecycle.py:595-606`). In PR A its
-  remedy is delete and recreate. From PR B, `agw vm recover` re-establishes trust.
+     provisioning file is removed when the platform's `create` returns or raises.
+- **A create that fails before enrolling** is kept as failed (`lifecycle.py:595-606`), and its
+  remedy is delete and recreate: `agw vm recover` refuses a VM whose provisioning failed.
 - **Delete.** `trust.remove(vm_name)` runs after the row is deleted (`power.py:336`), and even when
   the following `sync_ssh_config` fails, so the store file goes whenever the row goes and a failure
   in between never leaves a live row without its record. It runs on the path that skips backend
   cleanup after a binding failure (`power.py:245-256`), and not when `platform.delete` raises, which
   keeps the row. Logout and session teardown (279-301) still have the store. A cloud VM with no
-  record cannot log out of Tailscale, because its native transport is `VM`-bound; delete warns and
-  carries on, and the upgrade guide says to import first or remove the node in the admin console.
+  record is not logged out of Tailscale: its `run_as_root` raises `TrustMissing` before any route
+  opens, and delete never logs out under Unverified trust. Delete warns naming the node and carries
+  on, and the upgrade guide says to import first or remove the node in the admin console.
 - **Rekey and address changes** need nothing: the alias, not the address, keys the record.
 - **Stop and start** need nothing: the key persists on the guest (incident row I9).
 
@@ -262,22 +267,21 @@ Each test guards behavior, per the development principles and the no-prose-polic
   - quoting holds for a store path containing a space.
 - **Options and binding:**
   - `VM` with no record raises `TrustMissing` and spawns nothing;
-  - `vm start`, the activation gate and `vm rekey` on a VM with no record raise `TrustMissing`
-    before resolving any secret or calling the platform, and `wait_for_reconnect` and
-    `native_transport` raise it on the first attempt;
-  - the provisioning file is private, survives into core's post-create use (the release probe and
-    Phase A's fallback), and is removed on success and on failure;
+  - on a VM with no record, the activation gate's start raises `TrustMissing` before it starts the
+    VM, `vm rekey` before it resolves the auth key or calls the platform, `reachability.wait` on its
+    first attempt, and a cloud's `run_as_root` before any route opens;
+  - the provisioning file is private and is removed when `create` returns or raises;
     - Windows path forms, and import against the platform's own `ssh-keygen`
       (`@pytest.mark.windows`);
-  - `require_vm_ssh_boundary`, `vm start`, the activation gate, `vm rekey` and backup refuse a VM
-    with no record before resolving a secret or touching it, and `agent delete` and
-    `workspace delete` refuse before touching the database;
+  - `require_vm_ssh_boundary`, `vm rekey` and backup refuse a VM with no record before resolving a
+    secret or touching it, and `agent delete` and `workspace delete` refuse before touching the
+    database;
   - a multi-VM listing reports a missing record for that VM and carries on.
 
   `SSHTransport`'s required `trust` is a type-checker guarantee, so no test restates it.
 
 - **Enrollment:**
-  - the store holds the key after Phase A's verify connection;
+  - the store holds the key after Phase A's first contact;
   - an empty store after a successful connection fails create;
   - Phase B's transport is bound `VM`.
 - **Import:**
@@ -295,9 +299,9 @@ Each test guards behavior, per the development principles and the no-prose-polic
   whenever it removes the row.
 - **Managed entries:** the trust block appears exactly when a record exists, the installed client
   resolves it against the store, and one bad record never aborts the rebuild.
-- **ENROLL only from create** holds by construction: Phase A is reached only through `bootstrap_vm`
-  from create (`vms/initializer/driver.py:161`, `vms/manager/lifecycle.py:643`), and the factories
-  bind `VM`. The enrollment tests cover both; nothing pins the call graph.
+- **ENROLL only from create** holds by construction: `enrollment_access` is a distinct factory whose
+  only caller is Phase A (`vms/initializer/phase_a.py`), reached only from create, and every other
+  factory binds `VM`. The enrollment tests cover both; nothing pins the call graph.
 
 ## Collateral
 

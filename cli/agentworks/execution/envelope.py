@@ -53,9 +53,13 @@ _MAX_CLOSING_LINE = 4096
 DEFAULT_TERM = "xterm-256color"
 
 
+_NONCE_BYTES = 16
+_ANY_START_LINE = re.compile(rb"\x1e[0-9a-f]{%d} start\n" % (2 * _NONCE_BYTES))
+
+
 def new_nonce() -> str:
     """A fresh per-request nonce: 32 lowercase hex characters, never in the payload's argv or environment."""
-    return secrets.token_hex(16)
+    return secrets.token_hex(_NONCE_BYTES)
 
 
 def new_handover_token() -> str:
@@ -171,6 +175,11 @@ def marker_prefix(nonce: str) -> bytes:
     return b"\x1e" + nonce.encode("ascii") + b" "
 
 
+def holds_a_start_line(data: bytes) -> bool:
+    """Whether ``data`` holds the start marker line of a request, whatever its nonce."""
+    return _ANY_START_LINE.search(data) is not None
+
+
 class _Phase(enum.Enum):
     SEEKING = enum.auto()
     PASSING = enum.auto()
@@ -187,12 +196,16 @@ class StreamFilter:
       suffix that is a proper prefix of the closing prefix. No timer is
       involved. A ``parked`` line is removed from the stream and recorded.
     - Done: after the closing line, drop everything.
+
+    With no nonce there are no markers to find: the filter passes every byte
+    through and never closes, for a stream whose end the process's own exit
+    decides.
     """
 
-    def __init__(self, nonce: str) -> None:
-        self._prefix = marker_prefix(nonce)
-        self._start = self._prefix + b"start\n"
-        self._phase = _Phase.SEEKING
+    def __init__(self, nonce: str | None) -> None:
+        self._prefix = None if nonce is None else marker_prefix(nonce)
+        self._start = None if self._prefix is None else self._prefix + b"start\n"
+        self._phase = _Phase.SEEKING if nonce is not None else _Phase.PASSING
         self._held = b""
         self._line: bytearray | None = None
         self._parked = False
@@ -218,7 +231,11 @@ class StreamFilter:
         buffer = self._held + data
         self._held = b""
         while buffer and self._phase is not _Phase.DONE:
+            if self._prefix is None:
+                out += buffer
+                break
             if self._phase is _Phase.SEEKING:
+                assert self._start is not None
                 found = buffer.find(self._start)
                 if found < 0:
                     self._held = buffer[-(len(self._start) - 1) :]
@@ -268,6 +285,7 @@ class StreamFilter:
         self._line = None
 
     def _partial_prefix_length(self, buffer: bytes) -> int:
+        assert self._prefix is not None
         for length in range(min(len(self._prefix) - 1, len(buffer)), 0, -1):
             if buffer.endswith(self._prefix[:length]):
                 return length
@@ -280,6 +298,7 @@ def classify(
     ssh_status: int | None,
     *,
     host_key_failed: bool = False,
+    auth_failed: bool = False,
     stdout_abandoned: bool = False,
     stderr_abandoned: bool = False,
 ) -> Completion:
@@ -288,6 +307,8 @@ def classify(
     ``ssh_status`` is ssh's own status when it exited by itself, and ``None``
     when it was still running or was killed (a signal's negative status is not
     evidence either). A deadline or an output limit is the caller's to report.
+    ``host_key_failed`` and ``auth_failed`` say what ssh's own log holds; they
+    type only ssh's 255 with no start marker, the host key first.
 
     An abandoned stream is one whose consumer left, so the client closed it
     unread. An abandoned stdout stands in for the ``end`` line; the stderr
@@ -312,4 +333,8 @@ def classify(
         return NotDelivered(NotDeliveredReason.STDLIB_MISSING)
     if ssh_status is not None and 0 <= ssh_status <= 254:
         return NotDelivered(NotDeliveredReason.LAUNCHER_FAILED)
-    return Unknown(UnknownReason.HOST_KEY if host_key_failed and ssh_status == 255 else UnknownReason.CONNECTION)
+    if ssh_status == 255 and host_key_failed:
+        return Unknown(UnknownReason.HOST_KEY)
+    if ssh_status == 255 and auth_failed:
+        return Unknown(UnknownReason.AUTH_FAILED)
+    return Unknown(UnknownReason.CONNECTION)

@@ -3,9 +3,13 @@
 `agentworks.execution` is how core runs commands on a managed VM. It reaches the VM only through the
 installed OpenSSH client at the VM's tailnet address, and every request is sent on the client's
 stdin, never on a command line or in the environment. The commands that use it today are `vm exec`,
-`vm shell`, `agent exec`, `agent shell`, `vm verify-connection` and `vm port-forward`. Everything
-else still reaches VMs through the transport stack it will replace, which this package must never
-import.
+`vm shell`, `agent exec`, `agent shell`, `vm verify-connection` and `vm port-forward`, plus create's
+first contact (Phase A), the VM contract (`agentworks.vms.contract`) that create and reinit run,
+`vm confirm-release`, and the wait for a VM to answer (`reachability.wait`) after `vm start`, the
+activation gate's automatic start, `vm rekey` and `vm recover`. Everything else still reaches VMs
+through the legacy transport stack (`agentworks.transports`), which this package must never import.
+A platform's own channel is not part of either: core reaches it through `VMPlatform.run_as_root` and
+`native_shell`.
 
 ## Use
 
@@ -37,16 +41,39 @@ for `attach`). Each takes `env` and `cwd` (absolute; `None` is the home director
 `Script` also take `deadline` (seconds of local waiting; it never claims the guest command stopped).
 `vm exec` sends a `Script` under the identity's default shell, with several arguments shell-joined.
 
+`Command` and `Script` also take `elevated`, which runs the whole operation as root under `sudo -n`:
+it is the prefix of the constant first-stage command (below), not part of the request message, and
+the launcher rebuilds the payload's environment from root's passwd entry. An agent-bound access
+refuses an elevated request with `PermissionDenied` before anything resolves, and the guest's
+`sudo -n` is the second layer. `LoginShell` has no such option, so an attach never elevates.
+
+`reachability.wait(access, wording=)` is the one retry loop: it polls a fixed `true` probe (16
+attempts, 10 seconds each, 5 seconds apart, a second probe confirming an answer that followed a
+failure) and returns whether the VM answered. It polls only `CONNECTION`, `TRUNCATED` and `DEADLINE`
+and raises every other outcome at once, so a changed host key or a refused key is neither waited out
+nor repeated against the VM's sshd. The caller decides what an exhausted wait means.
+
+`execution.enrollment_access(vm, config, log=)` is the admin's access in Enroll mode, which may
+record a new host key. Create's first contact is its only caller; every other access verifies
+against the store.
+
+`vm_access(..., log=)` takes an operation log's record callable, `SSHLogger.record` today, which
+`run` calls once per request before raising for its outcome, so failures are logged. The block is
+`oplog.format_record`'s: the step label, the request's shape (the argv, or a script's shell and
+login flag, with the working directory, the environment's names and the deadline), the completion,
+both streams and ssh's diagnostics. No environment value or script source reaches the formatter; the
+logger redacts the secrets registered when it was constructed, at its one sink.
+
 ## What a request becomes
 
-Every connection runs the same constant command, `python3 -I -S -c '<stage 0>'` (`ssh_process.py`).
-Stage 0 is a one-line program that reads the launcher's source from stdin with exact-length reads
-and runs it. Its reader is recursive, so a pathological drip of tiny reads fails safely, as not
-delivered, instead of running. The launcher, `agw_launch.py`, reads the request, resets what the
-payload inherits, runs the payload as a child and reports completion. The client writes three things
-to ssh's stdin in order: the launcher source, the JSON envelope (`envelope.py`), and the caller's
-input untouched. A frame is ten ASCII digits then that many bytes, so the payload's stdin starts at
-the caller's first byte.
+Every connection runs the same constant command, `python3 -I -S -c '<stage 0>'` (`ssh_process.py`),
+behind `sudo -n` for an elevated request. Stage 0 is a one-line program that reads the launcher's
+source from stdin with exact-length reads and runs it. Its reader is recursive, so a pathological
+drip of tiny reads fails safely, as not delivered, instead of running. The launcher,
+`agw_launch.py`, reads the request, resets what the payload inherits, runs the payload as a child
+and reports completion. The client writes three things to ssh's stdin in order: the launcher source,
+the JSON envelope (`envelope.py`), and the caller's input untouched. A frame is ten ASCII digits
+then that many bytes, so the payload's stdin starts at the caller's first byte.
 
 The guest's account shell may print or export before stage 0 runs. The launcher brackets the
 payload's output with marker lines (`0x1E`, a per-request nonce, a word, a newline), and the client
@@ -63,20 +90,23 @@ Completion comes from the markers, never from ssh's exit status:
 - `NotDelivered(reason)`: the payload never started (`PYTHON_MISSING`, `STDLIB_MISSING`,
   `LAUNCHER_FAILED`, or `REFUSED` with the guest's refusal code).
 - `Unknown(reason)`: it may have run (`CONNECTION`, `HOST_KEY`, `TRUNCATED`, `DEADLINE`,
-  `OUTPUT_LIMIT`).
+  `OUTPUT_LIMIT`). `AUTH_FAILED` is the exception the evidence allows: ssh's 255 with no start
+  marker and `Permission denied (publickey` in its own log means the VM refused the configured key,
+  so nothing ran. `CONNECTION` stays "may have run": the start marker is written just before the
+  payload starts, so a connection lost then can drop it. Both errors' hints name `agw vm recover`.
 
 `Result.require_completed` and `run(check=True)` turn the rest into typed errors (`errors.py`):
 `VMNotReady`, `TrustMismatch`, `RequestRefused`, `ExecutionIncomplete`, `CommandFailed`. No error,
 repr or hint holds a stream, an environment value or script text; the only transcript an error may
 show is the last lines of ssh's own diagnostics, which the client keeps in a private log (`-E`)
-apart from the payload's output. On a connection failure, `VMAccess` reads the operator's key file
-once to decide whether to hint at `ssh-add`, and only then. `stream` reports a refusal the way a
-shell does: 127 for a missing command, 126 for any other `exec` failure, 125 for a working
-directory. A consumer that leaves (`| head`) gets what ssh gave it. For stdout the client closes its
-read end, so a writer takes `SIGPIPE`, while a quiet payload still runs to its end and `stream`
-reports its own status. A departed stderr ends the request once held stdout is delivered, since ssh
-does not end the channel for it, unless its trailer had already arrived; then stdout is read to its
-end and the guest's status stands. With no status to report, `stream` returns 141.
+apart from the payload's output. On a connection or authentication failure, `VMAccess` reads the
+operator's key file once to decide whether to hint at `ssh-add`, and only then. `stream` reports a
+refusal the way a shell does: 127 for a missing command, 126 for any other `exec` failure, 125 for a
+working directory. A consumer that leaves (`| head`) gets what ssh gave it. For stdout the client
+closes its read end, so a writer takes `SIGPIPE`, while a quiet payload still runs to its end and
+`stream` reports its own status. A departed stderr ends the request once held stdout is delivered,
+since ssh does not end the channel for it, unless its trailer had already arrived; then stdout is
+read to its end and the guest's status stands. With no status to report, `stream` returns 141.
 
 ## Client and policy
 
@@ -89,8 +119,13 @@ verdict.
 `ssh_process.py` builds the argv under `-F none`, so no operator or system configuration applies,
 with the explicit identity (`IdentitiesOnly`), `BatchMode`, publickey-only authentication, the VM's
 host-key trust options and keepalives on every connection. Its `spawn` is the only place a client is
-started. `pump.py` drives a started client through pipes: one thread over non-blocking pipes, with
-the operator's stdin reaching it through a daemon thread that reads the raw stream. A deadline or an
+started; it also starts a platform's root channel (below), and a program other than the OpenSSH
+client that cannot start is a `ConnectivityError` naming it, not `ClientUnsupported`.
+`build_host_argv` is the one other policy, for a platform's own connection to its host (Remote
+Lima's placement host): it honors the operator's SSH configuration (no `-F none`), trusts the host
+through `HOST_TRUST`, and keeps the connect timeout and keepalives, with `BatchMode` only when
+piped. `pump.py` drives a started client through pipes: one thread over non-blocking pipes, with the
+operator's stdin reaching it through a daemon thread that reads the raw stream. A deadline or an
 output limit kills the client at once. A sink that would block (the operator's own stdout is a
 non-blocking pipe) is waited on, never dropped.
 
@@ -106,6 +141,30 @@ connection is served, when the client closes its end, after 30 seconds, or on `S
 The client gives up on a parking connection that never reports `parked` within 60 seconds (its own
 bound for connecting and running the account's startup files; the 30 seconds above start only after
 `parked`), and raises before the terminal is touched.
+
+## Root scripts
+
+`root_script.py` is how core runs a script as root through a platform's own channel, which works
+without the VM's Tailscale state. A platform implements one primitive,
+`run_as_root(script, deadline) -> RawRun`: run `/bin/bash -s` as root with `script` on stdin and
+return both streams, with no status, because no channel's status is trusted.
+`root_script.run(run_as_root, payload, *, deadline, secret=None, log=None)` wraps the payload in one
+brace group that Bash parses whole before running (so a payload that reads stdin gets end of file,
+and a script cut short runs nothing), frames it with the execution markers, and returns a
+`RootScriptResult` whose `status` is the payload's only when both closing markers arrived. The one
+secret a script may need is an unexported shell variable, `AGW_SECRET`, in the script text: it is in
+no argument and no child's environment, and it is redacted from every field of the result and the
+log record.
+
+`run_process(argv, script, deadline)` is `run_as_root` for a channel that is a local process
+(`limactl`, `wsl.exe`, `ssh`): the pump drives it with `nonce=None`, passing both streams through,
+until it exits and its pipes go quiet, the deadline passes or a stream passes 1 MiB.
+`read_host_keys(run_as_root)` reads `/etc/ssh/ssh_host_*_key.pub` and keeps the lines
+`trust.is_valid_key` accepts; `trust.fingerprint` prints a key as OpenSSH's `SHA256:` form.
+
+A platform's interactive shell is not a root script: `VMPlatform.native_shell` runs it on the
+operator's terminal through `ssh_process.run_terminal`, and a platform that offers none is refused
+with `FeatureUnavailable` (`errors.py`) before the command's boundary resolves anything.
 
 ## Host-key trust
 
@@ -137,10 +196,11 @@ reference and the 0.20 upgrade guide.
 ## Independence
 
 Nothing in this package imports `agentworks.transports`, `agentworks.ssh`, `agentworks.remote_exec`,
-`agentworks.harness_setup.runner`, `agentworks.native_files` or
-`agentworks.plugins.proxmox.transport`. Three guards hold that: a fresh-interpreter test imports
-every submodule with them blocked (`tests/execution/test_independence.py`), a conftest blocks them
-for every test in `tests/execution/`, and a static check rejects any import of them in the files
-already migrated onto this package (`tests/test_execution_import_boundary.py`). A slice that
-migrates a file adds it to that list. The tests are described in
-[`tests/execution/README.md`](../../tests/execution/README.md).
+`agentworks.harness_setup.runner` or `agentworks.native_files`. Three guards hold that. A
+fresh-interpreter test (`tests/execution/test_independence.py`) imports every submodule with them
+blocked, and with them the modules outside the package that are built on it alone: `vms.contract`,
+`vms.recovery`, and `public_ssh`, which loads the `vm_platform` package. A conftest blocks them for
+every test in `tests/execution/`. A static check rejects any import of them, in a function body or
+under `TYPE_CHECKING` too, in the files already migrated onto this package
+(`tests/test_execution_import_boundary.py`); a slice that migrates a file adds it to that list. The
+tests are described in [`tests/execution/README.md`](../../tests/execution/README.md).

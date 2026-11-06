@@ -426,6 +426,33 @@ def test_logout_failure_does_not_skip_delete(
     assert db.get_vm("dvm") is None
 
 
+def test_session_teardown_failure_still_logs_out_and_deletes(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """The teardown's legacy transport can fail (it raises TrustMissing on a VM
+    with no record); the logout has its own span and still runs."""
+    from agentworks.vms.manager import power
+
+    _seed(db)
+    counts = _fake_backend(monkeypatch)
+    logouts: list[str] = []
+
+    def _broken_teardown(*a: object, **k: object) -> None:
+        raise RuntimeError("teardown transport exploded")
+
+    monkeypatch.setattr(power, "_teardown_vm_sessions", _broken_teardown)
+    monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda vm, *a, **k: logouts.append(vm.name))
+
+    vm_manager.delete_vm(db, make_config(), "dvm", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert logouts == ["dvm"]
+    assert counts["delete"] == 1
+    assert db.get_vm("dvm") is None
+
+
 def test_stranded_site_warns_with_hint_and_still_deletes_row(
     db: Database,
     make_config,  # noqa: ANN001
@@ -625,6 +652,110 @@ def test_azure_rbac_delete_failure_keeps_the_row_end_to_end(
     assert exc.value.hint is not None
     assert "Contributor" in exc.value.hint
     assert db.get_vm("vm1") is not None
+
+
+# -- A row a killed create left, with no platform metadata ---------------------
+
+
+def _proxmox_status_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fake only the status read: the REAL ``ProxmoxPlatform.delete`` refuses a row with no VMID before any API call."""
+    monkeypatch.setattr(ProxmoxPlatform, "status", lambda self, row, ctx: VMStatus.STOPPED)
+    monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
+
+
+def test_a_row_with_no_platform_metadata_is_refused_without_force(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """A create killed before its platform returned leaves a pending row with no metadata; delete names --force."""
+    _seed(db)
+    seed_vm_trust("dvm")
+    _proxmox_status_only(monkeypatch)
+
+    with pytest.raises(StateError) as caught:
+        vm_manager.delete_vm(db, make_config(), "dvm", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert "--force" in (caught.value.hint or "")
+    assert db.get_vm("dvm") is not None
+    assert trust.has_record("dvm")
+
+
+def test_force_removes_a_row_with_no_platform_metadata_and_warns_its_backend_may_remain(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    _seed(db)
+    seed_vm_trust("dvm")
+    _proxmox_status_only(monkeypatch)
+
+    vm_manager.delete_vm(db, make_config(), "dvm", force=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert db.get_vm("dvm") is None
+    assert not trust.has_record("dvm")
+    warned = "\n".join(captured_output.warnings)
+    assert "'dvm'" in warned
+    assert "vm-site 'proxmox'" in warned
+
+
+def test_force_still_keeps_a_row_whose_metadata_the_platform_refuses(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """Metadata a create returned, even metadata the platform refuses (here: no VMID), came from a VM that exists."""
+    _seed(db)
+    db.update_vm_platform_metadata("dvm", {"node": "pve1"})
+    _proxmox_status_only(monkeypatch)
+
+    with pytest.raises(StateError):
+        vm_manager.delete_vm(db, make_config(), "dvm", force=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert db.get_vm("dvm") is not None
+
+
+def test_force_removes_an_azure_row_with_no_resource_id_without_claiming_its_resources(
+    db: Database,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """Azure used to drop such a row as deleted; now it refuses, and --force removes the row touching nothing."""
+    config = write_operator_config(
+        tmp_path,
+        '[plugins]\nsystem = ["azure"]\n',
+        manifests=[
+            ManifestDoc(
+                "vm-site",
+                "azure",
+                {
+                    "platform": {
+                        "name": "azure-vm",
+                        "subscription_id": "sub-A",
+                        "resource_group": "rg1",
+                        "region": "eastus",
+                        "auth": {"mode": "ambient"},
+                    }
+                },
+            )
+        ],
+    )
+    db.insert_vm("vm1", site="azure", hostname="vm1")
+    fakes = _install_fakes(monkeypatch)
+
+    with pytest.raises(StateError):
+        vm_manager.delete_vm(db, config, "vm1", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+    assert db.get_vm("vm1") is not None
+
+    vm_manager.delete_vm(db, config, "vm1", force=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert db.get_vm("vm1") is None
+    assert fakes.events == []
+    assert captured_output.warnings
 
 
 # -- The host-key record goes whenever the row goes ---------------------------

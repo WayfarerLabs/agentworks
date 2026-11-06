@@ -202,21 +202,15 @@ def test_vm_active_does_not_verify_connectivity() -> None:
     that keeps ``vm start`` from double-printing the reconnect wording.
 
     This drives the REAL ``WSL2Platform.vm_active`` -> ``_keepalive``, so
-    it is the regression guard: if a future change reintroduces the
-    module-level ``from agentworks.transports import transport,
-    wait_for_reconnect`` and a bare ``wait_for_reconnect(...)`` call into
-    ``_keepalive``, the mocks below intercept it and
+    it is the regression guard: a wait reintroduced into ``_keepalive``
+    reaches ``reachability.wait``, the one wait, and
     ``wait.assert_not_called()`` fails for the right reason (an assertion,
-    not an incidental subprocess/SSH crash). ``create=True`` is required
-    because the current pure-power-hold code deliberately does NOT import
-    either name, so the attributes do not exist on the wsl2 module until a
-    reintroduction (or this patch) puts them there.
+    not an incidental subprocess/SSH crash).
     """
     proc = _running_proc()
     with (
         patch("agentworks.capabilities.vm_platform.wsl2.subprocess.Popen", return_value=proc) as popen,
-        patch("agentworks.capabilities.vm_platform.wsl2.wait_for_reconnect", create=True) as wait,
-        patch("agentworks.capabilities.vm_platform.wsl2.transport", create=True),
+        patch("agentworks.execution.reachability.wait") as wait,
         _job_object_mocks(),
     ):
         vm = _fake_vm(tailscale_host="100.64.0.5")
@@ -316,8 +310,12 @@ def test_base_platform_vm_active_is_nullcontext() -> None:
     class _Stub(VMPlatform):
         name = "stub"
         description = "stub"
-        contract_version = 1
+        contract_version = 2
         config_model = _StubConfig
+        recovery_needs_guest_sshd = False
+
+        def run_as_root(self, vm: Any, ctx: Any, script: bytes, deadline: float) -> Any:
+            raise NotImplementedError
 
         def create(self, request: Any, ctx: Any) -> Any:
             raise NotImplementedError
@@ -335,9 +333,6 @@ def test_base_platform_vm_active_is_nullcontext() -> None:
             raise NotImplementedError
 
         def display_backend_name(self, vm: Any) -> str:
-            raise NotImplementedError
-
-        def native_transport(self, vm: Any, ctx: Any, *, config: Any = None) -> Any:
             raise NotImplementedError
 
     # Patch Popen at the wsl2 module level; the base default must NOT touch it.
