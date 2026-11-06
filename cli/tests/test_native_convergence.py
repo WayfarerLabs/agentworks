@@ -88,7 +88,7 @@ def test_native_adoption_reports_the_adopted_entry(transport, tool, role, monkey
 
 @pytest.mark.parametrize("tool", ["codex", "claude"])
 @pytest.mark.parametrize("strategy", ["replace", "merge-overwrite", "merge-preserve", "skip-existing"])
-def test_skipped_plugin_is_preserved_by_mapping_while_an_independent_plugin_converges(transport, tool, strategy):
+def test_mapping_policy_controls_a_skipped_plugin_while_an_independent_plugin_converges(transport, tool, strategy):
     market = market_fixture(transport, tool)
     setup_user(
         tool,
@@ -138,11 +138,13 @@ def test_skipped_plugin_is_preserved_by_mapping_while_an_independent_plugin_conv
         )
     table = document[plugin_key]
     assert isinstance(table, dict)
-    assert table["one@fixture-market"] == ({"enabled": False} if tool == "codex" else False)
+    enabled = strategy in ("replace", "merge-overwrite")
+    assert table["one@fixture-market"] == ({"enabled": enabled} if tool == "codex" else enabled)
     with NativeFiles(transport) as files:
         cli = NativeCLI(tool, files, home=str(transport.home), config_root=str(settings.parent))
         installed = {item.identifier: item for item in cli.plugins(cli.markets())}
-        assert not installed["one@fixture-market"].enabled and installed["two@fixture-market"].enabled
+        assert installed["one@fixture-market"].enabled is enabled
+        assert installed["two@fixture-market"].enabled
 
 
 @pytest.mark.parametrize("tool", ["codex", "claude"])
@@ -212,7 +214,7 @@ def test_owned_marketplace_source_change_reinstalls_its_requested_plugin(transpo
 
 @pytest.mark.parametrize("tool", ["codex", "claude"])
 @pytest.mark.parametrize("strategy", ["replace", "merge-overwrite"])
-def test_skipped_market_preserves_its_native_associations_during_mapping(transport, tool, strategy):
+def test_mapping_policy_controls_skipped_marketplace_settings(transport, tool, strategy):
     market = market_fixture(transport, tool)
     setup_user(
         tool,
@@ -436,7 +438,7 @@ def test_claude_missing_native_settings_table_does_not_abort_mapping(transport, 
     if missing == "enabledPlugins":
         assert "fixture-market" in result["extraKnownMarketplaces"]
         assert len(incomplete) == 1
-        assert not result.get("enabledPlugins", {})
+        assert result["enabledPlugins"]["one@fixture-market"] is True
         assert {item.role for item in claims[-1]} == {"marketplace"}
     else:
         assert any("fixture-market" in reason for reason in incomplete)

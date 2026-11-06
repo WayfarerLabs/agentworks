@@ -93,17 +93,15 @@ def test_incomplete_or_differing_git_source_survives_mapping(transport, tool, de
         replace(invocation(transport, claims), report_incomplete=incomplete.append),
     )
     assert incomplete
-    assert {(item.role, item.identifier) for item in claims[-1]} == {
-        ("marketplace", "independent"),
-        ("plugin", "two@independent"),
-    }
+    expected = set() if tool == "claude" else {("marketplace", "independent"), ("plugin", "two@independent")}
+    assert {(item.role, item.identifier) for item in (claims[-1] if claims else ())} == expected
     document = parse_settings(destination.read_bytes(), format=format)
     assert document["mapped"] is True
     if tool == "claude":
         declarations = document.get("extraKnownMarketplaces", {})
         enabled = document["enabledPlugins"]
         assert isinstance(declarations, dict) and isinstance(enabled, dict)
-        # Unrelated native registration can discard source-less settings entries.
+        # Hold native rewrites instead of reconstructing this user declaration.
         assert declarations.get("fixture-market") in (None, declaration)
         assert enabled["one@fixture-market"] is True
         assert (
@@ -114,7 +112,8 @@ def test_incomplete_or_differing_git_source_survives_mapping(transport, tool, de
         cli = NativeCLI(tool, files, home=str(transport.home), config_root=str(root))
         observed = cli.markets()
         assert next(item for item in observed if item.name == "fixture-market") == before[0]
-        assert {item.identifier for item in cli.plugins(observed)} == {"one@fixture-market", "two@independent"}
+        expected = {"one@fixture-market"} | ({"two@independent"} if tool == "codex" else set())
+        assert {item.identifier for item in cli.plugins(observed)} == expected
 
 
 @pytest.mark.parametrize("source_kind", ["local", "git"])
@@ -157,12 +156,7 @@ def test_claude_missing_user_declaration_blocks_removal_before_dependent_uninsta
         replace(invocation(transport, claims, prior=record(previous, "claude")), report_incomplete=incomplete.append),
     )
     assert incomplete
-    assert set(previous) <= set(claims[-1])
-    assert {item.identifier for item in claims[-1]} == {
-        "fixture-market",
-        "independent",
-        "two@independent",
-    } | ({"one@fixture-market"} if dependent else set())
+    assert claims[-1] == previous
     document = json.loads(destination.read_bytes())
     assert document["mapped"] is True
     assert document.get("extraKnownMarketplaces", {}).get("fixture-market") in (None, declaration)
@@ -172,8 +166,8 @@ def test_claude_missing_user_declaration_blocks_removal_before_dependent_uninsta
         assert "one@fixture-market" not in document.get("enabledPlugins", {})
     with NativeFiles(transport) as files:
         cli = NativeCLI("claude", files, home=str(transport.home), config_root=str(destination.parent))
-        assert {item.name for item in cli.markets()} == {"fixture-market", "independent"}
-        assert {item.identifier for item in cli.plugins(cli.markets())} == {"two@independent"} | (
+        assert {item.name for item in cli.markets()} == {"fixture-market"}
+        assert {item.identifier for item in cli.plugins(cli.markets())} == (
             {"one@fixture-market"} if dependent else set()
         )
 
@@ -283,7 +277,7 @@ def test_ambiguous_selection_retains_both_previously_owned_marketplaces(transpor
 @pytest.mark.parametrize("declaration", [False, {"source": {"source": "directory", "path": "/missing-stale-market"}}])
 @pytest.mark.parametrize("owned", [False, True])
 @pytest.mark.parametrize("mapped", [False, True])
-def test_claude_invalid_named_declaration_retains_association_and_converges_independent_market(
+def test_claude_invalid_named_declaration_holds_unsafe_native_writes_but_not_other_integrations(
     transport, declaration, owned, mapped
 ):
     market = market_fixture(transport, "claude")
@@ -305,6 +299,7 @@ def test_claude_invalid_named_declaration_retains_association_and_converges_inde
     mapping = transport.root / "settings-source.json"
     mapping.write_text('{"mapped": true}')
     incomplete: list[str] = []
+    before_checkpoints = len(claims)
     setup_user(
         "claude",
         NativeUserConfig(
@@ -323,11 +318,7 @@ def test_claude_invalid_named_declaration_retains_association_and_converges_inde
         invocation(transport, codex_claims),
     )
     assert {item.role for item in codex_claims[-1]} == {"marketplace", "plugin"}
-    assert set(previous) <= set(claims[-1])
-    assert {(item.role, item.identifier) for item in claims[-1]} == {
-        ("marketplace", "independent"),
-        ("plugin", "two@independent"),
-    } | ({(item.role, item.identifier) for item in previous} if owned else set())
+    assert (claims[-1] if len(claims) > before_checkpoints else previous) == previous
     assert json.loads(registry_path.read_bytes())["fixture-market"] == registered
     final_document = json.loads(destination.read_bytes())
     assert final_document["extraKnownMarketplaces"]["fixture-market"] == declaration
@@ -338,11 +329,8 @@ def test_claude_invalid_named_declaration_retains_association_and_converges_inde
         markets = {item.name: item for item in cli.markets()}
         assert markets["fixture-market"].source is None
         assert markets["fixture-market"].unavailable_reason is not None
-        assert markets["independent"].source is not None
-        assert {item.identifier for item in cli.plugins(tuple(markets.values()))} == {
-            "one@fixture-market",
-            "two@independent",
-        }
+        assert set(markets) == {"fixture-market"}
+        assert {item.identifier for item in cli.plugins(tuple(markets.values()))} == {"one@fixture-market"}
 
 
 @pytest.mark.parametrize(
@@ -399,7 +387,7 @@ def test_native_operation_failure_identifies_request_without_provider_output_or_
 
 
 @pytest.mark.parametrize("declaration", [False, {"source": {"source": "directory", "path": "/missing-unrelated"}}])
-def test_unknown_unclaimed_market_does_not_block_unrelated_qualified_plugin(transport, declaration):
+def test_conflicting_foreign_settings_hold_native_rewrites_without_losing_the_entry(transport, declaration):
     market = market_fixture(transport, "claude")
     setup_user("claude", NativeUserConfig(marketplaces=[str(market)]), invocation(transport, []))
     destination = transport.home / ".claude/settings.json"
@@ -416,7 +404,4 @@ def test_unknown_unclaimed_market_does_not_block_unrelated_qualified_plugin(tran
     )
     assert any("fixture-market" in reason for reason in incomplete)
     assert json.loads(destination.read_bytes())["extraKnownMarketplaces"]["fixture-market"] == declaration
-    assert {(item.role, item.identifier) for item in claims[-1]} == {
-        ("marketplace", "independent"),
-        ("plugin", "two@independent"),
-    }
+    assert not claims

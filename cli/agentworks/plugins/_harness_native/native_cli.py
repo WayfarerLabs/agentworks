@@ -23,6 +23,7 @@ from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from agentworks.capabilities.harness_integration.settings import SettingsObject
     from agentworks.native_files import NativeFiles
 
 type NativeTool = Literal["codex", "claude"]
@@ -80,6 +81,8 @@ class NativeMarket:
     name: str
     source: str | None
     unavailable_reason: str | None = None
+    # Rewriting settings from this cached registration can undo a user edit.
+    settings_conflict: bool = False
 
 
 @dataclass(frozen=True)
@@ -127,8 +130,12 @@ def _command_description(tool: NativeTool, args: list[str]) -> str:
     return sanitize_setup_diagnostic(f"{tool} {operation}" + ("" if selector is None else f" {selector!r}"))
 
 
-def _claude_market(name: str, source: dict[str, object], declaration: object) -> NativeMarket:
+def _claude_market(name: str, source: Mapping[str, object], declaration: object) -> NativeMarket:
     """Keep a named declaration gap local without guessing its full association."""
+
+    def unavailable(reason: str) -> NativeMarket:
+        return NativeMarket(name, None, reason, settings_conflict=True)
+
     kind = source.get("source")
     location_key = (
         {"directory": "path", "file": "path", "github": "repo", "git": "url", "url": "url"}.get(kind)
@@ -136,18 +143,18 @@ def _claude_market(name: str, source: dict[str, object], declaration: object) ->
         else None
     )
     if location_key is None:
-        return NativeMarket(name, None, "its native source type cannot be compared safely")
+        return unavailable("its native source type cannot be compared safely")
     if not isinstance(source.get(location_key), str) or not source[location_key]:
-        return NativeMarket(name, None, f"its native registration has no usable {location_key!r}")
+        return unavailable(f"its native registration has no usable {location_key!r}")
     if "ref" in source and (not isinstance(source["ref"], str) or not source["ref"]):
-        return NativeMarket(name, None, "its native registration has an invalid source ref")
+        return unavailable("its native registration has an invalid source ref")
     if not isinstance(declaration, dict):
-        return NativeMarket(name, None, "its extraKnownMarketplaces user declaration is not an object")
+        return unavailable("its extraKnownMarketplaces user declaration is not an object")
     if "source" not in declaration:
-        return NativeMarket(name, None, "its source is unavailable without a usable user declaration")
+        return unavailable("its source is unavailable without a usable user declaration")
     declared_source = declaration["source"]
     if not isinstance(declared_source, dict):
-        return NativeMarket(name, None, "its user declaration has no object-valued source")
+        return unavailable("its user declaration has no object-valued source")
     observed = dict(source)
     # Only omitted optional fields come from the current native declaration.
     # A differing source never establishes ownership or permission to remove it.
@@ -155,13 +162,37 @@ def _claude_market(name: str, source: dict[str, object], declaration: object) ->
         if key in declared_source and key not in observed:
             observed[key] = declared_source[key]
     if declared_source != observed:
-        return NativeMarket(name, None, "its user declaration source differs from the observed native registration")
+        return unavailable("its user declaration source differs from the observed native registration")
     if "ref" in observed and not isinstance(observed["ref"], str):
-        return NativeMarket(name, None, "its user declaration has an invalid source ref")
+        return unavailable("its user declaration has an invalid source ref")
     sparse = observed.get("sparsePaths", [])
     if not isinstance(sparse, list) or any(not isinstance(item, str) or not item for item in sparse):
-        return NativeMarket(name, None, "its user declaration has invalid sparse paths")
+        return unavailable("its user declaration has invalid sparse paths")
     return NativeMarket(name, identity({"source": observed}))
+
+
+def unreadable_marketplace_settings(tool: NativeTool, document: SettingsObject) -> tuple[str, ...]:
+    """Identify external declarations unsafe for a whole-document native rewrite.
+
+    This validates settings syntax only; a usable declaration does not prove a
+    native registration or authorize adopting its association.
+    """
+    entries = document.get("marketplaces" if tool == "codex" else "extraKnownMarketplaces", {})
+    if not isinstance(entries, dict):
+        raise ConfigError("native marketplace settings must use object or table values")
+    unsafe = []
+    for name, declaration in entries.items():
+        if not isinstance(declaration, dict):
+            unsafe.append(name)
+        elif tool == "claude":
+            source = declaration.get("source")
+            if not isinstance(source, dict) or _claude_market(name, source, declaration).source is None:
+                unsafe.append(name)
+        elif any(
+            not isinstance(declaration.get(key), str) or not declaration[key] for key in ("source_type", "source")
+        ):
+            unsafe.append(name)
+    return tuple(unsafe)
 
 
 class NativeCLI:
