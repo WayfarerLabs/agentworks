@@ -176,7 +176,7 @@ def _repair_session_pid(
                 and (stored_boot_id is None or stored_boot_id == observed_boot_id)
                 and (stored_ticks is None or stored_ticks == fingerprint.start_ticks)
                 and (
-                    (session.pid is not None and stored_boot_id is not None)
+                    (session.pid is not None and stored_boot_id is not None and stored_ticks is not None)
                     or (
                         stored_boot_id == observed_boot_id
                         and _matches_launch_attempt(
@@ -205,7 +205,12 @@ def _repair_session_pid(
                 f"session '{session.name}' has a live tmux server whose identity does not match its row",
                 entity_kind="session",
                 entity_name=session.name,
-                hint="Investigate the tmux server manually.",
+                hint=(
+                    "Its stored runtime identity is incomplete. Stop the native workload manually, or stop and start "
+                    "its VM, then retry."
+                    if stored_ticks is None
+                    else "Investigate the tmux server manually."
+                ),
             )
         if probe.status is ProbeStatus.UNKNOWN:
             raise StateError(

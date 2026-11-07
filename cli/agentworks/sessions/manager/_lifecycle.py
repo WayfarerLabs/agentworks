@@ -275,6 +275,7 @@ def _teardown_session(
     """Destroy one managed session runtime and verify its absence."""
     from agentworks.sessions.tmux import (
         ProbeStatus,
+        _matches_launch_attempt,
         capture_tmux_server_fingerprint,
         kill_server,
         require_socket_path,
@@ -339,6 +340,21 @@ def _teardown_session(
         )
     stored_ticks = _mgr._validated_stored_start_ticks(session)
     if stored_ticks is None:
+        if not _matches_launch_attempt(
+            target=target,
+            socket_path=socket_path,
+            session_name=session.name,
+            session_uuid=session.session_uuid,
+            run_id=session.run_id,
+            fingerprint=observed,
+            sudo=not target_owns_session,
+        ):
+            raise StateError(
+                f"session '{session.name}' has an incomplete stored runtime identity",
+                entity_kind="session",
+                entity_name=session.name,
+                hint="Stop the native workload manually, or stop and start its VM, then retry.",
+            )
         db.update_session_runtime(
             session.name,
             socket_path=socket_path,
