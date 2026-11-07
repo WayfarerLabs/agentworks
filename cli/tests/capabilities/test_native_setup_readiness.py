@@ -121,6 +121,36 @@ def test_only_actual_user_current_applied_state_satisfies_evidence(tmp_path, mon
         db.close()
 
 
+def test_incomplete_prerequisite_retains_recorded_upstream_repair(db):
+    vm = db.insert_vm("producer-vm", site="local", hostname="producer-vm")
+    inputs = SetupInputs(
+        kind="agent",
+        name="consumer-agent",
+        component="agent",
+        activations={"shell": CapabilityConfig()},
+        target=SecretTarget(vm={}, agent={}),
+    )
+    upstream = f"agw vm reinit {vm.name}"
+    own = f"agw agent reinit {inputs.name}"
+    record = SetupRecord(
+        component="agent",
+        integration="shell",
+        destination_id="a" * 64,
+        declaration=inputs.declaration("shell", inputs.activations["shell"]),
+        complete=False,
+        incomplete_reasons=("\x1b[31m" + upstream + "\x1b[0m\n",),
+    )
+    write_native_setup(db, "agent", inputs.name, NativeSetupState(records=(record,)), operation="agent-reinit")
+    evidence = evaluate_setup(db, inputs, "shell", vm=vm, runner=Mock(), remediation=own)
+    with pytest.raises(RequiredSetupMissingError) as caught:
+        enforce_setup_gaps((SetupGap(evidence, "required", "fixture prerequisite"),))
+    assert caught.value.entity_kind == "agent" and caught.value.entity_name == inputs.name
+    assert caught.value.hint is not None
+    assert upstream in caught.value.hint and own in caught.value.hint
+    assert caught.value.hint.index(upstream) < caught.value.hint.index(own)
+    assert "\x1b" not in caught.value.hint and "\n" not in caught.value.hint
+
+
 @pytest.mark.parametrize(
     "malformed_gap", [object(), SetupGap(SetupEvidence("absent", "agent", "one", "repair"), "misspelled", "invalid")]
 )
@@ -155,6 +185,6 @@ def test_destination_probe_preserves_previously_recorded_identities(db, location
     vm = replace(db.insert_vm("fixture", site="local", hostname="fixture"), created_at="2026-01-01T00:00:00Z")
     runner = Mock()
     runner.run.side_effect = lambda command, **kwargs: Mock(
-        stdout="machine-fixture\n" if command == "cat /etc/machine-id" else "1:2:1000\n"
+        stdout="\nAGW_NATIVE_ID=" + ("machine-fixture\n" if "cat /etc/machine-id" in command else "1:2:1000\n")
     )
     assert destination_id(vm, runner, location=location, username=username) == recorded

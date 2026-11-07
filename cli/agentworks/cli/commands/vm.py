@@ -249,7 +249,9 @@ def vm_stop(
 @vm_app.command("delete")
 def vm_delete(
     name: Annotated[str, typer.Argument(help="VM name")],
-    force: Annotated[bool, typer.Option("--force", help="Force delete even with workspaces")] = False,
+    force: Annotated[
+        bool, typer.Option("--force", help="Also delete dependent workspaces, agents and sessions")
+    ] = False,
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
 ) -> None:
     """Delete a VM and clean up all resources."""

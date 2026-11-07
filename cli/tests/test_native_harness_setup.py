@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 from collections.abc import Iterator
+from dataclasses import replace
 from pathlib import Path
 from typing import cast
 
@@ -142,7 +143,10 @@ def test_guest_program_still_reports_a_regular_file(tmp_path: Path) -> None:
     result = _run_guest("fingerprint", root / "settings.json", tmp_path / "staging")
 
     assert result.returncode == 0
-    assert json.loads(result.stdout)["sha256"] == hashlib.sha256(b"{}").hexdigest()
+    assert (
+        json.loads(result.stdout.strip().removeprefix("AGW_NATIVE_FILE="))["sha256"]
+        == hashlib.sha256(b"{}").hexdigest()
+    )
 
 
 @pytest.mark.parametrize("tool", ["codex", "claude"])
@@ -168,32 +172,41 @@ def test_settings_only_replace_repairs_invalid_document_and_retirement_retains_i
 
 @pytest.mark.parametrize("tool", ["codex", "claude"])
 def test_actual_native_lifecycle_and_checkpointed_idempotency(
-    transport: LocalFixtureTransport, tool: NativeTool
+    transport: LocalFixtureTransport, tool: NativeTool, monkeypatch
 ) -> None:
     market = market_fixture(transport, tool)
+    reports: list[str] = []
+    monkeypatch.setattr("agentworks.plugins._harness_native.native.output.info", reports.append)
     claims: list[tuple[NativeClaim, ...]] = []
     config = NativeUserConfig(marketplaces=[str(market)], plugins=["one@fixture-market"])
     setup_user(tool, config, invocation(transport, claims))
     assert [claim.role for claim in claims[-1]] == ["marketplace", "plugin"]
+    assert len(reports) == 2
+    assert "fixture-market" in reports[0] and "one@fixture-market" in reports[1]
+    assert all(tool in report and str(market) not in report for report in reports)
     current = claims[-1]
     checkpoint_count = len(claims)
     setup_user(tool, config, invocation(transport, claims, prior=record(current, tool)))
     assert len(claims) == checkpoint_count
+    assert len(reports) == 2
     setup_user(tool, None, invocation(transport, claims, prior=record(current, tool)))
     assert claims[-1] == ()
+    assert len(reports) == 4
+    assert "one@fixture-market" in reports[2] and "fixture-market" in reports[3]
     assert not list((transport.root / "tmp").iterdir())
 
 
 @pytest.mark.parametrize("tool", ["codex", "claude"])
-def test_unowned_existing_native_setup_refused(transport: LocalFixtureTransport, tool: NativeTool) -> None:
+def test_identical_unowned_native_setup_is_adopted(transport: LocalFixtureTransport, tool: NativeTool) -> None:
     market = market_fixture(transport, tool)
     config = NativeUserConfig(marketplaces=[str(market)], plugins=["one@fixture-market"])
     claims: list[tuple[NativeClaim, ...]] = []
     setup_user(tool, config, invocation(transport, claims))
     settings = transport.home / (".codex/config.toml" if tool == "codex" else ".claude/settings.json")
     before = settings.read_bytes()
-    with pytest.raises(ConfigError):
-        setup_user(tool, config, invocation(transport, []))
+    adopted: list[tuple[NativeClaim, ...]] = []
+    setup_user(tool, config, invocation(transport, adopted))
+    assert adopted[-1] == claims[-1]
     assert settings.read_bytes() == before
 
 
@@ -393,7 +406,8 @@ def test_checkpoint_failure_stops_before_next_native_mutation(
         assert cli.plugins(cli.markets()) == ()
 
 
-def test_claude_project_dependency_blocks_all_retirement_writes(transport: LocalFixtureTransport) -> None:
+@pytest.mark.parametrize("strategy", [None, "replace", "merge-overwrite", "merge-preserve", "skip-existing"])
+def test_claude_project_dependency_retains_only_its_marketplace(transport: LocalFixtureTransport, strategy) -> None:
     market = market_fixture(transport, "claude")
     claims: list[tuple[NativeClaim, ...]] = []
     setup_user(
@@ -411,13 +425,45 @@ def test_claude_project_dependency_blocks_all_retirement_writes(transport: Local
     assert result.ok
     user_settings = transport.home / ".claude/settings.json"
     project_settings = project / ".claude/settings.json"
-    before_user, before_project = user_settings.read_bytes(), project_settings.read_bytes()
-    checkpoint_count = len(claims)
-    with pytest.raises(StateError):
-        setup_user("claude", None, invocation(transport, claims, prior=record(claims[-1], "claude")))
-    assert user_settings.read_bytes() == before_user
-    assert project_settings.read_bytes() == before_project
-    assert len(claims) == checkpoint_count
+    before_project = project_settings.read_bytes()
+    mapping = transport.root / "settings-source.json"
+    mapping.write_text('{"mapped": true}')
+    config = (
+        None if strategy is None else NativeUserConfig(settings=SettingsMapping(source=str(mapping), strategy=strategy))
+    )
+    incomplete: list[str] = []
+    previous_user_bytes = None
+    previous_user_inode = None
+    for _ in range(2):
+        setup_user(
+            "claude",
+            config,
+            replace(
+                invocation(transport, claims, prior=record(claims[-1], "claude")), report_incomplete=incomplete.append
+            ),
+        )
+        assert project_settings.read_bytes() == before_project
+        assert [(claim.role, claim.identifier) for claim in claims[-1]] == [("marketplace", "fixture-market")]
+        document = parse_settings(user_settings.read_bytes(), format="json")
+        enabled = document.get("enabledPlugins", {})
+        assert isinstance(enabled, dict)
+        assert "one@fixture-market" not in enabled
+        if strategy not in (None, "skip-existing"):
+            assert document["mapped"] is True
+        with NativeFiles(transport) as files:
+            cli = NativeCLI("claude", files, home=str(transport.home), config_root=str(user_settings.parent))
+            assert {item.name for item in cli.markets()} == {"fixture-market"}
+            assert {(item.identifier, item.scope) for item in cli.plugins(cli.markets())} == {
+                ("two@fixture-market", "project")
+            }
+        current_user_bytes = user_settings.read_bytes()
+        current_user_inode = user_settings.stat().st_ino
+        if previous_user_bytes is not None:
+            assert current_user_bytes == previous_user_bytes
+            assert current_user_inode == previous_user_inode
+        previous_user_bytes = current_user_bytes
+        previous_user_inode = current_user_inode
+    assert len(incomplete) == 2
 
 
 @pytest.mark.parametrize("tool", ["codex", "claude"])
@@ -599,9 +645,11 @@ def test_codex_missing_marketplace_keeps_unobservable_plugin_cleanup_pending(tra
         cli.remove_market("fixture-market")
     before = (transport.home / ".codex/config.toml").read_bytes()
     count = len(claims)
-    with pytest.raises(StateError):
-        setup_user("codex", None, invocation(transport, claims, prior=prior))
-    assert len(claims) == count
+    incomplete: list[str] = []
+    setup_user("codex", None, replace(invocation(transport, claims, prior=prior), report_incomplete=incomplete.append))
+    assert incomplete
+    assert len(claims) == count + 1
+    assert [claim.role for claim in claims[-1]] == ["plugin"]
     assert (transport.home / ".codex/config.toml").read_bytes() == before
 
 
@@ -624,7 +672,7 @@ def test_missing_guest_python_refuses_before_staging(transport: LocalFixtureTran
     from types import SimpleNamespace
     from unittest.mock import Mock
 
-    probe = Mock(return_value=SimpleNamespace(ok=False))
+    probe = Mock(return_value=SimpleNamespace(ok=True, stdout="AGW_PYTHON3=missing\n"))
     monkeypatch.setattr(transport, "run", probe)
     with pytest.raises(StateError), NativeFiles(transport):
         pytest.fail("missing prerequisite must stop before staging")
@@ -783,3 +831,43 @@ def test_marketplace_only_repeat_does_not_read_available_catalog(transport, monk
 
     monkeypatch.setattr(NativeCLI, "available", unexpected_catalog)
     setup_user("codex", config, invocation(transport, claims, prior=record(claims[-1], "codex")))
+
+
+@pytest.mark.parametrize("operation", ["directory", "read", "fingerprint"])
+@pytest.mark.parametrize(
+    "payload",
+    [
+        '{"exists":true}',  # Unframed observations are not protocol replies.
+        'AGW_NATIVE_FILE={"exists":true}\nAGW_NATIVE_FILE={"exists":false}',
+        'AGW_NATIVE_FILE={"exists":true,"exists":false}',
+        'AGW_NATIVE_FILE={"exists":1}',
+        "AGW_NATIVE_FILE=[]",
+        'AGW_NATIVE_FILE={"exists":false,"extra":true}',
+        'AGW_NATIVE_FILE={"exists":true,"sha256":"' + "z" * 64 + '","mode":384}',
+        'AGW_NATIVE_FILE={"exists":true,"sha256":"' + "a" * 64 + '","mode":true}',
+        'AGW_NATIVE_FILE={"exists":true,"sha256":"' + "a" * 64 + '","mode":4096}',
+    ],
+)
+def test_native_observations_fail_closed_on_ambiguous_or_malformed_frames(
+    transport: LocalFixtureTransport, monkeypatch: pytest.MonkeyPatch, operation: str, payload: str
+) -> None:
+    destination = transport.home / "settings.json"
+    destination.write_bytes(b"operator content")
+    original = transport.run
+
+    def corrupt_observation(command: str, **kwargs):
+        result = original(command, **kwargs)
+        if "AGW_NATIVE_FILE=" in result.stdout:
+            return replace(result, stdout=payload)
+        return result
+
+    monkeypatch.setattr(transport, "run", corrupt_observation)
+    with NativeFiles(transport) as files, pytest.raises(ExternalError):
+        if operation == "directory":
+            files.directory(str(transport.home))
+        elif operation == "read":
+            files.read(str(destination))
+        else:
+            files.fingerprint(str(destination))
+    assert destination.read_bytes() == b"operator content"
+    assert not list((transport.root / "tmp").iterdir())

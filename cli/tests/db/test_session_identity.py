@@ -196,3 +196,19 @@ def test_interrupted_identity_migration_rolls_back_its_schema_and_rows(
     assert row is not None and UUID(row.session_uuid)
     assert row.run_id is None
     migrated.close()
+
+
+def test_uncertain_launch_records_boot_without_claiming_process_identity(db: Database) -> None:
+    _parents(db)
+    db.insert_session("run", "work", "default", SessionMode.ADMIN)
+    boot_id = str(uuid4())
+    db.update_session_runtime("run", socket_path="/socket", pid=None, boot_id=boot_id, tmux_server_start_ticks=None)
+    row = db.get_session("run")
+    assert row is not None and row.boot_id == boot_id
+    assert row.pid is None and row.tmux_server_start_ticks is None
+    for pid, ticks in [(None, 7), (-1, None), (123, None)]:
+        with pytest.raises(ValueError):
+            db.update_session_runtime(
+                "run", socket_path="/socket", pid=pid, boot_id=boot_id, tmux_server_start_ticks=ticks
+            )
+    assert db.get_session("run") == row

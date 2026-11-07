@@ -169,10 +169,7 @@ def test_cli_verify_drives_the_real_prompt_broker_without_exposing_the_value(
     monkeypatch.setattr("agentworks.config.load_config", lambda *args, **kwargs: SimpleNamespace())
     monkeypatch.setattr("agentworks.bootstrap.load_request_registry", lambda config, **_kwargs: _Registry("token"))
     monkeypatch.setattr("agentworks.secrets.resolve.active_sources", lambda config, registry: (source,))
-    monkeypatch.setattr(
-        "agentworks.cli._helpers.sys",
-        SimpleNamespace(stdin=SimpleNamespace(isatty=lambda: True)),
-    )
+    monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)
 
     value = "prompt-value-must-not-escape"
     previous_handler = output.get_handler()

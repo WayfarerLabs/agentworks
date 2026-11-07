@@ -18,7 +18,6 @@ from agentworks.artifacts.inspection import inspect_artifacts, inspection_data
 from agentworks.artifacts.model import ArtifactGroup, ArtifactInput, ArtifactOrigin, ArtifactType
 from agentworks.artifacts.native.shell import shell_artifacts
 from agentworks.artifacts.state import capture_owner, write_capture
-from agentworks.errors import ConfigError
 from agentworks.manifests.emit import document_schema
 from agentworks.origin import Origin
 from agentworks.plugins.claude import artifacts as claude
@@ -194,7 +193,7 @@ def test_native_rule_and_hint_aggregation_preserves_same_keys_from_different_gro
 
 @pytest.mark.parametrize("adapter", [claude, codex, grok])
 @pytest.mark.parametrize("kind", [ArtifactType.SKILL, ArtifactType.AGENT])
-def test_native_ancestor_name_conflict_is_refused_with_no_session_inputs(adapter, kind):
+def test_native_ancestor_name_conflict_does_not_block_without_new_session_inputs(adapter, kind):
     user = artifact(kind, owner="user")
     project = artifact(kind, owner="workspace")
     if adapter is codex:
@@ -213,12 +212,12 @@ def test_native_ancestor_name_conflict_is_refused_with_no_session_inputs(adapter
     else:
         user_files = adapter.outer_artifacts(received(user), "/home/.native").files
         project_files = adapter.outer_artifacts(received(project), "/project/.native").files
-    with pytest.raises(ConfigError):
-        adapter.session_artifacts(
-            context(ancestors=tuple(owned(file) for file in (*user_files, *project_files))),
-            configured=None,
-            extra_args=[],
-        )
+    result = adapter.session_artifacts(
+        context(ancestors=tuple(owned(file) for file in (*user_files, *project_files))),
+        configured=None,
+        extra_args=[],
+    )
+    assert not result.application.files and not result.argv
 
 
 def test_inspection_retains_compact_replacement_evidence(db):

@@ -163,7 +163,13 @@ def _global_options(
 
     global _completion_mode  # noqa: PLW0603
 
-    legacy_completion = sys.stdin.isatty() and not sys.stderr.isatty() and is_legacy_database_completion(sys.argv[1:])
+    try:
+        legacy_completion = (
+            sys.stdin.isatty() and not sys.stderr.isatty() and is_legacy_database_completion(sys.argv[1:])
+        )
+    except (AttributeError, OSError, ValueError):
+        # Detached callers can have missing or closed process streams.
+        legacy_completion = False
     _completion_mode = completion_probe or legacy_completion
 
     output.set_non_interactive(non_interactive)

@@ -7,10 +7,11 @@ import shlex
 import tempfile
 from contextlib import AbstractContextManager
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from agentworks import output
 from agentworks.errors import ExternalError, StateError
+from agentworks.ssh import SSHError
 
 if TYPE_CHECKING:
     from types import TracebackType
@@ -24,6 +25,8 @@ import errno, grp, hashlib, json, os, secrets, stat, sys
 op, destination, staging, expected, group, executable = sys.argv[1:7]
 public = len(sys.argv) > 7 and sys.argv[7] == '1'
 preserve = len(sys.argv) > 8 and sys.argv[8] == '1'
+def observe(value):
+    print('\nAGW_NATIVE_FILE=' + json.dumps(value))
 parts = destination.split('/')[1:]
 if not destination.startswith('/') or any(p in ('', '.', '..') for p in parts):
     sys.exit(1)
@@ -33,8 +36,10 @@ traverse = getattr(os, 'O_PATH', os.O_RDONLY) | os.O_DIRECTORY | os.O_NOFOLLOW
 def classify(error):
     # Report a link, a non-directory component, and a denial as distinct
     # statuses so the caller can name the cause instead of failing generically.
-    if error.errno in (errno.ELOOP, errno.ENOTDIR):
+    if error.errno == errno.ELOOP:
         sys.exit(4)
+    if error.errno == errno.ENOTDIR:
+        sys.exit(6)
     if error.errno in (errno.EACCES, errno.EPERM, errno.EROFS):
         sys.exit(5)
     raise error
@@ -86,7 +91,7 @@ try:
             next_fd = os.open(component, traverse, dir_fd=fd)
         except FileNotFoundError:
             if op in ('read', 'fingerprint', 'delete', 'directory'):
-                print(json.dumps({'exists': False}))
+                observe({'exists': False})
                 sys.exit(0)
             os.mkdir(component, 0o755 if public else (0o700 if not group else 0o2770), dir_fd=fd)
             next_fd = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
@@ -98,7 +103,7 @@ try:
         os.close(fd)
         fd = next_fd
     if op in ('directory', 'mkdir'):
-        print(json.dumps({'exists': True}))
+        observe({'exists': True})
         sys.exit(0)
     content = None
     actual = '-'
@@ -112,7 +117,7 @@ try:
     else:
         with os.fdopen(source_fd, 'rb') as source:
             if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
-                sys.exit(4)
+                sys.exit(7)
             metadata = os.fstat(source.fileno())
             mode = stat.S_IMODE(metadata.st_mode)
             if op == 'read':
@@ -125,7 +130,7 @@ try:
             if preserve:
                 attributes = {key: os.getxattr(source.fileno(), key) for key in os.listxattr(source.fileno())}
     if op == 'fingerprint':
-        print(json.dumps({'exists': actual != '-', 'sha256': actual, 'mode': mode}))
+        observe({'exists': True, 'sha256': actual, 'mode': mode} if actual != '-' else {'exists': False})
         sys.exit(0)
     if op == 'read':
         if content is not None:
@@ -135,7 +140,7 @@ try:
                     staging_owner = os.stat(os.path.dirname(staging), follow_symlinks=False)
                     os.fchown(output.fileno(), staging_owner.st_uid, staging_owner.st_gid)
                 output.write(content)
-        print(json.dumps({'exists': content is not None}))
+        observe({'exists': content is not None})
     else:
         if actual != expected:
             sys.exit(2)
@@ -189,23 +194,58 @@ finally:
 """
 
 
+def _observation(stdout: str) -> dict[str, object]:
+    """Accept one framed guest observation, apart from shell startup output."""
+    frames = [
+        line.removeprefix("AGW_NATIVE_FILE=") for line in stdout.splitlines() if line.startswith("AGW_NATIVE_FILE=")
+    ]
+    if len(frames) != 1:
+        raise ValueError
+
+    def unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        value = dict(pairs)
+        if len(value) != len(pairs):
+            raise ValueError
+        return value
+
+    observed = json.loads(frames[0], object_pairs_hook=unique_object)
+    if not isinstance(observed, dict) or type(observed.get("exists")) is not bool:
+        raise ValueError
+    fields = {"exists", "sha256", "mode"} if observed["exists"] and "sha256" in observed else {"exists"}
+    if observed.keys() != fields:
+        raise ValueError
+    return cast("dict[str, object]", observed)
+
+
 # Shared by every integration. These are directory boundaries, never file targets.
 ROOT_FILE_DIRECTORIES = ("/etc/claude-code", "/etc/codex", "/opt/agentworks/artifacts")
 
 _UNSUITABLE_PATH = 4
 _DENIED_PATH = 5
+_NON_DIRECTORY_PATH = 6
+_NON_REGULAR_PATH = 7
+_PATH_FAILURES = (_UNSUITABLE_PATH, _DENIED_PATH, _NON_DIRECTORY_PATH, _NON_REGULAR_PATH)
 
 
 def _path_failure(subject: str, destination: str, returncode: int) -> StateError:
     """Name why a guarded path could not be used, from the guest program's status."""
     if returncode == _UNSUITABLE_PATH:
         return StateError(
-            f"{subject} '{destination}' is a symlink or is not a regular file",
+            f"{subject} '{destination}' is a symlink",
             hint=(
-                "Agentworks owns this file and never reads or writes through a link. Remove the link on the VM, "
-                "stop whatever installs it (commonly a dotfiles install script) from claiming this path, and "
-                "express those values through the integration's settings mapping instead."
+                "Agentworks never reads or writes through a link at this destination. Inspect the path and "
+                "its owning source, then use a regular file or directory appropriate for this operation."
             ),
+        )
+    if returncode == _NON_DIRECTORY_PATH:
+        return StateError(
+            f"{subject} '{destination}' requires real directories at every parent component",
+            hint="Inspect the parent path components and restore the expected directory layout, then retry setup.",
+        )
+    if returncode == _NON_REGULAR_PATH:
+        return StateError(
+            f"{subject} '{destination}' is not a regular file",
+            hint="Inspect the destination's file type and restore the expected regular file before retrying setup.",
         )
     if returncode == _DENIED_PATH:
         return StateError(
@@ -240,11 +280,24 @@ def root_native_path(path: str, *, directory: bool = False) -> str:
 
 def require_python3(runner: Transport) -> None:
     """Check the guest prerequisite before native setup, including older VMs."""
-    if not runner.run("command -v python3 >/dev/null", check=False, discard_output=True).ok:
+    result = runner.run(
+        "if command -v python3 >/dev/null 2>&1; then "
+        "printf '\\nAGW_PYTHON3=available\\n'; else printf '\\nAGW_PYTHON3=missing\\n'; fi"
+    )
+    if not result.ok:
+        raise SSHError(f"native setup Python prerequisite probe failed (exit {result.returncode})")
+    # Startup files can write unrelated output, even without a trailing newline.
+    # The probe starts its marker on a fresh line; ambiguity still fails closed.
+    observations = [
+        line.removeprefix("AGW_PYTHON3=") for line in result.stdout.splitlines() if line.startswith("AGW_PYTHON3=")
+    ]
+    if observations == ["missing"]:
         raise StateError(
             "native harness setup requires python3 on the VM",
-            hint="Run agw vm reinit <vm-name> to install required system packages before retrying setup.",
+            hint="Reinitialize this VM to install required system packages, then retry setup.",
         )
+    if observations != ["available"]:
+        raise ExternalError("native setup Python prerequisite probe returned an unexpected response")
 
 
 class NativeFiles(AbstractContextManager["NativeFiles"]):
@@ -264,10 +317,19 @@ class NativeFiles(AbstractContextManager["NativeFiles"]):
 
     def __enter__(self) -> NativeFiles:
         require_python3(self.runner)
-        result = self.runner.run("mktemp -d -t agentworks-native-XXXXXXXXXX", check=False)
-        if not result.ok or not PurePosixPath(result.stdout.strip()).name.startswith("agentworks-native-"):
+        result = self.runner.run(
+            "agw_native_staging=$(mktemp -d -t agentworks-native-XXXXXXXXXX) && "
+            "printf '\\nAGW_NATIVE_STAGING=%s\\n' \"$agw_native_staging\"",
+            check=False,
+        )
+        paths = [
+            line.removeprefix("AGW_NATIVE_STAGING=")
+            for line in result.stdout.splitlines()
+            if line.startswith("AGW_NATIVE_STAGING=")
+        ]
+        if not result.ok or len(paths) != 1 or not PurePosixPath(paths[0]).name.startswith("agentworks-native-"):
             raise ExternalError("could not create native setup staging directory")
-        self.remote = native_path(result.stdout.strip())
+        self.remote = native_path(paths[0])
         try:
             self._local = tempfile.TemporaryDirectory(prefix="agentworks-native-")
         except Exception:
@@ -324,7 +386,10 @@ class NativeFiles(AbstractContextManager["NativeFiles"]):
         if not result.ok:
             raise _path_failure("native config directory", destination, result.returncode)
         try:
-            exists = json.loads(result.stdout)["exists"]
+            observed = _observation(result.stdout)
+            if observed.keys() != {"exists"}:
+                raise ValueError
+            exists = observed["exists"]
             if not isinstance(exists, bool):
                 raise ValueError
             return exists
@@ -340,7 +405,10 @@ class NativeFiles(AbstractContextManager["NativeFiles"]):
         if not result.ok:
             raise _path_failure("native settings file", destination, result.returncode)
         try:
-            exists = json.loads(result.stdout)["exists"]
+            observed = _observation(result.stdout)
+            if observed.keys() != {"exists"}:
+                raise ValueError
+            exists = observed["exists"]
             if not isinstance(exists, bool):
                 raise ValueError
         except (ValueError, KeyError, TypeError):
@@ -388,7 +456,7 @@ class NativeFiles(AbstractContextManager["NativeFiles"]):
             raise ExternalError("could not publish native settings file") from None
         if result.returncode == 2:
             raise StateError("native settings changed during setup; retry against the current file")
-        if result.returncode in (_UNSUITABLE_PATH, _DENIED_PATH):
+        if result.returncode in _PATH_FAILURES:
             raise _path_failure("native settings file", destination, result.returncode)
         if not result.ok:
             raise StateError("native settings publication could not establish the destination ownership or mode")
@@ -400,7 +468,7 @@ class NativeFiles(AbstractContextManager["NativeFiles"]):
         result = self.runner.run(command, check=False, discard_output=True)
         if result.returncode == 2:
             raise StateError("owned native file changed; retaining it for operator inspection")
-        if result.returncode in (_UNSUITABLE_PATH, _DENIED_PATH):
+        if result.returncode in _PATH_FAILURES:
             raise _path_failure("owned native file", destination, result.returncode)
         if not result.ok:
             raise StateError("owned native file could not be removed safely")
@@ -430,7 +498,7 @@ class NativeFiles(AbstractContextManager["NativeFiles"]):
         if not result.ok:
             raise _path_failure("artifact destination", destination, result.returncode)
         try:
-            observed = json.loads(result.stdout)
+            observed = _observation(result.stdout)
             if observed["exists"] is False:
                 return None
             digest, mode = observed["sha256"], observed["mode"]
@@ -438,7 +506,9 @@ class NativeFiles(AbstractContextManager["NativeFiles"]):
                 observed["exists"] is not True
                 or not isinstance(digest, str)
                 or len(digest) != 64
+                or any(character not in "0123456789abcdef" for character in digest)
                 or type(mode) is not int
+                or not 0 <= mode <= 0o7777
             ):
                 raise ValueError
             return digest, mode

@@ -248,7 +248,10 @@ an already running workload is harness-specific and is not guaranteed. Deferral 
 later application; it does not refresh existing descendants. Owning setup must warn when it defers
 inputs, including inactive-owner passthrough of locally captured inputs, without enumerating or
 mutating descendants. User-routed updates require that actual user's setup; session-routed updates
-require a subsequent managed start or restart after stale ancestor setup is resolved. Workspace
+require a subsequent managed start or restart. Stale or incomplete upstream state is reported with
+its owner and supported repair command; it does not block descendant setup or session launch.
+Sessions use available captured inputs and known recorded routes without fetching or initializing
+ancestors. Unknown handling is reported rather than guessed or silently acknowledged. Workspace
 setup runs only on creation: there is no workspace reinit, and neither repair nor an upstream reinit
 can refresh an existing workspace's applied artifacts. Diagnostics must describe that limitation
 without suggesting unsupported workspace operations. Removal follows the same descendant timing.
@@ -357,10 +360,17 @@ workspace skill must not hide a same-named user skill that the integration promi
 Integrations must account for the native identities and discovery locations of local, deferred and
 already applied ancestor contributions, including existing native entries that can shadow managed
 artifacts. Use faithful aggregation, non-conflicting placement or a supported native namespace;
-otherwise refuse the combination with the competing origins and native identity. A successful file
+otherwise diagnose the affected contribution with its competing origins and native identity without
+claiming delivery. During setup, defer conflicting native entries individually while independent
+entries continue; new session delivery must not introduce native shadowing. A collision that remains
+at the session makes the affected inputs terminally unhandled with a warning, while independent
+delivery and launch continue. Rerender the remaining inputs so rejected content is absent from both
+files and launch arguments. A receiving facet can handle an earlier deferral through a genuinely
+non-conflicting native namespace; deferral does not preserve a permanent refusal. A successful file
 write or same-scope replacement rule does not authorize cross-scope native shadowing. Perform checks
-using the actual owners available at that lifecycle stage; the session validates the joined user and
-workspace context without making outer scopes inspect their descendants.
+using the actual owners available at that lifecycle stage; the session validates new delivery
+against the joined user and workspace context without making outer scopes inspect descendants.
+Conflicts solely between already-placed ancestor artifacts are reported without blocking launch.
 
 **R6. Give hints an appropriate representation.** Integrations may aggregate small hints into a
 native rule or include them in launch context when supported. Prefer one clearly named
@@ -385,15 +395,19 @@ identity slice before artifact publication depends on it.
 **R8. Apply idempotently.** Repeated setup converges. Removing a reference, changing a bundle,
 removing an activation or deleting an owning resource has an explicit outcome for previously
 provisioned artifacts. Remove owned effects where safe; retain and diagnose ambiguous or unowned
-content. Preserve recoverable progress after failure through the existing instance-state facility.
-Avoid a new universal reconciliation engine or restoring the predecessor's rejected per-key settings
-ownership ledger.
+content. Content identical to the declaration is adopted with recorded and reported ownership;
+differing unowned content is skipped and reported per entry while other setup continues. Preserve
+the incomplete state of an active setup with unresolved skips. Adoption makes matching pre-existing
+files managed and eligible for safe cleanup when their declaration is removed. Preserve recoverable
+progress after failure through the existing instance-state facility. Avoid a new universal
+reconciliation engine or restoring the predecessor's rejected per-key settings ownership ledger.
 
 **R9. Explain unresolved delivery.** Diagnostics identify the selected integration, original owner,
 artifact and the reason it remains unhandled. Final-session inputs are optional: warn when an input
 cannot be handled, including the applicable enabled-workaround choice when one exists, and continue
 launch without claiming delivery. Preserve the terminal unhandled result for inspection. Malformed
-input, unsafe publication and ambiguous ownership remain errors.
+input and unsafe publication remain errors of the running facet. Differing unowned file content is
+preserved and reported as an entry-specific skip, without blocking independent artifacts.
 
 Provide **`agw artifact show`**, following the scope-selection conventions of `agw env show`, to
 explain artifacts for a VM, an admin or agent user, a workspace, or a session. Include local inputs
@@ -489,3 +503,31 @@ type (say <= 3), they are all listed. Otherwise we should list the first two the
 "And yeah, VM artifacts should apply in that scope if possible, otherwise defer. And since shell is
 completely made up, we should just make up scope locations but there should be no deferrals. For vm,
 maybe /opt/agentworks/artifacts/?"
+
+## Operator ruling: independent facets and convergence, 2026-11-01
+
+The operator authorized the saga's 2026-10-31 ruling within this effort. No upstream artifact facet
+blocks a descendant: stale, missing or incomplete applied state and capture evidence are reported
+with the original owner and repair action. The session launches with existing native placement and
+available known deferrals; it does not apply or recapture an ancestor. Unknown routes are reported
+without pretending delivery. Repeated immutable inputs from stale diamond routes are delivered at
+most once. Existing ancestor-only native conflicts or discovery restrictions are reports; new
+session delivery still validates its own inputs, native identity, publication boundaries and launch
+carriers. Final unhandled inputs warn without blocking launch. Explicit integration-owned
+required/recommended prerequisites remain separate under the framework's R10.
+
+## Operator ruling: continue independent setup after facet errors, 2026-11-04
+
+The operator directed: "So as long as we don't have explicit dependencies between facets, my
+thinking is that we continue with facet failures and report at the end." After discussing that
+policy, the operator authorized implementation: "Sweet! Make it happen!"
+
+A valid activated setup facet can fail without stopping independent facets or the remaining owning
+initialization. Preserve its confirmed progress, record its current failure, continue independent
+work, and report all collected facet failures at the command boundary with a failing exit status.
+New agent and workspace owners retain their completed core setup and partial facet records. An
+explicit required prerequisite still blocks its consumer; recommended prerequisites warn. Neither
+creates an implicit dependency between sibling facets. Cancellation, shared persistence failures,
+invalid activation/binding preflight, and unexpected internal errors still abort through their
+existing paths. This supersedes the earlier fail-fast treatment of setup-facet execution errors; it
+does not change session launch safety or introduce a dependency framework.
