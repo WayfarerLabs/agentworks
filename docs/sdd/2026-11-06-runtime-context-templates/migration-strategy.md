@@ -1,63 +1,44 @@
-# Runtime context templates: migration
+# Runtime context templates: delivery and lifecycle
 
-Snapshot: 2026-11-06 at `c8d4dfb3cb042eea2ae5ac12b06624faf703400b`.
+## Desired state
 
-## Current state
-
-- The session manager defines two names, `session_name` and `workspace_name`, and one regex
-  substituter in `sessions/manager/_constants.py:7` and `_env.py:120`.
-- Session env plaintext is expanded before the cross-scope merge in `_env.py:223` and `:291`.
-- Create and lifecycle launch commands are expanded after the integration returns its command in
-  `_create_roll.py:348` and `_lifecycle.py:901`.
-- Other env scopes and `env show` do not run the session env substituter.
-- `compose_env` is consumed by session launch, VM access, agent access, console extra panes, and
-  harness setup. The shared core is in `env/compose.py:37`.
-- `quote_literal_argv` in `capabilities/harness_integration/base.py:194` protects workload data from
-  interpolation of returned shell command strings. Some native extra args intentionally participate
-  in interpolation.
-
-## Target and examples
-
-Keep the valid existing syntax and names. Add the accepted context catalogue across winning
-plaintext env values and existing command consumers.
+Templates and stored instance specs retain `${agw:NAME}` expressions. Rendering occurs when an
+invocation is prepared, using that invocation's consuming identity and selected resource context. No
+DB schema conversion or background configuration rewrite is required.
 
 ```yaml
 env:
-  TOOL_CONFIG_DIR: "{{user_home_dir}}/.config/tool"
-  WORKTREE_LABEL: "{{workspace_name}}"
+  TOOL_CONFIG_DIR: "${agw:user_home_dir}/.config/tool"
+  WORKTREE_LABEL: "${agw:workspace_name}"
 ```
 
-Given an agent resource `reviewer` running as Linux user `agt-reviewer`, the first value becomes
-`/home/agt-reviewer/.config/tool`. The template remains unchanged when used by another agent or the
-admin user. `WORKTREE_LABEL` requires a workspace-rooted consumer.
+For a resource named `reviewer` running as `agt-reviewer`, the config directory is
+`/home/agt-reviewer/.config/tool`. Another agent or the VM admin receives its own managed home.
+`WORKTREE_LABEL` requires workspace context.
 
-For literal brace text, replace `{{component}}` with `{{{{component}}` in an interpolated field.
-Secret values and ordinary harness prompt fields remain literal without this migration.
+Existing processes retain the environment with which they were started. A new shell/exec or session
+start/restart recomputes its env from the effective desired declarations. Setup uses its executing
+identity and only the resource context available to that setup operation.
 
-## Behavior changes to disclose
+## Interpretation boundaries
 
-1. A previously literal valid placeholder in a non-session env scope starts expanding. Unknown
-   placeholders in those scopes become errors. Operators needing literal text must escape it.
-2. The new parser rejects malformed opening `{{` sequences previously ignored by the regex. Closing
-   braces outside placeholders remain literal, including nested JSON ending in `}}`.
-3. Losing env entries are not rendered. A lower-scope unavailable placeholder overridden by a higher
-   scope no longer causes a runtime failure.
-4. `env show` previews expanded winning plaintext rather than raw placeholders. It remains an
-   offline managed-config inspection, not a view into a running shell.
-5. Existing valid command substitutions keep their meaning; command source still follows shell
-   quoting rules. Ordinary native harness input remains literal.
+- `${agw:...}` is the only Agentworks namespace; shell expressions and Go templates remain literal
+  input for their own consumers.
+- Escape the namespace as `$${agw:NAME}` when plaintext must contain the placeholder literally.
+- Secret contents are opaque: interpolation and unescaping do not apply to them. Changing an entry
+  between plaintext and secret forms deliberately changes this interpretation.
+- Env values are literal data. Command strings obey shell-source quoting rules, including when a
+  workspace path contains spaces or apostrophes.
+- Offline `env show` previews managed plaintext values and redacted secrets; it does not claim to
+  observe a process's live environment or shell startup effects.
 
-No DB schema conversion is needed for the proposed context increment. Persisted instance specs
-retain template expressions; recomputation happens when an invocation is prepared. Existing running
-sessions retain their current env until restarted. No background reconfiguration occurs.
+## Complete delivery
 
-## Sequence
+Ship parser, context projection, all env/command callers, behavior tests, permanent documentation,
+and the full SDD in PR #867. There is one active syntax and one shared rendering contract. The
+permanent reference stands alone when this SDD directory is removed.
 
-Land parser, context catalogue, env and command callers, tests, permanent reference updates, and
-release guidance as one coherent implementation increment. Remove the old manager-owned parser and
-early session env preprocessing in that increment; do not leave two implementations active. Inspect
-stored specs through normal fixtures, without reading an operator's private live state.
-
-If environment references are accepted, revise this migration before implementing them. Their lookup
-phase, sensitivity, and inspection behavior cannot be inherited from context placeholders by
-accident.
+Validation includes planned identities, discarded definitions, opaque secrets, command literal-data
+handling, and errors before destructive restart. Mark the locally validated implementation ready for
+the normal review and integration-testing pipeline. Wait for the integration report before starting
+the next authorized final review iteration.

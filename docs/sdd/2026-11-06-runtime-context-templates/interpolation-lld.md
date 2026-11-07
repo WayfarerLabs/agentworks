@@ -1,73 +1,68 @@
 # Runtime context templates: interpolation contract
 
-Status: proposed. This contract covers context placeholders only. The [FRD](frd.md) recommends
-omitting ambient lookup and managed env cross-references, subject to draft acceptance.
+This contract implements the [requirements](frd.md) using explicit resource context.
 
 ## Grammar
 
-- A placeholder is exactly `{{NAME}}`, where `NAME` is an ASCII identifier matching
-  `[A-Za-z_][A-Za-z0-9_]*` and belongs to the documented context catalogue.
-- Whitespace inside a placeholder is rejected rather than silently normalized.
-- `{{{{` emits a literal `{{`. Consequently `{{{{session_name}}` emits the literal text
-  `{{session_name}}`. The escaped opening delimiter does not start a placeholder.
-- Parse left to right, recognizing escaped delimiters before opening a placeholder.
-- Closing braces outside an active placeholder and lone braces are ordinary text. Only an unescaped
-  opening `{{` starts template syntax; a malformed or unclosed placeholder raises `ValidationError`
-  with the owning field location. Ordinary nested JSON ending in `}}` is literal.
-- Replacement strings are appended as data, never parsed again. Dollar signs, backticks, and `~`
-  have no interpolation meaning. There is no expression evaluation or dependency on a third-party
-  template library.
+- A reference is `${agw:NAME}`, with `NAME` matching ASCII `[A-Za-z_][A-Za-z0-9_]*`.
+- Only `${agw:` reserves syntax. A malformed or unclosed reference within that namespace is a
+  `ValidationError`; whitespace is not silently normalized.
+- Unknown names and supported names unavailable to the invocation are distinct errors.
+- `$${agw:NAME}` emits literal `${agw:NAME}` without a value lookup. Escaping applies only to the
+  reserved namespace. An escaped name does not have to exist in the catalogue.
+- Parse left to right, recognizing a namespace escape before a reference. Append replacements as
+  data without scanning them again.
+- `$HOME`, `${HOME}`, `${PATH:-default}`, `$$`, ordinary dollar signs, and Go-template text remain
+  unchanged. No other syntax is claimed by Agentworks.
 
-The malformed-opening rule is a deliberate tightening of the current regex, which leaves many
-unmatched opening sequences unchanged. The migration must disclose and test this behavior, not call
-it wholly backward compatible. Existing valid two-name placeholders keep working.
+The renderer receives authored text, explicit context, and a field location. Errors identify the
+field and offending name or syntax category, without including the whole input, replacement values,
+or rendered commands. The implementation needs a small scanner or bounded matcher, not an AST or a
+general template engine.
 
-## Pure rendering boundary
+## Env consumer
 
-The shared module receives explicit context values and knows the supported catalogue. Unknown names
-and known names absent from the supplied context are separate errors. Errors identify the name and
-field, but do not include the entire input, replacement values, or rendered command.
+Select winning entries after inheritance, instance overlays, and scope merging. Render plaintext
+through one function shared by execution and display. Keep original desired declarations intact;
+never persist rendered values over their expressions. Skip interpolation and unescaping for both
+secret names and secret contents.
 
-The implementation may use a small scanner and ordinary mappings. A separate AST, plugin registry,
-resolver hierarchy, or generic expression evaluator is unnecessary. The same scanner can collect
-references for preflight without requiring replacement values or exposing secrets.
+Context validation works without secret values. Unknown or unavailable references in winning entries
+fail before operations requiring them; losing entries are not rendered. Preserve transport-specific
+value validation after rendering. A syntactically valid placeholder does not make its replacement
+suitable for every destination.
 
-## Env rendering
+The same authored text can intentionally have different results as plaintext and as a secret.
+Plaintext `$${agw:user_name}` emits `${agw:user_name}`; secret content `$${agw:user_name}` retains
+both dollar signs. This distinction follows the declared entry type.
 
-Remove session-only early expansion. Select winning entries first, then render plaintext through one
-function used by execution and display. Preserve `EnvEntry`'s literal-versus-secret distinction and
-original declarations; do not persist rendered values over template text. A secret entry is never a
-template, even if its resolved string contains braces.
+## Command consumer
 
-Validate rendered plaintext at the actual env transport boundary alongside existing env safety
-handling. A valid placeholder expression does not make arbitrary replacement text safe for every
-destination. Missing context is a preflight error where context is already known.
+Commands are shell programs. Interpolation is textual substitution, not automatic quoting. A managed
+home may be used in `tool --config '${agw:user_home_dir}/.config/tool'` under the managed Linux
+username convention. Use `"$AGENTWORKS_WORKSPACE_DIR"` for an arbitrary workspace path, including
+spaces or apostrophes.
 
-## Commands
+Literal argv construction must shield `${agw:` before a returned command passes through the
+renderer. Shell quoting alone does not hide syntax from a textual renderer. Preserve exact native
+harness data and its argument boundaries. Validate returned command source after integration launch
+selection and before a restart destroys the current runtime. Env context is validated before
+boundary prompts when its facts are already known; command generation does not require a separate
+preflight interface.
 
-Preserve the current contract that commands are authored shell source and callers quote path
-placeholders appropriately, for example `tool --config '{{user_home_dir}}/.config/tool'` under the
-managed-home naming convention. Do not add a universal `shlex.quote` around substitutions: quoting
-an arbitrary fragment inside an already quoted shell program changes its meaning.
+## Behavioral vectors
 
-The same parsed expression rendered to an argv element in a future consumer yields plain text; that
-consumer quotes the final argv element once if it must serialize a shell command. Current
-literal-field protection shields opening delimiters; leaving closing braces literal preserves that
-boundary. Verify repeated braces and escaped openers against `quote_literal_argv`, not only the two
-valid legacy names.
+| Boundary      | Cases                                                                                                                                                       |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Parser        | All seven names, adjacent references, escapes, unknown names, missing context, malformed/unclosed namespaced forms, whitespace and non-ASCII names          |
+| Ordinary text | Shell parameters and dollars, Go fields/functions/control blocks, JSON, unmatched unrelated braces                                                          |
+| Replacement   | Empty available value, inserted namespace text not scanned again, quotes and dollar signs remain data                                                       |
+| Context       | Different agent/resource and Linux-user names, admin execution, workspace-free shell, console shell without session, setup identities, newly planned agents |
+| Merge         | Inheritance and instance overlays, higher scopes win, losing unavailable reference, literal/secret replacement in both directions                           |
+| Secrets       | Names and values remain literal, escape-looking text unchanged, explicit reveal and existing safety guards                                                  |
+| Inspection    | Execution/display plaintext parity, winning provenance, default redaction, no transport access                                                              |
+| Lifecycle     | Create/start/restart, invalid command/env reference leaves existing runtime intact                                                                          |
+| Harness       | Literal prompts/profile fields, intentionally interpolated extra args, shell argument boundaries                                                            |
 
-## Review vectors
-
-| Boundary     | Cases                                                                                                                                 |
-| ------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
-| Parser       | Legacy names; new names; adjacent placeholders; escapes; malformed/unclosed delimiters; unknown names; non-ASCII and whitespace forms |
-| Replacement  | Empty available value; inserted brace text is not scanned again; literal dollar signs and command syntax                              |
-| Context      | Agent name differs from Linux user; admin session; workspace-free shell; console pane without session; setup identities               |
-| Merge        | Child and instance override; higher-scope override; losing unavailable reference; literal replaces secret and secret replaces literal |
-| Secrets      | Secret name and secret value remain literal; reveal still explicit; unavailable secret remains existing typed outcome                 |
-| Inspection   | Execution/display plaintext parity for equivalent context; provenance retained; no transport access                                   |
-| Lifecycle    | Create/start/restart coverage; invalid winning reference rejected before replacement teardown; newly planned agent context            |
-| Harness data | Native prompt/profile literals and deliberately expanded extra args; quotes, spaces, repeated braces, dollars, and newlines           |
-
-Use behavior assertions, structured rows, recorded transport calls, and existing local test
-fixtures. Do not pin authored help, documentation wording, or source layout in tests.
+Test behavior with structured rows and recorded calls. Do not assert on authored help, documentation
+wording, or source layout.

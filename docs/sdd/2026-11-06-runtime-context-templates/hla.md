@@ -1,129 +1,91 @@
 # Runtime context templates: architecture
 
-Status: proposed design. The [FRD](frd.md) is a draft. This artifact recommends a concrete
-context-only increment following the operator's clarification about environment references;
-inclusion or omission of those references remains subject to draft acceptance.
-
-## Boundaries
-
-Provide a shared pure renderer and a finite context vocabulary. The renderer accepts authored text,
-explicit context values, and a diagnostic field location. It does not read configuration, the
-process environment, secrets, the filesystem, or a VM. It has no expression engine or extension
-registry. Reuse follows from callers supplying context and choosing which fields to render.
-
-Use the existing `ResourceContext` model as the starting point for shared runtime facts rather than
-creating a competing identity model. Separate its conversion to placeholder values from identity env
-production. Context assembly remains with the lifecycle or command that knows the target.
+The [requirements](frd.md) govern this design. A shared pure renderer combines explicit resource
+context with the reserved `${agw:...}` namespace. It has no I/O, expression engine, environment
+lookup, resolver registry, or secret resolution responsibility.
 
 ## Context catalogue
 
-| Placeholder      | Source                                 | Availability                                   |
-| ---------------- | -------------------------------------- | ---------------------------------------------- |
-| `user_name`      | Selected Linux username                | Every supported env composition                |
-| `user_home_dir`  | Managed home of that username          | Every supported env composition                |
-| `vm_name`        | Selected VM row or planned VM identity | Every supported env composition                |
-| `agent_name`     | Selected agent resource name           | Agent execution and agent setup                |
-| `workspace_name` | Selected workspace identity            | Workspace-rooted execution and workspace setup |
-| `workspace_dir`  | Managed workspace root                 | Same as `workspace_name`                       |
-| `session_name`   | Selected or planned session identity   | Session workload execution                     |
+Use the existing `ResourceContext` as the source of runtime identity. Convert it to the finite
+placeholder catalogue without creating another identity model. Preparation may supply already-known
+planned facts before a full runtime context exists; both paths use the same context-values producer
+and catalogue.
 
-A declaration's scope does not limit which names it can contain. The actual consumer's context
-determines availability. Thus a VM template can contain `user_home_dir` for multiple consuming
-users, but a winning `session_name` reference cannot be used during VM setup.
+| Name             | Value                            | Availability                         |
+| ---------------- | -------------------------------- | ------------------------------------ |
+| `user_name`      | Actual consuming Linux username  | Every supported env composition      |
+| `user_home_dir`  | Managed home of that username    | Every supported env composition      |
+| `vm_name`        | Selected or planned VM name      | Every supported env composition      |
+| `agent_name`     | Selected agent resource name     | Agent execution and setup            |
+| `workspace_name` | Selected workspace resource name | Workspace-rooted execution and setup |
+| `workspace_dir`  | Managed workspace root           | Same as `workspace_name`             |
+| `session_name`   | Selected or planned session name | Session workload execution           |
 
-The code currently provisions managed homes under `/home/<username>`. Centralize that existing rule
-in an ordinary helper shared with provisioning and setup. The context-to-placeholder mapping uses
-that helper with `ResourceContext.user`; no additional home field duplicates a value already
-determined by the managed username. Never derive it from the agent resource name or read local
-`HOME`. Supporting arbitrary home locations would need a managed source-of-truth change, not a
-hidden SSH probe during inspection.
+The managed-home helper implements `/home/<Linux username>` and is shared with initialization and
+setup. Derive the placeholder from `ResourceContext.user`; do not duplicate home state or consult
+workstation `HOME`. Arbitrary account-home relocation is outside this managed model.
 
-## Expansion sequence
+The consumer's context determines availability. A VM-level env definition can refer to a user's home
+and render differently for different consuming users. A winning `session_name` reference is
+unavailable during VM setup or a standalone agent shell.
 
-1. Decode and validate declarations with existing schema rules.
-2. Resolve template inheritance and stored instance overlays.
-3. Determine the consuming identity and any workspace/session context.
-4. Merge env scopes with the current precedence rules.
-5. Render each winning plaintext value once against that context. Leave secret references intact.
-6. Fill secret-backed values from the operation's existing eager resolution and apply existing
-   consumer-specific line-safety checks.
-7. Apply managed identity env precedence and deliver literal env strings through the transport.
+## Composition
 
-Secret collection continues to depend on the same winning secret-reference map. Rendering does not
-introduce a new secret resolver or require expanding secret names. Context failures should be
-checked before secret prompts and mutations once the needed context is known; eager resolution may
-still occur earlier in existing orchestration, but should not become necessary to validate plaintext
-placeholders.
+1. Decode declarations and resolve template inheritance and stored instance overlays.
+2. Determine the consuming identity and resource context.
+3. Merge applicable env scopes in precedence order.
+4. Render each winning plaintext entry once; preserve secret references as literal entries.
+5. Fill secrets from the command's existing eager resolution and enforce existing consumer safety.
+6. Apply managed identity precedence and deliver literal env strings through the transport.
 
-Retain scope provenance for inspection. A common per-entry plaintext renderer serves both
-`compose_env` and `show_env`; inspection must not route through a function that requires resolving
-redacted secrets. `env show` previews the managed context, not a live process's environment or the
-effects of user shell startup files.
+A common plaintext-rendering path serves execution and offline inspection. It must be usable without
+resolving secrets, so redacted inspection and context validation do not require secret values. Keep
+winning-scope provenance independent of rendering.
+
+Check context references before prompts and mutations when the invocation already knows its
+identity. Command source becomes available to core after the integration selects its launch command.
+Validate that returned source immediately, before launch or destructive session replacement; do not
+inspect integration-owned config generically or add a separate validation hook. Deriving context and
+validating text require no target connection.
 
 ## Invocation coverage
 
 | Invocation                   | Consuming user                     | Additional context                              |
 | ---------------------------- | ---------------------------------- | ----------------------------------------------- |
 | VM shell/exec                | VM admin                           | Optional selected workspace                     |
-| Agent shell/exec             | Agent's Linux user                 | Agent; optional authorized workspace            |
-| Session create/start/restart | Session's selected admin or agent  | Workspace and session; agent when applicable    |
-| Console extra shell pane     | Pane's selected admin or agent     | Workspace and agent when applicable; no session |
-| VM/admin harness setup       | VM admin                           | No workspace, agent, or session                 |
-| Agent harness setup          | Agent's Linux user                 | Agent; no workspace or session                  |
-| Workspace harness setup      | VM admin                           | Workspace; no agent or session                  |
+| Agent shell/exec             | Agent's Linux user                 | Agent and optional authorized workspace         |
+| Session create/start/restart | Selected admin or agent            | Workspace, session, and agent when applicable   |
+| Console extra shell          | Pane's selected admin or agent     | Workspace and agent when applicable; no session |
+| VM/admin setup               | VM admin                           | No workspace, agent, or session                 |
+| Agent setup                  | Agent's Linux user                 | Agent; no workspace or session                  |
+| Workspace setup              | VM admin                           | Workspace; no agent or session                  |
 | Offline `env show`           | Selected agent, otherwise VM admin | Selected/inferred workspace and session         |
 
-Audit every `compose_env` consumer, including setup, rather than changing only session launch.
-Native transports retain their existing env-delivery limitations; interpolation does not add new
-transport capabilities.
+Native transports retain their documented env-delivery limitations. Interpolation does not add a
+transport capability. Setup and runtime must use the same managed identity semantics.
 
-## Commands and literal data
+## Literal data and shell source
 
-Existing manager interpolation applies to the full command returned by any integration, not just
-`shell`. Integrations protect prompt and profile data using `quote_literal_argv`; some `extra_args`
-intentionally participate in interpolation. Preserve those behaviors during migration.
+Only `${agw:` starts Agentworks interpolation. Dollar signs and Go-template braces otherwise belong
+to their downstream consumer. The renderer is strict inside its own namespace and does not scan
+replacement values again.
 
-Use the common parser and context catalogue at current command sites. Commands remain
-operator-authored shell programs: a placeholder is textual substitution, not an argv boundary or
-automatic shell quoting. Paths with spaces require ordinary shell quoting in command source. Do not
-pass secret or arbitrary ambient-environment values through this command-source renderer. The
-implementation must prove literal harness fields still arrive literally, including brace text,
-quotes, dollar signs, and newlines. Future argv-oriented consumers render each argument as data
-before quoting; they do not interpolate a completed shell program.
+Env values are literal strings. Shell commands are authored source, so quoting depends on where text
+appears. In command source, use `"$AGENTWORKS_WORKSPACE_DIR"` for arbitrary workspace paths; raw
+substitution between single quotes cannot represent an embedded apostrophe safely.
 
-## Environment reference decision
+Integrations must quote literal argv data while shielding the reserved namespace from the command
+renderer. Prompts, profiles, and opaque workload fields are data; intentional extra args remain
+interpolated according to the integration's existing contract. Future argv consumers render each
+argument as data before serializing it, rather than interpolating a completed shell program.
 
-Context and environment references answer different questions:
+Secret values bypass both interpolation and unescaping. This is a consumer distinction, not a
+request for another template syntax. Do not infer a context source from exported identity env or
+build dependencies between arbitrary managed env entries.
 
-- `user_home_dir` asks for a managed target fact, available before a target shell exists.
-- A workstation reference asks for a value inherited by the `agw` process.
-- A target reference asks for a value in a particular remote execution environment at a specified
-  phase. Exported variables and unexported shell-local variables are distinct capabilities.
+## Permanent reference and delivery
 
-The operator intended target lookup and then questioned both that feature and references to
-agw-managed vars. Recommend omitting both kinds of lookup from this increment. Identity env values
-have corresponding context facts; direct placeholders provide those facts without reading an env
-map. Referencing arbitrary managed entries would instead turn that map into dependencies, needing
-ordering, cycle handling, unavailable-reference policy, and propagation of secret sensitivity.
-
-If a concrete use case later warrants target lookup, specify an explicit source and expansion phase,
-distinguish missing from empty values, retain sensitive-value handling, and define live versus
-offline inspection. A baseline `PATH` and a final managed `PATH` must not accidentally refer to each
-other. Exported environment variables and shell-local state also require different lookup
-mechanisms. These are additional product contracts, not parser details.
-
-No lookup syntax, resolver hooks, probing framework, or cross-entry dependency machinery belongs to
-the proposed context increment. Existing shell command source can still use normal shell variable
-syntax when the operator wants the shell to perform that expansion.
-
-## Documentation and delivery
-
-The permanent reference is `docs/arch/runtime-context.md`. This design-only change documents the
-existing implementation there. The implementation increment replaces its limited vocabulary and
-timing descriptions with the accepted shared contract and updates CLI/schema guidance at the same
-time. Permanent docs must not claim an unimplemented placeholder works.
-
-Deliver the full feature and full SDD in one PR, as directed by the operator. Use that PR's current
-draft as the design checkpoint, labeled `review-requested` to solicit feedback. Continue
-implementation and permanent documentation updates in the same PR after requirements settle; do not
-merge the design separately. Do not lock the SDD while implementation remains outstanding.
+The standalone reference is `docs/arch/runtime-context.md`; no permanent consumer depends on the SDD
+directory. The implementation, full SDD, documentation, and evidence remain in one PR. Local
+project, complexity, and correctness reviews precede the ready handoff. Subsequent iterations wait
+for the integration report before beginning a new correction round.

@@ -1167,15 +1167,14 @@ spec:
     required_commands: [htop]
 ```
 
-`agw resource explain harness-integration/shell` documents its config field by field. Two things
-that reference cannot tell you: command strings support `{{session_name}}` and `{{workspace_name}}`
-substitution (double-brace syntax), and the executables an integration checks are checked on the
-session's launch target (the agent, or the VM admin for admin sessions) before any state mutation,
-so launching a session whose tool is not installed fails fast with a clear error instead of a
-cryptic downstream tmux failure.
+`agw resource explain harness-integration/shell` documents its config field by field. Command
+strings support context substitution such as `${agw:session_name}`, `${agw:workspace_name}`, and
+`${agw:user_home_dir}`. Ordinary shell variables and Go templates are left to their own consumers.
+The executables an integration requires are checked on the session's launch target before state
+mutation, so a missing tool fails with an actionable error.
 
-See [runtime context and interpolation](../docs/arch/runtime-context.md) for identity delivery, env
-scope precedence, and the boundary between env values and shell command text.
+See [runtime context and interpolation](../docs/arch/runtime-context.md) for the complete
+vocabulary, literal escaping, env precedence, and command quoting rules.
 
 Those config keys live only inside the `harness_integration` table; spelling any of them at the
 `spec` top level is a load error that points you at the nested shape.

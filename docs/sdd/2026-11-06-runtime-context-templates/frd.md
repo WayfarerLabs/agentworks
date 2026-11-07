@@ -1,108 +1,91 @@
 # Runtime context templates: requirements
 
-Status: draft for operator review. This is a new effort designated by the operator on 2026-11-06.
-Requirements below distinguish operator direction from proposed behavior.
+Status: operator-approved scope. The feature uses `${agw:...}` throughout. The full SDD,
+implementation, permanent documentation, and validation belong to one PR.
 
-## Problem
+## Purpose
 
-An env value in a reusable template cannot currently name a path beneath the eventual target user's
-home directory. Hardcoding the path in an instance spec works for one identity but defeats template
-reuse. Existing session placeholders address only a small part of this problem.
+Reusable env definitions can refer to the consuming Linux user's managed home and other resource
+context without hardcoding a username. The same interpolation contract serves env values and
+operator-authored workload commands.
 
-## Operator direction
-
-- Introduce placeholders for the target user's home directory and other appropriate context values.
-- Use `user_home_dir`, consistent with `workspace_dir`.
-- Design the mechanism for reuse beyond env values; the existing shell integration's commands are
-  relevant prior art within Agentworks, but their syntax is not a constraint.
-- Investigate references to shell variables, including the suggested `{{$$SHELL_VAR}}` spelling.
-- Research external prior art.
-- Establish a new SDD and produce permanent documentation outside its directory.
-
-Delivery ruling from the operator:
-
-> Please note that we're going to end up implementing the whole feature in a single PR (including
-> the full SDD).
-
-## Proposed functional requirements
-
-### FR1. Reusable target context
-
-The same env definition works for different agents and for admin sessions without embedding a Linux
-username. `{{user_home_dir}}/.config/tool` resolves beneath the consuming user's managed home,
-regardless of which scope declared the value. The consuming user is the selected workload or setup
-identity, not the operator running `agw` or an administrative transport hop.
-
-### FR2. Initial vocabulary
+## FR1. Context vocabulary
 
 Support `user_home_dir`, `user_name`, `vm_name`, `agent_name`, `workspace_name`, `workspace_dir`,
-and `session_name`. Keep the existing `{{session_name}}` and `{{workspace_name}}` spellings and
-meanings. Context values unavailable to an invocation produce an actionable error when referenced.
+and `session_name`. The consuming user is the selected workload or setup identity, independent of
+which scope declares the expression and which account carries an administrative transport hop.
 
-### FR3. Env coverage and precedence
+```yaml
+env:
+  TOOL_CONFIG_DIR: "${agw:user_home_dir}/.config/tool"
+  PROJECT_DIR: "${agw:workspace_dir}"
+```
 
-Support plaintext env values from VM, workspace, admin, agent, and session templates and their
-instance overlays. Preserve inheritance and scope precedence. Expand only winning entries, against
-the consuming invocation's context. Do not expand variable names, secret reference names, or secret
-contents. An overridden entry cannot fail because its placeholder is unavailable at runtime.
+Use the actual Linux username for `user_name`, the managed home of that username for
+`user_home_dir`, and the agent resource name for `agent_name`. Optional resource context is
+available only where the corresponding resource applies.
 
-### FR4. Explicit interpolation contract
+## FR2. Reserved syntax
 
-Provide one documented placeholder grammar, literal escaping, and one-pass substitution. Unknown
-names and malformed placeholder syntax fail with field context. Replacement text is data and is
-never scanned again for placeholders. Do not perform shell evaluation, command substitution,
-recursive env dependencies, expressions, filters, or implicit workstation-environment lookup.
+A context reference is `${agw:NAME}`. Only this namespace belongs to Agentworks. Unknown names,
+unavailable context, and malformed references within it fail with field context. Literal escaping
+uses `$${agw:NAME}` to produce `${agw:NAME}` without lookup. Escaping is limited to the reserved
+namespace; ordinary dollar signs and brace text are unchanged.
 
-### FR5. Existing command consumers
+Render once. Inserted values are data and are never interpreted again as template expressions. Shell
+expressions and Go templates pass through unchanged. Do not implement expressions, filters, command
+evaluation, ambient environment lookup, or references between managed env entries.
 
-Use the same vocabulary and parsing semantics for the existing command interpolation sites,
-including shell `command` and `resume_command`. Preserve literal harness prompts and other workload
-data. Rendering an env value and rendering a shell program have different quoting requirements;
-sharing context lookup must not turn ordinary values into shell source.
+## FR3. Env scope and precedence
 
-### FR6. Inspection and lifecycle
+Support plaintext env values from VM, workspace, admin, agent, and session templates and stored
+instance overlays. Resolve inheritance and overlays, merge scopes, then render winning entries
+against the consuming context. Preserve precedence: VM, workspace, agent or admin, session, with
+later scopes winning. Agent and admin are alternatives for the consuming Linux user.
 
-`env show` renders the same winning plaintext values as execution for equivalent context, without
-connecting to a VM or waking it. Secret values retain existing redaction and explicit resolution
-behavior. A restart recomputes values for its current context. Invalid templates fail before
-creating resources or tearing down an existing running session where context is already known.
-Checks requiring a newly created identity occur as soon as that identity is determined, before
-launch or destructive replacement. Existing processes do not acquire changed values automatically.
+A discarded entry must not fail runtime rendering because it references unavailable context.
+Identity env precedence remains enforced. Env names are literal and are not interpolated.
 
-### FR7. Permanent reference
+## FR4. Opaque secrets and literal workload input
 
-Maintain `docs/arch/runtime-context.md` as the permanent architecture and extension reference. The
-implementation change updates it with the complete vocabulary, availability, escaping, expansion
-order, command handling, and examples. CLI and schema-owned descriptions link to or summarize this
-reference without requiring access to the SDD.
+Secret reference names and resolved secret contents are never interpolated or unescaped. This
+includes text resembling `${agw:NAME}` and `$${agw:NAME}`. Existing consumer validation still
+applies to secret values. Switching an entry from plaintext to a secret changes its interpretation
+from a template to literal data; document and test that boundary.
 
-## Proposed scope: environment references
+Native harness prompts, profile names, and other workload data likewise retain their literal
+content. Explicit command fields and the integration's designated extra arguments use the shared
+context renderer.
 
-The operator clarified the intended source and raised a related question:
+## FR5. Commands and quoting
 
-> I was thinking the target user's environment, but the more I think about this the less I like it.
-> Can you reference agw-managed vars? It just seems messy.
+Use one grammar and context catalogue across supported env and command consumers. Env values are
+literal transport data; commands are shell source. Interpolation does not automatically quote
+arbitrary placement inside shell source. Commands needing an arbitrary workspace path can use
+`"$AGENTWORKS_WORKSPACE_DIR"`, preserving spaces and apostrophes as part of one argument.
 
-Recommendation for draft acceptance: omit ambient environment lookup and references between managed
-env entries from the initial increment. Context placeholders expose the underlying identity facts
-directly; for example, `workspace_dir` supplies the value represented by `AGENTWORKS_WORKSPACE_DIR`.
-Arbitrary managed entries are not added to the context catalogue.
+## FR6. Inspection and lifecycle
 
-Reading another managed env entry would need dependency ordering, cycle handling, and secret
-propagation rules. Reading the target's environment would need shell startup, timing, sensitivity,
-and inspection rules. Neither behavior is necessary for `user_home_dir`. The omission remains a
-design recommendation pending acceptance of this draft, not a claim that the operator approved a new
-requirement. See [architecture](hla.md#environment-reference-decision).
+Offline `env show` must render the same winning plaintext values as execution for equivalent
+context, preserving scope provenance and default secret redaction. It must not connect to a VM or
+activate it. Secret resolution remains explicit.
 
-## Acceptance examples
+Recompute values when preparing shell/exec, setup, or session create/start/restart. Existing
+processes do not acquire changed values automatically. Validate references before prompts and
+mutations wherever context is known, and always before restart tears down the existing runtime.
+Newly planned users must be supported as soon as their identities are determined.
 
-- Two agents consuming `CACHE_DIR: "{{user_home_dir}}/.cache/tool"` receive different paths beneath
-  their respective managed homes; an admin shell receives the admin user's path.
-- The same expression works when declared at VM or workspace scope and consumed as an agent.
-- A session-only value referencing `session_name` works for session launch. A winning reference to
-  it in a standalone agent shell errors rather than inventing a session.
-- A secret containing `{{session_name}}` reaches the application literally.
-- Default `env show --session NAME` previews expanded plaintext and redacted secrets offline.
-- Shell commands continue accepting `$HOME` under ordinary shell quoting and execution rules; an env
-  value containing `$HOME` alone remains literal unless an explicit env-lookup feature is separately
-  accepted.
+Console extra shells have workspace and selected-user context, without session context. Setup uses
+the actual setup identity; workspace setup runs as the VM admin.
+
+## FR7. Permanent documentation and delivery
+
+`docs/arch/runtime-context.md` is the permanent standalone reference for vocabulary, availability,
+grammar, escaping, expansion order, consumer adoption, and quoting. Keep CLI/schema guidance and
+applicable sample/guide collateral consistent in the same PR. Document the destination; explain
+syntax choice briefly in the prior-art rationale.
+
+Deliver the feature and full SDD in PR #867. Mark the completed implementation ready for the
+standard review and integration-testing pipeline. The operator authorizes up to three final PR
+review iterations; wait for the integration report before a subsequent round, allowing up to four
+hours for its arrival.

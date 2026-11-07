@@ -1,84 +1,136 @@
 # Runtime context and string interpolation
 
-Agentworks has two related context mechanisms: identity env variables and session string
-interpolation. This reference describes their implemented behavior and the boundaries a consumer
-must respect.
+Agentworks substitutes explicit resource context in plaintext env values and workload commands using
+`${agw:NAME}`. It does not read arbitrary shell variables or build references between env entries.
+Secret reference names and secret contents are literal data.
 
-## Context and identity
+## Context values
 
-`ResourceContext` in `cli/agentworks/env/identity.py` describes the selected VM, platform, site,
-Linux user, and optional agent, workspace, and session. The command or lifecycle operation supplies
-these facts. An agent resource name and its Linux username are different identifiers.
+| Name             | Meaning                            | Availability                         |
+| ---------------- | ---------------------------------- | ------------------------------------ |
+| `user_name`      | The consuming Linux username       | Every supported env composition      |
+| `user_home_dir`  | That user's managed home directory | Every supported env composition      |
+| `vm_name`        | The VM resource name               | Every supported env composition      |
+| `agent_name`     | The agent resource name            | Agent execution and setup            |
+| `workspace_name` | The workspace resource name        | Workspace-rooted execution and setup |
+| `workspace_dir`  | The workspace root directory       | Same as `workspace_name`             |
+| `session_name`   | The session resource name          | Session workload execution           |
 
-Identity variables are produced from this context in three groups:
+The consuming identity determines the value, regardless of which template scope declares the
+expression. Agent resource names and Linux usernames are different identifiers. Managed homes use
+`/home/<Linux username>`, through the same rule used during initialization. Workstation `HOME` is
+not consulted.
 
-| Group      | Variables                                                                                                            | Delivery                  |
-| ---------- | -------------------------------------------------------------------------------------------------------------------- | ------------------------- |
-| VM         | `AGENTWORKS_VM`, `AGENTWORKS_PLATFORM`, `AGENTWORKS_SITE`                                                            | System profile fragment   |
-| User       | `AGENTWORKS_AGENT` for agent users                                                                                   | User profile fragment     |
-| Invocation | `AGENTWORKS_WORKSPACE`, `AGENTWORKS_WORKSPACE_DIR`, `AGENTWORKS_SESSION`, `AGENTWORKS_SESSION_KIND`, when applicable | Runtime SSH env injection |
+```yaml
+env:
+  TOOL_CONFIG_DIR: "${agw:user_home_dir}/.config/tool"
+  PROJECT_DIR: "${agw:workspace_dir}"
+```
 
-Console extra shell panes have workspace context but no session context. They are separate shells
-alongside a workload. Setup operations likewise use the context of their executing identity:
-workspace setup runs as admin; agent setup runs as the agent.
+An agent running as `agt-reviewer` receives `/home/agt-reviewer/.config/tool`; an admin shell
+receives the admin user's home path. `PROJECT_DIR` requires workspace context. A winning reference
+to an unavailable name fails rather than inventing a workspace, agent, or session.
 
-Managed agent and admin initialization currently use `/home/<linux_username>` as the user's home
-path. A workstation's `HOME` does not identify a managed user's home.
+## Syntax and literal text
 
-## Env values
+A reference is `${agw:NAME}`, with an ASCII identifier as the name. Unknown names, missing context,
+and malformed references within the reserved namespace fail with the owning field identified.
+Whitespace inside a reference is not normalized.
 
-Env entries contain plaintext or a secret reference. Template inheritance and stored instance
-overlays are resolved before the invocation merges the applicable scopes. Higher precedence wins:
+Use `$${agw:user_name}` in a plaintext template to obtain literal `${agw:user_name}`. Escaping
+applies only to the reserved namespace. Ordinary `$HOME`, `${HOME}`, `${PATH:-default}`, `$$`,
+Go-template text, and unrelated braces are unchanged by Agentworks.
+
+Rendering takes one pass. Namespace-looking text in a replacement value is not interpreted again.
+There are no expressions, filters, ambient lookups, or references between env entries.
+
+## Scope, lifecycle, and inspection
+
+Template inheritance and stored instance overlays produce each scope's effective declarations. Merge
+the applicable scopes before rendering their winning plaintext entries:
 
 ```text
 VM < workspace < agent or admin < session
 ```
 
-Agent and admin are alternatives selected by the consuming Linux user. `compose_env` renders secret
-references from the operation's eagerly resolved values and overlays dynamic identity variables. The
-env map is literal data delivered to the transport, not shell program text. An env value containing
-`$HOME/file` does not request shell expansion of that string.
+Later scopes win on a matching key. Agent and admin are alternatives selected by the consuming Linux
+user. Discarded entries are not rendered. Managed identity variables retain their own precedence.
 
-`agw env show` independently assembles winning values and scope provenance from managed state. It
-does not connect to the VM. Secret values remain redacted unless explicitly resolved. It includes
-dynamic identity variables, while the VM and user identity groups come from on-VM profile files.
+| Invocation                   | Context                                                             |
+| ---------------------------- | ------------------------------------------------------------------- |
+| VM shell/exec                | VM admin; optional selected workspace                               |
+| Agent shell/exec             | Agent's Linux user and resource name; optional authorized workspace |
+| Session create/start/restart | Selected admin or agent; workspace and session                      |
+| Console extra shell          | Selected admin or agent and workspace; no session                   |
+| VM/admin setup               | VM admin; no workspace, agent, or session                           |
+| Agent setup                  | Agent's Linux user and resource name                                |
+| Workspace setup              | VM admin and workspace                                              |
 
-## Implemented string placeholders
+Existing processes keep their initial environment. A new invocation recomputes values. Invalid
+references are checked before prompts and mutations where context is known, including before a
+restart replaces the current runtime. Returned command source is validated after the integration
+selects its launch command and before launch or destructive replacement. Native transports retain
+their documented env-delivery limitations.
 
-The session manager supports `{{session_name}}` and `{{workspace_name}}`. It applies these to
-plaintext session env entries before the cross-scope merge and to the launch command returned by a
-harness integration during create/start/restart. Other env scopes and `env show` do not apply that
-session substituter.
+`agw env show --session NAME` previews winning plaintext values and their scopes from managed state
+without connecting to the VM. `--vm`, `--workspace`, and `--agent` select other contexts. Secrets
+remain redacted unless `--resolve` is explicit. This is a managed-config preview, not an observation
+of a process's live environment or user shell startup effects.
 
-The current regex matches double braces around a word. It rejects matched unknown names; other brace
-syntax can remain unchanged. There is no general documented literal-escape grammar or
-ambient-environment lookup in this mechanism.
+## Secrets
 
-Launch commands are shell programs. Integrations use `quote_literal_argv` for workload fields whose
-literal brace text must survive the manager's interpolation pass. Some integration extra args
-intentionally allow the manager's placeholders. Ordinary shell variable references in a command
-follow the executed shell's quoting rules.
+Neither a secret reference name nor its resolved content is interpolated or unescaped. A secret
+containing `${agw:user_name}` retains that text; a secret containing `$${agw:user_name}` retains
+both dollar signs. Existing consumer safety checks still apply.
 
-## Consumer boundaries
+This differs intentionally from plaintext: a plaintext entry is a template, while a secret entry
+provides literal data. Its declared type determines interpretation, independent of its contents.
 
-Context lookup and shell quoting are separate responsibilities. An env value is a literal string; an
-argv argument is one data item; a shell command is source code. A renderer that returns text does
-not by itself provide shell escaping for arbitrary placement inside a shell program.
+## Commands and shell quoting
 
-Neither the workstation process environment nor a target shell's ambient environment is part of
-`ResourceContext`. An additional lookup source must specify its identity, timing, missing-value
-behavior, sensitivity, and inspection behavior. Login and interactive shell startup can affect
-target values, and offline inspection cannot observe them.
+Env values are literal transport data. Commands are shell source, so substitution alone does not
+quote an arbitrary value correctly for every position in a command.
 
-## Implementation map
+```yaml
+harness_integration:
+  name: shell
+  command: "tool --config '${agw:user_home_dir}/.config/tool'"
+```
 
-- `cli/agentworks/env/identity.py`: context model and identity producers.
-- `cli/agentworks/env/entry.py`: literal and secret entry types.
-- `cli/agentworks/env/merge.py` and `compose.py`: scope precedence and execution env rendering.
-- `cli/agentworks/env/show.py`: offline effective-env inspection.
-- `cli/agentworks/sessions/manager/_env.py`: current session string substitution.
-- `cli/agentworks/capabilities/harness_integration/base.py`: literal argv protection.
-- `cli/agentworks/harness_setup/inputs.py`: setup env composition.
+Managed Linux usernames make the home path suitable for that quoted example. For an arbitrary
+workspace path, including spaces or apostrophes, use `"$AGENTWORKS_WORKSPACE_DIR"` in shell source.
+The shell expands the variable as data within that argument. Raw substitution between single quotes
+cannot represent an embedded apostrophe safely.
+
+Native integration prompt/profile fields and other opaque workload input remain literal. The
+integration shields reserved namespace text while quoting such values as argv data. Fields that
+explicitly accept command arguments participate in context rendering according to their field
+contract. Shell variables and Go templates are processed only by their downstream consumers.
+
+## Identity env delivery
+
+The shared resource context also supplies `AGENTWORKS_*` identity variables:
+
+| Group      | Variables                                                                                                            | Delivery                |
+| ---------- | -------------------------------------------------------------------------------------------------------------------- | ----------------------- |
+| VM         | `AGENTWORKS_VM`, `AGENTWORKS_PLATFORM`, `AGENTWORKS_SITE`                                                            | System profile fragment |
+| User       | `AGENTWORKS_AGENT` for agent users                                                                                   | User profile fragment   |
+| Invocation | `AGENTWORKS_WORKSPACE`, `AGENTWORKS_WORKSPACE_DIR`, `AGENTWORKS_SESSION`, `AGENTWORKS_SESSION_KIND`, when applicable | Runtime env injection   |
+
+`env show` includes invocation identity. VM and user identity also reach login shells through their
+profile fragments. Placeholder values come from explicit context rather than reading these exports.
+
+## Adding a consumer
+
+Supply the managed identity and resource facts the invocation actually knows. Runtime callers use
+the existing `ResourceContext`; preparation can supply planned facts before a full runtime context
+exists. Both use the same finite catalogue and context projection.
+
+Render only fields whose contract calls for interpolation. Render winning plaintext env entries
+without requiring secret values; keep provenance independent. Validate before side effects when
+context is available. Treat env strings, argv elements, and shell source as different destinations:
+quote argv elements once if they must be serialized into shell source, and shield literal workload
+input from later textual rendering. No consumer may reinterpret secret contents as expressions.
 
 See the [CLI session-template reference](../../cli/command-reference.md#session-templates) for the
-operator-facing shell integration configuration.
+shell integration configuration.

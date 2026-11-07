@@ -1,99 +1,99 @@
 # Runtime context templates: prior art
 
-Research date: 2026-11-06. Sources are upstream documentation, not third-party tutorials. Findings
-inform a proposed design; they do not authorize an environment lookup feature.
+Research date: 2026-11-06. Sources are upstream documentation. The chosen design uses a reserved
+`${agw:NAME}` namespace and explicit managed context; it does not read ambient environments.
 
-## Findings
+## Namespaced substitution
 
-### Dev Containers: distinguish the source
+VS Code uses `${variableName}` for predefined context and `${env:Name}` or `${config:Name}` for
+named sources. This provides a familiar convention for clearly scoped substitution. Agentworks
+adopts the namespace-and-name shape, with `agw` identifying its finite context catalogue; it does
+not adopt the additional VS Code lookup or command-evaluation facilities.
 
-Dev Containers uses `${localEnv:NAME}` and `${containerEnv:NAME}` to distinguish host values from
-existing container values. Its configuration also exposes a `userEnvProbe` choice, with distinct
-login and interactive shell modes. This is the closest match to Agentworks' workstation versus
-target distinction. Adopt explicit source naming if environment references are added; do not infer
-the source from a bare variable name.
+Source:
+[VS Code variables reference](https://code.visualstudio.com/docs/reference/variables-reference).
+
+Dev Containers distinguishes `${localEnv:NAME}` and `${containerEnv:NAME}` and explicitly models
+shell probing. The source distinction reinforces why managed context should not silently imply
+workstation or target environment lookup.
 
 Sources:
 [environment variables](https://code.visualstudio.com/remote/advancedcontainers/environment-variables),
 [upstream specification](https://github.com/devcontainers/spec/blob/main/docs/specs/devcontainerjson-reference.md).
 
-### systemd: context facts and environment expansion are different
+## Syntax choice
 
-systemd's `Environment=` supports specifier expansion without shell variable expansion. Its `%h`
-specifier refers to the service manager user's home, and is not changed by `User=`. The useful
-lesson is to specify whose context a placeholder describes, not to copy that identity choice:
-Agentworks' `user_home_dir` must describe the selected consuming identity.
-
-Sources:
-[Environment=](https://www.freedesktop.org/software/systemd/man/latest/systemd.exec.html#Environment=),
-[specifiers](https://www.freedesktop.org/software/systemd/man/latest/systemd.unit.html#Specifiers).
-
-### Docker Compose: define phase and escaping
-
-Compose substitutes `$VAR` and `${VAR}` and uses `$$` to preserve a dollar sign for later
-processing. Its interpolation happens before per-file merging, and unresolved values can become
-empty strings with a warning. These are useful comparison points, not Agentworks requirements.
-Agentworks should render winning entries after merging and reject unavailable references. A `$$`
-spelling for lookup could mislead readers who expect Compose's deferral behavior.
+Double-brace placeholders overlap with Go-template fields and control actions used by tools such as
+Docker and gh. Choosing `${agw:NAME}` keeps Agentworks substitution separate from those downstream
+languages. A reserved namespace also lets ordinary shell `$NAME` and `${NAME}` expressions pass
+through, while Agentworks can reject mistakes within its own syntax.
 
 Sources:
-[interpolation specification](https://docs.docker.com/reference/compose-file/interpolation/),
-[interpolation sources](https://docs.docker.com/compose/how-tos/environment-variables/variable-interpolation/).
 
-### GNU envsubst: lookup does not require evaluation
+- [Docker formatting](https://docs.docker.com/engine/cli/formatting/)
+- [gh formatting](https://cli.github.com/manual/gh_help_formatting)
+- [Go templates](https://pkg.go.dev/text/template)
 
-GNU `envsubst` replaces `$VARIABLE` or `${VARIABLE}` from its process environment. It deliberately
-does not implement shell commands or shell default-value expressions. This supports keeping a
-substitution language small and treating environment lookup as named data access.
+## Escaping and limited interpretation
+
+Docker Compose uses dollar-based substitution and `$$` for literal dollars. Agentworks follows the
+familiar extra-dollar escape convention only for its reserved namespace; it does not transform
+ordinary shell dollar syntax or adopt Compose's broader interpolation language.
+
+Source: [Compose interpolation](https://docs.docker.com/reference/compose-file/interpolation/).
+
+GNU `envsubst` performs limited process-environment substitution without shell command evaluation.
+The useful principle is that substitution can remain small and data-oriented. Its ambient source is
+not part of the Agentworks contract.
 
 Source:
 [envsubst invocation](https://www.gnu.org/software/gettext/manual/html_node/envsubst-Invocation.html).
 
-## Internal evidence
+Python's standard `string.Template` interprets ordinary `$NAME` and `${NAME}` expressions. Used
+unchanged, it would also consume shell references that Agentworks needs to preserve. The design
+requires recognition of the reserved prefix rather than broad dollar substitution.
 
-Snapshot: `c8d4dfb3cb042eea2ae5ac12b06624faf703400b`.
+Source: [Python template strings](https://docs.python.org/3/library/string.html#template-strings).
 
-| Location                                                      | Observed behavior                                            | Design implication                                                                      |
-| ------------------------------------------------------------- | ------------------------------------------------------------ | --------------------------------------------------------------------------------------- |
-| `cli/agentworks/sessions/manager/_constants.py:7`             | Double braces, two known names                               | Keep working spellings; define escaping and malformed syntax explicitly                 |
-| `cli/agentworks/sessions/manager/_env.py:120`                 | String substitution and session-only env preprocessing       | Move parsing out of the session manager; stop preprocessing before the final env merge  |
-| `cli/agentworks/env/compose.py:37`                            | Shared env rendering for execution                           | Render winning plaintext here through a common pure renderer                            |
-| `cli/agentworks/env/show.py:73`                               | Independent display assembly                                 | Reuse plaintext rendering while preserving provenance and redaction                     |
-| `cli/agentworks/capabilities/harness_integration/base.py:194` | Literal argv quoting hides braces from manager interpolation | Preserve workload literals; command interpolation is broader than the shell integration |
-| `cli/agentworks/sessions/manager/_create_roll.py:348`         | Manager interpolates returned launch commands                | Audit all integrations, including intentionally expanded `extra_args`                   |
-| `cli/agentworks/harness_setup/inputs.py:67`                   | Setup consumes `compose_env` too                             | Define setup context, not just session context                                          |
-| `cli/agentworks/agents/initializer.py:121`                    | Managed agent home uses `/home/<linux_user>`                 | Use the provisioning model, not the workstation's home                                  |
-| `cli/agentworks/vms/initializer/driver.py:140`                | Managed admin home uses `/home/<admin_username>`             | Centralize the managed-home rule across setup and runtime                               |
+## Identity and context
 
-## Claims rejected or not established
+systemd distinguishes specifier expansion from shell environment expansion. Its `%h` refers to the
+service manager user's home, independent of `User=`. Agentworks deliberately binds its context to
+the consuming workload/setup user, so the identity must be explicit in its own contract.
 
-- `$$` is not an established cross-tool spelling for reading the remote shell environment.
-- A string delivered through SSH env injection is not shell source. Sending `$HOME/file` does not
-  ask the remote shell to expand it inside the env value.
-- A target user's shell environment is not a unique timeless map. Invocation mode and startup phase
-  must be specified. A previous workload's mutated environment is another source entirely.
-- systemd's `%h` must not be described as the home of its configured `User=` identity.
-- Dev Containers' probing option is evidence that startup mode matters, not a reason to add the same
-  set of options to Agentworks.
-- None of the surveyed tools requires introducing a general expression engine for this use case.
+Sources:
 
-## Open questions
+- [Environment=](https://www.freedesktop.org/software/systemd/man/latest/systemd.exec.html#Environment=)
+- [specifiers](https://www.freedesktop.org/software/systemd/man/latest/systemd.unit.html#Specifiers)
 
-- The operator clarified that the intended source was the target user's environment, then questioned
-  that feature and references to agw-managed vars. The draft recommends omitting both lookup forms
-  from the initial increment; acceptance is still pending.
-- Is there a concrete use case beyond context facts that warrants ambient lookup or managed env
-  dependencies later, such as appending to a baseline `PATH` or reading `XDG_CONFIG_HOME`?
-- If target lookup is desired, must offline inspection show an unresolved expression, or should a
-  separately requested live inspection be introduced? A stored snapshot cannot silently claim to
-  describe the next shell invocation.
+## Internal design constraints
+
+- `env/identity.py` already supplies the shared `ResourceContext` model.
+- `env/merge.py` defines precedence; rendering follows selection of the effective map.
+- `env/compose.py` and `env/show.py` need the same plaintext interpretation without requiring secret
+  resolution for inspection.
+- Runtime access, sessions, console shells, and harness setup are concrete consumers of that map.
+- Managed initialization uses `/home/<Linux username>`; context projection shares that rule instead
+  of consulting local `HOME` or issuing an inspection-time SSH probe.
+- Commands and literal argv are different destinations. Namespace shielding belongs with literal
+  argv construction; arbitrary automatic shell quoting cannot be inferred from a string fragment.
+
+## Claims not adopted
+
+- There is no universal standard for the names of Agentworks resource-context variables.
+- No general expression engine, remote environment probe, or managed-env dependency graph is
+  required to expose `user_home_dir`.
+- A template-looking string arriving from a secret is data, not an expression to evaluate.
+- A managed-config preview is not an observation of a remote process's ambient environment.
 
 ## Source assessment
 
-| Source                                        | Quality                                         | Angle                                               |
-| --------------------------------------------- | ----------------------------------------------- | --------------------------------------------------- |
-| Dev Containers specification and VS Code docs | Primary specification and product documentation | Explicit local/target sources and startup mode      |
-| systemd manuals                               | Primary reference                               | Context specifiers and identity semantics           |
-| Docker Compose docs                           | Primary reference                               | Expansion order, missing values, escaping           |
-| GNU gettext manual                            | Primary reference                               | Limited interpolation without shell evaluation      |
-| Agentworks source at the pinned snapshot      | Direct implementation evidence                  | Consumers, timing, homes, and literal-data handling |
+| Source                                 | Quality                            | Design contribution                                   |
+| -------------------------------------- | ---------------------------------- | ----------------------------------------------------- |
+| VS Code and Dev Containers references  | Primary product/spec documentation | Namespace shape and explicit source identity          |
+| Docker and gh manuals; Go package docs | Primary references                 | Downstream brace syntax                               |
+| Docker Compose docs                    | Primary reference                  | Explicit literal-dollar escaping                      |
+| GNU gettext manual                     | Primary reference                  | Bounded substitution without shell evaluation         |
+| Python library reference               | Primary reference                  | Scope of standard dollar templates                    |
+| systemd manuals                        | Primary reference                  | Context ownership and environment distinction         |
+| Agentworks code                        | Direct implementation evidence     | Existing shared context, consumers, and managed homes |

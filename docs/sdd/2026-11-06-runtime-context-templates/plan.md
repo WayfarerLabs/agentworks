@@ -1,13 +1,12 @@
 # Runtime context templates: plan
 
-Governing requirements: [draft FRD](frd.md). Architecture: [HLA](hla.md). Detailed contract:
+Governing requirements: [FRD](frd.md). Architecture: [HLA](hla.md). Detailed contract:
 [interpolation LLD](interpolation-lld.md). Background: [prior art](prior-art-research.md).
-Transition: [migration](migration-strategy.md).
+Lifecycle: [delivery](migration-strategy.md).
 
-Delivery: one PR containing the full feature, full SDD, permanent documentation, and validation. Its
-current draft is a design checkpoint, labeled `review-requested` to solicit feedback. Continue
-implementation on that same PR after requirements settle; do not merge the SDD separately. This plan
-records proposed implementation, not completion. No lockfile belongs to this design checkpoint.
+Delivery: one PR containing the full feature, full SDD, permanent documentation, and validation. The
+completed implementation is handed off ready on PR #867. Completion is tracked against the accepted
+namespaced contract; lock only after all feature work and final feedback are complete.
 
 ## Design checkpoint
 
@@ -18,13 +17,13 @@ records proposed implementation, not completion. No lockfile belongs to this des
 - [x] Establish a permanent reference describing current runtime context and interpolation.
 - [x] Run independent project and complexity reviews of the design checkpoint; disposition material
       findings and record the reviewed head and results here.
-- [ ] Obtain operator disposition of the draft requirements, including the recommended omission of
+- [x] Obtain operator disposition of the draft requirements, including the recommended omission of
       ambient lookup and references between managed env entries.
 
 ## Implementation
 
-- [ ] Confirm accepted requirements and update the architecture/LLD for any environment-reference
-      decision. Define all lookup, redaction, and inspection semantics before adding such a source.
+- [x] Record the accepted namespaced-only contract and destination-focused design, with opaque
+      secrets and no ambient lookup or dependencies between env entries.
 - [ ] Implement the pure shared parser with explicit literal escapes and field-aware errors; prove
       one-pass rendering, unknown/unavailable distinction, and malformed syntax behavior.
 - [ ] Supply consuming user, VM, agent, workspace, and session context using the existing shared
@@ -57,15 +56,9 @@ records proposed implementation, not completion. No lockfile belongs to this des
 - [ ] Once implementation and documentation are complete, record truthful completion and add the
       lockfile. The permanent reference must stand alone if this entire SDD directory is deleted.
 
-## Design review record
+## Final review iterations
 
-Reviewed head: `0724c4788113b686e26d85708d144622c16b6a79`.
-
-The independent project reviewer and complexity reviewer returned clean final verdicts. The first
-round's two complexity findings were incorporated: recognize only opening delimiters as template
-syntax, and derive the managed home through the shared rule rather than duplicate home state in the
-context. The operator's target-environment clarification is transcribed in the draft FRD; omitting
-lookup and cross-entry dependencies remains a recommendation for draft acceptance.
-
-The repository file-quality script passed formatting, Markdown lint, and spelling checks. No runtime
-implementation or live-environment testing is part of this design checkpoint.
+The operator authorizes up to three final PR review iterations. Mark the completed implementation
+ready, then wait for the integration report before starting each subsequent correction round. Allow
+up to four hours for the report. Record the exact reviewed head, findings, fixes, and evidence for
+each iteration. Published feedback informs disposition; it does not expand the authorized scope.
