@@ -208,7 +208,7 @@ def _repair_session_pid(
                 hint=(
                     "Its stored runtime identity is incomplete. Stop the native workload manually, or stop and start "
                     "its VM, then retry."
-                    if stored_ticks is None
+                    if session.pid is not None and session.pid > 0 and stored_ticks is None
                     else "Investigate the tmux server manually."
                 ),
             )

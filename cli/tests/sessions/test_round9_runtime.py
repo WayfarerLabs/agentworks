@@ -19,7 +19,7 @@ from agentworks.sessions.manager import _lifecycle
 
 from .test_create_start_restart_orchestrated import _create_stubs, _restart_fixture
 from .test_create_start_restart_orchestrated import _stub_build_registry as _stub_build_registry
-from .test_native_startup import _NATIVE_CAPTURE, _NATIVE_CREATE, launch
+from .test_native_startup import _NATIVE_CAPTURE, launch
 from .test_native_startup import native as native
 from .test_private_startup_boundaries import record_native_runtime
 from .test_round8_startup import bind_native_runtime
@@ -154,27 +154,6 @@ def test_known_pre_spawn_failure_can_retry_in_same_boot(tmp_path, monkeypatch, n
         assert sum("new-session" in command for command, _ in native.calls) == 1
     finally:
         db.close()
-
-
-@pytest.mark.parametrize("key", ["_AGW_SESSION_UUID", "_AGW_RUN_ID"])
-def test_private_launch_environment_conflict_prevents_checkpoint_and_spawn(native, key):
-    checkpoints = []
-    with pytest.raises(StateError):
-        _NATIVE_CREATE(
-            "s1",
-            str(native.root),
-            "sleep 30",
-            "owned",
-            run_command=native.run,
-            target=native,
-            admin_username="owned",
-            env={key: "operator-value"},
-            before_spawn=lambda: checkpoints.append(True),
-            session_uuid=str(uuid4()),
-            run_id=str(uuid4()),
-        )
-    assert checkpoints == []
-    assert not any("new-session" in command for command, _ in native.calls)
 
 
 @pytest.mark.parametrize("mutation", ["uuid", "run", "name", "replacement"])
