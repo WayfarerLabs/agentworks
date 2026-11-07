@@ -1174,6 +1174,9 @@ session's launch target (the agent, or the VM admin for admin sessions) before a
 so launching a session whose tool is not installed fails fast with a clear error instead of a
 cryptic downstream tmux failure.
 
+See [runtime context and interpolation](../docs/arch/runtime-context.md) for identity delivery, env
+scope precedence, and the boundary between env values and shell command text.
+
 Those config keys live only inside the `harness_integration` table; spelling any of them at the
 `spec` top level is a load error that points you at the nested shape.
 
