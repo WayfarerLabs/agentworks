@@ -380,8 +380,12 @@ def test_unpublished_nonrepo_failure_only_removes_empty_reservation(backend, occ
 
 @pytest.mark.parametrize("cancel", [False, True])
 @pytest.mark.parametrize("changed", ["none", "config", "config-symlink", "link", "other-file"])
-def test_late_nonrepo_failure_reclaims_only_unchanged_generated_files(backend, monkeypatch, cancel, changed):
+@pytest.mark.parametrize("path_suffix", ["", "/", "/./"])
+def test_late_nonrepo_failure_reclaims_only_unchanged_generated_files(
+    backend, make_config, monkeypatch, cancel, changed, path_suffix
+):
     target, vm, config, final = backend
+    config = make_config(f'\n[paths]\nvm_workspaces = "{final.parent.as_posix()}{path_suffix}"\n')
     original = KeyboardInterrupt() if cancel else SSHError("fixture ACL failure")
     link = target.home / f".config/tmuxinator/{console_session_name('project')}.yml"
     preserved = target.root / "preserved"

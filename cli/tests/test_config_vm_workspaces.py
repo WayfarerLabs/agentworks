@@ -102,8 +102,10 @@ def test_load_config_rejects_home_vm_workspaces(tmp_path: Path) -> None:
         load_config(config_file)
 
 
-def test_load_config_accepts_non_home_vm_workspaces(tmp_path: Path) -> None:
-    """A valid data-volume path loads cleanly and round-trips."""
-    config_file = _write_config(tmp_path, "/srv/ws")
+@pytest.mark.windows
+@pytest.mark.parametrize("path", ["/srv/ws", "/srv/ws/", "/srv//ws/./"])
+def test_load_config_accepts_non_home_vm_workspaces(tmp_path: Path, path: str) -> None:
+    """A valid data-volume path is stored in canonical guest form."""
+    config_file = _write_config(tmp_path, path)
     cfg = load_config(config_file)
     assert cfg.paths.vm_workspaces == "/srv/ws"
