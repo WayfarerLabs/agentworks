@@ -26,6 +26,8 @@ from typing import TYPE_CHECKING
 
 from agentworks.env.identity import per_context_identity_env
 from agentworks.env.merge import effective_env
+from agentworks.env.render import render_plaintext
+from agentworks.interpolation import runtime_values
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -60,7 +62,7 @@ def compose_env(
         agent=agent,
         session=session,
     )
-    user_env: dict[str, str] = {}
+    user_env = render_plaintext(merged, runtime_values(ctx))
     for key, entry in merged.items():
         if entry.secret is not None:
             if entry.secret not in values:
@@ -80,10 +82,6 @@ def compose_env(
                 use=LineOrientedSecretUse.ENVIRONMENT,
                 secret_name=entry.secret,
             )
-        else:
-            # EnvEntry invariant: exactly one of value/secret set.
-            assert entry.value is not None
-            user_env[key] = entry.value
     # Identity overlays user_env: AGENTWORKS_* names always reflect the
     # platform-set value when sshd injects the SetEnv'd vars into the
     # user's shell. A collision in user env has already produced a

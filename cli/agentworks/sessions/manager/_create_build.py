@@ -306,6 +306,8 @@ def _build_session_graph(
                 registry,
                 name=name,
                 workspace_name=workspace_name,
+                workspace_dir=workspace_node.workspace_path,
+                agent_name=agent_name,
                 vm=vm,
                 session_template=template,
                 new_workspace=new_workspace,
@@ -330,6 +332,7 @@ def _build_session_graph(
             vm=vm,
             name=workspace_name,
             template=workspace_tmpl,
+            root=pending_workspace.workspace_path,
         )
         if pending_workspace.setup_inputs is not None:
             pending_workspace.setup_inputs.register(resolver, registry)

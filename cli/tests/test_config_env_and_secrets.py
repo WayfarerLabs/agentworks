@@ -718,7 +718,7 @@ def test_session_template_required_commands_parsed(tmp_path: Path) -> None:
                 {
                     "harness_integration": {
                         "name": "shell",
-                        "command": "claude --name {{session_name}}",
+                        "command": "claude --name ${agw:session_name}",
                         "required_commands": ["claude"],
                     }
                 },
@@ -729,7 +729,7 @@ def test_session_template_required_commands_parsed(tmp_path: Path) -> None:
     tmpl = registry.lookup("session-template", "claude")
     assert tmpl.harness_integration.name == "shell"
     assert tmpl.harness_integration.config == {
-        "command": "claude --name {{session_name}}",
+        "command": "claude --name ${agw:session_name}",
         "required_commands": ["claude"],
     }
 

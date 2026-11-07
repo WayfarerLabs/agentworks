@@ -48,12 +48,20 @@ class _Probe:
 
 @pytest.mark.parametrize(
     "value",
-    ["", "plain", "{{session_name}}", "before {{component}} after", "{{{triple}}}", "quote ' and newline\n"],
+    [
+        "",
+        "plain",
+        "${agw:session_name}",
+        "before ${agw:component} after",
+        "$${agw:session_name}",
+        "quote ' and newline\n",
+    ],
 )
 def test_quote_literal_argv_hides_template_syntax_and_reconstructs_exact_value(value: str) -> None:
     encoded = quote_literal_argv(value)
-    assert "{{" not in encoded
-    assert shlex.split(encoded) == [value]
+    from agentworks.interpolation import render_template
+
+    assert shlex.split(render_template(encoded, {}, field="command")) == [value]
 
 
 def _harness_integration(

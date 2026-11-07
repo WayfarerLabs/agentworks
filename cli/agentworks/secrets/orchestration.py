@@ -39,13 +39,8 @@ agents. It just walks env dicts. Future legacy-prompt migrations
 (Tailscale auth key, git credentials) hook in via ``extra_decls`` rather
 than special-casing them in the orchestrator.
 
-**Substitution invariance:** callers may hand in either pre- or
-post-substitution env dicts (e.g. before or after
-``_substitute_template_vars_in_env``). The computed union of
-``SecretDecl``s is invariant under substitution because substitution
-only rewrites ``EnvEntry.value`` (plaintext), never ``EnvEntry.secret``
-(the reference name). This is load-bearing for callers that build
-targets from un-substituted template env dicts.
+Plaintext interpolation leaves secret-reference names unchanged, so the secret
+union depends only on the winning entries' secret arms.
 
 **Non-interactive errors:** ``resolve_for_command`` raises
 ``SecretUnavailableError`` if the active sources cannot satisfy a
@@ -103,6 +98,18 @@ class SecretTarget:
     label: str | None = field(default=None, compare=False)
     """Optional human-readable label for diagnostics. Not part of
     equality, hashing, or identity."""
+
+    def validate_context(self, values: Mapping[str, str]) -> None:
+        """Check authored winning plaintext before the operation resolves secrets."""
+        from agentworks.env.render import render_plaintext
+
+        render_plaintext(
+            effective_env(
+                vm=self.vm, workspace=self.workspace, admin=self.admin, agent=self.agent, session=self.session
+            ),
+            values,
+            field=f"{self.label}.env" if self.label else "env",
+        )
 
 
 def compute_needed_secrets(

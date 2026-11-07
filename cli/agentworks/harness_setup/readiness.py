@@ -13,6 +13,7 @@ from agentworks.capabilities.harness_integration.setup import (
 from agentworks.errors import StateError
 from agentworks.harness_setup.dispatch import destination_id
 from agentworks.harness_setup.state import read_native_setup
+from agentworks.linux_users import managed_home
 from agentworks.ssh import SSHError
 
 if TYPE_CHECKING:
@@ -156,7 +157,7 @@ def _applicable_evidence(
             )
             username = agent.linux_user
             remedy = f"Enable the integration activation and run 'agw agent reinit {agent.name}'."
-        location = f"/home/{username}"
+        location = managed_home(username)
     else:
         if workspace.vm_name != vm.name:
             raise StateError("setup readiness requires the session's workspace on this VM")

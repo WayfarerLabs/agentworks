@@ -115,11 +115,13 @@ class GrokBuildConfig(AgwModel):
     """Explicitly enabled session artifact carriers. An authored list replaces inherited opt-ins."""
 
     extra_args: Annotated[list[str], MergeStrategy.REPLACE] = Field(default_factory=list)
-    """Raw argv tokens appended verbatim after every managed flag and before
+    """Argv tokens appended after every managed flag and before
     any fresh positional prompt. Grok Build 1.0.4 rejects repeated managed
     flags, so use this for unmodeled flags rather than overriding a modeled
     field. A child template's declared list replaces its parent's instead of
-    accumulating."""
+    accumulating. Context references such as
+    ${agw:workspace_dir} render before each argument is shell-quoted; replacement
+    contents are literal data."""
 
 
 # Grok Build 1.0.4 resolves its user-state root through the official
@@ -292,7 +294,7 @@ class GrokBuildIntegration(HarnessIntegration):
         if self.config.rules is not None and "--rules" not in self._artifact_plan.argv:
             parts += ["--rules", quote_literal_argv(self.config.rules)]
         parts += [quote_literal_argv(token) for token in self._artifact_plan.argv]
-        parts += [shlex.quote(token) for token in self.config.extra_args]
+        parts += [self.quote_context_argv(token) for token in self.config.extra_args]
         if not resume and (prompt := self._fresh_prompt()) is not None:
             parts += ["--", quote_literal_argv(prompt)]
         argv = " ".join(parts)

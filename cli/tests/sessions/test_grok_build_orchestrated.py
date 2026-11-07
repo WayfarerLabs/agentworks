@@ -146,6 +146,8 @@ def test_substitution_preserves_workload_values_and_substitutes_extra_args(
     from agentworks.sessions.manager import create_session
 
     db = _seed_db(tmp_path)
+    workspace_path = "/srv/a project's $cache/${agw:unknown}"
+    db.update_workspace_path("ws1", workspace_path)
     events: list[str] = []
     captured: dict[str, str] = {}
     target = _GrokTarget(events, session_present=False)
@@ -153,11 +155,18 @@ def test_substitution_preserves_workload_values_and_substitutes_extra_args(
     _template(
         monkeypatch,
         {
-            "goal": "goal {{session_name}} {{component}}",
-            "initial_prompt": "prompt {{session_name}} {{component}}",
-            "agent": "profile {{session_name}} {{component}}",
-            "rules": "rules {{session_name}} {{component}}",
-            "extra_args": ["--future-flag", "extra-{{session_name}}"],
+            "goal": "goal ${agw:session_name} ${agw:component}",
+            "initial_prompt": "prompt ${agw:session_name} ${agw:component}",
+            "agent": "profile ${agw:session_name} ${agw:component}",
+            "rules": "rules ${agw:session_name} ${agw:component}",
+            "extra_args": [
+                "--future-flag",
+                "extra-${agw:session_name}",
+                "--future-path",
+                "${agw:workspace_dir}",
+                "--literal",
+                "$${agw:session_name}",
+            ],
         },
     )
     _capture_tmux(monkeypatch, events, captured)
@@ -174,16 +183,18 @@ def test_substitution_preserves_workload_values_and_substitutes_extra_args(
     inner = shlex.split(captured["command"])[2]
     inner_argv = shlex.split(inner)
     argv = inner_argv[inner_argv.index("grok") + 1 :]
-    assert argv[argv.index("--agent") + 1] == "profile {{session_name}} {{component}}"
-    assert argv[argv.index("--rules") + 1] == "rules {{session_name}} {{component}}"
+    assert argv[argv.index("--agent") + 1] == "profile ${agw:session_name} ${agw:component}"
+    assert argv[argv.index("--rules") + 1] == "rules ${agw:session_name} ${agw:component}"
     assert "--prompt" not in argv
     assert "--agent-profile" not in argv
     assert argv[-2] == "--"
     prompt = argv[-1]
-    assert "goal {{session_name}} {{component}}" in prompt
-    assert "prompt {{session_name}} {{component}}" in prompt
+    assert "goal ${agw:session_name} ${agw:component}" in prompt
+    assert "prompt ${agw:session_name} ${agw:component}" in prompt
     assert argv[argv.index("--future-flag") + 1] == "extra-s1"
     assert argv.index("--future-flag") < argv.index("--")
+    assert argv[argv.index("--future-path") + 1] == workspace_path
+    assert argv[argv.index("--literal") + 1] == "${agw:session_name}"
     db.close()
 
 

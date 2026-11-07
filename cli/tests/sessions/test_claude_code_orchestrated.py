@@ -437,6 +437,8 @@ def test_substitution_preserves_workload_values_and_substitutes_extra_args(
     from agentworks.sessions.manager import create_session
 
     db = _seed_db(tmp_path)
+    workspace_path = "/srv/a project's $cache/${agw:unknown}"
+    db.update_workspace_path("ws1", workspace_path)
     events: list[str] = []
     captured: dict[str, str] = {}
     _patch_transport(monkeypatch, _ClaudeTarget(events, transcript_present=False))
@@ -444,11 +446,18 @@ def test_substitution_preserves_workload_values_and_substitutes_extra_args(
     _harness_integration_template(
         monkeypatch,
         {
-            "goal": "goal {{session_name}} {{component}}",
-            "initial_prompt": "prompt {{session_name}} {{component}}",
-            "agent": "agent {{session_name}} {{component}}",
-            "append_system_prompt": "system {{session_name}} {{component}}",
-            "extra_args": ["--future-flag", "extra-{{session_name}}"],
+            "goal": "goal ${agw:session_name} ${agw:component}",
+            "initial_prompt": "prompt ${agw:session_name} ${agw:component}",
+            "agent": "agent ${agw:session_name} ${agw:component}",
+            "append_system_prompt": "system ${agw:session_name} ${agw:component}",
+            "extra_args": [
+                "--future-flag",
+                "extra-${agw:session_name}",
+                "--future-path",
+                "${agw:workspace_dir}",
+                "--literal",
+                "$${agw:session_name}",
+            ],
         },
     )
     _capture_pane_command(monkeypatch, events, captured)
@@ -471,10 +480,12 @@ def test_substitution_preserves_workload_values_and_substitutes_extra_args(
     inner = shlex.split(command)[2]
     inner_argv = shlex.split(inner)
     argv = inner_argv[inner_argv.index("claude") + 1 :]
-    assert argv[argv.index("--agent") + 1] == "agent {{session_name}} {{component}}"
-    assert argv[argv.index("--append-system-prompt") + 1] == "system {{session_name}} {{component}}"
+    assert argv[argv.index("--agent") + 1] == "agent ${agw:session_name} ${agw:component}"
+    assert argv[argv.index("--append-system-prompt") + 1] == "system ${agw:session_name} ${agw:component}"
     prompt = argv[-1]
-    assert "goal {{session_name}} {{component}}" in prompt
-    assert "prompt {{session_name}} {{component}}" in prompt
+    assert "goal ${agw:session_name} ${agw:component}" in prompt
+    assert "prompt ${agw:session_name} ${agw:component}" in prompt
     assert argv[argv.index("--future-flag") + 1] == "extra-s1"
+    assert argv[argv.index("--future-path") + 1] == workspace_path
+    assert argv[argv.index("--literal") + 1] == "${agw:session_name}"
     db.close()

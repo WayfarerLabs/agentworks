@@ -1508,9 +1508,9 @@ def test_create_passes_new_session_intent_to_the_harness_integration(
 # -- pane-command parity: integration op string + relocated substitution -----
 #
 # The command reaching tmux is the harness integration's start output with the
-# {{session_name}} / {{workspace_name}} substitution applied at the CALL
+# ${agw:session_name} / ${agw:workspace_name} substitution applied at the CALL
 # SITE (lifted out of the deleted _build_session_command). These pin that
-# every template produces the same pane command it did before the swap.
+# each selected template supplies the pane command consumed by tmux.
 
 
 def _template(
@@ -1561,7 +1561,7 @@ def test_create_pane_command_is_the_harness_integration_output_substituted(
     events: list[str] = []
     db = _create_stubs(tmp_path, monkeypatch, events)
     db.insert_agent("a1", "vm1", "agt-a1")
-    _template(monkeypatch, command="claude {{session_name}} in {{workspace_name}}")
+    _template(monkeypatch, command="claude ${agw:session_name} in ${agw:workspace_name}")
     captured: dict[str, str] = {}
     _capture_pane_command(monkeypatch, captured)
 
@@ -1593,7 +1593,7 @@ def test_restart_pane_command_uses_resume_command_and_session_workspace(
     _template(
         monkeypatch,
         command="claude",
-        resume_command="resume {{session_name}} {{workspace_name}}",
+        resume_command="resume ${agw:session_name} ${agw:workspace_name}",
     )
     captured: dict[str, str] = {}
     _capture_pane_command(monkeypatch, captured)
@@ -2057,3 +2057,55 @@ def test_restart_multiline_environment_secret_refuses_before_kill(
     assert "session-restart-sentinel" not in repr((caught.value.args, vars(caught.value)))
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
+
+
+def test_invalid_returned_command_preserves_running_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentworks.errors import ValidationError
+    from agentworks.sessions.manager import restart_session
+
+    db, events = _restart_fixture(tmp_path, monkeypatch)
+    _template(monkeypatch, resume_command="tool ${agw:unknown}")
+    before = db.get_session("s1")
+    with pytest.raises(ValidationError):
+        restart_session(
+            db,
+            SimpleNamespace(session=SimpleNamespace(history_limit=1)),
+            name="s1",
+            yes=True,
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+    assert db.get_session("s1") == before
+    assert "kill" not in events
+    assert "tmux_create" not in events
+    db.close()
+
+
+def test_invalid_env_reference_refuses_before_secret_resolution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from agentworks.env import EnvEntry
+    from agentworks.errors import ValidationError
+    from agentworks.sessions import manager
+
+    db, events = _restart_fixture(tmp_path, monkeypatch)
+    _template(monkeypatch, command="tool")
+    template = manager._resolve_template(None, None)
+    template.env = {"CONFIG": EnvEntry("${agw:unknown}")}
+    from agentworks.sessions.manager._env import _session_secret_target
+
+    monkeypatch.setattr(manager, "_session_secret_target", _session_secret_target)
+    before = db.get_session("s1")
+    with pytest.raises(ValidationError):
+        manager.restart_session(
+            db,
+            SimpleNamespace(session=SimpleNamespace(history_limit=1)),
+            name="s1",
+            yes=True,
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+    assert db.get_session("s1") == before
+    assert "resolve" not in events
+    assert "resolve_env" not in events
+    assert "kill" not in events
+    assert "tmux_create" not in events
+    db.close()

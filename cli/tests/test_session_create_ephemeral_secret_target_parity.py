@@ -116,6 +116,8 @@ def test_secret_target_pre_create_parity_with_session_secret_target(tmp_path: Pa
         registry,
         name="s1",
         workspace_name="ws1",
+        workspace_dir=ws.workspace_path,
+        agent_name="agt1" if mode == "agent" else None,
         vm=vm,
         session_template=session_template,
         new_workspace=False,
@@ -133,4 +135,67 @@ def test_secret_target_pre_create_parity_with_session_secret_target(tmp_path: Pa
     registry = build_registry(config)
     assert compute_needed_secrets([pre], registry) == compute_needed_secrets([post], registry)
 
+    db.close()
+
+
+def test_pre_create_uses_planned_agent_and_workspace_without_creating_rows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from agentworks.agents.templates import ResolvedAgentTemplate
+    from agentworks.bootstrap import build_registry
+    from agentworks.config import load_config
+    from agentworks.env import EnvEntry
+    from agentworks.env import render as rendering
+    from agentworks.sessions.manager import _session_secret_target_pre_create
+    from agentworks.sessions.templates import ResolvedSessionTemplate
+    from agentworks.workspaces.templates import ResolvedTemplate
+
+    config = load_config(_write_parity_config(tmp_path), warn_issues=False)
+    db = _seed_parity_db(tmp_path)
+    vm = db.get_vm("vm1")
+    assert vm is not None
+    registry = build_registry(config)
+    observed: dict[str, str] = {}
+    original_render = rendering.render_plaintext
+
+    def capture(entries, values, *, field="env"):
+        result = original_render(entries, values, field=field)
+        observed.update(result)
+        return result
+
+    monkeypatch.setattr(rendering, "render_plaintext", capture)
+    _session_secret_target_pre_create(
+        db,
+        registry,
+        name="job",
+        workspace_name="planned-project",
+        workspace_dir="/srv/project's files",
+        agent_name="planned",
+        vm=vm,
+        session_template=ResolvedSessionTemplate(
+            "default",
+            env={
+                "CONFIG": EnvEntry("${agw:user_home_dir}/tool"),
+                "USER": EnvEntry("${agw:user_name}"),
+                "AGENT": EnvEntry("${agw:agent_name}"),
+                "PROJECT": EnvEntry("${agw:workspace_dir}"),
+            },
+        ),
+        new_workspace=True,
+        resolved_workspace_template=ResolvedTemplate("default"),
+        existing_workspace=None,
+        new_agent=True,
+        resolved_agent_template=ResolvedAgentTemplate("default"),
+        existing_agent=None,
+        is_admin_mode=False,
+    )
+    assert observed == {
+        "CONFIG": "/home/agt-planned/tool",
+        "USER": "agt-planned",
+        "AGENT": "planned",
+        "PROJECT": "/srv/project's files",
+    }
+    assert db.get_agent("planned") is None
+    assert db.get_workspace("planned-project") is None
+    assert db.get_session("job") is None
     db.close()
