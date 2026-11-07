@@ -1369,7 +1369,7 @@ The bounded correction preserves the stronger uncertainty safeguards while repai
 boundaries. A socket path is an address, not authority to adopt and destroy a server. Reuse the
 existing `session_uuid` and `run_id` in minimal native launch metadata when recovering an incomplete
 fingerprint; complete older recorded fingerprints keep their authority without new metadata. The
-synchronous `before_spawn` checkpoint belongs after socket prechecks and immediately before the
+synchronous `before_spawn` checkpoint belongs after socket checks and immediately before the
 spawn-capable command. A failed checkpoint prevents dispatch, while an unacknowledged dispatch
 remains uncertain. No new persisted identity, journal, provider API or Transport interface is added.
 
@@ -1381,7 +1381,7 @@ remains uncertain. No new persisted identity, journal, provider API or Transport
 - [ ] Retain the admin dedicated address before launch and restore supported per-session recovery
       for already-retained null-address rows after sound absence evidence. Keep actual-user and
       legacy shared-server behavior, without workspace deletion as the recovery mechanism.
-- [ ] Move uncertainty checkpointing to the actual dispatch boundary; prove precheck and checkpoint
+- [ ] Record uncertainty at the actual dispatch boundary; prove precheck and checkpoint
       failure issue no spawn and need no reboot, while post-dispatch loss retains recoverable state.
 - [ ] Redact conventional repr forms through the shared boundary and actual failure callers before
       truncation; keep early-death detection and do not promise arbitrary encoding recognition.

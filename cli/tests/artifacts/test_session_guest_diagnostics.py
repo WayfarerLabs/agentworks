@@ -129,7 +129,7 @@ def test_destination_identity_ignores_noninteractive_startup_output(db, banner):
     assert observed == destination_id(vm, runner, location="/home/identity", username="identity")
 
 
-@pytest.mark.windows
+@pytest.mark.skipif(sys.platform != "linux", reason="executes the Linux guest inventory helper locally")
 def test_machine_inventory_failure_identifies_the_actual_machine_path(tmp_path):
     root = tmp_path / r"fixture\agent\target"
     path = root / "etc/codex/skills"

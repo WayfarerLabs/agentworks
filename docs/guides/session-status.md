@@ -39,7 +39,7 @@ running status when the session has a known start time. A running session withou
 rendering its configured facts. A stopped or unreachable VM remains stopped and yields `UNKNOWN`
 rather than being started for inspection.
 
-A launch records the current boot after socket prechecks, immediately before dispatching the
+A launch records the current boot after socket checks, immediately before dispatching the
 spawn-capable command. A failed checkpoint prevents dispatch; a lost acknowledgement afterward
 preserves an uncertain outcome. Both admin and agent launches retain their dedicated socket address.
 A lifecycle command may recover an incomplete fingerprint only when native metadata matches the
