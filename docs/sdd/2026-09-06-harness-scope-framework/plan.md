@@ -1423,3 +1423,14 @@ documented main-selector attempt without the exact generated persona markers. Th
 all versions or every internal registry; it does reject treating accepted argv as availability proof
 for the tested carrier. First-delivery outcomes must remain conservative and honest. Both SDDs
 remain owned through closeout after any intermediate merge; neither lock is present now.
+
+Private correctness review reproduced an inherited initial-creation race with actual tmux 3.3a on
+both main `c8d4dfb3` and candidate `216c0e65`: a native server created at the managed socket after the
+last socket check can receive the new session, be adopted and later be destroyed by managed stop.
+This is distinct from the report's already-present decoy regression, which this round corrects.
+The race remains owned follow-up work, not an assertion of atomic concurrent creation or same-user
+tamper resistance. Process-inherited server UUID/run metadata could distinguish server origins, but
+a post-launch check alone does not undo child creation or global option changes; temporary-socket
+publication also needs a separate native-identity and cleanup design. Do not add either incomplete
+mechanism to this bounded correction. Permanent session-status guidance tells operators to keep
+manual native servers on separate sockets. Retain this limit in acceptance and the handoff.

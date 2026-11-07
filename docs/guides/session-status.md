@@ -53,6 +53,10 @@ can recover after exact-session absence, dedicated-server absence and evidence t
 cannot survive; unrelated sessions on the default server do not prevent that repair. Recovery uses
 the ordinary per-session lifecycle commands and does not require deleting a workspace.
 
+Keep manually created tmux servers on separate sockets. A native server created at a managed socket
+between the last startup check and dispatch can still race initial creation. These checks do not
+isolate processes running as the same Linux user.
+
 `session start` can finish an interrupted startup on the existing runtime after recovering its
 identity. It completes access sharing, checks the recorded launch pane and releases startup
 protection; it does not create a second workload. Native launch-pane metadata identifies that pane
