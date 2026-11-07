@@ -178,14 +178,24 @@ def test_running_session_names_rejects_legacy_row_before_connectivity_probe(
     assert fake_target.commands == []
 
 
-def test_running_session_names_includes_incomplete_live_identity_without_repair(
+def test_running_session_names_refuses_unproved_live_identity_without_repair(
     db: Database,
     fake_target: _FakeTarget,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from agentworks.sessions import manager
     from agentworks.sessions.multi_console import running_session_names
 
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["alpha"])
+    before = db.get_session("alpha")
+    changes_before = db._conn.total_changes
+
+    def refuse_repair(*args: object, **kwargs: object) -> None:
+        pytest.fail("console inventory attempted runtime repair")
+
+    monkeypatch.setattr(manager, "ensure_pids_batch", refuse_repair)
+    monkeypatch.setattr(manager, "_repair_session_pid", refuse_repair)
 
     def stub_run(command: str, **kwargs: object) -> _FakeResult:
         fake_target.commands.append(command)
@@ -195,10 +205,13 @@ def test_running_session_names_includes_incomplete_live_identity_without_repair(
 
     fake_target.run = stub_run  # type: ignore[assignment]
 
-    assert running_session_names(db, _StubConfig(), "vm1") == ["alpha"]
+    with pytest.raises(ConnectivityError):
+        running_session_names(db, _StubConfig(), "vm1")
     unchanged = db.get_session("alpha")
     assert unchanged is not None
     assert (unchanged.pid, unchanged.boot_id, unchanged.tmux_server_start_ticks) == (None, None, None)
+    assert unchanged == before
+    assert db._conn.total_changes == changes_before
     assert len(fake_target.commands) == 1
 
 
