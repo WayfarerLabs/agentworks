@@ -1381,8 +1381,8 @@ remains uncertain. No new persisted identity, journal, provider API or Transport
 - [ ] Retain the admin dedicated address before launch and restore supported per-session recovery
       for already-retained null-address rows after sound absence evidence. Keep actual-user and
       legacy shared-server behavior, without workspace deletion as the recovery mechanism.
-- [ ] Record uncertainty at the actual dispatch boundary; prove precheck and checkpoint
-      failure issue no spawn and need no reboot, while post-dispatch loss retains recoverable state.
+- [ ] Record uncertainty at the actual dispatch boundary; prove precheck and checkpoint failure
+      issue no spawn and need no reboot, while post-dispatch loss retains recoverable state.
 - [ ] Redact conventional repr forms through the shared boundary and actual failure callers before
       truncation; keep early-death detection and do not promise arbitrary encoding recognition.
 - [ ] Isolate HOME-derived deletion-test paths, repair the identified portable fixture path/literal
@@ -1425,12 +1425,13 @@ for the tested carrier. First-delivery outcomes must remain conservative and hon
 remain owned through closeout after any intermediate merge; neither lock is present now.
 
 Private correctness review reproduced an inherited initial-creation race with actual tmux 3.3a on
-both main `c8d4dfb3` and candidate `216c0e65`: a native server created at the managed socket after the
-last socket check can receive the new session, be adopted and later be destroyed by managed stop.
-This is distinct from the report's already-present decoy regression, which this round corrects.
-The race remains owned follow-up work, not an assertion of atomic concurrent creation or same-user
-tamper resistance. Process-inherited server UUID/run metadata could distinguish server origins, but
-a post-launch check alone does not undo child creation or global option changes; temporary-socket
-publication also needs a separate native-identity and cleanup design. Do not add either incomplete
-mechanism to this bounded correction. Permanent session-status guidance tells operators to keep
-manual native servers on separate sockets. Retain this limit in acceptance and the handoff.
+both main `c8d4dfb3` and candidate `216c0e65`: a native server created at the managed socket after
+the last socket check can receive the new session, be adopted and later be destroyed by managed
+stop. This is distinct from the report's already-present decoy regression, which this round
+corrects. The race remains owned follow-up work, not an assertion of atomic concurrent creation or
+same-user tamper resistance. Process-inherited server UUID/run metadata could distinguish server
+origins, but a post-launch check alone does not undo child creation or global option changes;
+temporary-socket publication also needs a separate native-identity and cleanup design. Do not add
+either incomplete mechanism to this bounded correction. Permanent session-status guidance tells
+operators to keep manual native servers on separate sockets. Retain this limit in acceptance and the
+handoff.
