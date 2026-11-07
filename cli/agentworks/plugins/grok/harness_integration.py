@@ -288,7 +288,7 @@ class GrokBuildIntegration(HarnessIntegration):
             identity = ["--session-id", sid]
             message = f"agentworks harness integration (grok-build): starting new session {self._session_name}"
 
-        parts = [shlex.quote(token) for token in (*identity, *self._managed_flags())]
+        parts = [quote_literal_argv(token) for token in (*identity, *self._managed_flags())]
         if self.config.agent is not None:
             parts += ["--agent", quote_literal_argv(self.config.agent)]
         if self.config.rules is not None and "--rules" not in self._artifact_plan.argv:

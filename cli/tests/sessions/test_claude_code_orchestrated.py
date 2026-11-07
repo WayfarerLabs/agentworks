@@ -429,8 +429,9 @@ def test_restart_under_another_harness_integration_leaves_the_flat_legacy_key_in
 # -- substitution-safety: the generated snippet is not mangled ---------------
 
 
+@pytest.mark.parametrize("literal", ["${agw:session_name}", "${agw:unknown}", "$${agw:session_name}"])
 def test_substitution_preserves_workload_values_and_substitutes_extra_args(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, literal: str
 ) -> None:
     """Workload fields are literal harness input across the real manager
     substitution boundary, while ``extra_args`` retains template expansion."""
@@ -446,6 +447,9 @@ def test_substitution_preserves_workload_values_and_substitutes_extra_args(
     _harness_integration_template(
         monkeypatch,
         {
+            "model": literal,
+            "reasoning_effort": literal,
+            "permission_mode": literal,
             "goal": "goal ${agw:session_name} ${agw:component}",
             "initial_prompt": "prompt ${agw:session_name} ${agw:component}",
             "agent": "agent ${agw:session_name} ${agw:component}",
@@ -486,6 +490,9 @@ def test_substitution_preserves_workload_values_and_substitutes_extra_args(
     assert "goal ${agw:session_name} ${agw:component}" in prompt
     assert "prompt ${agw:session_name} ${agw:component}" in prompt
     assert argv[argv.index("--future-flag") + 1] == "extra-s1"
+    assert argv[argv.index("--model") + 1] == literal
+    assert argv[argv.index("--permission-mode") + 1] == literal
+    assert argv[argv.index("--effort") + 1] == literal
     assert argv[argv.index("--future-path") + 1] == workspace_path
     assert argv[argv.index("--literal") + 1] == "${agw:session_name}"
     db.close()

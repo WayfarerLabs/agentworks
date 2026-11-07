@@ -399,7 +399,9 @@ class ClaudeCodeIntegration(HarnessIntegration):
         else:
             identity = ["--session-id", sid]
             msg = f"agentworks harness integration (claude-code): starting new session {self._session_name}"
-        parts = [shlex.quote(token) for token in (*identity, "--name", self._session_name, *self._managed_flags())]
+        parts = [
+            quote_literal_argv(token) for token in (*identity, "--name", self._session_name, *self._managed_flags())
+        ]
         if self.config.agent is not None:
             parts += ["--agent", quote_literal_argv(self.config.agent)]
         if (
@@ -416,8 +418,8 @@ class ClaudeCodeIntegration(HarnessIntegration):
         # wrapping the tmux pane applies (``exec`` takes one simple
         # command): the login shell execs this sh, which echoes then
         # execs claude, so the pane becomes Claude. The message and the
-        # generated argv carry no ``{{word}}`` tokens, so the core
-        # template-var substitution does not mangle them.
+        # generated argv shield reserved context prefixes from the final
+        # command-source interpolation pass.
         inner = f"echo {shlex.quote(msg)}; exec claude {argv}"
         return f"sh -c {shlex.quote(inner)}"
 

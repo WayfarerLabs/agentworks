@@ -943,8 +943,8 @@ class CodexIntegration(HarnessIntegration):
 
         A single ``sh -c`` so the whole thing survives the ``exec``
         wrapping the tmux pane applies (``exec`` takes one simple
-        command). The message and the generated argv carry no ``{{word}}``
-        tokens, so the core template-var substitution does not mangle them.
+        command). Generated argv shields reserved context prefixes from
+        the final command-source interpolation pass.
         """
         parts = [f"echo {shlex.quote(msg)}"]
         if legacy_marker is not None:
@@ -1018,7 +1018,7 @@ class CodexIntegration(HarnessIntegration):
         ones). That deliberately disables the id binding, so it is
         documented on the field; discovery and the picker still hold.
         """
-        parts = [shlex.quote(token) for token in (*head, *self._managed_flags())]
+        parts = [quote_literal_argv(token) for token in (*head, *self._managed_flags())]
         parts += ["-c", notify_value_word(self._session_name)]
         if self.config.developer_instructions is not None and not any(
             token.startswith("developer_instructions=") for token in self._artifact_plan.argv

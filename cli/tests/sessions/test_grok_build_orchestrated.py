@@ -140,8 +140,9 @@ def test_create_persists_minted_uuid_and_launches_fresh(tmp_path: Path, monkeypa
     db.close()
 
 
+@pytest.mark.parametrize("literal", ["${agw:session_name}", "${agw:unknown}", "$${agw:session_name}"])
 def test_substitution_preserves_workload_values_and_substitutes_extra_args(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, literal: str
 ) -> None:
     from agentworks.sessions.manager import create_session
 
@@ -155,6 +156,9 @@ def test_substitution_preserves_workload_values_and_substitutes_extra_args(
     _template(
         monkeypatch,
         {
+            "model": literal,
+            "reasoning_effort": literal,
+            "permission_mode": literal,
             "goal": "goal ${agw:session_name} ${agw:component}",
             "initial_prompt": "prompt ${agw:session_name} ${agw:component}",
             "agent": "profile ${agw:session_name} ${agw:component}",
@@ -192,6 +196,9 @@ def test_substitution_preserves_workload_values_and_substitutes_extra_args(
     assert "goal ${agw:session_name} ${agw:component}" in prompt
     assert "prompt ${agw:session_name} ${agw:component}" in prompt
     assert argv[argv.index("--future-flag") + 1] == "extra-s1"
+    assert argv[argv.index("--model") + 1] == literal
+    assert argv[argv.index("--permission-mode") + 1] == literal
+    assert argv[argv.index("--reasoning-effort") + 1] == literal
     assert argv.index("--future-flag") < argv.index("--")
     assert argv[argv.index("--future-path") + 1] == workspace_path
     assert argv[argv.index("--literal") + 1] == "${agw:session_name}"
