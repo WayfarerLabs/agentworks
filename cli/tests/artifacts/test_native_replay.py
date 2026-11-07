@@ -189,11 +189,25 @@ def test_inactive_facet_replays_known_persona_without_reusing_old_policy_paths(
     monkeypatch.setattr(integration, "_resume_or_launch", lambda *args, **kwargs: "fixture-launch")
     warnings: list[str] = []
     monkeypatch.setattr("agentworks.output.warn", warnings.append)
+    retained = {file.path: Path(file.path).read_bytes() for file in all_files}
     result = integration.start(
         RunContext(admin_target=SimpleNamespace(run=run, logger=None)), intent=HarnessLaunchIntent.RESUME_OR_NEW
     )
     assert result.command == "fixture-launch"
     assert warnings
+    assert {path: Path(path).read_bytes() for path in retained} == retained
+    if tool == "grok":
+        assert result.artifacts.files == ()
+        assert integration._artifact_plan.argv == ()
+        assert {item.input_id for item in result.artifacts.deferred} == {item.identity for item in inputs.items()}
+        assert all(item.destination == "session" for item in result.artifacts.deferred)
+        assert requests
+        for request in requests:
+            assert set(request["paths"]) == set(retained)
+            assert set(request["entries"]) == {file.path for file in all_files if file.native_identity}
+            assert set(request["identities"]) == {file.native_identity for file in all_files if file.native_identity}
+            assert request["proposed"] == {}
+        return
     if prior_state == "competing":
         assert inputs.local is not None
         assert {item.input_id for item in result.artifacts.deferred} == {
