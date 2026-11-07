@@ -1695,11 +1695,20 @@ useful at their actual scope, not blanket current-head acceptance.
 
 - [x] Reconcile current source/test/permanent-home anchors and retained native evidence without
       inventing model-consumption or all-backend gates; retain actual unknown persona/resume cells.
-- [ ] Complete the joint runtime, repr, safe fixture and path/probe corrections with the companion
+- [x] Complete the joint runtime, repr, safe fixture and path/probe corrections with the companion
       effort, preserving origin-specific publication holds and optional final unhandled behavior.
-- [ ] Make Grok private-session personas honestly unhandled until a verified carrier exists,
+- [x] Make Grok private-session personas honestly unhandled until a verified carrier exists,
       preserving recognized configuration and independent/native outer-scope behavior. Update the
       support matrix and permanent worked two-session example without introducing another format.
-- [ ] Complete private review and exact-head gates, then the normal ready handoff and scoped report
-      reconciliation. Finish both owned SDD locks only after all retained requirements and permanent
-      teaching are proved; an intermediate correction merge does not end this ownership.
+- [x] Complete the private review and isolated local gates recorded in the companion round 9 plan.
+- [ ] Complete final-head CI and the normal ready handoff, then scoped report reconciliation. Finish
+      both owned SDD locks only after all retained requirements and permanent teaching are proved;
+      an intermediate correction merge does not end this ownership.
+
+The shared full local suite passed 11,320 tests with 11 skips. All three private lanes are clean
+through `9ed0a343`; final-head CI and the ready signal remain the handoff gate. Grok replay controls
+now verify exact persona deferrals, ancestor-only advisory requests, unchanged native files and
+independent supported rule delivery, including native-override refusal. The permanent two-session
+example is packaged, uses inline bundle content and retains distinct private run directories. The
+companion plan records the inherited concurrent native-creation limit and scoped test evidence.
+Artifact acceptance remains the full R1-R10 contract; these local results do not create either lock.

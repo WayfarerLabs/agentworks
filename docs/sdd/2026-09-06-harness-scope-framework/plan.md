@@ -1375,32 +1375,33 @@ remains uncertain. No new persisted identity, journal, provider API or Transport
 
 - [x] Read the full report and held reviews, verify the source causes, retain the reported limits,
       publish the critical reading and verify draft at the frozen source head.
-- [ ] Refuse destructive adoption of stopped or pre-spawn unrecorded servers; verify real same-UID
+- [x] Refuse destructive adoption of stopped or pre-spawn unrecorded servers; verify real same-UID
       decoys and rejected-create variants survive without row adoption. Recover genuinely dispatched
       attempts only with positive matching native identity and stable fingerprint.
-- [ ] Retain the admin dedicated address before launch and restore supported per-session recovery
+- [x] Retain the admin dedicated address before launch and restore supported per-session recovery
       for already-retained null-address rows after sound absence evidence. Keep actual-user and
       legacy shared-server behavior, without workspace deletion as the recovery mechanism.
-- [ ] Record uncertainty at the actual dispatch boundary; prove precheck and checkpoint failure
+- [x] Record uncertainty at the actual dispatch boundary; prove precheck and checkpoint failure
       issue no spawn and need no reboot, while post-dispatch loss retains recoverable state.
-- [ ] Redact conventional repr forms through the shared boundary and actual failure callers before
+- [x] Redact conventional repr forms through the shared boundary and actual failure callers before
       truncation; keep early-death detection and do not promise arbitrary encoding recognition.
-- [ ] Isolate HOME-derived deletion-test paths, repair the identified portable fixture path/literal
+- [x] Isolate HOME-derived deletion-test paths, repair the identified portable fixture path/literal
       assumptions, and distinguish local Linux guest-helper execution from portable controller
       logic. Do not relax product guest validation or claim a broad native Windows pass from Linux.
-- [ ] Normalize the accepted workspace root once, group the guarded probe body and cover UNKNOWN
+- [x] Normalize the accepted workspace root once, group the guarded probe body and cover UNKNOWN
       startup completion through a real caller. Keep existing native ownership/file guards strict.
-- [ ] Align the owned mapping-authority LLD, native preservation warnings and permanent guidance.
+- [x] Align the owned mapping-authority LLD, native preservation warnings and permanent guidance.
       Explicit mapped entries follow their policy; omitted protected entries remain preserved.
       Unknown native preservation is a conservative limit, not proof that valid native syntax is
       malformed. No parser/version matrix or snapshot replay is introduced.
-- [ ] Make the unverified Grok private-session persona carrier unhandled with a warning, retaining
+- [x] Make the unverified Grok private-session persona carrier unhandled with a warning, retaining
       config compatibility and independent delivery. Keep native user/workspace behavior separate;
       accepted flags and generic TUI startup do not establish persona availability.
-- [ ] Promote a usable two-concurrent-session artifact example and name the intentional child-count
+- [x] Promote a usable two-concurrent-session artifact example and name the intentional child-count
       and force/consent behavior in the PR body. Keep permanent teaching independent of the SDDs.
-- [ ] Complete independent project, complexity and correctness reviews of one combined candidate,
-      then required isolated gates and exact-head ready handoff without `review-requested`.
+- [x] Complete independent project, complexity and correctness reviews of the combined candidate and
+      required isolated local gates.
+- [ ] Publish the final green head and exact-head ready handoff without `review-requested`.
 - [ ] Reconcile the subsequent actual-scope report and retained evidence against all 26
       requirements, complete permanent promotion and create both `locked.md` files only when
       completion is proved.
@@ -1435,3 +1436,32 @@ temporary-socket publication also needs a separate native-identity and cleanup d
 either incomplete mechanism to this bounded correction. Permanent session-status guidance tells
 operators to keep manual native servers on separate sockets. Retain this limit in acceptance and the
 handoff.
+
+Round 9 implementation and local validation are complete through source `9ed0a343`. All three
+independent private lanes reviewed the combined change at `216c0e65`, the corrections at `c7946be0`
+and the final narrow hint correction at `9ed0a343`; no material finding remains. The project lane's
+reserved-env ordering proof led to validation at the shared composition boundary before staging or
+teardown, with both-key manager controls preserving the old runtime and run ID. The hint now offers
+manual native stop only when a positive stored PID and boot ID make that remedy sufficient.
+
+The full isolated local suite passed with 11,320 tests and 11 skips at the `c7946be0` candidate; the
+later hint selector received focused Ruff, format, mypy and 22 partial-runtime controls, plus all
+three review confirmations. Full Ruff, format, mypy and the exact CI typer-isolation command passed.
+The final documentation formatting check and final-head CI remain part of the handoff gate. The
+initial full run exposed seven stale Grok carrier assertions and two stale pending-status fixtures;
+the revised tests preserve ancestor files, supported delivery guards and read-only uncertainty
+instead of weakening product checks. Forty-seven other initial failures came from the lead's runner
+environment; removing its Git-config redirection and allowing build dependencies and terminal
+capabilities made all 74 affected environment-sensitive controls pass.
+
+Packaging passed and includes the permanent concurrent-session example. Both guide modes, artifact
+help, resource sample/explanation and isolated config initialization were exercised. Website Python
+passed 160 tests, Node passed 103, and both deterministic site-base build comparisons passed. Local
+Linux execution does not establish the broad native Windows suite; the required Windows CI selection
+and subsequent integration report retain their own evidentiary scope. No new VM, model or provider
+operation was performed by this lead's local gates.
+
+The PR body now names the intentional agent/session child-count and force/consent behavior. The saga
+withdrew its deletion objection in `6701379900`; #866 coordination remains separate. This is the
+last authorized correction round. Both actual SDD closeouts, retained acceptance reconciliation and
+locks remain owned after the complete intermediate correction, and neither lock is created here.
