@@ -17,8 +17,8 @@ belongs to this design checkpoint.
 - [x] Establish a permanent reference describing current runtime context and interpolation.
 - [ ] Run independent project and complexity reviews of the design checkpoint; disposition material
       findings and record the reviewed head and results here.
-- [ ] Obtain operator disposition of the draft requirements, especially environment source and
-      phase.
+- [ ] Obtain operator disposition of the draft requirements, including the recommended omission of
+      ambient lookup and references between managed env entries.
 
 ## Implementation
 
@@ -26,8 +26,9 @@ belongs to this design checkpoint.
       decision. Define all lookup, redaction, and inspection semantics before adding such a source.
 - [ ] Implement the pure shared parser with explicit literal escapes and field-aware errors; prove
       one-pass rendering, unknown/unavailable distinction, and malformed syntax behavior.
-- [ ] Supply consuming user, explicit managed home, VM, agent, workspace, and session context using
-      the existing shared model; centralize the existing managed-home rule with provisioning.
+- [ ] Supply consuming user, VM, agent, workspace, and session context using the existing shared
+      model; compute `user_home_dir` from its Linux username through the managed-home helper shared
+      with provisioning and setup, without duplicating home state in each context.
 - [ ] Render winning plaintext env entries after inheritance, stored overlays, and scope merging.
       Remove early session-only expansion and preserve secret collection and identity precedence.
 - [ ] Reuse plaintext rendering in offline `env show`, retaining winning scope provenance and

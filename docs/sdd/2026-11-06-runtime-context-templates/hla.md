@@ -1,8 +1,8 @@
 # Runtime context templates: architecture
 
-Status: proposed design. The [FRD](frd.md) is a draft; its environment-reference question remains
-open. This artifact describes a concrete context-only increment and evaluates the additional env
-lookup feature without treating that feature as approved.
+Status: proposed design. The [FRD](frd.md) is a draft. This artifact recommends a concrete
+context-only increment following the operator's clarification about environment references;
+inclusion or omission of those references remains subject to draft acceptance.
 
 ## Boundaries
 
@@ -32,11 +32,11 @@ determines availability. Thus a VM template can contain `user_home_dir` for mult
 users, but a winning `session_name` reference cannot be used during VM setup.
 
 The code currently provisions managed homes under `/home/<username>`. Centralize that existing rule
-in an ordinary helper shared with provisioning and setup. `ResourceContext` carries the explicit
-resulting home path, so the renderer never derives it from the agent resource name or reads local
-`HOME`. This effort does not promise support for manually relocating managed accounts' homes without
-updating their managed model. Supporting arbitrary home locations would need a separate
-source-of-truth change, not a hidden SSH probe during inspection.
+in an ordinary helper shared with provisioning and setup. The context-to-placeholder mapping uses
+that helper with `ResourceContext.user`; no additional home field duplicates a value already
+determined by the managed username. Never derive it from the agent resource name or read local
+`HOME`. Supporting arbitrary home locations would need a managed source-of-truth change, not a
+hidden SSH probe during inspection.
 
 ## Expansion sequence
 
@@ -51,9 +51,9 @@ source-of-truth change, not a hidden SSH probe during inspection.
 
 Secret collection continues to depend on the same winning secret-reference map. Rendering does not
 introduce a new secret resolver or require expanding secret names. Context failures should be
-preflighted before secret prompts and mutations once the needed context is known; eager resolution
-may still occur earlier in existing orchestration, but should not become necessary to validate
-plaintext placeholders.
+checked before secret prompts and mutations once the needed context is known; eager resolution may
+still occur earlier in existing orchestration, but should not become necessary to validate plaintext
+placeholders.
 
 Retain scope provenance for inspection. A common per-entry plaintext renderer serves both
 `compose_env` and `show_env`; inspection must not route through a function that requires resolving
@@ -100,28 +100,21 @@ Context and environment references answer different questions:
 - A target reference asks for a value in a particular remote execution environment at a specified
   phase. Exported variables and unexported shell-local variables are distinct capabilities.
 
-Recommend the context increment first. Keep source-qualified forms such as
-`{{workstation_env:NAME}}` and `{{target_env:NAME}}` as design candidates only. Do not install
-placeholder resolvers, reserve working aliases, or add a remote probing framework for them now. Do
-not accept `{{$$NAME}}` as a synonym while the source and phase remain unresolved.
+The operator intended target lookup and then questioned both that feature and references to
+agw-managed vars. Recommend omitting both kinds of lookup from this increment. Identity env values
+have corresponding context facts; direct placeholders provide those facts without reading an env
+map. Referencing arbitrary managed entries would instead turn that map into dependencies, needing
+ordering, cycle handling, unavailable-reference policy, and propagation of secret sensitivity.
 
-Before including environment references, settle all of these together:
+If a concrete use case later warrants target lookup, specify an explicit source and expansion phase,
+distinguish missing from empty values, retain sensitive-value handling, and define live versus
+offline inspection. A baseline `PATH` and a final managed `PATH` must not accidentally refer to each
+other. Exported environment variables and shell-local state also require different lookup
+mechanisms. These are additional product contracts, not parser details.
 
-1. Source: workstation process, target exported environment, or shell-local variables.
-2. Phase: baseline process environment versus login/interactive startup, and whether lookup occurs
-   before or after managed env overrides. `PATH` referring to its baseline must not recursively
-   refer to its own final assignment.
-3. Missing/empty policy: distinguish an unset value from an explicitly empty value; avoid silent
-   empty replacement. Decide whether a literal default is needed for the concrete use case.
-4. Exposure: arbitrary env values may be secrets. Define default redaction, explicit reveal, error
-   sanitization, and avoidance of values in logs or persisted desired state.
-5. Inspection: offline output cannot promise an unobserved live value. Any live read needs an
-   explicit operation and normal target access controls.
-6. Execution: retrieve only requested exported values, never evaluate authored template fragments as
-   shell source, and account for shell startup side effects and newly created users.
-
-These are an additional product contract, not parser details. The same interpolation delimiters can
-eventually host explicit source references once the contract is accepted.
+No lookup syntax, resolver hooks, probing framework, or cross-entry dependency machinery belongs to
+the proposed context increment. Existing shell command source can still use normal shell variable
+syntax when the operator wants the shell to perform that expansion.
 
 ## Documentation and delivery
 

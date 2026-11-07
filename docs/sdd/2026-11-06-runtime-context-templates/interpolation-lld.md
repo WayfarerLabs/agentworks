@@ -1,24 +1,25 @@
 # Runtime context templates: interpolation contract
 
-Status: proposed. This contract covers context placeholders only. Environment references remain an
-open requirement in the [FRD](frd.md).
+Status: proposed. This contract covers context placeholders only. The [FRD](frd.md) recommends
+omitting ambient lookup and managed env cross-references, subject to draft acceptance.
 
 ## Grammar
 
 - A placeholder is exactly `{{NAME}}`, where `NAME` is an ASCII identifier matching
   `[A-Za-z_][A-Za-z0-9_]*` and belongs to the documented context catalogue.
 - Whitespace inside a placeholder is rejected rather than silently normalized.
-- `{{{{` emits a literal `{{`; `}}}}` emits a literal `}}`. Consequently `{{{{session_name}}}}`
-  emits the literal text `{{session_name}}`.
+- `{{{{` emits a literal `{{`. Consequently `{{{{session_name}}` emits the literal text
+  `{{session_name}}`. The escaped opening delimiter does not start a placeholder.
 - Parse left to right, recognizing escaped delimiters before opening a placeholder.
-- A lone `{` or `}` is ordinary text. An unescaped doubled delimiter must form a valid placeholder
-  or raises `ValidationError` with the owning field location.
-- Replacement strings are appended as data, never reparsed. Dollar signs, backticks, and `~` have no
-  interpolation meaning. There is no expression evaluation or dependency on a third-party template
-  library.
+- Closing braces outside an active placeholder and lone braces are ordinary text. Only an unescaped
+  opening `{{` starts template syntax; a malformed or unclosed placeholder raises `ValidationError`
+  with the owning field location. Ordinary nested JSON ending in `}}` is literal.
+- Replacement strings are appended as data, never parsed again. Dollar signs, backticks, and `~`
+  have no interpolation meaning. There is no expression evaluation or dependency on a third-party
+  template library.
 
-The malformed-syntax rule is a deliberate tightening of the current regex, which leaves many
-nonmatching brace sequences unchanged. The migration must disclose and test this behavior, not call
+The malformed-opening rule is a deliberate tightening of the current regex, which leaves many
+unmatched opening sequences unchanged. The migration must disclose and test this behavior, not call
 it wholly backward compatible. Existing valid two-name placeholders keep working.
 
 ## Pure rendering boundary
@@ -51,15 +52,16 @@ an arbitrary fragment inside an already quoted shell program changes its meaning
 
 The same parsed expression rendered to an argv element in a future consumer yields plain text; that
 consumer quotes the final argv element once if it must serialize a shell command. Current
-literal-field protection must remain effective when the parser becomes stricter. Test repeated
-braces and escaped delimiters against `quote_literal_argv`, not only the two valid legacy names.
+literal-field protection shields opening delimiters; leaving closing braces literal preserves that
+boundary. Verify repeated braces and escaped openers against `quote_literal_argv`, not only the two
+valid legacy names.
 
 ## Review vectors
 
 | Boundary     | Cases                                                                                                                                 |
 | ------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
 | Parser       | Legacy names; new names; adjacent placeholders; escapes; malformed/unclosed delimiters; unknown names; non-ASCII and whitespace forms |
-| Replacement  | Empty available value; inserted brace text is not rescanned; literal dollar signs and command syntax                                  |
+| Replacement  | Empty available value; inserted brace text is not scanned again; literal dollar signs and command syntax                              |
 | Context      | Agent name differs from Linux user; admin session; workspace-free shell; console pane without session; setup identities               |
 | Merge        | Child and instance override; higher-scope override; losing unavailable reference; literal replaces secret and secret replaces literal |
 | Secrets      | Secret name and secret value remain literal; reveal still explicit; unavailable secret remains existing typed outcome                 |

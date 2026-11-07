@@ -79,9 +79,11 @@ Snapshot: `c8d4dfb3cb042eea2ae5ac12b06624faf703400b`.
 
 ## Open questions
 
-- Q1 from the FRD: which environment does the operator intend to reference?
-- Is there a current use case beyond `user_home_dir` that needs ambient environment lookup, such as
-  appending to the target user's configured `PATH` or reading `XDG_CONFIG_HOME`?
+- The operator clarified that the intended source was the target user's environment, then questioned
+  that feature and references to agw-managed vars. The draft recommends omitting both lookup forms
+  from the initial increment; acceptance is still pending.
+- Is there a concrete use case beyond context facts that warrants ambient lookup or managed env
+  dependencies later, such as appending to a baseline `PATH` or reading `XDG_CONFIG_HOME`?
 - If target lookup is desired, must offline inspection show an unresolved expression, or should a
   separately requested live inspection be introduced? A stored snapshot cannot silently claim to
   describe the next shell invocation.

@@ -31,14 +31,15 @@ Given an agent resource `reviewer` running as Linux user `agt-reviewer`, the fir
 `/home/agt-reviewer/.config/tool`. The template remains unchanged when used by another agent or the
 admin user. `WORKTREE_LABEL` requires a workspace-rooted consumer.
 
-For literal brace text, replace `{{component}}` with `{{{{component}}}}` in an interpolated field.
+For literal brace text, replace `{{component}}` with `{{{{component}}` in an interpolated field.
 Secret values and ordinary harness prompt fields remain literal without this migration.
 
 ## Behavior changes to disclose
 
 1. A previously literal valid placeholder in a non-session env scope starts expanding. Unknown
    placeholders in those scopes become errors. Operators needing literal text must escape it.
-2. The new parser rejects malformed doubled delimiters previously ignored by the regex.
+2. The new parser rejects malformed opening `{{` sequences previously ignored by the regex. Closing
+   braces outside placeholders remain literal, including nested JSON ending in `}}`.
 3. Losing env entries are not rendered. A lower-scope unavailable placeholder overridden by a higher
    scope no longer causes a runtime failure.
 4. `env show` previews expanded winning plaintext rather than raw placeholders. It remains an

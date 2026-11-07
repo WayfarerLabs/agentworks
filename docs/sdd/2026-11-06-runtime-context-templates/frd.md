@@ -45,8 +45,8 @@ contents. An overridden entry cannot fail because its placeholder is unavailable
 
 Provide one documented placeholder grammar, literal escaping, and one-pass substitution. Unknown
 names and malformed placeholder syntax fail with field context. Replacement text is data and is
-never rescanned for placeholders. Do not perform shell evaluation, command substitution, recursive
-env dependencies, expressions, filters, or implicit workstation-environment lookup.
+never scanned again for placeholders. Do not perform shell evaluation, command substitution,
+recursive env dependencies, expressions, filters, or implicit workstation-environment lookup.
 
 ### FR5. Existing command consumers
 
@@ -71,20 +71,23 @@ implementation change updates it with the complete vocabulary, availability, esc
 order, command handling, and examples. CLI and schema-owned descriptions link to or summarize this
 reference without requiring access to the SDD.
 
-## Open requirement: environment references
+## Proposed scope: environment references
 
-Q1: Does a shell-variable reference read the workstation process environment, the target user's
-environment, or both under explicit names? The operator has been asked; no answer is assumed.
+The operator clarified the intended source and raised a related question:
 
-Recommendation: retain context placeholders for managed facts such as the home directory. If env
-lookup is included, give each source a named form, such as `{{workstation_env:NAME}}` or
-`{{target_env:NAME}}`, rather than making `$$` implicitly choose a machine and expansion phase.
-These are illustrative candidates, not accepted syntax or implemented capabilities.
+> I was thinking the target user's environment, but the more I think about this the less I like it.
+> Can you reference agw-managed vars? It just seems messy.
 
-Target lookup also needs decisions on shell startup mode, snapshot timing, missing versus empty
-values, redaction, and offline inspection. Workstation lookup needs decisions on sensitivity and
-capture timing. Neither form is an implementation requirement until Q1 and these semantics are
-settled. See [architecture](hla.md#environment-reference-decision).
+Recommendation for draft acceptance: omit ambient environment lookup and references between managed
+env entries from the initial increment. Context placeholders expose the underlying identity facts
+directly; for example, `workspace_dir` supplies the value represented by `AGENTWORKS_WORKSPACE_DIR`.
+Arbitrary managed entries are not added to the context catalogue.
+
+Reading another managed env entry would need dependency ordering, cycle handling, and secret
+propagation rules. Reading the target's environment would need shell startup, timing, sensitivity,
+and inspection rules. Neither behavior is necessary for `user_home_dir`. The omission remains a
+design recommendation pending acceptance of this draft, not a claim that the operator approved a new
+requirement. See [architecture](hla.md#environment-reference-decision).
 
 ## Acceptance examples
 
