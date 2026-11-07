@@ -454,7 +454,7 @@ impose a blanket native-version floor.
 | Shell       | Publish all types as files below the actual user's `.agentworks-artifacts` directory. | Publish all types in a workspace-owned artifact directory, deliberately shared at this scope. | Publish all remaining types in the private session/run directory.                                                               |
 | Claude Code | Unconditional `.claude/rules`; standard `.claude/skills`; `.claude/agents`.           | Corresponding project directories owned by the workspace.                                     | Additive prompt file for hints/rules; session-only plugin for skills; `--agents` definitions for agents.                        |
 | Codex       | Native `.agents/skills`, `.codex/agents` and a generated native instruction section.  | Native project skills/agents and a generated instruction section.                             | Additional `developer_instructions` for hints/rules; private agent TOML files selected by config overrides; skills unsupported. |
-| Grok Build  | Native `.grok` rules, skills and agents.                                              | Corresponding project directories, with discovery exclusions checked.                         | Additive `--rules` text; `--agents` definitions in headless mode only; session skills unsupported.                              |
+| Grok Build  | Native `.grok` rules, skills and agents.                                              | Corresponding project directories, with discovery exclusions checked.                         | Additive `--rules` text; private session personas and skills unsupported.                                                       |
 
 Codex uses a generated section of user or project `AGENTS.md`, or the existing nonempty
 `AGENTS.override.md` selected by native precedence. It does not create an override to suppress
@@ -475,11 +475,12 @@ inspection reports that name. Persona JSON avoids assuming that plugin persona f
 preserved. Only the enabled session-prompt workaround considers native prompt recording; ancestor
 rules and skills do not justify changing system-prompt behavior.
 
-Grok uses a flat rules directory and honors discovery exclusions. Its `--agents` launch carrier is
-headless-only; interactive launches leave session personas unhandled even with the workaround
-enabled. Native user/workspace persona discovery remains supported. ACP plugin flags are not
-evidence of support in the launched command. Persona options that the selected native mechanism
-cannot preserve receive an explicit unsupported result.
+Grok uses a flat rules directory and honors discovery exclusions. No private session persona carrier
+has verified native availability, so those inputs remain unhandled in all launch modes, even with
+the accepted `session-agent-definitions` compatibility spelling. Native user/workspace persona
+discovery remains supported. ACP plugin flags are not evidence of support in the launched command.
+Persona options that the selected native mechanism cannot preserve receive an explicit unsupported
+result.
 
 Registering an agent persona makes a definition available; choosing it as the primary persona is a
 separate native launch behavior. Claude supports that selection. Codex's existing primary `agent`

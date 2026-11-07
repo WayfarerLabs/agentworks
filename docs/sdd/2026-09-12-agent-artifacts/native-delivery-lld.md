@@ -42,7 +42,7 @@ rendering must preserve every surviving contribution or explicitly refuse the co
 | Shell       | `~/.agentworks-artifacts/user/` and `<workspace>/.agentworks-artifacts/`, containing typed files and an index            | Same layout in the private run directory; `AGENTWORKS_ARTIFACTS_DIR` points there when the run has inputs                           |
 | Claude Code | `.claude/rules/agentworks-rule-<name>.md`, one hints rule, complete `.claude/skills/<name>/`, `.claude/agents/<name>.md` | Additive prompt file, private generated plugin for skills, inline `--agents` JSON                                                   |
 | Codex       | Complete `.agents/skills/<name>/`, `.codex/agents/<name>.toml` and a generated AGENTS instruction section                | Composed `developer_instructions`; private role config files selected through `agents.<name>.config_file` and description overrides |
-| Grok Build  | Flat `.grok/rules/`, complete `.grok/skills/<name>/`, `.grok/agents/<name>.md`                                           | Composed `--rules` text; inline `--agents` JSON in headless mode only                                                               |
+| Grok Build  | Flat `.grok/rules/`, complete `.grok/skills/<name>/`, `.grok/agents/<name>.md`                                           | Composed `--rules` text; private session personas unsupported                                                                       |
 
 User native roots honor `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and `GROK_HOME`. Codex's standard user
 skills remain under the actual user's `.agents/skills`, independently of `CODEX_HOME`. Workspace
@@ -96,9 +96,10 @@ unchanged origins and reports partial completion; unrelated entries continue. Pr
 placements omitted from the new plan follow ordinary safe retirement, while modified/unowned content
 is retained. Native identity collisions leave affected session inputs unhandled with a report;
 independent inputs continue. Conflicts solely between existing ancestor placements are reports.
-Unsafe filesystem destination overlaps remain errors. Session persona definitions are retained as
-individually owned files with their native identity; Claude and Grok still receive the combined
-definitions in one JSON argument. Previously handled ancestor payloads are not retransmitted.
+Unsafe filesystem destination overlaps remain errors. Supported session persona definitions are
+retained as individually owned files with their native identity; Claude receives the combined
+definitions in one JSON argument. Grok session personas remain unhandled, with no generated files or
+arguments. Previously handled ancestor payloads are not retransmitted.
 
 Hints aggregate into one rule-like file per native destination where file discovery is supported,
 using an `agentworks-hints` name. Session-only mechanisms may instead aggregate into additive native
@@ -125,7 +126,7 @@ and rejects unsupported fields rather than silently losing their requested behav
 | ----------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Claude Code | `model` string; `tools` and `disallowedTools` string lists; `maxTurns` positive integer | Markdown frontmatter for outer facets, native persona JSON for sessions                                                                                      |
 | Codex       | `model` and `model_reasoning_effort` strings                                            | Native discovery TOML includes name/description; session role config layers contain only config fields, with identity/description in the selecting overrides |
-| Grok Build  | `model` string and `tools` string list                                                  | Markdown frontmatter or inline persona JSON                                                                                                                  |
+| Grok Build  | `model` string and `tools` string list                                                  | Markdown frontmatter at user/workspace facets; private session personas unsupported                                                                          |
 
 Codex CLI overrides use literal dotted key components, not TOML key syntax. Session role selectors
 therefore use the validated portable persona name directly in `agents.<name>.config_file` and
@@ -238,12 +239,12 @@ this adjustment. No helper flags or version checks are added for skipped session
 `enabled_workarounds` is a default-empty, replacing list in each native session config. Claude
 accepts `session-prompt`, `session-skill-plugin`, and `session-agent-definitions`; Codex accepts
 `session-developer-instructions` and `session-agent-config`; Grok accepts `session-rules` and
-`session-agent-definitions`, with persona delivery restricted to native headless arguments
-(`--single`, `-p`, `--prompt-json` or `--prompt-file`). Interactive Grok leaves those personas
-unhandled rather than claiming its ignored `--agents` argument delivered them. This restriction
-follows Grok's
-[official headless-mode guide](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/14-headless-mode.md)
-and the integration report's observed interactive request bodies. Shell publishes directly without a
+`session-agent-definitions`. The latter remains accepted for config compatibility but has no
+verified private session persona carrier, so Grok leaves those inputs unhandled in every launch mode
+and emits no persona files or `--agents` argument. Bounded Grok 1.0.70 request captures did not
+expose the generated persona, including with explicit main-agent selection; accepting native flags
+alone does not prove delivery. This does not establish impossibility across all native versions.
+Native user/workspace personas and operator selection remain separate. Shell publishes without a
 workaround. Codex/Grok session skills have no workaround. These names opt into the existing carriers
 in the table above. Hooks, automatic fallbacks and release-by-release compatibility tables are not
 part of this correction.

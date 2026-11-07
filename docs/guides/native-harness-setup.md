@@ -126,13 +126,16 @@ Agentworks retains and names all affected entries, including unrelated operator 
 independent entries continue where the native CLI permits. Restore a valid native association before
 retrying setup. Marketplace retirement or replacement also retains dependent plugins when the user
 declaration needed for removal is absent. Agentworks does not broaden user-scoped removal to all
-scopes or write a guessed source. If the native CLI could discard an unsupported operator settings
-entry while rewriting its configuration, Agentworks skips that native mutation and reports the
-affected association. Independent file and settings work continues. Correct the named entry before
-retrying the skipped native work. An explicitly mapped settings contribution follows its selected
-strategy and can replace that entry; no initial snapshot is restored over the mapping, later
-operator edits or confirmed removals. A mapping repair can therefore require a second reinit for the
-previously skipped native command.
+scopes or write a guessed source. When Agentworks cannot verify preservation of a listed settings
+entry, it holds all native CLI mutations that can rewrite the whole settings document. An
+unrecognized source form, including a native inline `settings` source, can be valid native
+configuration; this guard does not establish that it is malformed or that the native command would
+lose it. Independent file/settings work and adoption of matching reported associations continue.
+Review the native CLI operation separately, then retry setup to adopt matching reported
+associations, or explicitly map the entry under the intended settings policy. An explicitly mapped
+settings contribution follows its selected strategy and can replace that entry; no initial snapshot
+is restored over the mapping, later operator edits or confirmed removals. A settings mapping change
+can therefore require a second reinit for the previously skipped native command.
 
 Native commands and Agentworks ownership checkpoints are separate operations. Abrupt termination can
 leave a native mutation without a checkpoint; retry observes and adopts a matching association.

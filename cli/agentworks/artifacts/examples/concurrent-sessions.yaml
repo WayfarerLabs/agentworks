@@ -1,0 +1,27 @@
+# Copy into the operator resources directory. These declarations create no sessions.
+# Both bundles use inline content; no system plugin or external source is required.
+apiVersion: agentworks/v1
+kind: artifact-bundle
+metadata:
+  name: session-notes-a
+spec:
+  hints:
+    task-note:
+      text: Review the command interface in this session.
+---
+apiVersion: agentworks/v1
+kind: artifact-bundle
+metadata:
+  name: session-notes-b
+spec:
+  hints:
+    task-note:
+      text: Review the documentation in this session.
+---
+apiVersion: agentworks/v1
+kind: session-template
+metadata:
+  name: concurrent-shell
+spec:
+  harness_integration:
+    name: shell

@@ -229,7 +229,9 @@ and defers other types to user. Grok defers VM inputs to user. Shell applies all
 `/opt/agentworks/artifacts`. Workspace-owned bundles remain useful independently: their workspace
 facet handles them in project locations or passes them to each consuming session. Workspace
 placement is shared with other users of that workspace, so session-only content belongs in the
-private session directory under the actual user's home.
+private session directory under the actual user's home. The
+[two concurrent Shell sessions example](../../cli/agentworks/artifacts/README.md#two-concurrent-sessions)
+uses an existing workspace and distinct private run paths, with inspection and teardown commands.
 
 Applying files at a facet updates its native locations during that setup. Whether a running workload
 reloads them depends on the harness. Deferring inputs updates only the reusable result; existing

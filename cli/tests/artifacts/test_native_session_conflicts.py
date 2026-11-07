@@ -176,6 +176,12 @@ def test_setup_operator_collision_is_reconsidered_at_session_without_blocking_ot
     )
     assert result.command == "fixture-launch"
     assert existing.read_text() == body
+    if tool == "grok":
+        assert {item.input_id for item in plan.application.deferred} == {bad.identity, good.identity}
+        assert plan.application.files == ()
+        assert plan.argv == ("--rules", guidance.content.text)
+        assert warnings.called
+        return
     assert any(good.origin_identity in file.origins for file in plan.application.files)
     if tool == "claude" and artifact_type is ArtifactType.SKILL:
         assert not plan.application.deferred
@@ -191,7 +197,7 @@ def test_setup_operator_collision_is_reconsidered_at_session_without_blocking_ot
 
 @pytest.mark.parametrize("tool,class_name", TOOLS)
 @pytest.mark.parametrize("conflict", ["input-owners", "ancestor"])
-def test_session_name_conflict_rerenders_remaining_personas_and_keeps_origin_identity(
+def test_session_persona_delivery_keeps_unhandled_origins_and_independent_guidance(
     tmp_path, monkeypatch, tool, class_name, conflict
 ):
     module = import_module(f"agentworks.plugins.{tool}.harness_integration")
@@ -228,10 +234,15 @@ def test_session_name_conflict_rerenders_remaining_personas_and_keeps_origin_ide
         implementation, adapter, runner, home, workspace, environment, inputs, monkeypatch, ancestors=ancestors
     )
     assert result.command == "fixture-launch"
+    if tool == "grok":
+        rejected = {item.identity for item in inputs.items() if item.content.type is ArtifactType.AGENT}
+        assert result.artifacts.files == ()
+        assert plan.argv == ("--rules", guidance.content.text)
     assert {item.input_id for item in result.artifacts.deferred} == rejected
     assert all(item.destination == "session" for item in result.artifacts.deferred)
-    assert any(good.origin_identity in file.origins for file in result.artifacts.files)
-    assert_persona_carriers(tool, plan, {good.content.name})
+    if tool != "grok":
+        assert any(good.origin_identity in file.origins for file in result.artifacts.files)
+        assert_persona_carriers(tool, plan, {good.content.name})
 
 
 @pytest.mark.parametrize("tool,class_name", TOOLS)
@@ -241,7 +252,9 @@ def test_new_session_unsafe_inventory_remains_a_hard_failure(tmp_path, monkeypat
     runner, home, workspace, native, environment = guest(tmp_path, tool)
     outside = tmp_path / "outside"
     outside.mkdir()
-    (native / "agents").symlink_to(outside, target_is_directory=True)
+    # Grok session rules inspect discovery roots, but do not inventory personas.
+    unsafe = workspace / ".grok" if tool == "grok" else native / "agents"
+    unsafe.symlink_to(outside, target_is_directory=True)
     with pytest.raises(StateError):
         launch(
             getattr(module, class_name),
@@ -250,7 +263,7 @@ def test_new_session_unsafe_inventory_remains_a_hard_failure(tmp_path, monkeypat
             home,
             workspace,
             environment,
-            received(artifact(ArtifactType.AGENT)),
+            received(artifact(ArtifactType.RULE if tool == "grok" else ArtifactType.AGENT, name="carrier")),
             monkeypatch,
         )
     assert list(outside.iterdir()) == []
@@ -279,7 +292,7 @@ def test_empty_or_unmatched_name_conflict_cannot_claim_terminal_handling(
             home,
             workspace,
             environment,
-            received(artifact(ArtifactType.AGENT)),
+            received(artifact(ArtifactType.RULE if tool == "grok" else ArtifactType.AGENT, name="carrier")),
             monkeypatch,
         )
     assert type(error.value) is StateError

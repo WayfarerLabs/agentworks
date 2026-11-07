@@ -393,7 +393,7 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
 
         def can_mutate(role: str, identifier: str, operation: str) -> bool:
             # Native commands can rewrite their entire settings document. Do not
-            # risk losing entries they cannot inventory, even on interruption.
+            # assume preservation of entries our comparator cannot recognize.
             current = files.read(destination)
             document = (
                 {}
@@ -405,9 +405,9 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
                 skip(
                     role,
                     identifier,
-                    f"'{tool} plugin {operation}' could discard unobservable settings entries "
+                    f"Agentworks cannot verify that '{tool} plugin {operation}' preserves settings entries "
                     + ", ".join(repr(name) for name in sorted(unavailable))
-                    + "; repair those entries with an explicit settings mapping or the native tool first",
+                    + "; review the native operation or explicitly map those entries before retrying",
                 )
                 return False
             return True

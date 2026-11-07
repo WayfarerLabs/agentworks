@@ -193,9 +193,11 @@ ownership; older claims that included a version remain readable. Record and repo
 can therefore heal mutation-before-checkpoint interruption without provisional claims. Differing
 unowned entries are skipped individually and reported through the invocation's incomplete callback.
 Core leaves `complete=False` while allowing independent native entries, artifact publication and
-later integrations to proceed. A settings mapping must preserve skipped native associations,
-including under replace policies. Query again after every command before recording its actual
-result. A command's success alone does not establish scope or identity.
+later integrations to proceed. Explicitly mapped entries follow the selected settings policy,
+including replace. Only omitted associations protected by unresolved claims or ambiguous selections
+retain their existing overlay; omission cannot bypass safe native retirement. Query again after
+every command before recording its actual result. A command's success alone does not establish scope
+or identity.
 
 Claude git/GitHub inventory without its user settings declaration has unobservable full source
 identity. Preserve it and protect its settings association. Check that scoped removal is available

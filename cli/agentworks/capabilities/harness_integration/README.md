@@ -87,11 +87,13 @@ IDs, grouped remaining inputs and ancestor file ownership metadata. Return the s
 in `HarnessStart.artifacts`. Core warns about unhandled inputs after validating the full result and
 restricts session file publication to that run's private directory under the actual user's home.
 First-party session facets default to no artifact delivery. Their typed `enabled_workarounds` config
-lists specific supported delivery methods, with an empty default and replacement inheritance. Return
-an explicit deferral for each disabled or unsupported input, including its relevant workaround in
-the reason when one exists. Filter disabled inputs before applying delivery-specific validation or
-compatibility probes. Keep unsafe paths, conflicting ownership, malformed results and invalid
-configuration as errors. Do not turn an optional artifact into a blanket version requirement.
+lists specific delivery opt-ins, with an empty default and replacement inheritance. A recognized
+compatibility name need not have a verified carrier: Grok accepts `session-agent-definitions` but
+returns its private session personas unhandled in every launch mode. Return an explicit deferral for
+each disabled or unsupported input, including its relevant workaround in the reason when one exists.
+Filter disabled inputs before applying delivery-specific validation or compatibility probes. Keep
+unsafe paths, conflicting ownership, malformed results and invalid configuration as errors. Do not
+turn an optional artifact into a blanket version requirement.
 
 Native-name collisions that prevent an input from being represented become terminal session
 deferrals. Rerender the remaining inputs so rejected content and carrier arguments are both absent,
@@ -121,6 +123,13 @@ shared files or silently provision a missing ancestor. Core owns accounts, direc
 and lifecycle transactions; integrations own their native placements and report confirmed claims.
 Authentication files are not supported settings roles. Put session-local secrets in the session's
 environment rather than command text.
+
+The shared native plugin reconciler holds whole-document native CLI mutations when its association
+comparator cannot verify preservation of listed settings entries. An unrecognized source form can be
+valid native configuration. Describe this as a verification limit rather than a syntax error or
+proven native data loss. Independent mappings, file publication and no-op adoption remain available;
+explicit mapped entries follow their selected settings policy. See the
+[native setup guide](../../../../docs/guides/native-harness-setup.md) for the operator workflow.
 
 ## Available Integrations
 

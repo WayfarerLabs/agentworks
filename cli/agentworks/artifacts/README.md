@@ -101,6 +101,59 @@ recorded unhandled input identities where available. Ancestor problems are repor
 without blocking launch. An inactive session integration has no setup obligation for that facet.
 Inspection reports recorded application, not a fresh check of native files or model context.
 
+## Two concurrent sessions
+
+Copy [the concurrent-session declarations](examples/concurrent-sessions.yaml) into your operator
+resources directory. They define two inline hint bundles and an explicit Shell session template,
+without fetching sources or creating instances. Choose an existing workspace and an existing agent
+with access to it, replacing `my-workspace` and `my-agent` below. If session creation is outside the
+requested work, inspect existing sessions instead with `agw session list --workspace my-workspace`
+and `agw artifact show --session <existing-session> --integration shell`.
+
+These commands create and start two concurrent Shell workloads as the same agent in the selected
+workspace. They create no VM, agent or workspace:
+
+```bash
+agw session create artifact-a --workspace my-workspace --agent my-agent \
+  --template concurrent-shell --spec '{"artifacts":{"bundles":["session-notes-a"]}}'
+agw session create artifact-b --workspace my-workspace --agent my-agent \
+  --template concurrent-shell --spec '{"artifacts":{"bundles":["session-notes-b"]}}'
+agw artifact show --session artifact-a --integration shell --output json
+agw artifact show --session artifact-b --integration shell --output json
+```
+
+The session owner's `integrations[].placements[].path` values show the published `index.json` and
+`scopes/session/<session-name>/hints/task-note.md`. Both hints have the same artifact name, but each
+session has a different stable `session_uuid` and its own per-launch `run_id`:
+
+```text
+~/.agentworks-artifacts/session/<uuid-a>/<run-a>/scopes/session/artifact-a/hints/task-note.md
+~/.agentworks-artifacts/session/<uuid-b>/<run-b>/scopes/session/artifact-b/hints/task-note.md
+```
+
+Use `agw session attach artifact-a` (or `artifact-b`) to enter that shell. There,
+`printf '%s\n' "$AGENTWORKS_ARTIFACTS_DIR"` prints its current run directory, and
+`cat "$AGENTWORKS_ARTIFACTS_DIR/index.json"` shows its own artifact index. Shell publishes context
+files for tools to read; it does not run the hint text as instructions.
+
+Separate run paths prevent publication collisions. Both processes share the same Linux user and can
+read that user's session files; these paths provide no security isolation between them. Sessions
+running as different Linux users use their respective private homes. Workspace artifacts remain
+shared with workspace users, so keep session-only content in the session bundle selection.
+
+A managed restart gives that session a new `run_id`, retaining its `session_uuid`. Old files stay
+available if preparation fails and retire after the old runtime is torn down. To end this example,
+leave any attached shell and delete both sessions:
+
+```bash
+agw session delete artifact-a
+agw session delete artifact-b
+```
+
+Deletion stops each workload and retires its unchanged owned session files. Changed or unowned files
+remain protected, and empty parent directories can remain. The bundles, template, selected agent,
+and shared workspace remain available.
+
 ## Composition and names
 
 Bundles contain four maps: `hints`, `rules`, `skills`, and `agents`. Each map key is the artifact's
@@ -266,7 +319,7 @@ current. Deleting a VM retains the ordinary VM deletion behavior: its filesystem
 | Shell       | All types under `/opt/agentworks/artifacts/`     | All types as files                               | All types as files, without an opt-in                                  |
 | Claude Code | Managed instructions, skills and agents          | Native rules, skills and agents                  | Opt-in appended context, skill plugin and agent definitions            |
 | Codex       | Native machine skills; other types defer to user | Generated instructions, native skills and agents | Opt-in developer instructions and agents; skills need earlier handling |
-| Grok Build  | Defer to user                                    | Native rules, skills and agents                  | Opt-in rules; headless-only agents; skills need earlier handling       |
+| Grok Build  | Defer to user                                    | Native rules, skills and agents                  | Opt-in rules; personas and skills need earlier handling                |
 
 The map key supplies the native name, with a native namespace where required, such as Claude's
 session skill plugin. Inspection shows recorded names and locations. Shell uses scope directories
@@ -412,7 +465,7 @@ activations do not enable session workarounds.
 | Codex       | `session-developer-instructions` | Compose rules and hints into the session's developer instructions.                   |
 | Codex       | `session-agent-config`           | Select private agent configuration files through launch overrides.                   |
 | Grok Build  | `session-rules`                  | Supply rules and hints through the native rules argument.                            |
-| Grok Build  | `session-agent-definitions`      | Supply agent personas through native launch JSON in headless mode only.              |
+| Grok Build  | `session-agent-definitions`      | Accepted for config compatibility; private session personas remain unhandled.        |
 
 Shell requires no workaround. It publishes files at every activated facet, using the VM directory
 above, `~/.agentworks-artifacts/user/`, `<workspace>/.agentworks-artifacts/`, and the private
@@ -420,10 +473,12 @@ session/run directory. Session publication exposes its index through `AGENTWORKS
 Remove `enabled_workarounds` from shell configurations; `session-artifact-files` is no longer
 needed.
 
-Grok's `session-agent-definitions` applies only when the native arguments select headless mode
-(`--single`, `-p`, `--prompt-json` or `--prompt-file`). Interactive Grok ignores its `--agents`
-argument, so Agentworks leaves those session personas unhandled and warns even when this workaround
-is enabled. Native user/workspace persona files remain available in interactive mode.
+Grok private session personas have no verified native carrier. They remain unhandled with a warning
+in both interactive and headless mode, including when `session-agent-definitions` is enabled.
+Agentworks emits no persona files or `--agents` argument for these inputs. The recognized workaround
+name remains accepted for existing configurations. Native user/workspace persona files and explicit
+operator `agent` selection keep their separate behavior; move a persona to an activated user or
+workspace facet only when sharing it at that scope is intended.
 
 Codex and Grok Build have no session skill workaround. Apply those skills at a supported user or
 workspace facet. Unhandled warnings name the relevant workaround when one exists; enabling a

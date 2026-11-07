@@ -172,10 +172,12 @@ def _claude_market(name: str, source: Mapping[str, object], declaration: object)
 
 
 def unreadable_marketplace_settings(tool: NativeTool, document: SettingsObject) -> tuple[str, ...]:
-    """Identify external declarations unsafe for a whole-document native rewrite.
+    """Identify declarations whose preservation Agentworks cannot verify.
 
-    This validates settings syntax only; a usable declaration does not prove a
-    native registration or authorize adopting its association.
+    The association comparator recognizes only supported source forms. An
+    unrecognized declaration can be valid native configuration, but prevents
+    automated whole-document native rewrites. A recognized declaration alone
+    does not prove a registration or authorize adopting its association.
     """
     entries = document.get("marketplaces" if tool == "codex" else "extraKnownMarketplaces", {})
     if not isinstance(entries, dict):
