@@ -18,6 +18,7 @@ from agentworks.errors import ExternalError, StateError, ValidationError
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import manager, tmux
 from agentworks.sessions.manager import _lifecycle, _pids
+from agentworks.status_observation import GUEST_OBSERVATION_ATTEMPTS, GUEST_OBSERVATION_TIMEOUT_SECONDS
 
 from .test_create_start_restart_orchestrated import BOOT_ID, _patch_transports, _requiring_template, _restart_fixture
 from .test_create_start_restart_orchestrated import _stub_build_registry as _stub_build_registry
@@ -72,7 +73,7 @@ def test_unacknowledged_native_spawn_is_recovered_and_finishes_startup(
     monkeypatch.setattr(ShellIntegration, "prepare_artifacts", prepare)
 
     def fail_after_native_spawn(*args, **kwargs):
-        launch(native, "sleep 30", is_admin=False)
+        launch(native, "sleep 30", is_admin=False, launch_options=kwargs)
         raise ExternalError("lost launch acknowledgement")
 
     monkeypatch.setattr(tmux, "create_session", fail_after_native_spawn)
@@ -88,6 +89,15 @@ def test_unacknowledged_native_spawn_is_recovered_and_finishes_startup(
         assert row is not None and row.pid is None
         assert row.boot_id == tmux.read_boot_id(native)
         assert manager._status.check_session_status(row, target=native) is SessionStatus.RUNNING
+        assert manager.batch_check_status([replace(row, mode="admin")], target=native) == {"s1": SessionStatus.RUNNING}
+        assert db.get_session("s1") == row
+        proofs = [options for command, options in native.calls if "AGW_RUNTIME_LAUNCH=" in command]
+        assert proofs and all(
+            options.get("timeout") == GUEST_OBSERVATION_TIMEOUT_SECONDS
+            and options.get("retries") == GUEST_OBSERVATION_ATTEMPTS
+            and options.get("tty") is False
+            for options in proofs
+        )
         observed = _NATIVE_CAPTURE(target=native, socket_path=native.socket).fingerprint
         assert observed is not None
         original_pid = observed.pid
@@ -240,7 +250,9 @@ def test_native_retry_completes_protected_runtime_with_known_fingerprint(tmp_pat
     db.update_session_runtime(
         "s1", socket_path=native.socket, pid=PID_STOPPED, boot_id=None, tmux_server_start_ticks=None
     )
-    monkeypatch.setattr(tmux, "create_session", lambda *a, **k: launch(native, "sleep 30", is_admin=False))
+    monkeypatch.setattr(
+        tmux, "create_session", lambda *a, **k: launch(native, "sleep 30", is_admin=False, launch_options=k)
+    )
     error = ExternalError("native release refused")
 
     def interrupted(*args, **kwargs):

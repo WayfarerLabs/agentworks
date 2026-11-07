@@ -50,7 +50,13 @@ class NativeTarget:
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.banner = ""
         self.stderr_banner = ""
-        self.environment = {"HOME": str(root), "PATH": os.defpath, "SHELL": "/bin/sh", "TERM": "xterm"}
+        self.environment = {
+            "HOME": str(root),
+            "PATH": os.defpath,
+            "SHELL": "/bin/sh",
+            "TERM": "xterm",
+            "TMUX_TMPDIR": str(root),
+        }
 
     def run(self, command: str, *, check: bool = True, **kwargs: Any) -> SSHResult:
         self.calls.append((command, kwargs))
@@ -87,7 +93,7 @@ def native(monkeypatch):
     if os.name != "posix" or not Path("/proc/self/stat").exists():
         pytest.skip("requires Linux guest process identity observations")
     # pytest's nested tmp_path is longer than sun_path on some hosts.
-    with tempfile.TemporaryDirectory(prefix="agw-r8-sessions-native-", dir="/tmp") as directory:
+    with tempfile.TemporaryDirectory(prefix="agw-r9-runtime-native-", dir="/tmp") as directory:
         root = Path(directory)
         target = NativeTarget(root)
         config = root / "tmux.conf"
@@ -108,7 +114,8 @@ def native(monkeypatch):
     assert not root.exists()
 
 
-def launch(native: NativeTarget, command: str, *, is_admin: bool = True):
+def launch(native: NativeTarget, command: str, *, is_admin: bool = True, launch_options=None):
+    options = launch_options or {}
     return _NATIVE_CREATE(
         "s1",
         str(native.root),
@@ -118,6 +125,10 @@ def launch(native: NativeTarget, command: str, *, is_admin: bool = True):
         target=native,
         admin_username="owned",
         is_admin=is_admin,
+        env=options.get("env"),
+        before_spawn=options.get("before_spawn"),
+        session_uuid=options.get("session_uuid"),
+        run_id=options.get("run_id"),
     )
 
 
@@ -189,7 +200,7 @@ def test_native_death_during_identity_capture_keeps_recoverable_fingerprint(tmp_
     script.write_text(f"while [ ! -e {shlex.quote(str(gate))} ]; do sleep .02; done\nprintf late-marker; exit 29\n")
 
     def create(*args, **kwargs):
-        return launch(native, f"/bin/sh {shlex.quote(str(script))}", is_admin=False)
+        return launch(native, f"/bin/sh {shlex.quote(str(script))}", is_admin=False, launch_options=kwargs)
 
     def capture(**kwargs):
         gate.touch()
@@ -223,7 +234,9 @@ def test_native_death_during_identity_capture_keeps_recoverable_fingerprint(tmp_
             time.sleep(0.02)
             status = check_session_status(row, target=native)
         assert status is SessionStatus.STOPPED
-        monkeypatch.setattr(tmux, "create_session", lambda *a, **k: launch(native, "sleep 30", is_admin=False))
+        monkeypatch.setattr(
+            tmux, "create_session", lambda *a, **k: launch(native, "sleep 30", is_admin=False, launch_options=k)
+        )
         monkeypatch.setattr(tmux, "capture_tmux_server_fingerprint", _NATIVE_CAPTURE)
         # A subsequent managed launch removes the observed stale socket and recovers.
         getattr(manager, operation)(
@@ -244,7 +257,9 @@ def test_native_unverified_checkpoint_recovers_still_private_socket(tmp_path, mo
     _patch_transports(monkeypatch, native, native)
     _requiring_template(monkeypatch, "sh")
     monkeypatch.setattr(manager, "_get_boot_id", tmux.read_boot_id)
-    monkeypatch.setattr(tmux, "create_session", lambda *a, **k: launch(native, "sleep 30", is_admin=False))
+    monkeypatch.setattr(
+        tmux, "create_session", lambda *a, **k: launch(native, "sleep 30", is_admin=False, launch_options=k)
+    )
     monkeypatch.setattr(
         tmux, "capture_tmux_server_fingerprint", lambda **k: tmux.FingerprintProbe(tmux.ProbeStatus.UNKNOWN)
     )
@@ -259,7 +274,7 @@ def test_native_unverified_checkpoint_recovers_still_private_socket(tmp_path, mo
         row = db.get_session("s1")
         assert row is not None and row.pid is None
         assert Path(native.socket).stat().st_mode & 0o077 == 0
-        assert check_session_status(row, target=native) is SessionStatus.RUNNING
+        assert check_session_status(row, target=native) is SessionStatus.UNKNOWN
         assert any(options.get("sudo") is True for command, options in native.calls if "has-session" in command)
         monkeypatch.setattr(tmux, "capture_tmux_server_fingerprint", _NATIVE_CAPTURE)
         assert _repair_session_pid(row, target=native, db=db)
@@ -291,7 +306,9 @@ def test_native_create_failure_keeps_live_runtime_and_new_dependencies(tmp_path,
     _patch_transports(monkeypatch, native, native)
     _requiring_template(monkeypatch, "sh")
     monkeypatch.setattr(manager, "_get_boot_id", tmux.read_boot_id)
-    monkeypatch.setattr(tmux, "create_session", lambda *a, **k: launch(native, "sleep 30", is_admin=False))
+    monkeypatch.setattr(
+        tmux, "create_session", lambda *a, **k: launch(native, "sleep 30", is_admin=False, launch_options=k)
+    )
     failure = KeyboardInterrupt() if fault == "interrupt" else SSHError("controlled sharing failure")
 
     def grant(*args, **kwargs):
@@ -323,7 +340,8 @@ def test_native_create_failure_keeps_live_runtime_and_new_dependencies(tmp_path,
         row = db.get_session("s1")
         assert row is not None and row.socket_path == native.socket
         assert db.get_agent("s1") is not None and db.get_workspace("s1") is not None
-        assert check_session_status(row, target=native) is SessionStatus.RUNNING
+        expected = SessionStatus.UNKNOWN if fault == "fingerprint" else SessionStatus.RUNNING
+        assert check_session_status(row, target=native) is expected
         if fault == "fingerprint":
             assert row.pid is None
             monkeypatch.setattr(tmux, "capture_tmux_server_fingerprint", _NATIVE_CAPTURE)
@@ -353,7 +371,9 @@ def test_failed_native_startup_release_retains_checkpointed_runtime(tmp_path, mo
     _patch_transports(monkeypatch, native, native)
     _requiring_template(monkeypatch, "sh")
     monkeypatch.setattr(manager, "_get_boot_id", tmux.read_boot_id)
-    monkeypatch.setattr(tmux, "create_session", lambda *a, **k: launch(native, "sleep 30", is_admin=False))
+    monkeypatch.setattr(
+        tmux, "create_session", lambda *a, **k: launch(native, "sleep 30", is_admin=False, launch_options=k)
+    )
     monkeypatch.setattr(tmux, "capture_tmux_server_fingerprint", _NATIVE_CAPTURE)
     monkeypatch.setattr(tmux, "finalize_session_start", _NATIVE_FINALIZE)
     real_run = native.run

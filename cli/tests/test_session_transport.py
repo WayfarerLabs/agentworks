@@ -435,7 +435,23 @@ def test_create_session_uses_agent_target_for_tmux(tmp_path: Path, monkeypatch: 
 
     captured: dict[str, object] = {}
 
-    def _capture_create(name, ws_path, command, linux_user, *, run_command, target, admin_username, is_admin, env=None):  # type: ignore[no-untyped-def]
+    def _capture_create(
+        name,
+        ws_path,
+        command,
+        linux_user,
+        *,
+        run_command,
+        target,
+        admin_username,
+        is_admin,
+        env=None,
+        before_spawn=None,
+        session_uuid=None,
+        run_id=None,
+    ):  # type: ignore[no-untyped-def]
+        if before_spawn is not None:
+            before_spawn()
         captured["run_command"] = run_command
         captured["target"] = target
         captured["env"] = env
@@ -781,7 +797,23 @@ def test_launch_migrates_legacy_session_to_per_session_socket(
     # downstream atomic runtime update lands the migration.
     create_calls: list[dict[str, object]] = []
 
-    def _capture_create(name, ws_path, command, linux_user, *, run_command, target, admin_username, is_admin, env=None):  # type: ignore[no-untyped-def]
+    def _capture_create(
+        name,
+        ws_path,
+        command,
+        linux_user,
+        *,
+        run_command,
+        target,
+        admin_username,
+        is_admin,
+        env=None,
+        before_spawn=None,
+        session_uuid=None,
+        run_id=None,
+    ):  # type: ignore[no-untyped-def]
+        if before_spawn is not None:
+            before_spawn()
         create_calls.append({"name": name, "is_admin": is_admin})
         return ("/run/agentworks/admin-tmux-sockets/admin/legacy.sock", 67890)
 

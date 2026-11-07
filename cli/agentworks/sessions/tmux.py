@@ -404,7 +404,7 @@ def _cleanup_stale_sockets_under(target: Transport, dir_path: str) -> int:
         def run(
             command: str, *, check: bool = True, env: dict[str, str] | None = None, guard: str = socket_guard
         ) -> object:
-            return target.run(f"{guard} && {command}", sudo=True, check=check, env=env or {})
+            return target.run(f"{guard} && {{ {command}; }}", sudo=True, check=check, env=env or {})
 
         if probe_tmux_server(run_command=run, socket_path=sock_path) is ProbeStatus.ABSENT:
             result = target.run(f"{socket_guard} && rm -f -- {q_sock}", sudo=True, check=False)
@@ -830,6 +830,9 @@ def create_session(
     admin_username: str | None = None,
     is_admin: bool = True,
     env: dict[str, str] | None = None,
+    before_spawn: Callable[[], None] | None = None,
+    session_uuid: str | None = None,
+    run_id: str | None = None,
 ) -> tuple[str, int | None]:
     """Create a locked-down tmux session.
 
@@ -858,6 +861,10 @@ def create_session(
     reporting success. An unacknowledged transport failure is not evidence that
     startup completed.
 
+    ``before_spawn`` checkpoints uncertainty after all prechecks, immediately
+    before dispatch. The private native session environment binds recovery to
+    the supplied session UUID and run ID, even if the acknowledgement is lost.
+
     Returns (socket_path, tmux_server_pid).
     """
     assert linux_user is not None
@@ -867,7 +874,12 @@ def create_session(
     q_session = shlex.quote(session_name)
     q_path = shlex.quote(workspace_path)
     pane_cmd = _pane_command(command, q_path)
-    env_flags = _tmux_env_flags(env)
+    launch_env = dict(env or {})
+    if session_uuid is not None and run_id is not None:
+        if {"_AGW_SESSION_UUID", "_AGW_RUN_ID"}.intersection(launch_env):
+            raise StateError("session environment conflicts with private tmux launch identity")
+        launch_env.update(_AGW_SESSION_UUID=session_uuid, _AGW_RUN_ID=run_id)
+    env_flags = _tmux_env_flags(launch_env)
 
     # Per-session socket setup. The admin path uses the simpler shape (no
     # cross-user group magic); the agent path keeps the existing group-shared
@@ -935,6 +947,10 @@ def create_session(
         + tmux_cmd('set-option -g @agentworks-launch-pane "$agw_launch_pane"', sock)
         + " \\; set-option -t \"$agw_launch_pane\" remain-on-exit on \\; display-message -p '#{pid}'"
     )
+    # Checkpoint only after all synchronous prechecks. Once dispatched, a lost
+    # acknowledgement cannot establish whether the server was created.
+    if before_spawn is not None:
+        before_spawn()
     result = run_command(cmd, env=env)
     try:
         pid = _parse_pid(getattr(result, "stdout", "") or "", context="after session create")
@@ -1237,3 +1253,31 @@ def capture_tmux_server_fingerprint(
         ProbeStatus.PRESENT,
         TmuxServerFingerprint(first_pid.value, boot_id, first_ticks.value),
     )
+
+
+def _matches_launch_attempt(
+    *,
+    target: Transport,
+    socket_path: str,
+    session_name: str,
+    session_uuid: str,
+    run_id: str | None,
+    fingerprint: TmuxServerFingerprint,
+    sudo: bool = False,
+) -> bool:
+    """Bind an unacknowledged launch to its exact native session and stable server."""
+    if run_id is None:
+        return False
+    q_target = exact_tmux_target(session_name)
+    commands = (
+        tmux_cmd(f"display-message -p -t {q_target} '#{{pid}}'", socket_path),
+        tmux_cmd(f"show-environment -t {q_target} _AGW_SESSION_UUID", socket_path),
+        tmux_cmd(f"show-environment -t {q_target} _AGW_RUN_ID", socket_path),
+    )
+    result = target.run(runtime_probe_command(" && ".join(commands), "LAUNCH"), sudo=sudo, check=False)
+    payload = runtime_probe_payload(result.stdout, "LAUNCH")
+    expected = f"{fingerprint.pid}\n_AGW_SESSION_UUID={session_uuid}\n_AGW_RUN_ID={run_id}\n"
+    if result.returncode != 0 or runtime_probe_stderr(result.stderr) != "" or payload != expected:
+        return False
+    verified = capture_tmux_server_fingerprint(target=target, socket_path=socket_path, sudo=sudo)
+    return verified.status is ProbeStatus.PRESENT and verified.fingerprint == fingerprint

@@ -324,18 +324,12 @@ def _teardown_session(
     assert observed is not None
     observed_boot_id = _mgr._validated_observed_boot_id(observed.boot_id, session=session)
     if session.pid == PID_STOPPED:
-        # Older unacknowledged launches left the stopped sentinel behind.
-        # Adopt only the observed server at this row's validated dedicated path.
-        db.update_session_runtime(
-            session.name,
-            socket_path=socket_path,
-            pid=observed.pid,
-            boot_id=observed_boot_id,
-            tmux_server_start_ticks=observed.start_ticks,
+        raise StateError(
+            f"session '{session.name}' has an unrecorded server at its managed socket",
+            entity_kind="session",
+            entity_name=session.name,
+            hint="Inspect the conflicting server manually; its runtime was preserved.",
         )
-        refreshed = db.get_session(session.name)
-        assert refreshed is not None
-        session = refreshed
     stored_boot_id = _mgr._validated_stored_boot_id(session)
     if observed.pid != session.pid or observed_boot_id != stored_boot_id:
         raise BrokenStateError(
@@ -1040,7 +1034,10 @@ def _launch_existing_session(
                 expected_socket = (
                     admin_socket_path(linux_user, name) if is_admin else agent_socket_path(linux_user, name)
                 )
-                _mark_runtime_unknown(db, session, socket_path=expected_socket, boot_id=launch_boot)
+
+                def before_spawn() -> None:
+                    _mark_runtime_unknown(db, session, socket_path=expected_socket, boot_id=launch_boot)
+
                 try:
                     new_sock, pid = create_tmux_session(
                         name,
@@ -1052,6 +1049,9 @@ def _launch_existing_session(
                         admin_username=vm.admin_username,
                         is_admin=is_admin,
                         env=session_env,
+                        before_spawn=before_spawn,
+                        session_uuid=prepared_artifacts.context.session_uuid,
+                        run_id=prepared_artifacts.context.run_id,
                     )
                 except RuntimeError as exc:
                     if "already has an active tmux server" in str(exc):
@@ -1059,7 +1059,7 @@ def _launch_existing_session(
                             f"session '{name}' has an active tmux server that was not detected by the status check.",
                             entity_kind="session",
                             entity_name=name,
-                            hint="Use 'session stop --force' to kill it, then retry.",
+                            hint="Inspect the conflicting server manually; its runtime was preserved.",
                         ) from exc
                     raise
                 from agentworks.sessions.tmux import (

@@ -5,7 +5,7 @@ from __future__ import annotations
 import base64
 from functools import partial
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import agentworks.sessions.manager as _mgr
 from agentworks.db import PID_STOPPED, SessionMode, SessionStatus
@@ -139,13 +139,15 @@ def _check_dedicated_session(session: SessionRow, *, target: Transport) -> Sessi
     if session_presence is ProbeStatus.UNKNOWN:
         return SessionStatus.UNKNOWN
     if session_presence is ProbeStatus.PRESENT:
-        return SessionStatus.RUNNING
+        if session.pid not in {None, PID_STOPPED} or _pending_launch_is_owned(session, target=target):
+            return SessionStatus.RUNNING
+        return SessionStatus.UNKNOWN
 
     server_presence = probe_tmux_server(run_command=run_command, socket_path=socket_path)
     if server_presence is ProbeStatus.UNKNOWN:
         return SessionStatus.UNKNOWN
     if server_presence is ProbeStatus.PRESENT:
-        return SessionStatus.RESIDUAL
+        return SessionStatus.UNKNOWN if session.pid in {None, PID_STOPPED} else SessionStatus.RESIDUAL
 
     # Exact session and dedicated server are authoritatively absent. The
     # stopped sentinel is supporting evidence only after those live facts.
@@ -175,18 +177,56 @@ def _check_dedicated_session(session: SessionRow, *, target: Transport) -> Sessi
     return SessionStatus.BROKEN  # same boot, process alive, socket unreachable
 
 
+def _pending_launch_is_owned(session: SessionRow, *, target: Transport) -> bool:
+    """Observe a dispatched attempt without adopting its native identity."""
+    from agentworks.sessions.tmux import (
+        _matches_launch_attempt,
+        canonical_boot_id,
+        capture_tmux_server_fingerprint,
+        require_socket_path,
+    )
+
+    if session.pid is not None or session.run_id is None or session.socket_path is None:
+        return False
+    boot_id = canonical_boot_id(session.boot_id)
+    if boot_id is None:
+        return False
+    bounded = cast("Transport", _BoundedStatusTarget(target))
+    sudo = session.mode == SessionMode.AGENT.value
+    try:
+        stored_ticks = _mgr._validated_stored_start_ticks(session)
+        require_socket_path(session.socket_path, run_command=partial(bounded.run, sudo=sudo))
+        probe = capture_tmux_server_fingerprint(target=bounded, socket_path=session.socket_path, sudo=sudo)
+        observed = probe.fingerprint
+        return (
+            probe.status is ProbeStatus.PRESENT
+            and observed is not None
+            and observed.boot_id == boot_id
+            and (stored_ticks is None or stored_ticks == observed.start_ticks)
+            and _matches_launch_attempt(
+                target=bounded,
+                socket_path=session.socket_path,
+                session_name=session.name,
+                session_uuid=session.session_uuid,
+                run_id=session.run_id,
+                fingerprint=observed,
+                sudo=sudo,
+            )
+        )
+    except (AgentworksError, OSError):
+        return False
+
+
 def batch_check_status(
     sessions: list[SessionRow],
     *,
     target: Transport,
 ) -> dict[str, SessionStatus]:
-    """Check status for multiple sessions in one SSH call per VM.
+    """Probe session presence together, verifying pending launch candidates separately.
 
-    Returns {session_name: SessionStatus}. Dedicated rows are probed even when
-    their persisted runtime identity is incomplete: exact tmux presence is
-    sufficient for ``RUNNING``; absence remains ``UNKNOWN`` until the stored
-    identity can prove more. Persisted-stopped rows are still probed so a
-    manually resurrected exact session cannot be hidden by stale evidence.
+    Returns {session_name: SessionStatus}. An unrecorded present server remains
+    ``UNKNOWN`` unless its exact native launch identity matches the pending
+    attempt. Observation never adopts that identity into the persisted row.
     """
     from agentworks.sessions.tmux import canonical_boot_id
 
@@ -241,14 +281,16 @@ def batch_check_status(
 
         has_presence = _batch_tmux_presence(fields[2], fields[3], missing_target_is_absent=True)
         if has_presence is ProbeStatus.PRESENT:
-            status_map[name] = SessionStatus.RUNNING
+            if session.pid not in {None, PID_STOPPED} or _pending_launch_is_owned(session, target=target):
+                status_map[name] = SessionStatus.RUNNING
             continue
         if has_presence is ProbeStatus.UNKNOWN:
             continue
 
         server_presence = _batch_tmux_presence(fields[4], fields[5], missing_target_is_absent=False)
         if server_presence is ProbeStatus.PRESENT:
-            status_map[name] = SessionStatus.RESIDUAL
+            if session.pid not in {None, PID_STOPPED}:
+                status_map[name] = SessionStatus.RESIDUAL
             continue
         if server_presence is ProbeStatus.UNKNOWN:
             continue

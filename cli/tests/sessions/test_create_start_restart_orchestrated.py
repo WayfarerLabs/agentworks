@@ -52,6 +52,13 @@ from ..orchestrated_fixtures import PLUGINS_ENABLED, proxmox_site, write_operato
 
 BOOT_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 
+
+def _acknowledged_launch(events: list[str], socket_path: str, **kwargs: Any) -> tuple[str, int]:
+    kwargs["before_spawn"]()
+    events.append("tmux_create")
+    return socket_path, 4243
+
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -238,7 +245,7 @@ def _restart_fixture(
     monkeypatch.setattr(
         tmux_mod,
         "create_session",
-        lambda *a, **k: events.append("tmux_create") or ("/run/agentworks/agent-tmux-sockets/agt-a1/s1.sock", 4243),
+        lambda *a, **k: _acknowledged_launch(events, "/run/agentworks/agent-tmux-sockets/agt-a1/s1.sock", **k),
     )
     monkeypatch.setattr(
         tmux_mod,
@@ -889,7 +896,7 @@ def _create_stubs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, events: list[
     monkeypatch.setattr(
         tmux_mod,
         "create_session",
-        lambda *a, **k: events.append("tmux_create") or ("/run/agentworks/agent-tmux-sockets/agt-s1/s1.sock", 4243),
+        lambda *a, **k: _acknowledged_launch(events, "/run/agentworks/agent-tmux-sockets/agt-s1/s1.sock", **k),
     )
     monkeypatch.setattr(
         tmux_mod,

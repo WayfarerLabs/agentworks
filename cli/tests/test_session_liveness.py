@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.db import SessionMode, SessionRow, SessionStatus
+from agentworks.db import PID_STOPPED, SessionMode, SessionRow, SessionStatus
 from agentworks.errors import ConnectivityError, NotFoundError, StateError
 from agentworks.sessions.manager import (
     _needs_repair,
@@ -391,7 +391,9 @@ def test_batch_probe_executes_only_read_only_guest_operations(tmp_path: Path) ->
     assert result.returncode == 0
     assert result.stderr == ""
     parsed = batch_check_status(sessions, target=_FakeTarget({"has-session": _FakeResult(stdout=result.stdout)}))
-    assert parsed == {session.name: SessionStatus.RUNNING for session in sessions}
+    assert parsed == {
+        session.name: SessionStatus.UNKNOWN if session.pid is None else SessionStatus.RUNNING for session in sessions
+    }
     assert audit.read_text().splitlines() == [
         "tmux\t-S\t/tmp/admin.sock\thas-session\t-t\t=admin",
         "tmux\t-S\t/tmp/admin.sock\tlist-sessions",
@@ -676,20 +678,22 @@ def test_missing_start_ticks_alone_does_not_trigger_eager_identity_repair() -> N
 
 
 @pytest.mark.parametrize(
-    ("pid", "boot_id"),
+    ("pid", "boot_id", "expected"),
     [
-        (None, BOOT_CURRENT),
-        (42, None),
+        (None, BOOT_CURRENT, SessionStatus.UNKNOWN),
+        (PID_STOPPED, None, SessionStatus.UNKNOWN),
+        (42, None, SessionStatus.RUNNING),
     ],
 )
-def test_incomplete_dedicated_identity_is_live_when_exact_tmux_session_is_present(
+def test_present_dedicated_session_requires_a_recorded_pid_for_running_inventory(
     pid: int | None,
     boot_id: str | None,
+    expected: SessionStatus,
 ) -> None:
     session = _session("s1", pid=pid, socket_path="/sock", boot_id=boot_id)
     target = _FakeTarget({"has-session": _FakeResult(ok=True)})
 
-    assert check_session_status(session, target=target) == SessionStatus.RUNNING
+    assert check_session_status(session, target=target) == expected
     assert len(target.commands) == 1
 
 

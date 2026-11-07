@@ -1,9 +1,8 @@
 """Dependency-ordered session creation and recovery-aware rollback.
 
-Before tmux acknowledges startup, failure unwinds the newly realized owners.
-After acknowledgement, the session owns its socket and startup protection;
-retain its row and dependencies unless runtime absence is proved. Persist the
-stable fingerprint before finalizing startup and releasing that protection.
+Before dispatching tmux, failure unwinds the newly realized owners. A dispatched
+launch retains its row and dependencies unless runtime absence is proved.
+Persist the stable fingerprint before finalizing startup and releasing protection.
 """
 
 from __future__ import annotations
@@ -240,14 +239,12 @@ def _start_session_slice(
             runner=agent_target or target,
         )
 
-    # Compute socket path up front (deterministic from linux_user +
-    # session name). Needed for the DB insert since the CHECK
-    # constraint requires agent sessions to have a socket_path.
-    expected_socket: str | None = None
-    if mode == SessionMode.AGENT:
-        from agentworks.sessions.tmux import agent_socket_path
+    # Retain the dedicated address for either mode, including failed launches.
+    from agentworks.sessions.tmux import admin_socket_path, agent_socket_path
 
-        expected_socket = agent_socket_path(linux_user, name)
+    expected_socket = (
+        agent_socket_path(linux_user, name) if mode == SessionMode.AGENT else admin_socket_path(linux_user, name)
+    )
 
     mode_label = f"agent: {resolved_agent_name}" if resolved_agent_name else "admin"
     from agentworks.harness_setup.locking import native_mutation_guard
@@ -405,10 +402,14 @@ def _start_session_slice(
                     entity_kind="session",
                     entity_name=name,
                 )
-            retain_unknown_runtime = True
-            db.update_session_runtime(
-                name, socket_path=expected_socket, pid=None, boot_id=launch_boot, tmux_server_start_ticks=None
-            )
+
+            def before_spawn() -> None:
+                nonlocal retain_unknown_runtime
+                db.update_session_runtime(
+                    name, socket_path=expected_socket, pid=None, boot_id=launch_boot, tmux_server_start_ticks=None
+                )
+                retain_unknown_runtime = True
+
             sock, pid = create_tmux_session(
                 name,
                 ws.workspace_path,
@@ -419,6 +420,9 @@ def _start_session_slice(
                 admin_username=vm.admin_username,
                 is_admin=(mode == SessionMode.ADMIN),
                 env=session_env,
+                before_spawn=before_spawn,
+                session_uuid=prepared_artifacts.context.session_uuid,
+                run_id=prepared_artifacts.context.run_id,
             )
             db.record_session_started(name)
             from agentworks.sessions.tmux import ProbeStatus, capture_tmux_server_fingerprint
