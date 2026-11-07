@@ -196,6 +196,7 @@ def test_merge_rejects_duplicate_destination_keys(
         PreparedSettings.from_bytes(source, format=format, strategy=strategy).apply(destination)
 
 
+@pytest.mark.windows
 @pytest.mark.parametrize("format", ["json", "toml"])
 @pytest.mark.parametrize("strategy", ["replace", "merge-overwrite", "merge-preserve", "skip-existing"])
 def test_invalid_settings_source_reports_its_workstation_path_without_content(tmp_path, format, strategy):
@@ -203,14 +204,15 @@ def test_invalid_settings_source_reports_its_workstation_path_without_content(tm
     source.write_bytes(b"external-private-value = [")
     with pytest.raises(ConfigError) as caught:
         prepare_settings(SettingsMapping(source=str(source), strategy=strategy), format=format)
-    assert str(source) in str(caught.value)
+    assert repr(str(source)) in str(caught.value)
     assert "external-private-value" not in "".join(traceback.format_exception(caught.value))
 
 
+@pytest.mark.windows
 @pytest.mark.parametrize("format,source", [("json", b"{}"), ("toml", b"")])
 @pytest.mark.parametrize("strategy", ["merge-overwrite", "merge-preserve"])
-def test_invalid_settings_destination_reports_its_guest_path_without_content(tmp_path, format, source, strategy):
-    destination = str(tmp_path / "guest-settings")
+def test_invalid_settings_destination_reports_its_guest_path_without_content(format, source, strategy):
+    destination = "/home/fixture/guest-settings"
     prepared = PreparedSettings.from_bytes(source, format=format, strategy=strategy)
     invalid = b"external-private-value = ["
     with pytest.raises(ConfigError) as caught:

@@ -1,6 +1,8 @@
 """Guest failures remain bounded and redacted at session boundaries."""
 
+import shlex
 import subprocess
+import sys
 import traceback
 from unittest.mock import Mock, patch
 from uuid import uuid4
@@ -19,10 +21,11 @@ from tests.artifacts.test_native_probe import probe
 from tests.native_setup_fixtures import LocalFixtureTransport
 
 
-def hostile_text() -> tuple[str, str]:
-    secret = uuid4().hex
-    middle = len(secret) // 2
-    rendered = secret[:middle] + "\x1b[31m\ufffd" + secret[middle:]
+def hostile_text(representation: str = "raw") -> tuple[str, str]:
+    secret = uuid4().hex + "_'both\"_end"
+    encoded = {"raw": secret, "shell": shlex.quote(secret), "repr": repr(secret)}[representation]
+    middle = len(encoded) // 2
+    rendered = encoded[:middle] + "\x1b[31m\ufffd" + encoded[middle:]
     return secret, "\x1b]0;guest-title\x07\n" + rendered + "\n" + "x" * (1024 * 1024)
 
 
@@ -40,9 +43,11 @@ def test_raw_redaction_precedes_context_sensitive_terminal_normalization():
     assert_safe(rendered, secret)
 
 
+@pytest.mark.windows
+@pytest.mark.parametrize("representation", ["raw", "shell", "repr"])
 @pytest.mark.parametrize("stage", ["python-exception", "probe-exception", "probe-status", "probe-protocol"])
-def test_session_probe_sanitizes_raised_and_returned_guest_failures(stage):
-    secret, payload = hostile_text()
+def test_session_probe_sanitizes_raised_and_returned_guest_failures(stage, representation):
+    secret, payload = hostile_text(representation)
     runner = Mock(spec=Transport)
     runner.logger = None
     failure = SSHError(payload, hint=payload)
@@ -62,17 +67,21 @@ def test_session_probe_sanitizes_raised_and_returned_guest_failures(stage):
         assert caught.value is failure
 
 
-def test_advisory_ancestor_warning_redacts_normalized_runtime_values():
-    secret, payload = hostile_text()
+@pytest.mark.windows
+@pytest.mark.parametrize("representation", ["raw", "shell", "repr"])
+def test_advisory_ancestor_warning_redacts_normalized_runtime_values(representation):
+    secret, payload = hostile_text(representation)
     with patch("agentworks.output.warn") as warn, ancestor_diagnostics("grok-build", redactions=(secret,)):
         raise ExternalError(payload, hint=payload)
     message = warn.call_args.args[0]
-    assert secret not in message and "\x1b" not in message and "\x07" not in message
+    assert secret[: len(secret) // 2] not in message and "\x1b" not in message and "\x07" not in message
     assert len(message.encode()) < 2300
 
 
-def test_setup_runner_preserves_error_identity_and_sanitizes_environment():
-    secret, payload = hostile_text()
+@pytest.mark.windows
+@pytest.mark.parametrize("representation", ["raw", "shell", "repr"])
+def test_setup_runner_preserves_error_identity_and_sanitizes_environment(representation):
+    secret, payload = hostile_text(representation)
     target = Mock(spec=Transport)
     target.logger = None
     target.default_timeout = 30
@@ -86,6 +95,7 @@ def test_setup_runner_preserves_error_identity_and_sanitizes_environment():
     assert_safe(failure.hint, secret)
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason="executes Linux guest login-shell and filesystem helpers locally")
 def test_native_discovery_accepts_a_login_banner_without_a_newline(tmp_path):
     root = tmp_path / "target"
     root.mkdir()
@@ -119,11 +129,13 @@ def test_destination_identity_ignores_noninteractive_startup_output(db, banner):
     assert observed == destination_id(vm, runner, location="/home/identity", username="identity")
 
 
+@pytest.mark.windows
 def test_machine_inventory_failure_identifies_the_actual_machine_path(tmp_path):
-    path = tmp_path / "etc/codex/skills"
+    root = tmp_path / r"fixture\agent\target"
+    path = root / "etc/codex/skills"
     path.parent.mkdir(parents=True)
     path.write_text("not a directory")
-    observed = probe(tmp_path, tool="codex", vm_only=True)
+    observed = probe(root, tool="codex", vm_only=True)
     assert str(path) in observed["problem_paths"]
 
 

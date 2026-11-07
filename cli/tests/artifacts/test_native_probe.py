@@ -80,9 +80,9 @@ def probe(
         **(environment or {}),
     }
     # Guest machine paths are isolated alongside HOME and the workspace.
-    program = _PROBE.replace("/etc/claude-code", str(tmp_path / "etc/claude-code")).replace(
-        "/etc/codex", str(tmp_path / "etc/codex")
-    )
+    program = _PROBE
+    for guest_path in ("/etc/claude-code/.claude", "/etc/claude-code/managed-settings.json", "/etc/codex"):
+        program = program.replace(repr(guest_path), repr(str(tmp_path / guest_path.removeprefix("/"))))
     result = subprocess.run(
         [sys.executable, "-c", program], input=json.dumps(request), env=env, capture_output=True, text=True, check=True
     )

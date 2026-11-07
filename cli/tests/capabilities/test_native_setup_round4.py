@@ -318,6 +318,7 @@ def test_unavailable_capture_cannot_erase_placements_or_unresolved_deferrals(rou
         assert failures == []
 
 
+@pytest.mark.windows
 def test_selected_unsupported_repoint_preserves_native_progress_before_core_or_secret_resolution(
     db, tmp_path, monkeypatch
 ):
@@ -360,7 +361,7 @@ def test_selected_unsupported_repoint_preserves_native_progress_before_core_or_s
                 complete=True,
                 artifact_files=(
                     OwnedArtifactFile(
-                        path=str(managed), sha256=hashlib.sha256(before_bytes).hexdigest(), origins=("b" * 64,)
+                        path="/home/dev/AGENTS.md", sha256=hashlib.sha256(before_bytes).hexdigest(), origins=("b" * 64,)
                     ),
                 ),
             ),

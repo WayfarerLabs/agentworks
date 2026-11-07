@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import shlex
+import sys
 import tomllib
 from collections.abc import Callable
 from dataclasses import replace
@@ -230,12 +231,11 @@ def test_private_skills_stay_unhandled_when_native_cli_cannot_discover_them(rend
     assert result.argv == ()
 
 
-@pytest.mark.parametrize("render", [claude.session_artifacts, codex.session_artifacts, grok.session_artifacts])
+@pytest.mark.parametrize("render", [claude.session_artifacts, codex.session_artifacts])
 def test_native_persona_options_do_not_enable_hooks_or_unknown_native_fields(render):
     name = {
         claude.session_artifacts: "claude-code",
         codex.session_artifacts: "codex",
-        grok.session_artifacts: "grok-build",
     }[render]
     item = artifact(ArtifactType.AGENT, options={name: {"hooks": {}}})
     with pytest.raises(ConfigError):
@@ -243,7 +243,7 @@ def test_native_persona_options_do_not_enable_hooks_or_unknown_native_fields(ren
             enabled_workarounds=enabled(render),
             context=context(item),
             configured=None,
-            extra_args=["--single", "task"] if render is grok.session_artifacts else [],
+            extra_args=[],
         )
 
 
@@ -636,7 +636,8 @@ def test_session_delivery_defaults_to_unhandled_before_native_validation(render)
 def test_config_workaround_names_match_native_delivery(integration, workarounds):
     annotation = integration.config_model.model_fields["enabled_workarounds"].annotation
     names = get_args(get_args(annotation)[0])
-    assert set(names) == set(workarounds.values())
+    compatibility_names = {"session-agent-definitions"} if integration is GrokBuildIntegration else set()
+    assert set(names) == set(workarounds.values()) | compatibility_names
 
 
 @pytest.mark.parametrize("type", list(ArtifactType))
@@ -680,7 +681,6 @@ def test_shell_delivers_session_artifacts_without_workarounds(type):
         (codex.session_artifacts, "session-developer-instructions", {ArtifactType.HINT, ArtifactType.RULE}, "-c"),
         (codex.session_artifacts, "session-agent-config", {ArtifactType.AGENT}, "-c"),
         (grok.session_artifacts, "session-rules", {ArtifactType.HINT, ArtifactType.RULE}, "--rules"),
-        (grok.session_artifacts, "session-agent-definitions", {ArtifactType.AGENT}, "--agents"),
     ],
 )
 def test_workaround_selects_only_its_types_including_deferred_ancestors(render, workaround, selected, flag):
@@ -697,7 +697,7 @@ def test_workaround_selects_only_its_types_including_deferred_ancestors(render, 
     result = render(
         received_context,
         configured=None,
-        extra_args=["--single", "task"] if render is grok.session_artifacts and ArtifactType.AGENT in selected else [],
+        extra_args=[],
         enabled_workarounds=[workaround],
     )
     assert flag in result.argv
@@ -717,14 +717,20 @@ def test_workaround_selects_only_its_types_including_deferred_ancestors(render, 
 def test_unselected_guidance_does_not_restrict_native_guidance_flags(render, workaround, args):
     if render is grok.session_artifacts:
         args = [*args, "--single", "task"]
+    rule, agent = artifact(ArtifactType.RULE), artifact(ArtifactType.AGENT)
     result = render(
-        context(artifact(ArtifactType.RULE), artifact(ArtifactType.AGENT)),
+        context(rule, agent),
         configured=None,
         extra_args=args,
         enabled_workarounds=[workaround],
     )
-    assert result.argv
-    assert len(result.application.deferred) == 1
+    if render is grok.session_artifacts:
+        assert result.argv == () and result.application.files == ()
+        assert {item.input_id for item in result.application.deferred} == {rule.identity, agent.identity}
+        assert {item.destination for item in result.application.deferred} == {"session"}
+    else:
+        assert result.argv
+        assert {item.input_id for item in result.application.deferred} == {rule.identity}
 
 
 @pytest.mark.parametrize("implementation", [ClaudeCodeIntegration, CodexIntegration, GrokBuildIntegration])
@@ -998,6 +1004,7 @@ def test_setup_native_name_conflict_defers_only_affected_artifact(implementation
     )
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason="executes Linux guest filesystem helpers locally")
 @pytest.mark.parametrize("modified", [False, True])
 def test_setup_name_conflict_deferral_uses_safe_owned_retirement(tmp_path, db, modified):
     from agentworks.artifacts.native.common import defer_setup_conflicts
@@ -1043,7 +1050,7 @@ def test_setup_name_conflict_deferral_uses_safe_owned_retirement(tmp_path, db, m
     assert any(good.origin_identity in file.origins for file in result.files)
 
 
-@pytest.mark.parametrize("render", [claude.session_artifacts, codex.session_artifacts, grok.session_artifacts])
+@pytest.mark.parametrize("render", [claude.session_artifacts, codex.session_artifacts])
 @pytest.mark.parametrize("matching_owner", ["user", "workspace"])
 def test_new_carrier_cannot_choose_one_of_competing_ancestor_origins(render, matching_owner):
     first = artifact(ArtifactType.AGENT, owner="user")
@@ -1057,6 +1064,6 @@ def test_new_carrier_cannot_choose_one_of_competing_ancestor_origins(render, mat
         render(
             context=context(selected, ancestors=tuple(owned(file) for file in earlier)),
             configured=None,
-            extra_args=["--single", "task"] if render is grok.session_artifacts else [],
+            extra_args=[],
             enabled_workarounds=enabled(render),
         )

@@ -105,10 +105,11 @@ def test_delete_never_gates(
     assert db.get_vm("dvm") is None
 
 
-def test_whole_vm_delete_never_uses_guest_transport(db: Database, make_config, monkeypatch):
+def test_whole_vm_delete_never_uses_guest_transport(db: Database, make_config, monkeypatch, tmp_path):
     from agentworks.db import SessionMode
     from agentworks.sessions import manager as session_manager
 
+    config = make_config(f'\n[paths]\nvscode_workspaces = "{(tmp_path / "vscode").as_posix()}"\n')
     _seed(db)
     db.insert_agent("agent", "dvm", "agt-agent")
     db.insert_workspace("ws1", "/srv/ws1", "dvm", "ws-ws1")
@@ -126,7 +127,7 @@ def test_whole_vm_delete_never_uses_guest_transport(db: Database, make_config, m
     monkeypatch.setattr(session_manager, "_teardown_session", unexpected)
     monkeypatch.setattr("agentworks.transports.transport", unexpected)
 
-    vm_manager.delete_vm(db, make_config(), "dvm", force=True, yes=True, interaction=TtyInteractionPolicy.REFUSE)
+    vm_manager.delete_vm(db, config, "dvm", force=True, yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
     assert guest_calls == []
     assert counts["delete"] == 1
@@ -307,15 +308,20 @@ def test_delete_skips_a_name_alias_targeting_another_vm_artifact(
 
 
 def test_stranded_site_warns_and_removes_local_row_and_children(
-    db: Database, make_config, resolve_counter, captured_output: CapturedOutput
+    db: Database, make_config, resolve_counter, captured_output: CapturedOutput, tmp_path: Path
 ):
+    config = make_config(f'\n[paths]\nvscode_workspaces = "{(tmp_path / "vscode").as_posix()}"\n')
     _seed(db, site="gone")
     db.insert_workspace("kept", "/srv/kept", "dvm", "ws-kept")
+    config.paths.vscode_workspaces.mkdir()
+    artifact = config.paths.vscode_workspaces / "kept.code-workspace"
+    artifact.write_text("fixture generated workspace")
 
-    vm_manager.delete_vm(db, make_config(), "dvm", force=True, yes=True, interaction=TtyInteractionPolicy.REFUSE)
+    vm_manager.delete_vm(db, config, "dvm", force=True, yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
     assert db.get_vm("dvm") is None
     assert db.get_workspace("kept") is None
+    assert not artifact.exists()
     assert resolve_counter == []
     assert captured_output.warnings
 
@@ -508,10 +514,11 @@ def test_agent_without_workspace_still_requires_cascade_opt_in(db: Database, mak
     assert counts["delete"] == 0
 
 
-def test_refused_backend_delete_never_mutates_guest_state(db: Database, make_config, monkeypatch):
+def test_refused_backend_delete_never_mutates_guest_state(db: Database, make_config, monkeypatch, tmp_path):
     from agentworks.db import SessionMode
     from agentworks.sessions import manager as session_manager
 
+    config = make_config(f'\n[paths]\nvscode_workspaces = "{(tmp_path / "vscode").as_posix()}"\n')
     _seed(db)
     db.insert_agent("agent", "dvm", "agt-agent")
     db.insert_workspace("ws1", "/srv/ws1", "dvm", "ws-ws1")
@@ -535,7 +542,7 @@ def test_refused_backend_delete_never_mutates_guest_state(db: Database, make_con
     monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *args, **kwargs: guest_calls.append("logout"))
 
     with pytest.raises(AuthorizationError) as caught:
-        vm_manager.delete_vm(db, make_config(), "dvm", force=True, yes=True, interaction=TtyInteractionPolicy.REFUSE)
+        vm_manager.delete_vm(db, config, "dvm", force=True, yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
     assert caught.value is failure
     assert guest_calls == []
@@ -546,9 +553,13 @@ def test_refused_backend_delete_never_mutates_guest_state(db: Database, make_con
 
 
 @pytest.mark.parametrize("failure", [ConfigError("site could not bind"), RuntimeError("unexpected boundary failure")])
-def test_binding_failure_warns_and_retires_local_resources(db: Database, make_config, monkeypatch, failure):
+def test_binding_failure_warns_and_retires_local_resources(db: Database, make_config, monkeypatch, failure, tmp_path):
+    config = make_config(f'\n[paths]\nvscode_workspaces = "{(tmp_path / "vscode").as_posix()}"\n')
     _seed(db)
     db.insert_workspace("kept", "/srv/kept", "dvm", "ws-kept")
+    config.paths.vscode_workspaces.mkdir()
+    artifact = config.paths.vscode_workspaces / "kept.code-workspace"
+    artifact.write_text("fixture generated workspace")
     counts = _fake_backend(monkeypatch)
     synced = []
     monkeypatch.setattr("agentworks.ssh_config.sync_ssh_config", lambda *args, **kwargs: synced.append(args))
@@ -557,9 +568,10 @@ def test_binding_failure_warns_and_retires_local_resources(db: Database, make_co
         raise failure
 
     monkeypatch.setattr("agentworks.vms.manager.power._live_vm_boundary", refuse)
-    vm_manager.delete_vm(db, make_config(), "dvm", force=True, yes=True, interaction=TtyInteractionPolicy.REFUSE)
+    vm_manager.delete_vm(db, config, "dvm", force=True, yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
     assert db.get_vm("dvm") is None
     assert db.get_workspace("kept") is None
+    assert not artifact.exists()
     assert counts["delete"] == 0
     assert len(synced) == 1
