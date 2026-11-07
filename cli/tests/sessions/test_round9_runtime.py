@@ -346,21 +346,21 @@ def test_old_admin_null_address_requires_native_absence_before_repair(tmp_path, 
     if obstruction == "dedicated":
         launch(native, "sleep 30")
     elif obstruction == "default":
-        native.run("tmux new-session -d -s unrelated 'sleep 30'")
+        native.run("tmux new-session -d -s s1 'sleep 30'")
     else:
 
         def unknown_default(command, **kwargs):
-            if "AGW_RUNTIME_PID=" in command and "-S " not in command:
+            if "AGW_RUNTIME_SESSION=" in command and "-S " not in command:
                 return SimpleNamespace(returncode=255, ok=False, stdout="", stderr="unavailable")
             return original_run(command, **kwargs)
 
         monkeypatch.setattr(native, "run", unknown_default)
     try:
-        with pytest.raises(StateError):
+        with pytest.raises(AgentworksError):
             manager._ensure_pid(before, target=native, db=db)
         assert db.get_session("s1") == before
         if obstruction == "default":
-            assert native.run("tmux has-session -t '=unrelated'", check=False).ok
+            assert native.run("tmux has-session -t '=s1'", check=False).ok
         elif obstruction == "dedicated":
             assert native.native("list-sessions").ok
     finally:
@@ -381,6 +381,8 @@ def test_old_admin_stopped_null_address_becomes_addressable_after_native_absence
     monkeypatch.setattr(tmux, "create_session", lambda *a, **k: launch(native, "sleep 30", launch_options=k))
     db.insert_session("s1", "ws1", "claude", SessionMode.ADMIN)
     db.update_session_runtime("s1", socket_path=None, pid=PID_STOPPED, boot_id=None, tmux_server_start_ticks=None)
+    native.run("tmux new-session -d -s unrelated 'sleep 30'")
+    first = len(native.calls)
     try:
         invoke(db, operation)
         row = db.get_session("s1")
@@ -390,11 +392,13 @@ def test_old_admin_stopped_null_address_becomes_addressable_after_native_absence
             assert row is not None and row.socket_path == native.socket
             assert (row.pid == PID_STOPPED) is (operation == "stop_session")
         assert db.get_workspace("ws1") is not None and db.get_vm("vm1") is not None
-        assert not any("kill-server" in command for command, _ in native.calls)
-        assert sum("new-session" in command for command, _ in native.calls) == int(
+        assert native.run("tmux has-session -t '=unrelated'", check=False).ok
+        assert not any("kill-server" in command for command, _ in native.calls[first:])
+        assert sum("new-session" in command for command, _ in native.calls[first:]) == int(
             operation in {"start_session", "restart_session"}
         )
     finally:
+        native.run("tmux kill-server", check=False)
         db.close()
 
 

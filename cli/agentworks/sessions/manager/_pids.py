@@ -102,7 +102,6 @@ def _repair_session_pid(
         _matches_launch_attempt,
         admin_socket_path,
         capture_tmux_server_fingerprint,
-        probe_tmux_server_pid,
         probe_tmux_session,
         require_socket_path,
     )
@@ -131,12 +130,6 @@ def _repair_session_pid(
         # permits assigning the dedicated address; a live legacy row keeps its
         # existing migration path.
         if session.mode == SessionMode.ADMIN.value and session.pid in {None, PID_STOPPED}:
-            if probe_tmux_server_pid(target=target).status is not ProbeStatus.ABSENT:
-                raise StateError(
-                    f"session '{session.name}' legacy server absence could not be proved",
-                    entity_kind="session",
-                    entity_name=session.name,
-                )
             workspace = db.get_workspace(session.workspace_name)
             vm = db.get_vm(workspace.vm_name) if workspace is not None else None
             assert vm is not None
