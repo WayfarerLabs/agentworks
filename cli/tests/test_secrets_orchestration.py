@@ -244,7 +244,7 @@ def test_secret_references_invariant_under_value_substitution(
 ) -> None:
     """Callers may hand pre- or post-substitution env dicts to
     SecretTarget. The computed SecretDecl union is invariant because
-    _substitute_template_vars_in_env only rewrites EnvEntry.value
+    Plaintext interpolation only reads EnvEntry.value
     (plaintext), never EnvEntry.secret (the reference name). This is
     load-bearing for Phase 6.2 wiring, which builds targets from
     un-substituted template env dicts."""
@@ -260,7 +260,7 @@ def test_secret_references_invariant_under_value_substitution(
 
     pre_subst = {
         "API": EnvEntry({"secret": "api"}),
-        "GREETING": EnvEntry({"value": "hello {{session_name}}"}),
+        "GREETING": EnvEntry({"value": "hello ${agw:session_name}"}),
     }
     post_subst = {
         "API": EnvEntry({"secret": "api"}),

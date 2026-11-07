@@ -64,7 +64,7 @@ def artifact(
             type,
             name,
             description="Review changes",
-            text="before {{session_name}} after\n",
+            text="before ${agw:session_name} after\n",
             members=members,
             native_options_json=json.dumps(options or {}),
         ),
@@ -391,7 +391,7 @@ def test_codex_literal_role_and_guidance_overrides_apply_on_resume_and_new(fresh
     persona = artifact(ArtifactType.AGENT, name=name)
     persona = replace(
         persona,
-        content=replace(persona.content, description='Review "developer_instructions=x".\n{{session_name}} café'),
+        content=replace(persona.content, description='Review "developer_instructions=x".\n${agw:session_name} café'),
     )
     artifacts = context(item, persona) if include_rule else context(persona)
     integration = CodexIntegration(

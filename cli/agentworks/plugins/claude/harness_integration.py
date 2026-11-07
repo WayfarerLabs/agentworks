@@ -147,12 +147,14 @@ class ClaudeCodeConfig(AgwModel):
     """Explicitly enabled session artifact carriers. An authored list replaces inherited opt-ins."""
 
     extra_args: Annotated[list[str], MergeStrategy.REPLACE] = Field(default_factory=list)
-    """Appended verbatim after every generated CLI option, so it can carry
+    """Appended after every generated CLI option, so it can carry
     any flag this integration does not model. Claude uses the last
     ``--settings`` occurrence, so a raw one here replaces all generated
     session settings. On a fresh launch with an initial input, only the
     ``--`` prompt separator and prompt value follow these option tokens. A
-    child template's declared list replaces its parent's."""
+    child template's declared list replaces its parent's. Context references such as
+    ${agw:workspace_dir} render before each argument is shell-quoted; replacement
+    contents are literal data."""
 
 
 # The transcript's config root. ``CLAUDE_CONFIG_DIR`` is the CLI's own
@@ -397,7 +399,9 @@ class ClaudeCodeIntegration(HarnessIntegration):
         else:
             identity = ["--session-id", sid]
             msg = f"agentworks harness integration (claude-code): starting new session {self._session_name}"
-        parts = [shlex.quote(token) for token in (*identity, "--name", self._session_name, *self._managed_flags())]
+        parts = [
+            quote_literal_argv(token) for token in (*identity, "--name", self._session_name, *self._managed_flags())
+        ]
         if self.config.agent is not None:
             parts += ["--agent", quote_literal_argv(self.config.agent)]
         if (
@@ -406,7 +410,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
         ):
             parts += ["--append-system-prompt", quote_literal_argv(self.config.append_system_prompt)]
         parts += [quote_literal_argv(token) for token in self._artifact_plan.argv]
-        parts += [shlex.quote(token) for token in self.config.extra_args]
+        parts += [self.quote_context_argv(token) for token in self.config.extra_args]
         if not resume and (prompt := self._fresh_prompt()) is not None:
             parts += ["--", quote_literal_argv(prompt)]
         argv = " ".join(parts)
@@ -414,8 +418,8 @@ class ClaudeCodeIntegration(HarnessIntegration):
         # wrapping the tmux pane applies (``exec`` takes one simple
         # command): the login shell execs this sh, which echoes then
         # execs claude, so the pane becomes Claude. The message and the
-        # generated argv carry no ``{{word}}`` tokens, so the core
-        # template-var substitution does not mangle them.
+        # generated argv shield reserved context prefixes from the final
+        # command-source interpolation pass.
         inner = f"echo {shlex.quote(msg)}; exec claude {argv}"
         return f"sh -c {shlex.quote(inner)}"
 

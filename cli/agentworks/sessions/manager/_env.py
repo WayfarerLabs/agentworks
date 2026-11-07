@@ -12,7 +12,6 @@ from agentworks.errors import (
 )
 
 if TYPE_CHECKING:
-    import re
     from collections.abc import Mapping
 
     from agentworks.agents.templates import ResolvedAgentTemplate
@@ -24,7 +23,6 @@ if TYPE_CHECKING:
     from agentworks.sessions.template import SessionTemplate
     from agentworks.sessions.templates import ResolvedSessionTemplate
     from agentworks.workspaces.templates import ResolvedTemplate as ResolvedWorkspaceTemplate
-from ._constants import _KNOWN_TEMPLATE_VARS, _TEMPLATE_VAR_RE
 
 
 def _resolve_template(
@@ -117,47 +115,6 @@ def _display_live_harness_integration(
         return "-"
 
 
-def _substitute_template_vars(text: str, variables: dict[str, str]) -> str:
-    """Replace {{var}} placeholders in a string with their values."""
-
-    def replace(m: re.Match[str]) -> str:
-        name = m.group(1)
-        if name not in _KNOWN_TEMPLATE_VARS:
-            raise ValidationError(f"unknown template variable '{{{{{name}}}}}'")
-        return variables[name]
-
-    return _TEMPLATE_VAR_RE.sub(replace, text)
-
-
-def _substitute_template_vars_in_env(
-    env: dict[str, EnvEntry],
-    variables: dict[str, str],
-) -> dict[str, EnvEntry]:
-    """Apply ``{{session_name}}`` / ``{{workspace_name}}`` substitution to
-    plaintext env entry values.
-
-    Preserves the legacy template-variable hook the session-command build
-    carried before the EnvEntry migration (the pane command itself now
-    substitutes at the harness integration op call site). Secret-ref entries pass
-    through unchanged (variable substitution applies to the resolved
-    string at resolution time, not the secret name).
-    """
-    from agentworks.env import EnvEntry as _EnvEntry
-    from agentworks.env import PlaintextEnvEntry as _PlaintextEnvEntry
-
-    result: dict[str, _EnvEntry] = {}
-    for key, entry in env.items():
-        if entry.value is None:
-            result[key] = entry
-            continue
-        new_val = _substitute_template_vars(entry.value, variables)
-        if new_val == entry.value:
-            result[key] = entry
-        else:
-            result[key] = _EnvEntry(_PlaintextEnvEntry(value=new_val))
-    return result
-
-
 class _SessionEnvScopes(NamedTuple):
     """Per-scope env dicts for session create, start, and restart.
 
@@ -220,17 +177,49 @@ def _resolve_session_env_scopes(
         resolved_agent_template = _resolve_agent_template(db, registry, agent_row.name, agent_row.template)
         agent_env = resolved_agent_template.env
 
-    session_env = _substitute_template_vars_in_env(
-        session_template.env,
-        variables={"session_name": session_name, "workspace_name": ws.name},
-    )
-
-    return _SessionEnvScopes(
+    scopes = _SessionEnvScopes(
         vm=vm_template.env,
         workspace=workspace_template.env,
         admin=admin_env,
         agent=agent_env,
-        session=session_env,
+        session=session_template.env,
+    )
+    from agentworks.env.merge import effective_env
+    from agentworks.env.render import render_plaintext
+
+    render_plaintext(
+        effective_env(**scopes._asdict()),
+        _session_context_values(db, vm, ws, session_name, mode, agent_name),
+        field=f"session={session_name}.env",
+    )
+    return scopes
+
+
+def _session_context_values(
+    db: Database,
+    vm: VMRow,
+    ws: WorkspaceRow,
+    session_name: str,
+    mode: SessionMode,
+    agent_name: str | None,
+) -> dict[str, str]:
+    """Read the consuming identity for session interpolation without remote work."""
+    from agentworks.interpolation import context_values
+
+    user = vm.admin_username
+    if mode == SessionMode.AGENT:
+        assert agent_name is not None
+        agent = db.get_agent(agent_name)
+        if agent is None:
+            raise NotFoundError(f"agent {agent_name!r} not found", entity_kind="agent", entity_name=agent_name)
+        user = agent.linux_user
+    return context_values(
+        vm_name=vm.name,
+        user=user,
+        workspace_name=ws.name,
+        workspace_dir=ws.workspace_path,
+        agent_name=agent_name,
+        session_name=session_name,
     )
 
 
@@ -240,6 +229,8 @@ def _session_secret_target_pre_create(
     *,
     name: str,
     workspace_name: str,
+    workspace_dir: str,
+    agent_name: str | None,
     vm: VMRow,
     session_template: ResolvedSessionTemplate,
     new_workspace: bool,
@@ -288,18 +279,35 @@ def _session_secret_target_pre_create(
     elif existing_agent is not None:
         agent_env = _resolve_live_agent_tmpl(db, registry, existing_agent.name, existing_agent.template).env
 
-    session_env = _substitute_template_vars_in_env(
-        session_template.env,
-        variables={"session_name": name, "workspace_name": workspace_name},
-    )
-    return SecretTarget(
+    target = SecretTarget(
         vm=vm_template.env,
         workspace=workspace_env,
         admin=admin_scope,
         agent=agent_env,
-        session=session_env,
+        session=session_template.env,
         label=f"session={name}",
     )
+    from agentworks.agents.manager import derive_linux_user
+    from agentworks.interpolation import context_values
+
+    if is_admin_mode:
+        user = vm.admin_username
+    elif existing_agent is not None:
+        user = existing_agent.linux_user
+    else:
+        assert agent_name is not None
+        user = derive_linux_user(agent_name)
+    target.validate_context(
+        context_values(
+            vm_name=vm.name,
+            user=user,
+            workspace_name=workspace_name,
+            workspace_dir=workspace_dir,
+            agent_name=agent_name,
+            session_name=name,
+        )
+    )
+    return target
 
 
 def _session_secret_target(
@@ -316,8 +324,7 @@ def _session_secret_target(
     """Build a SecretTarget for a session, for eager-prompting orchestration.
 
     Constructed from the same template chain that ``_resolve_session_env``
-    would consume; substitution invariance guarantees the
-    SecretDecl union is identical pre- vs post-substitution.
+    would consume. Plaintext rendering does not change the secret-reference union.
     """
     from agentworks.secrets import SecretTarget
 
@@ -357,8 +364,7 @@ def _resolve_session_env(
     """Compose the shell-open env for session create, start, and restart.
 
     Resolves the per-VM / per-workspace / per-agent templates, builds the
-    ResourceContext, applies template-variable substitution to the session
-    template's env values, and runs the merged dict through
+    ResourceContext and runs the merged dict through
     ``compose_env`` (which renders secrets from the command's
     pre-resolved ``values`` and overlays per-context identity vars).
     """

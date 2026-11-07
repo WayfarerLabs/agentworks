@@ -1125,21 +1125,6 @@ def test_picker_string_execs_bare_codex_resume_with_the_cwd_pin() -> None:
     assert _OTHER_SID not in argv
 
 
-def test_generated_pieces_carry_no_template_var_tokens() -> None:
-    """The core template-var substitution raises on unknown ``{{word}}``
-    tokens over the WHOLE returned string; the generated skeleton must
-    stay clear of doubled braces on every leaf."""
-    leaves = (
-        _harness_integration(state={}).start(_op_ctx(_target())),  # fresh
-        _harness_integration().start(_op_ctx(_target(rollout=0))),  # resumed
-        _harness_integration(state={}).start(_op_ctx(_target(discovered=f"{_ROLLOUT}\n", rollout=0))),  # adopted
-        _harness_integration(state={}).start(_op_ctx(_target(discovered=f"{_ROLLOUT}\n{_OTHER_ROLLOUT}\n"))),  # picker
-        _harness_integration(state={"session_id": _SID}).start(_op_ctx(_target(rollout=1))),  # stale
-    )
-    for command in leaves:
-        assert "{{" not in command.command
-
-
 def test_session_name_needing_quotes_stays_one_recorder_path_word() -> None:
     """The session name lands in the recorder destination; a name needing
     quoting is ``shlex.quote``d into the path token rather than splitting

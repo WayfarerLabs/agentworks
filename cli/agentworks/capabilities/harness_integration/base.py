@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import shlex
 from abc import abstractmethod
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import TYPE_CHECKING, Literal, Protocol, Self
 
@@ -192,22 +192,20 @@ def require_commands(
 
 
 def quote_literal_argv(value: str) -> str:
-    """Quote one shell argv value while shielding literal ``{{`` text.
+    """Quote one literal shell argv value while shielding the reserved prefix.
 
-    The session manager applies template-variable substitution to the full
-    pane command returned by an integration. Workload fields are literal
-    harness input, so split adjacent opening braces across concatenated shell
-    quote fragments. The target shell reconstructs the exact value while the
-    manager never sees a template placeholder. Callers must continue using
-    ordinary :func:`shlex.quote` for ``extra_args``, whose placeholders are
-    intentionally expanded by the manager.
+    The session manager interpolates the command returned by an integration.
+    Workload input is literal data, so separate a reserved prefix across
+    concatenated shell quote fragments. Ordinary shell and Go template text
+    needs no special handling beyond ordinary argv quoting.
     """
     chunks: list[str] = []
     start = 0
-    for index in range(1, len(value)):
-        if value[index - 1 : index + 1] == "{{":
-            chunks.append(value[start:index])
-            start = index
+    cursor = 0
+    while (index := value.find("${agw:", cursor)) >= 0:
+        chunks.append(value[start : index + 1])
+        start = index + 1
+        cursor = start
     chunks.append(value[start:])
     return "".join(shlex.quote(chunk) for chunk in chunks)
 
@@ -224,6 +222,7 @@ class SessionBinding:
     admin: bool
     state: dict[str, object]
     artifact_context: SessionArtifactContext | None = None
+    context_values: Mapping[str, str] = field(default_factory=dict)
 
 
 class HarnessIntegration(Capability):
@@ -341,6 +340,26 @@ class HarnessIntegration(Capability):
     def prepare_artifacts(self, context: SessionArtifactContext) -> None:
         """Bind core-prepared inputs before the integration chooses its launch."""
         self._session = replace(self._session_binding, artifact_context=context)
+
+    def prepare_context(self, values: Mapping[str, str]) -> None:
+        """Bind the invocation's context before selecting or quoting launch data."""
+        self._session = replace(self._session_binding, context_values=dict(values))
+
+    def quote_context_argv(self, value: str) -> str:
+        """Render one structured extra argument as data, then quote it once.
+
+        Shield the resulting literal argument from the later command-source
+        pass, including any namespace text introduced by a replacement.
+        """
+        from agentworks.interpolation import render_template
+
+        return quote_literal_argv(
+            render_template(
+                value,
+                self._session_binding.context_values,
+                field=f"{self.owner_kind}/{self.owner_name}.extra_args",
+            )
+        )
 
     @property
     def _session_binding(self) -> SessionBinding:

@@ -605,3 +605,38 @@ def test_return_type_is_list_of_resolved_env_rows(
     rows = show_env(db, config, vm_name="vm-1", interaction=TtyInteractionPolicy.REFUSE)
     assert isinstance(rows, list)
     assert all(isinstance(r, ResolvedEnvRow) for r in rows)
+
+
+def test_show_plaintext_matches_execution_with_live_instance_context(db: Database, tmp_path: Path) -> None:
+    from agentworks.env import ResourceContext, compose_env
+    from agentworks.env.entry import EnvEntry
+
+    source = {
+        "CONFIG": "${agw:user_home_dir}/.config/tool",
+        "PROJECT": "${agw:workspace_dir}",
+        "LABEL": "${agw:agent_name}/${agw:session_name}",
+        "LITERAL": "$${agw:user_name}",
+    }
+    config = load_config(
+        _write_config(tmp_path, vm_template=ManifestDoc("vm-template", "default", {"env": source})), warn_issues=False
+    )
+    _seed_db(db, with_agent=True, with_session=True)
+    rows = show_env(db, config, session_name="s1", interaction=TtyInteractionPolicy.REFUSE)
+    actual = {row.key: row.rendered_value for row in rows}
+    expected = compose_env(
+        values={},
+        vm={key: EnvEntry(value) for key, value in source.items()},
+        ctx=ResourceContext(
+            vm_name="vm-1",
+            platform="lima",
+            site="lima-local",
+            user="aw-claude",
+            agent_name="claude",
+            workspace_name="ws-a",
+            workspace_dir="/home/agentworks/ws-a",
+            session_name="s1",
+            session_kind="agent",
+        ),
+    )
+    assert actual == expected
+    assert all(row.scope == "vm" for row in rows if row.key in source)

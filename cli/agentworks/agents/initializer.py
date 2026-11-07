@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.git_config import ensure_safe_directory_wildcard
+from agentworks.linux_users import managed_home
 from agentworks.transports import transport
 
 if TYPE_CHECKING:
@@ -47,7 +48,7 @@ def create_new_agent_user(
     from agentworks.errors import StateError
 
     target = transport(vm, config, logger=logger)
-    home = f"/home/{linux_user}"
+    home = managed_home(linux_user)
     if (
         target.run(f"getent passwd {shlex.quote(linux_user)}", sudo=True, check=False).ok
         or target.run(
@@ -118,7 +119,7 @@ def create_agent_on_vm(
 
     admin_target = transport(vm, config, logger=logger)
 
-    home = f"/home/{linux_user}"
+    home = managed_home(linux_user)
 
     agent_cfg = agent_tmpl
     agent_shell = agent_cfg.shell

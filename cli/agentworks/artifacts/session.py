@@ -15,6 +15,7 @@ from agentworks.errors import StateError
 from agentworks.harness_setup.inputs import SetupInputs
 from agentworks.harness_setup.model import NativeSetupState, SetupRecord
 from agentworks.harness_setup.state import read_native_setup, replace_setup_record, write_native_setup
+from agentworks.linux_users import managed_home
 from agentworks.native_files import native_path
 from agentworks.schema import CapabilityConfig
 
@@ -70,7 +71,7 @@ def prepare_session_artifacts(
         if not evidence.current:
             raise StateError("ancestor artifact placement is not current", hint=evidence.remediation)
     # The actual launch user's home is an identity, never a workspace-derived path.
-    home = f"/home/{linux_user}"
+    home = managed_home(linux_user)
     prior = read_native_setup(db, "session", name)
     if routed.inputs or routed.ancestor_files or any(item.artifact_files for item in prior.records):
         result = runner.run('printf "%s" "$HOME"', check=False)

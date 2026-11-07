@@ -18,6 +18,7 @@ from agentworks.errors import (
     UserAbort,
     ValidationError,
 )
+from agentworks.interpolation import render_template
 from agentworks.sessions.tmux import ADMIN_SOCKET_ROOT, AGENT_SOCKET_ROOT
 
 if TYPE_CHECKING:
@@ -586,6 +587,16 @@ def _launch_existing_session(
     # resource before start or restart (Phase 7, LLD b). Drift guard:
     # tests/agents/test_recipe_gate_drift.py.
     ensure_recipe_enabled(registry, "session-template", template.name)
+    env_target = _mgr._session_secret_target(
+        registry,
+        db=db,
+        vm=vm,
+        ws=ws,
+        session_name=name,
+        session_template=template,
+        mode=SessionMode(session.mode),
+        agent_name=session.agent_name,
+    )
     session_node = live_session_node(
         session,
         template,
@@ -811,16 +822,7 @@ def _launch_existing_session(
 
             secret_values = resolve_for_command(
                 [
-                    _mgr._session_secret_target(
-                        registry,
-                        db=db,
-                        vm=vm,
-                        ws=ws,
-                        session_name=name,
-                        session_template=template,
-                        mode=SessionMode(session.mode),
-                        agent_name=session.agent_name,
-                    ),
+                    env_target,
                 ],
                 config,
                 registry,
@@ -861,16 +863,7 @@ def _launch_existing_session(
             environment=session_env,
             session_uuid=session.session_uuid,
             linux_user=linux_user,
-            secret_target=_mgr._session_secret_target(
-                registry,
-                db=db,
-                vm=vm,
-                ws=ws,
-                session_name=name,
-                session_template=template,
-                mode=SessionMode(session.mode),
-                agent_name=session.agent_name,
-            ),
+            secret_target=env_target,
         )
         session_node.harness_integration.prepare_artifacts(prepared_artifacts.context)
         # Ask the harness for its launch decision before any teardown. A
@@ -884,11 +877,18 @@ def _launch_existing_session(
             agent_target=None if is_admin else session_target,
             secrets=ScopedSecrets(graph_secret_values, session_node.secret_refs()),
         )
+        template_values = _mgr._session_context_values(db, vm, ws, name, SessionMode(session.mode), session.agent_name)
+        session_node.harness_integration.prepare_context(template_values)
         harness_start = require_implemented_start(
             session_node.harness_integration.start(start_ctx, intent=intent),
             intent=intent,
             harness_integration_name=template.harness_integration,
             session_name=name,
+        )
+        command = render_template(
+            harness_start.command,
+            template_values,
+            field=f"session={name}.command",
         )
         artifact_application = validate_session_application(
             harness_start.artifacts, prepared_artifacts.context, integration=template.harness_integration
@@ -897,10 +897,6 @@ def _launch_existing_session(
             session_env["AGENTWORKS_ARTIFACTS_DIR"] = artifact_application.artifacts_dir
         stage_session_artifacts(
             db, name, template.harness_integration, session_target, prepared_artifacts, artifact_application
-        )
-        command = _mgr._substitute_template_vars(
-            harness_start.command,
-            {"session_name": name, "workspace_name": session.workspace_name},
         )
 
         with output.section("Starting Session"):

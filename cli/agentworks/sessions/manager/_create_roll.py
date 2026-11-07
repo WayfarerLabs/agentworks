@@ -27,6 +27,7 @@ from agentworks import output
 from agentworks.capabilities.harness_integration import HarnessLaunchIntent, require_implemented_start
 from agentworks.db import SessionMode
 from agentworks.errors import ExternalError, NotFoundError, ValidationError
+from agentworks.interpolation import render_template
 
 if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
@@ -334,21 +335,25 @@ def _start_session_slice(
                 agent_target=agent_target,
                 secrets=ScopedSecrets(secret_values, session_node.secret_refs()),
             )
+            template_values = _mgr._session_context_values(db, vm, ws, name, mode, resolved_agent_name)
+            session_node.harness_integration.prepare_context(template_values)
             harness_start = require_implemented_start(
                 session_node.harness_integration.start(start_ctx, intent=HarnessLaunchIntent.CREATE),
                 intent=HarnessLaunchIntent.CREATE,
                 harness_integration_name=template.harness_integration,
                 session_name=name,
             )
+            command = render_template(
+                harness_start.command,
+                template_values,
+                field=f"session={name}.command",
+            )
             artifact_application = validate_session_application(
                 harness_start.artifacts, prepared_artifacts.context, integration=template.harness_integration
             )
             if artifact_application.artifacts_dir is not None:
                 session_env["AGENTWORKS_ARTIFACTS_DIR"] = artifact_application.artifacts_dir
-            command = _mgr._substitute_template_vars(
-                harness_start.command,
-                {"session_name": name, "workspace_name": workspace_name},
-            )
+
             if harness_start.note is not None:
                 output.detail(harness_start.note)
 

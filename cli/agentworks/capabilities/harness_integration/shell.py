@@ -53,11 +53,12 @@ class ShellConfig(AgwModel):
 
     command: str = Field(default="", examples=["htop"])
     """The command the session's pane runs. Empty (the default) is a bare
-    login shell."""
+    login shell. Supports ${agw:NAME} context substitution; ordinary shell
+    expressions and Go templates retain their own syntax."""
 
     resume_command: str = ""
     """The command a resumed session's pane runs. Empty (the default)
-    reruns ``command``."""
+    reruns ``command``. Supports the same ${agw:NAME} context substitution."""
 
     required_commands: list[str] = Field(default_factory=list, examples=[["htop"]])
     """Commands that must exist on the session's target before it starts.

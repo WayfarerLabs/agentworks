@@ -538,9 +538,11 @@ The surrounding wiring supplies the following behavior and debugging boundaries:
   node's composed `preflight` / `runup` on create; the existing-session launch path builds no runup
   context (its only readiness pass is the pre-kill preflight sweep), and on both paths only the op
   context carries secrets. An integration cannot depend on runup firing before `start`.
-- **Substitution stays outside:** the returned string is passed through `{{session_name}}` /
-  `{{workspace_name}}` substitution at the call site. The resulting constraints appear under
-  "Building the pane command" below.
+- **Context binding and rendering:** before `start`, the manager supplies the invocation's explicit
+  context through `prepare_context`. Returned command source uses `${agw:NAME}` interpolation at the
+  call site, before artifact staging or runtime replacement. Structured extra arguments render as
+  data before quoting; literal generated arguments are shielded from the source pass. See
+  [runtime context and interpolation](../../../../docs/arch/runtime-context.md).
 - **Display:** `session list` / `session describe` show the resolved integration name by
   re-resolving the template read-only (no instance is built, no gate runs);
   `resource list --kind harness-integration` inventories rows,
@@ -603,17 +605,18 @@ sessions. Five rules, each earned:
   and `exec` takes one simple command: with a bare `echo ...; exec tool ...` the shell would `exec`
   the `echo` and nothing after the `;` would ever run. Return `sh -c '<inner>'` with the inner
   `shlex.quote`d, and `exec` the tool inside it so the pane process becomes the tool.
-- **`shlex.quote` every generated token.** Build an argv token list, quote each, and space-join.
-  Never interpolate raw values into shell syntax.
-- **Generated pieces must not emit `{{word}}`.** The call-site substitution raises on unknown
-  `{{word}}` tokens and substitutes known ones over the entire returned string. Operator-authored
-  slices (shell's commands, `extra_args` elements) carry `{{session_name}}` semantics on purpose.
-  Free-form workload fields are literal harness input, so integrations use the shared argv quoting
-  seam that hides doubled opening braces from manager substitution while the target shell
-  reconstructs the exact token. Single braces (`${VAR}`, JSON) are untouched.
+- **Quote and shield generated argv data.** Build a token list and use `quote_literal_argv` for each
+  generated or modeled argument. It quotes the token and shields `${agw:` from the later
+  command-source renderer, preserving literal profile names, model values, settings, and workload
+  input. Normal shell and Go-template syntax needs only ordinary shell quoting.
+- **Render structured template arguments before quoting.** Use `self.quote_context_argv` for
+  designated `extra_args` values. It renders against the bound context, then quotes and shields the
+  result. A workspace path containing an apostrophe remains one argument, and placeholder-looking
+  replacement data is not interpreted twice. Raw shell command fields remain operator-authored
+  source with ordinary shell quoting responsibilities.
 - **Model the common flags; leave the rest to `extra_args`.** A small optional vocabulary
-  (`permission_mode`, `model`, `reasoning_effort`, workload inputs, and session preferences) plus a
-  verbatim `extra_args` list emitted after generated options keeps the integration useful without
+  (`permission_mode`, `model`, `reasoning_effort`, workload inputs, and session preferences) plus an
+  explicit `extra_args` list emitted after generated options keeps the integration useful without
   chasing the tool's whole flag surface. Session-local tool settings share one generated
   `--settings` JSON argument. Append `extra_args` after the managed options for deterministic
   ordering, but let the upstream tool define repeated-flag behavior. If Claude, Codex, or Grok also

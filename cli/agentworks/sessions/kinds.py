@@ -57,7 +57,8 @@ class _SessionTemplateKind:
         replace, and individual fields may declare replacement instead. Naming a
         different integration starts its config fresh.
 
-        Commands may use the `{{session_name}}` and `{{workspace_name}}` variables. A
+        Commands and plaintext env values may use `${agw:NAME}` context references,
+        including `${agw:user_home_dir}`, `${agw:session_name}`, and `${agw:workspace_dir}`. A
         harness with no dedicated integration can often be driven through `shell` alone
         by pairing `command` with `resume_command`, though a real integration is more
         robust.

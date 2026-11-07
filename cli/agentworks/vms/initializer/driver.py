@@ -27,6 +27,7 @@ from agentworks.db import InitStatus, ProvisioningStatus
 from agentworks.env import ResourceContext, vm_stable_identity_env
 from agentworks.git_config import ensure_safe_directory_wildcard
 from agentworks.git_credentials import configure_user_git_credentials
+from agentworks.linux_users import managed_home
 from agentworks.ssh import SSHError, SSHLogger
 from agentworks.transports import ExecTransport, SSHTransport, Transport
 
@@ -137,7 +138,7 @@ def bootstrap_vm(
     even the interrupt arm below never resolves a secret for the first
     time.
     """
-    home = f"/home/{admin_username}"
+    home = managed_home(admin_username)
 
     # Attach logger to the provisioning transport. ``ExecTransport`` declares
     # ``logger`` on the ABC; the assignment is polymorphic.

@@ -94,12 +94,23 @@ def _pane_secret_target(
     ws_tmpl = _resolve_ws_template(db, registry, workspace.name, workspace.template)
 
     if is_admin_pane:
-        return SecretTarget(
+        target = SecretTarget(
             vm=vm_tmpl.env,
             workspace=ws_tmpl.env,
             admin=_resolve_admin_template(db, registry, vm.name, vm.admin_template).env,
             label=f"console-pane:{session.name}/admin",
         )
+        from agentworks.interpolation import context_values
+
+        target.validate_context(
+            context_values(
+                vm_name=vm.name,
+                user=vm.admin_username,
+                workspace_name=workspace.name,
+                workspace_dir=workspace.workspace_path,
+            )
+        )
+        return target
 
     if session.agent_name is None:
         return None
@@ -107,12 +118,24 @@ def _pane_secret_target(
     if agent is None:
         return None
     agent_tmpl = _resolve_agent_template(db, registry, agent.name, agent.template)
-    return SecretTarget(
+    target = SecretTarget(
         vm=vm_tmpl.env,
         workspace=ws_tmpl.env,
         agent=agent_tmpl.env,
         label=f"console-pane:{session.name}/agent",
     )
+    from agentworks.interpolation import context_values
+
+    target.validate_context(
+        context_values(
+            vm_name=vm.name,
+            user=agent.linux_user,
+            agent_name=agent.name,
+            workspace_name=workspace.name,
+            workspace_dir=workspace.workspace_path,
+        )
+    )
+    return target
 
 
 def _admin_only_secret_target(
@@ -141,11 +164,15 @@ def _admin_only_secret_target(
     from agentworks.vms.templates import resolve_live_template as _resolve_vm_template
 
     vm_tmpl = _resolve_vm_template(db, registry, vm.name, vm.template)
-    return SecretTarget(
+    target = SecretTarget(
         vm=vm_tmpl.env,
         admin=_resolve_admin_template(db, registry, vm.name, vm.admin_template).env,
         label=label,
     )
+    from agentworks.interpolation import context_values
+
+    target.validate_context(context_values(vm_name=vm.name, user=vm.admin_username))
+    return target
 
 
 def _console_build_secret_targets(
@@ -293,10 +320,8 @@ def _resolve_pane_env(
     vm_tmpl = _resolve_vm_template(db, registry, vm.name, vm.template)
     ws_tmpl = _resolve_ws_template(db, registry, workspace.name, workspace.template)
 
-    # No session context: add-shell panes are sidecar shells, not part of
-    # the session itself. No agent_name in the ctx either -- the agent
-    # identifier is per-user-static and lives in the on-disk profile
-    # fragment, not in per-context SetEnv.
+    # Sidecar shells have their selected user and workspace context, with
+    # no session context. Agent identity remains in its per-user profile.
     from agentworks.vms.sites import site_platform_name
 
     ctx = ResourceContext(
@@ -306,6 +331,7 @@ def _resolve_pane_env(
         user=pane_user,
         workspace_name=workspace.name,
         workspace_dir=workspace.workspace_path,
+        agent_name=None if is_admin_pane else session.agent_name,
     )
 
     if is_admin_pane:

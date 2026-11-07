@@ -22,6 +22,11 @@ for broader relationship traversal and `agw doctor` for installation-wide health
 
 Use `--output json` when the result will be consumed programmatically.
 
+For a preview of effective managed env, use `agw env show --session NAME` or select a VM, workspace,
+or agent with the corresponding context option. This reads managed declarations without connecting
+to the VM and keeps secrets redacted. Plaintext values can use context references such as
+`${agw:user_home_dir}`; `agw env show --help` describes the inspection options.
+
 ## Change declared resources
 
 `agw resource explain KIND` describes a manifest shape, while `agw resource explain KIND/NAME`
