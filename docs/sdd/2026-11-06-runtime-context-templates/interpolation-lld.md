@@ -43,12 +43,13 @@ home may be used in `tool --config '${agw:user_home_dir}/.config/tool'` under th
 username convention. Use `"$AGENTWORKS_WORKSPACE_DIR"` for an arbitrary workspace path, including
 spaces or apostrophes.
 
-Literal argv construction must shield `${agw:` before a returned command passes through the
-renderer. Shell quoting alone does not hide syntax from a textual renderer. Preserve exact native
-harness data and its argument boundaries. Validate returned command source after integration launch
-selection and before a restart destroys the current runtime. Env context is validated before
-boundary prompts when its facts are already known; command generation does not require a separate
-preflight interface.
+Bind the selected context to the integration before launch selection. Render structured extra
+arguments as individual data values before quoting them, then shield `${agw:` in the resulting argv
+data before a returned command passes through the command-source renderer. Shell quoting alone does
+not hide syntax from a textual renderer. Preserve exact native harness data and its argument
+boundaries. Validate returned command source after integration launch selection and before a restart
+destroys the current runtime. Env context is validated before boundary prompts when its facts are
+already known; command generation does not require a separate preflight interface.
 
 ## Behavioral vectors
 

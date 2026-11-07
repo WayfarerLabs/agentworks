@@ -74,10 +74,12 @@ Env values are literal strings. Shell commands are authored source, so quoting d
 appears. In command source, use `"$AGENTWORKS_WORKSPACE_DIR"` for arbitrary workspace paths; raw
 substitution between single quotes cannot represent an embedded apostrophe safely.
 
-Integrations must quote literal argv data while shielding the reserved namespace from the command
-renderer. Prompts, profiles, and opaque workload fields are data; intentional extra args remain
-interpolated according to the integration's existing contract. Future argv consumers render each
-argument as data before serializing it, rather than interpolating a completed shell program.
+Bind the invocation context before the integration selects its launch command. Integrations render
+structured extra arguments as data before quoting them, and shield the resulting argv data from the
+command-source renderer. Prompts, profiles, and opaque workload fields are data; intentional extra
+args remain interpolated according to the integration's existing contract. Future argv consumers
+render each argument as data before serializing it, rather than interpolating a completed shell
+program.
 
 Secret values bypass both interpolation and unescaping. This is a consumer distinction, not a
 request for another template syntax. Do not infer a context source from exported identity env or

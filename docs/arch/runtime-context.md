@@ -38,8 +38,9 @@ and malformed references within the reserved namespace fail with the owning fiel
 Whitespace inside a reference is not normalized.
 
 Use `$${agw:user_name}` in a plaintext template to obtain literal `${agw:user_name}`. Escaping
-applies only to the reserved namespace. Ordinary `$HOME`, `${HOME}`, `${PATH:-default}`, `$$`,
-Go-template text, and unrelated braces are unchanged by Agentworks.
+applies only to the reserved namespace. In command source, this suppresses Agentworks expansion; the
+resulting text still follows shell quoting rules. Ordinary `$HOME`, `${HOME}`, `${PATH:-default}`,
+`$$`, Go-template text, and unrelated braces are unchanged by Agentworks.
 
 Rendering takes one pass. Namespace-looking text in a replacement value is not interpreted again.
 There are no expressions, filters, ambient lookups, or references between env entries.
@@ -103,9 +104,11 @@ The shell expands the variable as data within that argument. Raw substitution be
 cannot represent an embedded apostrophe safely.
 
 Native integration prompt/profile fields and other opaque workload input remain literal. The
-integration shields reserved namespace text while quoting such values as argv data. Fields that
-explicitly accept command arguments participate in context rendering according to their field
-contract. Shell variables and Go templates are processed only by their downstream consumers.
+integration shields reserved namespace text while quoting such values as argv data. Structured extra
+arguments are rendered against the bound invocation context before quoting, so a workspace path
+containing an apostrophe remains part of one argument. Rendered data is then shielded from the
+command-source pass; inserted placeholder-looking text is not expanded again. Shell variables and Go
+templates are processed only by their downstream consumers.
 
 ## Identity env delivery
 
@@ -134,3 +137,8 @@ input from later textual rendering. No consumer may reinterpret secret contents 
 
 See the [CLI session-template reference](../../cli/command-reference.md#session-templates) for the
 shell integration configuration.
+
+The shared implementation lives in `cli/agentworks/interpolation.py`: `context_values` supplies
+known facts, `runtime_values` projects `ResourceContext`, and `render_template` performs the pure
+substitution. `cli/agentworks/env/render.py` supplies `render_plaintext` for winning env entries;
+`cli/agentworks/linux_users.py` owns the managed-home rule.
