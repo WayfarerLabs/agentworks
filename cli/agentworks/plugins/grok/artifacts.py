@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING
 
 import yaml
@@ -15,7 +14,6 @@ from agentworks.artifacts.native.common import (
     artifact_file,
     context_text,
     has_artifacts,
-    json_text,
     persona_options,
     reject_flags,
     select_session_artifacts,
@@ -32,14 +30,13 @@ if TYPE_CHECKING:
     from agentworks.artifacts.model import ArtifactInput, ArtifactInputs
 
 
-# Only options represented by the headless JSON and native Markdown agent surfaces.
+# Only options represented by the native Markdown agent surface.
 _OPTIONS = {"model": str, "tools": list}
 
 
 _SESSION_WORKAROUNDS = {
     ArtifactType.HINT: "session-rules",
     ArtifactType.RULE: "session-rules",
-    ArtifactType.AGENT: "session-agent-definitions",
 }
 
 
@@ -99,28 +96,15 @@ def session_artifacts(
 ) -> NativeSessionArtifacts:
     if context is None or not has_artifacts(context):
         return NativeSessionArtifacts()
-    mode_args = extra_args[: extra_args.index("--")] if "--" in extra_args else extra_args
-    headless = any(
-        token.split("=", 1)[0] in {"--single", "--prompt-json", "--prompt-file"} or token.startswith("-p")
-        for token in mode_args
-    )
-    workarounds = {
-        artifact_type: workaround
-        for artifact_type, workaround in _SESSION_WORKAROUNDS.items()
-        if artifact_type is not ArtifactType.AGENT or headless
-    }
-    inputs, deferred = select_session_artifacts(context.inputs, enabled_workarounds, workarounds)
+    inputs, deferred = select_session_artifacts(context.inputs, enabled_workarounds, _SESSION_WORKAROUNDS)
     if not inputs and not context.ancestor_files:
         return NativeSessionArtifacts(ArtifactApplication(deferred=deferred))
     validate_names(inputs)
     selected_types = {item.content.type for item in inputs.items()}
     ancestor_names = {file.native_identity or "" for file in context.ancestor_files}
-    has_agents = ArtifactType.AGENT in selected_types
     forbidden = set()
     if selected_types & {ArtifactType.HINT, ArtifactType.RULE}:
         forbidden.update({"--rules", "--append-system-prompt", "--system-prompt", "--system-prompt-override"})
-    if has_agents:
-        forbidden.update({"--agents", "--no-subagents"})
     if inputs:
         reject_flags(extra_args, forbidden, "grok-build")
     if context.ancestor_files:
@@ -131,26 +115,12 @@ def session_artifacts(
             ancestor_flags.update({"--plugin-dir", "--disable-skills"})
         with ancestor_diagnostics("grok-build"):
             reject_flags(extra_args, ancestor_flags, "grok-build")
-    files = []
     argv: list[str] = []
     guidance = tuple(item for item in inputs.items() if item.content.type in (ArtifactType.HINT, ArtifactType.RULE))
     if guidance:
         text = context_text(guidance, configured)
         argv += ["--rules", text]
-    agents = tuple(item for item in inputs.items() if item.content.type is ArtifactType.AGENT)
-    if agents:
-        definitions = {item.content.name: _persona(item) for item in agents}
-        for item in agents:
-            files.append(
-                artifact_file(
-                    f"{context.directory}/agents/{item.content.name}.json",
-                    json_text(definitions[item.content.name]),
-                    (item,),
-                    identity=f"agent:{item.content.name}",
-                )
-            )
-        argv += ["--agents", json.dumps(definitions, ensure_ascii=False)]
-    application = ArtifactApplication(tuple(files), deferred)
+    application = ArtifactApplication(deferred=deferred)
     validate_ancestor_names(context, application)
     validate_native_argv(tuple(argv))
     return NativeSessionArtifacts(application, tuple(argv))

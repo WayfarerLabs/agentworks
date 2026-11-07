@@ -114,7 +114,11 @@ class GrokBuildConfig(AgwModel):
     enabled_workarounds: Annotated[
         list[Literal["session-rules", "session-agent-definitions"]], MergeStrategy.REPLACE
     ] = Field(default_factory=list)
-    """Explicitly enabled session artifact carriers. An authored list replaces inherited opt-ins."""
+    """Explicitly enabled session artifact carriers; replaces inherited opt-ins.
+
+    ``session-agent-definitions`` remains accepted for config compatibility,
+    but private session personas have no verified carrier and stay unhandled.
+    """
 
     extra_args: Annotated[list[str], MergeStrategy.REPLACE] = Field(default_factory=list)
     """Raw argv tokens appended verbatim after every managed flag and before
@@ -149,10 +153,10 @@ class GrokBuildIntegration(HarnessIntegration):
 
         User and workspace facets publish native rules, skills and agent personas.
         Session artifacts are optional and unhandled by default. `enabled_workarounds`
-        can opt into `session-rules` for rules/hints through `--rules`, and
-        `session-agent-definitions` for personas through `--agents`. Private session
-        skills have no supported workaround; activate the user or workspace facet
-        to publish those skills at their native scope.
+        can opt into `session-rules` for rules/hints through `--rules`. Private session
+        skills and personas have no verified carrier and remain unhandled. The accepted
+        `session-agent-definitions` spelling does not enable persona delivery. Activate
+        the user or workspace facet to publish skills and personas at their native scope.
         """,
     )
 
