@@ -1677,3 +1677,29 @@ All three private lanes cleared `26a4904a` and the final simulated-runtime fixtu
 records the remaining gates, actual prior failures, correction evidence and source-byte continuity.
 These results establish the bounded correction's local validation, not the retained live acceptance
 or either SDD's completion. The separate integration report must arrive before the remaining round.
+
+## Integration-report correction round 9, 2026-11-07
+
+The full independent report `6701131033` arrived at `7fb588cb`, satisfying the operator's explicit
+condition before another fix round. Critical reading `6701270166` and start `6701286789` freeze the
+joint report/review batch. This consumes the remaining of the two additional authorized rounds, with
+draft verified before source edits. The companion
+[round 9 plan](../2026-09-06-harness-scope-framework/plan.md#integration-report-correction-round-9-2026-11-07)
+owns the combined implementation and evidence record.
+
+Artifact obligations remain the full R1-R10 contract. Runtime takeover and null admin addresses are
+not waived by good publication tests: existing session/run identity must retain the correct runtime
+and keep unrelated servers untouched. The repr diagnostic and fixture cleanup findings also remain
+real correction work. Local source/schema/acquisition proofs and retained native observations are
+useful at their actual scope, not blanket current-head acceptance.
+
+- [x] Reconcile current source/test/permanent-home anchors and retained native evidence without
+      inventing model-consumption or all-backend gates; retain actual unknown persona/resume cells.
+- [ ] Complete the joint runtime, repr, safe fixture and path/probe corrections with the companion
+      effort, preserving origin-specific publication holds and optional final unhandled behavior.
+- [ ] Make Grok private-session personas honestly unhandled until a verified carrier exists,
+      preserving recognized configuration and independent/native outer-scope behavior. Update the
+      support matrix and permanent worked two-session example without introducing another format.
+- [ ] Complete private review and exact-head gates, then the normal ready handoff and scoped report
+      reconciliation. Finish both owned SDD locks only after all retained requirements and permanent
+      teaching are proved; an intermediate correction merge does not end this ownership.

@@ -1356,3 +1356,70 @@ inventory/settings, missing-capture routing, uncertain-start recovery, actual-ca
 owned workspace cleanup boundaries. One authorized round remains after this one and requires a fresh
 integration report. These local results do not complete the retained live acceptance audit or
 authorize either SDD lock. An intermediate merge leaves both closeouts with this session.
+
+## Integration-report correction round 9, 2026-11-07
+
+The independent report `6701131033` reached the required actual-report boundary at unchanged head
+`7fb588cb`, after the operator's extended wait. Critical reading `6701270166` addresses all six
+findings and the held saga/Muntz batch; start comment `6701286789` freezes this round. The operator
+had authorized two additional rounds: round 8 used the first and this is the remaining round. The PR
+is verified draft before source changes, and refreshed main remains `c8d4dfb3`.
+
+The bounded correction preserves the stronger uncertainty safeguards while repairing their faulty
+boundaries. A socket path is an address, not authority to adopt and destroy a server. Reuse the
+existing `session_uuid` and `run_id` in minimal native launch metadata when recovering an incomplete
+fingerprint; complete older recorded fingerprints keep their authority without new metadata. The
+synchronous `before_spawn` checkpoint belongs after socket prechecks and immediately before the
+spawn-capable command. A failed checkpoint prevents dispatch, while an unacknowledged dispatch
+remains uncertain. No new persisted identity, journal, provider API or Transport interface is added.
+
+- [x] Read the full report and held reviews, verify the source causes, retain the reported limits,
+      publish the critical reading and verify draft at the frozen source head.
+- [ ] Refuse destructive adoption of stopped or pre-spawn unrecorded servers; verify real same-UID
+      decoys and rejected-create variants survive without row adoption. Recover genuinely dispatched
+      attempts only with positive matching native identity and stable fingerprint.
+- [ ] Retain the admin dedicated address before launch and restore supported per-session recovery
+      for already-retained null-address rows after sound absence evidence. Keep actual-user and
+      legacy shared-server behavior, without workspace deletion as the recovery mechanism.
+- [ ] Move uncertainty checkpointing to the actual dispatch boundary; prove precheck and checkpoint
+      failure issue no spawn and need no reboot, while post-dispatch loss retains recoverable state.
+- [ ] Redact conventional repr forms through the shared boundary and actual failure callers before
+      truncation; keep early-death detection and do not promise arbitrary encoding recognition.
+- [ ] Isolate HOME-derived deletion-test paths, repair the identified portable fixture path/literal
+      assumptions, and distinguish local Linux guest-helper execution from portable controller
+      logic. Do not relax product guest validation or claim a broad native Windows pass from Linux.
+- [ ] Normalize the accepted workspace root once, group the guarded probe body and cover UNKNOWN
+      startup completion through a real caller. Keep existing native ownership/file guards strict.
+- [ ] Align the owned mapping-authority LLD, native preservation warnings and permanent guidance.
+      Explicit mapped entries follow their policy; omitted protected entries remain preserved.
+      Unknown native preservation is a conservative limit, not proof that valid native syntax is
+      malformed. No parser/version matrix or snapshot replay is introduced.
+- [ ] Make the unverified Grok private-session persona carrier unhandled with a warning, retaining
+      config compatibility and independent delivery. Keep native user/workspace behavior separate;
+      accepted flags and generic TUI startup do not establish persona availability.
+- [ ] Promote a usable two-concurrent-session artifact example and name the intentional child-count
+      and force/consent behavior in the PR body. Keep permanent teaching independent of the SDDs.
+- [ ] Complete independent project, complexity and correctness reviews of one combined candidate,
+      then required isolated gates and exact-head ready handoff without `review-requested`.
+- [ ] Reconcile the subsequent actual-scope report and retained evidence against all 26
+      requirements, complete permanent promotion and create both `locked.md` files only when
+      completion is proved.
+
+The report supplies meaningful current-head native/settings, ownership, capture and scoped-VM
+observations, with complete cleanup and explicit limitations. Its repeated test counts overlap.
+Historical format/schema/acquisition and finite migration contracts remain locally provable; the
+framework's real CLI vertical is not replaced by those tests. No model call or universal
+provider/workstation/native-version matrix is added. Export/restore semantics retain their local
+round-trip controls rather than acquiring a new VM-restore workflow.
+
+The shared pre-delete guest teardown/logout ordering remains explicit coordination with #866 under
+critical reading `6700703821`; neither provider parity nor reduced merge conflicts closes that
+policy item. The mixed-origin shell index hold is an acknowledged package boundary, not an excuse
+for a new partial-index ownership engine. Unsupported platform and inherited provider/host-token
+findings retain their own owners.
+
+A separate bounded local native probe at `7fb588cb` observed Grok 1.0.70 request/tool schemas and a
+documented main-selector attempt without the exact generated persona markers. This does not prove
+all versions or every internal registry; it does reject treating accepted argv as availability proof
+for the tested carrier. First-delivery outcomes must remain conservative and honest. Both SDDs
+remain owned through closeout after any intermediate merge; neither lock is present now.
