@@ -4,9 +4,10 @@ Governing requirements: [draft FRD](frd.md). Architecture: [HLA](hla.md). Detail
 [interpolation LLD](interpolation-lld.md). Background: [prior art](prior-art-research.md).
 Transition: [migration](migration-strategy.md).
 
-Delivery: a design-only draft increment now; one complete implementation PR after requirements
-settle. This plan records proposed implementation, not completion. No implementation or lockfile
-belongs to this design checkpoint.
+Delivery: one PR containing the full feature, full SDD, permanent documentation, and validation. Its
+current draft is a design checkpoint, labeled `review-requested` to solicit feedback. Continue
+implementation on that same PR after requirements settle; do not merge the SDD separately. This plan
+records proposed implementation, not completion. No lockfile belongs to this design checkpoint.
 
 ## Design checkpoint
 

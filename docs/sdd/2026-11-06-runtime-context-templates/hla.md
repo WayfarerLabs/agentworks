@@ -123,6 +123,7 @@ existing implementation there. The implementation increment replaces its limited
 timing descriptions with the accepted shared contract and updates CLI/schema guidance at the same
 time. Permanent docs must not claim an unimplemented placeholder works.
 
-Deliver this design as one reviewable draft increment. The expected implementation is one complete
-PR after requirements settle; reassess only if the accepted environment-lookup scope makes that
-increment too large. Do not lock the SDD while implementation remains outstanding.
+Deliver the full feature and full SDD in one PR, as directed by the operator. Use that PR's current
+draft as the design checkpoint, labeled `review-requested` to solicit feedback. Continue
+implementation and permanent documentation updates in the same PR after requirements settle; do not
+merge the design separately. Do not lock the SDD while implementation remains outstanding.

@@ -19,6 +19,11 @@ reuse. Existing session placeholders address only a small part of this problem.
 - Research external prior art.
 - Establish a new SDD and produce permanent documentation outside its directory.
 
+Delivery ruling from the operator:
+
+> Please note that we're going to end up implementing the whole feature in a single PR (including
+> the full SDD).
+
 ## Proposed functional requirements
 
 ### FR1. Reusable target context
