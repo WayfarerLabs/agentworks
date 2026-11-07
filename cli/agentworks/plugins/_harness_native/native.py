@@ -379,7 +379,7 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
             protected.add(_native_key(tool, role, identifier))
             invocation.report_incomplete(
                 f"Retained {role} '{identifier}': {reason}. "
-                "Resolve the conflicting native association before reinitializing its owning setup."
+                "Review the listed native entries before reinitializing their owning setup."
             )
             if role == "marketplace":
                 blocked_markets.add(identifier)
