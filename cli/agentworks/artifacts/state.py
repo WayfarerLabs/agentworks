@@ -142,7 +142,13 @@ def decode_captures(record: AppliedStateSlice) -> dict[ArtifactComponent, Captur
             result[component] = snapshot
         return result
     except (KeyError, TypeError, ValueError, SourceRefError, RecursionError):
-        raise StateError("stored artifact capture is malformed") from None
+        raise StateError(
+            "stored artifact capture is malformed",
+            hint=(
+                "Normal setup cannot safely replace this malformed saved capture. Restore a known-good state "
+                "backup or repair the capture explicitly; native file ownership records were retained."
+            ),
+        ) from None
 
 
 def read_captures(db: Database, kind: InstanceKind, name: str) -> dict[ArtifactComponent, CapturedArtifacts]:

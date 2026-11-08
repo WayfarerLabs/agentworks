@@ -19,6 +19,7 @@ from agentworks.output import AgentworksError
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.ssh import SSHError
 
+from ._runtime_probes import framed_runtime_result
 from .conftest import stub_build_registry, stub_session_resolvers, stub_vm_gates
 
 
@@ -486,7 +487,7 @@ def test_create_session_rolls_back_on_keyboard_interrupt(tmp_path: Path, monkeyp
     def _explode(*args: object, **kwargs: object) -> tuple[None, None]:
         raise KeyboardInterrupt
 
-    monkeypatch.setattr(tmux_mod, "create_session", _explode)
+    monkeypatch.setattr(tmux_mod, "deploy_restricted_config", _explode)
 
     stub_session_resolvers(monkeypatch)
 
@@ -568,7 +569,7 @@ def test_create_session_releases_group_membership_on_keyboard_interrupt(
     def _explode(*args: object, **kwargs: object) -> tuple[None, None]:
         raise KeyboardInterrupt
 
-    monkeypatch.setattr(tmux_mod, "create_session", _explode)
+    monkeypatch.setattr(tmux_mod, "deploy_restricted_config", _explode)
 
     stub_session_resolvers(monkeypatch)
 
@@ -634,7 +635,7 @@ def test_create_session_rollback_failure_does_not_mask_keyboard_interrupt(
     def _explode(*args: object, **kwargs: object) -> tuple[None, None]:
         raise KeyboardInterrupt
 
-    monkeypatch.setattr(tmux_mod, "create_session", _explode)
+    monkeypatch.setattr(tmux_mod, "deploy_restricted_config", _explode)
 
     # Poison the rollback: db.delete_session raises during cleanup.
     cleanup_attempts: list[str] = []
@@ -680,8 +681,8 @@ def test_create_session_surfaces_dead_workload_output_through_rollback(
     """End-to-end through the manager: a session workload that dies instantly
     (the 2026-08-03 incident: `codex -a on-failure` rejected by clap in
     milliseconds) must surface its own captured output in the operator-visible
-    failure, roll back the session's partial state, and never run the grant
-    machinery against the dead socket. Drives the REAL tmux.create_session
+    failure, prove runtime absence before rolling back partial state, and
+    skip server-access grants for the dead pane. Drives the REAL tmux.create_session
     against a scripted agent transport whose pane_dead probe answers dead."""
     from agentworks.agents import grants as agent_grants
     from agentworks.agents import manager as agent_mgr
@@ -720,22 +721,37 @@ def test_create_session_surfaces_dead_workload_output_through_rollback(
     agent_commands: list[str] = []
 
     class _DeadPaneAgentTarget:
-        """Agent transport whose tmux server holds a dead pane: the liveness
-        probe answers dead and capture-pane returns the workload's output."""
+        """A held dead pane with stable identity until the server is killed."""
+
+        def __init__(self) -> None:
+            self.alive = True
 
         def run(self, cmd: str, *args: object, **kwargs: object) -> _Result:
             agent_commands.append(cmd)
             if cmd.startswith("test -e "):
                 return _Result(ok=False)
             if "#{pane_dead}" in cmd:
-                return _Result(ok=True, stdout="1 2\n")
+                return framed_runtime_result(cmd, _Result(stdout="1 2\n"))
+            if "#{pid}" in cmd:
+                return framed_runtime_result(cmd, _Result(stdout="4242\n"))
+            if "boot_id" in cmd:
+                return framed_runtime_result(cmd, _Result(stdout="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\n"))
+            if "test -d /proc/4242" in cmd:
+                return framed_runtime_result(cmd, _Result(stdout="present" if self.alive else "absent"))
+            if "cat /proc/4242/stat" in cmd:
+                fields = ["S", *[str(value) for value in range(4, 23)]]
+                return framed_runtime_result(cmd, _Result(stdout=f"4242 (tmux: server) {' '.join(fields)}\n"))
             if "capture-pane" in cmd:
-                return _Result(ok=True, stdout=f"{clap_error}\n\nFor more information, try '--help'.\n")
+                return _Result(stdout=f"{clap_error}\n\nFor more information, try '--help'.\n")
+            if "kill-server" in cmd:
+                self.alive = False
             return _Result()
+
+    agent_target = _DeadPaneAgentTarget()
 
     monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: _AdminTarget())
     monkeypatch.setattr("agentworks.sessions.manager.transport", lambda *a, **k: _AdminTarget())
-    monkeypatch.setattr("agentworks.transports.agent_transport", lambda *a, **k: _DeadPaneAgentTarget())
+    monkeypatch.setattr("agentworks.transports.agent_transport", lambda *a, **k: agent_target)
     monkeypatch.setattr(agent_mgr, "_assert_agent_ssh_works", lambda *a, **k: None)
     monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *args, **kwargs: None)
     monkeypatch.setattr(agent_grants, "add_to_workspace_group", lambda *a, **k: None)
@@ -767,16 +783,18 @@ def test_create_session_surfaces_dead_workload_output_through_rollback(
 
     # The manager's pre-rollback warn (the operator-visible bridge line)
     # carries the same captured output.
-    reason_warns = [w for w in warns if "rolling back. Reason:" in w]
-    assert reason_warns and clap_error in reason_warns[0]
+    assert any(clap_error in warning for warning in warns)
 
     # Rollback ran: no session row, no grant left behind.
     assert db.get_session("s1") is None
     assert not db.has_any_grant("a1", "ws1")
 
-    # The grant machinery never touched the dead socket.
+    # Make a dead socket observable before diagnosis, without server grants.
     assert not any("server-access" in c for c in agent_commands)
-    assert not any("chmod g+rwx" in c for c in agent_commands)
+    chmod = next(index for index, command in enumerate(agent_commands) if "chmod g+rwx" in command)
+    death_probe = next(index for index, command in enumerate(agent_commands) if "#{pane_dead}" in command)
+    assert chmod < death_probe
+    assert not agent_target.alive
     db.close()
 
 

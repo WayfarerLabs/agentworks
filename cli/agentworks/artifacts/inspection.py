@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.artifacts.bundle import resolve_bundle
 from agentworks.errors import NotFoundError, StateError, ValidationError
 from agentworks.harness_setup.inputs import SetupInputs
-from agentworks.harness_setup.state import read_native_setup
+from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
+from agentworks.harness_setup.state import UnsupportedNativeSetupVersionError, read_native_setup
 from agentworks.schema import CapabilityConfig
 from agentworks.secrets.orchestration import SecretTarget
 
@@ -128,6 +129,7 @@ class IntegrationMetadata:
     passthrough_inputs: tuple[str, ...] = ()
     passthrough_destination: ArtifactFacet | None = None
     recorded_skipped: tuple[ArtifactSkip, ...] = ()
+    recorded_incomplete_reasons: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -225,7 +227,11 @@ def inspect_artifacts(
     integration_name: str | None = None,
 ) -> ArtifactInspection:
     """Project declarations and recorded application without acquiring or applying anything."""
-    from agentworks.artifacts.routing import deferred_inputs, inspect_owner_artifacts, session_inherited_inputs
+    from agentworks.artifacts.routing import (
+        inspect_owner_artifacts,
+        session_inherited_inputs,
+        setup_inherited_inputs,
+    )
 
     with db.snapshot():
         context = resolve_context(
@@ -247,6 +253,8 @@ def inspect_artifacts(
                     for record in read_native_setup(db, owner.kind, owner.name).records
                     if record.component == owner.component
                 )
+            except UnsupportedNativeSetupVersionError as error:
+                diagnostics[owner.component] = (" ".join(value for value in (str(error), error.hint) if value),)
             except StateError:
                 diagnostics[owner.component] = ("Native setup evidence is malformed or unavailable.",)
         if integration_name is not None:
@@ -261,21 +269,22 @@ def inspect_artifacts(
         for name in names:
             views: dict[ArtifactComponent, ArtifactOwnerView] = {}
             for owner in owners:
-                inherited: dict[ArtifactOwner, ArtifactGroup] | None = {}
-                blocker: ArtifactOwnerView | None = None
+                inherited: dict[ArtifactOwner, ArtifactGroup] = {}
+                unavailable_reasons: tuple[str, ...] = ()
                 if owner.component in ("admin", "agent", "workspace"):
-                    inherited = deferred_inputs(views["vm"], "workspace" if owner.component == "workspace" else "user")
+                    routed = setup_inherited_inputs(
+                        views["vm"], "workspace" if owner.component == "workspace" else "user", name
+                    )
+                    inherited = dict(routed.inputs.deferred)
+                    unavailable_reasons = routed.unavailable_reasons
                 elif owner.component == "session":
                     ancestors = (views["vm"], views["admin" if context.admin else "agent"], views["workspace"])
-                    blocker = next((view for view in ancestors if view.status not in ("current", "inactive")), None)
-                    inherited = session_inherited_inputs(*ancestors)
-                view = inspect_owner_artifacts(db, registry, owner, name, inherited=inherited)
-                if view.ancestor_blocked and blocker is not None:
-                    source = blocker.owner
-                    view = replace(
-                        view,
-                        reason=f"Blocked by {source.component}/{source.name} ({blocker.status}): {blocker.reason}",
-                    )
+                    routed = session_inherited_inputs(*ancestors, integration_name=name)
+                    inherited = dict(routed.inputs.deferred)
+                    unavailable_reasons = routed.unavailable_reasons
+                view = inspect_owner_artifacts(db, registry, owner, name, inherited=inherited).with_unavailable_routes(
+                    unavailable_reasons
+                )
                 views[owner.component] = view
                 integrations[owner.component].append(_integration_metadata(owner, name, view))
         projected = []
@@ -291,7 +300,7 @@ def inspect_artifacts(
                     view.capture_status,
                     _artifact_metadata(registry, owner.artifacts, view),
                     tuple(integrations[owner.component]),
-                    diagnostics.get(owner.component, ()) + ((view.reason,) if view.reason else ()),
+                    diagnostics.get(owner.component, ()) + ((view.diagnostic,) if view.diagnostic else ()),
                 )
             )
         return ArtifactInspection(tuple(projected))
@@ -344,12 +353,12 @@ def _artifact_metadata(
 
 
 def _integration_metadata(owner: SetupInputs, name: str, view: ArtifactOwnerView) -> IntegrationMetadata:
-    from agentworks.artifacts.routing import deferred_inputs, inactive_destination
+    from agentworks.artifacts.routing import available_deferred_inputs, inactive_destination, owner_remediation
 
     destination = (
-        inactive_destination(owner.facet) if view.status == "inactive" and owner.component != "session" else None
+        inactive_destination(owner.facet) if name not in owner.activations and owner.component != "session" else None
     )
-    passthrough = deferred_inputs(view, destination) if destination is not None else {}
+    passthrough = available_deferred_inputs(view, destination, name) if destination is not None else {}
     record = view.record
     deferred = (
         ()
@@ -378,13 +387,16 @@ def _integration_metadata(owner: SetupInputs, name: str, view: ArtifactOwnerView
         name,
         name in owner.activations,
         view.status,
-        view.reason,
+        f"{view.diagnostic} {owner_remediation(view)}"
+        if view.status in ("incomplete", "retirement")
+        else view.diagnostic,
         handled,
         deferred,
         placements,
-        tuple(item.identity for group in (passthrough or {}).values() for item in group.items()),
+        tuple(item.identity for group in passthrough.values() for item in group.items()),
         destination if passthrough else None,
         skipped,
+        () if record is None else record.incomplete_reasons,
     )
 
 
@@ -394,7 +406,7 @@ def render_artifacts(inspection: ArtifactInspection) -> None:
         output.info(f"{owner.scope}/{owner.resource_name} (facet: {owner.facet}; capture: {owner.capture_status})")
         output.info(f"  Bundles: {', '.join(owner.bundles) or '(none declared)'}")
         for diagnostic in owner.diagnostics:
-            output.info(f"  {diagnostic}")
+            output.info(f"  {sanitize_setup_diagnostic(diagnostic)}")
         for artifact in owner.artifacts:
             content = artifact.input_id[:12] if artifact.input_id is not None else "contents unknown"
             revision = artifact.revision or ("not applicable" if artifact.input_id is not None else "unknown")
@@ -427,19 +439,26 @@ def render_artifacts(inspection: ArtifactInspection) -> None:
             if integration.status != activation:
                 details.append(integration.status)
             if integration.reason:
-                details.append(integration.reason)
+                details.append(sanitize_setup_diagnostic(integration.reason))
             output.info(f"  {integration.name}: {'; '.join(details)}")
+            for reason in integration.recorded_incomplete_reasons:
+                output.info(f"    Recorded incomplete: {sanitize_setup_diagnostic(reason)}")
             for input_id in integration.passthrough_inputs:
                 output.info(f"    Core passthrough: {input_id[:12]} to {integration.passthrough_destination}")
             for input_id in integration.recorded_handled:
                 output.info(f"    Recorded handled: {input_id[:12]}")
             for item in integration.recorded_deferred:
                 if owner.facet == "session":
-                    output.info(f"    Recorded unhandled: {item.input_id[:12]}: {item.reason}")
+                    output.info(
+                        f"    Recorded unhandled: {item.input_id[:12]}: {sanitize_setup_diagnostic(item.reason)}"
+                    )
                 else:
-                    output.info(f"    Recorded deferred: {item.input_id[:12]} to {item.destination}: {item.reason}")
+                    output.info(
+                        f"    Recorded deferred: {item.input_id[:12]} to {item.destination}: "
+                        f"{sanitize_setup_diagnostic(item.reason)}"
+                    )
             for skipped in integration.recorded_skipped:
-                output.info(f"    Recorded skipped: {skipped.path}: {skipped.reason}")
+                output.info(f"    Recorded skipped: {skipped.path}: {sanitize_setup_diagnostic(skipped.reason)}")
             for placement in integration.placements:
                 output.info(f"    Recorded placement: {placement.path} ({placement.native_identity or 'file'})")
     output.info("Recorded application does not verify current native files or model context.")
@@ -494,6 +513,7 @@ def inspection_data(inspection: ArtifactInspection) -> JsonObject:
                         "status": item.status,
                         "reason": item.reason,
                         "recorded_handled": list(item.recorded_handled),
+                        "recorded_incomplete_reasons": list(item.recorded_incomplete_reasons),
                         "passthrough_inputs": list(item.passthrough_inputs),
                         "passthrough_destination": item.passthrough_destination,
                         "recorded_deferred": [

@@ -41,6 +41,11 @@ class SetupHarness(ConformingHarnessIntegration):
     description = "A fixture requiring user setup config"
     selections: ClassVar[int] = 0
 
+    def user_init(self, invocation):
+        from agentworks.artifacts.application import ArtifactApplication
+
+        return ArtifactApplication()
+
     @classmethod
     def config_for(cls, facet: Facet | None = None) -> type[BaseModel] | None:
         cls.selections += 1

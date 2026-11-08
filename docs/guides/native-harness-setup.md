@@ -57,14 +57,25 @@ contents and native command output are transferred privately and are not stored 
 records or logs. Removing a mapping retains the native file and its current values. Settings
 mappings do not create ownership claims; the setup record tracks completion and the requested
 policy. It does not restore overwritten values. Workspace mapping changes follow workspace creation;
-applying a new mapping requires workspace recreation.
+applying a new mapping requires workspace recreation. Correct the source before recreating and
+preserve work outside the workspace first; see the
+[workspace recovery guidance](harness-facets.md#inspecting-and-reconciling-setup).
 
 ## Marketplaces and plugins
 
 User configuration has `marketplaces` and `plugins` lists, both empty by default. Marketplace
 strings use the installed harness's native source grammar. Local marketplace paths refer to the
 guest filesystem; relative paths resolve against the actual user's home. Plugin names resolve
-against the native catalog; qualify ambiguous names as `plugin@marketplace`.
+against the native catalog; qualify ambiguous names as `plugin@marketplace`. An ambiguous
+unqualified selection is retained and reported without retiring its prior associations. A name
+absent from the catalog is a configuration error.
+
+Claude marketplace paths can select a directory or its `marketplace.json` file. A named entry with a
+source form Agentworks cannot establish is preserved and reported locally rather than invalidating
+unrelated marketplace entries when the native CLI can read the inventory. If the CLI itself refuses
+the inventory, that facet fails without rewriting the configuration. The diagnostic names the entry
+and durable native configuration root; repair the unsupported declaration with the native tool or
+configuration before retrying. Malformed overall inventory still fails that facet.
 
 Tool discovery reads the actual user's login-shell PATH once per setup invocation. An explicit PATH
 in the prepared setup environment takes precedence. Native commands use that resolved executable and
@@ -83,15 +94,57 @@ Agentworks reconciles explicit plugin settings and mapped settings as one plan. 
 value that disables an explicitly requested plugin or changes its marketplace identity is a config
 error before writes. Source values discarded by `merge-preserve` or `skip-existing` create no such
 conflict. Plugin commands run first; the final mapping preserves their controlled native keys.
-`skip-existing` skips only the mapping, not separately requested plugin work.
+`skip-existing` skips only the mapping, not separately requested plugin work. Native associations
+retained by an unresolved managed claim or ambiguous selection keep their existing overlay when the
+mapping omits them; omission does not bypass safe native retirement. Explicitly supplied mapped
+entries follow the selected settings policy.
 
 Completed native mutations are observed and recorded individually. Repeat setup leaves matching
 owned installations in place and enables a requested owned plugin if it is disabled. A native
-registration or plugin without an Agentworks ownership record is not adopted, even when it matches
-the request. Remove the conflicting association with the native CLI before retrying. Source identity
-drift also requires native remediation before setup can continue. Unrelated built-in or remote
-entries whose source cannot be established are preserved; Agentworks cannot claim or remove those
-entries without observable source identity.
+registration or user plugin whose observable identity and source match the request is adopted,
+recorded and reported, including after an interrupted setup. Differing unowned entries or ambiguous
+native drift are preserved and reported individually. Independent entries and later integrations
+continue, and the affected integration's setup record remains incomplete until retry succeeds.
+Adoption makes the matching entry managed: removing its declaration can remove it under the normal
+safe-cleanup rules. Confirmed registrations, installs, removals and replacements report progress.
+Descendant session launches still proceed and can repeat the incomplete-setup warning until the
+owning setup resolves the retained conflict. Resolve a conflicting association with the native CLI
+before retrying its owning setup. Unrelated built-in or remote entries whose source cannot be
+established are preserved; Agentworks cannot claim or remove those entries without observable source
+identity. An unrelated built-in marketplace without an observable source does not make Agentworks
+setup incomplete. Only a declared or previously managed association needs to converge or retire.
+
+Matching uses the native tool's reported association, including the full marketplace source and any
+ref or sparse-path options. Agentworks does not authenticate the historical origin of cached plugin
+files. An installed version can change through the native tool without changing the owned plugin
+association. A differing unowned source or association is preserved with a warning; resolve that
+native conflict before retrying setup.
+
+Claude's git and GitHub list entries do not expose every source option. A missing or malformed user
+source declaration, or one inconsistent with native inventory, makes that entry unobservable.
+Agentworks retains and names all affected entries, including unrelated operator entries, while
+independent entries continue where the native CLI permits. Restore a valid native association before
+retrying setup. Marketplace retirement or replacement also retains dependent plugins when the user
+declaration needed for removal is absent. Agentworks does not broaden user-scoped removal to all
+scopes or write a guessed source. When Agentworks cannot verify preservation of a listed settings
+entry, it holds all native CLI mutations that can rewrite the whole settings document. An
+unrecognized source form, including a native inline `settings` source, can be valid native
+configuration; this guard does not establish that it is malformed or that the native command would
+lose it. Independent file/settings work and adoption of matching reported associations continue.
+Review the native CLI operation separately, then retry setup to adopt matching reported
+associations, or explicitly map the entry under the intended settings policy. An explicitly mapped
+settings contribution follows its selected strategy and can replace that entry; no initial snapshot
+is restored over the mapping, later operator edits or confirmed removals. A settings mapping change
+can therefore require a second reinit for the previously skipped native command.
+
+Native commands and Agentworks ownership checkpoints are separate operations. Abrupt termination can
+leave a native mutation without a checkpoint; retry observes and adopts a matching association.
+Agentworks does not promise transactional rollback of the native executable's work.
+
+Current-attempt incomplete reasons are retained with setup evidence. `agw artifact show` and managed
+session-start warnings identify the retained entry and its reason. Resolve that native or file
+conflict before running the owning repair command; repeating setup alone cannot resolve a differing
+operator-owned entry. A successful retry clears the previous incomplete reasons.
 
 Removing desired associations removes owned plugins before owned marketplaces. The integration
 refuses marketplace cleanup when it would affect an unowned or project plugin. Claude's native
@@ -101,10 +154,21 @@ garbage collection owns orphaned cache cleanup. Agentworks does not delete guess
 
 An independently removed marketplace can hide a surviving plugin from native inventory. When the
 remaining evidence cannot prove the plugin's ownership, cleanup stays pending with its prior
-applied-state record. Repair or remove the association using the native CLI, then retry. A failure
-after a native mutation but before its checkpoint may likewise require native remediation; an
-unrecorded write is never silently adopted. Settings retention is intentional and is separate from
-pending plugin cleanup.
+applied-state record. Inspect the installed plugin and native registration first. Restore the
+matching original marketplace registration with the native CLI when it is still intended, or
+explicitly remove the remaining plugin using its native scope after confirming that removal is
+appropriate, then retry the owning setup. Reinit does not reinstall an externally removed
+registration solely because an old owned record exists, and cannot prove a hidden plugin was
+removed. A failure after a native mutation but before its checkpoint heals on retry when the
+resulting native entry matches the declaration; adoption is recorded and reported. Settings
+retention is intentional and is separate from pending plugin cleanup.
+
+A native setup error stops that facet while independent facets and the owner's remaining setup
+continue. The command reports the collected failures at the end and returns a failing exit status;
+completed core setup and confirmed native claims remain recorded. Shared persistence failures and
+cancellation still abort immediately. Inspect the recorded reason before retrying the owning
+operation. Workspace creation has no reinit command; changing its setup requires explicit recreation
+through the ordinary workspace lifecycle.
 
 ## Native compatibility evidence
 
@@ -128,10 +192,17 @@ plugins inside it. There is no separate native plugin retirement step before par
 applied-state records, including unreadable or unknown versions, do not add deletion prerequisites.
 The existing database deletion removes the owner's records and any affected child records together.
 
-Backend binding failures retain the existing warning-and-local-cleanup behavior of VM deletion. An
-actual platform deletion failure still aborts as before. Agent and workspace remote cleanup retains
-its existing best-effort warnings. Files deliberately configured outside the removed parent remain
-outside that filesystem cleanup; setup does not introduce a new forget command or force option.
+Backend binding failures warn and continue local cleanup without attempting remote deletion. An
+exception raised by a bound platform's delete operation aborts local removal. Agent and workspace
+remote cleanup retains its existing best-effort warnings. Files deliberately configured outside the
+removed parent remain outside that filesystem cleanup; setup does not introduce a new forget command
+or force option.
+
+Whole-VM deletion does not first log out of Tailscale or stop individual guest sessions. An external
+tailnet entry can remain after the guest is gone; remove a retired node from the Tailscale admin
+console separately. A binding-failure warning means remote deletion was not attempted, so inspect
+and clean up the provider resource as well. Platform-specific best-effort deletion may also leave
+remote resources; a removed local row alone does not prove provider removal.
 
 Setup and parent deletion share a VM-family mutation guard so they cannot race. This serializes
 mutating operations on the same VM, including owners without harness activations; contention refuses
@@ -141,3 +212,8 @@ deletion.
 Rehome moves project settings with the workspace and holds the same guard across the move. Setup
 records do not block rehome. Their old destination makes readiness stale until owning setup runs
 successfully at the new destination; rehome itself does not run harness setup.
+
+The VM description's initialization field records the last initialization run. It is separate from
+per-integration lifecycle evidence: a run can finish while a native entry is skipped. Read the
+integration's incomplete reasons in that description or `agw artifact show` before concluding that
+its requested artifacts or native associations were applied.

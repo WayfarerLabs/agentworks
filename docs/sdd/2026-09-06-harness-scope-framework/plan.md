@@ -1,5 +1,36 @@
 # Harness Scope Framework: Implementation Plan
 
+## Facet independence and closeout, 2026-11-01
+
+The operator authorized the saga's facet-independence amendment and completion of both this SDD and
+its companion on 2026-11-01. This amendment supersedes earlier ancestor-freshness launch gates and
+refusal to adopt matching unclaimed native entries. Completed checkboxes below remain the historical
+record. The explicit integration-owned required/recommended prerequisite API and unsupported
+activated-facet errors remain in scope and unchanged.
+
+One implementation PR on `fix/harness-facet-independence`, based on `c8d4dfb`, carries both
+`sdd:harness-scope-framework` and `sdd:agent-artifacts`, plus `saga:next-steps`. The operator
+authorized up to three published feedback/fix rounds per PR. After independent private reviews and
+gates, the ready handoff requests the separate integration-test session's full process and
+explicitly lists the retained live acceptance obligations. Neither SDD locks ahead of that
+acceptance. The final closeout records the R1-R16/R1-R10 audits and adds both lockfiles together.
+Transport work remains with its owner; this implementation uses today's transport APIs.
+
+- [x] Amend owned requirements and architecture to independent facets, matching-content adoption,
+      per-entry conflict reports and advisory stale-ancestor artifact delivery.
+- [x] Implement native adoption/convergence and interrupted-run retry with truthful partial setup
+      evidence, preserving differing unowned entries and independent setup work.
+- [x] Implement runtime routing over available captures and known deferrals without an ancestor
+      freshness gate, recapture, implicit setup or duplicate delivery; preserve own-facet errors.
+- [x] Align artifact publication, permanent guides and diagnostics with the amended contract.
+- [x] Complete private project, complexity and correctness reviews and the required gates.
+- [ ] Publish the complete ready handoff with the full live-test emphasis; critically assess and
+      incorporate or rebut feedback within the three-round allowance.
+- [ ] Audit the independent live evidence against every retained acceptance requirement, reconcile
+      completed follow-up handoffs with their merge evidence, and close actual remaining gaps.
+- [ ] Promote remaining load-bearing guidance, audit all requirements and create `locked.md` only
+      once both efforts' retained obligations are complete.
+
 - Status: Implementation authorized by the operator after design review on 2026-09-07
 - Governing requirements: [FRD](frd.md)
 - Approved architecture: [HLA](hla.md)
@@ -156,8 +187,8 @@ and budget before creating live resources. Native CLI research can use isolated 
 fixtures, without touching the operator's installed plugins or authentication.
 
 - [ ] Prove VM, admin, agent, workspace and session env and facet mapping, explicit enablement,
-      multiple independent configurations, inherited lists and deliberate empty selections (R1-R6,
-      R8).
+      multiple independent configurations, inherited activation maps and explicit null opt-outs
+      (R1-R6, R8).
 - [ ] Observe two users and two workspaces for native plugin/settings applicability and all four
       mapping policies; verify session-only compatibility (R3, R13-R15).
 - [ ] Observe required/recommended/absent prerequisites for the actual user, including stale and
@@ -165,8 +196,9 @@ fixtures, without touching the operator's installed plugins or authentication.
 - [ ] Exercise repeat setup, one-entry removal, removal of an integration activation, interruption,
       concurrent mutation, native drift, unknown codec versions, failed cleanup and owner deletion
       (R9).
-- [ ] Prove failed workspace setup unwinds under standalone and session-created paths and retry
-      refuses unexplained residue (R13).
+- [ ] Prove core workspace creation failures unwind under standalone and session-created paths and
+      retry refuses unexplained residue. Under the 2026-11-04 ruling, facet execution failures
+      instead retain the created owner and partial records while independent work continues (R13).
 - [x] Run full repository gates and focused native Windows tests from the current CI selection;
       record actual commands, exit codes and unreachable live surfaces.
 - [x] Obtain independent project, complexity and generic correctness/security reviews, resolve
@@ -423,7 +455,7 @@ selector keeps its existing tagged shape and setup activation maps support expli
       including persisted instance specs and removal of inherited config references.
 - [x] Verify inheritance, defaults, selection replacement, source attribution, saved-state recovery,
       readiness, and lifecycle behavior; run required gates and independent private review lanes.
-- [ ] Publish the complete PR ready for review and monitor its feedback under the delivery process.
+- [x] Publish the complete PR ready for review and monitor its feedback under the delivery process.
 
 The clarified implementation passed 9,657 non-integration tests with seven skips, Ruff lint/format,
 and strict mypy across 849 files. File lint, locked-SDD and Rulesync checks passed, alongside 160
@@ -465,3 +497,971 @@ The operator agreed to a separate follow-up for a consistent omitted-versus-null
 inheritance: omission inherits; explicit null clears the inherited value, with defaults or required
 value validation applied afterward. Unknown opt-out key validation belongs in that follow-up's
 clearing contract; this correction preserves the current treatment of unavailable integrations.
+
+## Follow-up handoff audit, 2026-11-01
+
+The activation-map handoff box is complete: PR
+[816](https://github.com/WayfarerLabs/agentworks/pull/816) merged on 2026-09-15 as
+`a22d5cb6b73b03d116335dc3a732685d0e6289ae`. Its final feedback closeout records clean saga, Muntz
+and integration-test reports at `67bb0dc1`, with no remaining correction. The agreed broader
+null-inheritance follow-up is separate. This audit closes only the stale publish box; it does not
+substitute that report for the live matrix still listed above.
+
+## Facet independence implementation evidence, 2026-11-01
+
+The complete implementation was reviewed at `06fa0dfcb6511627e47b5e98b682ca1f6891ed11` against
+`c8d4dfb`. Independent project, complexity and correctness reviews are clean after correction of
+stale inactive inspection, obsolete strict routing, ancestor-only argument checks and same-origin
+native replay. Recognized ancestor metadata is separate from new policy paths and strict proposal
+expectations; old name drift cannot block unrelated new delivery, while actual competing names
+remain errors. No persisted-state version or transport API changed.
+
+Lead validation on that code head: **10,297 non-integration tests passed, 11 skipped**; Ruff lint
+and format passed (920 files), and mypy passed (884 files). Wheel and source builds passed. File
+lint, locked-SDD and Rulesync 7.14.0 checks passed, as did CI's Typer-isolation check. Website
+validation passed 160 Python and 103 Node tests, with 14 files identical across both repeated builds
+for each site base. Actual isolated local marketplace tests used Claude Code 2.1.316 and Codex
+0.166.0; those are observed versions, not minimum requirements. Target-side native probes exercise
+Claude, Codex and Grok replay without starting a model.
+
+The real CLI ran help, isolated config initialization, both harness/artifact guide topics and
+artifact inspection help successfully. The temporary HOME was independently verified removed. An
+attempted workspace-local pytest fixture root inherited default ACLs and exceeded tmux's socket path
+limit, producing 14 fixture failures. Unchanged `c8d4dfb` reproduced the initial ACL failure:
+
+```text
+AssertionError: assert 'system.posix_acl_access' not in ['system.posix_acl_access']
+```
+
+The tmux failure reported `File name too long`. All 145 tests from the affected modules then passed
+under a short clean temporary root, followed by the full passing run above. Both short roots were
+verified removed; no failing cases were filtered out and no product checks were weakened.
+
+The operator directed live validation to the separate integration-test session triggered by the
+ready PR. This lead created no live backend resources and claims no completed live matrix from these
+local checks. The handoff requests every retained acceptance scenario below, with particular
+attention to interrupted native registration, independent facets during upstream drift, actual users
+and workspaces, own-session failure before teardown, native options and cleanup. Both SDDs remain
+unlocked until that evidence is audited and the remaining requirements are complete.
+
+## Facet independence feedback, round 1 of 3
+
+PR [862](https://github.com/WayfarerLabs/agentworks/pull/862) opened ready at `72923b6`; all CI jobs
+passed. After the one-hour reporting window, the first authorized public correction round began on
+2026-11-01 at 07:38 UTC, with the PR returned to draft before source changes. The feedback batch
+contains Copilot's six threads and the initial saga and Muntz reports. No independent live
+acceptance report is claimed from those code reviews.
+
+The accepted corrections cover whole-file session collisions before teardown, modified obsolete
+members of requested skills, pre-render setup name collisions, recorded routes independent of
+current upstream routing, shared strict/advisory native discovery and adoption-report events.
+Optional simplifications stay within those paths. The native inventory reread and safe retirement
+guards stay: marketplace registration can change the source observable for an installed plugin, so
+manual inventory updates do not replace the fresh observation.
+
+Codex's listing follows current marketplace registration without proving an unclaimed installation's
+original source. The operator has been asked to choose conservative preservation with a reported
+recovery limit or persisted installation-intent tracking. That finding remains unresolved;
+independent corrections proceed without inventing ownership or an intent-state protocol. The
+`awaiting-direction` label identifies this decision. The remaining round allowance stays dormant
+after this round until the operator resolves it.
+
+- [x] Complete the independent accepted corrections and their focused regression checks.
+- [x] Resolve the Codex provenance decision through authenticated operator direction and complete
+      the resulting correction within its agreed boundary.
+- [x] Run the three private review lanes and required gates on the corrected exact head; publish the
+      complete handoff with the appropriate draft/ready signal (completed by round 2 below).
+- [ ] Audit independent live acceptance against every retained requirement and finish promotion and
+      both locks. Unit tests and CI alone do not close the live obligations above.
+
+Round 1's independent corrections are reviewed clean through `eb1a081`, whose production code is
+unchanged from `a13ddfe`. Each private lane independently passed 400 relevant tests; the project and
+complexity lanes also checked collateral and plan honesty. The complexity lane reproduced the
+negative control that makes a single setup probe unsafe: deferring a proposed persona after an
+identity mismatch can expose another native collision. The iterative probe remains. The fresh native
+inventory observation and safe retirement guards also remain. Reporting checks assert event emission
+and runtime entry identities, without pinning authored wording.
+
+The full CI-selected local run passed **10,334 tests, 11 skipped** on the corrected production code.
+The final type-only fixture changes repair three mypy errors without changing that behavior; full
+mypy passes across 885 files, and Ruff lint/format passes across 921 files. Wheel and source builds
+pass. Website validation passed 160 Python and 103 Node tests, with 14 files identical across both
+builds for each site base. The real CLI passed help, isolated config initialization, both guide
+topics and artifact inspection help. Managed temporary fixture/build roots and the isolated HOME
+were independently verified removed. After correcting fixture types and document formatting, file
+lint, locked-SDD and Rulesync 7.14.0 checks passed. CI and checkpoint state are recorded on PR 862;
+the complete correction handoff remains pending the Codex decision.
+
+Codex provenance remains unresolved under the operator question above. These are independent code
+and local CLI results, not live VM acceptance or whole-PR readiness. Neither SDD is locked.
+
+## Facet independence feedback, round 2 of 3, 2026-11-02
+
+The operator resolved the held native-provenance question: use the native tool's reported full
+association, preserve and warn about differing unowned associations, and add no historical cache
+verification or installation-intent tracking. This supersedes round 1's pending-source notes.
+Matching adopted entries become managed and may be safely retired when no longer declared. Native
+version changes do not change the owned association.
+
+The second authorized batch includes the unresolved source thread, the later live integration
+reports and saga reading, and Muntz's checkpoint review. The preceding handoff's reporting window
+elapsed before this round began. PR 862 stays draft with `review-requested` removed during work. The
+seven live findings are addressed within the existing contract; own malformed/config/process/
+transport and unsafe publication failures remain hard. There is no error-aggregation or directory
+ownership engine. Empty session/run directories may remain after owned-file retirement.
+
+- [x] Record the authenticated native-association ruling and make full marketplace identity,
+      version-stable ownership and safe settings-overlay behavior converge with confirmed reports.
+- [x] Make remaining native-name conflicts terminally unhandled, rerender complete session files and
+      argv, and preserve genuinely non-conflicting native namespaces and own-session errors.
+- [x] Report native-only incomplete or retired setup, leave skipped setup incomplete, preserve
+      compatible-version repair guidance, and remove duplicated setup route arguments.
+- [x] Add bounded file/section retirement and update reports, accurate executable-intent
+      diagnostics, guest-index privacy and artifact ownership counts; keep provenance in workstation
+      inspection.
+- [x] Supply a bounded fixture launcher through existing registration and the real CLI for the
+      separate prerequisite/unsupported-facet live acceptance cases, without a product plugin
+      loader.
+- [x] Complete all three private review lanes and integrated gates, then publish the exact head
+      ready with the retained acceptance matrix and no checkpoint label.
+- [x] Assess that ready handoff's full feedback batch. One authorized public fix round remains.
+- [ ] Audit final-head live evidence, close every retained requirement, promote remaining durable
+      content and add both locks. No unit or fixture result alone closes a real-VM obligation.
+
+Native fixture validation observed Claude Code 2.1.316 and Codex 0.166.0. The focused native slice
+passed 104 tests. The flow slice passed 1,143 tests with four skips, including actual adapter/guest
+probes and real-manager failures preserving the existing run before teardown. The fixture-tooling
+slice passed its fresh-process CLI checks and full branch suite, with real VM execution explicitly
+unperformed. These were slice-level results at the start of the round, before integrated validation
+or live acceptance. The validation record below supersedes that interim review and handoff status.
+
+Round 2 validation is complete. The integrated CI selection passed **10,401 tests, 11 skipped** with
+Claude Code 2.1.316 and Codex 0.166.0 available for the native fixtures. The first integrated run
+exposed one existing inventory test still expecting the mutable plugin version in association
+identity; the corrected test verifies stability across a version change, and the entire selection
+then passed without filtering failures. Ruff lint/format passed across 925 files; mypy passed across
+889 files. The acceptance launcher also passed separate lint, format and strict type checks.
+Wheel/source builds, Typer isolation, file lint, locked-SDD and Rulesync 7.14.0 checks all passed.
+Website checks passed 160 Python and 103 Node tests, with deterministic double builds for both site
+bases. Real isolated CLI help, config initialization, both current concept guide topics and artifact
+inspection help passed. The initial smoke used obsolete topic names; the corrected calls used the
+names exposed by `guide list`. Temporary test/build homes and roots were verified removed.
+
+All three independent private lanes reviewed the full PR and round 2 at `ef6d882`, including the
+`0dc51c7` test/document correction, without material findings. The project and correctness lanes
+identified the same stale readiness docstring; it now describes advisory artifact drift and explicit
+integration-owned prerequisites. Independent boundary suites passed 87 and 96 cases; the complexity
+lane also passed eight real-native cases and demonstrated that deleting conflict recovery or full
+source/legacy-version handling breaks the required behavior. These are local CLI/native-fixture
+results, not final real-VM acceptance. The exact ready head and CI result are recorded in PR 862's
+round 2 handoff. One public correction round remains, and both locks still await the final live
+requirement audit.
+
+## Facet independence feedback, round 3 of 3, 2026-11-02
+
+The one-hour reporting window elapsed before this final authorized correction round began. PR 862
+returned to draft at `3748bcc` before edits; main remains `c8d4dfb`. The frozen batch includes live
+report `6572238674`, Muntz `6571607223`, saga `6571111808`, and every unresolved item. The live
+report confirms the original seven fixes and #840/#841, but finds two missing-Claude-declaration
+paths that still need correction. Its gates passed with 10,401 tests and 11 skips; that evidence
+belongs to the ready head, not the correction still under development.
+
+- [x] Preserve unobservable Claude git/GitHub source associations during mapping, and preflight
+      user-scoped removal before touching marketplace dependents.
+- [x] Make native plugin ambiguity entry-local without retiring unresolved prior associations;
+      handle malformed driver claim sources conservatively and retain legacy version support.
+- [x] Persist current-attempt incomplete reasons in the existing versioned setup record and expose
+      entry-specific repair diagnostics without new ownership or history mechanisms.
+- [x] Strengthen missing-target coverage, remove redundant first-party identity-format checks,
+      retain retry-progress guards and fix temporary-path-sensitive carrier assertions.
+- [x] Align permanent guidance, bounded progress messages and current plan status with the fixes.
+- [x] Resolve the own-failure policy question through authenticated operator direction; retain
+      today's fail-fast pipeline until that direction arrives. `awaiting-direction` tracks this
+      ambiguity, not a second request for the already-authorized FRD amendments.
+- [x] Run all three private review lanes and full gates on the integrated head, then publish the
+      appropriate complete handoff. This round exhausts the three-round public correction allowance.
+- [ ] Audit final live acceptance against every retained requirement and create both locks only
+      after the remaining actual-scope evidence exists.
+
+The independent corrections do not wait on the pipeline policy choice. Missing native declarations,
+ambiguous selection and unreadable claim identity are handled as conservative entry-local retention;
+unexpected own process/config/persistence failures are not silently swallowed. The operator has been
+asked whether those unexpected own failures should continue sibling integrations before a final
+error. No error-aggregation mechanism is being added without that decision.
+
+The latest live run used Linux and remote Lima/Debian 13, two 2-CPU/4-GiB VMs, Claude Code 2.1.316
+and Codex 0.166.0, with local sources and no model calls. It independently verified VM/backend/SSH
+cleanup, leaving only offline tailnet records for the operator. It does not close the outstanding
+prerequisite/unsupported-facet fixture, real interruption, admin artifact, Git capture, power cycle,
+resume-only, Grok launch or Claude workaround obligations. Workspace matching/conflict and project
+settings cases can use files supplied by repository checkout during ordinary create; the verified
+call order and controlled fixture are recorded in `6572186080`. No workspace reinit or workspace
+plugin support is implied. Both locks remain pending.
+
+At the initial private checkpoint, production head `4e286ac` passed the CI-selected local suite with
+**10,433 tests, 11 skipped**, with real Claude Code 2.1.316 and Codex 0.166.0 fixtures available.
+The first integrated source run passed 10,431 tests; private review then caught and corrected two
+diagnostic regressions: session repair incorrectly targeted a VM, and an early retirement shortcut
+could discard explicitly pending reason-only cleanup. The final full rerun includes both regressions
+and passed without filtering failures.
+
+All three independent private lanes reviewed the full PR and round 3 at `4b44d42`; project and
+correctness findings above were incorporated, and all three re-reviewed `4e286ac` clean. Independent
+focused runs passed 78, 123 and 139 cases; the complexity lane also exercised 16 real-native cases
+and proved the persistence and pre-removal checks with failing deletion controls. Final narrow
+checks passed three project/complexity cases and 66 correctness cases. These are local boundary and
+native-fixture results, not a new real-VM acceptance claim.
+
+Ruff lint/format passes across 926 files and mypy across 890 files. Full file lint passed after
+correcting five spelling findings by revising the prose. Package builds, Typer isolation, Rulesync
+7.14.0 and locked-SDD checks passed. Website tests passed 160 Python and 103 Node cases, with both
+site bases deterministic. Real isolated CLI config initialization, help, both current concept guides
+and artifact inspection help passed. Managed temporary fixture homes and test/build roots were
+verified removed. Exact final-head CI and the checkpoint signal are recorded in PR 862's handoff.
+
+The checkpoint deliberately remains draft with `review-requested` while the authenticated
+own-failure policy choice is pending; `awaiting-direction` marks that question. This is a coherent,
+green handoff of all independent fixes, not merge intent or a statement that either SDD is closed.
+The three public correction rounds are exhausted. No additional correction is authorized solely by
+new published feedback. The operator's policy answer and final live acceptance still precede both
+locks.
+
+A final adversarial native check before publication found the same missing-declaration defects when
+Claude accepted an empty marketplace object, or one containing only an update option. Outer-key
+membership did not prove a usable source declaration. Both predicates now require the inner source
+member. Twenty-six targeted real-native cases passed, including missing, empty and update-only
+objects; eight strengthened cases verified actual native ref/sparse source metadata remained intact.
+Independent native commands can discard incomplete outer placeholders, so assertions allow that
+native normalization while rejecting a fabricated source and verifying plugin/registration/claim
+retention. Production code neither parses cache history nor restores a guessed declaration.
+Integrated validation and narrow reviews of this final predicate correction follow before handoff.
+
+Final predicate-correction validation is complete at source head `6e2d13a`: **10,449 tests passed,
+11 skipped** in the complete local CI selection. Full static checks (926 Ruff files, 890 mypy
+files), file lint, locked-SDD and package builds pass. Website checks again passed 160 Python and
+103 Node cases with both site bases deterministic. The unchanged Typer-isolation and Rulesync gates
+also passed earlier in this round. Required CI is green for source head `6e2d13a`; the exact final
+checkpoint head is linked from the PR handoff.
+
+All three private lanes re-reviewed the final two predicates and associated tests clean. Complexity
+checks passed seven inventory cases; correctness independently passed 27 real-native cases,
+including absent, empty and update-only declarations with actual ref/sparse preservation and
+pre-removal dependent retention. The final documentation checkpoint is reviewed separately before
+publication. This supersedes the earlier interim validation status while preserving its historical
+counts and the late finding. The operator policy answer and the remaining actual-scope acceptance
+matrix are still open; no lockfile or merge intent is claimed.
+
+## Independent setup continuation, operator direction 2026-11-04
+
+The operator resolved the earlier own-failure question by directing continuation of independent
+facets and a final failure report. This is direct implementation authorization, separate from the
+three exhausted public feedback/fix rounds. The 2026-11-02 checkpoint statements that the policy
+answer was pending are historical and superseded here. Invalid activation preflight, cancellation,
+shared state failures and unexpected internal errors retain immediate failure behavior. Session
+launch safety remains unchanged.
+
+- [x] Record the authenticated ruling and align the owned FRD, architecture and permanent guides.
+- [x] Implement explicit operation-local failure collection, truthful partial records and
+      independent continuation through VM/admin, agent, workspace and session-created ancestors.
+- [x] Verify required prerequisites retain completed ancestors, recommended prerequisites remain
+      advisory, and persistence/cancellation still abort without swallowed failures.
+- [x] Complete the private project, complexity and correctness reviews, run required gates, and
+      publish a coherent exact-head handoff.
+- [x] Dispose the later published workspace permission/adoption and native status findings under
+      authenticated direction; the exhausted feedback budget does not authorize another fix round.
+- [ ] Audit the expanded live evidence from PR comment `6575184960` against retained requirements
+      and close remaining acceptance gaps before creating either lockfile.
+
+The later live report exercised prerequisite/readiness fixtures, real agent-reinit cancellation,
+admin artifacts, Git capture/ref refresh, VM power cycles, Grok and Claude workaround launches,
+workspace collisions and settings mappings, and multi-user isolation. It used Linux with remote
+Lima/Debian 13 and performed no model calls. It reports independently verified cleanup. Its precise
+limits include other workstation/backend combinations, the native-write/checkpoint interruption
+window, real transcript creation, some native source variants and workspace copy/rehome. These are
+scoped acceptance results, not blanket final-head acceptance or permission to lock either SDD.
+
+The continuation implementation is reviewed at `df7b3cd`; production code is unchanged through the
+subsequent VM test-import correction and developer-guide clarification. The full local CI selection
+passed **10,498 tests, 11 skipped**. The final import-only delta also receives focused VM checks.
+Ruff lint/format passes across 929 files and strict mypy across 893 files. Package wheel/source
+builds, file lint, Rulesync 7.14.0, locked-SDD checks and Typer isolation pass. Website tests passed
+160 Python and 103 Node cases; both site bases produced deterministic double builds. Real isolated
+CLI help, config initialization, both concept guides and artifact inspection help passed; the
+isolated home and build roots were removed and their absence checked.
+
+All three private lanes found no remaining code issue in this increment. Project review passed 50
+focused cases; complexity passed 68 and proved the callback infrastructure marker and required
+consumer retention with failing deletion controls; correctness passed 92. Project review caught one
+stale developer-README rollback statement, now corrected. Earlier worker checks run from the
+repository root missed the CLI's strict configuration; root checks from `cli/` caught and corrected
+four test typing errors and two test import groups before handoff. No ignored failures or relaxed
+checks were used. Final documentation-only review and exact pushed-head CI are recorded with the
+checkpoint handoff.
+
+The [critical reading](https://github.com/WayfarerLabs/agentworks/pull/862#issuecomment-6638116414)
+records every later material finding and the scoped acceptance evidence. Current continuation
+contains a malformed native inventory failure to its facet but does not yet make inventory entries
+individually skippable. Workspace ACL/adoption, native-only freshness and the uncovered retirement
+and ambiguity guards remain open. The exhausted public correction budget is not silently renewed.
+Neither SDD is locked or represented as complete.
+
+## Additional authorized feedback/fix round 1 of 1, 2026-11-04
+
+The operator explicitly approved one additional round after the green continuation checkpoint at
+`9e52d4e`. The batch was frozen at 20:45 UTC, more than an hour after handoff, and includes the
+previously open findings plus saga `6638655434`, Muntz `6639301024` and live report `6640566529`.
+The
+[critical reading and round charter](https://github.com/WayfarerLabs/agentworks/pull/862#issuecomment-6641797832)
+records each disposition. The PR remains draft during work; `review-requested` was removed before
+edits. This consumes the single additional round, not a standing allowance for later feedback.
+
+- [x] Freeze the full batch, record authenticated authorization, assess every material item and
+      establish isolated implementation ownership.
+- [x] Preserve failed routing and existing descendant placements; enforce unsupported-facet
+      preflight and retain fatal persistence/cancellation behavior.
+- [x] Correct native entry-local inventory, bounded diagnostics, native-only freshness, workspace
+      ACL/adoption and generated-section stability; cover the identified deletion controls.
+- [x] Align recovery guidance, developer/operator guides, fixtures and acceptance milestones with
+      the corrected behavior.
+- [x] Integrate the changes, complete all three private review lanes and required local checks.
+- [ ] Publish the exact green ready handoff and audit the separate full integration-test result.
+- [ ] Reconcile the expanded live evidence and any later findings against retained requirements
+      before final promotion and locking. Feedback arriving mid-round is a later batch.
+
+The copied-workspace `template="copied"` resolution failure exists in current main: copy records
+that synthetic template at `workspaces/manager/copy.py`, and artifact/runtime resolution calls the
+strict workspace-template resolver. Copy also omits native applied evidence on main. This round
+leaves that existing lifecycle contract unchanged rather than copying source ownership claims into a
+new destination. It is a separate workspace follow-up, with live reproduction in `6640566529`. The
+requirement that destination changes must not inherit proof of setup remains in force.
+
+A workspace integration retry/reinit command remains deliberately excluded by the operator's
+existing design. Retention preserves the owner's work and partial evidence; `workspace repair`
+continues to handle access and Git identity only. Recovery guidance must identify retained owners,
+existing-owner session bindings, the possibility of a running session after a failing command, and
+the destructive nature of explicit workspace recreation. This round introduces no implicit setup or
+new workspace command. Neither SDD is locked.
+
+### Additional round validation and disposition
+
+The integrated source at `3da18ff` passed the full local CI selection with **10,693 tests, 11
+skipped**, with Claude Code 2.1.316 and Codex 0.166.0 available for real isolated native fixtures.
+Configured Ruff lint/format passed across 934 files and strict mypy across 898 files. File lint,
+Rulesync 7.14.0, locked-SDD checks, package wheel/source builds, Typer isolation and real isolated
+CLI config/help/both concept guides/artifact inspection help passed. Website validation passed 160
+Python tests, 103 Node tests and deterministic double builds at both site bases. The final
+pushed-head CI and ready signal are recorded in the PR handoff.
+
+All three private lanes reviewed the round and re-reviewed the corrected source clean. Initial
+review exposed three additional cases: unreadable evidence after bundle declarations were cleared, a
+partial first VM file prefix mistaken for confirmed routing, and control sequences reconstructing a
+secret after raw matching. The fixes use the existing nullable input field and normalize secret
+patterns before the final size bound. Twenty-two dedicated tests all failed on `11cc97a` and all
+passed with the correction; user file operations run through real `NativeFiles`, while the VM
+checkpoint failure is simulated. Follow-up focused reviews passed 142 project, 142 complexity and
+164 independent correctness cases. Real local Git/POSIX ACL checks prove adoption, script execution,
+group/mode preservation and an unchanged first repair; live acceptance across different users is not
+inferred.
+
+An isolated startup-banner check also caught a Python presence-probe regression. A line-delimited
+marker now tolerates unrelated startup output while rejecting ambiguous or missing evidence; 131
+focused cases cover local execution and first-party SSH command construction without a VM. The first
+complete source run then caught a native settings interaction: retaining a marketplace for a project
+plugin restored a user plugin's already-removed enable flag. Confirmed removals now take precedence
+over snapshot protection. Five real-Claude cases cover no mapping and all four mapping policies,
+repeated retirement, unchanged project bytes and stable bytes and inode in user settings. All three
+lanes re-reviewed this final small correction clean; a deletion control reproduces the old failure.
+The full suite was rerun without filtering failures and passed at `3da18ff`.
+
+The unrelated website browser witness once failed while heavy checks overlapped. The complete
+160-test website suite passed unchanged on a separate run, and CI website validation passed too. No
+assertion, timeout or test-selection weakening was used. The additional round is now consumed; new
+published findings require a later authenticated disposition rather than an automatic fifth
+correction round. Both locks still await the final requirement-by-requirement live acceptance audit.
+
+## Additional authorized feedback/fix round 1 of 2, 2026-11-05
+
+The operator authorized up to two further public correction rounds and allowed unrelated fixes with
+clear paths that do not conflict with ongoing Transport/SSH work. This is the fifth published
+correction round, not a reset of the earlier historical allowances. The batch is frozen at
+2026-11-05 16:32 UTC against `1e0d2fe`: critical reading PR comment `6651844728`, the final-head
+live report `6646701174`, the instance-spec followup `6650616936`, and the expanded
+Proxmox/workstation report `6652928141`. The start is recorded in PR comment `6663467162`.
+
+- [x] Distinguish confirmed empty routing from unknown results without holding unrelated local
+      application, including receiver-specific routes and inactive passthrough with opaque evidence.
+- [x] Carry unavailable session routes through inactive intermediate facets, record terminal
+      unhandled IDs/reasons and incomplete delivery, and keep optional inputs advisory. Preserve the
+      old runtime's files before teardown and retire obsolete private runs afterward; retaining
+      unused files would not deliver missing content and does not justify a history mechanism.
+- [x] Normalize ambiguous older incomplete zero-deferral setup records through domain codec v4,
+      using the same fields. Complete or explicit-route older records remain usable; early file
+      checkpoints do not certify routing. No database schema, journal or native version floor added.
+- [x] Support observed Claude file marketplaces, isolate named unknown native sources, preserve
+      confirmed current-operation native mutations during snapshot restoration, and bound private
+      native-error transfer even when its original stderr file is read-only.
+- [x] Redact normalized guest errors and warnings before bounding them, preserve typed errors, frame
+      native discovery and identity responses, and identify offending inventory paths. Actual
+      per-path publication holds supply their own incomplete evidence; an unrelated upstream
+      condition alone does not permanently fail a newly created workspace's local setup.
+- [x] Isolate Git clones in unique private attempt paths and publish only confirmed completed
+      checkouts. Preserve unexplained or occupied reservations instead of deleting them. Real Git
+      controls reproduce replacement-work loss on the prior head and preserve committed, untracked
+      and stashed work with the correction.
+- [x] Correct the adjacent admin session-create log redactions and exact-pane output capture, with
+      real command-log and local tmux checks. Explicit non-interactive confirmations decline without
+      reading input or granting default consent. Add useful binding/corruption diagnostics and
+      update permanent recovery guidance, including source changes needed before destructive
+      recreation.
+- [x] Correct adjacent Proxmox deletion and rollback classification using the exact structured
+      provider missing-config response for the bound node/VMID. Locked, authentication, transport,
+      task and malformed responses remain failures; direct delete preserves the core VM row.
+      Rollback preserves its original failure/interrupt and warns. No Transport/SSH APIs changed.
+- [x] Protect analogous admin session start/restart logs after resolving secret values. Preserve the
+      successful core-owner status while disclosing incomplete native setup after soft holds or
+      skips. Detach unsafe provider traceback causes, preserve safe typed domain causes, and forward
+      missing explicit route IDs through fresh active receivers without fabricating payloads.
+      Restore the capability import boundary and remove the redundant join wrapper.
+- [x] Complete the three private reviews, required integrated gates and final collateral audit.
+- [ ] Publish the exact green ready handoff without `review-requested`, then assess the separate
+      full live result within the remaining one-round allowance.
+- [ ] Finish the requirement-by-requirement acceptance and promotion audit and create both locks
+      only after the remaining contracts are proven.
+
+### Scope and remaining evidence
+
+The integrated source before private review is `f0e6e39`. Local lane evidence is scoped: routing and
+artifact/capability checks passed 1,365 cases with four skips; the broader native selection passed
+327 cases, followed by 30 bounded-transfer/discovery cases; Proxmox/core-deletion checks passed 180
+cases; workspace/session checks passed 153 cases. Lead diagnostic/session checks passed 166 cases,
+and a later bounded diagnostic/readiness/tmux selection passed 55. These selections overlap, do not
+constitute the full repository gate, and do not replace backend acceptance.
+
+The new live report materially confirms prior routing-loss, unsupported preflight, workspace ACL,
+native-only freshness, mapping and ref/sparse fixes. The subsequent report adds actual Proxmox 8/9
+and workstation cells, lifecycle/rekey and cleanup evidence. Their new contradictory findings still
+prevent a lock. Bookworm cannot currently be created by Agentworks, including through Proxmox, under
+the existing release policy; an unavailable test cell is not silently a passing one.
+
+Desired instance specs remain desired state rather than a last-known-good application snapshot.
+Capture availability is not a structural declaration guarantee. This round reports retained template
+bindings and keeps the existing desired-before-convergence policy; it adds no automatic rollback.
+Malformed saved captures are not destructively replaced: their hints identify explicit state
+recovery rather than an ineffective ordinary-reinit loop. Workspace copy/rehome lifecycle repair,
+global Windows terminal/database classification, generalized remote-process cancellation, raw
+SSH-log normalization/bounds and broader transport protocol cleanup remain outside this correction.
+They need their owning contracts and current platform evidence. Unsafe publication through a link
+remains a facet error; no-follow protection is retained. Proxmox hard-stop semantics remain
+unchanged and are now documented; changing shutdown behavior would be a separate platform decision.
+Certificate trust guidance now includes a verified CA path rather than offering only disabled
+verification.
+
+No final-head backend run or completion of either SDD is claimed by these local checks. The next
+ready handoff must emphasize unknown versus confirmed-empty routes, first checkpoints and legacy
+codec evidence, inactive passthrough, optional session omission/inspection, clone cancellation and
+name reuse, native registration protection, bounded diagnostics, actual resolved-value logs, real
+pane capture, and locked/outage/already-gone Proxmox deletion on both tested PVE generations.
+
+### Corrected-head validation
+
+The three private lanes reviewed corrected source `b78d0fe`, the collateral alignment at `4bde5ae`,
+and the final test-only correction at `5f89ba1`, with no material findings remaining. Project review
+passed 52 focused cases; Muntz passed 143 and verified deletion controls for missing-ID forwarding
+and provider traceback secrecy; independent correctness passed 75, then the corrected final test.
+These selections overlap. The project findings restored the original truthful session-create
+checkbox and aligned the HLA, delivery LLD and durable artifact documentation with metadata-only
+forwarding after known-input validation.
+
+At `5f89ba1`, the full non-integration pytest selection passed 10,827 cases with 11 skips, exit 0.
+An earlier run passed 10,826 with one obsolete assertion requiring missing-route metadata to remain
+frozen; its replacement requires every missing identity to reach session deferrals while retaining
+incomplete-state, skip, ownership and actual file-byte checks. The focused correction passed 56
+cases. Ruff lint and format passed across 942 files; CI-exact mypy passed all 906 source/test files.
+File lint, Rulesync drift, locked-SDD validation, Typer isolation, source/wheel builds, Python
+website checks (160), Node website checks (103), deterministic builds for both site bases, and five
+isolated CLI drives all returned 0. The CLI drives covered help, first config initialization,
+artifact help and both packaged guides; the temporary home and site build roots were removed. These
+are local and isolated-process results, not final-head backend acceptance. Neither lock is created
+by them.
+
+The closeout read also removed stale SDD statements about a shell file workaround and fatal native
+identity collisions. Shell publishes directly; session identity conflicts leave affected inputs
+unhandled while independent inputs continue. Unsafe filesystem overlaps remain errors.
+
+## Additional authorized feedback/fix round 2 of 2, 2026-11-05
+
+This sixth published correction round uses the final round of the operator's additional allowance.
+The batch freezes at 2026-11-05 19:18:22 UTC against ready head `082437fe`, after the normal
+one-hour reporting window. Muntz report `6666101942` identifies three material corrections; the
+lead's critical reading `6666264141` independently reproduces the error paths and accepts all three.
+Saga report `6665772379` is clean. Copilot's new review reports quota exhaustion, not findings.
+There are no unresolved inline threads. Start comment `6667039978` records the batch, the current
+main `c8d4dfb` and return to draft. The separate full live report was not published by the cutoff.
+
+- [x] Preserve the typed workload failure and exit status through expected failures of main and
+      alternate capture and server cleanup. Keep ordinary session-log capture strict and both pane
+      targets exact; cancellation and unexpected internal errors retain their behavior.
+- [x] Keep failed-command diagnostic transfer/read optional, preserving the native operation error
+      without raw provider prose. Successful structured-response transfer remains required.
+- [x] Use one new native setup domain codec version, 3, accepting released versions 1 and 2 and
+      normalizing their ambiguous incomplete zero-deferral records. Preserve unknown future data.
+- [x] Add a raw-before-normalized redaction regression with a failing deletion control. Keep the
+      necessary pass; do not add a shared deferral abstraction or change missing-route logic merely
+      for optional reason-text or counting differences.
+- [x] Correct the related tmux liveness probe to target the exact pane and accept only valid native
+      observations. Exercise an actual private server alive then dead at status 23; malformed
+      successful output remains unverified rather than falsely alive.
+- [ ] Complete the three independent private lanes and required integrated gates on the corrected
+      head, and update permanent collateral wherever the correction changes an operator contract.
+- [ ] Publish the exact green ready handoff without `review-requested`, reporting the exhausted
+      correction allowance and the still-required independent live acceptance.
+- [ ] Reconcile final acceptance against every retained requirement, promote any actual remaining
+      guidance, and create both locks only when that evidence proves completion.
+
+Supersession: the earlier completed branch-only codec work is truthful history; the final writer
+combines those unreleased updates into version 3. No compatibility mechanism is introduced for the
+intermediate branch-only versions. The current LLD and implementation describe the final format.
+
+The two error paths are independently reproduced at the prior ready head. A failed main capture
+loses the known workload status and skips cleanup; alternate capture and cleanup transport failures
+also replace that primary error. A failed optional native diagnostic copy replaces the native
+operation error. The redaction deletion control exposes a secret marker when terminal parsing
+consumes the first character of a known multiline value. These are scoped local reproductions, not
+final backend acceptance. The full live result remains necessary before either SDD locks.
+
+### Integrated implementation evidence
+
+Runtime correction `9bd3f369` integrates delegated commit `8c5fb5f3`. Its baseline produced 19
+failures and 14 passes; the broader corrected selection passed 292 cases and the final focused
+selection passed 37. Four private guard-deletion controls produced 5, 4, 4 and 6 failures. The
+worker verified all 13 owned temporary roots absent and made no backend or model calls. The codec
+correction initially produced 10 failures and 12 passes against the prior writer; the corrected
+codec/routing/diagnostic selection passed 72. The new raw-redaction case passes with the guard and
+fails after removing that pass; the original source was restored. Root mypy passed 906 files before
+the runtime integration. These are scoped local checks; integrated gates and all three private lanes
+remain required, and no final live acceptance is claimed.
+
+The first integrated run at `295a6181` passed 10,858 tests with 11 skips and one stale legacy
+fixture failure. The fixture labeled the earlier premature-ID writer as the now-current version 3;
+`3baba4ae` uses released version 2 instead, preserving every file/ownership assertion. Its 28-case
+selection passes. Private correctness review also proved a preexisting real tmux liveness target/
+parser error that bypasses the corrected workload-failure path. The bounded prerequisite fix stays
+in the same round; integrated gates and all three lanes will review the corrected head again.
+
+Liveness correction `834463f4` integrates delegated `0f07c109`. The real-tool baseline produced 10
+failures and 7 passes, including a dead pane reported as alive; the corrected session selection
+passed 115 cases. Rolling back the target fails the real regression; rolling back parsing fails 13
+cases. Root integration passed 93 focused cases including the legacy file-preservation fixture. The
+lead independently verified all 19 reported worker test roots absent. Private reviewers will recheck
+this delta and the corrected fixture at one common final candidate.
+
+### Native test observation correction
+
+The next integrated run at `cfe250ce` passed 10,879 cases with 11 skips and one new real-tmux
+fixture failure. Its independent native query reported a dead pane with no exit status before
+calling the production helper. The runtime contract already permits an unavailable native status. A
+private diagnostic reproduced this with an inherited blocked child-exit signal, and an ordinary
+parallel repeat also observed absent status. The failed full-run worker's signal mask was not
+captured, so that run's cause is not asserted. Test-only correction `b317fb03` requires the intended
+exit marker, actual native death, no reported signal, and agreement with native status observations
+bracketing the helper. Explicit-status cases still require preserving status 23. Production code is
+unchanged. The corrected 115-case selection and the masked real-tool case pass; target and parser
+rollback controls still fail. The lead independently verified all 28 newly reported fixture and
+diagnostic roots absent. Final integrated acceptance and the independent backend report remain
+separate gates.
+
+### Final local validation for round 6
+
+All three private lanes cleared runtime candidate `cfe250ce` and final test correction `b317fb03`.
+Their final narrow selections passed 40 project cases, one real-tool Muntz case and four independent
+correctness cases. Earlier runtime selections passed 82, 82 and 78 respectively; these overlap. The
+final full pytest log reports 10,880 passed and 11 skipped in 581.11 seconds. Its execution receipt
+was lost during tool-output truncation, so no independently observed local process exit code is
+claimed for that run; the exact pushed head's required CI remains a handoff gate.
+
+Ruff lint and format returned 0 across 945 files, and CI-exact mypy returned 0 across all 909
+source/test files. File lint returned 0 after formatting this record and spelling out the child-exit
+signal name. Rulesync drift, locked-SDD validation, Typer isolation, source/wheel builds, Python
+website checks (160), Node website checks (103), deterministic builds for both site bases and five
+isolated CLI drives returned 0. The latter unchanged-source checks remain scoped to their recorded
+candidate; no backend or model acceptance is inferred. The operator contract is unchanged by the
+final test correction, and permanent collateral remains current.
+
+The 26-requirement source and permanent-promotion audit finds no material documentation gap. The
+remaining unchecked boxes retain actual-scope acceptance, final delivery, requirement reconciliation
+and locks. Historical handoff evidence does not close composite live obligations. Both locks remain
+absent pending the independent full report and final requirement-by-requirement reconciliation.
+
+## Integration-report correction round 7, 2026-11-06
+
+The operator directed continuation after report `6676063798` and increased the next integration
+report window to six hours from its ready handoff. A report arriving earlier may be assessed and
+acted on immediately. Start comment `6676418997` freezes the batch at 2026-11-06 03:53:58 UTC,
+against `b14302bc`; main remains `c8d4dfb3`. The PR returned to draft before production edits. This
+is new authenticated direction following the earlier exhausted allowance.
+
+The report supplies the missing exact-head pytest exit receipt: 10,880 passed, 11 skipped, exit 0.
+It also establishes substantial actual-scope acceptance across the reported Linux, macOS and Windows
+beds. Unchanged positive cells retain their exact head/config; they do not certify changed failure
+paths or waive remaining acceptance. Three blockers and the additional material findings prevent
+both locks. The artifact companion tracks this same joint correction through this section.
+
+- [x] Correct routing evidence coverage for restored, added and unreadable routed inputs, and
+      receiving-facet/inspection health without an ancestor freshness gate or new codec.
+- [x] Preserve recoverable managed session ownership after post-spawn uncertainty, keep socket and
+      identity recovery coherent, and protect resolved secrets on create/start/restart diagnostics.
+- [x] Use definitive Proxmox destroy-task acknowledgement, refuse a different recorded guest name,
+      and remove pre-delete guest mutations. Binding failure retains the row; force does not imply
+      consent. Preserve the ongoing execution effort's separate trust and HTTP-error work.
+- [x] Preserve unavailable native entries, name durable diagnostic locations, and report unsupported
+      interactive Grok personas as unhandled rather than claiming application.
+- [x] Make clone cleanup independent, retain occupied reservations and keep private attempts private
+      during ACL repair. Surface residual-attempt recovery limits without automatic destructive
+      reclamation or a new journal.
+- [x] Disposition every reported should-fix and incidental finding against its current caller,
+      including exact Transport/SSH overlap, and update permanent collateral with actual behavior.
+- [ ] Strengthen the identified behavioral regression boundaries and native CI prerequisite, run all
+      three private lanes and required integrated gates, and publish one exact green ready handoff.
+- [ ] Wait up to six hours for the next full integration report, assess earlier arrival promptly,
+      and reconcile every retained requirement before final promotion and either lock.
+
+Independent scouts confirm that input IDs include content digests, so an old non-null input table is
+not confirmation of a changed capture. They also reproduce the dead-socket permission wedge and
+unverified-create record removal. Proxmox's successful destroy task already confirms the operation;
+its pool-scoped token can legitimately lose audit permission immediately afterwards. Existing
+provider name evidence can guard different-name VMID reuse, but is not an immutable incarnation or
+race-free identity promise. These scoped facts guide the corrections; local reproductions alone do
+not complete the real-backend acceptance requirements.
+
+### Round 7 reading and disposition
+
+The numbered items below refer to report `6676063798`. This is the full batch disposition;
+implementation and local regression evidence remain distinct from renewed backend acceptance. The
+operator authorized bounded incidental corrections that do not conflict with Transport/SSH work.
+
+| Report item                                                                      | Disposition and boundary                                                                                                                                                                                                                                                                                                                                                                       |
+| -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Blocker 1; material 8                                                            | Use the completed Proxmox destroy task as confirmation. Before mutation, compare the provider guest name with the recorded hostname. Do not tear down guest sessions or tailnet access first. A failed binding or unproven provider result retains the row. Name comparison does not prove immutable incarnation or protect a same-name replacement/race.                                      |
+| Blocker 2; material 6                                                            | Require recorded routing coverage for current content identities and explicit unreadable incoming routes. Unknown applicable input sets keep fresh receivers incomplete too. Keep independent native failures with confirmed covered routing usable.                                                                                                                                           |
+| Blocker 3; material 5                                                            | Checkpoint the acknowledged managed runtime and its identity before releasing tmux retention. Preserve the session and new dependencies on uncertain post-spawn failures. Read retained mode-0600 sockets through the existing privileged observation path. Do not weaken unowned-runtime or absence guards.                                                                                   |
+| Material 4; should-fix 5                                                         | Use the union of resolved secrets and registered logger secrets, including shell-escaped forms, before and after terminal normalization. Do not treat ordinary environment values as secrets. Preserve typed exception identity and sanitize persisted reasons and traceback paths.                                                                                                            |
+| Material 7; should-fix 1-4                                                       | Independently attempt private clone cleanup and reservation/group cleanup, retain occupied unpublished reservations, restore actionable safe clone hints, and exclude private attempts from recursive ACL repair. Document the exact residual-attempt pattern and manual inspection after hard termination; no automatic destructive garbage collection.                                       |
+| Material 9                                                                       | Preserve all named unavailable operator entries through unrelated native rewrites, including failure-path restoration. If the native CLI refuses the whole inventory, fail that facet with the durable config root and entry rather than build a shadow installer.                                                                                                                             |
+| Material 10                                                                      | Restrict Grok's session persona workaround to headless arguments. Interactive launches report those personas unhandled; native user/workspace files remain supported.                                                                                                                                                                                                                          |
+| Should-fix 6                                                                     | Frame observations owned by NativeFiles and session identity/liveness helpers. Their preceding stdout must not become a pathname, JSON body or identity. Broader SSH stderr, SCP and `vm exec` banner protocols belong to the Transport/SSH effort; do not introduce a competing normalization API here.                                                                                       |
+| Should-fix 7                                                                     | Bound the delete status observation with the existing timeout argument. Malformed HTTP response conversion is owned by the overlapping Proxmox execution work in PR 866. Preserve that work when resolving conflicts.                                                                                                                                                                          |
+| Should-fix 8                                                                     | Name the durable native configuration root and measured malformed-entry formats, retain the workstation source filename, and recognize the observed Codex runtime load format. Never persist an already-deleted discovery staging path as the repair target.                                                                                                                                   |
+| Should-fix 9                                                                     | Externally removed native associations are not proof of removal of hidden plugins. Report unavailable desired/owned associations and document inspecting/restoring the original matching registration or explicitly removing the remaining scoped native plugin, followed by owning setup. No guessed reinstall.                                                                               |
+| Should-fix 10                                                                    | Include recorded, sanitized upstream failure causes and their owning repair hints before the consumer's own repair operation. Repeating agent reinit does not repair an unresolved VM owner.                                                                                                                                                                                                   |
+| Should-fix 11; 12 early-death item                                               | Retain the pane until identity is recorded, capture both active and saved native buffers, and describe unavailable capture honestly. A tmux death overlay is diagnostic state, not claimed workload output.                                                                                                                                                                                    |
+| Should-fix 12 truncation, session completion and reuse items                     | Preserve the bounded-list truncation marker. Qualify session start/restart/create success from persisted incomplete setup. Reuse hints remove all corresponding creation-only name/template/spec options; inspect a possibly retained session before retrying creation.                                                                                                                        |
+| Should-fix 12 workspace confirmation and TLS sample                              | Disclose loss of untracked edits, stashes and commits not pushed elsewhere in workspace deletion confirmation. Keep TLS verification enabled in the ordinary Proxmox sample.                                                                                                                                                                                                                   |
+| Should-fix 12 bare abort                                                         | Existing CLI entry handling deliberately renders every `UserAbort` as a bare cancellation. Changing that global presentation is outside this correction; refusal still performs no mutation and returns failure. Explicit required confirmation uses the existing actionable validation path.                                                                                                  |
+| Should-fix 12 Git inode                                                          | Isolated Git observations show byte-identical converged configuration with a replaced inode. Idempotency promises the intended configuration and ownership, not stable inode identity or zero physical writes. Treat inode preservation as an optional optimization, not a correctness gate.                                                                                                   |
+| Should-fix 12 describe summary                                                   | The initialization field is the recorded initialization-run status; the same description separately exposes per-integration incomplete lifecycle evidence. Clarify that distinction in permanent guidance rather than add another aggregate status contract.                                                                                                                                   |
+| Should-fix 13                                                                    | Add boundary regressions for current routing coverage, unreadable routes, fresh-receiver health, actual managed runtime ownership, escaped/split-secret diagnostics and framed native responses. Install tmux in CI so the actual liveness guard runs. Review remaining guards by reachable behavior instead of pinning implementation text or demanding every redundant branch kill a mutant. |
+| Incidental binding failure, tmux config, force consent and log count             | Correct the bounded existing-contract defects: fail closed on binding, use tmux's global config option, keep force separate from consent, and honor the requested log tail count.                                                                                                                                                                                                              |
+| Incidental closed stdin                                                          | Detached commands must not crash during completion detection or interactivity observation. Missing/closed input remains non-interactive without granting consent.                                                                                                                                                                                                                              |
+| Incidental piped consent                                                         | Ordinary confirmation deliberately delegates to Click unless `--non-interactive` is explicit. Database restore has a stronger TTY gate. Changing all piped-input consent would change the shared interaction contract; preserve it here.                                                                                                                                                       |
+| Incidental WSL cancellation, resize task, locked database and Codex notification | Defer with evidence to their console/Transport, provider execution, persistence and native-session owners. The WSL cause and real-model notification race remain unproven. Do not add competing protocols or mask shared persistence failures.                                                                                                                                                 |
+
+The unchanged positive live cells retain the report's exact head and configuration. The corrected
+routing, runtime, native preservation and Proxmox paths require new live checks before closeout. The
+next handoff specifically carries the known node-migration and immutable-identity limitations, the
+native-version and real-private-repository coverage gaps, and the six-hour report deadline.
+
+### Integrated round 7 source
+
+Routing corrections are integrated in `ddc9830b` and `2b63e574`, runtime corrections in `8b7a807a`
+and `f72107c5`, Proxmox/deletion in `8f4f1382`, clone/privacy cleanup in `78011cce`, and native
+preservation/framing in `bc1dd4b4`. The shared redaction helper and setup-secret plumbing are in
+`9b4e19a6` and `9a66bded`. Detached-input and recovery collateral are in `64b6cd4f`;
+retained-session inspection is in `2c9931c3`.
+
+Scoped delegated checks passed 225 routing cases, 534 runtime/privacy cases, 213 deletion cases and
+105 clone/ACL cases. These selections overlap and are not a full-suite total. Native checks include
+190 delivery/privacy cases, 52 preservation cases and measured failure-path restoration controls.
+The lead independently observed all 24 reported runtime temporary roots absent. The added sibling-
+route boundary passes both cases with the corrected source; removing its routing guard causes a
+failure, after which the exact source bytes were restored. Detached-input, routing and completion
+checks passed 33 cases; CI-exact whole-tree mypy passed 921 source/test files before the final
+native integration. Full integrated gates and independent review of the combined candidate remain
+pending.
+
+### Private review and whole-suite integration corrections
+
+The first combined full suite returned 1 with 18 failures, 11,035 passes and 11 skips. Thirteen
+failures were older assertions/fixtures for the deliberately changed force-consent, failed-binding,
+unknown-input health, Grok headless and source path contracts. The corrected 102-case selection
+passes while preserving ownership, native-name collision and failure-identity checks. The remaining
+session cases require framed probe fixtures and independently observed native exit facts; absence
+and ownership checks are not weakened. A native teardown observation can briefly show the old PID
+before it exits, so real-tool tests wait for the observed final state rather than require an atomic
+kernel transition.
+
+Private project review at `d0bf6e00` found one material artifact-owned banner path that the report's
+helper checks had missed: session preparation and cleanup still consumed raw HOME stdout. `77a9ebed`
+shares strict JSON-framed discovery between them. Its worker measured six baseline failures, then 37
+corrected passes; duplicate-frame and invalid-path deletion controls fail. Muntz found the stored
+`retain_previous` flag derivable from known missing routes and the unknown-input fact. `b1e3a074`
+makes that an invariant property and removes three caller assignments; 18 input- coverage cases pass
+with the simpler representation. Its three safety deletion controls each fail four cases. These are
+private findings and corrections within the same authorized round.
+
+The generic correctness lane also established two concrete owned-helper defects. Existing stale
+socket cleanup interpreted an intermittent startup banner as a relative filename and could remove an
+ordinary file after tmux reported no server. Bound its inventory protocol and candidate paths to the
+expected socket directory, require a real non-symlink socket before unlinking, and retain live or
+uncertain servers. Startup finalization also ignored failure to release temporary tmux protection;
+require confirmed release before success, preserving the managed session through the existing
+post-checkpoint failure path. Both corrections use the existing command APIs and are included under
+the operator's bounded incidental-fix authorization. No Transport protocol or additional journal is
+introduced.
+
+The first collateral pass returned 1 for section spacing and two plan spelling issues; those are
+corrected. Its locked-SDD, Rulesync, package build, 160 Python website tests, 103 Node website tests
+and both deterministic site-base comparisons returned 0. These receipts are preliminary; final
+changed-file checks and the corrected combined source still need their own observed green gates and
+common-candidate private re-review before ready.
+
+The startup release correction is integrated in `3a79f857`. Actual tmux also established that the
+prior unchecked command used a session-only target for a window option; the corrected exact window
+target and checked release pass 46 focused cases. Reverting checked execution fails three
+manager-boundary cases, and reverting the target fails the native healthy-start release check. The
+socket correction in `4a64820d` passes 25 focused cases, including real Unix sockets, an ordinary
+banner-named file and a live private server. Removing type, path-scope or native-absence guards
+fails the respective controls. The full corrected source now proceeds to common-candidate re-review
+and integrated gates.
+
+### Final combined validation for round 7
+
+All three private lanes cleared the common source candidate `2cdb6855`. Their final narrow passes
+returned 0: project eight cases, Muntz eight cases and generic correctness 28 cases. The latter also
+reran both original reproductions with the real framing and checked-command contract; ordinary files
+survive cleanup, failed startup release raises with managed ownership retained, and healthy release
+is observed off. The lead independently checked the additional 11 reported runtime scratch roots
+absent. No private review or local fixture result substitutes for backend acceptance.
+
+The exact combined-source full suite returned 0 with 11,113 passed and 11 skipped in 384.96 seconds.
+Ruff lint and formatting returned 0, as did CI-exact mypy across 923 source/test files. Locked-SDD
+validation, Rulesync drift, the package build, 160 Python website tests, 103 Node website tests and
+two deterministic builds for each site base returned 0. Six isolated CLI help, guide, resource and
+config-init drives returned 0 on their unchanged command paths; Typer isolation also returned 0. The
+collateral pass identified one remaining plan spelling issue, now corrected. The final file- quality
+pass and exact pushed-head CI are required before ready. The final documentation record and
+external-tailnet qualification do not change the reviewed production or test trees.
+
+The renewed live handoff must emphasize routing coverage for current inputs, truthful status for
+fresh receivers, prerequisites for the actual user, recovery and secrecy for dead or uncertain
+runtimes, successful and failed native protection release, home/socket helpers that tolerate startup
+output, preservation of malformed native entries, Grok personas limited to headless mode, private
+clone cleanup, and Proxmox task completion and recorded name checks. The 26-row acceptance audit
+retains seven prior pure-contract/transfer dispositions and 19 pending obligations; none is promoted
+merely by these local gates. Both SDDs stay unlocked until those retained live obligations and
+permanent-promotion checks are reconciled. The next full-report window is six hours from the new
+ready handoff, with earlier assessment when the full report arrives.
+
+## Integration-report correction round 8, 2026-11-06
+
+The operator authorized two additional rounds after report `6688937883` and critical reading
+`6689997796`. This is the first of those rounds, answering the report already received at
+`41bc36fe`; start comment `6692382891` freezes the joint batch. A subsequent round must wait for a
+new integration report. Main remains `c8d4dfb3`, and PR #862 is draft before edits.
+
+An intermediate merge delivers the bounded correction; it does not discharge either SDD. This
+session continues to own both through requirement-level acceptance, permanent promotion and locks.
+The late report is partial and supplies no full requirement mapping. Artifact R10 excludes model
+calls from acceptance; model-consumption proof is not an extra closeout requirement. Its measured
+positives remain evidence only for their actual head, configuration and scope.
+
+- [x] Restore the existing provider-specific deletion implementation and binding-failure local
+      retirement contract. Keep whole-VM deletion independent of guest artifact/session teardown,
+      disclose external tailnet/provider cleanup limits, and leave provider identity/retirement
+      redesign with its owning effort. Focused workspace, VM deletion and Proxmox rollback controls
+      return 0 with 80 cases; they are local tests, not provider acceptance.
+- [x] Reclaim only the failed non-repository create's confirmed unchanged generated tmuxinator file
+      before empty-reservation cleanup. Preserve modified files, unrelated work, ordinary discovery
+      files and replaced links; exercise a real filesystem retry after cleanup.
+- [x] Correct native inventory relevance and settings authorization; remove stale snapshot replay in
+      favor of conservative refusal of unsafe native rewrites, without a transaction journal.
+- [x] Separate known local setup completion from lazy incoming-route health. Unknown/stale captures
+      cannot authorize retirement; independently attributable local changes continue, while shared
+      unknown-dependent files remain held. A healthy workspace must not need destructive recreation
+      merely to clear a recovered ancestor's transient warning.
+- [x] Correct uncertain session startup and supported recovery using existing identity fields;
+      complete recovered startup, address the actual launch pane and preserve unknown ownership. Fix
+      actual caller redaction before truncation and the adjacent observation/input boundaries.
+- [x] Complete common-candidate independent project, complexity and correctness reviews, required
+      gates and collateral review. Publish the exact green ready handoff with the evidence below;
+      await the next integration report before spending the remaining authorized round.
+- [ ] Finish the retained R1-R16 and companion R1-R10 acceptance reconciliation after the bounded
+      correction, including remaining live gaps and permanent promotion. Publish both SDD locks only
+      when that evidence establishes completion, in a follow-up if the correction merges first.
+
+The batch disposition is recorded in critical reading `6689997796`: all numbered report findings and
+the open Muntz items remain accounted for. Inherited Lima/EC2/Proxmox provider lifecycle defects,
+broader VM create rollback and unsupported-platform test gaps are not silently reclassified as
+facet/artifact correction requirements. No new recovery API, workspace reinit command, provenance
+store, journal or Transport interface is introduced by this round.
+
+### Private quality loop for round 8
+
+The first combined candidate `cd6d70b3` returned 11,138 passed, 11 skipped and eight failed cases.
+The failures exposed stale binding-policy, pre-spawn cancellation, nullable transport-env and TTY
+fixture assumptions; corrected controls retain the actual behavioral boundaries. The whole-tree
+typing gate also caught ten native test annotations, now corrected. Required mypy then returned 0
+across 924 files. File lint found formatting in two changed guides; other collateral gates passed.
+
+Independent project, complexity and correctness passes found four material session issues: healthy
+legacy multi-pane start/log behavior, pathname redirection before runtime adoption, startup
+completion without a fresh match to the recorded process identity, and multiline ANSI output
+escaping redaction through a line cap. All were reproduced before correction. The corrected source
+uses the existing socket type checks and runtime fingerprint, preserves harmless legacy operations,
+and normalizes whole captured text and secret forms before truncation without flattening lines. The
+source owner's broader correction selection returned 0 with 708 cases; focused controls returned 0
+with 135 cases. The original ANSI reproduction now reports no marker disclosure.
+
+The first generic correctness pass was interrupted after its completed observations and supplied a
+partial written report; its uncollected final experiment is not acceptance evidence. The lead
+verified its process absent, checked 24 recorded native fixture roots absent, and removed the
+remaining isolated scratch and test file. All three lanes must review the corrected common candidate
+before clearance. Source-owner tests, private local fixtures and green gates do not replace the
+separate integration report or the retained requirement-level closeout audit.
+
+### Final local validation for round 8
+
+All three independent lanes cleared common candidate `26a4904a` and the final fixture correction
+`b696bd1e`. Their corrected-source selections passed 93 project cases, 83 complexity cases and 257
+correctness cases; the narrower fixture follow-ups passed 33, 38 and 52 cases respectively. These
+selections overlap. The complexity lane's removal controls caught whole-text redaction, socket-type
+checks and the fresh runtime-identity comparison. Its original multiline ANSI reproduction now
+passes, and the shared normalizer retains its default behavior across 1,000 compared samples.
+
+The second full run exposed one remaining artifact lifecycle fixture mismatch: the fixture simulates
+completed tmux startup but had begun inspecting a server it never creates. The final correction
+stubs that runtime observation at the existing fixture boundary, preserving real artifact files,
+state and no-op assertions. Separate real-tmux startup and identity controls remain active.
+Production source is unchanged from the independently cleared candidate.
+
+At `b696bd1e`, the full CI-selected local suite returned 0 with 11,165 passed and 11 skipped in
+369.58 seconds. Ruff lint, format and mypy returned 0; all 14 CI checks passed. File lint,
+locked-SDD validation, Rulesync drift, source/wheel builds, Typer isolation, 103 Node website cases,
+deterministic double builds at both site bases and six isolated CLI drives returned 0. The 160-case
+Python website suite initially had an unchanged browser timing failure, then returned 0 on the full
+rerun; CI's website job also passed. No website source was changed. Final plan-only edits preserve
+the reviewed and tested production/test bytes; final collateral checks and CI remain delivery gates.
+
+The ready handoff requests the separate full integration pipeline, emphasizing the corrected native
+inventory/settings, missing-capture routing, uncertain-start recovery, actual-caller redaction and
+owned workspace cleanup boundaries. One authorized round remains after this one and requires a fresh
+integration report. These local results do not complete the retained live acceptance audit or
+authorize either SDD lock. An intermediate merge leaves both closeouts with this session.
+
+## Integration-report correction round 9, 2026-11-07
+
+The independent report `6701131033` reached the required actual-report boundary at unchanged head
+`7fb588cb`, after the operator's extended wait. Critical reading `6701270166` addresses all six
+findings and the held saga/Muntz batch; start comment `6701286789` freezes this round. The operator
+had authorized two additional rounds: round 8 used the first and this is the remaining round. The PR
+is verified draft before source changes, and refreshed main remains `c8d4dfb3`.
+
+The bounded correction preserves the stronger uncertainty safeguards while repairing their faulty
+boundaries. A socket path is an address, not authority to adopt and destroy a server. Reuse the
+existing `session_uuid` and `run_id` in minimal native launch metadata when recovering an incomplete
+fingerprint; complete older recorded fingerprints keep their authority without new metadata. The
+synchronous `before_spawn` checkpoint belongs after socket checks and immediately before the
+spawn-capable command. A failed checkpoint prevents dispatch, while an unacknowledged dispatch
+remains uncertain. No new persisted identity, journal, provider API or Transport interface is added.
+
+- [x] Read the full report and held reviews, verify the source causes, retain the reported limits,
+      publish the critical reading and verify draft at the frozen source head.
+- [x] Refuse destructive adoption of stopped or pre-spawn unrecorded servers; verify real same-UID
+      decoys and rejected-create variants survive without row adoption. Recover genuinely dispatched
+      attempts only with positive matching native identity and stable fingerprint.
+- [x] Retain the admin dedicated address before launch and restore supported per-session recovery
+      for already-retained null-address rows after sound absence evidence. Keep actual-user and
+      legacy shared-server behavior, without workspace deletion as the recovery mechanism.
+- [x] Record uncertainty at the actual dispatch boundary; prove precheck and checkpoint failure
+      issue no spawn and need no reboot, while post-dispatch loss retains recoverable state.
+- [x] Redact conventional repr forms through the shared boundary and actual failure callers before
+      truncation; keep early-death detection and do not promise arbitrary encoding recognition.
+- [x] Isolate HOME-derived deletion-test paths, repair the identified portable fixture path/literal
+      assumptions, and distinguish local Linux guest-helper execution from portable controller
+      logic. Do not relax product guest validation or claim a broad native Windows pass from Linux.
+- [x] Normalize the accepted workspace root once, group the guarded probe body and cover UNKNOWN
+      startup completion through a real caller. Keep existing native ownership/file guards strict.
+- [x] Align the owned mapping-authority LLD, native preservation warnings and permanent guidance.
+      Explicit mapped entries follow their policy; omitted protected entries remain preserved.
+      Unknown native preservation is a conservative limit, not proof that valid native syntax is
+      malformed. No parser/version matrix or snapshot replay is introduced.
+- [x] Make the unverified Grok private-session persona carrier unhandled with a warning, retaining
+      config compatibility and independent delivery. Keep native user/workspace behavior separate;
+      accepted flags and generic TUI startup do not establish persona availability.
+- [x] Promote a usable two-concurrent-session artifact example and name the intentional child-count
+      and force/consent behavior in the PR body. Keep permanent teaching independent of the SDDs.
+- [x] Complete independent project, complexity and correctness reviews of the combined candidate and
+      required isolated local gates.
+- [ ] Publish the final green head and exact-head ready handoff without `review-requested`.
+- [ ] Reconcile the subsequent actual-scope report and retained evidence against all 26
+      requirements, complete permanent promotion and create both `locked.md` files only when
+      completion is proved.
+
+The report supplies meaningful current-head native/settings, ownership, capture and scoped-VM
+observations, with complete cleanup and explicit limitations. Its repeated test counts overlap.
+Historical format/schema/acquisition and finite migration contracts remain locally provable; the
+framework's real CLI vertical is not replaced by those tests. No model call or universal
+provider/workstation/native-version matrix is added. Export/restore semantics retain their local
+round-trip controls rather than acquiring a new VM-restore workflow.
+
+The shared pre-delete guest teardown/logout ordering remains explicit coordination with #866 under
+critical reading `6700703821`; neither provider parity nor reduced merge conflicts closes that
+policy item. The mixed-origin shell index hold is an acknowledged package boundary, not an excuse
+for a new partial-index ownership engine. Unsupported platform and inherited provider/host-token
+findings retain their own owners.
+
+A separate bounded local native probe at `7fb588cb` observed Grok 1.0.70 request/tool schemas and a
+documented main-selector attempt without the exact generated persona markers. This does not prove
+all versions or every internal registry; it does reject treating accepted argv as availability proof
+for the tested carrier. First-delivery outcomes must remain conservative and honest. Both SDDs
+remain owned through closeout after any intermediate merge; neither lock is present now.
+
+Private correctness review reproduced an inherited initial-creation race with actual tmux 3.3a on
+both main `c8d4dfb3` and candidate `216c0e65`: a native server created at the managed socket after
+the last socket check can receive the new session, be adopted and later be destroyed by managed
+stop. This is distinct from the report's already-present decoy regression, which this round
+corrects. The race remains owned follow-up work, not an assertion of atomic concurrent creation or
+same-user tamper resistance. Process-inherited server UUID/run metadata could distinguish server
+origins, but a post-launch check alone does not undo child creation or global option changes;
+temporary-socket publication also needs a separate native-identity and cleanup design. Do not add
+either incomplete mechanism to this bounded correction. Permanent session-status guidance tells
+operators to keep manual native servers on separate sockets. Retain this limit in acceptance and the
+handoff.
+
+Round 9 implementation and local validation are complete through source `9ed0a343`. All three
+independent private lanes reviewed the combined change at `216c0e65`, the corrections at `c7946be0`
+and the final narrow hint correction at `9ed0a343`; no material finding remains. The project lane's
+reserved-env ordering proof led to validation at the shared composition boundary before staging or
+teardown, with both-key manager controls preserving the old runtime and run ID. The hint now offers
+manual native stop only when a positive stored PID and boot ID make that remedy sufficient.
+
+The full isolated local suite passed with 11,320 tests and 11 skips at the `c7946be0` candidate; the
+later hint selector received focused Ruff, format, mypy and 22 partial-runtime controls, plus all
+three review confirmations. Full Ruff, format, mypy and the exact CI typer-isolation command passed.
+The final documentation formatting check and final-head CI remain part of the handoff gate. The
+initial full run exposed seven stale Grok carrier assertions and two stale pending-status fixtures;
+the revised tests preserve ancestor files, supported delivery guards and read-only uncertainty
+instead of weakening product checks. Forty-seven other initial failures came from the lead's runner
+environment; removing its Git-config redirection and allowing build dependencies and terminal
+capabilities made all 74 affected environment-sensitive controls pass.
+
+Packaging passed and includes the permanent concurrent-session example. Both guide modes, artifact
+help, resource sample/explanation and isolated config initialization were exercised. Website Python
+passed 160 tests, Node passed 103, and both deterministic site-base build comparisons passed. Local
+Linux execution does not establish the broad native Windows suite; the required Windows CI selection
+and subsequent integration report retain their own evidentiary scope. No new VM, model or provider
+operation was performed by this lead's local gates.
+
+The PR body now names the intentional agent/session child-count and force/consent behavior. The saga
+withdrew its deletion objection in `6701379900`; #866 coordination remains separate. This is the
+last authorized correction round. Both actual SDD closeouts, retained acceptance reconciliation and
+locks remain owned after the complete intermediate correction, and neither lock is created here.

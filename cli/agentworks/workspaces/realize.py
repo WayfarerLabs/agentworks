@@ -8,10 +8,10 @@ secrets, opens no gate, and re-checks nothing its caller already
 validated (name shape, existence, VM anchoring). The calling
 orchestrator owns all of that; this body owns only the mutation and
 the mutation's own partial-state cleanup (files or a VS Code stub
-written before the failure), which it unwinds itself before
-re-raising. Rollback of a COMPLETED workspace is not this function's
-job either: that is the pending workspace node's ``teardown``, driven
-by the orchestrator's realization log.
+written before the failure), which it attempts before re-raising.
+The backend reports unconfirmed remote work or residual paths for inspection.
+Rollback of a COMPLETED workspace belongs to the pending workspace node's
+``teardown``, driven by the orchestrator's realization log.
 
 Parity oracle: the mutation slice of the imperative ``workspaces
 .manager.create_workspace``, exactly as ``session create
@@ -39,6 +39,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
     from agentworks.harness_setup.inputs import SetupInputs
+    from agentworks.harness_setup.outcomes import SetupFailure
     from agentworks.instance_specs import InstanceOverlay
     from agentworks.resources.registry import Registry
     from agentworks.workspaces.templates import ResolvedTemplate
@@ -54,6 +55,7 @@ def realize_workspace(
     template: ResolvedTemplate,
     overlay: InstanceOverlay[BaseModel] | None = None,
     defer_overlay_report: bool = False,
+    setup_failures: list[SetupFailure],
     setup_inputs: SetupInputs | None = None,
     setup_values: Mapping[str, str] | None = None,
 ) -> Path:
@@ -69,9 +71,11 @@ def realize_workspace(
     prompt or a VM start; this body is only the mutation.
 
     Returns the VS Code workspace stub path, for callers with an
-    open-in-VS-Code tail; callers without one ignore it. Raises on
-    failure AFTER unwinding its own partial state; the caller's
-    realization log never sees a half-made workspace.
+    open-in-VS-Code tail; callers without one ignore it. Core failures raise
+    after attempting cleanup of confirmed partial state. Unconfirmed remote
+    mutations can leave reported residue; the caller's realization log never
+    marks a half-made workspace complete. Native setup failures join
+    ``setup_failures`` while the row and setup progress are committed.
     """
     from agentworks.agents.grants import materialize_grant_all_agents, workspace_group
     from agentworks.ssh import SSHLogger
@@ -90,11 +94,10 @@ def realize_workspace(
         # create_vm_workspace RETURNS. So it covers failures AFTER a
         # successful create (the VS Code stub, the row insert), the same
         # window the directory cleanup already covered; the group teardown
-        # rides along on exactly that window. A failure mid-create (e.g. the
-        # git clone) leaves workspace_path unset here, but is NOT a leak:
-        # create_vm_workspace self-cleans its own group and directory before
-        # re-raising (issue #262), so the two teardowns never overlap and
-        # each partial-create window is reclaimed exactly once.
+        # rides along on exactly that window. The backend owns cleanup before
+        # it returns, including unique clone attempts. It preserves and reports
+        # unconfirmed or occupied reservations. With workspace_path unset here,
+        # this layer must not guess a path and remove that unexplained residue.
         if workspace_path:
             delete_vm_workspace(vm, config, name, workspace_path, workspace_group(name), logger=ssh_logger)
         if vscode_path:
@@ -138,6 +141,7 @@ def realize_workspace(
                         config,
                         registry,
                         inputs=setup_inputs,
+                        failures=setup_failures,
                         vm=vm,
                         root=workspace_path,
                         linux_group=workspace_group(name),
@@ -204,7 +208,10 @@ def realize_workspace(
         finally:
             ssh_logger.close()
 
-        output.info(f"Workspace '{name}' created")
+        from agentworks.harness_setup.outcomes import setup_completion_suffix
+
+        setup_suffix = setup_completion_suffix(native_setup)
+        output.info(f"Workspace '{name}' created{setup_suffix}")
         # vscode_path was assigned inside the try before the row insert;
         # reaching here means the body completed without raising, so it is
         # set. Assert for the type-checker.

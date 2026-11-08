@@ -120,6 +120,8 @@ class SSHLogger:
     ) -> None:
         from datetime import UTC, datetime
 
+        from agentworks.secrets.redaction import secret_redaction_forms
+
         timestamp = datetime.now(tz=UTC).strftime("%Y%m%dT%H%M%SZ")
         self.vm_name = vm_name
         self.path = LOG_DIR / f"{vm_name}-{timestamp}-{command_stem}.log"
@@ -129,7 +131,7 @@ class SSHLogger:
         for secret in redactions:
             if not secret:
                 continue
-            for representation in (secret, shlex.quote(secret)):
+            for representation in secret_redaction_forms(secret):
                 if representation not in normalized:
                     normalized.append(representation)
         # Prefer the longest representation so an overlapping shorter token
@@ -159,9 +161,16 @@ class SSHLogger:
         """
         return format_host_path(self.path)
 
-    def sanitize(self, text: str) -> str:
-        """Apply the operation redactions before publishing diagnostics or state."""
-        for secret in self._redact:
+    def sanitize(self, text: str, *, normalize: Callable[[str], str] | None = None) -> str:
+        """Redact operation secrets, optionally matching already-normalized text."""
+        patterns = (
+            self._redact
+            if normalize is None
+            else tuple(
+                sorted({value for secret in self._redact if (value := normalize(secret))}, key=len, reverse=True)
+            )
+        )
+        for secret in patterns:
             text = text.replace(secret, "[REDACTED]")
         return text
 

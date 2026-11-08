@@ -79,19 +79,80 @@ The VM has no activated shell facet, so core makes its captured hint available t
 Agent setup handles it as a file for that actual user. A shell session under that agent does not
 receive the handled hint again. If the user facet were inactive, the hint would instead reach
 session and be published in its private artifact directory. Inactive workspace facets likewise pass
-their applicable inputs to session.
+their applicable inputs to session. Recorded session deferrals resolve against the original owner's
+capture, even if an upstream facet later changes its routing. If that content is no longer readable,
+Agentworks reports the unresolved route and its owning repair action without inventing content.
+Confirmed empty deferrals remain a known result even when the ancestor has incomplete native setup;
+they do not prevent descendants from applying their own content.
 
 Use `agw artifact show --agent <agent-name> --integration shell` to inspect the captured input and
 recorded handling. The templates themselves do not create instances. See `agw vm create --help`,
 `agw agent create --help` and `agw session create --help` for your normal instance workflow.
 
-For a session refusal, use
+To inspect artifact delivery, use
 `agw artifact show --session <session-name> --integration <integration-name>`. Read the VM, actual
 user, workspace, then session rows in that order. An incomplete ancestor has unfinished application
-or cleanup. A stale ancestor reports changed integration config keys, declared environment variable
-names by scope, or prepared artifact names, without their values. The session row names the ancestor
-blocking its artifact route. An inactive integration has no setup obligation for that facet.
+or cleanup. Native-only incomplete setup also carries its recorded entry-specific reasons; resolve
+the retained conflict before rerunning the owning setup. A stale ancestor reports changed
+integration config keys, declared environment variable names by scope, or prepared artifact names,
+without their values. Each owner's status is independent; the session row describes its own recorded
+application. Missing session payloads or unknown session routing remain explicitly incomplete, with
+recorded unhandled input identities where available. Ancestor problems are reported at managed start
+without blocking launch. An inactive session integration has no setup obligation for that facet.
 Inspection reports recorded application, not a fresh check of native files or model context.
+
+## Two concurrent sessions
+
+Copy [the concurrent-session declarations](examples/concurrent-sessions.yaml) into your operator
+resources directory. They define two inline hint bundles and an explicit Shell session template,
+without fetching sources or creating instances. Choose an existing workspace and an existing agent
+with access to it, replacing `my-workspace` and `my-agent` below. If session creation is outside the
+requested work, inspect existing sessions instead with `agw session list --workspace my-workspace`
+and `agw artifact show --session <existing-session> --integration shell`.
+
+These commands create and start two concurrent Shell workloads as the same agent in the selected
+workspace. They create no VM, agent or workspace:
+
+```bash
+agw session create artifact-a --workspace my-workspace --agent my-agent \
+  --template concurrent-shell --spec '{"artifacts":{"bundles":["session-notes-a"]}}'
+agw session create artifact-b --workspace my-workspace --agent my-agent \
+  --template concurrent-shell --spec '{"artifacts":{"bundles":["session-notes-b"]}}'
+agw artifact show --session artifact-a --integration shell --output json
+agw artifact show --session artifact-b --integration shell --output json
+```
+
+The session owner's `integrations[].placements[].path` values show the published `index.json` and
+`scopes/session/<session-name>/hints/task-note.md`. Both hints have the same artifact name, but each
+session has a different stable `session_uuid` and its own per-launch `run_id`:
+
+```text
+~/.agentworks-artifacts/session/<uuid-a>/<run-a>/scopes/session/artifact-a/hints/task-note.md
+~/.agentworks-artifacts/session/<uuid-b>/<run-b>/scopes/session/artifact-b/hints/task-note.md
+```
+
+Use `agw session attach artifact-a` (or `artifact-b`) to enter that shell. There,
+`printf '%s\n' "$AGENTWORKS_ARTIFACTS_DIR"` prints its current run directory, and
+`cat "$AGENTWORKS_ARTIFACTS_DIR/index.json"` shows its own artifact index. Shell publishes context
+files for tools to read; it does not run the hint text as instructions.
+
+Separate run paths prevent publication collisions. Both processes share the same Linux user and can
+read that user's session files; these paths provide no security isolation between them. Sessions
+running as different Linux users use their respective private homes. Workspace artifacts remain
+shared with workspace users, so keep session-only content in the session bundle selection.
+
+A managed restart gives that session a new `run_id`, retaining its `session_uuid`. Old files stay
+available if preparation fails and retire after the old runtime is torn down. To end this example,
+leave any attached shell and delete both sessions:
+
+```bash
+agw session delete artifact-a
+agw session delete artifact-b
+```
+
+Deletion stops each workload and retires its unchanged owned session files. Changed or unowned files
+remain protected, and empty parent directories can remain. The bundles, template, selected agent,
+and shared workspace remain available.
 
 ## Composition and names
 
@@ -209,13 +270,16 @@ unsupported metadata before refreshing. Source changes alone do not update an ex
 VM/admin and agent changes take effect through the owning reinitialization operation. Workspaces
 have no reinit operation; recreate the workspace when its artifact setup must change. Session
 creation and managed launch prepare session-owned inputs. A stale ancestor requires its own setup
-operation; starting a descendant does not repair it implicitly.
+operation; starting a descendant reports it and continues with existing placement and known captured
+deferrals. It does not repair or recapture the ancestor implicitly. Unknown handling is reported
+without claiming delivery.
 
 Applying files at an owning facet changes its native locations during that setup. A running workload
 may pick up those files if its harness supports reloading them; Agentworks does not promise live
 reload. Deferral instead records inputs for a later facet and does not update existing descendants.
 User-routed changes take effect when the actual user's setup runs. Session-routed changes take
-effect on a subsequent managed start or restart, after any stale ancestors have been refreshed.
+effect on a subsequent managed start or restart using the available captures and known routes.
+Missing, stale or interrupted ancestor setup warns with its owner and supported repair operation.
 Running sessions retain their existing delivery until then.
 
 Workspace-routed changes have a stricter limit: workspace setup runs only during creation. There is
@@ -224,6 +288,13 @@ cannot adopt those changes in place. Choosing to recreate it is a separate lifec
 an automatic response to an artifact update. Setup warns about the delayed application of deferred
 inputs without inspecting or modifying downstream owners. This timing also matters when inputs are
 removed: updating an ancestor alone does not retire effects previously applied by a descendant.
+
+Recreation is destructive. Preserve tracked edits, untracked files, commits not yet pushed and
+stashes outside the workspace first. Correct and push the repository content the next clone needs,
+or correct the configured workstation source/template. Editing only the old guest checkout does not
+update the next workspace's inputs. An unknown applicable input set keeps a receiving facet
+incomplete even if its local files apply. An unrelated ancestor native failure with a confirmed
+routing table covering the current inputs does not make a completed receiver incomplete.
 
 Applied config records identify files and registrations owned by the integration. Refresh removes
 obsolete owned effects where supported. Retired skill files also prune empty parents up to their
@@ -248,7 +319,7 @@ current. Deleting a VM retains the ordinary VM deletion behavior: its filesystem
 | Shell       | All types under `/opt/agentworks/artifacts/`     | All types as files                               | All types as files, without an opt-in                                  |
 | Claude Code | Managed instructions, skills and agents          | Native rules, skills and agents                  | Opt-in appended context, skill plugin and agent definitions            |
 | Codex       | Native machine skills; other types defer to user | Generated instructions, native skills and agents | Opt-in developer instructions and agents; skills need earlier handling |
-| Grok Build  | Defer to user                                    | Native rules, skills and agents                  | Opt-in rules and agents; skills need earlier handling                  |
+| Grok Build  | Defer to user                                    | Native rules, skills and agents                  | Opt-in rules; personas and skills need earlier handling                |
 
 The map key supplies the native name, with a native namespace where required, such as Claude's
 session skill plugin. Inspection shows recorded names and locations. Shell uses scope directories
@@ -270,11 +341,12 @@ section. A file containing ordinary instructions but no markers retains those in
 receives a section. A missing partner, reversed pair or duplicate marker warns and skips that file
 without modifying it. Inspection records the skipped application; it is not reported as applied or
 silently rerouted. Restore a complete pair or remove the broken markers, then retry the owning
-setup. Retirement removes only a complete generated section and preserves surrounding content; an
-empty instruction file may remain. A malformed obsolete section retains cleanup evidence. An active
-integration can continue with that skip; removing the whole activation retains its pending cleanup
-until the section is repaired or removed. Existing section ownership never authorizes replacing the
-entire file.
+setup. Retirement clears the generated body and retains an empty complete marker pair as its
+insertion anchor. Surrounding bytes and section position remain stable across removal and restore;
+an instruction file containing only the empty marker pair may remain. A malformed obsolete section
+retains cleanup evidence. An active integration can continue with that skip; removing the whole
+activation retains its pending cleanup until the section is repaired or removed. Existing section
+ownership never authorizes replacing the entire file.
 
 Claude's VM instructions use the same section mechanism in `/etc/claude-code/CLAUDE.md`. Its managed
 skill and agent directories are `/etc/claude-code/.claude/skills/` and
@@ -294,12 +366,31 @@ names are shown in full; larger groups show the first two and `...`. Deferral ou
 the affected artifacts, destination and reason. A later setup or restart reconsiders those inputs;
 delivery still depends on the receiving integration and any required workaround.
 
-The native adapters refuse ambiguous skill or persona identities across scopes, including already
-handled ancestors. Before managed launch, a bounded inventory also checks existing native entries in
-the known machine, user and direct workspace discovery roots. It reads native metadata names,
-including Codex configuration registrations, rather than assuming filenames are names. Conflicts
-identify the native name and competing paths. This check still runs when all applicable inputs were
-handled upstream.
+The native adapters check skill and persona identities across scopes. Before new delivery, a bounded
+inventory checks existing entries in known machine, user and direct workspace discovery roots. It
+reads native metadata names, including Codex configuration registrations, rather than assuming
+filenames are names. Conflicts identify the native name and competing paths. During setup,
+conflicting artifacts are deferred individually to the next supported facet while independent
+artifacts continue. During VM, user and workspace setup, missing, unreadable or stale ancestor
+captures cannot authorize retirement. Unresolved inherited origins protect affected prior placements
+and related packages against replacement and removal until their source evidence is current.
+Independently attributable local updates, removals and additions still converge. Attribution uses
+the prior and current local captures; shared files and old placements whose origins can no longer be
+classified remain held. Repairing the upstream owner and retrying the receiving owner's supported
+setup removes that hold. Ordinary safe retirement removes prior owned placements no longer in that
+plan; modified or unowned files remain protected. If session delivery still has a native-name
+conflict, the affected inputs are reported as unhandled and excluded from both files and launch
+arguments; independent delivery and launch continue. A non-conflicting native namespace can allow a
+later facet to handle a previously deferred input. Problems solely in existing ancestor placement
+also warn without blocking launch.
+
+Local setup completion records the known inputs actually supplied to its invocation. Unknown
+incoming-route health is calculated lazily from the ancestor records, rather than saved as a
+permanent local failure. A workspace created while its upstream routing is unknown can become
+current without another setup invocation when the repaired upstream handles its own inputs. If the
+repaired upstream instead routes new content to that workspace, its artifact placement remains
+noncurrent until that content is actually applied. Explicit required/recommended native setup
+prerequisites retain their separate configuration, destination and local completion checks.
 
 Inventory covers selected skill/persona types, with at most 512 directory entries, YAML headers up
 to 32 KiB each and 1 MiB combined, and an Agentworks rendered-TOML budget for Codex personas of 32
@@ -327,8 +418,32 @@ content to other workspace users, but sessions sharing that Linux user share its
 managed run uses a new directory; reusable session names do not reuse another session's identity.
 Native harness session delivery is disabled by default; shell publishes its private files directly.
 Inputs left unhandled, including deferrals from ancestors, produce warnings with their original
-owner, type, name and reason. They do not prevent launch and are not reported as successfully
-delivered. Invalid input, unsafe publication and ownership conflicts remain errors.
+owner, type, name and reason when that content is known. An unavailable payload instead names its
+owner and recorded input identity where available; unknown routing without recoverable identities
+reports the owner without inventing artifact names or content. These unavailable inputs remain
+unhandled in the session evidence, which stays incomplete until a later managed restart can resolve
+them. They do not prevent launch and are not reported as successfully delivered. Malformed input,
+transport failures and unsafe publication remain errors. A differing whole file in the prospective
+session directory is preserved and refuses the new run before teardown of an existing runtime.
+Differing unowned file content during setup is preserved and recorded as a skip, leaving that setup
+incomplete. Incomplete native-only facets are also reported; neither case creates a blanket
+descendant launch prerequisite.
+
+Selecting a native persona and delivering its definition are separate operations. If a managed
+persona definition remains unhandled, an explicit integration `agent` selection still applies. The
+native harness may select its existing same-named persona; the warning does not claim that the
+Agentworks definition was delivered.
+
+Adopting matching artifact files makes them managed and eligible for safe cleanup when removed from
+the declaration. Confirmed file and generated-section removals and updates report bounded summaries.
+Cleanup retires owned files and explicit skill package roots. Empty session/run directories can
+remain; they grant no ownership over their parents and do not retain artifact content. Shell's guest
+index retains applicability and revision metadata without workstation acquisition paths; workstation
+inspection still shows source provenance.
+
+A managed restart prepares the next run before replacing the old runtime. Old private-run files
+remain available through failed preparation and retire only after the old runtime is torn down. If a
+later run omits an unavailable input, its incomplete/unhandled evidence reports that omission.
 
 This delivery includes declared bundles and harness handling. Core hint emission, features, hooks,
 and MCP artifacts are later work.
@@ -350,13 +465,20 @@ activations do not enable session workarounds.
 | Codex       | `session-developer-instructions` | Compose rules and hints into the session's developer instructions.                   |
 | Codex       | `session-agent-config`           | Select private agent configuration files through launch overrides.                   |
 | Grok Build  | `session-rules`                  | Supply rules and hints through the native rules argument.                            |
-| Grok Build  | `session-agent-definitions`      | Supply agent personas through native launch JSON.                                    |
+| Grok Build  | `session-agent-definitions`      | Accepted for config compatibility; private session personas remain unhandled.        |
 
 Shell requires no workaround. It publishes files at every activated facet, using the VM directory
 above, `~/.agentworks-artifacts/user/`, `<workspace>/.agentworks-artifacts/`, and the private
 session/run directory. Session publication exposes its index through `AGENTWORKS_ARTIFACTS_DIR`.
 Remove `enabled_workarounds` from shell configurations; `session-artifact-files` is no longer
 needed.
+
+Grok private session personas have no verified native carrier. They remain unhandled with a warning
+in both interactive and headless mode, including when `session-agent-definitions` is enabled.
+Agentworks emits no persona files or `--agents` argument for these inputs. The recognized workaround
+name remains accepted for existing configurations. Native user/workspace persona files and explicit
+operator `agent` selection keep their separate behavior; move a persona to an activated user or
+workspace facet only when sharing it at that scope is intended.
 
 Codex and Grok Build have no session skill workaround. Apply those skills at a supported user or
 workspace facet. Unhandled warnings name the relevant workaround when one exists; enabling a
@@ -422,12 +544,20 @@ capture per owner component in the existing instance-state store. `routing.py` r
 and the selected integration's reusable results along one actual VM/user/workspace/session graph.
 Handling an input for one user does not consume the VM result for another user.
 
+An unavailable explicit route retains its input identity and source repair reason without a payload.
+Integrations receive only readable inputs. After validating an active receiver's result, core
+forwards the unavailable identities in its recorded input and deferral metadata, including on first
+application. Inactive receivers preserve the same metadata through fixed passthrough. Missing
+content stays incomplete through the session; it is never counted as delivered.
+
 `application.py` defines integration results, file/section ownership and recorded skips.
 `publication.py` validates plugin output and uses the shared guarded `NativeFiles` transport
-utility. Native formats and policy live in integration adapters. Existing unowned files are never
-adopted merely because their bytes match. Changed whole files are retained and diagnosed, with
-evidence for retry. Generated instruction sections instead follow their explicit replaceable-section
-contract.
+utility. Native formats and policy live in integration adapters. Existing files whose bytes match
+the declaration can be adopted, with recorded ownership and a report. Differing unowned or manually
+changed files are preserved with recorded skips and evidence for retry; independent artifacts still
+apply. A conflicting member skips its whole skill package, including when a modified obsolete member
+must be retained while the package is still requested. Generated instruction sections instead follow
+their explicit replaceable-section contract.
 
 `session.py` prepares the launch context, stages a new private run before old-runtime teardown, then
 retires obsolete owned files after teardown. No artifact bookkeeping changes VM deletion.

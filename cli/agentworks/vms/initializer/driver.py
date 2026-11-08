@@ -79,6 +79,7 @@ if TYPE_CHECKING:
     from agentworks.git_credentials import CredentialRequest
     from agentworks.harness_setup.inputs import SetupInputs
     from agentworks.harness_setup.locking import NativeMutationGuard
+    from agentworks.harness_setup.outcomes import SetupFailure
     from agentworks.resources.registry import Registry
     from agentworks.vms.admin import AdminConfig
     from agentworks.vms.templates import ResolvedVMTemplate
@@ -260,6 +261,7 @@ def run_initialization(
     *,
     debian_release: DebianRelease,
     operation: VMInitializationOperation,
+    setup_failures: list[SetupFailure],
     setup_inputs: tuple[SetupInputs, ...] = (),
     setup_guard: NativeMutationGuard | None = None,
     setup_values: Mapping[str, str] | None = None,
@@ -271,6 +273,9 @@ def run_initialization(
     from ``reinit_vm`` for repeatable re-initialization. The closed
     ``operation`` value also drives create-only setup behavior.
     Each credential request carries the provider's scoped context assembler.
+    Native setup failures join the caller's collector and leave initialization
+    partial after terminal key reconciliation and checkpointing. The caller
+    reports them after its remaining command bookkeeping.
     """
     from agentworks.harness_setup.locking import native_mutation_guard
 
@@ -310,6 +315,7 @@ def run_initialization(
                     values=setup_values or {},
                     held=guard,
                     operation=operation.value,
+                    failures=setup_failures,
                 )
             # Terminal guest mutation follows every integration's setup.
             authorized_keys = _reconcile_authorized_keys(ts_target, config, home, logger)
@@ -345,9 +351,15 @@ def run_initialization(
             logger.warning(msg)
             output.warn(msg)
 
-        final_status = InitStatus.PARTIAL if logger.has_warnings else InitStatus.COMPLETE
-        final_event = "init_partial" if logger.has_warnings else "init_complete"
-        final_detail = f"{len(logger.warnings)} warning(s)" if logger.has_warnings else None
+        partial = bool(setup_failures) or logger.has_warnings
+        final_status = InitStatus.PARTIAL if partial else InitStatus.COMPLETE
+        final_event = "init_partial" if partial else "init_complete"
+        details = []
+        if setup_failures:
+            details.append(f"{len(setup_failures)} setup failure(s)")
+        if logger.has_warnings:
+            details.append(f"{len(logger.warnings)} warning(s)")
+        final_detail = "; ".join(details) or None
 
         # Do not include this checkpoint in the Phase B exception arm above: a
         # local database failure must roll back the complete terminal result and

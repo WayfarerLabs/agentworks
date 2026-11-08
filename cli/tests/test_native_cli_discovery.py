@@ -134,8 +134,10 @@ def test_home_dependent_launcher_does_not_escape_discovery_isolation(target: Loc
     launcher.chmod(0o700)
     with NativeFiles(target) as files:
         cli = NativeCLI("codex", files, home=str(target.home), config_root=str(target.home / ".codex"))
-        with pytest.raises(ExternalError):
+        with pytest.raises(ExternalError) as caught:
             cli.discover("fixture-source")
+        assert str(target.home / ".codex") in str(caught.value)
+        assert files.remote not in str(caught.value)
     assert not (target.home / ".codex").exists()
     assert not (target.home / ".claude").exists()
     assert not list((target.root / "tmp").iterdir())

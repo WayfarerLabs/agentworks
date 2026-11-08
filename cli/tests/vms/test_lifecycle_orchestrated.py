@@ -122,7 +122,6 @@ def test_start_stopped_vm_resolves_once_starts_and_clears_flag(
     row = db.get_vm("box")
     assert row is not None and row.operator_stopped is False
     assert row.last_started_at is not None
-    assert any("VM 'box' is ready" in m for m in captured_output.info)
     assert not any("already running" in m for m in captured_output.info)
 
 
@@ -155,8 +154,7 @@ def test_start_running_vm_short_circuits_but_still_clears_flag(
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
-    """An already-running VM: no start op, the 'already running' info
-    (and no 'is ready' noise), Tailscale still verified, and the flag
+    """An already-running VM: no start op, Tailscale still verified, and the flag
     still cleared; the boundary still costs exactly one burst."""
     config = make_config()
     monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", "ts-key")

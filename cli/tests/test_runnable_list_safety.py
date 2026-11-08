@@ -18,6 +18,7 @@ from agentworks.sessions import manager as session_manager
 from agentworks.sessions.multi_console import console_listing
 from agentworks.vms import manager as vm_manager
 from agentworks.vms.manager import inspect
+from tests._runtime_probes import framed_runtime_result
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -92,6 +93,13 @@ def _seed_session(db: Database) -> None:
         "default",
         SessionMode.ADMIN,
         socket_path="/tmp/work.sock",
+    )
+    db.update_session_runtime(
+        "work",
+        socket_path="/tmp/work.sock",
+        pid=100,
+        boot_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        tmux_server_start_ticks=1,
     )
 
 
@@ -180,9 +188,9 @@ def test_session_plain_and_status_lists_keep_their_distinct_safety_boundaries(
             encoded_name, encoded_socket, mode, pid = lines[0].split()
             assert base64.b64decode(encoded_name, validate=True).decode() == "work"
             assert base64.b64decode(encoded_socket, validate=True).decode() == "/tmp/work.sock"
-            assert (mode, pid) == ("u", "-")
+            assert (mode, pid) == ("u", "100")
             events.append("transport-read")
-            return _Result(0, f"S:{name_key}:0::0::0::0:\n")
+            return framed_runtime_result(_command, _Result(0, f"S:{name_key}:0::0::0::0:\n"))
 
     def open_transport(*args: object, **kwargs: object) -> Target:
         assert len(args) == 2

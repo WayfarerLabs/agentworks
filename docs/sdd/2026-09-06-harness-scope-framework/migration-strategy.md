@@ -81,10 +81,11 @@ this migration.
 ## Native ownership
 
 The old installer provides no ownership records. A native installation matching old config is
-therefore not automatically owned by Agentworks. Before managing it, report the native identifier
-and destination conflict. The supported initial remediation is explicit operator removal using the
-native CLI, followed by owning reinit to provision and record it. No automatic adoption or general
-force flag is introduced by this migration.
+therefore not already owned by Agentworks. Owning setup adopts an entry whose observed native
+identity and source match the declaration, records the claim and reports adoption. Differing unowned
+entries are retained and reported individually, without blocking independent setup. Resolve such a
+conflict through the native CLI, then retry the owning setup. No general force flag is introduced by
+this migration.
 
 Once new applied-state records exist, removal of an entry or whole activation can safely reconcile
 recorded claims. Settings mapping policy controls explicit replacement/merge of its declared file;
