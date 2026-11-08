@@ -7,6 +7,8 @@
 - **S** runs the real client against a rootless local ``sshd`` (loopback, a
   temporary host key and ``AuthorizedKeysFile``, no PAM) and ``trust.write_records``
   for the test host key. It skips when no ``sshd`` binary exists, and fails on CI.
+- L and S run agw-launch on this host, which needs Linux's ``memfd_create``, so
+  both skip on macOS and Windows; V covers those workstations against a real guest.
 - **V** runs against a live VM named by ``AGW_CONFORMANCE_VM``, as the operator's
   own configured admin. It is the integration lane, run by the tester from each
   workstation.
@@ -203,6 +205,12 @@ def unavailable(message: str) -> NoReturn:
     pytest.skip(message)
 
 
+def require_guest_host() -> None:
+    """Skip unless this host can run agw-launch, the guest side, which needs Linux's ``memfd_create``."""
+    if not hasattr(os, "memfd_create"):
+        pytest.skip("the L and S lanes run agw-launch locally, which needs Linux's memfd_create")
+
+
 def require_shell(name: str) -> str:
     """The shell's path; a missing one fails on CI and skips elsewhere."""
     found = find_shell(name)
@@ -237,6 +245,7 @@ class LocalLane(LocalFilesystem):
     name = "L"
 
     def __init__(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, shell: str, python: str) -> None:
+        require_guest_host()
         super().__init__(monkeypatch)
         self.shell_name = shell
         self.shell = require_shell(shell)
@@ -313,6 +322,7 @@ def free_port() -> int:
 @contextlib.contextmanager
 def rootless_sshd(directory: Path) -> Iterator[SSHDServer]:
     """A loopback sshd run by the current user, with a temporary host key and authorized key."""
+    require_guest_host()
     sshd = find_sshd()
     if sshd is None:
         unavailable("S lane needs an sshd binary")
