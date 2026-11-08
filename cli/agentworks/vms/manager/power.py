@@ -436,8 +436,9 @@ def rekey_vm(
         try:
             result = recovery.rekey(platform, vm, ops_ctx, auth_key=auth_key, log=logger.record)
         except ChannelUnreachable as error:
-            # The script never ran, so the node is as it was; recover starts a stopped VM and repairs it.
-            error.add_hint(f"Run 'agw vm recover {name}'.")
+            # The script never ran, so the node is as it was: once the channel's own hint gets the VM
+            # answering, the rekey itself is what is left to do.
+            error.add_hint(f"Once it answers, run 'agw vm rekey {name}' again.")
             raise
         recovery.require_success(
             result,

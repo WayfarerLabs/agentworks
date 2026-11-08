@@ -44,8 +44,8 @@ ROOT_COMMAND = "sudo -n /bin/bash -s"
 """The remote command: a constant every account shell Agentworks allows parses unchanged."""
 
 _PROVIDER_ACCESS_HINT = (
-    "Reach the VM through the provider's own access (its serial console, or EC2 Instance Connect) "
-    "to restore the admin's authorized key, or delete and recreate the VM."
+    "Reach the VM through the provider's own access, such as its serial console, to restore the admin's "
+    "authorized key, or delete and recreate the VM."
 )
 
 # sudo's own prefix for the lines it prints when it refuses to run a command,
@@ -74,6 +74,10 @@ class KeyRefused(ConnectivityError):
     """The VM answered at its public address and refused the configured SSH key."""
 
 
+class ConnectionRefused(ConnectivityError):
+    """The VM's public address refused the connection: nothing listens on the SSH port, so nothing ran."""
+
+
 class SudoRefused(StateError):
     """The VM answered at its public address, and ``sudo -n`` refused to run the root script for its admin."""
 
@@ -94,6 +98,7 @@ class PublicSSH:
         The log is read only when the script never started: ssh writes the
         server's banner there too, and a script that started has already
         connected and logged in, so text in the log cannot mean either failure.
+        A refused connection raises :class:`ConnectionRefused` the same way.
         """
         with ssh_process.client_log() as log:
             argv = ssh_process.build_argv(
@@ -121,6 +126,12 @@ class PublicSSH:
                 entity_name=self._vm_name,
                 hint=" ".join(part for part in (load_hint, _PROVIDER_ACCESS_HINT) if part),
             )
+        if ssh_process.CONNECTION_REFUSED in text:
+            raise ConnectionRefused(
+                f"VM '{self._vm_name}' refused SSH connections at its public address {self._destination.host}",
+                entity_kind="vm",
+                entity_name=self._vm_name,
+            )
         return raw
 
     def shell(self) -> int:
@@ -144,15 +155,22 @@ class PublicSSH:
         being created, whose guest agent may install the key after sshd
         starts); then the next probe waits :data:`REFUSED_KEY_INTERVAL_SECONDS`,
         and a refusal still standing at the bound is what raises.
-        When no probe completes, :data:`PROBE_FAILURE_HINT` is warned before
-        :class:`ChannelUnreachable`.
+        When no probe completes, :class:`ChannelUnreachable` raises naming a
+        restart: a VM whose address refused the last probe's connection has
+        no SSH server listening, and one that never answered may have hung.
+        Only the second warns :data:`PROBE_FAILURE_HINT` first, since an
+        address that refuses is one the allow already lets through.
         """
         expires = time.monotonic() + seconds
         waited = False
         refused: KeyRefused | None = None
         while True:
+            connection_refused: ConnectionRefused | None = None
             try:
                 result = root_script.run(self.run_as_root, "true", deadline=PROBE_DEADLINE_SECONDS)
+            except ConnectionRefused as error:
+                # A VM that has just started refuses until its sshd listens, so this is waited out too.
+                refused, connection_refused = None, error
             except KeyRefused as error:
                 if not retry_refused_key:
                     raise
@@ -172,11 +190,26 @@ class PublicSSH:
             time.sleep(min(interval, remaining))
         if refused is not None:
             raise refused
+        restart = f"'agw vm stop {self._vm_name}' and 'agw vm start {self._vm_name}'"
+        if connection_refused is not None:
+            raise root_script.ChannelUnreachable(
+                str(connection_refused),
+                entity_kind="vm",
+                entity_name=self._vm_name,
+                hint=(
+                    "Nothing on the VM accepts connections on the SSH port, so its SSH server is likely not running. "
+                    f"Restart the VM with {restart}, or repair the server through the provider's serial console."
+                ),
+            ) from connection_refused
         output.warn(PROBE_FAILURE_HINT)
         raise root_script.ChannelUnreachable(
             f"VM '{self._vm_name}' did not answer over SSH at its public address {self._destination.host}",
             entity_kind="vm",
             entity_name=self._vm_name,
+            hint=(
+                f"If the VM itself has hung, restart it with {restart}, or reach it through the provider's "
+                "serial console."
+            ),
         )
 
     def _refuse_without_sudo(self, result: RootScriptResult) -> None:

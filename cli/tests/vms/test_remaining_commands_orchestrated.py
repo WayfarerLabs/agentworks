@@ -886,7 +886,7 @@ def test_backup_wraps_phases_in_a_section(
 
 
 @pytest.mark.parametrize("unreachable_at", ["rekey", "read"])
-def test_a_channel_that_cannot_reach_the_vm_ends_the_rekey_at_once_naming_recover(
+def test_a_channel_that_cannot_reach_the_vm_ends_the_rekey_at_once_naming_a_command_that_can_follow(
     db: Database,
     make_config,  # noqa: ANN001
     _ts_key: None,
@@ -911,7 +911,8 @@ def test_a_channel_that_cannot_reach_the_vm_ends_the_rekey_at_once_naming_recove
     assert len(guest.scripts) == (1 if unreachable_at == "rekey" else 2)
     assert guest.count(LOGOUT_SCRIPT) == 0
     hint = caught.value.hint or ""
-    assert "agw vm recover box" in hint
+    # Before the script ran the node is as it was, so the rekey is what follows; after it, the repair is.
+    assert ("agw vm rekey box" if unreachable_at == "rekey" else "agw vm recover box") in hint
     assert "admin console" not in hint
     row = db.get_vm("box")
     assert row is not None and row.tailscale_host == "100.64.0.9"

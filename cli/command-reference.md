@@ -787,9 +787,11 @@ console) or recreation.
 in one script through the platform's own channel, then reads and records the new address and waits
 for the VM to answer there. If the new address cannot be read, the node is logged out and the error
 names `agw vm recover`, which rejoins it. When the platform's channel cannot reach the VM at all
-(after its own wait of about two minutes), rekey stops at that first call, naming `agw vm recover`,
-and does not try a logout. A rekeyed VM that does not answer at its new address fails naming
-`agw vm recover`, as `vm start` does; the new address is recorded either way.
+(after its own wait of about two minutes), rekey stops at that first call and does not try a logout;
+the error says what gets the VM answering again (on a cloud, a restart with `agw vm stop` and
+`agw vm start`, or the provider's serial console) and to run the rekey again after that. A rekeyed
+VM that does not answer at its new address fails naming `agw vm recover`, as `vm start` does; the
+new address is recorded either way.
 
 `vm delete` requires `--force` if the VM has workspaces, agents, or sessions. The confirmation
 message shows what will be deleted. Pass `--yes` to skip the prompt. Delete logs the VM's node out
@@ -869,11 +871,13 @@ Linux, or by Ctrl-Break on Windows. The same holds for the routes `vm create`, `
 `vm rekey` and `vm delete` open on a cloud VM. On Windows, killing `agw` runs no cleanup, and
 closing the console window may start it, but Windows ends the process within seconds, so it cannot
 be relied on to finish. Either can leave the rule in place until you delete it from the VM's
-firewall in the provider's console, so end the session by exiting the shell. If your SSH traffic
-egresses through a different address than the detection sees (VPN split tunnel, proxy, CGNAT), set
-`ssh_allow_cidrs` in the config's `[operator]` section to a list of IPv4 addresses and/or CIDRs to
-allow additionally; if detection fails entirely, those entries are used alone. A shell that ends
-with status 255 gets a notice that the connection may have dropped.
+firewall in the provider's console, so end the session by exiting the shell. A VM whose address
+refuses the connection has no SSH server listening; that error names a restart (`agw vm stop`, then
+`agw vm start`) or the provider's serial console. If your SSH traffic egresses through a different
+address than the detection sees (VPN split tunnel, proxy, CGNAT), set `ssh_allow_cidrs` in the
+config's `[operator]` section to a list of IPv4 addresses and/or CIDRs to allow additionally; if
+detection fails entirely, those entries are used alone. A shell that ends with status 255 gets a
+notice that the connection may have dropped.
 
 #### Host keys
 

@@ -227,6 +227,9 @@ def complete_cloud_bootstrap(
             f"{error}, so create-time bootstrap cannot run",
             hint="The image's admin account must have passwordless sudo; fix the image, then create the VM again.",
         ) from None
+    except ChannelUnreachable as error:
+        # Not its hint: the restart it names does not fit a VM the create's rollback is about to remove.
+        raise ProvisioningError(f"the VM did not answer over SSH for create-time bootstrap: {error}") from error
     except ConnectivityError as error:
         # A refused key's hint (load an encrypted key into the agent) is the operator's next step.
         raise ProvisioningError("the VM did not answer over SSH for create-time bootstrap", hint=error.hint) from error
