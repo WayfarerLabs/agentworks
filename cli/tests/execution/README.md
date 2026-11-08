@@ -62,6 +62,9 @@ returns canned outcomes without ssh.
   it from each workstation the evidence matrix names; Windows is where binary stdin and early exit
   matter most. The lane is not part of the default run.
 
+L and S run agw-launch on the test host, which needs Linux (`memfd_create`, `/proc`), so the vector
+and attach tests skip off Linux; V covers macOS and Windows workstations against a real guest.
+
 `conformance/test_attach_terminal.py` and `conformance/test_forward.py` cover what happens around
 the terminal half and a forward, on the same lanes.
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import sys
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
@@ -16,6 +17,9 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
     from tests.execution.conformance.lanes import LocalLane
+
+
+pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="agw-launch needs Linux")
 
 
 @pytest.fixture
