@@ -175,8 +175,34 @@ records the original schedule; this effort adds no version-dependent compatibili
 - [x] Audit transport-take2 requirements R4, R9, and R10: current transport consumers remain in
       place until migration, with no dependency on the replacement stack. Migration must preserve
       independent worker ownership, privilege selection, finite calls, and no mutation retries.
-- [ ] Complete fresh full gates, installed-wheel validation, and private reviews after resumption.
-- [ ] Record reachable live coverage and any remaining VM or workstation gaps.
+- [x] Complete fresh full gates, installed-wheel validation, and private reviews after resumption.
+- [x] Record reachable live coverage and any remaining VM or workstation gaps.
+
+#### Live validation checkpoint
+
+The final executable head passed 10,251 Python tests with 11 skipped. Ruff, formatting, mypy across
+884 files, repository lint, locked-SDD validation, Rulesync, typer isolation, 160 Python website
+tests, 103 Node website tests, and deterministic website builds passed.
+
+At `51b717218`, an installed wheel on Linux drove the real coordinator against independent local
+tmux servers and isolated SQLite through a subprocess-backed target. Ten batches stopped 120
+servers; each result was checked against process incarnation, socket removal, and persisted stopped
+fields. Ten mixed batches stopped two healthy siblings each and refused a deliberately incorrect
+start-time identity without changing its live runtime or persisted fingerprint. Peak observed
+concurrency was eight; twelve-session batches took 0.055 to 0.062 seconds. These local measurements
+do not calibrate the ten-second network-call timeout.
+
+The initial drive exposed a process exiting between its presence probe and stat read. The shared
+absence proof now rechecks presence once after an unreadable stat, accepting only explicit absence.
+Present and unknown observations still fail closed, and no mutation is retried. Boundary tests and
+the rebuilt-wheel drive cover the correction; all three private review lanes are clean.
+
+The isolated installed CLI also passed config initialization, empty batch stop, and names-only
+listing. All disposable processes, sockets, homes, keys, and databases were independently checked
+after cleanup. Operator state was untouched. Remote SSH, multiple actual VMs, Windows, live
+interruption, compatibility lanes, and supported-environment timeout calibration remain gaps because
+this workspace has no configured test inventory or workstation bed. Publication remains blocked by
+automatic approval review requiring destination-specific authorization for the private repository.
 
 - [x] Update active command reference and session lifecycle/status guidance.
 - [ ] Add `locked.md` from the implemented exact head and run locked-SDD validation.
