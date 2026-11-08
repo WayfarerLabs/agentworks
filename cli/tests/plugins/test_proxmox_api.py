@@ -11,7 +11,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agentworks.plugins.proxmox.api import ProxmoxAPI, ProxmoxAPIError, _InvalidQGAExecStatus
+from agentworks.plugins.proxmox.api import (
+    ERROR_BODY_LIMIT_BYTES,
+    ProxmoxAPI,
+    ProxmoxAPIError,
+    _InvalidQGAExecStatus,
+)
 
 
 @pytest.fixture()
@@ -281,6 +286,24 @@ class TestErrorHandling:
             api.next_id()
 
     @patch("urllib.request.urlopen")
+    def test_a_huge_error_body_is_read_only_in_part(self, mock_urlopen: MagicMock, api: ProxmoxAPI) -> None:
+        """Every message quotes the body, so a 2 MB one would reach the terminal whole."""
+        mock_urlopen.side_effect = _http_error(500, b"x" * 2_000_000)
+
+        with pytest.raises(ProxmoxAPIError) as caught:
+            api.next_id()
+
+        assert len(str(caught.value)) < 2 * ERROR_BODY_LIMIT_BYTES
+
+    @pytest.mark.parametrize("status", [None, "running", ["running"]])
+    @patch("urllib.request.urlopen")
+    def test_a_malformed_vm_status_is_typed(self, mock_urlopen: MagicMock, api: ProxmoxAPI, status: Any) -> None:
+        mock_urlopen.return_value = _mock_response(status)
+
+        with pytest.raises(ProxmoxAPIError):
+            api.vm_status("pve", 100)
+
+    @patch("urllib.request.urlopen")
     def test_transport_error_is_typed(self, mock_urlopen: MagicMock, api: ProxmoxAPI) -> None:
         source = urllib.error.URLError("provider unavailable")
         mock_urlopen.side_effect = source
@@ -423,6 +446,60 @@ class TestVMOperations:
         req = mock_urlopen.call_args[0][0]
         assert req.get_method() == "PUT"
         assert "/resize" in req.full_url
+
+
+def _http_error(code: int, body: bytes) -> urllib.error.HTTPError:
+    return urllib.error.HTTPError(
+        url="https://pve.example.com:8006/api2/json/cluster/nextid?vmid=100",
+        code=code,
+        msg="error",
+        hdrs=None,  # type: ignore[arg-type]
+        fp=BytesIO(body),
+    )
+
+
+class TestVMIDInUse:
+    """``/cluster/nextid?vmid=N``, the one read any token may make about any VMID (measured on PVE 8 and 9)."""
+
+    @patch("urllib.request.urlopen")
+    def test_a_free_vmid_is_echoed(self, mock_urlopen: MagicMock, api: ProxmoxAPI) -> None:
+        mock_urlopen.return_value = _mock_response("100")
+
+        assert api.vmid_in_use(100) is False
+        assert mock_urlopen.call_args[0][0].full_url.endswith("/cluster/nextid?vmid=100")
+
+    @patch("urllib.request.urlopen")
+    def test_a_held_vmid_is_a_400_saying_it_exists(self, mock_urlopen: MagicMock, api: ProxmoxAPI) -> None:
+        mock_urlopen.side_effect = _http_error(400, b'{"errors":{"vmid":"VM 100 already exists"},"data":null}')
+
+        assert api.vmid_in_use(100) is True
+
+    @pytest.mark.parametrize(
+        ("code", "body"),
+        [
+            (400, b'{"errors":{"vmid":"value must be at least 100"},"data":null}'),
+            (400, b"not json"),
+            (401, b"authentication failure"),
+            (500, b'{"errors":{"vmid":"VM 100 already exists"}}'),
+        ],
+    )
+    @patch("urllib.request.urlopen")
+    def test_any_other_error_shows_neither(
+        self, mock_urlopen: MagicMock, api: ProxmoxAPI, code: int, body: bytes
+    ) -> None:
+        mock_urlopen.side_effect = _http_error(code, body)
+
+        with pytest.raises(ProxmoxAPIError) as caught:
+            api.vmid_in_use(100)
+
+        assert caught.value.code == code
+
+    @patch("urllib.request.urlopen")
+    def test_an_answer_for_another_vmid_shows_neither(self, mock_urlopen: MagicMock, api: ProxmoxAPI) -> None:
+        mock_urlopen.return_value = _mock_response("101")
+
+        with pytest.raises(ProxmoxAPIError):
+            api.vmid_in_use(100)
 
 
 class TestTaskOperations:

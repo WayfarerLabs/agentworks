@@ -324,6 +324,10 @@ class _BootingGuestAgent:
         self.dispatches = 0
         self.finished: dict[int, RawRun] = {}
 
+    def vm_status(self, node: str, vmid: int, *, timeout: float | None = None) -> dict[str, object]:
+        """The guest at the row's VMID is the row's: its name is the hostname the clone set."""
+        return {"status": "running", "name": "box-node"}
+
     def guest_agent_ping(self, node: str, vmid: int, *, timeout: float) -> None:
         self.pings += 1
         if self.pings < 3:

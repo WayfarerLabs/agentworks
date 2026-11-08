@@ -2,18 +2,18 @@
 sequence shared by the delete op and ``create``'s rollback arms.
 
 The platform's only backend artifact is the cloned VM (one VMID on one
-node), so teardown is a single sequence: settle any in-flight task,
-stop the VM if running, delete the VMID. This module is the one place
-that sequence lives; ``ProxmoxPlatform.delete`` and both rollback arms
-of ``ProxmoxPlatform.create`` compose it (the azure plugin's
-``network.delete_vm_and_resources`` is the structural precedent:
-platform.py keeps the capability surface, a sibling module holds the
-teardown mechanics).
+node), so teardown is a single sequence: confirm the guest at the VMID is
+ours (:func:`~agentworks.plugins.proxmox.identity.find_guest`), stop it if
+running, delete the VMID. This module holds the sequence after that check
+(:func:`remove_guest`) and the rollback wrappers that compose both;
+``ProxmoxPlatform.delete`` composes the same two pieces.
 
-``stop_and_delete_vm`` returns only once the VMID is gone and raises
+:func:`remove_guest` returns only once the VMID is gone and raises
 otherwise: core drops a VM's row only when its delete returns (incident
 row I18), and Proxmox has no azure-style tag sweep to find an orphan
-later. ``ProxmoxAPI`` wraps every HTTP and transport failure as
+later. A destroy task that completes shows the VMID gone; a failed delete
+counts as done only when ``/cluster/nextid`` says nothing holds the VMID.
+``ProxmoxAPI`` wraps every HTTP and transport failure as
 ``ProxmoxAPIError``, so an unreachable API is a failed delete like any
 other. The two rollback wrappers contain every non-interrupt failure of
 that sequence with an operator warning naming the node and VMID, and
@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING
 from agentworks import output
 from agentworks.capabilities.vm_platform.base import RetainedProvisioningError
 from agentworks.plugins.proxmox.api import ProxmoxAPIError
+from agentworks.plugins.proxmox.identity import Gone, find_guest
 
 if TYPE_CHECKING:
     from agentworks.plugins.proxmox.api import ProxmoxAPI
@@ -39,50 +40,37 @@ if TYPE_CHECKING:
 # been told to stop, so this only covers PVE tearing the worker down,
 # not a full clone finishing.
 _SETTLE_TIMEOUT = 60
-# The HTTP statuses of a request the API refused for the token's authorization.
-_REFUSED = frozenset({401, 403})
 
 
-def stop_and_delete_vm(api: ProxmoxAPI, node: str, vmid: int) -> None:
-    """Stop the VM if it is running, then delete the VMID; return only once it is gone.
+def remove_guest(api: ProxmoxAPI, node: str, vmid: int, *, running: bool) -> None:
+    """Stop our guest if it is running, then delete its VMID; return only once the VMID is gone.
 
-    Each step tolerates a VM already stopped, mid-teardown or gone, since
-    the delete op is retried against partial prior failures: a failed stop
-    still leaves the delete to decide, and a failed delete counts as done
-    when the node no longer lists the VMID. Otherwise the delete's error
-    propagates, a listing that fails included, since it cannot show the
-    VMID gone, and so does a delete refused for authorization (401 or 403),
-    whatever the listing shows. Shared by the delete op and the create rollback wrappers, so
-    the stop-then-delete ordering lives in exactly one place.
+    The caller has confirmed the guest is ours. A failed stop still leaves
+    the delete to decide, since the delete op is retried against partial
+    prior failures. A failed delete counts as done only when nothing holds
+    the VMID any more; otherwise, or when that cannot be asked, the delete's
+    error propagates. Shared by the delete op and the create rollback
+    wrappers, so the stop-then-delete ordering lives in exactly one place.
     """
-    with contextlib.suppress(ProxmoxAPIError):
-        status = api.vm_status(node, vmid)
-        if status.get("status") == "running":
+    if running:
+        with contextlib.suppress(ProxmoxAPIError):
             upid = api.stop_vm(node, vmid)
             api.wait_for_task(node, upid)
     try:
         upid = api.delete_vm(node, vmid)
         api.wait_for_task(node, upid)
     except ProxmoxAPIError as error:
-        # A token refused the delete may also be one the listing hides the
-        # VM from, so a refusal is never read as absence.
-        if error.code in _REFUSED or not _vm_absent(api, node, vmid):
+        try:
+            held = api.vmid_in_use(vmid)
+        except ProxmoxAPIError:
+            raise error from None
+        if held:
             raise
 
 
-def _vm_absent(api: ProxmoxAPI, node: str, vmid: int) -> bool:
-    """Whether the node's VM listing, which shows every VM the token can audit, lacks ``vmid``.
-
-    A listing that fails cannot show the VMID gone, so it answers no.
-    """
-    try:
-        listed = api.list_vms(node)
-    except ProxmoxAPIError:
-        return False
-    return all(str(entry.get("vmid")) != str(vmid) for entry in listed)
-
-
-def _settle_and_teardown(api: ProxmoxAPI, node: str, vmid: int, pending_upid: str | None) -> None:
+def _settle_and_teardown(
+    api: ProxmoxAPI, node: str, vmid: int, pending_upid: str | None, *, vm_name: str, clone_name: str
+) -> None:
     """The raw rollback sequence; raises freely, callers contain.
 
     ``pending_upid`` is the task ``create`` was still waiting on when it
@@ -93,15 +81,25 @@ def _settle_and_teardown(api: ProxmoxAPI, node: str, vmid: int, pending_upid: st
     (broadly: a cancelled task reports a non-OK exit, which
     ``wait_for_task`` raises as its "Task failed" error and is the
     expected outcome here, and a settle failure must not skip the delete
-    attempt). Only the VMID this create allocated is ever touched; the
-    template is a different VMID and is never named here.
+    attempt). Then only a guest named ``clone_name`` at ``vmid`` is
+    stopped or deleted: a clone that lost the race for its VMID finds the
+    winner there, and leaves it untouched. The template is a different
+    VMID and is never named here.
     """
     if pending_upid is not None:
         with contextlib.suppress(Exception):
             api.stop_task(node, pending_upid)
         with contextlib.suppress(Exception):
             api.wait_for_task(node, pending_upid, timeout=_SETTLE_TIMEOUT)
-    stop_and_delete_vm(api, node, vmid)
+    found = find_guest(api, node, vmid, vm_name=vm_name, names=(clone_name,))
+    if isinstance(found, Gone):
+        if found.holder is not None:
+            output.warn(
+                f"Proxmox VMID {vmid} on node '{node}' is '{found.holder}', not this create's clone, "
+                "so the rollback leaves it untouched."
+            )
+        return
+    remove_guest(api, node, vmid, running=found.get("status") == "running")
 
 
 def rollback_partial_create(
@@ -110,11 +108,12 @@ def rollback_partial_create(
     vmid: int,
     *,
     vm_name: str,
+    clone_name: str,
     failure: Exception,
     pending_upid: str | None = None,
 ) -> None:
-    """Tear down whatever a failed ``create`` made: the cloned VM under
-    ``vmid``, and nothing else.
+    """Tear down whatever a failed ``create`` made: the cloned VM named
+    ``clone_name`` under ``vmid``, and nothing else.
 
     The failure arm's wrapper. A rollback that cannot confirm the VMID
     gone warns naming it and raises :class:`RetainedProvisioningError`,
@@ -126,7 +125,7 @@ def rollback_partial_create(
     (:func:`rollback_create_on_interrupt`).
     """
     try:
-        _settle_and_teardown(api, node, vmid, pending_upid)
+        _settle_and_teardown(api, node, vmid, pending_upid, vm_name=vm_name, clone_name=clone_name)
     except Exception as cleanup_error:
         output.warn(f"Rollback incomplete: Proxmox VM {vmid} may remain on node '{node}'.")
         raise _retained(
@@ -135,7 +134,7 @@ def rollback_partial_create(
 
 
 def rollback_create_on_interrupt(
-    api: ProxmoxAPI, node: str, vmid: int, *, vm_name: str, pending_upid: str | None = None
+    api: ProxmoxAPI, node: str, vmid: int, *, vm_name: str, clone_name: str, pending_upid: str | None = None
 ) -> None:
     """Roll back the partially created VM after an operator interrupt
     inside ``ProxmoxPlatform.create``.
@@ -157,7 +156,7 @@ def rollback_create_on_interrupt(
         f"'{node}', please wait (Ctrl-C again retains it for explicit deletion)..."
     )
     try:
-        _settle_and_teardown(api, node, vmid, pending_upid)
+        _settle_and_teardown(api, node, vmid, pending_upid, vm_name=vm_name, clone_name=clone_name)
     except (KeyboardInterrupt, Exception) as cleanup_error:
         # Both types on purpose: a delete that could not be confirmed
         # raises out of _settle_and_teardown as surely as a second Ctrl-C

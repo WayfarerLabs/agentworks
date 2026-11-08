@@ -202,10 +202,22 @@ On Proxmox, `vm stop` uses the platform's hard power-off operation. It does not 
 guest shutdown. Save and flush work before stopping; request shutdown inside the guest when a
 graceful shutdown is needed.
 
-`agw vm delete` succeeds only once the node no longer lists the VM's ID. A delete that Proxmox
-refuses (a locked VM) or that gets no answer keeps the VM's row and its host-key record, so run it
-again once the cause is fixed. When a failed or interrupted create cannot remove its clone, it names
-the VM ID and node and keeps the VM in a failed state for `agw vm delete` to remove.
+Proxmox gives a freed VM ID to the next VM created, so every command that reaches a VM by its ID
+(`vm start`, `stop`, `describe`, `recover`, `rekey` and `delete`) first checks that the guest
+holding the ID still carries the name its create gave it, the VM's hostname. A VM whose ID nothing
+holds any more, or whose ID another guest now holds, is gone: `agw vm delete` removes its row and
+host-key record without touching that other guest, warning with the ID and the guest's name, and
+every other command refuses it and names `agw vm delete`. When the API token cannot audit the guest
+holding the ID, every command refuses, delete included, since nothing shows whether that guest is
+the VM; check it in the Proxmox web UI.
+
+Otherwise `agw vm delete` stops and deletes the VM, and succeeds once Proxmox's destroy task
+completes or a failed delete leaves the ID free. A delete that Proxmox refuses (a locked VM) or that
+gets no answer keeps the VM's row and its host-key record, so run it again once the cause is fixed.
+When a failed or interrupted create cannot remove its clone, it names the VM ID and node and keeps
+the VM in a failed state for `agw vm delete` to remove. A create rollback likewise touches only a
+guest carrying the new VM's name, so a create that lost its ID to another create leaves that VM
+alone.
 
 Whole-VM deletion does not first tear down guest sessions or log out of Tailscale. The external
 tailnet record can remain after the guest is deleted; remove a retired node from the Tailscale admin

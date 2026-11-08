@@ -19,10 +19,6 @@ Test shape mirrors ``test_azure_create_interrupt.py``. The fake below
 is a recording ``ProxmoxAPI`` stand-in injected through the platform's
 ``_api`` accessor; the API-client wire tests live in
 ``test_proxmox_api.py``; no test here touches the network.
-
-``TestProvisionResultTransport`` rides along as the one happy-path
-``create`` test (#345): the fake is the only full create harness, so
-the pin on the returned transport lives here too.
 """
 
 from __future__ import annotations
@@ -40,7 +36,14 @@ from agentworks.debian import DebianRelease
 from agentworks.errors import ProvisioningError, StateError
 from agentworks.plugins.proxmox.api import ProxmoxAPIError
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
-from tests._proxmox_fakes import CLONE_UPID, NEWID, PROXMOX_CONFIG, START_UPID, TEMPLATE_VMID, FakeProxmoxAPI
+from tests._proxmox_fakes import (
+    CLONE_UPID,
+    NEWID,
+    PROXMOX_CONFIG,
+    START_UPID,
+    TEMPLATE_VMID,
+    FakeProxmoxAPI,
+)
 from tests._root_channel_fakes import Answer, FakeGuest
 from tests.conftest import provisioning_trust_for_tests
 
@@ -367,7 +370,7 @@ class TestUnremovedVMIsRetained:
         outage = ProxmoxAPIError("Proxmox API failed: connection refused")
         fake.status_errors = [outage]
         fake.delete_error = outage
-        fake.list_error = outage
+        fake.in_use_error = outage
 
         with pytest.raises(RetainedProvisioningError) as exc:
             platform.create(_request(tailscale=True), RunContext())
@@ -431,19 +434,69 @@ class TestPlainFailure:
             assert op not in fake.ops()
 
 
+class TestCloneThatLostItsVMID:
+    """A clone refused for its VMID made nothing, so the rollback touches nothing (material 8 of #866's round two)."""
+
+    def test_the_winner_of_a_next_id_race_is_left_untouched(
+        self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+    ) -> None:
+        platform, fake = _platform_with_fake(monkeypatch)
+        fake.holder = "winner"
+        fake.running = True
+        refusal = ProxmoxAPIError(f"unable to create VM {NEWID}: config file already exists")
+        fake.clone_error = refusal
+
+        with pytest.raises(ProxmoxAPIError) as caught:
+            platform.create(_request(tailscale=False), RunContext())
+
+        assert caught.value is refusal
+        assert "stop_vm" not in fake.ops()
+        assert "delete_vm" not in fake.ops()
+        assert fake.holder == "winner"
+        warned = "\n".join(captured_output.warnings)
+        assert "'winner'" in warned
+        assert f"VMID {NEWID}" in warned
+
+    def test_a_clone_that_made_nothing_needs_no_retained_row(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A mistyped storage: PVE refuses the clone, nothing holds the VMID, and the pool token sees a 403."""
+        platform, fake = _platform_with_fake(monkeypatch)
+        refusal = ProxmoxAPIError("storage 'typo' does not exist")
+        fake.clone_error = refusal
+
+        with pytest.raises(ProxmoxAPIError) as caught:
+            platform.create(_request(tailscale=False), RunContext())
+
+        assert caught.value is refusal
+        assert "delete_vm" not in fake.ops()
+
+    def test_a_winner_the_token_cannot_audit_is_retained_rather_than_touched(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        platform, fake = _platform_with_fake(monkeypatch)
+        fake.holder = "elsewhere"
+        fake.auditable = False
+        fake.clone_error = ProxmoxAPIError(f"unable to create VM {NEWID}: config file already exists")
+
+        with pytest.raises(RetainedProvisioningError, match="cannot audit"):
+            platform.create(_request(tailscale=False), RunContext())
+
+        assert "stop_vm" not in fake.ops()
+        assert "delete_vm" not in fake.ops()
+
+
 class TestDeleteOp:
-    """The delete op composes the shared teardown, and returns only once the VMID is gone (incident row I18)."""
+    """The delete op deletes only our guest, and returns only once its VMID is gone (incident row I18)."""
 
     @staticmethod
     def _vm_row() -> VMRow:
         return cast(
             "VMRow",
-            SimpleNamespace(name="vm1", platform_metadata={"vmid": str(NEWID), "node": "pve1"}),
+            SimpleNamespace(name="vm1", hostname="vm1", platform_metadata={"vmid": str(NEWID), "node": "pve1"}),
         )
 
     def test_running_vm_is_stopped_then_deleted(self, monkeypatch: pytest.MonkeyPatch) -> None:
         platform, fake = _platform_with_fake(monkeypatch)
-        fake.present = True
+        fake.holder = "vm1"
         fake.running = True
 
         platform.delete(self._vm_row(), RunContext())
@@ -452,60 +505,141 @@ class TestDeleteOp:
         assert ("delete_vm", "pve1", NEWID) in fake.calls
         assert fake.ops().index("stop_vm") < fake.ops().index("delete_vm")
         assert "stop_task" not in fake.ops()
+        assert fake.holder is None
 
-    def test_an_already_gone_vm_counts_as_deleted(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """The idempotency contract: a VMID the node no longer lists is gone, whatever the delete said."""
+    def test_a_gone_vm_counts_as_deleted_through_the_pool_token(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The pool token sees a gone VMID as a 403 on every call but /cluster/nextid, which says nothing holds it."""
         platform, fake = _platform_with_fake(monkeypatch)
-        fake.status_errors = [ProxmoxAPIError("does not exist")]
-        fake.delete_error = ProxmoxAPIError("does not exist")
 
         platform.delete(self._vm_row(), RunContext())  # no raise
 
         assert "stop_vm" not in fake.ops()
-        assert ("list_vms", "pve1") in fake.calls
+        assert "delete_vm" not in fake.ops()
+        assert ("vmid_in_use", NEWID) in fake.calls
+
+    def test_a_gone_vm_counts_as_deleted_through_a_token_with_rights(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        platform, fake = _platform_with_fake(monkeypatch)
+        fake.status_errors = [ProxmoxAPIError(f"Configuration file 'qemu-server/{NEWID}.conf' does not exist")]
+
+        platform.delete(self._vm_row(), RunContext())  # no raise
+
+        assert "delete_vm" not in fake.ops()
+
+    def test_a_reissued_vmid_is_left_to_its_new_guest(
+        self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+    ) -> None:
+        """Blocker 3 of #866's round two: the row's guest is gone and another create got its VMID."""
+        platform, fake = _platform_with_fake(monkeypatch)
+        fake.holder = "vm2"
+        fake.running = True
+
+        platform.delete(self._vm_row(), RunContext())  # the row may go
+
+        assert "stop_vm" not in fake.ops()
+        assert "delete_vm" not in fake.ops()
+        assert fake.holder == "vm2"
+        warned = "\n".join(captured_output.warnings)
+        assert f"VMID {NEWID}" in warned
+        assert "'vm2'" in warned
+
+    def test_a_guest_the_token_cannot_audit_is_refused(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        platform, fake = _platform_with_fake(monkeypatch)
+        fake.holder = "outside-the-pool"
+        fake.auditable = False
+
+        with pytest.raises(StateError) as caught:
+            platform.delete(self._vm_row(), RunContext())
+
+        assert caught.value.hint
+        assert "delete_vm" not in fake.ops()
 
     def test_a_locked_vm_that_survives_the_delete_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         platform, fake = _platform_with_fake(monkeypatch)
-        fake.present = True
+        fake.holder = "vm1"
         fake.delete_error = ProxmoxAPIError(f"VM {NEWID} is locked (backup)")
 
         with pytest.raises(ProxmoxAPIError, match="locked"):
             platform.delete(self._vm_row(), RunContext())
 
-    @pytest.mark.parametrize("code", [401, 403])
-    def test_a_delete_refused_for_authorization_raises_whatever_the_listing_shows(
-        self, monkeypatch: pytest.MonkeyPatch, code: int
-    ) -> None:
-        """A token without rights on the VM may not see it listed either, so the listing cannot show it gone."""
+    @pytest.mark.parametrize("code", [401, 403, 500])
+    def test_a_failed_delete_of_a_guest_still_there_raises(self, monkeypatch: pytest.MonkeyPatch, code: int) -> None:
+        """Material 10 of #866's round two: only /cluster/nextid can show a failed delete's VMID free."""
         platform, fake = _platform_with_fake(monkeypatch)
-        refused = ProxmoxAPIError(f"Proxmox API DELETE /nodes/pve1/qemu/{NEWID} failed ({code})")
-        refused.code = code
-        fake.delete_error = refused
+        fake.holder = "vm1"
+        failure = ProxmoxAPIError(f"Proxmox API DELETE /nodes/pve1/qemu/{NEWID} failed ({code})")
+        failure.code = code
+        fake.delete_error = failure
 
         with pytest.raises(ProxmoxAPIError) as caught:
             platform.delete(self._vm_row(), RunContext())
 
-        assert caught.value is refused
-        assert ("list_vms", "pve1") not in fake.calls
+        assert caught.value is failure
+        assert fake.holder == "vm1"
+
+    def test_a_failed_delete_whose_vmid_is_free_counts_as_done(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The guest went between the identity check and the delete."""
+        platform, fake = _platform_with_fake(monkeypatch)
+        fake.holder = "vm1"
+
+        def _gone_meanwhile(node: str, vmid: int) -> str:
+            fake.holder = None
+            raise ProxmoxAPIError(f"Configuration file 'qemu-server/{vmid}.conf' does not exist")
+
+        monkeypatch.setattr(fake, "delete_vm", _gone_meanwhile)
+
+        platform.delete(self._vm_row(), RunContext())  # no raise
 
     def test_a_delete_while_the_api_is_down_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """No call answers, so nothing shows the VMID gone."""
         platform, fake = _platform_with_fake(monkeypatch)
         outage = ProxmoxAPIError("Proxmox API failed: connection refused")
-        fake.present = True
+        fake.holder = "vm1"
         fake.status_errors = [outage]
-        fake.delete_error = outage
-        fake.list_error = outage
+        fake.in_use_error = outage
 
         with pytest.raises(ProxmoxAPIError, match="connection refused"):
             platform.delete(self._vm_row(), RunContext())
+
+        assert "delete_vm" not in fake.ops()
+
+    def test_a_status_failure_on_a_held_vmid_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Something holds the VMID and its name cannot be read, so it cannot be shown to be ours or not."""
+        platform, fake = _platform_with_fake(monkeypatch)
+        fake.holder = "vm1"
+        failure = ProxmoxAPIError("Proxmox API failed: 500 timeout")
+        fake.status_errors = [failure]
+
+        with pytest.raises(ProxmoxAPIError) as caught:
+            platform.delete(self._vm_row(), RunContext())
+
+        assert caught.value is failure
+        assert "delete_vm" not in fake.ops()
+
+    def test_a_vm_migrated_from_before_vm_sites_is_recognized_by_its_clone_name(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Such a row's hostname is proxmox--NAME, the guest's OS hostname, while its clone was named NAME."""
+        platform, fake = _platform_with_fake(monkeypatch)
+        fake.holder = "vm1"
+        row = cast(
+            "VMRow",
+            SimpleNamespace(
+                name="vm1", hostname="proxmox--vm1", platform_metadata={"vmid": str(NEWID), "node": "pve1"}
+            ),
+        )
+
+        platform.delete(row, RunContext())
+
+        assert ("delete_vm", "pve1", NEWID) in fake.calls
 
     @pytest.mark.parametrize("vmid", ["not-a-number", "-1", "1e3", "\u0661\u0662", -1, True, 1.5])
     def test_a_row_whose_vmid_is_not_a_number_is_refused_naming_the_row(
         self, monkeypatch: pytest.MonkeyPatch, vmid: object
     ) -> None:
         platform, fake = _platform_with_fake(monkeypatch)
-        row = cast("VMRow", SimpleNamespace(name="vm1", platform_metadata={"vmid": vmid, "node": "pve1"}))
+        row = cast(
+            "VMRow", SimpleNamespace(name="vm1", hostname="vm1", platform_metadata={"vmid": vmid, "node": "pve1"})
+        )
 
         with pytest.raises(StateError, match="VM 'vm1'"):
             platform.delete(row, RunContext())

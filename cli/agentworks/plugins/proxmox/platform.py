@@ -28,10 +28,11 @@ from agentworks.errors import ConnectivityError, ProvisioningError, StateError
 from agentworks.execution import root_script
 from agentworks.plugins.proxmox import guest_agent
 from agentworks.plugins.proxmox.api import ProxmoxAPI, ProxmoxAPIError
+from agentworks.plugins.proxmox.identity import Gone, find_guest
 from agentworks.plugins.proxmox.teardown import (
+    remove_guest,
     rollback_create_on_interrupt,
     rollback_partial_create,
-    stop_and_delete_vm,
 )
 from agentworks.schema import AgwModel, NonEmptyStr, PositiveInt, SecretRef
 from agentworks.topics import TopicProse
@@ -320,10 +321,11 @@ class ProxmoxPlatform(VMPlatform):
         pool = self.config.pool
         storage = self.config.storage
 
-        # The platform owns the backend-side name. PVE names are
-        # soft (the vmid identifies), but a duplicate name is operator
-        # confusion worth surfacing.
-        backend_name = f"{request.system_slug}-{request.vm_name}" if request.system_slug else request.vm_name
+        # The clone is named the VM's hostname, which the row records: every
+        # later operation compares the name at the row's VMID with it, since a
+        # freed VMID is reissued. A duplicate name is operator confusion worth
+        # surfacing.
+        backend_name = request.hostname
         if self._name_exists(node, backend_name, ctx):
             raise StateError(
                 f"a Proxmox VM named '{backend_name}' already exists on node {node}",
@@ -427,12 +429,18 @@ class ProxmoxPlatform(VMPlatform):
                 # remove the VM raises the retained-row error instead.
                 output.detail("Cleaning up the partial VM...")
                 rollback_partial_create(
-                    self._api(ctx), node, newid, vm_name=request.vm_name, failure=failure, pending_upid=pending_upid
+                    self._api(ctx),
+                    node,
+                    newid,
+                    vm_name=request.vm_name,
+                    clone_name=backend_name,
+                    failure=failure,
+                    pending_upid=pending_upid,
                 )
                 raise
         except KeyboardInterrupt:
             rollback_create_on_interrupt(
-                self._api(ctx), node, newid, vm_name=request.vm_name, pending_upid=pending_upid
+                self._api(ctx), node, newid, vm_name=request.vm_name, clone_name=backend_name, pending_upid=pending_upid
             )
             raise
 
@@ -449,10 +457,28 @@ class ProxmoxPlatform(VMPlatform):
             return False
         return any(entry.get("name") == backend_name for entry in existing)
 
+    def _find_guest(self, vm: VMRow, ctx: RunContext, *, timeout: float | None = None) -> dict[str, Any] | Gone:
+        """What holds the row's VMID: our guest's ``status/current`` answer, or :class:`Gone`."""
+        return find_guest(
+            self._api(ctx),
+            self._vm_node(vm),
+            self._vmid(vm),
+            vm_name=vm.name,
+            names=_clone_names(vm),
+            timeout=timeout,
+        )
+
+    def _guest(self, vm: VMRow, ctx: RunContext, *, timeout: float | None = None) -> dict[str, Any]:
+        """Our guest's ``status/current`` answer; a guest that is gone refuses, naming ``agw vm delete``."""
+        found = self._find_guest(vm, ctx, timeout=timeout)
+        if isinstance(found, Gone):
+            raise found.refusal()
+        return found
+
     def start(self, vm: VMRow, ctx: RunContext) -> None:
         # Idempotency guard (the ABC flags start): the Proxmox
         # status/start endpoint errors on an already-running VM.
-        if self.status(vm, ctx) == VMStatus.RUNNING:
+        if self._guest(vm, ctx).get("status") == "running":
             output.detail(f"Proxmox VM '{vm.name}' is already running")
             return
         node = self._vm_node(vm)
@@ -462,7 +488,7 @@ class ProxmoxPlatform(VMPlatform):
     def stop(self, vm: VMRow, ctx: RunContext) -> None:
         # Idempotency guard (the ABC flags stop): stopping an
         # already-stopped VM must land in the stopped state, not error.
-        if self.status(vm, ctx) == VMStatus.STOPPED:
+        if self._guest(vm, ctx).get("status") == "stopped":
             output.detail(f"Proxmox VM '{vm.name}' is already stopped")
             return
         node = self._vm_node(vm)
@@ -470,13 +496,20 @@ class ProxmoxPlatform(VMPlatform):
         self._api(ctx).wait_for_task(node, upid)
 
     def delete(self, vm: VMRow, ctx: RunContext) -> None:
-        # The stop-then-delete sequence lives in the teardown module,
-        # shared with create's rollback arms.
-        stop_and_delete_vm(self._api(ctx), self._vm_node(vm), self._vmid(vm))
+        # A guest that is gone is deleted already. One whose VMID another
+        # guest now holds is left alone, since only the row is ours.
+        found = self._find_guest(vm, ctx)
+        if isinstance(found, Gone):
+            if found.holder is not None:
+                output.warn(f"{found.describe()}, which is left untouched; removing the row only")
+            return
+        remove_guest(self._api(ctx), self._vm_node(vm), self._vmid(vm), running=found.get("status") == "running")
 
     def status(self, vm: VMRow, ctx: RunContext) -> VMStatus:
+        # A guest that is gone, or whose identity a token cannot audit,
+        # refuses; only an API failure reads as UNKNOWN.
         try:
-            result = self._api(ctx).vm_status(self._vm_node(vm), self._vmid(vm), timeout=10)
+            result = self._guest(vm, ctx, timeout=10)
         except ProxmoxAPIError:
             return VMStatus.UNKNOWN
         pve_status = result.get("status", "")
@@ -492,10 +525,22 @@ class ProxmoxPlatform(VMPlatform):
         return f"{vmid}@{node}"
 
     def run_as_root(self, vm: VMRow, ctx: RunContext, script: bytes, deadline: float) -> RawRun:
-        """Run ``script`` as root through the QEMU Guest Agent, which needs no guest sshd."""
+        """Run ``script`` as root through the QEMU Guest Agent, which needs no guest sshd, once the guest is ours."""
+        self._guest(vm, ctx)
         return guest_agent.run_as_root(self._api(ctx), self._vm_node(vm), self._vmid(vm), script, deadline)
 
     # -- Helpers ---------------------------------------------------------------
+
+
+def _clone_names(vm: VMRow) -> tuple[str, ...]:
+    """The names the row's clone may carry: create names it the VM's hostname.
+
+    A row migrated from before vm-sites recorded ``proxmox--NAME``, the
+    guest's OS hostname, while its clone was named ``NAME``.
+    """
+    if vm.hostname == f"proxmox--{vm.name}":
+        return (vm.hostname, vm.name)
+    return (vm.hostname,)
 
 
 def _wait_for_cloud_init(run_as_root: Callable[[bytes, float], RawRun], vmid: int) -> None:
