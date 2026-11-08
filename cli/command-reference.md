@@ -765,15 +765,18 @@ resolves up front, with the site's secrets. In one run it:
    to compare with the VM's console, and records them only once you confirm. Without a terminal to
    confirm on, recover refuses such a VM before resolving anything; import its keys from a verified
    file with `agw vm import-host-keys <name> --known-hosts FILE` instead.
-2. Runs one repair script as root, in this order: it restores your SSH public key in the admin's
-   `authorized_keys`; checks the SSH server's configuration (a failed check stops the repair), then
-   unmasks, enables and restarts it, which ends no open session, so a stopped or masked server is
-   repaired even where the channel goes through it, as Lima's persistent connection can; installs
-   `python3` when it is missing or lacks its standard library; starts `tailscaled` if it is not
-   running and waits up to about 30 seconds for its state to settle; and rejoins Tailscale only when
-   the node needs a login. A missing Tailscale is reported, not installed.
-3. Reads the VM's tailnet address and records it. After a rejoin, an address that cannot be read
-   logs the node out again, as create does.
+2. Runs one repair script as root, in this order: it rewrites the admin's `authorized_keys` as
+   `vm reinit` does, with your SSH public key and `operator.extra_ssh_public_keys`, so a key they no
+   longer list (one you replaced, say) stops working; checks the SSH server's configuration (a
+   failed check stops the repair), then unmasks, enables and restarts it, which ends no open
+   session, so a stopped or masked server is repaired even where the channel goes through it, as
+   Lima's persistent connection can; installs `python3` when it is missing or lacks its standard
+   library; starts `tailscaled` if it is not running and waits up to about 30 seconds for its state
+   to settle; and rejoins Tailscale only when the node needs a login. A missing Tailscale is
+   reported, not installed.
+3. Reads the VM's tailnet address and records it, then rebuilds the SSH config, whose aliases name
+   that address and your configured key. After a rejoin, an address that cannot be read logs the
+   node out again, as create does.
 4. Waits once for the VM to answer over SSH.
 5. Records the configured SSH identity as the VM's, since the VM has just accepted it. A key file
    replaced while recover ran is not recorded, and recover fails asking for a rerun.
@@ -1004,7 +1007,9 @@ prefixes are configurable via `operator.ssh_host_prefix` (default `awvm--`) and
 `operator.ssh_agent_host_prefix` (default `awagent--`).
 
 Entries are rebuilt declaratively from the database on every agent / VM lifecycle operation, so a
-fresh `agw agent create` or `agw vm delete` keeps the file in sync without manual intervention. Run
+fresh `agw agent create` or `agw vm delete` keeps the file in sync without manual intervention. Each
+entry's `IdentityFile` is `operator.ssh_private_key`, so after changing that key, `agw vm recover`
+or `agw vm reinit` (which install the new key on the VM) rebuild the file too. Run
 `agw config sync-ssh-config` to force a rebuild.
 
 Entries for a VM that has a host-key record also carry `HostKeyAlias`, `UserKnownHostsFile` (the

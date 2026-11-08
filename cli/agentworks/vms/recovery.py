@@ -5,8 +5,8 @@ Each of the two scripts has one function that runs it once with
 without its Tailscale or, on a platform whose channel is not sshd, its SSH
 server:
 
-- :func:`repair`, ``agw vm recover``'s one script: restore the admin's
-  authorized key, restart a broken sshd, install python3 when agw-launch's
+- :func:`repair`, ``agw vm recover``'s one script: rewrite the admin's
+  ``authorized_keys`` as reinit does, restart a broken sshd, install python3 when agw-launch's
   interpreter does not run, start ``tailscaled`` if it is not running and
   wait for its state to settle, and join Tailscale only when the node needs
   a login.
@@ -73,17 +73,15 @@ set -eu
 # lives there too.
 PATH="$PATH:/usr/sbin:/sbin"
 admin={admin}
-key={key}
 
 entry=$(getent passwd "$admin") || {{ echo "the admin account '$admin' does not exist" >&2; exit 1; }}
 home=$(printf '%s\\n' "$entry" | cut -d: -f6)
 keys="$home/.ssh/authorized_keys"
 mkdir -p "$home/.ssh"
-if ! grep -qxF "$key" "$keys" 2>/dev/null; then
-    # A last line without its newline would otherwise run into the key.
-    if [ -s "$keys" ] && [ -n "$(tail -c 1 "$keys")" ]; then printf '\\n' >> "$keys"; fi
-    printf '%s\\n' "$key" >> "$keys"
-fi
+# The whole managed file, as reinit writes it, so a key it no longer lists
+# (one the configured key replaced) stops working now, not at the next reinit.
+(umask 077 && printf '%s' {authorized_keys} > "$keys.agw-recover")
+mv -f "$keys.agw-recover" "$keys"
 chown -R "$admin:" "$home/.ssh"
 chmod 700 "$home/.ssh"
 chmod 600 "$keys"
@@ -177,19 +175,20 @@ def repair(
     vm: VMRow,
     ctx: RunContext,
     *,
-    public_key: str,
+    authorized_keys: str,
     auth_key: str,
     log: Callable[[RunRequest, Result], None] | None,
 ) -> RootScriptResult:
     """Run the repair script once; :func:`joined` says whether it joined the tailnet.
 
-    ``public_key`` is the configured key's one line. The sshd repair runs on
+    ``authorized_keys`` is the admin's whole managed file
+    (``ssh_keys.authorized_keys_content``). The sshd repair runs on
     every platform: that this script runs at all says the channel works now,
     not that sshd will accept the next connection or survive the next boot.
     """
     payload = _REPAIR.format(
         admin=shlex.quote(vm.admin_username),
-        key=shlex.quote(public_key),
+        authorized_keys=shlex.quote(authorized_keys),
         python=shlex.quote(ssh_process.DEFAULT_PYTHON),
         backend_state=BACKEND_STATE_FRAGMENT,
         state_reads=SETTLING_STATE_READS,

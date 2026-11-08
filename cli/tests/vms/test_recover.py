@@ -147,6 +147,23 @@ def test_a_healthy_node_is_repaired_read_and_verified_with_the_key_resolved_once
     assert row is not None and row.tailscale_host == NEW_ADDRESS
 
 
+def test_the_ssh_config_is_synced_even_when_the_address_did_not_change(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+    _world: list[str],
+) -> None:
+    """The aliases name the configured key, which the repair just installed: after a key change it is a new one."""
+    _seed(db)
+    _guest(monkeypatch, address=Answer(stdout=f"{ADDRESS}\n".encode()))
+    _waits(monkeypatch)
+
+    _recover(db, make_config())
+
+    assert _world == ["sync"]
+
+
 def test_the_operation_log_never_holds_the_key(
     db: Database,
     make_config,  # noqa: ANN001

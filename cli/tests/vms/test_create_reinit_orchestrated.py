@@ -1112,12 +1112,16 @@ def test_reinit_runs_initialization_through_the_gate(
     monkeypatch.setattr("agentworks.ssh.SSHLogger", _LoggerSpy)
     _contract_passes.access(vm_name="rvm").run_outcomes = _contract_outcomes(os_release=BOOKWORM_OS_RELEASE)
 
+    steps: list[str] = []
+
     def _fake_init(*args: object, **kwargs: object) -> None:
         captured["providers"] = args[7]
         captured["held"] = list(holds)
         captured["debian_release"] = kwargs["debian_release"]
+        steps.append("init")
 
     monkeypatch.setattr(vm_manager, "run_initialization", _fake_init)
+    monkeypatch.setattr("agentworks.ssh_config.sync_ssh_config", lambda *a, **k: steps.append("sync"))
     import agentworks.transports as transports
 
     monkeypatch.setattr(transports, "transport", lambda vm, config, **kw: _reinit_transport())
@@ -1125,6 +1129,8 @@ def test_reinit_runs_initialization_through_the_gate(
     vm_manager.reinit_vm(db, config, "rvm", interaction=TtyInteractionPolicy.REFUSE)
 
     assert captured["debian_release"] is DebianRelease.BOOKWORM
+    # The aliases name the configured key, which the initialization installs: a changed key reaches them.
+    assert steps == ["init", "sync"]
     # The base checks, release first, over the admin's access, and nothing else on the new stack.
     assert _contract_passes.operations == [("admin", "run")] * 3
     assert legacy_checked == ["rvm"]

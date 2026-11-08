@@ -243,8 +243,9 @@ before they resolve the auth key.
   on an ephemeral auth key whose node expired while it was offline, and one whose node was removed
   in the Tailscale admin console. No start resolves the auth key any more.
 - **`agw vm recover NAME`** is new. It starts a stopped VM first; then, through the platform's own
-  channel, it records missing host keys once you confirm their fingerprints, then restores your SSH
-  public key, restarts a broken SSH server, installs `python3`, starts `tailscaled` if it is not
+  channel, it records missing host keys once you confirm their fingerprints, then rewrites the
+  admin's `authorized_keys` with your configured keys as `vm reinit` does (removing a key you
+  replaced), restarts a broken SSH server, installs `python3`, starts `tailscaled` if it is not
   running, and rejoins Tailscale only when the node needs a login. Then it waits once for the VM to
   answer. See the [command reference](../../cli/command-reference.md) for what it refuses.
 - **`vm rekey`** runs its steps as one script through the platform's own channel and keeps an

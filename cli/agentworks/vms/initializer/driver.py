@@ -128,16 +128,10 @@ def bootstrap_vm(
     )
 
     # The operator's ``ssh awvm--<name>`` aliases go in before Phase B's many
-    # connections. Non-fatal: a local ``~/.ssh/config`` write failure has
-    # nothing to do with VM health, so it warns and continues into Phase B.
-    # Matches the caller's post-init re-sync handling.
-    try:
-        from agentworks.ssh_config import sync_ssh_config
+    # connections, and a failed write continues into Phase B.
+    from agentworks.ssh_config import sync_ssh_config_or_warn
 
-        sync_ssh_config(config, db)
-    except Exception as e:
-        output.warn(f"SSH config sync failed: {e}")
-        output.info("VM is likely still usable.")
+    sync_ssh_config_or_warn(config, db)
 
     ts_target = SSHTransport(
         host=address,

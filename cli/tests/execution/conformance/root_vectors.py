@@ -343,9 +343,18 @@ def the_repair_runs_to_status_zero(lane: RootLane) -> None:
     # The lane's own sshd dependence, which only recover's failure hint reads.
     platform: Any = _LanePlatform(lane, recovery_needs_guest_sshd=lane.recovery_needs_guest_sshd)
 
-    # A healthy node reads Running, so the stand-in key is never used.
-    repaired = recovery.repair(platform, vm, RunContext(), public_key=stand_in_key, auth_key=SECRET, log=None)
-    lane.run(f"sed -i '/ agw-conformance$/d' ~{admin}/.ssh/authorized_keys")
+    # The repair rewrites the account's whole file, so it gets every key already there plus the stand-in, and the
+    # original is put back after. A healthy node reads Running, so the auth key is never used.
+    keys = f"~{admin}/.ssh/authorized_keys"
+    saved = f"{keys}.agw-conformance"
+    present = lane.run(f"cat {keys}")
+    original = present.stdout.decode() if present.status == 0 else ""
+    lane.run(f"if [ -e {keys} ]; then cp -p {keys} {saved}; fi")
+    content = original + ("\n" if original and not original.endswith("\n") else "") + f"{stand_in_key}\n"
+    try:
+        repaired = recovery.repair(platform, vm, RunContext(), authorized_keys=content, auth_key=SECRET, log=None)
+    finally:
+        lane.run(f"if [ -e {saved} ]; then mv -f {saved} {keys}; else rm -f {keys}; fi")
     stdlib = lane.check("python3 -c 'import json, ssl, venv'")
 
     tmp = scratch_path()

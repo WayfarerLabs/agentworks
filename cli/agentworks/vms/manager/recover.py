@@ -3,8 +3,9 @@
 In order: start the VM when it is stopped; re-establish the VM's host-key
 record when it is missing, under the operator's confirmation; run the repair
 script; read the tailnet address, settling it (and logging the node out when
-it cannot be read) only when the repair joined; wait once for the VM to answer
-over SSH; then record the configured SSH identity as the VM's.
+it cannot be read) only when the repair joined, and sync the SSH config, whose
+aliases name the address and the configured key; wait once for the VM to
+answer over SSH; then record the configured SSH identity as the VM's.
 """
 
 from __future__ import annotations
@@ -51,6 +52,7 @@ def recover_vm(db: Database, config: Config, name: str, *, interaction: TtyInter
     import agentworks.vms.manager as _mgr
     from agentworks.ssh_config import sync_ssh_config
     from agentworks.vms.applied_state import prepare_configured_ssh_identity
+    from agentworks.vms.initializer.ssh_keys import authorized_keys_content
 
     vm = _require_vm(db, name)
     _guard_incomplete_vm(vm, allow_failed_init=True)
@@ -70,6 +72,7 @@ def recover_vm(db: Database, config: Config, name: str, *, interaction: TtyInter
     # refuses before a secret or the platform is touched.
     execution.resolve_ssh()
     prepared = prepare_configured_ssh_identity(config.operator.ssh_public_key, config.operator.ssh_private_key)
+    authorized_keys = authorized_keys_content(prepared.public_text, config.operator.extra_ssh_public_keys)
 
     vm_node, _resolver, ops_ctx, auth_key = _auth_key_boundary(db, config, vm, interaction=interaction)
     platform = vm_node.site.platform
@@ -93,7 +96,7 @@ def recover_vm(db: Database, config: Config, name: str, *, interaction: TtyInter
             log.step("Repair")
             output.info("Repairing SSH access, python3 and Tailscale (this may take several minutes)...")
             result = recovery.repair(
-                platform, vm, ops_ctx, public_key=prepared.public_text, auth_key=auth_key, log=log.record
+                platform, vm, ops_ctx, authorized_keys=authorized_keys, auth_key=auth_key, log=log.record
             )
             hint = f"Run 'agw vm logs {name}' for its output."
             if platform.recovery_needs_guest_sshd:
@@ -120,7 +123,8 @@ def recover_vm(db: Database, config: Config, name: str, *, interaction: TtyInter
                     raise
             if address != vm.tailscale_host:
                 db.update_vm_tailscale(name, address)
-                sync_ssh_config(config, db)
+            # Whatever the address did: the repair installed the configured key, which may be a new one.
+            sync_ssh_config(config, db)
 
             log.step("Wait for SSH")
             wording = reachability.Wording.RECONNECT if joined else reachability.Wording.VERIFY
