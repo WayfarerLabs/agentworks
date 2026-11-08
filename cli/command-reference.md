@@ -781,8 +781,8 @@ Agentworks verifies every connection to a VM against a per-VM host-key store, ne
 by VM name, so a VM keeps its trust across tailnet address changes. `vm create` records the key on
 its first connection and nowhere else; `vm delete` removes the file. A command that reaches a VM
 over SSH refuses a VM with no recorded key, with a hint naming the import, rather than trusting it
-on first use; describe and listing commands warn per VM and carry on. `vm delete` still works
-without a record, but on a cloud VM it cannot then log the node out of Tailscale.
+on first use; describe and listing commands warn per VM and carry on. `vm delete` works without a
+record.
 
 `agw vm import-host-keys (--all | <name>...) [--known-hosts <path>]` copies keys you already trust
 into the store. It asks OpenSSH's own `ssh-keygen -F` which keys `~/.ssh/known_hosts` (or the file

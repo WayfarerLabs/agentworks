@@ -591,7 +591,6 @@ def test_delete_removes_the_host_key_record_after_the_backend_delete(
     seed_vm_trust("dvm")
     seed_vm_trust("other")
     counts = _fake_backend(monkeypatch)
-    monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
 
     vm_manager.delete_vm(db, make_config(), "dvm", yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
@@ -624,7 +623,6 @@ def test_backend_delete_failure_keeps_the_host_key_record(
     _seed(db)
     seed_vm_trust("dvm")
     counts = _fake_backend(monkeypatch)
-    monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
     _failing_backend_delete(monkeypatch, counts)
 
     with pytest.raises(AuthorizationError):
@@ -643,7 +641,6 @@ def test_delete_removes_the_host_key_record_even_when_the_ssh_config_rebuild_fai
     _seed(db)
     seed_vm_trust("dvm")
     _fake_backend(monkeypatch)
-    monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
 
     def _boom(*_a: object, **_k: object) -> None:
         raise RuntimeError("read-only home")

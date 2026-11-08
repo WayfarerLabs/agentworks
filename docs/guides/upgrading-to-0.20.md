@@ -70,10 +70,7 @@ boot the VM or spend a Tailscale auth key. The exception is `vm shell --platform
 refuses. `vm describe`, `session describe` and the status listings that span several VMs warn that
 the VM has no record, leave out what they would have read over SSH, and carry on.
 
-`vm delete` still works without a record, because deleting is what you do with a broken VM. It
-cannot reach a cloud VM (AWS, Azure, GCP) to log its node out of Tailscale, though, so that step is
-skipped with a warning. Import first to get the logout, or remove the node in the Tailscale admin
-console afterwards.
+`vm delete` still works without a record, because deleting is what you do with a broken VM.
 
 `agw database restore` onto another workstation carries no host-key records, because the store lives
 beside the database, not in it. Copy `~/.config/agentworks/known_hosts/` from the old workstation
