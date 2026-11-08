@@ -20,6 +20,7 @@ from agentworks.capabilities.base import RunContext
 from agentworks.db import SYSTEM_SLUG_KEY, InitStatus, ProvisioningStatus
 from agentworks.errors import StateError
 from agentworks.execution.access import Admin, Agent
+from agentworks.harness_setup.outcomes import SetupFailure, raise_setup_failures
 from agentworks.vms import contract
 
 from ._helpers import _require_vm
@@ -222,6 +223,7 @@ def reinit_vm(
             secrets=ScopedSecrets(resolver.values, secret_names),
         )
 
+    setup_failures: list[SetupFailure] = []
     with activation_gate(vm_node, gate_secret_resolver(config, registry, resolver)):
         # Credentials and active setup env/config secrets share one eager
         # boundary. Install-command runners keep their existing environment.
@@ -297,6 +299,7 @@ def reinit_vm(
                     logger,
                     debian_release=verified_release,
                     operation=_mgr.VMInitializationOperation.VM_REINIT,
+                    setup_failures=setup_failures,
                     legacy_conversion=legacy_conversion,
                     setup_inputs=setup_inputs,
                     setup_values=resolver.values,
@@ -316,11 +319,18 @@ def reinit_vm(
     refreshed_vm = db.get_vm(name)
     assert refreshed_vm is not None
     # Terminal outcome line at column 0 via result().
+    if setup_failures:
+        output.info(f"Log: {logger.display_path}")
+    raise_setup_failures(setup_failures)
     if refreshed_vm.init_status == InitStatus.PARTIAL.value:
         output.result(f"VM '{name}' reinitialized (with warnings, see above)")
         output.info(f"Log: {logger.display_path}")
     else:
-        output.result(f"VM '{name}' reinitialized successfully!")
+        from agentworks.harness_setup.outcomes import setup_completion_suffix
+        from agentworks.harness_setup.state import read_native_setup
+
+        suffix = setup_completion_suffix(read_native_setup(db, "vm", name))
+        output.result(f"VM '{name}' reinitialized{suffix}.")
 
 
 def _warn_newly_observed_legacy(vm: VMRow, observed: DebianRelease) -> None:

@@ -44,7 +44,6 @@ def shell_artifacts(inputs: ArtifactInputs, root: str, *, session: bool = False)
             maps[content.type.map_name][content.name] = {
                 "files": [file.path.removeprefix(root + "/") for file in publication],
                 "origin": asdict(item.origin),
-                "source": item.provenance.source,
                 "commit": item.provenance.commit,
             }
         groups.append({"owner": asdict(group.owner), **maps})

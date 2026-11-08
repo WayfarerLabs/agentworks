@@ -384,12 +384,58 @@ omission from a successful result means handled; there is no separate acknowledg
 entry still deferred at the session facet must receive an explicit disposition; silent loss is never
 one. Whether it blocks launch or is treated another way is deliberately open (operator, 2026-09-07)
 and belongs to the artifacts successor SDD, which supersedes the earlier single-enforcement-point
-wording recorded here. Core attaches immutable origin metadata (owning scope, resource identity,
-producer), and a facet is derived from core's fixed mapping rather than authored as a second origin.
-Limited hooks and MCP server configurations are recognized as future artifact kinds this delivery
-model must not foreclose. This ruling supersedes the earlier wording, here and in
+wording recorded here. (Settled 2026-10-31: reported, never blocking; see the facet independence
+ruling below.) Core attaches immutable origin metadata (owning scope, resource identity, producer),
+and a facet is derived from core's fixed mapping rather than authored as a second origin. Limited
+hooks and MCP server configurations are recognized as future artifact kinds this delivery model must
+not foreclose. This ruling supersedes the earlier wording, here and in
 `scope-participation-contract.md`, that every session receives all artifact payloads; both artifacts
 are corrected in place. Their other constraints stand.
+
+**Facets are independent and converge (operator, 2026-10-31).** Wave 4 and agent artifacts shipped
+two kinds of hard gate the rulings above did not ask for. Session start refused unless every
+upstream facet's artifact placement was current, so one changed template blocked every descendant
+session. [Issue 841](https://github.com/WayfarerLabs/agentworks/issues/841) records that impact: a
+bundle added to a widely inherited agent template made every descendant session refuse to restart,
+and the reinit its hint named was itself failing for an unrelated reason. Native setup validated
+existing state before applying and refused any entry it held no claim for, even an identical one,
+failing whole VM initialization
+([issue 840](https://github.com/WayfarerLabs/agentworks/issues/840)). The saga lead proposed the
+following contract, and the operator accepted it:
+
+> Yeah, I agree completely.
+
+- **No facet blocks another.** A stale or incomplete upstream facet is reported at session start,
+  naming its owner and repair command, and the session launches with what is placed.
+- **Applying a facet converges what it owns** to its declaration rather than refusing on current
+  state. Matching content is adopted, and an interrupted run heals on retry.
+- **Refusal is reserved** for the facet's own failures and for overwriting content Agentworks does
+  not own that differs from the declaration. Such a refusal is scoped to that entry, not to the
+  whole initialization.
+- **"Never silently lost" means reported, not blocked**, which settles the 2026-09-07 open question
+  above.
+
+The operator also confirmed the unsupported-facet rule that wave 4 shipped:
+
+<!-- cspell:ignore existant asomething IIRC -->
+
+> Fwiw, IIRC, the decision was that activating a non-existant facet would be an error. That seems
+> like asomething the user should know. The core underlying problem we were trying to solve with
+> that was allowing for stuff to be passed through, but that's now handled by the core when a facet
+> isn't activated.
+
+Activating a facet an integration does not implement is an error the operator should see;
+pass-through for a facet that is not activated is core's routing (an inactive VM facet hands its
+inputs to user, inner facets to session), not a reason for the base class to accept every facet
+silently. This supersedes the base no-op defaults in `scope-participation-contract.md`, corrected in
+place.
+
+The required/recommended setup readiness gate stays for now (operator, 2026-11-01). It has no
+producers today, and a `required` gap is a block between facets, but the operator is keeping it and
+will settle its future with the harness scope framework's lead:
+
+> I'm not ready to abandon that recommend/required thing yet. I'll discuss it with the harness facet
+> lead.
 
 **Explicit integration enablement (operator, 2026-09-06).** A harness integration is enabled only by
 being selected on the resource, even when its config is entirely default. An available plugin, a

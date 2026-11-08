@@ -67,7 +67,6 @@ from .release import confirm_vm_release, reconcile_release
 from .tailscale import (
     _await_tailnet,
     _is_tailscale_reachable,
-    _tailscale_logout,
     _warned_tailscale_missing,
 )
 from .verification import VMConnectionVerification, verify_vm_connection
@@ -87,7 +86,6 @@ __all__ = [
     "_resolve_system_slug",
     "_resolve_vm_admin_env_scopes",
     "_resolve_workspace_for_vm",
-    "_tailscale_logout",
     "_vm_scope",
     "_vm_secret_target",
     "_warned_tailscale_missing",

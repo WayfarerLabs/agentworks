@@ -133,7 +133,7 @@ spec:
     storage: data
     bridge: vmbr0
     pool: agentworks
-    verify_ssl: false
+    verify_ssl: true
 ```
 
 `agw resource explain vm-platform/proxmox` documents every field above with its type, whether it is
@@ -198,22 +198,32 @@ agw vm describe test-vm
 agw vm delete test-vm
 ```
 
+On Proxmox, `vm stop` uses the platform's hard power-off operation. It does not request a graceful
+guest shutdown. Save and flush work before stopping; request shutdown inside the guest when a
+graceful shutdown is needed.
+
 `agw vm delete` succeeds only once the node no longer lists the VM's ID. A delete that Proxmox
 refuses (a locked VM) or that gets no answer keeps the VM's row and its host-key record, so run it
 again once the cause is fixed. When a failed or interrupted create cannot remove its clone, it names
 the VM ID and node and keeps the VM in a failed state for `agw vm delete` to remove.
 
+Whole-VM deletion does not first tear down guest sessions or log out of Tailscale. The external
+tailnet record can remain after the guest is deleted; remove a retired node from the Tailscale admin
+console separately. `--force` permits deleting dependent workspaces, agents and sessions; it does
+not skip the confirmation prompt, so pass `--yes` for that. A backend binding failure warns and
+removes local state without attempting remote deletion.
+
 ### Native recovery and interactive access
 
 Agentworks uses QEMU Guest Agent as the root channel that works without Tailscale: create's
-bootstrap and Tailscale join, `agw vm recover`, `vm rekey` and the logout during deletion run their
-root scripts through it. Before each script, Agentworks waits up to about two minutes for the guest
-agent to answer, since a VM that has just started has none running yet; a VM whose agent never
-answers fails with nothing dispatched. Create's wait for cloud-init asks again for about seven
-minutes in all, since cloud-init can restart the agent, so a create from a template without the
-agent fails after about seven minutes. A started VM that does not answer over Tailscale SSH fails
-`vm start` with a hint to run `agw vm recover`, which can also restart a broken SSH server here,
-since the guest agent does not depend on it.
+bootstrap and Tailscale join, `agw vm recover` and `vm rekey` run their root scripts through it.
+Before each script, Agentworks waits up to about two minutes for the guest agent to answer, since a
+VM that has just started has none running yet; a VM whose agent never answers fails with nothing
+dispatched. Create's wait for cloud-init asks again for about seven minutes in all, since cloud-init
+can restart the agent, so a create from a template without the agent fails after about seven
+minutes. A started VM that does not answer over Tailscale SSH fails `vm start` with a hint to run
+`agw vm recover`, which can also restart a broken SSH server here, since the guest agent does not
+depend on it.
 
 QEMU Guest Agent does not provide an interactive terminal, so `vm shell --platform` is unavailable
 for Proxmox. Use the Proxmox web UI's serial console for interactive access. Normal Agentworks work
@@ -289,5 +299,10 @@ repository, then rerun the script. The script does not alter package sources.
 
 ### Self-signed certificate errors
 
-Set `verify_ssl: false` in the site's `platform` table. This is common for homelab setups without a
-trusted CA.
+Keep certificate verification enabled and trust your Proxmox certificate authority on the
+workstation. Python's TLS trust configuration also accepts `SSL_CERT_FILE` pointing to a PEM CA
+bundle; set it in the environment running Agentworks. The certificate must still match the site's
+API hostname.
+
+`verify_ssl: false` in the site's `platform` table disables certificate verification entirely. Use
+it only when that is the trust policy you intend for this site.

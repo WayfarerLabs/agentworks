@@ -12,8 +12,6 @@ server:
   a login.
 - :func:`rekey`, ``vm rekey``'s logout and rejoin with a new auth key.
 
-``vm delete``'s logout is ``tailscale_join.log_out``, the one logout.
-
 A script that finds a problem prints its reason on stderr and exits 1, so
 core reads its status only as zero or not and the reason reaches the
 operation log, never an error. The auth key is ``root_script``'s one secret,

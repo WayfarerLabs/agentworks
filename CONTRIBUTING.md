@@ -86,6 +86,9 @@ From `cli/`, the default pytest configuration uses all available workers:
 uv run pytest tests/ -m 'not integration'
 ```
 
+On Linux, install `tmux` before running the full suite. Native runtime safety tests require it; CI
+installs it explicitly so those guards execute.
+
 A full Windows run needs Git for Windows' `bin` and `usr\bin` directories on `PATH`; some tests
 invoke POSIX tools directly.
 

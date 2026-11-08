@@ -80,10 +80,11 @@ invalidate existing workspace setup or discard ownership records.
 
 ## Existing native installations
 
-The old installer wrote no ownership records. A matching native marketplace or plugin therefore
-remains unowned and is not adopted automatically. Remove a conflicting association explicitly with
-the native CLI, then rerun owning reinit to provision it with recorded ownership. There is no force
-or adoption flag. Review project dependencies before removing marketplaces: Claude's native
+The old installer wrote no ownership records. Owning setup adopts a matching native marketplace or
+user plugin after verifying its native identity and source, records ownership and reports adoption.
+A differing unowned association is preserved and reported individually. Resolve it explicitly with
+the native CLI, then retry owning setup; other setup entries can proceed meanwhile. There is no
+force or adoption flag. Review project dependencies before removing marketplaces: Claude's native
 marketplace removal can also affect project installations.
 
 The old warning-only installer no longer runs. All native setup uses the same integration path and

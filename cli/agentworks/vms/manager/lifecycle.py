@@ -42,6 +42,7 @@ from agentworks.errors import (
 )
 from agentworks.execution import trust
 from agentworks.execution.errors import TrustMissing, VMNotReady
+from agentworks.harness_setup.outcomes import SetupFailure, raise_setup_failures
 from agentworks.naming import MAX_VM_NAME_LENGTH, validate_name
 
 if TYPE_CHECKING:
@@ -362,6 +363,7 @@ def create_vm(
     from agentworks.harness_setup.locking import native_mutation_guard
     from agentworks.interrupts import termination_as_interrupt
 
+    setup_failures: list[SetupFailure] = []
     with ExitStack() as init_stack:
         # First in, so last out: SIGTERM and SIGHUP unwind like Ctrl-C through
         # every interrupt arm below (a cloud's create rolls back its bootstrap
@@ -670,6 +672,7 @@ def create_vm(
                 logger,
                 debian_release=observed_release,
                 operation=_mgr.VMInitializationOperation.VM_CREATE,
+                setup_failures=setup_failures,
                 setup_inputs=setup_inputs,
                 setup_guard=setup_guard,
                 setup_values=resolver.values,
@@ -700,7 +703,14 @@ def create_vm(
     vm = db.get_vm(vm_name)
     assert vm is not None
     render_overlay_outcome(overlay_outcome)
+    if setup_failures:
+        output.info(f"Log: {logger.display_path}")
+    raise_setup_failures(setup_failures)
     if vm.init_status == InitStatus.PARTIAL.value:
         output.result(f"VM '{vm_name}' is ready (with warnings, see above)")
     else:
-        output.result(f"VM '{vm_name}' is ready!")
+        from agentworks.harness_setup.outcomes import setup_completion_suffix
+        from agentworks.harness_setup.state import read_native_setup
+
+        suffix = setup_completion_suffix(read_native_setup(db, "vm", vm_name))
+        output.result(f"VM '{vm_name}' is ready{suffix}.")

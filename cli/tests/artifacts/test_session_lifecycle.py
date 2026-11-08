@@ -60,6 +60,9 @@ def lifecycle(tmp_path, monkeypatch):
     db, events = _restart_fixture(tmp_path, monkeypatch)
     target = LocalFixtureTransport(tmp_path / "native")
     _patch_transports(monkeypatch, target, target)
+    # The shared lifecycle fixture simulates a completed runtime without
+    # creating tmux. Keep its startup observation on that same runtime seam.
+    monkeypatch.setattr("agentworks.sessions.tmux.startup_protection_enabled", lambda *a, **k: False)
     bundle = ArtifactBundle(name="team", hints={"setup": HintArtifactSpec(text="Use the project tools.\n")})
     template = ResolvedSessionTemplate(
         name="shell-artifacts",
@@ -139,6 +142,36 @@ def test_forged_artifact_directory_preserves_running_session(lifecycle, monkeypa
     assert current is not None and previous is not None and current.run_id == previous.run_id
     assert files == lifecycle.files() and all(file.exists() for file in files)
     assert "kill" not in lifecycle.events and "tmux_create" not in lifecycle.events
+
+
+def test_differing_prospective_session_file_preserves_running_session(lifecycle, monkeypatch):
+    from agentworks.artifacts import session as artifact_session
+    from agentworks.artifacts.publication import publish_artifacts
+
+    lifecycle.restart()
+    previous = lifecycle.db.get_session("s1")
+    old_files = lifecycle.files()
+    conflicts = []
+
+    def interfere(runner, desired, *args, **kwargs):
+        path = Path(desired[0].path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"unowned prospective content")
+        conflicts.append(path)
+        return publish_artifacts(runner, desired, *args, **kwargs)
+
+    monkeypatch.setattr(artifact_session, "publish_artifacts", interfere)
+    lifecycle.events.clear()
+    with pytest.raises(StateError):
+        lifecycle.restart()
+    current = lifecycle.db.get_session("s1")
+    assert previous is not None and current is not None and current.run_id == previous.run_id
+    assert all(file.exists() for file in old_files)
+    assert len(conflicts) == 1 and conflicts[0].read_bytes() == b"unowned prospective content"
+    assert "kill" not in lifecycle.events and "tmux_create" not in lifecycle.events
+    record = read_native_setup(lifecycle.db, "session", "s1").records[0]
+    assert not record.complete and record.skipped
+    assert str(conflicts[0]) not in {file.path for file in record.artifact_files}
 
 
 def test_restart_stages_new_files_before_kill_and_cleans_old_after(lifecycle, monkeypatch):
@@ -405,7 +438,6 @@ def test_unconfirmed_new_runtime_keeps_its_run_and_artifacts(lifecycle, monkeypa
     previous = lifecycle.db.get_session("s1")
     assert previous is not None
     monkeypatch.setattr(tmux, "capture_tmux_server_fingerprint", lambda **kwargs: FingerprintProbe(ProbeStatus.UNKNOWN))
-    monkeypatch.setattr(tmux, "kill_server_and_probe", lambda **kwargs: ProbeStatus.UNKNOWN)
     with pytest.raises(ExternalError):
         lifecycle.restart()
     current = lifecycle.db.get_session("s1")
@@ -487,7 +519,7 @@ def test_session_delete_refuses_while_vm_native_mutation_is_held(lifecycle):
 
 
 @pytest.mark.parametrize("operation", ["start", "restart", "create"])
-def test_uncaptured_ancestor_refuses_before_secrets(lifecycle, monkeypatch, operation):
+def test_uncaptured_ancestor_does_not_block_session_operations(lifecycle, monkeypatch, operation):
     from agentworks.vms.templates import ResolvedVMTemplate
 
     monkeypatch.setattr(
@@ -500,33 +532,42 @@ def test_uncaptured_ancestor_refuses_before_secrets(lifecycle, monkeypatch, oper
         lifecycle.db.insert_agent_grant("a1", "ws1", "explicit")
         monkeypatch.setattr("agentworks.agents.manager._assert_agent_ssh_works", lambda *a, **k: None)
     lifecycle.events.clear()
-    with pytest.raises(StateError):
-        if operation == "create":
-            manager.create_session(
-                lifecycle.db,
-                lifecycle.config,
-                name="s2",
-                workspace="ws1",
-                agent="a1",
-                interaction=TtyInteractionPolicy.REFUSE,
-            )
-        elif operation == "start":
-            manager.start_session(lifecycle.db, lifecycle.config, name="s1", interaction=TtyInteractionPolicy.REFUSE)
-        else:
-            lifecycle.restart()
-    assert "resolve" not in lifecycle.events and "resolve_env" not in lifecycle.events
-    assert "kill" not in lifecycle.events and not lifecycle.files()
+    if operation == "create":
+        manager.create_session(
+            lifecycle.db,
+            lifecycle.config,
+            name="s2",
+            workspace="ws1",
+            agent="a1",
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+    elif operation == "start":
+        manager.start_session(lifecycle.db, lifecycle.config, name="s1", interaction=TtyInteractionPolicy.REFUSE)
+    else:
+        lifecycle.restart()
+    name = "s2" if operation == "create" else "s1"
+    record = read_native_setup(lifecycle.db, "session", name).records[0]
+    assert not record.complete and record.artifact_files and record.incomplete_reasons
+    assert "resolve" in lifecycle.events and "tmux_create" in lifecycle.events
 
 
-def test_new_agent_does_not_hide_known_vm_artifact_gap(lifecycle, monkeypatch):
+def test_new_agent_preflight_does_not_block_on_known_vm_artifact_gap(lifecycle, monkeypatch):
+    from agentworks.secrets.resolver import Resolver
     from agentworks.vms.templates import ResolvedVMTemplate
 
     monkeypatch.setattr(
         "agentworks.vms.templates.resolve_live_template",
         lambda *a, **k: ResolvedVMTemplate("default", artifacts=ArtifactsConfig(bundles=["team"])),
     )
-    lifecycle.events.clear()
-    with pytest.raises(StateError) as error:
+
+    class PassedPreflight(Exception):
+        pass
+
+    def stop_after_preflight(*args, **kwargs):
+        raise PassedPreflight
+
+    monkeypatch.setattr(Resolver, "resolve", stop_after_preflight)
+    with pytest.raises(PassedPreflight):
         manager.create_session(
             lifecycle.db,
             lifecycle.config,
@@ -535,6 +576,167 @@ def test_new_agent_does_not_hide_known_vm_artifact_gap(lifecycle, monkeypatch):
             new_agent=True,
             interaction=TtyInteractionPolicy.REFUSE,
         )
-    assert error.value.entity_kind == "vm" and error.value.entity_name == "vm1"
-    assert "resolve" not in lifecycle.events and "resolve_env" not in lifecycle.events
     assert lifecycle.db.get_agent("s2") is None and lifecycle.db.get_session("s2") is None
+
+
+@pytest.mark.parametrize("status", ["stale", "incomplete", "unavailable"])
+def test_upstream_placement_readiness_is_reported_without_blocking_restart(lifecycle, monkeypatch, status):
+    from agentworks import output
+    from agentworks.artifacts.model import ArtifactInputs
+    from agentworks.artifacts.routing import RoutingResult
+    from agentworks.capabilities.harness_integration.setup import SetupEvidence
+
+    warnings: list[str] = []
+    monkeypatch.setattr(output, "warn", warnings.append)
+    monkeypatch.setattr(
+        "agentworks.artifacts.routing.session_artifacts",
+        lambda *args, **kwargs: RoutingResult(ArtifactInputs(local=args[-1]), active_facets=("user",)),
+    )
+    monkeypatch.setattr(
+        "agentworks.harness_setup.readiness._applicable_evidence",
+        lambda *args, **kwargs: SetupEvidence(status, "agent", "a1", "fixture owning repair"),
+    )
+    lifecycle.restart()
+    assert warnings and "kill" in lifecycle.events and "tmux_create" in lifecycle.events
+    assert read_native_setup(lifecycle.db, "session", "s1").records[0].complete
+
+
+@pytest.mark.parametrize(
+    "tool,integration,workaround",
+    [
+        ("claude", "claude-code", "session-prompt"),
+        ("codex", "codex", "session-developer-instructions"),
+        ("grok", "grok-build", "session-rules"),
+    ],
+)
+def test_real_native_probe_failure_preserves_existing_runtime_before_teardown(
+    lifecycle, monkeypatch, tool, integration, workaround
+):
+    from importlib import import_module
+    from unittest.mock import Mock
+
+    from agentworks.artifacts.native import probe as native
+    from agentworks.errors import ExternalError
+
+    lifecycle.restart()
+    previous = lifecycle.db.get_session("s1")
+    files = [(path, path.read_bytes()) for path in lifecycle.files()]
+    lifecycle.template.harness_integration = integration
+    lifecycle.template.harness_integration_config = {"enabled_workarounds": [workaround]}
+    module = import_module(f"agentworks.plugins.{tool}.harness_integration")
+    monkeypatch.setattr(module, "require_commands", lambda *args, **kwargs: None)
+    observed = Mock(wraps=native.probe_native)
+    monkeypatch.setattr(native, "probe_native", observed)
+    lifecycle.events.clear()
+
+    # The isolated transport's login shell rejects -lic, producing a real failed
+    # guest discovery process rather than a fabricated exception or inventory.
+    with pytest.raises(ExternalError):
+        lifecycle.restart()
+    assert observed.called
+    current = lifecycle.db.get_session("s1")
+    assert current is not None and previous is not None
+    assert (current.session_uuid, current.run_id, current.pid) == (previous.session_uuid, previous.run_id, previous.pid)
+    assert [(path, path.read_bytes()) for path, _ in files] == files
+    assert "kill" not in lifecycle.events and "tmux_create" not in lifecycle.events
+
+
+@pytest.mark.parametrize("capture_state", ["changed", "missing"])
+def test_unknown_passthrough_restart_records_missing_delivery_and_retires_old_files_after_teardown(
+    lifecycle, monkeypatch, captured_output, capture_state
+):
+    from agentworks.artifacts.application import ArtifactDeferral
+    from agentworks.artifacts.state import capture_owner, write_capture
+    from agentworks.harness_setup.inputs import SetupInputs
+    from agentworks.harness_setup.model import NativeSetupState, SetupRecord
+    from agentworks.harness_setup.state import write_native_setup
+    from agentworks.schema import CapabilityConfig
+    from agentworks.secrets.orchestration import SecretTarget
+    from agentworks.vms.templates import ResolvedVMTemplate
+    from tests.conftest import _StubRegistry
+
+    outer = ArtifactBundle(name="outer", hints={"vm-tools": HintArtifactSpec(text="VM-ONLY-CONTENT")})
+    lifecycle.config.artifact_bundles["outer"] = outer
+    template = ResolvedVMTemplate(
+        "default", artifacts=ArtifactsConfig(bundles=["outer"]), harness_integrations={"shell": CapabilityConfig()}
+    )
+    monkeypatch.setattr("agentworks.vms.templates.resolve_live_template", lambda *a, **k: template)
+    registry = _StubRegistry(lifecycle.config)
+    capture = capture_owner(registry, "vm", "vm1", "vm", template.artifacts)
+    write_capture(lifecycle.db, "vm", "vm1", "vm", capture, operation="fixture")
+    item = next(capture.inputs.items())
+    owner = SetupInputs("vm", "vm1", "vm", template.harness_integrations, SecretTarget(vm={}), template.artifacts)
+    record = SetupRecord(
+        component="vm",
+        integration="shell",
+        destination_id="d" * 64,
+        declaration=owner.declaration("shell", CapabilityConfig()),
+        complete=True,
+        artifact_inputs=(item.identity,),
+        deferred=(ArtifactDeferral(input_id=item.identity, destination="user", reason="fixture user delivery"),),
+    )
+    write_native_setup(lifecycle.db, "vm", "vm1", NativeSetupState(records=(record,)), operation="fixture")
+    lifecycle.restart()
+    old_files = {path: path.read_bytes() for path in lifecycle.files()}
+    assert any(b"VM-ONLY-CONTENT" in body for body in old_files.values())
+    first = lifecycle.db.get_session("s1")
+    assert first is not None
+
+    if capture_state == "changed":
+        outer.hints["vm-tools"] = HintArtifactSpec(text="UPDATED-VM-CONTENT")
+        changed = capture_owner(registry, "vm", "vm1", "vm", template.artifacts)
+        write_capture(lifecycle.db, "vm", "vm1", "vm", changed, operation="fixture")
+    else:
+        lifecycle.db._conn.execute(
+            "DELETE FROM instance_records WHERE instance_kind = 'vm' "
+            "AND instance_name = 'vm1' AND record_key = 'artifact-inputs'"
+        )
+        lifecycle.db._conn.commit()
+    lifecycle.events.clear()
+    captured_output.warnings.clear()
+    teardowns = []
+
+    def teardown(*args, **kwargs):
+        assert all(path.read_bytes() == body for path, body in old_files.items())
+        teardowns.append(True)
+        lifecycle.events.append("kill")
+
+    monkeypatch.setattr("agentworks.sessions.manager._lifecycle._teardown_session", teardown)
+    lifecycle.restart()
+    current = lifecycle.db.get_session("s1")
+    assert current is not None and current.run_id != first.run_id
+    assert teardowns == [True]
+    assert "tmux_create" in lifecycle.events and "kill" in lifecycle.events
+    state = read_native_setup(lifecycle.db, "session", "s1").records[0]
+    assert not state.complete and state.incomplete_reasons
+    assert state.artifact_inputs is not None
+    assert item.identity in state.artifact_inputs
+    assert any(entry.input_id == item.identity and entry.destination == "session" for entry in state.deferred)
+    assert any("vm/vm1" in reason and item.identity[:12] in reason for reason in state.incomplete_reasons)
+    assert captured_output.warnings
+    assert all(not path.exists() for path in old_files)
+    new_root = lifecycle.target.home / ".agentworks-artifacts" / "session" / current.session_uuid / current.run_id
+    index = json.loads((new_root / "index.json").read_text())
+    assert all(group["owner"]["component"] != "vm" for group in index["groups"])
+    assert not any(b"VM-ONLY-CONTENT" in path.read_bytes() for path in new_root.rglob("*") if path.is_file())
+
+    # Repair the outer routing, then restart: delivery returns to the complete
+    # current input set without retaining a private history of unused runs.
+    repaired = capture_owner(registry, "vm", "vm1", "vm", template.artifacts)
+    write_capture(lifecycle.db, "vm", "vm1", "vm", repaired, operation="fixture")
+    renewed = next(repaired.inputs.items())
+    healed = record.model_copy(
+        update={
+            "artifact_inputs": (renewed.identity,),
+            "deferred": (ArtifactDeferral(input_id=renewed.identity, destination="user", reason="fixture repair"),),
+        }
+    )
+    write_native_setup(lifecycle.db, "vm", "vm1", NativeSetupState(records=(healed,)), operation="fixture")
+    monkeypatch.setattr(
+        "agentworks.sessions.manager._lifecycle._teardown_session", lambda *a, **k: lifecycle.events.append("kill")
+    )
+    lifecycle.restart()
+    state = read_native_setup(lifecycle.db, "session", "s1").records[0]
+    assert state.complete and not state.incomplete_reasons
+    assert not any(entry.input_id == item.identity for entry in state.deferred)
+    assert all(not path.exists() for path in old_files)

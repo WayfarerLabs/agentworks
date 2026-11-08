@@ -1,20 +1,17 @@
-"""Tailscale around a VM's power state: the reachability fast path, the wait after a start, delete's logout."""
+"""Tailscale around a VM's power state: the reachability fast path, and the wait after a start."""
 
 from __future__ import annotations
 
 import subprocess
-from functools import partial
 from typing import TYPE_CHECKING
 
 from agentworks import output
-from agentworks.errors import ConnectivityError, UserAbort
+from agentworks.errors import ConnectivityError
 from agentworks.programs import resolve_program
 
 from ._helpers import _require_vm
 
 if TYPE_CHECKING:
-    from agentworks.capabilities.base import RunContext
-    from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
 
@@ -104,52 +101,3 @@ def _await_tailnet(db: Database, config: Config, vm: VMRow, *, already_running: 
         if reachability.wait(execution.vm_access(current, config, Admin()), wording=wording):
             return
     raise VMNotAnswering(vm.name, address)
-
-
-def _tailscale_logout(vm: VMRow, platform: VMPlatform, ctx: RunContext) -> None:
-    """Log the VM's node out of the tailnet over its root channel, best effort, and say what happened.
-
-    Each outcome is reported and none is checked over SSH, since the VM is
-    going away. A VM the platform reports stopped or deallocated is not
-    asked: no channel reaches it, and a cloud's would wait two minutes to
-    find that out (a WSL2 distro the caller's hold has booted reports
-    running). A cloud VM whose host key was never recorded refuses inside
-    ``run_as_root``, before any route opens: an impostor could report a
-    logout that never happened. Either way the node is named for removal
-    instead.
-    """
-    from agentworks.capabilities.vm_platform.tailscale_join import log_out
-    from agentworks.db import VMStatus
-    from agentworks.execution.errors import TrustMissing
-
-    node = vm.hostname
-    removal = f"remove '{node}' in the Tailscale admin console if it is listed there"
-    try:
-        status = platform.status(vm, ctx)
-    except UserAbort:
-        raise
-    except Exception:
-        status = VMStatus.UNKNOWN
-    if status in (VMStatus.STOPPED, VMStatus.DEALLOCATED):
-        output.warn(f"Tailscale node {node} was not logged out: VM '{vm.name}' is {status.value}; {removal}")
-        return
-    output.info("Logging out of Tailscale...")
-    try:
-        result = log_out(partial(platform.run_as_root, vm, ctx))
-    except UserAbort:
-        raise
-    except TrustMissing:
-        output.warn(
-            f"Tailscale node {node} was not logged out: the host key of VM '{vm.name}' was never "
-            f"recorded, so its logout could not be trusted; {removal}"
-        )
-        return
-    except Exception as error:
-        output.warn(f"the Tailscale logout of node {node} could not be confirmed ({error}); {removal}")
-        return
-    if result.status == 0:
-        output.info(f"Tailscale node {node} logged out")
-    elif result.status is None:
-        output.warn(f"the Tailscale logout of node {node} could not be confirmed; {removal}")
-    else:
-        output.warn(f"'tailscale logout' exited with status {result.status} on node {node}; {removal}")

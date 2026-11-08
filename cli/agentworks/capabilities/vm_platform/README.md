@@ -272,7 +272,7 @@ the VM is running or was just started:
   Phase A treats it as best effort: a failure warns, and an error or interrupt already propagating
   keeps going. The ordinary-command gate refuses a VM Phase A did not complete,
   `vm shell --platform` included, so debugging such a VM goes through the platform's serial console
-  (not firewall-gated); `vm delete`'s logout opens its own per-operation allow.
+  (not firewall-gated).
 
 The closing hook and the route take `ctx` because opening or closing the firewall route (an Azure
 NSG rule, an EC2 security-group rule) is a backend call; Phase A (`phase_a.bootstrap`) passes the

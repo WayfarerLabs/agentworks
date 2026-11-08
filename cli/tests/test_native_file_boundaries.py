@@ -11,7 +11,8 @@ import pytest
 import agentworks.native_files as native
 from agentworks.artifacts.application import ArtifactFile, OwnedArtifactFile
 from agentworks.artifacts.publication import publish_artifacts
-from agentworks.errors import StateError
+from agentworks.errors import ExternalError, StateError
+from agentworks.execution.trust import HOST_TRUST
 from agentworks.transports import Transport
 from tests.native_setup_fixtures import LocalFixtureTransport
 
@@ -56,7 +57,7 @@ def test_disallowed_root_operations_do_not_stage_or_dispatch(path, operation, mo
 def test_allowed_trees_accept_directories_and_descendants_but_not_boundary_files(boundary):
     runner = Mock(spec=Transport)
     runner.run.return_value.ok = True
-    runner.run.return_value.stdout = '{"exists": false}'
+    runner.run.return_value.stdout = 'AGW_NATIVE_FILE={"exists": false}'
     files = native.NativeFiles(runner, root=True)
     assert not files.directory(boundary)
     assert not files.directory(boundary, create=True)
@@ -158,3 +159,137 @@ def test_unprivileged_operations_keep_normal_scope_access(tmp_path):
         files.prune_empty_parents(str(path), root=str(package))
     assert not package.exists()
     assert target.home.is_dir()
+
+
+@pytest.mark.parametrize("returncode", [1, 9, 127, 255])
+@pytest.mark.parametrize("stdout", ["", "AGW_PYTHON3=available\n"])
+def test_python_prerequisite_probe_failures_preserve_failure_kind_and_status(returncode, stdout):
+    from agentworks.ssh import SSHError, SSHResult
+
+    runner = Mock(spec=Transport)
+    runner.run.return_value = SSHResult(returncode, stdout, "fixture profile or transport error")
+    with pytest.raises(SSHError) as caught:
+        native.require_python3(runner)
+    assert str(returncode) in str(caught.value)
+    assert runner.run.call_count == 1
+
+
+def test_python_prerequisite_probe_preserves_the_transport_exception():
+    from agentworks.ssh import SSHError
+
+    failure = SSHError("fixture SSH failure")
+    runner = Mock(spec=Transport)
+    runner.run.side_effect = failure
+    with pytest.raises(SSHError) as caught:
+        native.require_python3(runner)
+    assert caught.value is failure
+
+
+@pytest.mark.parametrize(
+    "observation,outcome",
+    [
+        ("AGW_PYTHON3=missing\n", StateError),
+        ("AGW_PYTHON3=available\n", None),
+        ("startup banner\nAGW_PYTHON3=available\ncompletion banner", None),
+        ("startup banner\nAGW_PYTHON3=missing\ncompletion banner", StateError),
+        ("", ExternalError),
+        ("profile outputavailable", ExternalError),
+        ("prefixAGW_PYTHON3=available\n", ExternalError),
+        ("AGW_PYTHON3=unknown\n", ExternalError),
+        ("AGW_PYTHON3=available\nAGW_PYTHON3=missing\n", ExternalError),
+        ("AGW_PYTHON3=available\nAGW_PYTHON3=available\n", ExternalError),
+    ],
+)
+def test_python_prerequisite_requires_an_unambiguous_successful_observation(observation, outcome):
+    from agentworks.ssh import SSHResult
+
+    runner = Mock(spec=Transport)
+    runner.run.return_value = SSHResult(0, observation, "")
+    if outcome is None:
+        native.require_python3(runner)
+    else:
+        with pytest.raises(outcome):
+            native.require_python3(runner)
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux guest filesystem operations")
+@pytest.mark.parametrize("operation", ["read", "fingerprint", "publish", "remove", "directory"])
+def test_regular_file_parent_is_distinct_from_leaf_symlink_and_never_mutated(tmp_path, operation, monkeypatch):
+    target = LocalFixtureTransport(tmp_path / "target")
+    parent = target.home / "not-a-directory"
+    parent.write_bytes(b"operator file")
+    with native.NativeFiles(target) as files:
+        path = str(parent / "child")
+        observed = []
+        run = target.run
+
+        def record(command, **kwargs):
+            result = run(command, **kwargs)
+            observed.append(result.returncode)
+            return result
+
+        monkeypatch.setattr(target, "run", record)
+        with pytest.raises(StateError):
+            if operation == "publish":
+                files.publish(path, b"fixture", expected=None)
+            elif operation == "remove":
+                files.remove(path, expected="a" * 64)
+            else:
+                getattr(files, operation)(path)
+        assert observed[-1] == native._NON_DIRECTORY_PATH
+        assert parent.read_bytes() == b"operator file"
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux guest filesystem operations")
+@pytest.mark.parametrize("python_available", [False, True])
+@pytest.mark.parametrize("startup_output", [False, True])
+def test_python_prerequisite_observes_the_command_in_the_guest_environment(tmp_path, python_available, startup_output):
+    from pathlib import Path
+
+    target = LocalFixtureTransport(tmp_path / "target")
+    binary_dir = target.root / "bin"
+    binary_dir.mkdir()
+    (binary_dir / "bash").symlink_to("/bin/bash")
+    if python_available:
+        (binary_dir / "python3").symlink_to(Path(sys.executable))
+    target.environment["PATH"] = str(binary_dir)
+    if startup_output:
+        startup = target.root / "startup.sh"
+        startup.write_text("printf 'fixture startup banner'\ntrap 'printf completion-banner' EXIT\n")
+        target.environment["BASH_ENV"] = str(startup)
+    if python_available:
+        native.require_python3(target)
+    else:
+        with pytest.raises(StateError):
+            native.require_python3(target)
+    assert len(target.commands) == 1
+    assert not list((target.root / "tmp").iterdir())
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux guest shell operations")
+@pytest.mark.parametrize("login_shell", [False, True])
+def test_first_party_ssh_python_probe_accepts_startup_output_without_a_newline(tmp_path, monkeypatch, login_shell):
+    import subprocess
+
+    from agentworks.transports import SSHTransport
+
+    target = LocalFixtureTransport(tmp_path / "target")
+    startup = target.root / "startup.sh"
+    startup.write_text("printf 'fixture startup banner'\ntrap 'printf completion-banner' EXIT\n")
+    target.environment["BASH_ENV"] = str(startup)
+    execute = subprocess.run
+    calls = []
+
+    def ssh_locally(args, **kwargs):
+        assert args[0] == "ssh"
+        calls.append(args)
+        # Execute only the remote payload in the fixture's shell and environment.
+        return execute(["/bin/bash", "-c", args[-1]], cwd=target.home, env=target.environment, **kwargs)
+
+    monkeypatch.setattr("agentworks.transports.ssh.subprocess.run", ssh_locally)
+    transport = SSHTransport("fixture.invalid", user="fixture", trust=HOST_TRUST, login_shell=login_shell, retries=1)
+    assert transport.run("command -v python3 >/dev/null", check=False, discard_output=True).ok
+    native.require_python3(transport)
+    assert len(calls) == 2
+    assert all("-T" in args and "--" in args for args in calls)
+    assert not list((target.root / "tmp").iterdir())

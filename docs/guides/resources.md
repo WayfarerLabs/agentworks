@@ -612,6 +612,14 @@ root. The command must explicitly use `sudo` for each step that needs root privi
 `user-install-command` runs as the admin or agent user whose template selects it and should not
 assume elevation.
 
+An install-command's `path` entries persist in the target user's managed `~/.agentworks-profile.sh`.
+User install commands contribute to the selected admin or agent user's profile; system install
+commands contribute to the VM admin's profile. Agentworks rewrites the profile after install
+commands run, including paths from commands skipped by completion checks. Later shells that source
+the profile prepend these directories to `PATH`, and child processes inherit them. A leading `~`
+resolves to the target user's home. Install commands themselves use the login shell's existing
+`PATH`; declaring `path` does not inject those directories into that command.
+
 `test_exec` resolves a command on `PATH` in the target user's login shell. `test_file` and
 `test_dir` check for an existing path; a leading `~` resolves to the target user's home. Declare a
 check only when its success proves that no work is needed. For example:

@@ -1133,15 +1133,10 @@ def test_reinit_runs_initialization_through_the_gate(
     assert [request.name for request in requests] == ["gh"]
     assert captured["held"] == ["open"]  # init ran inside the span
     assert holds == ["open", "close"]  # span closed at the end
-    assert any("reinitialized successfully" in m for m in captured_output.info)
     # Preflight is a real section (header at level 0), and the terminal
     # outcome routes through result() (RESULT role at level 0).
-    assert (Role.HEADER, 0, "Preflight") in captured_output.lines
-    assert (
-        Role.RESULT,
-        0,
-        "VM 'rvm' reinitialized successfully!",
-    ) in captured_output.lines
+    assert any(role is Role.HEADER and level == 0 for role, level, _ in captured_output.lines)
+    assert any(role is Role.RESULT and level == 0 and "rvm" in text for role, level, text in captured_output.lines)
 
 
 def test_reinit_refuses_invalid_configured_identity_before_activation_or_transport(

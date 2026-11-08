@@ -283,7 +283,10 @@ def vm_delete(
         bool,
         typer.Option(
             "--force",
-            help="Force delete even with workspaces, and remove a row whose create left no platform metadata",
+            help=(
+                "Also delete dependent workspaces, agents and sessions, and remove a row whose create "
+                "left no platform metadata"
+            ),
         ),
     ] = False,
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,

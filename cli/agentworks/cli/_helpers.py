@@ -35,9 +35,11 @@ def ordinary_tty_interaction_policy() -> TtyInteractionPolicy:
 
 def ordinary_tty_interaction_access() -> TtyInteractionAccess:
     """Combine the CLI-root TTY policy with the current terminal fact."""
+    from agentworks import output
+
     return tty_interaction_access(
         ordinary_tty_interaction_policy(),
-        terminal_input_usable=sys.stdin.isatty(),
+        terminal_input_usable=output.is_interactive(),
     )
 
 

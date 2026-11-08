@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from agentworks.artifacts.application import ArtifactDeferral
 from agentworks.db import AppliedStateKey, AppliedStateSlice, Database, VersionedPayload
 from agentworks.db.backup import create_manual_backup, restore_backup
 from agentworks.errors import BackupError, StateError
@@ -30,6 +31,7 @@ def _state() -> NativeSetupState:
                 destination_id="a" * 64,
                 declaration={"config": {"plugins": ["p@m"]}, "env": {"TOKEN": {"secret": "ref"}}},
                 claims=(NativeClaim(role="plugin", identifier="p@m", destination="/home/u/.codex"),),
+                incomplete_reasons=("fixture native association conflict",),
             ),
         )
     )
@@ -69,11 +71,80 @@ def test_nested_declaration_survives_persistence(tmp_path):
         db.close()
 
 
-def test_unknown_version_is_retained_but_cannot_bless_setup():
-    record = _slice(VersionedPayload(3, {"future": True}))
+@pytest.mark.parametrize("version", [4, 99])
+def test_unknown_version_is_retained_but_cannot_bless_setup(version):
+    record = _slice(VersionedPayload(version, {"future": True}))
     with pytest.raises(UnsupportedNativeSetupVersionError):
         decode_native_setup(record)
     assert canonicalize_native_setup(record) == record.payload
+
+
+@pytest.mark.parametrize("version", [1, 2])
+def test_legacy_records_default_to_no_entry_diagnostics_and_export_current_version(version):
+    payload = _state().model_dump(mode="json")
+    del payload["records"][0]["incomplete_reasons"]
+    record = _slice(VersionedPayload(version, payload))
+    state = decode_native_setup(record)
+    assert state.records[0].incomplete_reasons == ()
+    encoded = canonicalize_native_setup(record)
+    assert encoded.payload_version == 3
+    assert decode_native_setup(_slice(encoded)) == state
+
+
+@pytest.mark.parametrize("reasons", [[""], [" \n"], [12], "reason"])
+def test_persisted_incomplete_reason_boundary_rejects_invalid_values(reasons):
+    payload = _state().model_dump(mode="json")
+    payload["records"][0]["incomplete_reasons"] = reasons
+    with pytest.raises(StateError):
+        decode_native_setup(_slice(VersionedPayload(3, payload)))
+
+
+def test_completed_record_cannot_carry_incomplete_reasons():
+    payload = _state().model_dump(mode="json")
+    payload["records"][0]["complete"] = True
+    with pytest.raises(StateError):
+        decode_native_setup(_slice(VersionedPayload(3, payload)))
+
+
+@pytest.mark.parametrize("inputs", [None, [], ["b" * 64]])
+@pytest.mark.parametrize("duplicate", [False, True])
+def test_known_partial_deferral_boundary_with_known_or_unknown_full_table(inputs, duplicate):
+    payload = _state().model_dump(mode="json")
+    record = payload["records"][0]
+    record["artifact_inputs"] = inputs
+    route = {"input_id": "b" * 64, "destination": "session", "reason": "fixture later delivery"}
+    record["deferred"] = [route, route] if duplicate else [route]
+    encoded = _slice(VersionedPayload(3, payload))
+    if duplicate or inputs == []:
+        with pytest.raises(StateError):
+            decode_native_setup(encoded)
+    else:
+        decoded = decode_native_setup(encoded)
+        actual = decoded.records[0]
+        assert actual.artifact_inputs == (None if inputs is None else tuple(inputs))
+        assert tuple(item.input_id for item in actual.deferred) == ("b" * 64,)
+        assert decode_native_setup(_slice(encode_native_setup(decoded))) == decoded
+
+
+@pytest.mark.parametrize("deferred", [False, True])
+def test_completed_record_with_unknown_full_table_requires_no_partial_routes(deferred):
+    payload = _state().model_dump(mode="json")
+    record = payload["records"][0]
+    record["complete"] = True
+    record["incomplete_reasons"] = []
+    record["artifact_inputs"] = None
+    if deferred:
+        record["deferred"] = [{"input_id": "b" * 64, "destination": "session", "reason": "fixture later delivery"}]
+    encoded = _slice(VersionedPayload(3, payload))
+    if deferred:
+        with pytest.raises(StateError):
+            decode_native_setup(encoded)
+    else:
+        decoded = decode_native_setup(encoded)
+        assert decoded.records[0].complete
+        assert decoded.records[0].artifact_inputs is None
+        assert decoded.records[0].deferred == ()
+        assert decode_native_setup(_slice(encode_native_setup(decoded))) == decoded
 
 
 def test_malformed_known_payload_has_safe_error():
@@ -86,7 +157,9 @@ def test_replacement_retains_sibling_records_and_incomplete_prefix(tmp_path):
     db = Database(tmp_path / "state.db")
     try:
         first = _state()
-        second = first.records[0].model_copy(update={"integration": "claude-code", "complete": True})
+        second = first.records[0].model_copy(
+            update={"integration": "claude-code", "complete": True, "incomplete_reasons": ()}
+        )
         state = replace_setup_record(first, second)
         write_native_setup(db, "agent", "a", state, operation="agent-create")
         assert read_native_setup(db, "agent", "a") == state
@@ -137,3 +210,46 @@ def test_restore_preserves_native_applied_state_after_setup_releases_database(tm
             assert read_native_setup(restored, "agent", "a") == pending
     finally:
         restored.close()
+
+
+@pytest.mark.parametrize("version", [1, 2])
+@pytest.mark.parametrize("case", ["complete", "explicit-route", "unconfirmed"])
+def test_legacy_codec_only_trusts_complete_or_explicit_routing_results(version, case):
+    identity = "b" * 64
+    original = (
+        _state()
+        .records[0]
+        .model_copy(
+            update={
+                "complete": case == "complete",
+                "incomplete_reasons": () if case == "complete" else ("fixture incomplete application",),
+                "artifact_inputs": (identity,),
+                "deferred": (ArtifactDeferral(input_id=identity, destination="session", reason="fixture route"),)
+                if case == "explicit-route"
+                else (),
+            }
+        )
+    )
+    payload = NativeSetupState(records=(original,)).model_dump(mode="json")
+    stored = _slice(VersionedPayload(version, payload))
+    decoded = decode_native_setup(stored)
+    expected = None if case == "unconfirmed" else (identity,)
+    assert decoded.records[0].artifact_inputs == expected
+    assert decoded.records[0].claims == original.claims
+    assert decoded.records[0].incomplete_reasons == original.incomplete_reasons
+    assert decoded.records[0].deferred == original.deferred
+    assert stored.payload.value == payload
+    canonical = canonicalize_native_setup(stored)
+    assert canonical.payload_version == 3
+    records = canonical.value["records"]
+    assert isinstance(records, list) and isinstance(records[0], dict)
+    assert records[0]["artifact_inputs"] == (None if expected is None else [identity])
+    assert decode_native_setup(_slice(canonical)) == decoded
+
+
+def test_current_codec_preserves_confirmed_empty_routes_despite_native_failure():
+    original = _state().records[0].model_copy(update={"artifact_inputs": ("b" * 64,)})
+    state = NativeSetupState(records=(original,))
+    encoded = encode_native_setup(state)
+    assert encoded.payload_version == 3
+    assert decode_native_setup(_slice(encoded)) == state

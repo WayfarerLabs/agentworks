@@ -66,7 +66,11 @@ class _InstallCommandEntry(DeclaredResource):
     after success because init and reinit may invoke the resource again."""
 
     path: list[str] = Field(default_factory=list)
-    """Directories prepended to ``PATH`` for the duration of the command."""
+    """Directories written to the target user's managed profile after install
+    commands run, including commands skipped by completion checks. Later shells
+    that source the profile prepend these directories to ``PATH``; child processes
+    inherit them. A leading ``~`` resolves to that user's home. Install commands
+    themselves use the login shell's existing ``PATH``."""
 
     test_exec: str | None = Field(default=None, examples=["my-tool"])
     """Optional completion check for whether this command is already on

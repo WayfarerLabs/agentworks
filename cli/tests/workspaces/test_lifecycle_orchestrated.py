@@ -534,7 +534,7 @@ def test_repair_healthy_workspace_reports_ok_for_every_step(
     assert "\nNo issues found" in captured_output.info
     # Convergence is unconditional: the canonical commands still ran.
     assert any("chmod -c 2770 /srv/ws1" in c for c in fake.commands)
-    assert any("setfacl -R -m g::rwx" in c for c in fake.commands)
+    assert any("-exec setfacl -m g::rwx" in c for c in fake.commands)
 
 
 def test_repair_fully_damaged_workspace_reports_fixed_per_step(
@@ -704,7 +704,7 @@ def test_repair_acls_indeterminate_when_getfacl_fails(
     # found", but qualified with the unverified-step count.
     assert "\nNo issues found (1 step(s) could not be verified)" in captured_output.info
     # apply_workspace_acls still ran: convergence is unaffected by the probe.
-    assert any("setfacl -R -m g::rwx" in c for c in fake.commands)
+    assert any("-exec setfacl -m g::rwx" in c for c in fake.commands)
 
 
 def test_repair_parent_traversal_quotes_a_spaced_path(
@@ -830,7 +830,7 @@ class _CreateThenRepairTarget(_FakeAdminTarget):
             self._ws_mode = 0o2770  # repair step 3 stamps the canonical mode
         elif "chmod -c a+x" in cmd:
             stdout, self._ws_mode = _self_inclusive_traversal_line(cmd, self._ws_mode)
-        elif "setfacl -R -m g::rwx" in cmd:
+        elif "-exec setfacl -m g::rwx" in cmd:
             self._acl_canonical = True  # the recursive access apply converges the tree
         elif "getfacl" in cmd:
             entries = _HEALTHY_ACL if self._acl_canonical else _DAMAGED_ACL
@@ -868,7 +868,7 @@ def test_first_repair_after_create_is_a_noop(
     # not a top-dir-only default. Assert on shape, path-agnostically.
     create_acls = [c for c in fake.commands if "setfacl" in c]
     assert any(c.startswith("find ") and "setfacl -d -m g::rwx -m m::rwx -m o::---" in c for c in create_acls)
-    assert any("setfacl -R -m g::rwx -m m::rwx -m o::---" in c for c in create_acls)
+    assert any("-exec setfacl -m g::rwx -m m::rwx -m o::---" in c for c in create_acls)
     assert fake._acl_canonical
 
     workspace_manager.repair_workspace(db, config, "ws1", interaction=TtyInteractionPolicy.REFUSE)
@@ -943,7 +943,7 @@ def test_repair_hardens_other_bits_on_a_pre254_workspace(
     assert "\nRepaired 1 issue(s)" in captured_output.info
     # The other-denial rode in on both applications.
     assert any(c.startswith("find ") and "setfacl -d" in c and "o::---" in c for c in fake.commands)
-    assert any(c.startswith("setfacl -R") and "o::---" in c for c in fake.commands)
+    assert any("-exec setfacl -m" in c and "o::---" in c for c in fake.commands)
 
 
 def test_delete_reachable_vm_is_one_boundary_burst(
@@ -1210,7 +1210,7 @@ def test_create_rollback_on_clone_failure_leaves_no_residue(
     residue: ``create_vm_workspace`` self-cleans exactly what it created
     (issue #262). ``realize._cleanup`` is gated on the function RETURNING,
     so for this window the self-cleanup is the ONLY teardown, and it fires
-    exactly once. The original clone error propagates unmasked, the
+    exactly once. The original clone error type propagates with safe operation context, the
     directory ``rm -rf`` and the ``groupdel ws-ws1`` are both issued (the
     group after the directory, mirroring delete), and no DB row survives.
     ``failing=('test -d', 'git clone')`` makes the existence probe report
@@ -1226,21 +1226,67 @@ def test_create_rollback_on_clone_failure_leaves_no_residue(
     _seed_vm_only(db)
     _reachable(monkeypatch, True)
 
-    # SSHError is an AgentworksError, so realize re-raises it verbatim (not
-    # wrapped in ExternalError): the operator-facing clone error survives.
-    with pytest.raises(SSHError, match="git clone"):
+    # Realize preserves the transport error type and workspace identity.
+    with pytest.raises(SSHError) as caught:
         workspace_manager.create_workspace(
             db, config, name="ws1", vm_name="box", interaction=TtyInteractionPolicy.REFUSE
         )
 
+    assert caught.value.entity_kind == "workspace" and caught.value.entity_name == "ws1"
     dir_removed = next(i for i, c in enumerate(fake.commands) if c.startswith("rm -rf") and "ws1" in c)
     group_removed = next(i for i, c in enumerate(fake.commands) if "groupdel ws-ws1" in c)
     assert group_removed > dir_removed
     assert db.get_workspace("ws1") is None
     # The teardown succeeded, so the self-cleanup's own failure warning must
     # not fire, and realize's post-return rollback path never engaged.
-    assert not any("cleanup after failed workspace create" in w for w in captured_output.warnings)
-    assert not any("rollback during workspace create" in w for w in captured_output.warnings)
+    assert not captured_output.warnings
+
+
+@pytest.mark.parametrize("cleanup_interrupt", [False, True])
+def test_cancel_during_clone_cleans_directory_and_group_and_preserves_original_interrupt(
+    db: Database,
+    make_config,
+    monkeypatch: pytest.MonkeyPatch,
+    cleanup_interrupt: bool,
+) -> None:
+    interrupt = KeyboardInterrupt("fixture clone cancellation")
+    resources: set[str] = set()
+
+    class Target(_CheckAwareTarget):
+        def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
+            if cmd.startswith("git clone"):
+                self.commands.append(cmd)
+                assert resources == {"directory", "group"}
+                raise interrupt
+            result = super().run(cmd, **kwargs)
+            if "groupadd" in cmd:
+                resources.add("group")
+            elif cmd.startswith("mkdir -p "):
+                resources.add("directory")
+            elif cmd.startswith("rm -rf"):
+                resources.discard("directory")
+            elif "groupdel" in cmd:
+                resources.discard("group")
+                if cleanup_interrupt:
+                    raise KeyboardInterrupt("fixture second interruption during cleanup")
+            return result
+
+    target = Target(failing=("test -d",))
+    _wire_target(monkeypatch, target)
+    config = make_config(
+        manifests=[ManifestDoc("workspace-template", "default", {"repo": "https://example.com/repo.git"})]
+    )
+    _seed_vm_only(db)
+    _reachable(monkeypatch, True)
+    with pytest.raises(KeyboardInterrupt) as caught:
+        workspace_manager.create_workspace(
+            db, config, name="ws1", vm_name="box", interaction=TtyInteractionPolicy.REFUSE
+        )
+    assert caught.value is interrupt
+    assert not resources and db.get_workspace("ws1") is None
+    directory = [index for index, command in enumerate(target.commands) if command.startswith("rm -rf")]
+    group = [index for index, command in enumerate(target.commands) if "groupdel" in command]
+    assert len(directory) == len(group) == 1 and directory[0] < group[0]
 
 
 # -- the operation scope reaches readiness ------------------------------------
@@ -1834,12 +1880,12 @@ def test_copy_applies_canonical_acl_after_unpack_and_chown(
     cmds = fake.commands
     # The canonical pair, both carrying other-denial (path-agnostic shape).
     assert any(c.startswith("find ") and "setfacl -d -m g::rwx -m m::rwx -m o::---" in c for c in cmds)
-    assert any(c.startswith("setfacl -R -m g::rwx -m m::rwx -m o::---") for c in cmds)
+    assert any("-exec setfacl -m g::rwx -m m::rwx -m o::---" in c for c in cmds)
     # The old top-dir-only default (a bare `setfacl -d ...`, not via `find`) is gone.
     assert not any(c.startswith("setfacl -d") for c in cmds)
     # Applied AFTER the unpack AND the recursive chown, so it covers the
     # unpacked, correctly-owned content.
-    access = next(i for i, c in enumerate(cmds) if c.startswith("setfacl -R -m g::rwx"))
+    access = next(i for i, c in enumerate(cmds) if "-exec setfacl -m g::rwx" in c)
     unpack = next(i for i, c in enumerate(cmds) if "tar xzf" in c)
     chown_r = next(i for i, c in enumerate(cmds) if c.startswith("chown -R"))
     sgid = next(i for i, c in enumerate(cmds) if "chmod g+s" in c)
@@ -1891,12 +1937,12 @@ def test_rehome_routes_through_the_canonical_acl_helper(
 
     cmds = fake.commands
     assert any(c.startswith("find ") and "setfacl -d -m g::rwx -m m::rwx -m o::---" in c for c in cmds)
-    assert any(c.startswith("setfacl -R -m g::rwx -m m::rwx -m o::---") for c in cmds)
+    assert any("-exec setfacl -m g::rwx -m m::rwx -m o::---" in c for c in cmds)
     # Ordering: the canonical ACL lands after the rsync move and before the
     # ancestor-traversal re-grant, mirroring the copy test's ordering pin so
     # a future resequencing regression is caught here too.
     rsync_idx = next(i for i, c in enumerate(cmds) if c.startswith(("rsync", "cp -a")))
-    acl_idx = next(i for i, c in enumerate(cmds) if c.startswith("setfacl -R -m g::rwx"))
+    acl_idx = next(i for i, c in enumerate(cmds) if "-exec setfacl -m g::rwx" in c)
     walk_idx = next(i for i, c in enumerate(cmds) if "chmod a+x" in c and "dirname" in c)
     assert rsync_idx < acl_idx < walk_idx
     # The DB moved, confirming the rehome ran to completion (the ACL step is
@@ -1956,7 +2002,7 @@ class _RehomeThenRepairTarget(_FakeAdminTarget, SSHTransport):  # type: ignore[m
             self._ws_mode = 0o2770
         elif "chmod -c a+x" in cmd:
             stdout, self._ws_mode = _self_inclusive_traversal_line(cmd, self._ws_mode)
-        elif "setfacl -R -m g::rwx" in cmd:
+        elif "-exec setfacl -m g::rwx" in cmd:
             self._acl_canonical = True
         elif "getfacl" in cmd:
             entries = _HEALTHY_ACL if self._acl_canonical else _DAMAGED_ACL
@@ -2022,7 +2068,7 @@ class _CopyThenRepairTarget(_FakeAdminTarget, SSHTransport):  # type: ignore[mis
             self._ws_mode = 0o2770  # repair step 3 stamps the canonical mode
         elif "chmod -c a+x" in cmd:
             stdout, self._ws_mode = _self_inclusive_traversal_line(cmd, self._ws_mode)
-        elif "setfacl -R -m g::rwx" in cmd:
+        elif "-exec setfacl -m g::rwx" in cmd:
             self._acl_canonical = True  # the recursive access apply converges the tree
         elif "getfacl" in cmd:
             entries = _HEALTHY_ACL if self._acl_canonical else _DAMAGED_ACL
@@ -2063,7 +2109,7 @@ def test_first_repair_after_copy_is_a_noop(
     # not a top-dir-only default.
     copy_acls = [c for c in fake.commands if "setfacl" in c]
     assert any(c.startswith("find ") and "setfacl -d -m g::rwx -m m::rwx -m o::---" in c for c in copy_acls)
-    assert any("setfacl -R -m g::rwx -m m::rwx -m o::---" in c for c in copy_acls)
+    assert any("-exec setfacl -m g::rwx -m m::rwx -m o::---" in c for c in copy_acls)
     assert fake._acl_canonical
 
     workspace_manager.repair_workspace(db, config, "ws2", interaction=TtyInteractionPolicy.REFUSE)

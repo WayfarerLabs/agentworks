@@ -55,8 +55,8 @@ class _VMPlatformKind:
         and how to reach them over Tailscale SSH once they exist.
 
         Every platform also runs core's root scripts through its own channel, which works
-        independently of the VM's Tailscale state; that is how recovery, rekey and the
-        logout at delete reach a VM. A native interactive shell is optional: Proxmox's QEMU
+        independently of the VM's Tailscale state; that is how recovery and rekey reach a
+        VM. A native interactive shell is optional: Proxmox's QEMU
         Guest Agent runs scripts but directs interactive access to its provider console.
 
         Contract version 2 receives core's concrete current Debian release, resolves it

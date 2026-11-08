@@ -501,6 +501,12 @@ def _run_agent_install_commands(
     # in create_agent_on_vm (so install commands above could see
     # AGENTWORKS_AGENT via login-shell sourcing); the rewrite here adds
     # the PATH entries those install commands contributed.
+    # Each export prepends, so keep the last occurrence to preserve lookup
+    # precedence when commands contribute interleaved paths such as A, B, A.
+    path_additions = list(
+        dict.fromkeys(p.replace("~", "$HOME", 1) if p.startswith("~") else p for p in reversed(path_additions))
+    )
+    path_additions.reverse()
     if path_additions:
         output.info(f"Adding {len(path_additions)} PATH entries for agent...")
     _write_agent_profile(

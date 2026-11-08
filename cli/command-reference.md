@@ -792,16 +792,14 @@ and does not try a logout. A rekeyed VM that does not answer at its new address 
 `agw vm recover`, as `vm start` does; the new address is recorded either way.
 
 `vm delete` requires `--force` if the VM has workspaces, agents, or sessions. The confirmation
-message shows what will be deleted. Pass `--yes` to skip the prompt. Delete logs the VM's node out
-of the tailnet through the platform's own channel and reports the outcome; when the logout fails or
-cannot be confirmed, it names the node to remove in the Tailscale admin console. A VM that is
-stopped or deallocated is not logged out, since nothing reaches it (a stopped WSL2 distro is usually
-booted by the hold delete keeps on it, and is then logged out), and neither is a cloud VM whose host
-key was never recorded, since nothing could verify the VM that answered; delete names the node
-instead. The backend VM is deleted either way. A backend delete that fails, such as a locked Proxmox
-VM or an unreachable Lima host, keeps the VM's row and its host-key record, so run `vm delete` again
-once the cause is fixed. The one row `--force` removes past such a failure is one a killed create
-left with no platform metadata, as `vm create` describes above.
+message shows what will be deleted. Pass `--yes` to skip the prompt. If backend binding fails, the
+command warns and removes local state without attempting remote deletion. The backend VM is deleted
+first and alone: delete does not stop individual workloads or log the node out of Tailscale before
+it, so a refused delete leaves a surviving VM as it was, and an external tailnet entry can remain
+for separate removal in the Tailscale admin console. A backend delete that fails, such as a locked
+Proxmox VM or an unreachable Lima host, keeps the VM's row and its host-key record, so run
+`vm delete` again once the cause is fixed. The one row `--force` removes past such a failure is one
+a killed create left with no platform metadata, as `vm create` describes above.
 
 `vm backup` exports the VM row and exact owner tree of agents, workspaces, sessions, events, grants,
 desired instance specs, and workspace files. It does not create or copy a provider VM snapshot,
@@ -928,7 +926,8 @@ and destination can be the same VM (a clone) or different VMs.
 the filter is an error, not an empty result.
 
 `workspace delete` requires `--force` if the workspace has sessions. Running sessions are killed
-during deletion. Pass `--yes` to skip the confirmation prompt.
+during deletion. Its confirmation warns that workspace files, uncommitted changes, stashes and
+commits not pushed elsewhere will be lost. Pass `--yes` to skip the confirmation prompt.
 
 There is deliberately no `workspace shell`: a shell rooted in a workspace is always _somebody's_
 shell. Use `agw vm shell <vm> --workspace <ws>` for an admin shell or
