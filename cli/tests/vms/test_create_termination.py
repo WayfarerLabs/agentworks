@@ -120,7 +120,14 @@ def test_a_closed_terminal_during_a_cloud_create_still_rolls_it_back(
             vm_manager.create_vm(child_db, config, name="dev", site="aws-dev", interaction=TtyInteractionPolicy.REFUSE)
         except BaseException as error:
             outcome = type(error).__name__
-        os.write(report_write, json.dumps({"outcome": outcome, "calls": recorder.methods("ec2")}).encode())
+        report = {
+            "outcome": outcome,
+            "calls": recorder.methods("ec2"),
+            # Not DryRun calls: the route's poke dry-runs a revoke of its own, which the rollback's is not.
+            "authorized": recorder.authorized_cidrs(),
+            "revoked": recorder.revoked_cidrs(),
+        }
+        os.write(report_write, json.dumps(report).encode())
         os._exit(0)
 
     os.close(started_write)
@@ -147,6 +154,7 @@ def test_a_closed_terminal_during_a_cloud_create_still_rolls_it_back(
 
     assert report["outcome"] == "KeyboardInterrupt"
     assert "terminate_instances" in report["calls"]
-    assert "revoke_security_group_ingress" in report["calls"]
+    assert report["authorized"]
+    assert sorted(report["revoked"]) == sorted(report["authorized"])  # the bootstrap allow was revoked
     assert "delete_security_group" in report["calls"]
     assert db.get_vm("dev") is None

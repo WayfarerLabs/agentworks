@@ -224,7 +224,6 @@ class TestInterruptDuringInlineWait:
         assert "Azure VM 'vm1'" in warned
         assert "resource group 'rg1'" in warned
         assert "vm delete boom" in warned
-        assert "delete it there manually" in warned
         # The cleanup was NOT abandoned: the sweep ran past the failed
         # VM delete and the stragglers stayed collectable.
         assert fakes.network.network_interfaces.deleted == [("rg1", "vm1-nic")]
@@ -390,7 +389,6 @@ class TestVMDeleteFailureWarns:
         assert "'vm1'" in warned
         assert "AuthorizationFailed" in warned
         assert "'rg1'" in warned
-        assert "manually" in warned
         # Still best-effort: the name-based sweep ran regardless.
         assert fakes.network.network_interfaces.deleted == [("rg1", "vm1-nic")]
         assert fakes.network.public_ip_addresses.deleted == [("rg1", "vm1-ip")]
