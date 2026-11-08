@@ -333,6 +333,12 @@ that read the same instruction file can also see its generated content. Codex's 
 discovery, context budgets and reload behavior still apply; file publication does not prove that a
 running model has loaded the content.
 
+Codex project persona discovery also follows its native project-trust policy. Publishing a persona
+under `<workspace>/.codex/agents/` does not grant that trust. In an untrusted project, Codex can
+disable project configuration and omit those roles from its agent catalog; trust the project through
+Codex before relying on its project personas. User-level persona discovery is a separate native
+scope.
+
 Generated instruction sections use `<!-- BEGIN AGENTWORKS GENERATED -->` and
 `<!-- END AGENTWORKS GENERATED -->` on their own lines. Applying replaces everything between a
 complete pair, including edits to the generated content, and preserves unrelated text, ownership,
