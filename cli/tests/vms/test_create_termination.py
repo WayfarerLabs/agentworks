@@ -1,7 +1,8 @@
-"""``vm create`` ended by ``SIGTERM`` or ``SIGHUP``: it unwinds like Ctrl-C, so a cloud's create rolls back."""
+"""``vm create`` ended by any signal, or with nothing reading its output: a cloud's create still rolls back."""
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import select
@@ -22,6 +23,7 @@ from tests._root_channel_fakes import Answer, FakeGuest, install_at_run_process
 from tests.ssh_fixtures import write_test_ssh_keypair
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from pathlib import Path
 
     from agentworks.config import Config
@@ -50,8 +52,7 @@ def _config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Config:
     return load_config(config, warn_issues=False, warn_deprecations=False)
 
 
-@pytest.mark.usefixtures("standard_streams")
-@pytest.mark.parametrize("signal_name", ["SIGTERM", "SIGHUP"])
+@pytest.mark.parametrize("signal_name", ["SIGINT", "SIGTERM", "SIGHUP"])
 def test_a_termination_during_a_cloud_create_rolls_it_back(
     db: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, signal_name: str
 ) -> None:
@@ -79,12 +80,63 @@ def test_a_termination_during_a_cloud_create_rolls_it_back(
     assert signal.getsignal(getattr(signal, signal_name)) == before
 
 
+@contextlib.contextmanager
+def _dead_pipe() -> Iterator[None]:
+    """``agw vm create 2>&1 | tee create.log`` once ``tee`` has gone: both streams are a pipe nobody reads.
+
+    The CLI's own handler writes the lines, as in a real run. It is entered in
+    the test body, since the runner's capture puts its own streams back
+    around each fixture.
+    """
+    from agentworks import output
+    from agentworks.cli._typer_output import TyperHandler
+
+    reader, writer = os.pipe()
+    os.close(reader)
+    stream = open(writer, "w", encoding="utf-8", buffering=1)  # noqa: SIM115 - closed below
+    saved = (sys.stdout, sys.stderr, output.get_handler())
+    sys.stdout = sys.stderr = stream
+    output.set_handler(TyperHandler())
+    try:
+        yield
+    finally:
+        sys.stdout, sys.stderr = saved[0], saved[1]
+        output.set_handler(saved[2])
+        with contextlib.suppress(OSError):
+            stream.close()
+
+
+@pytest.mark.parametrize("signal_name", ["SIGINT", "SIGTERM", "SIGHUP"])
+def test_a_create_whose_reader_has_gone_rolls_back_as_on_a_live_terminal(
+    db: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, signal_name: str
+) -> None:
+    """Closing the window ends ``tee`` too, so every line the rollback prints fails; none of them may stop it."""
+    config = _config(tmp_path, monkeypatch)
+    recorder = install_fakes(monkeypatch)
+    stub_egress(monkeypatch)
+
+    def respond(payload: str, seen: int) -> Answer:
+        os.kill(os.getpid(), getattr(signal, signal_name))
+        raise AssertionError(f"{signal_name} did not interrupt the create")
+
+    install_at_run_process(monkeypatch, FakeGuest(respond))
+
+    with pytest.raises(KeyboardInterrupt), _dead_pipe():
+        vm_manager.create_vm(db, config, name="dev", site="aws-dev", interaction=TtyInteractionPolicy.REFUSE)
+
+    calls = recorder.methods("ec2")
+    assert "revoke_security_group_ingress" in calls
+    assert "terminate_instances" in calls
+    assert "delete_security_group" in calls
+    assert db.get_vm("dev") is None
+    assert not trust.store_file("dev").exists()
+
+
 # The forked child runs the create with every fixture this process set up. A
 # test runner's worker has threads of its own, so a lock one held at the fork
 # could deadlock the child; the parent's watchdog then fails the test rather
 # than hanging it.
 @pytest.mark.filterwarnings("ignore:This process .* is multi-threaded:DeprecationWarning")
-@pytest.mark.usefixtures("standard_streams")
 def test_a_closed_terminal_during_a_cloud_create_still_rolls_it_back(
     db: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -92,7 +144,7 @@ def test_a_closed_terminal_during_a_cloud_create_still_rolls_it_back(
 
     The kernel hangs the terminal up and sends ``SIGHUP``. Every write to the
     terminal now fails, and the rollback's first line would end it with the
-    VM running and its allow open, so the hangup must leave it writing nowhere.
+    VM running and its allow open, so a failed line must not stop it.
     """
     import pty
 

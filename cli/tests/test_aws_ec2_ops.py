@@ -6,7 +6,6 @@ interrupt), status mapping, and strict idempotent delete.
 
 from __future__ import annotations
 
-import errno
 import gzip
 from pathlib import Path
 from types import SimpleNamespace
@@ -15,7 +14,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from agentworks import output
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import ProvisionRequest, RetainedProvisioningError
 from agentworks.db import VMStatus
@@ -132,11 +130,6 @@ def _ec2(platform: EC2Platform) -> Any:
     """The cached fake EC2 client for the platform's region, whose ``ingress``
     dict is the live per-SG ingress state the exposure tests read."""
     return platform._client("ec2", "us-east-1", RunContext())
-
-
-def _dead_terminal(*_args: object, **_kwargs: object) -> None:
-    """``output`` after a hangup: the terminal is gone and a write to it fails."""
-    raise OSError(errno.EIO, "Input/output error")
 
 
 class TestCreate:
@@ -730,19 +723,6 @@ class TestTransientRoute:
         platform = _platform()
         with pytest.raises(RuntimeError), platform._transient_route(_vm(), RunContext(config=_config())):
             raise RuntimeError("boom")
-        assert _ec2(platform).ingress["sg-123"] == {}
-
-    def test_a_dead_terminal_cannot_keep_the_allow_open(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """A route closed by a hangup revokes every prefix before printing anything."""
-        install_fakes(monkeypatch)
-        platform = _platform()
-
-        route = platform._transient_route(_vm(), RunContext(config=_config(["198.51.100.0/24"])))
-        with pytest.raises(OSError), route:
-            monkeypatch.setattr(output, "info", _dead_terminal)
-            monkeypatch.setattr(output, "warn", _dead_terminal)
-            raise KeyboardInterrupt
-
         assert _ec2(platform).ingress["sg-123"] == {}
 
     def test_partial_poke_failure_is_still_swept(self, monkeypatch: pytest.MonkeyPatch) -> None:

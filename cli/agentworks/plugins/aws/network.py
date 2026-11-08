@@ -273,9 +273,7 @@ def remove_ssh_allow(ec2: Any, security_group_id: str, prefixes: Sequence[str]) 
     Best-effort per prefix: a tuple already gone (a concurrent route's exit
     revoked a shared prefix, or the group is gone) is tolerated; any other
     failure warns naming the prefix and the residual exposure rather than
-    raising, because every call site must keep unwinding. Every revoke runs
-    before anything is printed: on a route closed by a hangup the terminal is
-    gone and a write to it can fail, so the allows must be gone first."""
+    raising, because every call site must keep unwinding."""
     warnings: list[str] = []
     for prefix in prefixes:
         try:

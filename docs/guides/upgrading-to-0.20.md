@@ -278,6 +278,11 @@ before they resolve the auth key.
   console window on Windows may start that cleanup, but Windows ends the process within seconds, so
   it cannot be relied on to finish: end the command with Ctrl-C or Ctrl-Break instead, and delete a
   rule a closed window left behind from the VM's firewall in the provider's console.
+- **Output nobody reads no longer fails a command.** When the reader of `agw`'s output has gone (a
+  pipe into `head` that has exited, `2>&1 | tee create.log` in a closed window, or the closed
+  terminal itself), the rest of that output is dropped and the command carries on to the end, a
+  create's rollback included, with the exit status it would have had. Output redirected to a file
+  that cannot be written, such as on a full disk, still fails the command.
 
 ## Third-party VM platforms
 

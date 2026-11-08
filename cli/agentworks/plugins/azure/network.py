@@ -391,10 +391,6 @@ def remove_ssh_allow(
     the platform instance just to sharpen a warning string is not worth
     the coupling; the rule NAME, by contrast, is always known (fixed for
     bootstrap, returned by the poke), so it is always named.
-
-    It deletes before it prints: on a route closed by a hangup the
-    terminal is gone and a write to it can fail, so the rule must be
-    gone first.
     """
     from azure.core.exceptions import ResourceNotFoundError
 

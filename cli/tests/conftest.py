@@ -5,7 +5,6 @@ from __future__ import annotations
 import contextlib
 import os
 import sqlite3
-import sys
 import tempfile
 from collections.abc import Generator, Iterator
 from contextlib import AbstractContextManager, contextmanager
@@ -261,20 +260,6 @@ def _isolate_inherited_aw_secrets(
     for name in tuple(os.environ):
         if name.startswith("AW_SECRET_"):
             monkeypatch.delenv(name, raising=False)
-
-
-@pytest.fixture
-def standard_streams() -> Iterator[None]:
-    """Put back descriptors 1 and 2 and the Python streams, which a delivered hangup points at the null device."""
-    saved = {descriptor: os.dup(descriptor) for descriptor in (1, 2)}
-    streams = (sys.stdout, sys.stderr)
-    try:
-        yield
-    finally:
-        for descriptor, copy in saved.items():
-            os.dup2(copy, descriptor)
-            os.close(copy)
-        sys.stdout, sys.stderr = streams
 
 
 @pytest.fixture

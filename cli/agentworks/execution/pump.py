@@ -14,11 +14,9 @@ from __future__ import annotations
 
 import contextlib
 import enum
-import errno
 import os
 import queue
 import subprocess
-import sys
 import threading
 import time
 from collections.abc import Callable
@@ -28,6 +26,7 @@ from typing import TYPE_CHECKING
 from agentworks.execution import ssh_process
 from agentworks.execution.envelope import StreamFilter
 from agentworks.execution.results import UnknownReason
+from agentworks.output import consumer_left
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -70,20 +69,9 @@ Sink = Callable[[bytes], None]
 A sink that cannot take them yet raises ``BlockingIOError`` with
 ``characters_written`` set to what it did take; the pump holds the rest and
 offers it again (an empty remainder asks the sink to finish, say a flush). An
-error for which :func:`consumer_left` holds means the consumer has gone; any
-other ``OSError`` propagates.
+error for which :func:`agentworks.output.consumer_left` holds means the
+consumer has gone; any other ``OSError`` propagates.
 """
-
-
-def consumer_left(error: OSError) -> bool:
-    """Whether a failed write or flush means the consumer at the other end has gone (``| head``).
-
-    That is ``BrokenPipeError`` or ``ConnectionResetError``, and on Windows
-    ``EINVAL``, which is how CPython reports a pipe whose reader closed there.
-    """
-    if isinstance(error, (BrokenPipeError, ConnectionResetError)):
-        return True
-    return sys.platform == "win32" and error.errno == errno.EINVAL
 
 
 class OutputLimitExceeded(Exception):
@@ -191,8 +179,8 @@ class PipeSession:
 
     A write that fails to the client's stdin is the consumer ending early, not a
     failure: the session stops sending and keeps reading. A sink that raises
-    an error for which :func:`consumer_left` holds is the consumer of that
-    stream leaving. The session closes its read end of that stream of the
+    an error for which :func:`agentworks.output.consumer_left` holds is the
+    consumer of that stream leaving. The session closes its read end of that stream of the
     client's, so ssh sees ``EPIPE`` as it did when it held the operator's
     streams. A departed stdout makes ssh close the channel when the guest next
     writes, and the session keeps pumping stderr until then, so a quiet payload

@@ -16,6 +16,7 @@ import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from agentworks import output
 from agentworks.errors import StateError
 from agentworks.execution import attach as attach_module
 from agentworks.execution import client, envelope, forwarding, pump, ssh_process
@@ -294,20 +295,14 @@ def _flush_or_point_at_null_device(stream: BinaryIO) -> OSError | None:
     Bytes that could not be flushed to a departed consumer (``| head``) stay
     in the stream's buffer and would fail again at interpreter shutdown,
     turning the exit status into 120 with a traceback; the null device gives
-    shutdown somewhere to write them. Any other flush failure is returned for
-    the caller to raise, not raised.
+    shutdown somewhere to write them (:func:`output.tolerating_dead_sink`).
+    Any other flush failure is returned for the caller to raise, not raised.
     """
     try:
-        stream.flush()
+        with output.tolerating_dead_sink(stream):
+            stream.flush()
     except OSError as error:
-        if not pump.consumer_left(error):
-            return error
-        with contextlib.suppress(OSError, ValueError):
-            null = os.open(os.devnull, os.O_WRONLY)
-            try:
-                os.dup2(null, stream.fileno())
-            finally:
-                os.close(null)
+        return error
     return None
 
 
