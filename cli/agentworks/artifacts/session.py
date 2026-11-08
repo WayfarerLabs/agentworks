@@ -3,23 +3,34 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import shlex
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
-from agentworks.artifacts.application import ArtifactApplication, OwnedArtifactFile, SessionArtifactContext
+from agentworks import output
+from agentworks.artifacts.application import (
+    ArtifactApplication,
+    ArtifactDeferral,
+    OwnedArtifactFile,
+    SessionArtifactContext,
+)
 from agentworks.artifacts.publication import publish_artifacts, validate_application
 from agentworks.artifacts.reporting import report_applied, report_deferrals
 from agentworks.artifacts.state import CapturedArtifacts, capture_owner, write_capture
 from agentworks.errors import StateError
 from agentworks.harness_setup.inputs import SetupInputs
 from agentworks.harness_setup.model import NativeSetupState, SetupRecord
+from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
 from agentworks.harness_setup.state import read_native_setup, replace_setup_record, write_native_setup
 from agentworks.linux_users import managed_home
 from agentworks.native_files import native_path
 from agentworks.schema import CapabilityConfig
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from agentworks.db import Database, SessionRow, VMRow, WorkspaceRow
     from agentworks.resources.registry import Registry
     from agentworks.secrets.orchestration import SecretTarget
@@ -32,6 +43,32 @@ class PreparedSessionArtifacts:
     context: SessionArtifactContext
     capture: CapturedArtifacts
     setup_inputs: SetupInputs
+    unresolved_routes: frozenset[str] = frozenset()
+    unavailable_reasons: tuple[str, ...] = ()
+
+
+def _session_artifact_home(runner: Transport) -> str:
+    """Observe one normalized actual-user home despite shell startup stdout."""
+    command = shlex.join(
+        ["python3", "-c", "import json, os; print('\\nAGW_ARTIFACT_HOME=' + json.dumps(os.environ.get('HOME', '')))"]
+    )
+    result = runner.run(command, check=False)
+    if not result.ok:
+        raise StateError("could not determine the session artifact home")
+    homes = [
+        line.removeprefix("AGW_ARTIFACT_HOME=")
+        for line in result.stdout.splitlines()
+        if line.startswith("AGW_ARTIFACT_HOME=")
+    ]
+    if len(homes) != 1:
+        raise StateError("session artifact home observation must contain exactly one framed path")
+    try:
+        home = json.loads(homes[0])
+        if not isinstance(home, str):
+            raise ValueError
+    except ValueError:
+        raise StateError("session artifact home observation contains an invalid path payload") from None
+    return native_path(home)
 
 
 def prepare_session_artifacts(
@@ -48,8 +85,9 @@ def prepare_session_artifacts(
     secret_target: SecretTarget,
     linux_user: str,
     session_uuid: str | None = None,
+    redactions: Iterable[str] = (),
 ) -> PreparedSessionArtifacts:
-    """Capture local inputs and validate ancestor results before runtime teardown."""
+    """Capture local inputs and report ancestor state before runtime teardown."""
     from agentworks.artifacts.routing import session_artifacts
     from agentworks.harness_setup.readiness import _applicable_evidence
 
@@ -69,15 +107,16 @@ def prepare_session_artifacts(
             runner=runner,
         )
         if not evidence.current:
-            raise StateError("ancestor artifact placement is not current", hint=evidence.remediation)
+            output.warn(
+                f"Artifact placement via {template.harness_integration} at "
+                f"{evidence.owner_kind}/{evidence.owner_name} is {evidence.status}. "
+                f"{evidence.remediation} Continuing with existing placement."
+            )
     # The actual launch user's home is an identity, never a workspace-derived path.
     home = managed_home(linux_user)
     prior = read_native_setup(db, "session", name)
-    if routed.inputs or routed.ancestor_files or any(item.artifact_files for item in prior.records):
-        result = runner.run('printf "%s" "$HOME"', check=False)
-        if not result.ok:
-            raise StateError("could not determine the session artifact home")
-        home = native_path(result.stdout.strip())
+    if routed.inputs or any(item.artifact_files for item in prior.records):
+        home = _session_artifact_home(runner)
     identity = session_uuid or str(uuid4())
     run_id = str(uuid4())
     context = SessionArtifactContext(
@@ -88,6 +127,7 @@ def prepare_session_artifacts(
         run_id=run_id,
         ancestor_files=routed.ancestor_files,
         environment=dict(environment),
+        redactions=tuple(redactions),
     )
     setup_inputs = SetupInputs(
         "session",
@@ -98,7 +138,13 @@ def prepare_session_artifacts(
         template.artifacts,
         capture,
     )
-    return PreparedSessionArtifacts(context, capture, setup_inputs)
+    return PreparedSessionArtifacts(
+        context,
+        capture,
+        setup_inputs,
+        routed.unresolved_routes,
+        tuple(sanitize_setup_diagnostic(reason) for reason in routed.unavailable_reasons),
+    )
 
 
 def validate_session_application(
@@ -129,7 +175,7 @@ def stage_session_artifacts(
     """Publish the prospective run while retaining files the old runtime can use."""
     context = prepared.context
     state = read_native_setup(db, "session", name)
-    if not context.inputs and not application.files and not state.records:
+    if not context.inputs and not application.files and not state.records and not prepared.unavailable_reasons:
         return
     previous = next((item for item in state.records if item.integration == integration), None)
     retained = () if previous is None else previous.artifact_files
@@ -138,9 +184,23 @@ def stage_session_artifacts(
         integration=integration,
         destination_id=hashlib.sha256(context.directory.encode()).hexdigest(),
         declaration=prepared.setup_inputs.declaration(integration, prepared.setup_inputs.activations[integration]),
-        artifact_inputs=tuple(item.identity for item in context.inputs.items()),
+        artifact_inputs=tuple(item.identity for item in context.inputs.items())
+        + tuple(sorted(prepared.unresolved_routes)),
         artifact_files=retained,
-        deferred=application.deferred,
+        deferred=(
+            *application.deferred,
+            *(
+                ArtifactDeferral(
+                    input_id=identity,
+                    destination="session",
+                    reason=(
+                        "The recorded upstream route has no readable captured content; this input was not delivered."
+                    ),
+                )
+                for identity in sorted(prepared.unresolved_routes)
+            ),
+        ),
+        incomplete_reasons=prepared.unavailable_reasons,
     )
 
     def checkpoint(files: tuple[OwnedArtifactFile, ...]) -> None:
@@ -155,6 +215,13 @@ def stage_session_artifacts(
         current = current.model_copy(update={"skipped": published.skipped})
         state = replace_setup_record(state, current)
         write_native_setup(db, "session", name, state, operation="session-prepare")
+        whole_files = {file.path for file in application.files if not file.generated_section}
+        conflict = next((item for item in published.skipped if item.path in whole_files), None)
+        if conflict is not None:
+            raise StateError(
+                f"Session artifact publication could not apply '{conflict.path}': {conflict.reason}",
+                hint="Existing content was retained; inspect the destination before retrying.",
+            )
     report_applied(
         context.inputs,
         integration=integration,
@@ -198,7 +265,7 @@ def commit_session_artifacts(
         updated = record.model_copy(
             update={
                 "artifact_files": (*keep, *remaining.files),
-                "complete": record.integration == integration,
+                "complete": record.integration == integration and not prepared.unavailable_reasons,
                 "pending_cleanup": record.integration != integration and bool(remaining.files),
             }
         )
@@ -218,7 +285,7 @@ def cleanup_session_artifacts(db: Database, session: SessionRow, runner: Transpo
     state = read_native_setup(db, "session", session.name)
     if not any(item.artifact_files for item in state.records):
         return
-    home = native_path(runner.run('printf "%s" "$HOME"').stdout.strip())
+    home = _session_artifact_home(runner)
     for record in tuple(state.records):
 
         def checkpoint(files: tuple[OwnedArtifactFile, ...], record: SetupRecord = record) -> None:

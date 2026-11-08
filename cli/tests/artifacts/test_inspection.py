@@ -280,7 +280,7 @@ def test_session_inspection_uses_runtime_diamond_order(db: Database, unhandled: 
     )
     blocked = inspect_artifacts(db, fixture.registry, session_name="review")
     assert blocked.owners[1].integrations[0].status == "incomplete"
-    assert blocked.owners[-1].integrations[0].status == "unavailable"
+    assert blocked.owners[-1].integrations[0].status == "current"
 
     from agentworks.artifacts.routing import inspect_owner_artifacts
     from agentworks.db import AppliedStateKey, VersionedPayload
@@ -288,8 +288,8 @@ def test_session_inspection_uses_runtime_diamond_order(db: Database, unhandled: 
     db.instance_state.replace_applied_slices(
         "session", "review", "fixture", {AppliedStateKey.HARNESS_NATIVE_SETUP: VersionedPayload(2, {"broken": True})}
     )
-    own_failure = inspect_owner_artifacts(db, fixture.registry, owner, "shell", inherited=None)
-    assert own_failure.status == "unavailable" and not own_failure.ancestor_blocked
+    own_failure = inspect_owner_artifacts(db, fixture.registry, owner, "shell")
+    assert own_failure.status == "unavailable"
     result = inspect_artifacts(db, fixture.registry, session_name="review")
     assert result.owners[-1].integrations[0].reason == own_failure.reason
 
@@ -331,7 +331,7 @@ def test_removed_bundle_reference_preserves_unknown_and_historical_metadata(db: 
     assert owner.integrations[0].status == "unavailable"
 
 
-def test_integration_config_values_are_excluded_from_both_outputs(db: Database, capsys) -> None:
+def test_integration_config_values_are_excluded_from_both_outputs(db: Database, capsys, monkeypatch) -> None:
     from agentworks.artifacts.inspection import inspect_artifacts, inspection_data, render_artifacts
     from agentworks.harness_setup.model import NativeSetupState
     from agentworks.harness_setup.state import write_native_setup
@@ -339,14 +339,25 @@ def test_integration_config_values_are_excluded_from_both_outputs(db: Database, 
 
     fixture = graph(db, active=("agent",))
     record = fixture.save("agent")
+    from agentworks.schema import CapabilityConfig
+
     confidential = "operator-supplied-private-value"
-    record = record.model_copy(update={"declaration": {"config": {"private_setting": confidential}}})
+    previous = "previous-private-value"
+    # A third-party facet may expose arbitrary native config strings. Exercise
+    # both the persisted and current sides of the comparison without requiring a CLI.
+    monkeypatch.setattr("agentworks.harness_setup.inputs.validate_capability_config", lambda **kwargs: None)
+    fixture.registry.lookup("agent-template", "agent").harness_integrations["shell"] = CapabilityConfig.model_validate(
+        {"private_setting": confidential}
+    )
+    record = record.model_copy(update={"declaration": {"config": {"private_setting": previous}}})
     write_native_setup(db, "agent", "agent", NativeSetupState(records=(record,)), operation="fixture")
     result = inspect_artifacts(db, fixture.registry, agent_name="agent")
     assert result.owners[-1].integrations[0].status == "stale"
-    assert confidential not in json.dumps(inspection_data(result))
+    encoded = json.dumps(inspection_data(result))
+    assert confidential not in encoded and previous not in encoded
     render_artifacts(result)
-    assert confidential not in capsys.readouterr().out
+    rendered = capsys.readouterr().out
+    assert confidential not in rendered and previous not in rendered
 
 
 @pytest.mark.parametrize("component", ["vm", "agent", "workspace"])
@@ -401,9 +412,117 @@ def test_skipped_section_is_inspectable_without_being_handled_or_deferred(db: Da
     write_native_setup(db, "agent", "agent", state.model_copy(update={"records": (record,)}), operation="fixture")
     result = inspect_artifacts(db, fixture.registry, agent_name="agent")
     integration = result.owners[-1].integrations[0]
-    assert integration.status == "current"
+    assert integration.status == "incomplete"
     assert item.identity not in integration.recorded_handled
     assert not integration.recorded_deferred
     assert integration.recorded_skipped == (skipped,)
     encoded = json.dumps(inspection_data(result))
     assert skipped.path in encoded and item.content.text not in encoded
+
+
+@pytest.mark.parametrize("component", ["vm", "agent", "workspace"])
+def test_stale_inactive_capture_explains_available_passthrough_without_refresh(db: Database, monkeypatch, component):
+    from agentworks.artifacts.inspection import inspect_artifacts, inspection_data
+    from agentworks.artifacts.routing import setup_artifacts
+    from agentworks.capabilities.harness_integration.kinds import HarnessIntegrationEntry
+    from agentworks.db import VersionedPayload
+    from agentworks.origin import Origin
+    from agentworks.package_sources import PackageCapture
+    from tests.artifacts.test_routing import graph
+
+    fixture = graph(db)
+    fixture.registry.add(
+        "harness-integration", "shell", HarnessIntegrationEntry(name="shell"), Origin.built_in(source="test")
+    )
+    db.instance_state.put_desired_overlay(component, component, VersionedPayload(1, {"artifacts": {"bundles": []}}))
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("inspection acquired sources or changed instance state")
+
+    monkeypatch.setattr(PackageCapture, "capture", forbidden)
+    monkeypatch.setattr(type(db.instance_state), "replace_applied_slices", forbidden)
+    result = inspect_artifacts(
+        db,
+        fixture.registry,
+        vm_name="vm" if component == "vm" else None,
+        agent_name="agent" if component == "agent" else None,
+        workspace_name="workspace" if component == "workspace" else None,
+        integration_name="shell",
+    )
+    owner = result.owners[-1]
+    integration = owner.integrations[0]
+    groups = ("vm", "agent") if component == "agent" else (component,)
+    expected = tuple(item.identity for group in groups for item in fixture.captures[group].inputs.items())
+    destination = "user" if component == "vm" else "session"
+    assert owner.capture_status == "stale" and integration.status == "stale"
+    assert not integration.activated and integration.passthrough_inputs == expected
+    assert integration.passthrough_destination == destination
+    encoded = json.loads(json.dumps(inspection_data(result)))["owners"][-1]["integrations"][0]
+    assert encoded["status"] == "stale" and encoded["passthrough_inputs"] == list(expected)
+    assert encoded["passthrough_destination"] == destination
+    if component == "vm":
+        runtime = setup_artifacts(db, fixture.registry, fixture.owners["agent"], fixture.vm, "shell").inputs
+        assert (
+            tuple(item.identity for item in runtime.deferred[fixture.captures["vm"].inputs.owner].items()) == expected
+        )
+    else:
+        runtime = fixture.route().inputs
+        known = {item.identity for item in runtime.items()}
+        assert set(expected) <= known
+
+
+@pytest.mark.parametrize("source_available", [False, True])
+def test_session_inspection_reuses_recorded_route_independently_of_current_vm_route(
+    db: Database, monkeypatch, source_available
+):
+    from agentworks.artifacts.inspection import inspect_artifacts
+    from agentworks.artifacts.state import capture_owner, read_captures, write_capture
+    from agentworks.harness_setup.inputs import SetupInputs
+    from agentworks.harness_setup.model import NativeSetupState, SetupRecord
+    from agentworks.harness_setup.state import read_native_setup, write_native_setup
+    from agentworks.package_sources import PackageCapture
+    from agentworks.schema import CapabilityConfig
+    from agentworks.secrets.orchestration import SecretTarget
+    from tests.artifacts.test_routing import graph
+
+    fixture = graph(db, active=("vm", "agent", "workspace"), counts={"agent": 0, "workspace": 0})
+    source = fixture.captures["vm"].inputs
+    fixture.save("vm", routes={"vm-0": "user"})
+    agent = fixture.save("agent", inherited=source, routes={"vm-0": "session"})
+    fixture.save("vm", routes={"vm-0": "workspace"})
+    fixture.save("workspace", inherited=source)
+    if not source_available:
+        fixture.registry.lookup("artifact-bundle", "vm-bundle").hints.clear()
+        empty = capture_owner(fixture.registry, "vm", "vm", "vm", fixture.owners["vm"].artifacts)
+        write_capture(db, "vm", "vm", "vm", empty, operation="fixture")
+    db.insert_session("review", "workspace", "default", SessionMode.AGENT, agent_name="agent", socket_path="/socket")
+    block = CapabilityConfig()
+    owner = SetupInputs(
+        "session", "review", "session", {"shell": block}, SecretTarget(vm={}, agent={}, workspace={}, session={})
+    )
+    record = SetupRecord(
+        component="session",
+        integration="shell",
+        destination_id="d" * 64,
+        declaration=owner.declaration("shell", block),
+        complete=True,
+        artifact_inputs=tuple(item.identity for item in source.items()),
+    )
+    write_native_setup(db, "session", "review", NativeSetupState(records=(record,)), operation="fixture")
+    captures = read_captures(db, "vm", "vm")
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("inspection acquired sources or changed instance state")
+
+    monkeypatch.setattr(PackageCapture, "capture", forbidden)
+    monkeypatch.setattr(type(db.instance_state), "replace_applied_slices", forbidden)
+    runtime = fixture.route().inputs
+    assert tuple(runtime.items()) == (tuple(source.items()) if source_available else ())
+    inspected = inspect_artifacts(db, fixture.registry, session_name="review")
+    assert inspected.owners[1].integrations[0].status == "stale"
+    assert inspected.owners[-1].integrations[0].status == ("current" if source_available else "stale")
+    assert tuple(item.input_id for item in inspected.owners[1].integrations[0].recorded_deferred) == tuple(
+        item.input_id for item in agent.deferred
+    )
+    assert read_native_setup(db, "session", "review").records == (record,)
+    assert read_captures(db, "vm", "vm") == captures

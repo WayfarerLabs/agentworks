@@ -16,29 +16,17 @@ loads every kind module. Import it from there rather than from here.
 
 from __future__ import annotations
 
-import unicodedata
 from typing import TYPE_CHECKING
 
 import yaml
 
 from agentworks.path_rendering import format_host_path
-from agentworks.terminal import sanitize_terminal_output
+from agentworks.terminal import sanitize_fact_line as sanitize_fact_line
 
 if TYPE_CHECKING:
     from agentworks.machine_output import JsonObject
     from agentworks.origin import Origin
     from agentworks.resources.reference import ReferenceEntry
-
-
-_UNSAFE_LINE_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Zl", "Zp"})
-
-
-def sanitize_fact_line(value: str) -> str:
-    """Remove terminal controls and unsafe Unicode categories from a fact line."""
-    sanitized = sanitize_terminal_output(value)
-    return "".join(
-        character for character in sanitized if unicodedata.category(character) not in _UNSAFE_LINE_CATEGORIES
-    )
 
 
 def yaml_document_lines(value: JsonObject) -> tuple[str, ...]:

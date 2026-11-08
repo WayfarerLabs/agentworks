@@ -84,7 +84,7 @@ def test_common_capture_without_activation_and_vm_admin_separation(owner):
             if inputs.component == "vm"
             else user_call(owner)
         )
-        run_setup(owner.db, owner.registry, inputs, invocation, operation="vm-init")
+        run_setup(owner.db, owner.registry, inputs, invocation, failures=[], operation="vm-init")
     captured = read_captures(owner.db, "vm", "vm")
     assert set(captured) == {"vm", "admin"}
     vm_item = tuple(captured["vm"].inputs.items())[0]
@@ -203,6 +203,7 @@ def test_buffered_capture_commits_atomically_with_realized_owner(owner, monkeypa
                 owner.db,
                 owner.config,
                 owner.registry,
+                setup_failures=[],
                 name="new",
                 vm=owner.vm,
                 template=template,
@@ -219,6 +220,7 @@ def test_buffered_capture_commits_atomically_with_realized_owner(owner, monkeypa
                 owner.db,
                 owner.config,
                 owner.registry,
+                setup_failures=[],
                 name="new",
                 vm=owner.vm,
                 template=workspace_template,
@@ -246,13 +248,13 @@ def test_reinit_refreshes_source_and_failed_capture_cannot_publish_old_success(o
     template = ResolvedAgentTemplate("default", artifacts=owner.artifacts)
     first = prepare_agent_setup(owner.db, owner.registry, vm=owner.vm, name="agent", template=template)
     assert first is not None
-    run_setup(owner.db, owner.registry, first, user_call(owner), operation="agent-init")
+    run_setup(owner.db, owner.registry, first, user_call(owner), failures=[], operation="agent-init")
     old = read_captures(owner.db, "agent", "agent")["agent"]
     owner.source.write_text("changed source\n")
     second = prepare_agent_setup(owner.db, owner.registry, vm=owner.vm, name="agent", template=template)
     assert second is not None
     assert read_captures(owner.db, "agent", "agent")["agent"] == old
-    run_setup(owner.db, owner.registry, second, user_call(owner), operation="agent-reinit")
+    run_setup(owner.db, owner.registry, second, user_call(owner), failures=[], operation="agent-reinit")
     current = read_captures(owner.db, "agent", "agent")["agent"]
     assert tuple(current.inputs.items())[0].content.text == "changed source\n"
     assert tuple(current.inputs.items())[0].identity != tuple(old.inputs.items())[0].identity
@@ -265,7 +267,7 @@ def test_reinit_refreshes_source_and_failed_capture_cannot_publish_old_success(o
 
 @pytest.mark.parametrize("modified", [False, True])
 @pytest.mark.parametrize("remove_activation", [False, True])
-def test_owned_effect_removal_uses_native_state_and_blocks_pending_cleanup(owner, modified, remove_activation):
+def test_owned_effect_removal_retains_pending_cleanup_without_blocking_descendants(owner, modified, remove_activation):
     owner.db.insert_agent("agent", "vm", "worker", template="configured")
     workspace = owner.db.insert_workspace("project", str(owner.target.root / "project"), "vm", "project")
     template = ResolvedAgentTemplate(
@@ -278,7 +280,7 @@ def test_owned_effect_removal_uses_native_state_and_blocks_pending_cleanup(owner
     )
     inputs = prepare_agent_setup(owner.db, owner.registry, vm=owner.vm, name="agent", template=template)
     assert inputs is not None
-    run_setup(owner.db, owner.registry, inputs, user_call(owner), operation="agent-init")
+    run_setup(owner.db, owner.registry, inputs, user_call(owner), failures=[], operation="agent-init")
     previous = read_native_setup(owner.db, "agent", "agent").records[0]
     assert previous.complete and len(previous.artifact_files) == 2
     managed = Path(previous.artifact_files[0].path)
@@ -294,7 +296,7 @@ def test_owned_effect_removal_uses_native_state_and_blocks_pending_cleanup(owner
     )
     removal = prepare_agent_setup(owner.db, owner.registry, vm=owner.vm, name="agent", template=updated)
     assert removal is not None
-    run_setup(owner.db, owner.registry, removal, user_call(owner), operation="agent-reinit")
+    run_setup(owner.db, owner.registry, removal, user_call(owner), failures=[], operation="agent-reinit")
     state = read_native_setup(owner.db, "agent", "agent")
     view = inspect_owner_artifacts(owner.db, owner.registry, replace(removal, artifact_snapshot=None), "shell")
     if modified:
@@ -302,16 +304,16 @@ def test_owned_effect_removal_uses_native_state_and_blocks_pending_cleanup(owner
         assert state.records[0].pending_cleanup and not state.records[0].complete
         assert len(state.records[0].artifact_files) == 1
         assert view.status == ("retirement" if remove_activation else "incomplete")
-        with pytest.raises(StateError):
-            session_artifacts(
-                owner.db,
-                owner.registry,
-                owner.vm,
-                workspace,
-                "agent",
-                "shell",
-                ArtifactGroup(ArtifactOwner("session", "session", "s1")),
-            )
+        routed = session_artifacts(
+            owner.db,
+            owner.registry,
+            owner.vm,
+            workspace,
+            "agent",
+            "shell",
+            ArtifactGroup(ArtifactOwner("session", "session", "s1")),
+        )
+        assert routed.ancestor_files == state.records[0].artifact_files
     else:
         assert not managed.exists()
         assert not state.records if remove_activation else state.records[0].complete
@@ -336,7 +338,7 @@ def test_repeated_owner_setup_does_not_rewrite_unchanged_native_files(owner, mon
     )
     first = prepare_agent_setup(owner.db, owner.registry, vm=owner.vm, name="agent", template=template)
     assert first is not None
-    run_setup(owner.db, owner.registry, first, user_call(owner), operation="agent-init")
+    run_setup(owner.db, owner.registry, first, user_call(owner), failures=[], operation="agent-init")
     previous = read_native_setup(owner.db, "agent", "agent").records[0]
 
     def unexpected_write(*args, **kwargs):
@@ -345,7 +347,7 @@ def test_repeated_owner_setup_does_not_rewrite_unchanged_native_files(owner, mon
     monkeypatch.setattr(NativeFiles, "publish", unexpected_write)
     second = prepare_agent_setup(owner.db, owner.registry, vm=owner.vm, name="agent", template=template)
     assert second is not None
-    run_setup(owner.db, owner.registry, second, user_call(owner), operation="agent-reinit")
+    run_setup(owner.db, owner.registry, second, user_call(owner), failures=[], operation="agent-reinit")
     current = read_native_setup(owner.db, "agent", "agent").records[0]
     assert current.complete and current.artifact_files == previous.artifact_files
     assert current.artifact_inputs == previous.artifact_inputs
@@ -370,7 +372,7 @@ def test_user_setup_publishes_vm_inputs_without_vm_activation(db, tmp_path):
         username="worker",
         home=str(target.home),
     )
-    run_setup(db, fixture.registry, fixture.owners["agent"], invocation, operation="agent-init")
+    run_setup(db, fixture.registry, fixture.owners["agent"], invocation, failures=[], operation="agent-init")
     record = read_native_setup(db, "agent", "agent").records[0]
     expected = (*fixture.captures["vm"].inputs.items(), *fixture.captures["agent"].inputs.items())
     assert record.complete

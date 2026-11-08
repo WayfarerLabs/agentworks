@@ -1,6 +1,6 @@
 """Native plugin observations and commands, with no raw output in logs.
 
-Payloads and scope behavior were measured with Codex 0.153.4 and Claude 2.1.263.
+Payloads and scope behavior were measured with Codex 0.166.0 and Claude 2.1.316.
 Provider additions are tolerated; the identity fields used below must remain
 well formed. Source references are declared non-secret configuration.
 """
@@ -9,16 +9,21 @@ from __future__ import annotations
 
 import json
 import posixpath
+import re
 import shlex
+import subprocess
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
+from urllib.parse import urlsplit, urlunsplit
 
 from agentworks.capabilities.harness_integration.settings import parse_settings
-from agentworks.errors import ConfigError, ExternalError
+from agentworks.errors import ConfigError, ConnectivityError, ExternalError
+from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from agentworks.capabilities.harness_integration.settings import SettingsObject
     from agentworks.native_files import NativeFiles
 
 type NativeTool = Literal["codex", "claude"]
@@ -56,11 +61,28 @@ with os.fdopen(fd, 'w') as output:
     json.dump({'executable': os.path.abspath(executable), 'path': path}, output)
 """
 
+_BOUND_STDERR = """import sys
+with open(sys.argv[1], 'rb') as source:
+    data = source.read(8192)
+with open(sys.argv[2], 'xb') as destination:
+    destination.write(data)
+"""
+_MARKETPLACE_ERROR = re.compile(r"\bmarketplaces\.([A-Za-z0-9][A-Za-z0-9_.-]{0,127})(?=[`'\s:]|$)")
+_CODEX_MARKETPLACE_LOAD_ERROR = re.compile(
+    r"^- `([A-Za-z0-9][A-Za-z0-9_.-]{0,127})` at <invalid source>:", re.MULTILINE
+)
+_CLAUDE_MARKETPLACE_ERROR = re.compile(
+    r"Marketplace configuration file is corrupted: ([A-Za-z0-9][A-Za-z0-9_.-]{0,127}?)\.source(?:\.[a-zA-Z_]+)*:"
+)
+
 
 @dataclass(frozen=True)
 class NativeMarket:
     name: str
     source: str | None
+    unavailable_reason: str | None = None
+    # Rewriting settings from this cached registration can undo a user edit.
+    settings_conflict: bool = False
 
 
 @dataclass(frozen=True)
@@ -94,6 +116,87 @@ def identity(value: object) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
 
+def _command_description(tool: NativeTool, args: list[str]) -> str:
+    """Identify an operation without provider output or URL credentials."""
+    count = 3 if args[:2] == ["plugin", "marketplace"] else 2
+    operation = " ".join(args[:count])
+    selector = args[count] if len(args) > count and not args[count].startswith("--") else None
+    if selector is not None and args[:3] == ["plugin", "marketplace", "add"] and "://" in selector:
+        try:
+            parsed = urlsplit(selector)
+            selector = urlunsplit((parsed.scheme, parsed.netloc.rsplit("@", 1)[-1], parsed.path, "", parsed.fragment))
+        except ValueError:
+            selector = "<invalid URL>"
+    return sanitize_setup_diagnostic(f"{tool} {operation}" + ("" if selector is None else f" {selector!r}"))
+
+
+def _claude_market(name: str, source: Mapping[str, object], declaration: object) -> NativeMarket:
+    """Keep a named declaration gap local without guessing its full association."""
+
+    def unavailable(reason: str) -> NativeMarket:
+        return NativeMarket(name, None, reason, settings_conflict=True)
+
+    kind = source.get("source")
+    location_key = (
+        {"directory": "path", "file": "path", "github": "repo", "git": "url", "url": "url"}.get(kind)
+        if isinstance(kind, str)
+        else None
+    )
+    if location_key is None:
+        return unavailable("its native source type cannot be compared safely")
+    if not isinstance(source.get(location_key), str) or not source[location_key]:
+        return unavailable(f"its native registration has no usable {location_key!r}")
+    if "ref" in source and (not isinstance(source["ref"], str) or not source["ref"]):
+        return unavailable("its native registration has an invalid source ref")
+    if not isinstance(declaration, dict):
+        return unavailable("its extraKnownMarketplaces user declaration is not an object")
+    if "source" not in declaration:
+        return unavailable("its source is unavailable without a usable user declaration")
+    declared_source = declaration["source"]
+    if not isinstance(declared_source, dict):
+        return unavailable("its user declaration has no object-valued source")
+    observed = dict(source)
+    # Only omitted optional fields come from the current native declaration.
+    # A differing source never establishes ownership or permission to remove it.
+    for key in ("ref", "sparsePaths"):
+        if key in declared_source and key not in observed:
+            observed[key] = declared_source[key]
+    if declared_source != observed:
+        return unavailable("its user declaration source differs from the observed native registration")
+    if "ref" in observed and not isinstance(observed["ref"], str):
+        return unavailable("its user declaration has an invalid source ref")
+    sparse = observed.get("sparsePaths", [])
+    if not isinstance(sparse, list) or any(not isinstance(item, str) or not item for item in sparse):
+        return unavailable("its user declaration has invalid sparse paths")
+    return NativeMarket(name, identity({"source": observed}))
+
+
+def unreadable_marketplace_settings(tool: NativeTool, document: SettingsObject) -> tuple[str, ...]:
+    """Identify declarations whose preservation Agentworks cannot verify.
+
+    The association comparator recognizes only supported source forms. An
+    unrecognized declaration can be valid native configuration, but prevents
+    automated whole-document native rewrites. A recognized declaration alone
+    does not prove a registration or authorize adopting its association.
+    """
+    entries = document.get("marketplaces" if tool == "codex" else "extraKnownMarketplaces", {})
+    if not isinstance(entries, dict):
+        raise ConfigError("native marketplace settings must use object or table values")
+    unsafe = []
+    for name, declaration in entries.items():
+        if not isinstance(declaration, dict):
+            unsafe.append(name)
+        elif tool == "claude":
+            source = declaration.get("source")
+            if not isinstance(source, dict) or _claude_market(name, source, declaration).source is None:
+                unsafe.append(name)
+        elif any(
+            not isinstance(declaration.get(key), str) or not declaration[key] for key in ("source_type", "source")
+        ):
+            unsafe.append(name)
+    return tuple(unsafe)
+
+
 class NativeCLI:
     """Run one harness as the invoking user, optionally with an isolated home."""
 
@@ -106,11 +209,13 @@ class NativeCLI:
         config_root: str,
         isolated: bool = False,
         environment: Mapping[str, str] | None = None,
+        diagnostic_root: str | None = None,
     ):
         self.tool = tool
         self.files = files
         self.home = home
         self.config_root = config_root
+        self.diagnostic_root = diagnostic_root or config_root
         self.isolated = isolated
         self.environment = dict(environment or {})
         self._resolved: tuple[str, str] | None = None
@@ -168,14 +273,40 @@ class NativeCLI:
                 }
             )
         # Sensitive stdin keeps source URLs and all provider output out of the
-        # transport logger. Only the private stdout file is subsequently read.
+        # transport logger. On failure only a bounded private stderr prefix is
+        # inspected for a named marketplace, never rendered as provider prose.
+        stderr = remote + ".stderr"
+        diagnostic_path = remote + ".diagnostic"
         script = (
-            f"cd {shlex.quote(self.files.remote)} && "
-            f"{shlex.join([executable, *args])} > {shlex.quote(remote)} 2>/dev/null"
+            f"cd {shlex.quote(self.files.remote)} || exit 1\n"
+            f"{shlex.join([executable, *args])} > {shlex.quote(remote)} 2> {shlex.quote(stderr)}\n"
+            "native_status=$?\n"
+            'if [ "$native_status" -ne 0 ]; then\n'
+            f"{shlex.join(['python3', '-c', _BOUND_STDERR, stderr, diagnostic_path])}\n"
+            "fi\n"
+            'exit "$native_status"'
         )
         result = self.files.runner.run("bash", input_text=script, env=env, check=False, timeout=180)
         if not result.ok:
-            raise ExternalError(f"{self.tool} native plugin operation failed; inspect its setup with the native CLI")
+            try:
+                self.files.runner.copy_from(diagnostic_path, local)
+                diagnostic = local.read_bytes().decode("utf-8", errors="replace")
+            except (ConnectivityError, ExternalError, OSError, subprocess.SubprocessError):
+                diagnostic = ""
+            match = _MARKETPLACE_ERROR.search(diagnostic)
+            entry = "" if match is None else f" at native setting {'marketplaces.' + match[1]!r}"
+            if match is None and self.tool == "codex":
+                match = _CODEX_MARKETPLACE_LOAD_ERROR.search(diagnostic)
+                if match is not None:
+                    entry = f" at native setting {'marketplaces.' + match[1]!r}"
+            elif match is None and self.tool == "claude":
+                match = _CLAUDE_MARKETPLACE_ERROR.search(diagnostic)
+                if match is not None:
+                    entry = f" at native marketplace {match[1]!r} in plugins/known_marketplaces.json"
+            raise ExternalError(
+                f"{_command_description(self.tool, args)} failed{entry}; "
+                f"inspect its setup in {self.diagnostic_root!r} with the native CLI"
+            )
         if not structured:
             return None
         self.files.runner.copy_from(remote, local)
@@ -191,9 +322,16 @@ class NativeCLI:
             if self.isolated
             else self.config_root
         )
-        settings = self.files.read(active_root + ("/config.toml" if self.tool == "codex" else "/settings.json"))
+        settings_path = active_root + ("/config.toml" if self.tool == "codex" else "/settings.json")
+        settings = self.files.read(settings_path)
         document = (
-            {} if settings is None else parse_settings(settings, format="toml" if self.tool == "codex" else "json")
+            {}
+            if settings is None
+            else parse_settings(
+                settings,
+                format="toml" if self.tool == "codex" else "json",
+                location=f"guest destination {settings_path!r}",
+            )
         )
         configured_raw = document.get("marketplaces" if self.tool == "codex" else "extraKnownMarketplaces", {})
         try:
@@ -214,8 +352,8 @@ class NativeCLI:
                         for key in ("source", "repo", "url", "path", "ref", "sparsePaths")
                         if key in entry
                     }
-                declaration = _object(configured.get(name, {}))
                 if self.tool == "codex":
+                    declaration = _object(configured.get(name, {}))
                     native_source = {"source_type": source["sourceType"], "source": source["source"]}
                     for key in ("ref", "sparse_paths"):
                         if key in declaration:
@@ -223,12 +361,21 @@ class NativeCLI:
                     if any(key in declaration and declaration[key] != value for key, value in native_source.items()):
                         raise ValueError
                 else:
-                    native_source = {"source": declaration.get("source", source)}
-                    if native_source["source"] != source:
-                        raise ValueError
+                    result.append(_claude_market(name, source, configured.get(name, {})))
+                    continue
                 result.append(NativeMarket(name, identity(native_source)))
-            if len({market.name for market in result}) != len(result):
+            observed_names = {market.name for market in result}
+            if len(observed_names) != len(result):
                 raise ValueError
+            if self.tool == "claude":
+                # A bad current declaration can hide a still-registered entry
+                # from list output. Its name is evidence, never its full source.
+                for name in configured:
+                    if name in observed_names:
+                        continue
+                    result.append(
+                        NativeMarket(name, None, "its user declaration has no matching native inventory entry")
+                    )
             return tuple(result)
         except (KeyError, ValueError, TypeError):
             raise ExternalError(f"invalid {self.tool} native marketplace inventory") from None
@@ -248,7 +395,7 @@ class NativeCLI:
                     raise ValueError
                 market = by_name.get(market_name)
                 source = (
-                    identity({"marketplace": market.source, "version": _text(entry["version"])})
+                    identity({"marketplace": market.source})
                     if market is not None and market.source is not None
                     else None
                 )
@@ -314,7 +461,13 @@ class NativeCLI:
         if not result.ok:
             raise ExternalError("could not create isolated native marketplace discovery directory")
         staged = NativeCLI(
-            self.tool, self.files, home=self.home, config_root=root, isolated=True, environment=self.environment
+            self.tool,
+            self.files,
+            home=self.home,
+            config_root=root,
+            isolated=True,
+            environment=self.environment,
+            diagnostic_root=self.diagnostic_root,
         )
         staged._resolved = self._resolve_command()
         staged.add_market(self.home + source[1:] if source.startswith("~/") else source)

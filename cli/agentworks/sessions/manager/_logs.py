@@ -10,6 +10,7 @@ from agentworks.db import SessionStatus
 from agentworks.errors import (
     BrokenStateError,
     StateError,
+    ValidationError,
 )
 from agentworks.machine_output import write_all
 
@@ -30,6 +31,8 @@ def session_logs(
     """Dump the scrollback buffer for a session."""
     from agentworks.sessions.tmux import capture_output
 
+    if lines is not None and lines < 1:
+        raise ValidationError("session log line count must be positive")
     session = _mgr._require_session(db, name)
     with _mgr._prepare_vm(
         db,

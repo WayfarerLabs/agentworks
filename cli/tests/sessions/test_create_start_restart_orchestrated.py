@@ -52,6 +52,13 @@ from ..orchestrated_fixtures import PLUGINS_ENABLED, proxmox_site, write_operato
 
 BOOT_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 
+
+def _acknowledged_launch(events: list[str], socket_path: str, **kwargs: Any) -> tuple[str, int]:
+    kwargs["before_spawn"]()
+    events.append("tmux_create")
+    return socket_path, 4243
+
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -83,6 +90,10 @@ class _Target:
         if cmd.startswith("rm -f ") and ".tmuxinator.yml" in cmd:
             self._events.append("tmuxinator_remove")
             return _Result()
+        if "AGW_RUNTIME_STARTUP=" in cmd:
+            result = _Result()
+            result.stdout = "\nAGW_RUNTIME_STARTUP=off\n"
+            return result
         if "command -v" in cmd:
             self._events.append("probe")
             return _Result(ok=not any(f"command -v {m} " in cmd for m in self._missing))
@@ -181,7 +192,13 @@ def _restart_fixture(
         agent_name="a1",
         socket_path="/run/agentworks/agent-tmux-sockets/agt-a1/s1.sock",
     )
-    db.update_session_runtime("s1", socket_path="/tmp/s1.sock", pid=4242, boot_id=BOOT_ID, tmux_server_start_ticks=77)
+    db.update_session_runtime(
+        "s1",
+        socket_path="/run/agentworks/agent-tmux-sockets/agt-a1/s1.sock",
+        pid=4242,
+        boot_id=BOOT_ID,
+        tmux_server_start_ticks=77,
+    )
 
     events: list[str] = []
     _patch_transports(monkeypatch, _Target(events), _Target(events, missing=missing))
@@ -224,10 +241,11 @@ def _restart_fixture(
         lambda *args, **kwargs: events.append("kill"),
     )
     monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *a, **k: None)
+    monkeypatch.setattr(tmux_mod, "finalize_session_start", lambda *a, **k: None)
     monkeypatch.setattr(
         tmux_mod,
         "create_session",
-        lambda *a, **k: events.append("tmux_create") or ("/run/agentworks/agent-tmux-sockets/agt-a1/s1.sock", 4243),
+        lambda *a, **k: _acknowledged_launch(events, "/run/agentworks/agent-tmux-sockets/agt-a1/s1.sock", **k),
     )
     monkeypatch.setattr(
         tmux_mod,
@@ -578,7 +596,7 @@ def test_session_start_records_immediately_after_tmux_creation(
     db.close()
 
 
-def test_session_start_cleans_up_if_start_observation_cannot_be_recorded(
+def test_session_start_retains_runtime_if_start_observation_cannot_be_recorded(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -594,8 +612,8 @@ def test_session_start_cleans_up_if_start_observation_cannot_be_recorded(
     monkeypatch.setattr(db, "record_session_started", _interrupt_record)
     monkeypatch.setattr(
         tmux_mod,
-        "kill_server_and_probe",
-        lambda **kwargs: cleaned.append(kwargs["socket_path"]) or ProbeStatus.ABSENT,
+        "kill_server",
+        lambda **kwargs: cleaned.append(kwargs["socket_path"]) or True,
     )
 
     with pytest.raises(KeyboardInterrupt):
@@ -606,7 +624,7 @@ def test_session_start_cleans_up_if_start_observation_cannot_be_recorded(
             interaction=TtyInteractionPolicy.REFUSE,
         )  # type: ignore[arg-type]
 
-    assert cleaned == ["/run/agentworks/agent-tmux-sockets/agt-a1/s1.sock"]
+    assert cleaned == []
     db.close()
 
 
@@ -724,11 +742,6 @@ def test_indeterminate_post_launch_cleanup_retains_addressable_runtime(
         "capture_tmux_server_fingerprint",
         lambda **kwargs: FingerprintProbe(ProbeStatus.UNKNOWN),
     )
-    monkeypatch.setattr(
-        tmux_mod,
-        "kill_server_and_probe",
-        lambda **kwargs: ProbeStatus.UNKNOWN,
-    )
 
     with pytest.raises(ExternalError):
         session_manager.start_session(
@@ -741,7 +754,7 @@ def test_indeterminate_post_launch_cleanup_retains_addressable_runtime(
     refreshed = db.get_session("s1")
     assert refreshed is not None
     assert refreshed.socket_path == "/run/agentworks/agent-tmux-sockets/agt-a1/s1.sock"
-    assert refreshed.pid is None and refreshed.boot_id is None
+    assert refreshed.pid is None and refreshed.boot_id == BOOT_ID
     assert refreshed.last_started_at is not None
     db.close()
 
@@ -879,10 +892,11 @@ def _create_stubs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, events: list[
     monkeypatch.setattr(agent_mgr, "_assert_agent_ssh_works", lambda *a, **k: None)
     monkeypatch.setattr("agentworks.agents.grants.add_to_workspace_group", lambda *a, **k: None)
     monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *a, **k: None)
+    monkeypatch.setattr(tmux_mod, "finalize_session_start", lambda *a, **k: None)
     monkeypatch.setattr(
         tmux_mod,
         "create_session",
-        lambda *a, **k: events.append("tmux_create") or ("/run/agentworks/agent-tmux-sockets/agt-s1/s1.sock", 4243),
+        lambda *a, **k: _acknowledged_launch(events, "/run/agentworks/agent-tmux-sockets/agt-s1/s1.sock", **k),
     )
     monkeypatch.setattr(
         tmux_mod,
@@ -901,7 +915,6 @@ def test_create_retains_unknown_runtime_if_start_observation_write_fails(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from agentworks.sessions import tmux as tmux_mod
     from agentworks.sessions.manager import create_session
 
     db = _create_stubs(tmp_path, monkeypatch, [])
@@ -911,7 +924,6 @@ def test_create_retains_unknown_runtime_if_start_observation_write_fails(
         raise StateError("session row disappeared", entity_kind="session", entity_name="s1")
 
     monkeypatch.setattr(db, "record_session_started", _fail_record)
-    monkeypatch.setattr(tmux_mod, "kill_server_and_probe", lambda **kwargs: ProbeStatus.UNKNOWN)
 
     with pytest.raises(StateError):
         create_session(
@@ -925,8 +937,8 @@ def test_create_retains_unknown_runtime_if_start_observation_write_fails(
 
     session = db.get_session("s1")
     assert session is not None
-    assert session.socket_path == "/run/agentworks/agent-tmux-sockets/agt-s1/s1.sock"
-    assert session.pid is None and session.boot_id is None
+    assert session.socket_path == "/run/agentworks/agent-tmux-sockets/agt-a1/s1.sock"
+    assert session.pid is None and session.boot_id == BOOT_ID
     db.close()
 
 
@@ -1128,7 +1140,7 @@ def test_create_failure_cleans_session_slice_then_unwinds_ephemerals(
     def _explode(*a: object, **k: object) -> None:
         raise RuntimeError("tmux exploded")
 
-    monkeypatch.setattr(tmux_mod, "create_session", _explode)
+    monkeypatch.setattr(tmux_mod, "deploy_restricted_config", _explode)
 
     with pytest.raises(RuntimeError, match="tmux exploded"):
         create_session(
@@ -1692,6 +1704,7 @@ def _patch_session_ops(monkeypatch: pytest.MonkeyPatch, events: list[str], captu
 
     _patch_transports(monkeypatch, _Target(events), _Target(events))
     monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *a, **k: None)
+    monkeypatch.setattr(tmux_mod, "finalize_session_start", lambda *a, **k: None)
 
     def _capture_create(*a: object, env: dict[str, str] | None = None, **k: object):  # noqa: ANN202
         events.append("tmux_create")

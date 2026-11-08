@@ -151,7 +151,7 @@ def snapshot_workstation_file(source: str) -> bytes:
             raise SourceRefError("workstation source must be a regular file")
         return path.read_bytes()
     except (OSError, ValueError, RuntimeError):
-        raise SourceRefError("could not read workstation source file") from None
+        raise SourceRefError(f"could not read workstation source file {reference.path!r}") from None
 
 
 def fetch_file(

@@ -706,7 +706,12 @@ refreshes its timestamp and leaves initialization state unchanged. See
 provider-recovery boundary.
 
 `vm delete` requires `--force` if the VM has workspaces, agents, or sessions. The confirmation
-message shows what will be deleted. Pass `--yes` to skip the prompt.
+message shows what will be deleted. Pass `--yes` to skip the prompt. If backend binding fails, the
+command warns and removes local state without attempting remote deletion. A bound platform's delete
+exception aborts local removal. Check the provider's cleanup result; local removal alone does not
+prove the remote VM is gone. Whole-VM deletion does not first stop individual workloads or log out
+of Tailscale, so an external tailnet entry can remain for separate removal in the Tailscale admin
+console.
 
 `vm backup` exports the VM row and exact owner tree of agents, workspaces, sessions, events, grants,
 desired instance specs, and workspace files. It does not create or copy a provider VM snapshot,
@@ -773,7 +778,8 @@ and destination can be the same VM (a clone) or different VMs.
 the filter is an error, not an empty result.
 
 `workspace delete` requires `--force` if the workspace has sessions. Running sessions are killed
-during deletion. Pass `--yes` to skip the confirmation prompt.
+during deletion. Its confirmation warns that workspace files, uncommitted changes, stashes and
+commits not pushed elsewhere will be lost. Pass `--yes` to skip the confirmation prompt.
 
 There is deliberately no `workspace shell`: a shell rooted in a workspace is always _somebody's_
 shell. Use `agw vm shell <vm> --workspace <ws>` for an admin shell or

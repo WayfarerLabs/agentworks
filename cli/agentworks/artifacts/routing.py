@@ -2,16 +2,23 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from dataclasses import dataclass
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Literal
 
+from agentworks import output
 from agentworks.artifacts.model import ALLOWED_DEFERRALS, ArtifactInputs
-from agentworks.artifacts.state import CapturedArtifacts, declaration_digest, read_captures
+from agentworks.artifacts.state import (
+    CapturedArtifacts,
+    UnsupportedArtifactCaptureVersionError,
+    declaration_digest,
+    read_captures,
+)
 from agentworks.errors import ConfigError, StateError
 from agentworks.harness_setup.inputs import SetupInputs
-from agentworks.harness_setup.state import read_native_setup
+from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
+from agentworks.harness_setup.state import UnsupportedNativeSetupVersionError, read_native_setup
 from agentworks.secrets.orchestration import SecretTarget
 
 if TYPE_CHECKING:
@@ -36,7 +43,21 @@ class ArtifactOwnerView:
     reason: str = ""
     record: SetupRecord | None = None
     prepared: ArtifactInputs | None = None
-    ancestor_blocked: bool = False
+    repair_hint: str | None = None
+
+    @property
+    def diagnostic(self) -> str:
+        return " ".join(value for value in (self.reason, self.repair_hint) if value)
+
+    def with_unavailable_routes(self, reasons: tuple[str, ...]) -> ArtifactOwnerView:
+        """Include unavailable incoming routes in this owner's artifact health."""
+        if not reasons:
+            return self
+        return replace(
+            self,
+            status="incomplete" if self.status == "current" else self.status,
+            reason=" ".join(dict.fromkeys(value for value in (self.reason, *reasons) if value)),
+        )
 
 
 @dataclass(frozen=True)
@@ -44,6 +65,13 @@ class RoutingResult:
     inputs: ArtifactInputs
     ancestor_files: tuple[OwnedArtifactFile, ...] = ()
     active_facets: tuple[ArtifactFacet, ...] = ()
+    unresolved_routes: frozenset[str] = frozenset()
+    unavailable_reasons: tuple[str, ...] = ()
+    routing_unknown: bool = False
+
+    @property
+    def retain_previous(self) -> bool:
+        return bool(self.unresolved_routes) or self.routing_unknown
 
 
 def inspect_owner_artifacts(
@@ -52,16 +80,13 @@ def inspect_owner_artifacts(
     inputs: SetupInputs,
     integration_name: str | None = None,
     *,
-    inherited: Mapping[ArtifactOwner, ArtifactGroup] | None = MappingProxyType({}),
+    inherited: Mapping[ArtifactOwner, ArtifactGroup] = MappingProxyType({}),
 ) -> ArtifactOwnerView:
-    """Project persisted evidence without fetching or repairing any owner.
-
-    ``inherited=None`` explicitly means an ancestor's route is unavailable. It
-    cannot be substituted with empty input to claim this owner's result current.
-    """
+    """Project persisted evidence and known inputs without fetching or repairing owners."""
     captured = None
     record = None
     reason = ""
+    repair_hint = None
     capture_status: CaptureStatus = "current"
     try:
         captured = inputs.artifact_snapshot or read_captures(db, inputs.kind, inputs.name).get(inputs.component)
@@ -70,8 +95,12 @@ def inspect_owner_artifacts(
             capture_status, reason = "missing", "Artifact bundles have not been captured for this owner."
         elif captured is not None and captured.declaration != desired:
             capture_status, reason = "stale", "Captured artifacts do not match the owner's current bundle declarations."
-    except (ConfigError, StateError, KeyError):
+    except UnsupportedArtifactCaptureVersionError as error:
+        capture_status, reason, repair_hint = "unavailable", f"{error}.", error.hint
+    except (ConfigError, StateError, KeyError) as error:
         capture_status, reason = "unavailable", "The owner's artifact declarations or captured state are unavailable."
+        repair_hint = error.hint if isinstance(error, StateError) else None
+    prepared = ArtifactInputs(local=captured.inputs if captured is not None else None, deferred=inherited)
     if integration_name is not None:
         try:
             record = next(
@@ -82,11 +111,29 @@ def inspect_owner_artifacts(
                 ),
                 None,
             )
-        except StateError:
+        except StateError as error:
             return ArtifactOwnerView(
-                inputs, captured, capture_status, "unavailable", "The owner's integration state is unavailable."
+                inputs,
+                captured,
+                capture_status,
+                "unavailable",
+                f"{error}."
+                if isinstance(error, UnsupportedNativeSetupVersionError)
+                else "The owner's integration state is unavailable.",
+                prepared=prepared,
+                repair_hint=error.hint if isinstance(error, UnsupportedNativeSetupVersionError) else None,
             )
     block = inputs.activations.get(integration_name) if integration_name is not None else None
+    recorded_details = ""
+    if record is not None:
+        if record.incomplete_reasons:
+            recorded_details += " Recorded incomplete entries: " + _brief(record.incomplete_reasons) + "."
+        if record.skipped:
+            recorded_details += (
+                " Skipped destinations: "
+                + _brief(tuple(f"{item.path}: {item.reason}" for item in record.skipped))
+                + "."
+            )
     if inputs.component == "session" and integration_name is not None and block is None:
         if record is not None and record.artifact_files:
             return ArtifactOwnerView(
@@ -94,41 +141,72 @@ def inspect_owner_artifacts(
                 captured,
                 capture_status,
                 "retirement",
-                "The removed activation still owns artifact files.",
+                "The removed activation still owns artifact files." + recorded_details,
                 record,
             )
         return ArtifactOwnerView(inputs, captured, capture_status, "inactive", record=record)
     if capture_status != "current":
-        return ArtifactOwnerView(inputs, captured, capture_status, capture_status, reason, record)
-    if inherited is None:
         return ArtifactOwnerView(
-            inputs,
-            captured,
-            capture_status,
-            "unavailable",
-            "An ancestor's artifact routing result is unavailable.",
-            record,
-            ancestor_blocked=True,
+            inputs, captured, capture_status, capture_status, reason, record, prepared, repair_hint=repair_hint
         )
-    local = captured.inputs if captured is not None else None
-    prepared = ArtifactInputs(local=local, deferred=inherited)
     if integration_name is None:
         return ArtifactOwnerView(inputs, captured, capture_status, "current", prepared=prepared)
     if block is None:
-        if record is not None and record.artifact_files:
+        if record is not None and (record.artifact_files or record.claims or record.pending_cleanup):
             return ArtifactOwnerView(
                 inputs,
                 captured,
                 capture_status,
                 "retirement",
-                "The removed activation still owns artifact files; finish its cleanup first.",
+                "The removed activation retains native setup or artifact cleanup evidence." + recorded_details,
                 record,
                 prepared,
             )
         return ArtifactOwnerView(inputs, captured, capture_status, "inactive", record=record, prepared=prepared)
-    # Plugin/settings-only evidence keeps its existing required/recommended
-    # readiness behavior. There is no artifact result to reuse in this case.
-    if not prepared and (record is None or not record.artifact_files):
+    if record is not None and (not record.complete or record.pending_cleanup or record.skipped):
+        reason = (
+            "The activated facet still has native setup or artifact cleanup pending."
+            if record.pending_cleanup
+            else "The activated facet's previous setup did not complete all declared entries."
+        )
+        reason += recorded_details
+        return ArtifactOwnerView(
+            inputs,
+            captured,
+            capture_status,
+            "incomplete",
+            reason,
+            record,
+            prepared,
+        )
+    declaration = None
+    if record is not None:
+        try:
+            declaration = inputs.declaration(integration_name, block)
+        except ConfigError:
+            return ArtifactOwnerView(
+                inputs,
+                captured,
+                capture_status,
+                "unavailable",
+                "The activated facet's current configuration is unavailable.",
+                record,
+                prepared,
+            )
+    # An optional native-only facet needs no fabricated artifact result, but its
+    # incomplete native setup above remains actionable even without artifact inputs.
+    if not prepared and (record is None or not (record.artifact_files or record.artifact_inputs)):
+        if record is not None and declaration != record.declaration:
+            assert declaration is not None
+            return ArtifactOwnerView(
+                inputs,
+                captured,
+                capture_status,
+                "stale",
+                "; ".join(_declaration_changes(record.declaration, declaration)) + ".",
+                record,
+                prepared,
+            )
         return ArtifactOwnerView(inputs, captured, capture_status, "current", record=record, prepared=prepared)
     if record is None or record.artifact_inputs is None:
         return ArtifactOwnerView(
@@ -140,33 +218,7 @@ def inspect_owner_artifacts(
             record,
             prepared,
         )
-    if not record.complete or record.pending_cleanup:
-        reason = (
-            "The activated facet still has artifact cleanup pending."
-            if record.pending_cleanup
-            else "The activated facet's previous setup did not finish."
-        )
-        return ArtifactOwnerView(
-            inputs,
-            captured,
-            capture_status,
-            "incomplete",
-            reason,
-            record,
-            prepared,
-        )
-    try:
-        declaration = inputs.declaration(integration_name, block)
-    except ConfigError:
-        return ArtifactOwnerView(
-            inputs,
-            captured,
-            capture_status,
-            "unavailable",
-            "The activated facet's current configuration is unavailable.",
-            record,
-            prepared,
-        )
+    assert declaration is not None
     current_ids = tuple(item.identity for item in prepared.items())
     if declaration != record.declaration or current_ids != record.artifact_inputs:
         differences = _declaration_changes(record.declaration, declaration) if declaration != record.declaration else []
@@ -205,7 +257,9 @@ def inspect_owner_artifacts(
 
 def _brief(names: tuple[str, ...]) -> str:
     """Keep drift diagnostics bounded without exposing values or artifact bodies."""
-    return ", ".join(names if len(names) <= 3 else (*names[:2], "..."))
+    selected = names if len(names) <= 3 else names[:2]
+    rendered = ", ".join(sanitize_setup_diagnostic(name).rstrip(".") for name in selected)
+    return sanitize_setup_diagnostic(rendered if len(names) <= 3 else rendered + ", ...")
 
 
 def _changed_keys(before: object, after: object) -> tuple[str, ...]:
@@ -242,41 +296,127 @@ def inactive_destination(facet: ArtifactFacet) -> ArtifactFacet:
     return "user" if facet == "vm" else "session"
 
 
-def deferred_inputs(view: ArtifactOwnerView, destination: ArtifactFacet) -> dict[ArtifactOwner, ArtifactGroup] | None:
-    """Project one route, preserving input order; unknown evidence stays unknown."""
-    if view.status not in ("current", "inactive") or view.prepared is None:
-        return None
-    if view.status == "inactive":
+def available_deferred_inputs(
+    view: ArtifactOwnerView, destination: ArtifactFacet, integration_name: str
+) -> dict[ArtifactOwner, ArtifactGroup]:
+    """Project only known captured routes, independently of their freshness status.
+
+    An activated facet with unavailable handling evidence cannot acknowledge or
+    invent a deferral. Its readable explicit deferrals remain usable after drift.
+    """
+    if view.prepared is None:
+        return {}
+    if integration_name not in view.owner.activations:
         return (
             {group.owner: group for group in view.prepared.groups() if group}
             if destination == inactive_destination(view.owner.facet)
             else {}
         )
-    if view.record is None:
+    if view.record is None or destination not in ALLOWED_DEFERRALS[view.owner.facet]:
         return {}
     identities = {item.input_id for item in view.record.deferred if item.destination == destination}
     selected = (group.select(identities) for group in view.prepared.groups())
     return {group.owner: group for group in selected if group}
 
 
+def report_ancestor(view: ArtifactOwnerView, integration_name: str) -> None:
+    """Explain upstream repair without treating it as a descendant prerequisite."""
+    if view.status not in ("current", "inactive"):
+        owner = view.owner
+        output.warn(
+            f"Setup via {integration_name} at {owner.component}/{owner.name}: {sanitize_setup_diagnostic(view.reason)} "
+            f"{owner_remediation(view)} Continuing with available captured routes and existing placement."
+        )
+
+
+def _recorded_routes(view: ArtifactOwnerView, destination: ArtifactFacet, integration_name: str) -> tuple[str, ...]:
+    if integration_name not in view.owner.activations:
+        if destination != inactive_destination(view.owner.facet) or view.captured is None:
+            return ()
+        return tuple(item.identity for item in view.captured.inputs.items())
+    if view.record is None or destination not in ALLOWED_DEFERRALS[view.owner.facet]:
+        return ()
+    return tuple(item.input_id for item in view.record.deferred if item.destination == destination)
+
+
+def _routing_unknown(view: ArtifactOwnerView, destination: ArtifactFacet, integration_name: str) -> bool:
+    """Distinguish missing routing evidence from an incomplete native application."""
+    if integration_name not in view.owner.activations:
+        return destination == inactive_destination(view.owner.facet) and view.capture_status in (
+            "missing",
+            "stale",
+            "unavailable",
+        )
+    if destination not in ALLOWED_DEFERRALS[view.owner.facet]:
+        return False
+    # An old or unreadable capture cannot authorize retirement, even when the
+    # previous handling record has no deferrals or the readable input set is empty.
+    if view.capture_status != "current":
+        return True
+    record = view.record
+    if record is None and view.status == "unavailable":
+        return True
+    if record is not None and any(
+        item.destination not in ALLOWED_DEFERRALS[view.owner.facet] for item in record.deferred
+    ):
+        return True
+    return bool(view.prepared) and not _covers_inputs(
+        record, (() if view.prepared is None else (item.identity for item in view.prepared.items()))
+    )
+
+
+def _covers_inputs(record: SetupRecord | None, identities: Iterable[str]) -> bool:
+    """An acknowledgement covers only the captured identities it actually observed."""
+    return (
+        record is not None and record.artifact_inputs is not None and set(identities).issubset(record.artifact_inputs)
+    )
+
+
+def setup_inherited_inputs(view: ArtifactOwnerView, destination: ArtifactFacet, integration_name: str) -> RoutingResult:
+    """Project known ancestor inputs and unknown-route evidence for setup or inspection."""
+    inherited = available_deferred_inputs(view, destination, integration_name)
+    known = {item.identity for group in inherited.values() for item in group.items()}
+    recorded = frozenset(_recorded_routes(view, destination, integration_name))
+    unresolved = recorded - known
+    unknown = _routing_unknown(view, destination, integration_name)
+    detail = (
+        f"have no readable captured source ({_brief(tuple(identity[:12] for identity in sorted(unresolved)))})"
+        if unresolved
+        else "have no confirmed routing result"
+    )
+    unavailable = (
+        (
+            f"Artifact inputs via {integration_name} from {view.owner.component}/{view.owner.name} {detail}. "
+            + owner_remediation(view),
+        )
+        if unresolved or unknown
+        else ()
+    )
+    return RoutingResult(
+        ArtifactInputs(deferred=inherited),
+        unresolved_routes=unresolved,
+        unavailable_reasons=unavailable,
+        routing_unknown=unknown,
+    )
+
+
 def setup_artifacts(
     db: Database, registry: Registry, inputs: SetupInputs, vm: VMRow, integration_name: str
-) -> ArtifactInputs:
-    """Prepare a facet's local capture plus only its applicable VM route."""
+) -> RoutingResult:
+    """Prepare local capture plus available VM routes without repairing ancestors."""
     if inputs.kind == "vm" and inputs.name != vm.name:
         raise StateError("artifact setup requires the actual owning VM")
     prepared = _require(inspect_owner_artifacts(db, registry, inputs)).prepared
     assert prepared is not None
-    local = prepared.local
     if inputs.component == "vm":
-        return prepared
+        return RoutingResult(prepared)
     if inputs.component not in ("admin", "agent", "workspace"):
         raise StateError("artifact setup requires a VM, user or workspace facet")
     ancestor = _vm_inputs(db, registry, vm)
-    view = _require(inspect_owner_artifacts(db, registry, ancestor, integration_name))
-    inherited = deferred_inputs(view, inputs.facet)
-    assert inherited is not None
-    return ArtifactInputs(local=local, deferred=inherited)
+    view = inspect_owner_artifacts(db, registry, ancestor, integration_name)
+    report_ancestor(view, integration_name)
+    routed = setup_inherited_inputs(view, inputs.facet, integration_name)
+    return replace(routed, inputs=ArtifactInputs(local=prepared.local, deferred=routed.inputs.deferred))
 
 
 def session_artifacts(
@@ -288,69 +428,112 @@ def session_artifacts(
     integration_name: str,
     local: ArtifactGroup,
 ) -> RoutingResult:
-    """Join one actual owner diamond without consuming or rerunning ancestors."""
-    vm_view, user_view, workspace_view = require_session_ancestors(
+    """Join known owner routes without requiring or rerunning ancestor setup."""
+    vm_view, user_view, workspace_view = session_ancestor_views(
         db, registry, vm, workspace, agent_name, integration_name
     )
-    assert user_view is not None and workspace_view is not None
-    inherited = session_inherited_inputs(vm_view, user_view, workspace_view)
-    assert inherited is not None
-    result = ArtifactInputs(local=local, deferred=inherited)
+    ancestors = (vm_view, user_view, workspace_view)
+    for view in ancestors:
+        report_ancestor(view, integration_name)
+    routed = session_inherited_inputs(*ancestors, integration_name=integration_name, report=True)
+    result = ArtifactInputs(local=local, deferred=routed.inputs.deferred)
     files: list[OwnedArtifactFile] = []
     active: list[ArtifactFacet] = []
-    for view in (vm_view, user_view, workspace_view):
-        if view.status == "current" and view.record is not None and (view.prepared or view.record.artifact_files):
+    for view in ancestors:
+        if view.record is not None and (view.prepared or view.record.artifact_files):
             skipped_paths = {item.path for item in view.record.skipped}
             files.extend(item for item in view.record.artifact_files if item.path not in skipped_paths)
-            active.append(view.owner.facet)
-    return RoutingResult(result, tuple(files), tuple(active))
+            if view.status == "current":
+                active.append(view.owner.facet)
+    return RoutingResult(
+        result,
+        tuple(files),
+        tuple(active),
+        unresolved_routes=routed.unresolved_routes,
+        unavailable_reasons=routed.unavailable_reasons,
+        routing_unknown=routed.routing_unknown,
+    )
 
 
-def require_session_ancestors(
+def session_ancestor_views(
     db: Database,
     registry: Registry,
     vm: VMRow,
-    workspace: WorkspaceRow | None,
+    workspace: WorkspaceRow,
     agent_name: str | None,
     integration_name: str,
-    *,
-    pending_user: bool = False,
-) -> tuple[ArtifactOwnerView, ArtifactOwnerView | None, ArtifactOwnerView | None]:
-    """Resolve and check known session ancestors, skipping only pending owners."""
-    if workspace is not None and workspace.vm_name != vm.name:
+) -> tuple[ArtifactOwnerView, ArtifactOwnerView, ArtifactOwnerView]:
+    """Read ancestor facts without making their freshness a descendant gate."""
+    if workspace.vm_name != vm.name:
         raise StateError("artifact routing requires the session's actual workspace on its VM")
     vm_inputs = _vm_inputs(db, registry, vm)
-    vm_view = _require(inspect_owner_artifacts(db, registry, vm_inputs, integration_name))
-    user_view = workspace_view = None
-    if not pending_user:
-        user_inputs = _user_inputs(db, registry, vm, vm_inputs, agent_name)
-        user_view = _require(
-            inspect_owner_artifacts(
-                db, registry, user_inputs, integration_name, inherited=deferred_inputs(vm_view, "user")
-            )
-        )
-    if workspace is not None:
-        workspace_inputs = _workspace_inputs(db, registry, workspace, vm_inputs)
-        workspace_view = _require(
-            inspect_owner_artifacts(
-                db, registry, workspace_inputs, integration_name, inherited=deferred_inputs(vm_view, "workspace")
-            )
-        )
+    vm_view = inspect_owner_artifacts(db, registry, vm_inputs, integration_name)
+    user_inputs = _user_inputs(db, registry, vm, vm_inputs, agent_name)
+    user_routes = setup_inherited_inputs(vm_view, "user", integration_name)
+    user_view = inspect_owner_artifacts(
+        db,
+        registry,
+        user_inputs,
+        integration_name,
+        inherited=user_routes.inputs.deferred,
+    ).with_unavailable_routes(user_routes.unavailable_reasons)
+    workspace_inputs = _workspace_inputs(db, registry, workspace, vm_inputs)
+    workspace_routes = setup_inherited_inputs(vm_view, "workspace", integration_name)
+    workspace_view = inspect_owner_artifacts(
+        db,
+        registry,
+        workspace_inputs,
+        integration_name,
+        inherited=workspace_routes.inputs.deferred,
+    ).with_unavailable_routes(workspace_routes.unavailable_reasons)
     return vm_view, user_view, workspace_view
 
 
+def _session_routes(
+    vm: ArtifactOwnerView,
+    user: ArtifactOwnerView,
+    workspace: ArtifactOwnerView,
+    *,
+    integration_name: str,
+) -> tuple[tuple[ArtifactOwnerView, tuple[str, ...], bool], ...]:
+    """Keep passthrough route identities even when their captured payload is missing."""
+    routes = []
+    for view in (vm, user, workspace):
+        identities = _recorded_routes(view, "session", integration_name)
+        unknown = _routing_unknown(view, "session", integration_name)
+        if view is not vm and integration_name in view.owner.activations:
+            destination: ArtifactFacet = "user" if view is user else "workspace"
+            incoming = _recorded_routes(vm, destination, integration_name)
+            if _routing_unknown(vm, destination, integration_name) or (
+                incoming and not _covers_inputs(view.record, incoming)
+            ):
+                unknown = True
+        routes.append((view, identities, unknown))
+        if view is not vm and integration_name not in view.owner.activations:
+            destination = "user" if view is user else "workspace"
+            routes.append(
+                (
+                    vm,
+                    _recorded_routes(vm, destination, integration_name),
+                    _routing_unknown(vm, destination, integration_name),
+                )
+            )
+    return tuple(routes)
+
+
 def session_inherited_inputs(
-    vm: ArtifactOwnerView, user: ArtifactOwnerView, workspace: ArtifactOwnerView
-) -> dict[ArtifactOwner, ArtifactGroup] | None:
-    """Join deferred routes by original owner, retaining each owner's map order."""
-    routes = tuple(deferred_inputs(view, "session") for view in (vm, user, workspace))
-    if any(route is None for route in routes):
-        return None
-    selected = [
-        item.identity for route in routes if route is not None for group in route.values() for item in group.items()
-    ]
-    if len(set(selected)) != len(selected):
-        raise StateError("artifact routing delivered the same input along more than one path")
+    vm: ArtifactOwnerView,
+    user: ArtifactOwnerView,
+    workspace: ArtifactOwnerView,
+    *,
+    integration_name: str,
+    report: bool = False,
+) -> RoutingResult:
+    """Join captured session inputs and explicit unavailable-route evidence once."""
+    routes = _session_routes(vm, user, workspace, integration_name=integration_name)
+    selected = [identity for _, identities, _ in routes for identity in identities]
+    if report and len(set(selected)) != len(selected):
+        output.warn(f"Repeated artifact routes via {integration_name} were combined once; refresh the owning facets.")
     selected_ids = set(selected)
     result = {}
     for view in (vm, user, workspace):
@@ -358,20 +541,64 @@ def session_inherited_inputs(
             group = view.captured.inputs.select(selected_ids)
             if group:
                 result[group.owner] = group
-    if sum(1 for group in result.values() for _ in group.items()) != len(selected):
-        raise StateError("artifact routing encountered input outside its actual owner graph")
-    return result
+    resolved = {item.identity for group in result.values() for item in group.items()}
+    unresolved = frozenset(selected_ids - resolved)
+    reasons = []
+    for view, identities, unknown in routes:
+        missing_ids = unresolved.intersection(identities)
+        missing = tuple(identity[:12] for identity in identities if identity in missing_ids)
+        if not missing and not unknown:
+            continue
+        detail = f"have no readable source ({_brief(missing)})" if missing else "have no confirmed routing result"
+        recorded_reasons = tuple(
+            dict.fromkeys(
+                item.reason
+                for item in (() if view.record is None else view.record.deferred)
+                if item.destination == "session" and item.input_id in missing_ids
+            )
+        )
+        reason = sanitize_setup_diagnostic(
+            f"Artifact inputs via {integration_name} at {view.owner.component}/{view.owner.name} {detail}. "
+            + (" ".join(recorded_reasons) + " " if recorded_reasons else "")
+            + f"{owner_remediation(view)} Unavailable content was not delivered."
+        )
+        if reason not in reasons:
+            reasons.append(reason)
+            if report:
+                output.warn(reason)
+    return RoutingResult(
+        ArtifactInputs(deferred=result),
+        unresolved_routes=unresolved,
+        unavailable_reasons=tuple(reasons),
+        routing_unknown=any(unknown for _, _, unknown in routes),
+    )
+
+
+def owner_remediation(view: ArtifactOwnerView) -> str:
+    if view.repair_hint is not None:
+        return view.repair_hint
+    conflict = (
+        "Resolve the recorded entry or destination conflicts first. "
+        if view.record is not None and (view.record.incomplete_reasons or view.record.skipped)
+        else ""
+    )
+    if view.owner.component == "workspace":
+        return (
+            f"{conflict}Recreate workspace '{view.owner.name}' to apply changed setup; "
+            "workspace reinit is not supported."
+        )
+    if view.owner.component == "agent":
+        return f"{conflict}Run 'agw agent reinit {view.owner.name}'."
+    if view.owner.component == "session":
+        return f"{conflict}Run 'agw session restart {view.owner.name}'."
+    return f"{conflict}Run 'agw vm reinit {view.owner.name}'."
 
 
 def _require(view: ArtifactOwnerView) -> ArtifactOwnerView:
     if view.status not in ("current", "inactive"):
-        if view.owner.component == "workspace":
-            remedy = f"Recreate workspace '{view.owner.name}' with its current setup."
-        elif view.owner.component == "agent":
-            remedy = f"Run 'agw agent reinit {view.owner.name}'."
-        else:
-            remedy = f"Run 'agw vm reinit {view.owner.name}'."
-        raise StateError(view.reason, entity_kind=view.owner.kind, entity_name=view.owner.name, hint=remedy)
+        raise StateError(
+            view.reason, entity_kind=view.owner.kind, entity_name=view.owner.name, hint=owner_remediation(view)
+        )
     return view
 
 

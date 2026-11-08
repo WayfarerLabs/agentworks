@@ -43,7 +43,7 @@ def test_traversal_regrant_runs_after_the_recursive_acl_apply() -> None:
 
     mkdir_i = next(i for i, c in enumerate(target.commands) if c == f"mkdir -p {ws}")
     # The recursive access apply that sets other::--- on workspaces_dir itself.
-    acl_i = next(i for i, c in enumerate(target.commands) if c.startswith("setfacl -R") and "o::---" in c and ws in c)
+    acl_i = next(i for i, c in enumerate(target.commands) if "-exec setfacl -m" in c and "o::---" in c and ws in c)
     # The parent-traversal re-grant loop (walks workspaces_dir up its ancestors).
     traverse_i = next(i for i, c in enumerate(target.commands) if "chmod a+x" in c and f"p={ws};" in c)
 

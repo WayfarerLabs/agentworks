@@ -276,6 +276,24 @@ class HarnessIntegration(Capability):
         self._probed = False
 
     @classmethod
+    def implements_setup(cls, facet: Literal["vm", "user", "workspace"]) -> bool:
+        """Distinguish implemented setup from the base unsupported-facet refusal."""
+        method = f"{facet}_init"
+        return getattr(cls, method) is not getattr(HarnessIntegration, method)
+
+    @classmethod
+    def require_setup_implementation(
+        cls, facet: Literal["vm", "user", "workspace"], *, owner_kind: str, owner_name: str
+    ) -> None:
+        """Refuse an unsupported selected setup facet before owning mutations."""
+        if not cls.implements_setup(facet):
+            raise StateError(
+                f"harness integration '{cls.name}' does not implement setup facet '{facet}'",
+                entity_kind=owner_kind,
+                entity_name=owner_name,
+            )
+
+    @classmethod
     def for_setup(
         cls,
         *,
@@ -292,6 +310,8 @@ class HarnessIntegration(Capability):
         """
         if facet not in ("vm", "user", "workspace"):
             raise StateError("setup construction requires a setup facet")
+        if config is not None:
+            cls.require_setup_implementation(facet, owner_kind=owner_kind, owner_name=owner_name)
         instance = cls.__new__(cls)
         Capability.__init__(instance, owner_name, config, facet=facet, owner_kind=owner_kind)
         instance._session = None

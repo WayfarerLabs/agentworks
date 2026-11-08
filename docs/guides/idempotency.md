@@ -41,13 +41,19 @@ When `--update-template` and `--spec` are supplied together, Agentworks validate
 template binding and instance layer as one desired-state change before convergence. A later plain
 reinit reads both stored inputs again.
 
+Source capture can fail after those desired inputs have been saved, even before guest mutation.
+Inspect the recorded template and instance spec, then correct the source or explicitly restore the
+intended binding/layer before retrying. The stored declaration remains the desired state for retry.
+
 ## VM reinit
 
 `vm reinit` re-runs initialization using the current config. Many core installation steps collect
 warnings and can finish with a `partial` status. Required system-package installation is fatal on
-failure, as is harness integration setup: VM/admin setup must finish before the terminal
-authorized-key write and successful initialization checkpoint. An integration failure preserves its
-last confirmed native claims for retry; it does not report complete setup.
+failure. A valid VM/admin harness facet's domain or transport failure preserves confirmed progress,
+records its reason, and lets independent setup and the terminal authorized-key write finish. The VM
+is recorded as partial before the command reports collected failures and exits unsuccessfully.
+Cancellation, shared persistence failures, invalid activation preflight and unexpected internal
+errors still abort. An integration failure does not report complete setup.
 
 If the VM was created with `--spec` or `--admin-spec`, reinit consumes both stored final layers
 after their selected VM and admin templates. It does not accept a flag to change or clear either
@@ -140,6 +146,37 @@ access was restored.
 | ----------------------- | ------------------------------------------------------------------------ |
 | Dotfiles (local source) | Overwritten, not merged. Side effects from previous installs may linger. |
 
+## Workspace creation and interruption
+
+Workspace creation reserves its destination exclusively. Repository clones run in private, unique
+attempt directories beside that destination; only a confirmed successful clone is published into the
+workspace. An old guest clone may survive a controller timeout or cancellation, but its attempt path
+is separate from any later workspace using the same name. Recursive workspace ACL repair skips these
+private attempt trees.
+
+The attempt path is `<workspace-path>.agentworks-clone-<32-hex-digits>`, with the clone inside its
+`checkout` child. For example, a workspace at `/workspaces/project` can leave a sibling named
+`/workspaces/project.agentworks-clone-0123456789abcdef0123456789abcdef`. This naming pattern is
+reserved for private clone attempts. Cleanup failures report the actual attempt path. Killing the
+controller without allowing cleanup can leave an attempt without a warning; inspect the workspace's
+parent directory on the VM for this pattern. Agentworks does not automatically collect these
+leftovers.
+
+Cleanup of the attempt and the final reservation proceeds independently. Before confirmed clone
+publication, cleanup removes only an empty final reservation, including for a workspace without a
+repository. A failed non-repository create first retires its confirmed, unchanged generated
+tmuxinator file; its matching discovery link is removed with the reservation. Modified files,
+replacement links and unrelated contents are preserved. Existing tmuxinator discovery entries are
+not overwritten by workspace creation.
+
+A lost reservation or publication response, or a reservation that gained content, leaves that path
+and its group for inspection. An absent database row does not establish that a leftover directory is
+empty or safe to remove.
+
+Inspect and preserve valuable contents before manual cleanup or choosing another name. Check for a
+surviving Git process using the exact attempt path and stop it before removing that attempt. Do not
+recursively delete the final workspace path based on the naming pattern or a failed create alone.
+
 ## Workspace repair
 
 `workspace repair` reconciles the on-VM workspace's access mechanics with its database grants and
@@ -165,6 +202,11 @@ Activated workspace integration facets run after workspace directory and reposit
 explicit workspace recreation. Session create, start, and restart inspect declared prerequisites
 without implicitly running any ancestor setup.
 
+Before recreating a workspace, preserve tracked edits, untracked files, commits not yet pushed and
+stashes outside that workspace. Correct and push any repository content needed by the next clone,
+and correct workstation mapping sources as applicable. A change made only inside the old guest
+checkout does not change the next workspace's inputs.
+
 Owning setup receives both the effective activation map and prior applied state. It reconciles
 matching owned effects, retires removed associations where ownership can be established, and
 preserves incomplete or pending cleanup evidence on failure. Removing an activation from config
@@ -173,12 +215,24 @@ map or supplying `{}` inherits existing activations. Entries merge by integratio
 configuration following its facet's merge rules. A null entry, such as `codex: null`, disables that
 integration while preserving the others; a later layer can reactivate it with fresh configuration.
 
+A confirmed empty routing result remains usable even when the ancestor has an incomplete native
+entry. Unrelated descendant setup can still update or retire its own content. Truly unresolved
+inputs protect affected prior setup placements; a fresh workspace's completed local work does not
+become permanently incomplete merely because an ancestor needs repair. Session launch reports and
+records unavailable delivery as unhandled/incomplete while continuing with known inputs. Repair the
+owning ancestor and restart the session to reconsider those inputs.
+
 Cleanup is deliberately bounded. Settings mappings retain their native document when removed and
 have no separate ownership claims; they do not restore overwritten values. Native plugins and
 marketplaces are removed only when their recorded identity still proves ownership, without affecting
-unowned or project dependencies. A matching pre-existing installation is not adopted. See
-[native harness setup](native-harness-setup.md) for collision and retirement behavior, and
-[migrating Claude setup](migrating-claude-setup.md) for old declarations and stored overlays.
+unowned or project dependencies. Matching pre-existing entries are adopted after native identity and
+source verification against the native tool's reported association, with a recorded claim and
+adoption report. Adoption makes a matching pre-existing entry managed and permits safe removal when
+it is no longer declared. Mutable native plugin versions do not change association ownership;
+historical cache origin is not verified. Differing unowned entries are preserved and reported
+individually while other setup continues. See [native harness setup](native-harness-setup.md) for
+collision and retirement behavior, and [migrating Claude setup](migrating-claude-setup.md) for old
+declarations and stored overlays.
 
 Setup and parent deletion share a VM-family mutation guard. Parent deletion uses the existing core
 lifecycle and clears setup records in its database transaction; it does not first uninstall native
