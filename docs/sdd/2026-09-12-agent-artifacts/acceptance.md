@@ -73,6 +73,10 @@ successful model turn.
 
 ## Remaining decision
 
+The measured discrepancy is tracked in
+[issue 869](https://github.com/WayfarerLabs/agentworks/issues/869), separately from PR #862's clean
+bounded correction. The issue also identifies the shared per-process input carriers from #674.
+
 Passing current arguments on every process launch does not establish that a resumed conversation
 uses changed guidance. The current native-resume claims therefore cannot be checked off or used to
 lock this SDD. The proposed conservative disposition is to warn and leave session hints/rules
