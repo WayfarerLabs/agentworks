@@ -66,9 +66,11 @@ def wsl_program(*, windows: bool, environ: Mapping[str, str]) -> str:
 
 # The one place the wsl.exe program is named.
 _WSL = wsl_program(windows=sys.platform == "win32", environ=os.environ)
-# The error code wsl.exe prints with an empty listing, whose status is non-zero
-# and whose text is localized; the one token of its output this module reads.
-# It is looked for on both streams, as wsl.exe prints its own errors on stdout.
+# The error code other WSL releases print, with a non-zero status, for a
+# listing when no distro is installed (not measured here); the one token of
+# their localized output this module reads, on either stream, as wsl.exe prints
+# its own errors on stdout. WSL 2.7.14.0 (measured) instead exits 0 with no
+# output on either stream, which reads as an ordinary empty listing.
 _NO_DISTRIBUTIONS = "WSL_E_DEFAULT_DISTRO_NOT_FOUND"
 
 # The root channel's program inside the distro: Bash in a session of its own, with no controlling terminal.
@@ -492,11 +494,12 @@ def _keepalive(distro_name: str) -> Iterator[None]:
     skips the ``finally:`` (SIGKILL, console window closed, hard crash),
     the kernel closes the job handle and kills the orphan for us.
     """
+    # Both streams share one pipe, read only on the fast-fail path: wsl.exe prints its own errors on stdout.
     proc = subprocess.Popen(
         [_WSL, "--distribution", distro_name, "--", "sleep", "infinity"],
         stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
     )
     # Bind the subprocess to a Job Object so a hard-kill of this Python
     # process still tears down the wsl.exe orphan (the OS closes the job
@@ -518,14 +521,14 @@ def _keepalive(distro_name: str) -> Iterator[None]:
     if h_job is None and sys.platform == "win32":
         output.detail("(note: Win32 Job Object unavailable; a hard-kill of this command may leave an orphan wsl.exe.)")
 
-    def _close_stderr() -> None:
-        # Popen with stderr=PIPE leaves a read-end fd open until the Popen
+    def _close_output() -> None:
+        # Popen with stdout=PIPE leaves a read-end fd open until the Popen
         # object is GC'd. On the fast-fail path we already read and won't
         # touch it again; on the normal-exit path the subprocess has been
         # waited on so the pipe is at EOF. Either way the fd is dead weight.
-        if proc.stderr is not None:
+        if proc.stdout is not None:
             with contextlib.suppress(OSError):
-                proc.stderr.close()
+                proc.stdout.close()
 
     # Fast-fail check: if wsl.exe couldn't attach (wrong distro name, WSL
     # service hiccup, etc.), `sleep infinity` exits within milliseconds.
@@ -536,12 +539,17 @@ def _keepalive(distro_name: str) -> Iterator[None]:
     except subprocess.TimeoutExpired:
         rc = None  # still running, which is what we want
     if rc is not None:
-        stderr = proc.stderr.read().decode("utf-8", errors="replace").strip() if proc.stderr else ""
-        _close_stderr()
+        printed = proc.stdout.read().decode("utf-8", errors="replace") if proc.stdout else ""
+        _close_output()
         _close_handle(h_job)
-        raise RuntimeError(
-            f"WSL2 keepalive for distro {distro_name!r} exited immediately (rc={rc})"
-            + (f": {stderr}" if stderr else "")
+        reason = sanitize_terminal_output(printed.replace("\x00", "").strip()) or "no output"
+        raise WSLCommandFailed(
+            f"WSL2 distro '{distro_name}' could not be held running: "
+            f"'wsl --distribution {distro_name} -- sleep infinity' exited with status {rc}: {reason}",
+            hint=(
+                f"Check that 'wsl --list --verbose' lists '{distro_name}'. A distro unregistered outside "
+                "Agentworks leaves a VM that only 'agw vm delete' can remove."
+            ),
         )
     output.detail(f"Preventing idle-shutdown of WSL2 distro {distro_name!r} for the duration of this command...")
     try:
@@ -564,7 +572,7 @@ def _keepalive(distro_name: str) -> Iterator[None]:
                 proc.kill()
             with contextlib.suppress(subprocess.TimeoutExpired):
                 proc.wait(timeout=5)
-        _close_stderr()
+        _close_output()
         _close_handle(h_job)
         output.detail("Idle-shutdown prevention stopped.")
 
@@ -1000,8 +1008,10 @@ class WSL2Platform(VMPlatform):
         never finished) make either fail harmlessly. Then ``wsl --list``
         decides, and nothing reads a failure as absence: the distro is
         gone only when the listing does not name it and either the
-        unregister or the listing exited 0, or the listing reports that no
-        distro is installed at all, which it does with a non-zero status.
+        unregister or the listing exited 0 (an empty one included), or the
+        listing reports :data:`_NO_DISTRIBUTIONS`. A distro shown gone whose
+        install directory survived (a process outside WSL holds its disk
+        image) warns naming the directory.
         """
         unregistered = _run_wsl(["--unregister", distro_name]).returncode == 0
         install_path = _wsl_base_path() / distro_name
@@ -1013,7 +1023,13 @@ class WSL2Platform(VMPlatform):
         if any(line.strip() == distro_name for line in listing.stdout.splitlines()):
             return False
         empty = _NO_DISTRIBUTIONS in listing.stdout or _NO_DISTRIBUTIONS in listing.stderr
-        return unregistered or listing.returncode == 0 or empty
+        gone = unregistered or listing.returncode == 0 or empty
+        if gone and install_path.exists():
+            output.warn(
+                f"WSL2 distro '{distro_name}' is unregistered, but its directory '{install_path}' could not be "
+                "removed, so its disk image may remain there: run 'wsl --shutdown', then delete the directory."
+            )
+        return gone
 
     def delete(self, vm: VMRow, ctx: RunContext) -> None:
         output.info(f"Unregistering WSL2 distro '{vm.name}'...")
