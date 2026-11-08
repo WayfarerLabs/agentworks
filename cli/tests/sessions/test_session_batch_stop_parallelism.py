@@ -24,6 +24,7 @@ from agentworks.sessions.manager._teardown import (
     DedicatedTeardownEvidence,
     DedicatedTeardownPlan,
 )
+from agentworks.sessions.tmux import ProbeStatus
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -266,6 +267,45 @@ def test_database_compare_and_set_rejects_reused_name(db: Database) -> None:
             expected_boot_id=BOOT_ID,
             expected_tmux_server_start_ticks=201,
         )
+
+
+@pytest.mark.parametrize("last_presence", list(ProbeStatus))
+def test_absence_proof_rechecks_process_after_unreadable_start_time(
+    monkeypatch: pytest.MonkeyPatch,
+    last_presence: ProbeStatus,
+) -> None:
+    from agentworks.sessions import tmux as tmux_mod
+    from agentworks.sessions.manager._pids import _prove_runtime_absent
+
+    observations = iter((tmux_mod.ProbeStatus.PRESENT, last_presence))
+    privileges: list[bool] = []
+
+    def presence(pid: int, *, target: Transport, sudo: bool = False) -> tmux_mod.ProbeStatus:
+        assert pid == 101
+        privileges.append(sudo)
+        return next(observations)
+
+    monkeypatch.setattr(session_manager, "_get_boot_id", lambda target: BOOT_ID)
+    monkeypatch.setattr(session_manager, "_pid_presence", presence)
+    monkeypatch.setattr(
+        tmux_mod,
+        "probe_process_start_ticks",
+        lambda *args, **kwargs: tmux_mod.IntegerProbe(tmux_mod.ProbeStatus.UNKNOWN),
+    )
+    arguments: dict[str, Any] = {
+        "session_name": "session",
+        "stored_pid": 101,
+        "stored_boot_id": BOOT_ID,
+        "stored_start_ticks": 201,
+        "target": _Target("absence"),
+        "sudo": True,
+    }
+    if last_presence is tmux_mod.ProbeStatus.ABSENT:
+        assert _prove_runtime_absent(**arguments) is True
+    else:
+        with pytest.raises(StateError):
+            _prove_runtime_absent(**arguments)
+    assert privileges == [True, True]
 
 
 def test_invalid_complete_fingerprint_fails_preparation_closed(db: Database) -> None:

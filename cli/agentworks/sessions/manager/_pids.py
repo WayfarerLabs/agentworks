@@ -288,6 +288,10 @@ def _prove_runtime_absent(
     if ticks.status is ProbeStatus.ABSENT:
         return _mgr._pid_presence(stored_pid, target=target, sudo=sudo) is ProbeStatus.ABSENT
     if ticks.status is ProbeStatus.UNKNOWN or ticks.value is None:
+        # The process may exit between the presence probe and the stat read.
+        # Require an explicit absence fact rather than treating unreadable stat as absence.
+        if _mgr._pid_presence(stored_pid, target=target, sudo=sudo) is ProbeStatus.ABSENT:
+            return True
         raise StateError(
             f"could not verify the stored process start time for session '{session_name}'",
             entity_kind="session",
