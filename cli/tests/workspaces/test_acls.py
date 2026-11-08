@@ -1,70 +1,188 @@
-"""The canonical workspace ACL helper (``apply_workspace_acls``).
-
-The spec opens access to the owning group (``g::rwx`` + a matching mask) and
-denies ``other`` on BOTH the default ACL (so new entries created inside a
-workspace inherit ``default:other::---`` and are not world-readable or
-world-traversable) and the recursive access ACL (so entries that already
-exist lose any ``other`` bits they carried from the old ``default:other::r-x``)
-per #254. These tests assert the emitted ``setfacl`` command strings, not live
-ACL state, so they pin the exact spec the three call sites share.
-"""
+"""Workspace collaboration and native publication against actual POSIX ACLs."""
 
 from __future__ import annotations
 
-from types import SimpleNamespace
+import os
+import shlex
+import shutil
+import subprocess
+import sys
+from pathlib import Path
 
+import pytest
+
+from agentworks.artifacts.application import ArtifactFile, OwnedArtifactFile
+from agentworks.artifacts.publication import publish_artifacts
 from agentworks.workspaces.acls import apply_workspace_acls
+from tests.native_setup_fixtures import LocalFixtureTransport
+
+pytestmark = pytest.mark.skipif(
+    sys.platform != "linux" or shutil.which("setfacl") is None or shutil.which("getfacl") is None,
+    reason="requires Linux POSIX ACL tools",
+)
 
 
-class _RecordingTarget:
-    """Minimal transport double: records every command and answers ok."""
-
-    def __init__(self) -> None:
-        self.commands: list[str] = []
-
-    def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
-        self.commands.append(cmd)
-        return SimpleNamespace(ok=True, returncode=0, stdout="", stderr="")
+def fixture_group() -> str:
+    return subprocess.run(["id", "-gn"], check=True, capture_output=True, text=True).stdout.strip()
 
 
-def _default_cmd(target: _RecordingTarget) -> str:
-    """The default-ACL-on-directories command (find ... setfacl -d ...)."""
-    return next(c for c in target.commands if c.startswith("find ") and "setfacl -d" in c)
+def snapshot(path: Path) -> str:
+    return subprocess.run(["getfacl", "-R", "-n", "-p", str(path)], check=True, capture_output=True, text=True).stdout
 
 
-def _access_cmd(target: _RecordingTarget) -> str:
-    """The recursive access-ACL command (setfacl -R ...)."""
-    return next(c for c in target.commands if c.startswith("setfacl -R"))
+def test_cloned_artifacts_adopt_and_first_repair_keeps_published_file_acls(tmp_path):
+    target = LocalFixtureTransport(tmp_path / "target")
+    parent = target.home / "workspaces"
+    parent.mkdir()
+    parent.chmod(0o2770)
+    apply_workspace_acls(target, str(parent))
+    source = target.root / "source"
+    source.mkdir()
+    content = {
+        ".claude/rules/review.md": (b"fixture rule", False, "a" * 64),
+        ".claude/agents/reviewer.md": (b"fixture agent", False, "b" * 64),
+        ".codex/skills/review/SKILL.md": (b"fixture skill", False, "c" * 64),
+        ".codex/skills/review/run.sh": (b"#!/bin/sh\nexit 0\n", True, "c" * 64),
+    }
+    for name, (data, executable, _) in content.items():
+        path = source / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        path.chmod(0o755 if executable else 0o644)
+    for command in (
+        f"git init -q {shlex.quote(str(source))}",
+        f"git -C {shlex.quote(str(source))} add .",
+        f"git -C {shlex.quote(str(source))} "
+        "-c user.name=Fixture -c user.email=fixture@example.invalid commit -qm fixture",
+    ):
+        assert target.run(command).ok
+    workspace = parent / "project"
+    assert target.run(f"git clone -- {shlex.quote(str(source))} {shlex.quote(str(workspace))}").ok
+    for directory in (workspace, *(entry for entry in workspace.rglob("*") if entry.is_dir())):
+        directory.chmod(directory.stat().st_mode | 0o2000)
+    apply_workspace_acls(target, str(workspace))
+    desired = tuple(
+        ArtifactFile(
+            str(workspace / name),
+            data,
+            (origin,),
+            executable=executable,
+            package_root=str(workspace / ".codex/skills/review") if origin == "c" * 64 else None,
+        )
+        for name, (data, executable, origin) in content.items()
+    )
+    before = {item.path: Path(item.path).stat() for item in desired}
+    checkpoints: list[tuple[OwnedArtifactFile, ...]] = []
+    group = fixture_group()
+    adopted = publish_artifacts(target, desired, (), checkpoints.append, roots=(str(workspace),), group=group)
+    assert not adopted.skipped and len(adopted.files) == len(content)
+    for item in desired:
+        observed = Path(item.path).stat()
+        assert (observed.st_ino, observed.st_mtime_ns) == (before[item.path].st_ino, before[item.path].st_mtime_ns)
+        assert observed.st_mode & 0o777 == (0o770 if item.executable else 0o660)
+        assert os.access(item.path, os.R_OK | os.W_OK)
+        assert os.access(item.path, os.X_OK) == item.executable
+    assert target.run(shlex.quote(str(workspace / ".codex/skills/review/run.sh"))).ok
+    new_file = workspace / ".codex/rules/new.md"
+    updated = publish_artifacts(
+        target,
+        (*desired, ArtifactFile(str(new_file), b"new fixture rule", ("d" * 64,))),
+        adopted.files,
+        checkpoints.append,
+        roots=(str(workspace),),
+        group=group,
+    )
+    assert not updated.skipped and new_file.stat().st_mode & 0o777 == 0o660
+    acl_before = snapshot(workspace)
+    apply_workspace_acls(target, str(workspace))
+    assert snapshot(workspace) == acl_before
+    for entry in (workspace, *workspace.rglob("*")):
+        assert entry.stat().st_gid == os.getgid()
+        assert entry.stat().st_mode & 0o007 == 0
+        if entry.is_dir():
+            assert entry.stat().st_mode & 0o2070 == 0o2070
+            assert "default:other::---" in snapshot(entry)
 
 
-def test_default_acl_on_dirs_denies_other() -> None:
-    """The per-directory default ACL sets ``o::---`` under ``-d`` (which yields
-    ``default:other::---``), so entries created later are not world-readable."""
-    target = _RecordingTarget()
+@pytest.mark.parametrize("original_mode", [0o644, 0o755, 0o650])
+def test_access_mask_preserves_effective_executable_intent_and_is_idempotent(tmp_path, original_mode):
+    target = LocalFixtureTransport(tmp_path / "target")
+    workspace = target.home / "workspace"
+    workspace.mkdir()
+    workspace.chmod(0o2770)
+    apply_workspace_acls(target, str(workspace))
+    path = workspace / "file"
+    path.write_bytes(b"fixture")
+    path.chmod(original_mode)
+    apply_workspace_acls(target, str(workspace))
+    assert bool(path.stat().st_mode & 0o111) == bool(original_mode & 0o111)
+    assert path.stat().st_mode & 0o070 == (0o070 if original_mode & 0o111 else 0o060)
+    assert path.stat().st_mode & 0o007 == 0
+    before = snapshot(workspace)
+    apply_workspace_acls(target, str(workspace))
+    assert snapshot(workspace) == before
 
-    apply_workspace_acls(target, "/srv/ws1")  # type: ignore[arg-type]
 
-    assert "-m o::---" in _default_cmd(target)
+@pytest.mark.parametrize("executable", [False, True])
+def test_differing_executable_intent_is_retained_after_workspace_acl_application(tmp_path, executable):
+    target = LocalFixtureTransport(tmp_path / "target")
+    path = target.home / "rule.md"
+    path.write_bytes(b"fixture")
+    path.chmod(0o644 if executable else 0o755)
+    apply_workspace_acls(target, str(target.home))
+    before = path.stat()
+    result = publish_artifacts(
+        target,
+        (ArtifactFile(str(path), b"fixture", ("a" * 64,), executable=executable),),
+        (),
+        lambda files: None,
+        roots=(str(target.home),),
+        group=fixture_group(),
+    )
+    assert not result.files and len(result.skipped) == 1
+    assert result.skipped[0].path == str(path)
+    assert path.read_bytes() == b"fixture"
+    assert path.stat().st_mode == before.st_mode and path.stat().st_ino == before.st_ino
 
 
-def test_recursive_access_acl_denies_other() -> None:
-    """The recursive access ACL sets ``o::---`` over the whole existing tree,
-    so entries created under the old ``default:other::r-x`` are hardened too."""
-    target = _RecordingTarget()
+def test_workspace_acl_does_not_follow_a_link_outside_the_tree(tmp_path):
+    target = LocalFixtureTransport(tmp_path / "target")
+    workspace = target.home / "workspace"
+    workspace.mkdir()
+    outside = target.home / "outside"
+    outside.write_bytes(b"fixture")
+    outside.chmod(0o644)
+    (workspace / "link").symlink_to(outside)
+    apply_workspace_acls(target, str(workspace))
+    assert outside.stat().st_mode & 0o777 == 0o644
 
-    apply_workspace_acls(target, "/srv/ws1")  # type: ignore[arg-type]
 
-    assert "-m o::---" in _access_cmd(target)
+def test_parent_acl_repair_prunes_private_clone_attempt_trees(tmp_path):
+    target = LocalFixtureTransport(tmp_path / "target")
+    parent = target.home / "workspaces"
+    parent.mkdir()
+    apply_workspace_acls(target, str(parent))
+    workspace = parent / "project"
+    workspace.mkdir()
+    ordinary = workspace / "tracked"
+    ordinary.write_bytes(b"shared")
+    ordinary.chmod(0o600)
+    attempt = parent / ("project.agentworks-clone-" + "a" * 32)
+    attempt.mkdir(mode=0o700)
+    checkout = attempt / "checkout"
+    checkout.mkdir(mode=0o700)
+    private = checkout / "private"
+    private.write_bytes(b"private")
+    private.chmod(0o600)
+    executable = checkout / "tool"
+    executable.write_bytes(b"#!/bin/sh\n")
+    executable.chmod(0o700)
+    before = snapshot(attempt)
 
+    apply_workspace_acls(target, str(parent))
 
-def test_group_and_mask_entries_are_preserved() -> None:
-    """Denying ``other`` does not clobber the group / mask entries: both the
-    default and access commands still open ``g::rwx`` with a matching mask, so
-    owner/group collaboration is untouched."""
-    target = _RecordingTarget()
-
-    apply_workspace_acls(target, "/srv/ws1")  # type: ignore[arg-type]
-
-    for cmd in (_default_cmd(target), _access_cmd(target)):
-        assert "-m g::rwx" in cmd
-        assert "-m m::rwx" in cmd
+    assert snapshot(attempt) == before
+    assert attempt.stat().st_mode & 0o077 == 0
+    assert private.stat().st_mode & 0o077 == 0
+    assert ordinary.stat().st_mode & 0o770 == 0o660
+    assert "default:group::rwx" in snapshot(workspace)

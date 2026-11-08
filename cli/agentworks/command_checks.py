@@ -73,5 +73,8 @@ def check_required_commands(
         if result.returncode == 20:
             missing.append(command)
             continue
-        raise SSHError("could not check required commands in the target user's shell")
+        raise SSHError(
+            "could not check required commands in the target user's shell",
+            hint="Check the target user's login and interactive shell startup, then retry the operation.",
+        )
     return tuple(missing)

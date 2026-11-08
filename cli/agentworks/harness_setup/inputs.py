@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, cast
 
 from agentworks.artifacts.declarations import ArtifactsConfig
 from agentworks.capabilities.config import validate_capability_config
-from agentworks.capabilities.harness_integration import ensure_harness_integration_enabled
+from agentworks.capabilities.harness_integration import ensure_harness_integration_enabled, harness_integration_for
 from agentworks.env.compose import compose_env
 from agentworks.env.identity import ResourceContext, agentworks_identity_env
 from agentworks.schema import RefOwner
@@ -57,8 +57,13 @@ class SetupInputs:
 
         source = (self.kind, self.name)
         validate_activations(self.activations, facet=self.facet, source=source, provenance={})
+        facet = self.facet
         for name in self.activations:
             ensure_harness_integration_enabled(registry, name)
+            if facet in ("vm", "user", "workspace"):
+                harness_integration_for(name).require_setup_implementation(
+                    facet, owner_kind=self.kind, owner_name=self.name
+                )
         resolver.register_targets([self.target])
         for reference in activation_references(self.activations, facet=self.facet, source=source, provenance={}):
             if reference.kind == "secret":

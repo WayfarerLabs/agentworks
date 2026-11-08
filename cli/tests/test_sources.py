@@ -154,14 +154,12 @@ def test_workstation_snapshot_rejects_missing_and_directory_sources(tmp_path) ->
 
 
 @pytest.mark.windows
-def test_workstation_snapshot_error_does_not_echo_path(tmp_path) -> None:
-    import traceback
-
+def test_workstation_snapshot_error_identifies_declared_source_without_io_cause(tmp_path) -> None:
     from agentworks.sources import snapshot_workstation_file
 
-    source = str(tmp_path / "external-sensitive-path")
+    source = str(tmp_path / "missing")
     with pytest.raises(SourceRefError) as caught:
         snapshot_workstation_file(source)
-    assert "external-sensitive-path" not in "".join(traceback.format_exception(caught.value))
+    assert repr(source) in str(caught.value)
     assert caught.value.__cause__ is None
     assert caught.value.__suppress_context__

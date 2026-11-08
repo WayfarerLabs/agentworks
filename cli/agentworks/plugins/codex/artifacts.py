@@ -13,6 +13,7 @@ from agentworks.artifacts.model import ArtifactType
 from agentworks.artifacts.native.common import (
     MAX_CODEX_PERSONA_BYTES,
     NativeSessionArtifacts,
+    ancestor_diagnostics,
     artifact_file,
     context_text,
     has_artifacts,
@@ -154,12 +155,22 @@ def session_artifacts(
     validate_names(inputs)
     types = {item.content.type for item in inputs.items()}
     ancestors = {file.native_identity or "" for file in context.ancestor_files}
-    _reject_overrides(
-        extra_args,
-        guidance=bool(types & {ArtifactType.HINT, ArtifactType.RULE}),
-        skills=any(name.startswith("skill:") for name in ancestors),
-        agents=ArtifactType.AGENT in types or any(name.startswith("agent:") for name in ancestors),
-    )
+    if inputs:
+        _reject_overrides(
+            extra_args,
+            guidance=bool(types & {ArtifactType.HINT, ArtifactType.RULE}),
+            skills=False,
+            agents=ArtifactType.AGENT in types,
+        )
+    if context.ancestor_files:
+        with ancestor_diagnostics("codex"):
+            _reject_overrides(
+                extra_args,
+                guidance=False,
+                skills=any(name.startswith("skill:") for name in ancestors),
+                agents=any(name.startswith("agent:") for name in ancestors),
+            )
+
     files: list[ArtifactFile] = []
     argv: list[str] = []
     guidance = tuple(item for item in inputs.items() if item.content.type in (ArtifactType.HINT, ArtifactType.RULE))

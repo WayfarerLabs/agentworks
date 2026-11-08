@@ -42,7 +42,7 @@ rendering must preserve every surviving contribution or explicitly refuse the co
 | Shell       | `~/.agentworks-artifacts/user/` and `<workspace>/.agentworks-artifacts/`, containing typed files and an index            | Same layout in the private run directory; `AGENTWORKS_ARTIFACTS_DIR` points there when the run has inputs                           |
 | Claude Code | `.claude/rules/agentworks-rule-<name>.md`, one hints rule, complete `.claude/skills/<name>/`, `.claude/agents/<name>.md` | Additive prompt file, private generated plugin for skills, inline `--agents` JSON                                                   |
 | Codex       | Complete `.agents/skills/<name>/`, `.codex/agents/<name>.toml` and a generated AGENTS instruction section                | Composed `developer_instructions`; private role config files selected through `agents.<name>.config_file` and description overrides |
-| Grok Build  | Flat `.grok/rules/`, complete `.grok/skills/<name>/`, `.grok/agents/<name>.md`                                           | Composed `--rules` text and inline `--agents` JSON                                                                                  |
+| Grok Build  | Flat `.grok/rules/`, complete `.grok/skills/<name>/`, `.grok/agents/<name>.md`                                           | Composed `--rules` text; private session personas unsupported                                                                       |
 
 User native roots honor `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and `GROK_HOME`. Codex's standard user
 skills remain under the actual user's `.agents/skills`, independently of `CODEX_HOME`. Workspace
@@ -72,16 +72,17 @@ section publication with fixed `<!-- BEGIN AGENTWORKS GENERATED -->` and
 `<!-- END AGENTWORKS GENERATED -->` delimiters. Core replaces a complete section regardless of
 changes inside it and preserves surrounding bytes, ownership, permissions and extended attributes.
 Missing partners, reversed or duplicate markers warn and skip the file, recording the reason
-separately from deferrals. Cleanup removes only the generated section; it may leave an empty file.
-The existing whole-file ownership checks remain unchanged for skills, personas and separate native
-rule files.
+separately from deferrals. Cleanup clears the generated body and retains an empty complete marker
+pair as an insertion anchor. This preserves operator bytes and section position through repeated
+removal and restoration without a second ownership-history store. The existing whole-file ownership
+checks remain unchanged for skills, personas and separate native rule files.
 
 Skill members retain their captured bytes and executable intent. Adapters neither flatten skills
 into prompts nor omit supporting files. The Claude session plugin is named `agentworks-artifacts`;
 its skills use the native `agentworks-artifacts:<name>` namespace. Its manifest contains only the
-generated plugin identity, with no hook or MCP configuration. Codex and interactive Grok Build have
-no supported private session skill carrier in this implementation; those inputs remain deferred and
-core warns and records them as unhandled while allowing launch.
+generated plugin identity, with no hook or MCP configuration. Codex and Grok Build have no supported
+private session skill carrier in this implementation; those inputs remain deferred and core warns
+and records them as unhandled while allowing launch.
 
 Native names are checked across local/deferred owner groups and persisted ancestor ownership
 metadata, with supported native discovery locations checked for existing entries that can shadow
@@ -90,10 +91,15 @@ if the native harness normally chooses one by precedence. Same-scope composition
 that cross-scope suppression. Outer setup uses the owners it knows; the session checks the joined
 actual user/workspace context without retroactively running ancestor setup. Multiple members
 belonging to one skill are one identity. Distinct origins claiming the same native skill or agent
-identity are an error, including across user/workspace branches. Session persona definitions are
-retained as individually owned files with their native identity; Claude and Grok still receive the
-combined definitions in one JSON argument. Previously handled ancestor payloads are not
-retransmitted.
+identity cannot be delivered by silently choosing one. Setup defers affected native entries with
+unchanged origins and reports partial completion; unrelated entries continue. Previously owned
+placements omitted from the new plan follow ordinary safe retirement, while modified/unowned content
+is retained. Native identity collisions leave affected session inputs unhandled with a report;
+independent inputs continue. Conflicts solely between existing ancestor placements are reports.
+Unsafe filesystem destination overlaps remain errors. Supported session persona definitions are
+retained as individually owned files with their native identity; Claude receives the combined
+definitions in one JSON argument. Grok session personas remain unhandled, with no generated files or
+arguments. Previously handled ancestor payloads are not retransmitted.
 
 Hints aggregate into one rule-like file per native destination where file discovery is supported,
 using an `agentworks-hints` name. Session-only mechanisms may instead aggregate into additive native
@@ -120,7 +126,7 @@ and rejects unsupported fields rather than silently losing their requested behav
 | ----------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Claude Code | `model` string; `tools` and `disallowedTools` string lists; `maxTurns` positive integer | Markdown frontmatter for outer facets, native persona JSON for sessions                                                                                      |
 | Codex       | `model` and `model_reasoning_effort` strings                                            | Native discovery TOML includes name/description; session role config layers contain only config fields, with identity/description in the selecting overrides |
-| Grok Build  | `model` string and `tools` string list                                                  | Markdown frontmatter or inline persona JSON                                                                                                                  |
+| Grok Build  | `model` string and `tools` string list                                                  | Markdown frontmatter at user/workspace facets; private session personas unsupported                                                                          |
 
 Codex CLI overrides use literal dotted key components, not TOML key syntax. Session role selectors
 therefore use the validated portable persona name directly in `agents.<name>.config_file` and
@@ -129,21 +135,28 @@ rejected before publication rather than creating another nested key or a name co
 
 Hooks, MCP definitions and unknown option fields are not accepted through this surface. Registering
 a persona makes its native definition available; it does not silently select the primary persona.
-Existing integration `agent` configuration retains its documented behavior. In particular, Codex
-primary-persona selection remains prompt-mediated and does not promise that the persona's model or
-other runtime configuration applies to the primary thread.
+Existing integration `agent` configuration retains its documented behavior even when its same-named
+managed definition is left unhandled; the native tool can select an existing native definition. The
+warning does not claim managed-definition delivery. In particular, Codex primary-persona selection
+remains prompt-mediated and does not promise that the persona's model or other runtime configuration
+applies to the primary thread.
 
 ## Native preflight
 
 Preflight resolves the native root in the actual login environment. Declared environment is passed
 through the transport's environment channel, not embedded into logged command text. A changed actual
 `HOME` is an error because session publication belongs to the Linux user selected by core. A changed
-native home that no longer discovers an applied ancestor's files requires correction or owning-facet
-reinitialization. User artifact publication honors native-home overrides beneath that user's `HOME`.
-A plan that would publish outside `HOME` is explicitly unsupported and fails before settings or
-plugin mutations. Persisted ownership and retirement therefore share the same user boundary. A
-session can still use an external native home when its artifacts remain inline or in the private run
-directory and it has no incompatible ancestor placement.
+native home that no longer discovers an applied ancestor's files is reported with its owning repair
+operation and does not block session launch. User artifact publication honors native-home overrides
+beneath that user's `HOME`. A plan that would publish outside `HOME` is explicitly unsupported and
+fails before settings or plugin mutations. Persisted ownership and retirement therefore share the
+same user boundary. A session can still use an external native home when its artifacts remain inline
+or in the private run directory. Existing ancestor-only discovery problems are warnings; new session
+delivery must still validate its own carriers, destinations and native identities.
+
+The shared session probe checks new carriers strictly, then checks existing ancestor files through
+the advisory path. A mixed-delivery start therefore retains ancestor warnings without adding old
+paths to the strict request. Integrations keep their native discovery roots and carrier details.
 
 Codex and Grok guidance is carried directly in native argv; no unused guidance file is published.
 Claude's additive prompt file and Codex's selected role configuration files are consumed by their
@@ -157,7 +170,10 @@ Codex TOML and configuration-registered role names use the standard library. Pub
 skill entrypoints before supporting members, so an interrupted large-package write remains
 inspectable and retryable. Retirement reverses that order: `SKILL.md` stays present and owned while
 any owned supporting member or required parent cleanup remains. Modified or unowned files remain
-untouched.
+untouched. A modified obsolete member of a still-requested skill skips the whole package before
+publication, so new instructions cannot be combined with that retained member. A differing whole
+file in a prospective session directory refuses staging before the old runtime is torn down; setup's
+per-entry skip policy does not authorize launching with that content.
 
 Retirement prunes empty parents of each removed owned skill member only within the exact package
 root supplied by the integration and retained on that file's existing record. Core validates that
@@ -203,8 +219,9 @@ not require enabling it. Claude rule exclusions are checked against requested ru
 exclusion patterns that this adapter cannot interpret are diagnosed explicitly. Codex skill
 selectors and Grok disabled skill names are checked against supplied artifacts. Grok workspace paths
 are checked against Git ignore rules; user files outside that workspace are not fed to the
-workspace's ignore check. A relevant restriction in any inspected configuration layer causes a
-conservative refusal. The adapter does not reconstruct native trust or merge precedence, so a later
+workspace's ignore check. A relevant restriction on newly requested delivery in an inspected
+configuration layer causes a conservative refusal. An ancestor-only restriction is a report and does
+not prevent launch. The adapter does not reconstruct native trust or merge precedence, so a later
 layer that reenables an artifact does not clear that refusal. Diagnostics identify a configured
 restriction without claiming it is the native effective policy.
 
@@ -222,16 +239,35 @@ this adjustment. No helper flags or version checks are added for skipped session
 `enabled_workarounds` is a default-empty, replacing list in each native session config. Claude
 accepts `session-prompt`, `session-skill-plugin`, and `session-agent-definitions`; Codex accepts
 `session-developer-instructions` and `session-agent-config`; Grok accepts `session-rules` and
-`session-agent-definitions`. Shell publishes directly without a workaround. Codex/Grok session
-skills have no workaround. These names opt into the existing carriers in the table above. Hooks,
-automatic fallbacks and release-by-release compatibility tables are not part of this correction.
+`session-agent-definitions`. The latter remains accepted for config compatibility but has no
+verified private session persona carrier, so Grok leaves those inputs unhandled in every launch mode
+and emits no persona files or `--agents` argument. Bounded Grok 1.0.70 request captures did not
+expose the generated persona, including with explicit main-agent selection; accepting native flags
+alone does not prove delivery. This does not establish impossibility across all native versions.
+Native user/workspace personas and operator selection remain separate. Shell publishes without a
+workaround. Codex/Grok session skills have no workaround. These names opt into the existing carriers
+in the table above. Hooks, automatic fallbacks and release-by-release compatibility tables are not
+part of this correction.
 
-Raw carrier conflicts are checked for enabled session delivery and already applied ancestor
-discovery. Disabled session inputs do not introduce restrictions on native launch arguments. Outer
-native placement and its safety/ownership checks remain in place. Core emits final unhandled
-warnings after full output validation and stores the deferrals so inspection does not claim success.
-Known domain failures retain their error type and focused remediation through the agent lifecycle;
-version/configuration refusals are not recast as unexplained SSH failures.
+Native-name conflicts in enabled session delivery leave the identified inputs terminally unhandled.
+The shared session pipeline rerenders complete files and arguments for the remaining inputs and
+repeats validation; removing one proposal can expose another collision with retained native content.
+A supported namespace can resolve an earlier setup collision. Malformed inputs, invalid native
+responses, transport failures and unsafe filesystem publication remain hard errors. Raw argument
+override conflicts are still checked for enabled new session delivery. Ancestor-only discovery
+problems are reported rather than enforced as session prerequisites. Disabled session inputs do not
+introduce restrictions on native launch arguments. Outer native placement and its safety/ownership
+checks remain in place. Core emits final unhandled warnings after full output validation and stores
+the deferrals so inspection does not claim success. Setup-facet domain and transport failures retain
+their sanitized reason and focused remediation in incomplete state and the command's failure list.
+Independent setup and owner bookkeeping continue before the terminal error summary; these failures
+are not recast as unexplained SSH failures. Persistence failures and cancellation still abort.
+Session preparation errors retain their existing fail-before-teardown behavior.
+
+An ancestor-only check still returns its native root for discovery-path diagnostics. A missing
+ancestor-only target produces an advisory warning; a missing target needed for new delivery remains
+an error. Mixed new/ancestor delivery uses a separate read-only advisory query, preserving strict
+checks over new paths without turning ancestor policy into a launch prerequisite.
 
 Native argv and the fully quoted returned command each have a conservative 32 KiB UTF-8 limit,
 leaving room for launcher wrapping below the operating system's per-argument limit. Oversized text
@@ -295,3 +331,43 @@ personas, rule and skill loading paths, fresh/resume carrier selection, native p
 cleanup through native diagnostics and a scoped VM. R10 excludes model calls and external
 marketplaces from this acceptance. File existence, native diagnostics and green renderer tests must
 not be reported as proof that a model consumed an artifact.
+
+## Failed routing and conservative publication
+
+A setup attempt starts incomplete while retaining its prior input IDs and deferrals. A recorded
+routing table is confirmed only for the current prepared inputs it covers, including explicit
+incoming routes whose payload is unreadable. Content changes create new input identities. An old
+non-null table, including an empty table, cannot establish handling for added or changed inputs. A
+native-only failure can leave a fully covered routing result usable; completeness alone is not the
+routing test. A failed outer facet can still feed readable old deferrals to descendants without
+authorizing retirement as though an unknown declaration were empty.
+
+The internal routing result distinguishes known unresolved input IDs from unavailable routing
+without IDs. A confirmed routing table with no routes to a receiver does not hold that receiver's
+own content merely because unrelated native setup is incomplete. Missing, unavailable or stale
+capture evidence cannot authorize retirement, even when an older table has no deferrals. Missing
+payload for an explicit applicable route remains unknown even when current bundle selection is
+empty. Inactive facets use core's fixed passthrough independently of opaque old active-facet state.
+
+When unknown applicable routes prevent establishing requested inputs, setup publication holds prior
+placements against removal or replacement, including generated sections and related packages. Prior
+and current local captures identify independently attributable local files, which can still update
+or retire; a shared file containing unknown ancestor content remains held. Actual held paths keep
+local publication incomplete. Temporary incoming-route health is recomputed lazily and does not
+become a permanent local native failure on a fresh workspace. A healed VM that handles all inputs
+can clear that warning without workspace recreation; genuinely new workspace placement still needs
+application. The receiving record acknowledges known supplied inputs only, while inspection and the
+session join retain the separate unknown incoming-route health. No codec or history store is added.
+
+Missing explicit route IDs survive active receivers, including their first application, and inactive
+user/workspace passthrough. An integration receives only readable inputs; core appends the missing
+IDs to recorded input and onward-deferral metadata after validating that application. This preserves
+the source owner's repair reason without inventing content or accepting unknown IDs from integration
+output. The session join retains that metadata. Known unavailable IDs become terminal unhandled
+metadata; unknown routing without IDs records its owner and repair reason. The session launches with
+readable inputs and records incomplete delivery rather than calling the reduced set current. It does
+not fabricate missing canonical content or turn these optional inputs into prerequisites. Old
+private files remain usable until runtime teardown; afterward normal owned cleanup retires obsolete
+runs. Keeping unreferenced old files would not deliver missing content and does not justify
+accumulating run history. The existing applied-state fields carry the outcome; there is no new
+persisted ledger or artifact wire format.

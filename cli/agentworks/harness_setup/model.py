@@ -44,9 +44,14 @@ class SetupRecord(AgwModel):
     declaration: dict[str, JsonValue]
     complete: bool = False
     pending_cleanup: bool = False
+    # Current-attempt diagnostics only, never native contents or an event history.
+    incomplete_reasons: Annotated[tuple[Annotated[str, Field(pattern=r"\S")], ...], Field(strict=False)] = ()
     claims: Annotated[tuple[NativeClaim, ...], Field(strict=False)] = ()
 
     artifact_files: Annotated[tuple[OwnedArtifactFile, ...], Field(strict=False)] = ()
+    # None means this invocation never confirmed handling of its supplied inputs.
+    # Incoming ancestor route health is computed lazily from the owning records;
+    # it is not a permanent failure of this facet's completed local application.
     artifact_inputs: Annotated[tuple[_Hash, ...], Field(strict=False)] | None = None
     deferred: Annotated[tuple[ArtifactDeferral, ...], Field(strict=False)] = ()
     skipped: Annotated[tuple[ArtifactSkip, ...], Field(strict=False)] = ()
@@ -64,12 +69,18 @@ class SetupRecord(AgwModel):
         if len(skipped) != len(set(skipped)):
             raise ValueError("native setup contains duplicate skipped artifact paths")
         deferred = [item.input_id for item in self.deferred]
-        if len(deferred) != len(set(deferred)) or not set(deferred) <= set(self.artifact_inputs or ()):
+        if len(deferred) != len(set(deferred)) or (
+            self.artifact_inputs is not None and not set(deferred) <= set(self.artifact_inputs)
+        ):
             raise ValueError("native setup contains invalid artifact deferrals")
         if self.artifact_inputs is not None and len(self.artifact_inputs) != len(set(self.artifact_inputs)):
             raise ValueError("native setup contains duplicate artifact inputs")
         if self.complete and self.pending_cleanup:
             raise ValueError("pending cleanup cannot be complete setup")
+        if self.complete and self.incomplete_reasons:
+            raise ValueError("incomplete reasons cannot be complete setup")
+        if self.complete and self.artifact_inputs is None and self.deferred:
+            raise ValueError("unconfirmed artifact routing cannot be complete setup")
         return self
 
 

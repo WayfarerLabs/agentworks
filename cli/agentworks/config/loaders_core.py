@@ -21,6 +21,7 @@ Split out of the former monolithic ``agentworks/config.py`` (see
 from __future__ import annotations
 
 import ipaddress
+import posixpath
 from pathlib import Path
 
 from agentworks.config.models import DefaultsConfig, OperatorConfig, PathsConfig, TerminalConfig
@@ -252,6 +253,7 @@ def _load_paths(data: dict[str, object]) -> PathsConfig:
     defaults = PathsConfig()
     vm_ws = str(raw["vm_workspaces"]) if "vm_workspaces" in raw else defaults.vm_workspaces
     validate_vm_workspaces(vm_ws)
+    vm_ws = posixpath.normpath(vm_ws)
     vscode_ws = _expand(str(raw["vscode_workspaces"])) if "vscode_workspaces" in raw else defaults.vscode_workspaces
     backups = _expand(str(raw["backups"])) if "backups" in raw else defaults.backups
     return PathsConfig(vm_workspaces=vm_ws, vscode_workspaces=vscode_ws, backups=backups)
