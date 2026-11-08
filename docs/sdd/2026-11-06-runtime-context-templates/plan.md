@@ -4,10 +4,11 @@ Governing requirements: [FRD](frd.md). Architecture: [HLA](hla.md). Detailed con
 [interpolation LLD](interpolation-lld.md). Background: [prior art](prior-art-research.md).
 Lifecycle: [delivery](migration-strategy.md).
 
-Delivery: one PR containing the full feature, full SDD, permanent documentation, and validation. PR
-#867 is a draft correction checkpoint after its first ready handoff. Completion is tracked against
-the accepted namespaced contract; transport acceptance and validation timing remain unresolved. Lock
-only after all feature work and final feedback are complete.
+Delivery: one PR containing the full feature, full SDD, permanent documentation, and validation.
+[PR 867](https://github.com/WayfarerLabs/agentworks/pull/867) is a draft correction checkpoint after
+its first ready handoff. Completion is tracked against the accepted namespaced contract; transport
+acceptance and validation timing remain unresolved. Lock only after all feature work and final
+feedback are complete.
 
 ## Design checkpoint
 
@@ -137,3 +138,32 @@ validation before launch or destructive replacement, without a generic integrati
 This is a request for operator disposition, not an amendment to the accepted FRD. The current FRD
 remains unchanged and this requirement remains incomplete until the operator rules or implementation
 meets its existing timing.
+
+### Correction evidence
+
+Runtime correction head: `def2ac6e37414ee9f58cb9c99568e965925a3700`. All three private lanes
+returned clean scoped follow-up reviews. Project and complexity each passed 102 focused tests;
+generic correctness passed 134 and reproduced the setup correction. These selections overlap the
+full suite.
+
+The runtime identity fix discards applicable managed-identity collisions before validation,
+collection, reveal, and composition. Setup applies its broader reserved-prefix rule through one
+setup-owned projection, preserving the original declaration capture. A private-review setup finding
+was corrected before this checkpoint. Command rendering belongs to declared integration fields;
+returned commands receive no additional interpolation. The resource guide and related collateral
+teach that contract. Muntz's optional redundant final setup comprehension was acknowledged and
+retained; it costs one extra dictionary pass and does not affect acceptance.
+
+Full non-integration validation passed 11,406 tests with 11 skipped. Ruff lint and formatting passed
+for 968 files; strict Mypy passed for 932 files. The exact CI Typer-isolation step, Rulesync drift,
+and locked-SDD checks passed. Five real offline CLI invocations verified context, precedence,
+redaction/reveal, ignored identity plaintext and secret declarations, and expected
+unavailable-context refusal, with zero transport attempts. Website validation passed 160 Python and
+103 Node tests and deterministic double builds at both site bases. File-quality checks accompany the
+final bookkeeping commit. None of this replaces current-head live acceptance.
+
+This correction checkpoint remains draft, `review-requested`, and `awaiting-direction`. The
+transport and timing rulings above remain open, the accepted FRD is unchanged, and the SDD is
+unlocked. The operator's remaining feedback allowance is dormant while those dispositions are
+pending; a new correction cycle must still wait for its integration report. No merge is authorized
+or claimed.
