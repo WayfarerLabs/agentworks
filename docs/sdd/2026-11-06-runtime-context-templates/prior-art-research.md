@@ -75,8 +75,9 @@ Sources:
 - Runtime access, sessions, console shells, and harness setup are concrete consumers of that map.
 - Managed initialization uses `/home/<Linux username>`; context projection shares that rule instead
   of consulting local `HOME` or issuing an inspection-time SSH probe.
-- Commands and literal argv are different destinations. Namespace shielding belongs with literal
-  argv construction; arbitrary automatic shell quoting cannot be inferred from a string fragment.
+- Commands and literal argv are different destinations. Render declared template fields in their
+  owning integration and quote structured argv values once; arbitrary automatic shell quoting cannot
+  be inferred from a string fragment.
 
 ## Claims not adopted
 

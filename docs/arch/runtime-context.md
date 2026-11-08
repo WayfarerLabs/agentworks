@@ -84,8 +84,8 @@ of a process's live environment or user shell startup effects.
 SSH delivery uses the client's `SetEnv` option. Clients that expand SetEnv values can reinterpret
 literal `${...}` text using the controller's environment, or refuse it when that variable is absent.
 This affects escaped plaintext and opaque secrets as well as ordinary shell-looking text. Preview
-and setup rendering do not perform that client expansion. Literal-value delivery on those clients
-is an unresolved transport dependency; changing Agentworks template escaping does not suppress it.
+and setup rendering do not perform that client expansion. Literal-value delivery on those clients is
+an unresolved transport dependency; changing Agentworks template escaping does not suppress it.
 
 ## Secrets
 

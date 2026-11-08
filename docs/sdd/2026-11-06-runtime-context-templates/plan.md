@@ -37,7 +37,7 @@ namespaced contract; lock only after all feature work and final feedback are com
       integration's literal workload fields and intentionally expanded extra args.
 - [x] Cover VM/agent shell and exec, session create/start/restart, console extra panes, and setup
       composition, including new agents and contexts missing workspace/session values.
-- [x] Reject invalid winning expressions before prompts and mutations whenever their context is
+- [ ] Reject invalid winning expressions before prompts and mutations whenever their context is
       known, including before a restart destroys the current runtime.
 - [x] Update `docs/arch/runtime-context.md` with the accepted vocabulary, grammar, availability,
       phase, consumer boundaries, examples, and how another consumer should adopt the renderer.
@@ -121,3 +121,17 @@ alter local client execution; shell preludes would reopen ADR 0014. This exceeds
 correction. The accepted literal-data and preview-parity requirements remain in force;
 operator/transport-owner disposition is pending, and the SDD remains open. Critical reading and
 call-site evidence are recorded in PR comment 6728073054.
+
+### Validation timing ruling pending
+
+The accepted FRD requires known winning references to fail before prompts and mutations. Env checks
+run at that boundary, but selected command fields render inside integration launch selection, after
+secret resolution and potentially workspace access realization. They still fail before destructive
+runtime replacement. The earlier completion checkbox for the broader timing requirement was
+premature and is corrected while unmerged, under the SDD's erroneous-checkbox carve-out.
+
+The proposed requirement amendment would retain early env validation and require selected command
+validation before launch or destructive replacement, without a generic integration preflight hook.
+This is a request for operator disposition, not an amendment to the accepted FRD. The current FRD
+remains unchanged and this requirement remains incomplete until the operator rules or implementation
+meets its existing timing.
