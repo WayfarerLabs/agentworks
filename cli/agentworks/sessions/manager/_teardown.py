@@ -620,14 +620,6 @@ def execute_concurrent_dedicated_teardowns(
                     continue
                 pending.remove(future)
                 output.info(f"Session '{plan.session_name}' stopped")
-        except KeyboardInterrupt as exc:
-            if primary_error is None:
-                primary_error = exc
-            if not reconciling:
-                reconciling = True
-                _enter_reconciliation(tuple(pending), exc, cancel_queued=True)
-            else:
-                _enter_reconciliation(tuple(pending), exc, cancel_queued=False)
         except BaseException as exc:
             if primary_error is None:
                 primary_error = exc

@@ -164,6 +164,20 @@ not authored prose.
 
 ## Phase 4: Collateral and Exact-Head Validation
 
+### November resumption
+
+The September validation below records the implementation as it then stood. Work resumed on
+2026-11-08 after main advanced to `c8d4dfb3c` and version 0.19.0 released. The FRD's release target
+records the original schedule; this effort adds no version-dependent compatibility or deprecation.
+
+- [x] Merge current main, preserving running-restart consent, selected-session identity checks,
+      native mutation guards, and legacy teardown authorization.
+- [x] Audit transport-take2 requirements R4, R9, and R10: current transport consumers remain in
+      place until migration, with no dependency on the replacement stack. Migration must preserve
+      independent worker ownership, privilege selection, finite calls, and no mutation retries.
+- [ ] Complete fresh full gates, installed-wheel validation, and private reviews after resumption.
+- [ ] Record reachable live coverage and any remaining VM or workstation gaps.
+
 - [x] Update active command reference and session lifecycle/status guidance.
 - [ ] Add `locked.md` from the implemented exact head and run locked-SDD validation.
 - [x] Run full Python, lint, Rulesync, website, and installed-wheel gates.
