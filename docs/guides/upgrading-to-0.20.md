@@ -273,11 +273,13 @@ before they resolve the auth key.
   Agentworks opens to a cloud VM (AWS, Azure, GCP) is removed when the command is ended on macOS and
   Linux by `SIGTERM` or `SIGHUP` (a closed terminal), or on Windows by Ctrl-Break, as it is on
   Ctrl-C: `vm create` rolls back, bootstrap allow included, and a root script (`vm recover`,
-  `vm rekey`, the logout at `vm delete`) or a `vm shell --platform` session removes its own allow. A
-  second signal during that cleanup is ignored, so it cannot cut the removal short. Closing the
-  console window on Windows may start that cleanup, but Windows ends the process within seconds, so
-  it cannot be relied on to finish: end the command with Ctrl-C or Ctrl-Break instead, and delete a
-  rule a closed window left behind from the VM's firewall in the provider's console.
+  `vm rekey`, the logout at `vm delete`) or a `vm shell --platform` session removes its own allow.
+  Once a signal has started that cleanup, Ctrl-C included, a `SIGTERM`, `SIGHUP` or Ctrl-Break is
+  ignored, so a closed terminal cannot cut the removal short; a second Ctrl-C still abandons the
+  cleanup, as its message says. Closing the console window on Windows may start that cleanup, but
+  Windows ends the process within seconds, so it cannot be relied on to finish: end the command with
+  Ctrl-C or Ctrl-Break instead, and delete a rule a closed window left behind from the VM's firewall
+  in the provider's console.
 - **Output nobody reads no longer fails a command.** When the reader of `agw`'s output has gone (a
   pipe into `head` that has exited, `2>&1 | tee create.log` in a closed window, or the closed
   terminal itself), the rest of that output is dropped and the command carries on to the end, a

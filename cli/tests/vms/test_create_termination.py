@@ -132,6 +132,39 @@ def test_a_create_whose_reader_has_gone_rolls_back_as_on_a_live_terminal(
     assert not trust.store_file("dev").exists()
 
 
+@pytest.mark.parametrize("second", ["SIGTERM", "SIGHUP"])
+def test_a_termination_during_a_ctrl_c_rollback_does_not_cut_it_short(
+    db: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, second: str
+) -> None:
+    """Ctrl-C, then the window closes while the rollback waits on the provider: the rollback still finishes."""
+    from tests import _aws_fakes
+
+    config = _config(tmp_path, monkeypatch)
+    recorder = install_fakes(monkeypatch)
+    stub_egress(monkeypatch)
+    terminate = _aws_fakes._FakeEC2.terminate_instances
+
+    def terminate_then_signal(self: object, **kwargs: object) -> object:
+        os.kill(os.getpid(), getattr(signal, second))
+        return terminate(self, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(_aws_fakes._FakeEC2, "terminate_instances", terminate_then_signal)
+
+    def respond(payload: str, seen: int) -> Answer:
+        os.kill(os.getpid(), signal.SIGINT)
+        raise AssertionError("Ctrl-C did not interrupt the create")
+
+    install_at_run_process(monkeypatch, FakeGuest(respond))
+
+    with pytest.raises(KeyboardInterrupt):
+        vm_manager.create_vm(db, config, name="dev", site="aws-dev", interaction=TtyInteractionPolicy.REFUSE)
+
+    calls = recorder.methods("ec2")
+    assert "terminate_instances" in calls
+    assert "delete_security_group" in calls
+    assert db.get_vm("dev") is None
+
+
 # The forked child runs the create with every fixture this process set up. A
 # test runner's worker has threads of its own, so a lock one held at the fork
 # could deadlock the child; the parent's watchdog then fails the test rather

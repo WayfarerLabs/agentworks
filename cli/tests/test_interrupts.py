@@ -14,7 +14,7 @@ posix_only = pytest.mark.skipif(sys.platform == "win32", reason="SIGHUP and os.k
 # SIGBREAK, Ctrl-Break's signal, exists only on Windows.
 _CTRL_BREAK: int | None = getattr(signal, "SIGBREAK", None)
 # Windows has handlers for these but no delivery to them from outside, so each test raises them in-process.
-_FIRST_SIGNALS = ["SIGTERM", *(["SIGHUP"] if sys.platform != "win32" else ["SIGBREAK"])]
+_FIRST_SIGNALS = ["SIGINT", "SIGTERM", *(["SIGHUP"] if sys.platform != "win32" else ["SIGBREAK"])]
 
 
 def _deliver(name: str) -> None:
@@ -37,8 +37,8 @@ def test_each_signal_inside_the_block_is_an_interrupt_and_the_handlers_are_resto
 @pytest.mark.windows
 @pytest.mark.parametrize("first", _FIRST_SIGNALS)
 def test_after_any_first_signal_a_termination_does_not_cut_the_unwind_short(first: str) -> None:
-    """The cleanup the first signal started (closing a cloud allow) runs to the end through a second one."""
-    terminations = _FIRST_SIGNALS
+    """Ctrl-C, then the window closes: the cleanup the first signal started (closing a cloud allow) runs to the end."""
+    terminations = [name for name in _FIRST_SIGNALS if name != "SIGINT"]
     unwound = False
 
     with pytest.raises(KeyboardInterrupt), termination_as_interrupt():
@@ -92,8 +92,8 @@ def test_a_second_termination_does_not_cut_an_outer_unwind_short() -> None:
     with pytest.raises(KeyboardInterrupt), termination_as_interrupt():
         try:
             with termination_as_interrupt():
-                os.kill(os.getpid(), signal.SIGHUP)
-                raise AssertionError("SIGHUP was not delivered as an interrupt")
+                os.kill(os.getpid(), signal.SIGINT)
+                raise AssertionError("SIGINT was not delivered as an interrupt")
         finally:
             try:
                 os.kill(os.getpid(), signal.SIGHUP)

@@ -6,11 +6,14 @@ other state a command holds open, would outlive it.
 :func:`termination_as_interrupt` raises ``KeyboardInterrupt`` for them
 instead, as Ctrl-C does, for the span of a command that waits on something
 the operator ends (an interactive shell, a port forward) or holds a cloud
-route open, and restores the previous handlers afterwards. Once one has
-arrived, further ones no longer interrupt until the block exits, so a second
-signal cannot cut short the cleanup the first one started. A signal the
-process already ignores stays ignored, so a command started under ``nohup``
-keeps running after its terminal closes.
+route open, and restores the previous handlers afterwards. Ctrl-C takes the
+same path, so whichever signal arrives first starts the cleanup, and from then
+until the block exits ``SIGTERM``, ``SIGHUP`` and ``SIGBREAK`` are ignored: a
+closed terminal or a second termination cannot cut short the cleanup the
+first signal started. A second Ctrl-C still interrupts, since that is how the
+operator abandons a cleanup that hangs. A signal the process already ignores
+stays ignored, so a command started under ``nohup`` keeps running after its
+terminal closes.
 
 A hangup needs nothing more: the cleanup's output to the terminal it took
 away, or to a pipe into a program in that terminal's session, goes nowhere
@@ -37,6 +40,7 @@ _TERMINATIONS = tuple(
     )
     if number is not None
 )
+_INTERRUPTS = (signal.SIGINT, *_TERMINATIONS)
 
 
 def _interrupt(_signal_number: int, _frame: object) -> None:
@@ -48,8 +52,9 @@ def _interrupt(_signal_number: int, _frame: object) -> None:
 
 @contextlib.contextmanager
 def termination_as_interrupt() -> Iterator[None]:
-    """Raise ``KeyboardInterrupt`` on ``SIGTERM``, ``SIGHUP`` and ``SIGBREAK`` where they exist, unless ignored.
+    """Raise ``KeyboardInterrupt`` on Ctrl-C, ``SIGTERM``, ``SIGHUP`` and ``SIGBREAK`` where they exist, unless ignored.
 
+    After the first, only Ctrl-C interrupts again until the block exits.
     Inside an enclosing block, or off the main thread, it changes nothing: the
     outermost block owns the handlers and their restoration.
     """
@@ -59,7 +64,7 @@ def termination_as_interrupt() -> Iterator[None]:
         return
     previous = {
         number: signal.signal(number, _interrupt)
-        for number in _TERMINATIONS
+        for number in _INTERRUPTS
         if signal.getsignal(number) not in (signal.SIG_IGN, _interrupt)
     }
     try:
