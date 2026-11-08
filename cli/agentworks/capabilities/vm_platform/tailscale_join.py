@@ -5,7 +5,8 @@ has installed Tailscale. The auth key travels only inside the join script,
 as ``root_script``'s unexported ``AGW_SECRET``, and :data:`JOIN_FRAGMENT`
 hands it to Tailscale on stdin, so it is in no argument on the workstation
 or the guest. The address read and the logout carry no key, so retrying a
-read never sends the key twice. :func:`log_out` is the one logout.
+read never sends the key twice. :func:`log_out` is the one logout, for the
+settle here and for ``vm delete``.
 """
 
 from __future__ import annotations

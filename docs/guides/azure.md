@@ -88,13 +88,14 @@ Each VM gets an Agentworks-owned public IP, NSG, VNet, NIC, and managed OS disk.
 deny-all-inbound baseline. TCP/22 is allowed only from the detected operator address plus
 `operator.ssh_allow_cidrs`, and only while an operation needs it. Create adds a bootstrap allow and
 deletes it once create has reached the VM over Tailscale and checked it, or when the create fails or
-is interrupted. After that, every script Agentworks runs over the VM's public address (`vm recover`
-and `vm rekey`) and every `vm shell --platform` session adds its own allow and deletes it when that
-script or session ends. Every one of these allows, create's bootstrap allow included, is also
-removed when the command is ended on macOS and Linux by `SIGTERM` or `SIGHUP`, or on Windows by
-Ctrl-Break; an interrupted create rolls back as it does on Ctrl-C. Closing the console window on
-Windows may start that cleanup, but Windows ends the process within seconds, so it cannot be relied
-on to finish: end the command with Ctrl-C or Ctrl-Break instead, and delete a rule a closed window
-left behind from the VM's firewall in the provider's console. `agw vm delete <name>` deletes the VM
-first, then sweeps its auxiliary resources and confirms that the VM is absent before dropping the
-database row. A failed delete keeps the row so the operator can correct RBAC and retry.
+is interrupted. After that, every script Agentworks runs over the VM's public address (`vm recover`,
+`vm rekey`, and the Tailscale logout at `vm delete`) and every `vm shell --platform` session adds
+its own allow and deletes it when that script or session ends. Every one of these allows, create's
+bootstrap allow included, is also removed when the command is ended on macOS and Linux by `SIGTERM`
+or `SIGHUP`, or on Windows by Ctrl-Break; an interrupted create rolls back as it does on Ctrl-C.
+Closing the console window on Windows may start that cleanup, but Windows ends the process within
+seconds, so it cannot be relied on to finish: end the command with Ctrl-C or Ctrl-Break instead, and
+delete a rule a closed window left behind from the VM's firewall in the provider's console.
+`agw vm delete <name>` deletes the VM first, then sweeps its auxiliary resources and confirms that
+the VM is absent before dropping the database row. A failed delete keeps the row so the operator can
+correct RBAC and retry.

@@ -85,14 +85,15 @@ Each VM receives one Agentworks-owned security group. Its empty ingress set is t
 Agentworks opens TCP/22 only to the detected operator IPv4 address plus `operator.ssh_allow_cidrs`,
 and only while an operation needs it. Create opens a bootstrap allow and revokes it once create has
 reached the VM over Tailscale and checked it, or when the create fails or is interrupted. After
-that, every script Agentworks runs over the VM's public address (`vm recover` and `vm rekey`) and
-every `vm shell --platform` session opens its own allow and revokes it when that script or session
-ends. Every one of these allows, create's bootstrap allow included, is also removed when the command
-is ended on macOS and Linux by `SIGTERM` or `SIGHUP`, or on Windows by Ctrl-Break; an interrupted
-create rolls back as it does on Ctrl-C. Closing the console window on Windows may start that
-cleanup, but Windows ends the process within seconds, so it cannot be relied on to finish: end the
-command with Ctrl-C or Ctrl-Break instead, and delete a rule a closed window left behind from the
-VM's firewall in the provider's console. Each operation revokes only the tuples it opened.
+that, every script Agentworks runs over the VM's public address (`vm recover`, `vm rekey`, and the
+Tailscale logout at `vm delete`) and every `vm shell --platform` session opens its own allow and
+revokes it when that script or session ends. Every one of these allows, create's bootstrap allow
+included, is also removed when the command is ended on macOS and Linux by `SIGTERM` or `SIGHUP`, or
+on Windows by Ctrl-Break; an interrupted create rolls back as it does on Ctrl-C. Closing the console
+window on Windows may start that cleanup, but Windows ends the process within seconds, so it cannot
+be relied on to finish: end the command with Ctrl-C or Ctrl-Break instead, and delete a rule a
+closed window left behind from the VM's firewall in the provider's console. Each operation revokes
+only the tuples it opened.
 
 `agw vm delete <name>` refreshes the STS identity and refuses an account mismatch. It reads the
 recorded instance and security group, verifies their `agentworks:vm` ownership and recorded

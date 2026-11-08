@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.db import VMStatus
-from agentworks.errors import StateError, UserAbort
+from agentworks.errors import AgentworksError, StateError, UserAbort
 from agentworks.execution import trust
 from agentworks.naming import NAME_RE
 from agentworks.secrets.policy import require_exact_tty_interaction_policy
@@ -154,11 +154,16 @@ def delete_vm(
     row past two of these, warning what may remain: a binding failure, and a
     platform's refusal of a row with no platform metadata at all, which only
     a create that ended before its platform returned leaves. It never
-    removes a row past a bound delete that failed. Deletion never starts the guest, tears down
-    individual workloads, or logs the node out first: a refused delete must
-    leave a surviving VM untouched. ``UserAbort`` at the boundary's secret
-    prompt keeps the row.
+    removes a row past a bound delete that failed. Once the binding holds,
+    the node is logged out of the tailnet through the platform's root
+    channel, best effort, and the provider delete follows: whoever deletes a
+    VM wants it gone, and ``vm rekey`` rejoins one whose delete then fails.
+    Deletion never starts the guest or tears down individual workloads, which
+    the provider delete ends. ``UserAbort`` at the boundary's secret prompt or
+    in the logout keeps the row.
     """
+    import agentworks.vms.manager as _mgr
+
     require_exact_tty_interaction_policy(interaction)
     vm = _require_vm(db, name)
 
@@ -197,6 +202,9 @@ def delete_vm(
 
     with native_mutation_guard(db.path, vm.name):
         backend_left = False
+        # Why the node was not logged out, reported once the row goes, or None
+        # once it has; only a row with a tailnet address is ever logged out.
+        not_logged_out: str | None = "the VM has no tailnet address"
         try:
             vm_node, ops_ctx = _live_vm_boundary(db, config, vm, interaction=interaction)
         except UserAbort:
@@ -220,39 +228,57 @@ def delete_vm(
                 f"It may still run {_backend_named(vm)}; remove it there."
             )
             backend_left = True
+            not_logged_out = f"vm-site '{vm.site}' cannot be bound"
         else:
-            # Whole-VM removal runs first and alone: no session teardown or
-            # Tailscale logout precedes it, so a refused delete leaves the
-            # surviving VM's workloads and node as they were. The delete is
-            # not best-effort: a platform delete that cannot remove the
-            # backend VM raises a typed error (VMPlatform.delete), which
-            # aborts here and keeps the row. ``--force`` does not soften
-            # this, with one exception: a row the platform refuses because it
-            # holds no metadata at all, which only a create that ended before
-            # the platform returned leaves (create persists the metadata the
+            platform = vm_node.site.platform
+            # The logout, best effort and inside a hold-only span: it wants the
+            # VM up if it happens to be (the WSL2 hold boots a stopped distro),
+            # but never gates, since an operator-stopped VM would refuse. A
+            # platform that cannot confirm the guest is this VM's is asked
+            # nothing (the helper reads its status first), and its delete
+            # below refuses or finds the guest gone.
+            if vm.tailscale_host:
+                try:
+                    with vm_node.hold_active():
+                        not_logged_out = _mgr._tailscale_logout(vm, platform, ops_ctx)
+                except UserAbort:
+                    raise
+                except Exception as e:
+                    not_logged_out = f"the VM could not be held for its logout ({e})"
+            # NOT best-effort: a platform delete that cannot remove the backend
+            # VM raises a typed error (VMPlatform.delete), which aborts here
+            # and keeps the row. ``--force`` does not soften this, with one
+            # exception: a row the platform refuses because it holds no
+            # metadata at all, which only a create that ended before the
+            # platform returned leaves (create persists the metadata the
             # moment the platform returns). Nothing can target its backend,
             # so the row is all a retry could ever remove.
             try:
-                vm_node.site.platform.delete(vm, ops_ctx)
+                platform.delete(vm, ops_ctx)
             except StateError as refusal:
-                if vm.platform_metadata:
-                    raise
-                if not force:
-                    refusal.add_hint(
-                        f"Its create ended before the platform returned. Remove anything named or tagged "
-                        f"'{vm.hostname}' on vm-site '{vm.site}' there, then run "
-                        f"'agw vm delete --force {name}' to remove the row."
-                    )
+                if vm.platform_metadata or not force:
+                    if not vm.platform_metadata:
+                        refusal.add_hint(
+                            f"Its create ended before the platform returned. Remove anything named or tagged "
+                            f"'{vm.hostname}' on vm-site '{vm.site}' there, then run "
+                            f"'agw vm delete --force {name}' to remove the row."
+                        )
+                    elif not_logged_out is None:
+                        refusal.add_hint(_logged_out_hint(vm))
                     raise
                 output.warn(
                     f"VM '{name}' has no platform metadata, so its backend was not deleted. "
                     f"Resources may remain {_backend_named(vm)}; remove them there."
                 )
                 backend_left = True
-        if vm.tailscale_host:
+            except AgentworksError as failure:
+                if not_logged_out is None:
+                    failure.add_hint(_logged_out_hint(vm))
+                raise
+        if vm.tailscale_host and not_logged_out is not None:
             output.warn(
-                "The external Tailscale node entry may remain. "
-                "Remove the retired node from the Tailscale admin console."
+                f"Tailscale node {vm.hostname} was not logged out: {not_logged_out}; "
+                f"remove '{vm.hostname}' in the Tailscale admin console if it is listed there."
             )
 
         # Clean up logs
@@ -287,6 +313,16 @@ def delete_vm(
         finally:
             sync_ssh_config(config, db)
         output.result(f"VM '{name}' removed; its backend was not deleted" if backend_left else f"VM '{name}' deleted")
+
+
+def _logged_out_hint(vm: VMRow) -> str:
+    """How to finish a delete that failed after the node logged out, then how to undo the logout instead."""
+    return (
+        f"VM '{vm.name}' was logged out of Tailscale before its delete failed. To finish the delete, fix "
+        f"what the provider refused, or remove its backend yourself {_backend_named(vm)}, and run "
+        f"'agw vm delete {vm.name}' again: a backend already gone counts as deleted. To put the VM back on "
+        f"Tailscale instead, run 'agw vm rekey {vm.name}'."
+    )
 
 
 def _backend_named(vm: VMRow) -> str:

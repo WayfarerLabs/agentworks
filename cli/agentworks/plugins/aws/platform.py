@@ -681,7 +681,8 @@ class EC2Platform(PublicAddressPlatform):
         create op's own scoped context; on an ``access-key`` site the network
         call authenticates as the configured key, with no ambient fallback.
         A kept VM Phase A did not complete is debugged through the EC2 serial
-        console.
+        console; ``vm delete``'s logout pokes a fresh transient allow via
+        :meth:`_transient_route`.
 
         Revoking exactly the recorded bootstrap prefixes, rather than sweeping
         all ingress, is what lets a concurrent ``vm shell --platform`` route

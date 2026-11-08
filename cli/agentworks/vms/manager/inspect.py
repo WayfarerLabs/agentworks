@@ -385,8 +385,8 @@ def _project_vm_issue(issue: VMIssue) -> JsonObject:
 # ._helpers import _query_live_resources`` here would bind a local name in
 # THIS module's namespace, invisible to a monkeypatch of the package
 # attribute, so the call goes through ``import agentworks.vms.manager as
-# _mgr`` at call time instead. ``power.py`` reaches ``_await_tailnet`` the
-# same way.
+# _mgr`` at call time instead. ``power.py`` reaches ``_await_tailnet`` and
+# ``_tailscale_logout`` the same way.
 
 
 def vm_listing(

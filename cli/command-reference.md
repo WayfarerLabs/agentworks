@@ -797,13 +797,22 @@ message shows what will be deleted. Pass `--yes` to skip the prompt. A VM whose 
 refuses, naming the site's failure and the backend identifiers the row holds (its hostname and
 platform metadata, such as a Proxmox VM ID, a cloud instance ID or a Lima instance name). Fix the
 site and run it again, or pass `--force` to remove only the row and its host-key record; delete then
-warns with those identifiers and reports that the backend was not deleted. The backend VM is deleted
-first and alone: delete does not stop individual workloads or log the node out of Tailscale before
-it, so a refused delete leaves a surviving VM as it was, and an external tailnet entry can remain
-for separate removal in the Tailscale admin console. A backend delete that fails, such as a locked
-Proxmox VM or an unreachable Lima host, keeps the VM's row and its host-key record, so run
-`vm delete` again once the cause is fixed. The one row `--force` removes past such a failure is one
-a killed create left with no platform metadata, as `vm create` describes above.
+warns with those identifiers and reports that the backend was not deleted.
+
+Once the site binds, delete logs the VM's node out of the tailnet through the platform's own
+channel, then deletes the backend VM; it does not stop individual workloads first, since deleting
+the VM ends them. The logout is best effort: when it does not run or fails, delete goes on and, once
+the row is gone, names the node to remove in the Tailscale admin console. A VM that is stopped or
+deallocated is not logged out, since nothing reaches it (a stopped WSL2 distro is usually booted by
+the hold delete keeps on it, and is then logged out), and neither is a cloud VM whose host key was
+never recorded, since nothing could verify the VM that answered. A backend delete that fails, such
+as a locked Proxmox VM or an unreachable Lima host, keeps the VM's row and its host-key record. To
+finish the delete, fix the cause, or remove the backend yourself, and run `vm delete` again: a
+backend already gone counts as deleted (on AWS, only for a VM created since rows record their
+account; see [the AWS guide](../docs/guides/aws.md)). When the node was logged out before the delete
+failed, the error says so, and `agw vm rekey <name>` puts the VM back on Tailscale if you would
+rather keep it. The one row `--force` removes past such a failure is one a killed create left with
+no platform metadata, as `vm create` describes above.
 
 `vm backup` exports the VM row and exact owner tree of agents, workspaces, sessions, events, grants,
 desired instance specs, and workspace files. It does not create or copy a provider VM snapshot,

@@ -801,7 +801,8 @@ class AzureVMPlatform(PublicAddressPlatform):
         context; on a service-principal site the network call authenticates
         as the configured principal, with no ambient fallback. A kept VM
         Phase A did not complete is debugged through the Azure serial
-        console, which is not NSG-gated.
+        console, which is not NSG-gated; ``vm delete``'s logout pokes a fresh
+        transient allow via :meth:`_transient_route`.
         """
         self._remove_ssh_allow(vm, ctx, BOOTSTRAP_ALLOW_RULE_NAME)
 

@@ -269,18 +269,23 @@ before they resolve the auth key.
   refuses, naming the site's failure and the backend identifiers the row holds; fix the site and run
   it again, or pass `--force` to remove only the row and its host-key record, then delete the VM in
   its provider yourself.
-- **`vm delete`** deletes the backend VM first and alone, with no session teardown or Tailscale
-  logout before it, so a refused delete leaves the surviving VM as it was. It warns that the VM's
-  external Tailscale node entry may remain; remove the retired node in the Tailscale admin console.
+- **`vm delete`** logs the node out of Tailscale over the platform's own channel before the backend
+  delete, and no longer stops each session first. It reports whether the logout worked, and goes on
+  with the delete either way. It does not log out a cloud VM whose host key was never recorded, and
+  names the node to remove in the Tailscale admin console instead. It reads the VM's power state
+  once it holds the VM, so a WSL2 distro that the hold boots is still logged out; a VM that is still
+  stopped or deallocated is not, and the warning names its node the same way. A backend delete that
+  fails after the logout says how to finish the delete, and that `agw vm rekey NAME` puts the VM
+  back on Tailscale instead.
 - **A cloud VM's temporary SSH allow closes on `SIGTERM`, `SIGHUP` and Ctrl-Break.** Every allow
   Agentworks opens to a cloud VM (AWS, Azure, GCP) is removed when the command is ended on macOS and
   Linux by `SIGTERM` or `SIGHUP` (a closed terminal), or on Windows by Ctrl-Break, as it is on
-  Ctrl-C: `vm create` rolls back, bootstrap allow included, and a root script (`vm recover` or
-  `vm rekey`) or a `vm shell --platform` session removes its own allow. A second signal during that
-  cleanup is ignored, so it cannot cut the removal short. Closing the console window on Windows may
-  start that cleanup, but Windows ends the process within seconds, so it cannot be relied on to
-  finish: end the command with Ctrl-C or Ctrl-Break instead, and delete a rule a closed window left
-  behind from the VM's firewall in the provider's console.
+  Ctrl-C: `vm create` rolls back, bootstrap allow included, and a root script (`vm recover`,
+  `vm rekey`, the logout at `vm delete`) or a `vm shell --platform` session removes its own allow. A
+  second signal during that cleanup is ignored, so it cannot cut the removal short. Closing the
+  console window on Windows may start that cleanup, but Windows ends the process within seconds, so
+  it cannot be relied on to finish: end the command with Ctrl-C or Ctrl-Break instead, and delete a
+  rule a closed window left behind from the VM's firewall in the provider's console.
 
 ## Third-party VM platforms
 
@@ -305,8 +310,8 @@ state the full contract, and the
 - **Implement `run_as_root(vm, ctx, script, deadline) -> RawRun`.** It is abstract and required. It
   runs `/bin/bash -s` as root through the platform's own channel, without the VM's Tailscale, with
   `script` on its stdin and nowhere else; it runs the script once and returns both streams with no
-  exit status. The platform's own create-time join runs through it, and so do `vm recover` and
-  `vm rekey`.
+  exit status. The platform's own create-time join runs through it, and so do `vm recover`,
+  `vm rekey` and the logout at `vm delete`.
 - **Declare `recovery_needs_guest_sshd`.** It is `True` when that channel goes through the guest's
   sshd. It has no default, and registration refuses a platform that leaves it out.
 - **`native_transport()` is gone,** along with `transient_route()` and `probe_failure_hint`. A cloud

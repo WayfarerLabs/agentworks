@@ -198,11 +198,12 @@ delete operation aborts local removal. Agent and workspace remote cleanup retain
 best-effort warnings. Files deliberately configured outside the removed parent remain outside that
 filesystem cleanup; setup does not introduce a new forget command or force option.
 
-Whole-VM deletion does not first log out of Tailscale or stop individual guest sessions. An external
-tailnet entry can remain after the guest is gone; remove a retired node from the Tailscale admin
-console separately. A delete forced past a site that cannot be bound did not attempt remote
-deletion, so inspect and clean up the provider resource as well. Platform-specific best-effort
-deletion may also leave remote resources; a removed local row alone does not prove provider removal.
+Whole-VM deletion logs the node out of Tailscale first, best effort, and does not stop individual
+guest sessions, which deleting the VM ends. When that logout does not run or fails, the tailnet
+entry can remain; delete names the node to remove from the Tailscale admin console. A delete forced
+past a site that cannot be bound did not attempt remote deletion, so inspect and clean up the
+provider resource as well. Platform-specific best-effort deletion may also leave remote resources; a
+removed local row alone does not prove provider removal.
 
 Setup and parent deletion share a VM-family mutation guard so they cannot race. This serializes
 mutating operations on the same VM, including owners without harness activations; contention refuses

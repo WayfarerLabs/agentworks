@@ -1,17 +1,20 @@
-"""Tailscale around a VM's power state: the reachability fast path, and the wait after a start."""
+"""Tailscale around a VM's power state: the reachability fast path, the wait after a start, delete's logout."""
 
 from __future__ import annotations
 
 import subprocess
+from functools import partial
 from typing import TYPE_CHECKING
 
 from agentworks import output
-from agentworks.errors import ConnectivityError
+from agentworks.errors import ConnectivityError, UserAbort
 from agentworks.programs import resolve_program
 
 from ._helpers import _require_vm
 
 if TYPE_CHECKING:
+    from agentworks.capabilities.base import RunContext
+    from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
 
@@ -101,3 +104,49 @@ def _await_tailnet(db: Database, config: Config, vm: VMRow, *, already_running: 
         if reachability.wait(execution.vm_access(current, config, Admin()), wording=wording):
             return
     raise VMNotAnswering(vm.name, address)
+
+
+def _tailscale_logout(vm: VMRow, platform: VMPlatform, ctx: RunContext) -> str | None:
+    """Log the VM's node out of the tailnet over its root channel, best effort.
+
+    Returns ``None`` once the node has logged out, or why it was not, for
+    ``vm delete`` to report once its delete's outcome is known. Nothing is
+    checked over SSH, since the VM is going away. A VM the platform reports
+    stopped or deallocated is not asked: no channel reaches it, and a cloud's
+    would wait two minutes to find that out (a WSL2 distro the caller's hold
+    has booted reports running). A status the platform refuses with a
+    ``StateError`` means it cannot confirm the guest is this VM's (a Proxmox
+    VMID another guest now holds), so nothing is sent to it. A cloud VM whose
+    host key was never recorded refuses inside ``run_as_root``, before any
+    route opens: an impostor could report a logout that never happened.
+    """
+    from agentworks.capabilities.vm_platform.tailscale_join import log_out
+    from agentworks.db import VMStatus
+    from agentworks.errors import StateError
+    from agentworks.execution.errors import TrustMissing
+
+    try:
+        status = platform.status(vm, ctx)
+    except UserAbort:
+        raise
+    except StateError as refusal:
+        return str(refusal)
+    except Exception:
+        status = VMStatus.UNKNOWN
+    if status in (VMStatus.STOPPED, VMStatus.DEALLOCATED):
+        return f"VM '{vm.name}' is {status.value}"
+    output.info("Logging out of Tailscale...")
+    try:
+        result = log_out(partial(platform.run_as_root, vm, ctx))
+    except UserAbort:
+        raise
+    except TrustMissing:
+        return f"the host key of VM '{vm.name}' was never recorded, so its logout could not be trusted"
+    except Exception as error:
+        return f"its logout could not be confirmed ({error})"
+    if result.status == 0:
+        output.info(f"Tailscale node {vm.hostname} logged out")
+        return None
+    if result.status is None:
+        return "its logout could not be confirmed"
+    return f"'tailscale logout' exited with status {result.status}"

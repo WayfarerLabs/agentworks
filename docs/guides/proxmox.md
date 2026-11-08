@@ -219,25 +219,25 @@ the VM in a failed state for `agw vm delete` to remove. A create rollback likewi
 guest carrying the new VM's name, so a create that lost its ID to another create leaves that VM
 alone.
 
-Whole-VM deletion does not first tear down guest sessions or log out of Tailscale. The external
-tailnet record can remain after the guest is deleted; remove a retired node from the Tailscale admin
-console separately. `--force` permits deleting dependent workspaces, agents and sessions; it does
-not skip the confirmation prompt, so pass `--yes` for that. A VM whose site cannot be bound, such as
-one whose API token secret is unset, is not deleted: delete refuses, naming its VM ID and node. Fix
-the site and run it again, or pass `--force` to remove only the row, then delete the VM in Proxmox
-yourself.
+Delete logs the VM's node out of Tailscale through the guest agent before it deletes the VM, best
+effort, and does not tear down guest sessions first. When the logout does not run or fails, delete
+names the node to remove from the Tailscale admin console. `--force` permits deleting dependent
+workspaces, agents and sessions; it does not skip the confirmation prompt, so pass `--yes` for that.
+A VM whose site cannot be bound, such as one whose API token secret is unset, is not deleted: delete
+refuses, naming its VM ID and node. Fix the site and run it again, or pass `--force` to remove only
+the row, then delete the VM in Proxmox yourself.
 
 ### Native recovery and interactive access
 
 Agentworks uses QEMU Guest Agent as the root channel that works without Tailscale: create's
-bootstrap and Tailscale join, `agw vm recover` and `vm rekey` run their root scripts through it.
-Before each script, Agentworks waits up to about two minutes for the guest agent to answer, since a
-VM that has just started has none running yet; a VM whose agent never answers fails with nothing
-dispatched. Create's wait for cloud-init asks again for about seven minutes in all, since cloud-init
-can restart the agent, so a create from a template without the agent fails after about seven
-minutes. A started VM that does not answer over Tailscale SSH fails `vm start` with a hint to run
-`agw vm recover`, which can also restart a broken SSH server here, since the guest agent does not
-depend on it.
+bootstrap and Tailscale join, `agw vm recover`, `vm rekey` and the logout during deletion run their
+root scripts through it. Before each script, Agentworks waits up to about two minutes for the guest
+agent to answer, since a VM that has just started has none running yet; a VM whose agent never
+answers fails with nothing dispatched. Create's wait for cloud-init asks again for about seven
+minutes in all, since cloud-init can restart the agent, so a create from a template without the
+agent fails after about seven minutes. A started VM that does not answer over Tailscale SSH fails
+`vm start` with a hint to run `agw vm recover`, which can also restart a broken SSH server here,
+since the guest agent does not depend on it.
 
 QEMU Guest Agent does not provide an interactive terminal, so `vm shell --platform` is unavailable
 for Proxmox. Use the Proxmox web UI's serial console for interactive access. Normal Agentworks work
