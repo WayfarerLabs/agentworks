@@ -170,7 +170,9 @@ def test_managed_identity_discards_authored_entries_before_render_or_secret_use(
     }
 
 
-@pytest.mark.parametrize("key", ["AGENTWORKS_WORKSPACE", "AGENTWORKS_SESSION_KIND", "AGENTWORKS_CUSTOM"])
+@pytest.mark.parametrize(
+    "key", ["AGENTWORKS_WORKSPACE", "AGENTWORKS_SESSION_KIND", "AGENTWORKS_VM", "AGENTWORKS_CUSTOM"]
+)
 def test_authored_values_without_applicable_identity_remain_winners(key: str) -> None:
     assert compose_env(values={}, ctx=_ctx(), vm={key: EnvEntry("${agw:user_name}")})[key] == "agentworks"
     with pytest.raises(ValidationError):

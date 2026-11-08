@@ -595,7 +595,9 @@ def test_identity_collisions_do_not_validate_collect_or_resolve(
     assert resolve_for_command([target], config, registry, interaction=TtyInteractionPolicy.REFUSE) == {}
 
 
-@pytest.mark.parametrize("key", ["AGENTWORKS_WORKSPACE", "AGENTWORKS_SESSION_KIND", "AGENTWORKS_CUSTOM"])
+@pytest.mark.parametrize(
+    "key", ["AGENTWORKS_WORKSPACE", "AGENTWORKS_SESSION_KIND", "AGENTWORKS_VM", "AGENTWORKS_CUSTOM"]
+)
 def test_absent_identity_context_does_not_discard_authored_entries(tmp_path: Path, key: str) -> None:
     from agentworks.interpolation import context_values
 

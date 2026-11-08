@@ -318,8 +318,8 @@ def _start_session_slice(
             # the runup readiness ctx above (targets), plus the scoped
             # secrets (the session node's declared union, empty for the
             # built-in shell harness_integration; ScopedSecrets never delivers).
-            # Template-var substitution lifts OUT of the harness_integration and
-            # wraps its returned string. The op runs BEFORE the insert
+            # The integration renders its declared template fields before
+            # returning the completed command. The op runs BEFORE the insert
             # so a freshly minted harness_integration_state (claude-code's session
             # id) lands with the new row; it does only read-only work
             # (a login-shell string for shell, a find probe for

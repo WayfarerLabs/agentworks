@@ -123,7 +123,7 @@ def prepare_vm_setup(
     row = db.get_vm(name)
     values = context_values(vm_name=name, user=row.admin_username if row else admin.username)
     for inputs in result:
-        inputs.target.validate_context(values)
+        inputs.environment_target.validate_context(values)
     return tuple(result)
 
 
@@ -149,7 +149,7 @@ def prepare_agent_setup(
     from agentworks.interpolation import context_values
 
     row = db.get_agent(name)
-    inputs.target.validate_context(
+    inputs.environment_target.validate_context(
         context_values(
             vm_name=vm.name,
             user=row.linux_user if row else derive_linux_user(name),
@@ -179,7 +179,7 @@ def prepare_workspace_setup(
     )
     from agentworks.interpolation import context_values
 
-    inputs.target.validate_context(
+    inputs.environment_target.validate_context(
         context_values(
             vm_name=vm.name,
             user=vm.admin_username,
