@@ -61,12 +61,16 @@ CREATE_RERUN_HINT = "The join spent the auth key: replace a single-use key befor
 The platform's rollback reports for itself whether the backend was removed.
 """
 
-DEFAULT_READINESS_COMMAND = "cloud-init status --wait"
+# ``--long`` adds cloud-init's own detail and errors to the status line, so a
+# failed wait can say why before the create's rollback removes the VM.
+DEFAULT_READINESS_COMMAND = "cloud-init status --wait --long"
 DEFAULT_READINESS_LABEL = "cloud-init"
 # ``cloud-init status --wait`` exits 2 when cloud-init finished with recoverable
 # errors (a deprecated key, a module that warned): the VM came up, so a wait
 # for it warns and carries on.
 CLOUD_INIT_RECOVERABLE_STATUS = 2
+READINESS_REASON_LINES = 12
+"""How many of a failed readiness wait's last output lines its error quotes: ``--long``'s detail and errors."""
 
 
 def join_tailscale(run_as_root: Callable[[bytes, float], RawRun], auth_key: str, *, node: str) -> None:
@@ -213,7 +217,9 @@ def complete_cloud_bootstrap(
     and retrying a refused key, since a cloud's guest agent may install the
     key after sshd starts. A readiness failure raises before the key is
     sent, so the platform's create rollback removes the partial VM with the
-    key never used. The default readiness command's
+    key never used, quoting the command's status and its last
+    :data:`READINESS_REASON_LINES` lines, since the rollback destroys the
+    evidence. The default readiness command's
     :data:`CLOUD_INIT_RECOVERABLE_STATUS` warns instead, as Proxmox's wait
     for cloud-init does.
     """
@@ -242,6 +248,9 @@ def complete_cloud_bootstrap(
     if result.status == CLOUD_INIT_RECOVERABLE_STATUS and readiness_command == DEFAULT_READINESS_COMMAND:
         output.warn(f"{readiness_label} completed with recoverable errors; continuing")
     elif result.status != 0:
-        raise ProvisioningError(incomplete)
+        outcome = "its outcome is unknown" if result.status is None else f"exit {result.status}"
+        printed = (result.stdout + b"\n" + result.stderr).decode("utf-8", errors="replace")
+        reason = ssh_process.tail_lines(printed, READINESS_REASON_LINES)
+        raise ProvisioningError(f"{incomplete} ({outcome})" + (f":\n{reason}" if reason else ""))
     join_tailscale(target.run_as_root, auth_key, node=node)
     return settle_tailnet_address(target.run_as_root, node=node, rerun_hint=CREATE_RERUN_HINT)

@@ -416,6 +416,20 @@ def test_a_failed_readiness_command_raises_before_the_join(
     assert guest.payloads == ["true", "ready"]
 
 
+def test_a_failed_cloud_init_s_status_and_reason_reach_the_error(cloud: Callable[[FakeGuest], PublicSSH]) -> None:
+    """The create's rollback removes the VM, so what cloud-init said is kept in the error before it goes."""
+    reported = b"status: error\ndetail: DataSourceEc2Local\nerrors:\n\t- (scripts_user) failed\n"
+    failed = Answer(status=1, stdout=reported)
+    guest = FakeGuest(answer_by_payload(answers={DEFAULT_READINESS_COMMAND: failed}))
+
+    with pytest.raises(ProvisioningError) as caught:
+        complete_cloud_bootstrap(cloud(guest), KEY, node=NODE)
+
+    assert "exit 1" in str(caught.value)
+    assert "(scripts_user) failed" in str(caught.value)
+    assert JOIN_FRAGMENT not in guest.payloads
+
+
 def test_cloud_init_s_recoverable_status_warns_and_the_bootstrap_carries_on(
     cloud: Callable[[FakeGuest], PublicSSH], captured_output: CapturedOutput
 ) -> None:

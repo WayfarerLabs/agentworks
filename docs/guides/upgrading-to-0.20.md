@@ -333,7 +333,9 @@ state the full contract, and the
   `PublicSSH.wait_until_answering(seconds=..., retry_refused_key=True)`, where a refused key raises
   `public_ssh.KeyRefused` and is retried until the bound, since a cloud's guest agent may install
   the key after sshd starts; then it waits for cloud-init, joins and settles the address. A
-  cloud-init that finished with recoverable errors (exit status 2) warns and lets create carry on.
+  cloud-init that finished with recoverable errors (exit status 2) warns and lets create carry on;
+  any other failure's error quotes the exit status and cloud-init's own detail and errors
+  (`cloud-init status --wait --long`), since the rollback then removes the VM.
 - **`close_provisioning_access(vm, ctx)` replaces `post_tailscale_ready` and `secure_failed_vm`.**
   Phase A calls it exactly once with the create's own context, however Phase A ends: after the VM
   contract passes, when Phase A fails, and when it is interrupted. A platform that opens

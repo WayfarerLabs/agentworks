@@ -126,7 +126,7 @@ class TestInterruptDuringInlineWait:
         ("failure_command", "expected_commands"),
         [
             ("true", ["true"]),
-            ("cloud-init status --wait", ["true", "cloud-init status --wait"]),
+            ("cloud-init status --wait --long", ["true", "cloud-init status --wait --long"]),
         ],
         ids=("ssh-readiness", "cloud-init-wait"),
     )
@@ -172,7 +172,7 @@ class TestInterruptDuringInlineWait:
         ("failure_command", "expected_commands"),
         [
             ("true", ["true"]),
-            ("cloud-init status --wait", ["true", "cloud-init status --wait"]),
+            ("cloud-init status --wait --long", ["true", "cloud-init status --wait --long"]),
         ],
         ids=("ssh-readiness", "cloud-init-wait"),
     )
@@ -316,13 +316,13 @@ class TestFailureDuringInlineWait:
     ) -> None:
         fakes = _install_fakes(monkeypatch, vm_exists_lookup=False)
         guest = install_at_run_process(
-            monkeypatch, FakeGuest(answer_by_payload(answers={"cloud-init status --wait": Answer(status=1)}))
+            monkeypatch, FakeGuest(answer_by_payload(answers={"cloud-init status --wait --long": Answer(status=1)}))
         )
 
         with pytest.raises(AzureError, match="cloud-init did not complete") as caught:
             _platform().create(_request(tailscale=True), RunContext())
 
-        assert guest.payloads == ["true", "cloud-init status --wait"]
+        assert guest.payloads == ["true", "cloud-init status --wait --long"]
         assert guest.deadlines == [10, 600]
         self._assert_safe_provider_failure(fakes, guest, caught.value, captured_output)
 
