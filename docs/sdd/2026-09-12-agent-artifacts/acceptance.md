@@ -79,11 +79,12 @@ bounded correction. The issue also identifies the shared per-process input carri
 
 Passing current arguments on every process launch does not establish that a resumed conversation
 uses changed guidance. The current native-resume claims therefore cannot be checked off or used to
-lock this SDD. The proposed conservative disposition is to warn and leave session hints/rules
-unhandled on genuine Codex/Grok resume, directing the operator to `--force-new` for delivery into a
-fresh conversation. Investigating another explicit resume mechanism is a different possible
-direction. The operator's decision is pending; no support-matrix narrowing or dependent product
-change is recorded as approved here.
+lock this SDD. The operator subsequently requested a broader reconsideration of artifact delivery,
+including generated rules/hints skills and avoiding shared instruction-file mutation. The
+[delivery reassessment](delivery-reassessment.md) supersedes the earlier binary
+warning-versus-resume workaround proposal. The measured discrepancy remains open; voluntary agent
+cooperation does not make skill-based native delivery inherently invalid. No rule-definition
+amendment, support-matrix narrowing or dependent product change is recorded as approved here.
 
 ## Permanent promotion and closeout
 

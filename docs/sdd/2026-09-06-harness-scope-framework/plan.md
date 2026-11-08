@@ -10,10 +10,11 @@
       `08827b56` through the project and Muntz lanes; neither found a material correction for that
       draft. File lint passed. These are draft-document results, not final lock or code-change
       reviews.
-- [ ] Complete the companion's native-resume disposition and the approved implementation before
-      joint closeout. Exact interactive Codex/Grok probes retain initial guidance despite changed
-      launch arguments; the operator's choice is pending. The clean intermediate correction PR #862
-      remains separate and ready, without a source change from this audit.
+- [ ] Complete the companion's delivery reassessment and the approved implementation before joint
+      closeout. Exact interactive Codex/Grok probes retain initial guidance despite changed launch
+      arguments; the operator requested a broader file/skill-based design response. The clean
+      intermediate correction PR #862 merged at `89bb63e4`; this audit does not reopen that
+      correction.
 - [ ] Record final acceptance and plan dispositions, review and validate the actual final change,
       then add both locks. Neither SDD is locked by this reconciliation.
 

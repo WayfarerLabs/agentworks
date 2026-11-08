@@ -1,5 +1,18 @@
 # Agent artifacts: implementation plan
 
+## Delivery reassessment, 2026-11-08
+
+- [x] Reconsider all four artifact types using the operator's distinction between delivery and
+      voluntary cooperation. Map current native placement, lifecycle, private loaders,
+      shared-document mutation and Git-ignore behavior; preserve the verified resume counterexamples
+      as evidence rather than treating them as a reason to reject skill-based guidance.
+- [x] Verify Codex 0.167.0 project skill discovery after an exact Git exclusion and process-local
+      app-server extra-root set/list/clear behavior without requesting model turns. Distinguish that
+      API evidence from an unverified interactive-CLI private loader.
+- [ ] Review the concrete [delivery proposal](delivery-reassessment.md), obtain the operator's
+      amended contract, then update the HLA, native LLD, permanent teaching and implementation
+      together. The current FRD and support matrix remain unchanged until that decision.
+
 ## Acceptance reconciliation, 2026-11-08
 
 - [x] Reconcile R1-R10, current native evidence and permanent promotion in
@@ -14,14 +27,12 @@
 - [x] Independently review the records and trust clarification at `08827b56` through project and
       Muntz lanes, with no material correction; pass file lint. These results do not cover a later
       product correction or either lock.
-- [ ] Obtain the operator's native-resume disposition for
-      [issue 869](https://github.com/WayfarerLabs/agentworks/issues/869) before changing approved
-      support. The current recommendation is warning/unhandled session hints and rules on genuine
-      Codex/Grok resume, with `--force-new` for delivery; investigating another explicit mechanism
-      remains an alternative.
+- [ ] Resolve [issue 869](https://github.com/WayfarerLabs/agentworks/issues/869) through the broader
+      delivery reassessment before changing approved support. The prior binary warning-versus-resume
+      workaround proposal is superseded by that operator-requested design work.
 - [ ] Implement and verify the approved behavior, finish plan and acceptance records, run the final
       private review and gates, and add both SDD locks. PR #862's clean intermediate correction
-      remains unchanged and does not discharge these duties.
+      merged at `89bb63e4` and does not discharge these duties.
 
 ## Facet independence and closeout, 2026-11-01
 
