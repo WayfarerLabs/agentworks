@@ -14,6 +14,8 @@ from agentworks.execution.client import SSHClient
 from agentworks.execution.root_script import RawRun
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from tests.conftest import CapturedOutput
 
 
@@ -178,3 +180,68 @@ def test_a_placement_host_that_drops_for_a_while_does_not_end_the_detached_comma
     assert (result.exit_code, result.output) == (0, "limactl output\n")
     assert all(len(queue) == 1 for queue in answers.values())  # every dropped answer was asked again
     assert len(captured_output.warnings) == 1  # the poll's first unanswered check, once
+
+
+class _Clock:
+    """A fake clock that moves only when the code under test sleeps."""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self.now = 0.0
+        monkeypatch.setattr("agentworks.capabilities.vm_platform.lima_host.time.monotonic", lambda: self.now)
+        monkeypatch.setattr("agentworks.capabilities.vm_platform.lima_host.time.sleep", self.sleep)
+
+    def sleep(self, seconds: float) -> None:
+        self.now += seconds
+
+
+@pytest.mark.parametrize("down_from", ["launch", "poll"])
+def test_a_placement_host_that_stops_answering_is_an_unknown_outcome_not_an_exit_status(
+    monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput, down_from: str
+) -> None:
+    """A create whose host went down polled to its timeout, then blamed 'exit 1', a status nothing had read."""
+    _Clock(monkeypatch)
+    commands: list[str] = []
+    down = False
+
+    def execute(host: LimaHost, command: str, *, input: str | None, timeout: float | None) -> _Completed:
+        nonlocal down
+        commands.append(command)
+        down = down or (command.startswith("nohup ") if down_from == "launch" else command.startswith("wc -c"))
+        if down:
+            return _Completed(255, "", "ssh: connect to host gpu-box port 22: Operation timed out")
+        return _Completed(1 if command.startswith("test -f") else 0, "", "")
+
+    monkeypatch.setattr(LimaHost, "_execute", execute)
+
+    with pytest.raises(LimaCommandFailed) as caught:
+        LimaHost("me@gpu-box").run_detached("limactl start vm1", base_path="/var/tmp/agw-x", timeout=600)
+
+    assert "gpu-box" in str(caught.value)
+    # Down at the launch, nothing is polled; down mid-poll, the poll still waits out its bound.
+    assert any(command.startswith("wc -c") for command in commands) is (down_from == "poll")
+
+
+def test_a_kill_reaches_only_the_wrapper_its_pid_file_names(tmp_path: Path) -> None:
+    """A delete can run days after an abandoned create, when the PID file's number belongs to another process."""
+    if shutil.which("ps") is None or shutil.which("bash") is None:
+        pytest.skip("needs ps and bash")
+    from agentworks.capabilities.vm_platform.lima_host import _DetachedFiles, _kill_wrapper
+
+    files = _DetachedFiles(str(tmp_path / "agw-x"))
+    bystander = subprocess.Popen(["sleep", "30"])
+    wrapper: subprocess.Popen[bytes] | None = None
+    try:
+        (tmp_path / "agw-x.pid").write_text(f"{bystander.pid}\n")
+        subprocess.run(["bash", "-c", _kill_wrapper(files)], check=False)
+        assert bystander.poll() is None  # not the wrapper: left alone
+
+        (tmp_path / "agw-x.sh").write_text("sleep 30\n")
+        wrapper = subprocess.Popen(["/bin/bash", files.wrapper])
+        (tmp_path / "agw-x.pid").write_text(f"{wrapper.pid}\n")
+        subprocess.run(["bash", "-c", _kill_wrapper(files)], check=False)
+        assert wrapper.wait(timeout=10) != 0  # the wrapper: killed
+    finally:
+        for process in (bystander, wrapper):
+            if process is not None and process.poll() is None:
+                process.kill()
+                process.wait()

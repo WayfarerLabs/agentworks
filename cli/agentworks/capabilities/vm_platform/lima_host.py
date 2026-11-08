@@ -120,22 +120,31 @@ class LimaHost:
         files. A leftover status file is an interrupted earlier run's, so it
         is cleared with a warning and a fresh run starts. At ``timeout``
         seconds the command is killed and the result is exit 1 with the
-        output so far. Every file is removed at the end.
+        output so far. Every file is removed at the end. A host that does
+        not answer the launch, or never answers for the status, raises
+        :class:`LimaCommandFailed` saying so rather than reporting an exit
+        status nothing read; the files are then the caller's to remove
+        (:meth:`kill_detached`).
         """
         files = _DetachedFiles(base_path)
         if self._returncode(f"test -f {files.status}") == 0:
             output.warn(f"clearing stale result files from a previous interrupted run ({base_path}.*)")
         self.upload(files.wrapper, _WRAPPER_TEMPLATE.format(command=command, **files.template_fields()))
         self._returncode(f"rm -f {files.output} {files.pid} {files.status}")
-        self._returncode(f"nohup /bin/bash {files.wrapper} </dev/null >/dev/null 2>&1 &")
+        if self._returncode(f"nohup /bin/bash {files.wrapper} </dev/null >/dev/null 2>&1 &") == _SSH_CONNECTION_FAILED:
+            raise LimaCommandFailed(f"the placement host '{self.host}' did not answer when starting: {command}")
         time.sleep(0.5)
         self._poll_until_done(files, timeout=timeout)
         captured = self._read_with_retries(f"cat {files.output} 2>/dev/null")
         if captured is None:
             output.warn("unable to retrieve the detached command's output after repeated connection failures")
         status = self._read_with_retries(f"cat {files.status} 2>/dev/null")
+        if status is None:
+            raise LimaCommandFailed(
+                f"the placement host '{self.host}' stopped answering, so the outcome is unknown: {command}"
+            )
         try:
-            exit_code = int((status or "").strip())
+            exit_code = int(status.strip())
         except ValueError:
             exit_code = 1
         with contextlib.suppress(LimaCommandFailed):
@@ -149,11 +158,13 @@ class LimaHost:
         caller unwinding from an earlier failure keeps that failure:
         ``nohup`` exists precisely so the command survives this process, so
         an interrupted caller must stop it before undoing what it built.
+        The PID file may be days old by the time a later delete calls this,
+        so the PID is killed only while it is still that run's wrapper.
         """
         files = _DetachedFiles(base_path)
         try:
             with contextlib.suppress(LimaCommandFailed):
-                self._returncode(f"test -f {files.pid} && kill $(cat {files.pid}) 2>/dev/null")
+                self._returncode(_kill_wrapper(files))
         finally:
             with contextlib.suppress(Exception):
                 self._returncode(f"rm -f {files.output} {files.wrapper} {files.pid} {files.status}")
@@ -177,7 +188,7 @@ class LimaHost:
             if time.monotonic() - started > timeout:
                 output.warn(f"the detached command timed out after {timeout}s; killing it")
                 with contextlib.suppress(LimaCommandFailed):
-                    self._returncode(f"test -f {files.pid} && kill $(cat {files.pid}) 2>/dev/null")
+                    self._returncode(_kill_wrapper(files))
                 return
             # The host may be briefly unreachable: an unanswered check is asked again at the next
             # poll, within the timeout, while the wrapper keeps running there.
@@ -260,6 +271,14 @@ class LimaHost:
             process.wait()
             raise
         return _Completed(process.returncode, decode_stream(stdout), decode_stream(stderr))
+
+
+def _kill_wrapper(files: _DetachedFiles) -> str:
+    """The command that kills the PID in ``files.pid`` only while that process is still ``files.wrapper``."""
+    return (
+        f'test -f {files.pid} && pid=$(cat {files.pid}) && ps -p "$pid" -o args= | grep -qF -- {files.wrapper} '
+        '&& kill "$pid" 2>/dev/null'
+    )
 
 
 @dataclass(frozen=True)
