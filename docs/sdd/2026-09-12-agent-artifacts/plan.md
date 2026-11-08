@@ -1,5 +1,26 @@
 # Agent artifacts: implementation plan
 
+## Acceptance reconciliation, 2026-11-08
+
+- [x] Reconcile R1-R10, current native evidence and permanent promotion in
+      [acceptance.md](acceptance.md). R1-R4/R6-R9 are proven with local and scoped real
+      observations; R5/R10 retain the concrete native-resume question rather than generic
+      pending-test claims.
+- [x] Verify Codex outer persona availability at user scope and trusted project scope using current
+      renderer bytes; document native project trust in the permanent artifact guide. Actual
+      interactive Codex and Grok resumes retain initial guidance despite receiving changed current
+      arguments. The probe modes, repetitions, controls and exploratory fixture overrun are
+      preserved in the record.
+- [x] Independently review the records and trust clarification at `08827b56` through project and
+      Muntz lanes, with no material correction; pass file lint. These results do not cover a later
+      product correction or either lock.
+- [ ] Obtain the operator's native-resume disposition before changing approved support. The current
+      recommendation is warning/unhandled session hints and rules on genuine Codex/Grok resume, with
+      `--force-new` for delivery; investigating another explicit mechanism remains an alternative.
+- [ ] Implement and verify the approved behavior, finish plan and acceptance records, run the final
+      private review and gates, and add both SDD locks. PR #862's clean intermediate correction
+      remains unchanged and does not discharge these duties.
+
 ## Facet independence and closeout, 2026-11-01
 
 The operator authorized the saga's facet-independence amendment and completion of both this SDD and

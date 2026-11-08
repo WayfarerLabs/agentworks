@@ -1,5 +1,22 @@
 # Harness Scope Framework: Implementation Plan
 
+## Acceptance reconciliation, 2026-11-08
+
+- [x] Reconcile R1-R16 and the definition of done against current source, meaningful local controls
+      and the replacement tester's final report `6719171109`, preserving prior-head attribution in
+      [acceptance.md](acceptance.md). Thirteen requirements are proven; R7/R12/R16 remain explicit
+      transfers to the companion. No new framework functional or permanent-promotion gap was found.
+- [x] Independently review the acceptance records and Codex project-trust clarification at
+      `08827b56` through the project and Muntz lanes; neither found a material correction for that
+      draft. File lint passed. These are draft-document results, not final lock or code-change
+      reviews.
+- [ ] Complete the companion's native-resume disposition and the approved implementation before
+      joint closeout. Exact interactive Codex/Grok probes retain initial guidance despite changed
+      launch arguments; the operator's choice is pending. The clean intermediate correction PR #862
+      remains separate and ready, without a source change from this audit.
+- [ ] Record final acceptance and plan dispositions, review and validate the actual final change,
+      then add both locks. Neither SDD is locked by this reconciliation.
+
 ## Facet independence and closeout, 2026-11-01
 
 The operator authorized the saga's facet-independence amendment and completion of both this SDD and
