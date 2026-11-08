@@ -13,7 +13,9 @@ This contract implements the [requirements](frd.md) using explicit resource cont
 - Parse left to right, recognizing a namespace escape before a reference. Append replacements as
   data without scanning them again.
 - `$HOME`, `${HOME}`, `${PATH:-default}`, `$$`, ordinary dollar signs, and Go-template text remain
-  unchanged. No other syntax is claimed by Agentworks.
+  unchanged except where a dollar immediately precedes a reserved reference: `$$${agw:user_name}`
+  becomes `$${agw:user_name}` through the namespace escape. No other syntax is claimed by
+  Agentworks.
 
 The renderer receives authored text, explicit context, and a field location. Errors identify the
 field and offending name or syntax category, without including the whole input, replacement values,
@@ -22,10 +24,11 @@ general template engine.
 
 ## Env consumer
 
-Select winning entries after inheritance, instance overlays, and scope merging. Render plaintext
-through one function shared by execution and display. Keep original desired declarations intact;
-never persist rendered values over their expressions. Skip interpolation and unescaping for both
-secret names and secret contents.
+Select winning entries after inheritance, instance overlays, scope merging, and applicable managed
+identity precedence. Discard ignored identity collisions before validation and secret collection.
+Render plaintext through one function shared by execution and display. Keep original desired
+declarations intact; never persist rendered values over their expressions. Skip interpolation and
+unescaping for both secret names and secret contents.
 
 Context validation works without secret values. Unknown or unavailable references in winning entries
 fail before operations requiring them; losing entries are not rendered. Preserve transport-specific
@@ -43,13 +46,13 @@ home may be used in `tool --config '${agw:user_home_dir}/.config/tool'` under th
 username convention. Use `"$AGENTWORKS_WORKSPACE_DIR"` for an arbitrary workspace path, including
 spaces or apostrophes.
 
-Bind the selected context to the integration before launch selection. Render structured extra
-arguments as individual data values before quoting them, then shield `${agw:` in the resulting argv
-data before a returned command passes through the command-source renderer. Shell quoting alone does
-not hide syntax from a textual renderer. Preserve exact native harness data and its argument
-boundaries. Validate returned command source after integration launch selection and before a restart
-destroys the current runtime. Env context is validated before boundary prompts when its facts are
-already known; command generation does not require a separate preflight interface.
+Bind the selected context to the integration before launch selection. Shell renders the selected
+`command` or `resume_command` field against that context. Native integrations render structured
+extra arguments as individual data values before quoting them with `shlex.quote`; other native
+fields remain literal argv data. Core consumes the returned command without further interpolation.
+Preserve exact native harness data and its argument boundaries. Command validation occurs during
+launch selection before a restart destroys the current runtime. Env context is validated before
+boundary prompts when its facts are known; command generation needs no separate preflight interface.
 
 ## Behavioral vectors
 

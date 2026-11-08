@@ -78,3 +78,46 @@ The full non-integration suite passed: 10,264 tests, with 11 skipped. File-quali
 rulesync drift, and locked-SDD checks passed. Website validation passed 160 Python tests, 103 Node
 tests, and deterministic double builds at both supported site bases. The ready handoff records the
 exact published head; live integration evidence is pending the standard pipeline.
+
+## Final review iteration 1
+
+Ready head: `b927a0ff8207a7f49a16f527a8995859c8d6beba`, handed off on 2026-11-07. Muntz's report
+accepted the namespace and identified stale resource guidance and avoidable command-output
+rendering. The namespace-only contract remains as directed by the operator; no legacy detector is
+added.
+
+Integration reports on 2026-11-08 tested that exact head against `c8d4dfb3`: all required gates
+passed, with 10,264 non-integration tests passed and 11 skipped. Live Linux/macOS and native Windows
+evidence found an identity-precedence regression and the stale guide. Windows measured literal-env
+cases passed; Linux/macOS literal delivery failed in inherited SSH SetEnv expansion. Their bounded
+live and cleanup evidence is in PR comments 6719400693 and 6725905647. These are not full acceptance
+and are not evidence about the subsequently composed build.
+
+## Final review iteration 2
+
+The operator authorized two additional cycles, retaining the requirement to wait for an integration
+report before each. Both iteration-one integration reports were present before this correction round
+began. PR #867 returned to draft. Latest main `89bb63e40` was merged for a conflict-free composed
+build; no other effort's SDD artifacts are edited by this effort.
+
+The fixed feedback batch includes identity precedence before validation and secret collection,
+field-owned command rendering, the retained resource guide, dollar-adjacency guidance, and precise
+validation timing. Independent private reviews and required gates must pass before the resulting
+head is handed off.
+
+### Acceptance-blocking transport dependency
+
+The inherited `_set_env_args` implementation in `cli/agentworks/ssh.py` quotes SSH configuration
+syntax but does not preserve arbitrary literal values on clients that expand SetEnv values. The
+reported Linux/macOS failures include escaped namespace text, opaque secrets containing that text,
+and ordinary `${HOME}`. Native Windows cases passed on the measured client; no universal transport
+pass follows from that result.
+
+Read-only investigation compared official OpenSSH source and actual offline local 9.2 client probes.
+Inspected 9.x sources preserve SetEnv text; 10.0 adds expansion with no portable dollar escape. A
+transport fix needs a design covering old and new clients and the low-level run, transport run,
+interactive, and streaming paths. Child-environment forwarding must not allow remote declarations to
+alter local client execution; shell preludes would reopen ADR 0014. This exceeds a small incidental
+correction. The accepted literal-data and preview-parity requirements remain in force;
+operator/transport-owner disposition is pending, and the SDD remains open. Critical reading and
+call-site evidence are recorded in PR comment 6728073054.

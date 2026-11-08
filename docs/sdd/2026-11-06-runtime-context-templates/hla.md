@@ -33,18 +33,20 @@ unavailable during VM setup or a standalone agent shell.
 
 1. Decode declarations and resolve template inheritance and stored instance overlays.
 2. Determine the consuming identity and resource context.
-3. Merge applicable env scopes in precedence order.
+3. Merge applicable env scopes in precedence order and discard collisions with applicable managed
+   identity before validation or secret collection.
 4. Render each winning plaintext entry once; preserve secret references as literal entries.
 5. Fill secrets from the command's existing eager resolution and enforce existing consumer safety.
-6. Apply managed identity precedence and deliver literal env strings through the transport.
+6. Add managed identity values and deliver literal env strings through the transport.
 
 A common plaintext-rendering path serves execution and offline inspection. It must be usable without
 resolving secrets, so redacted inspection and context validation do not require secret values. Keep
 winning-scope provenance independent of rendering.
 
-Check context references before prompts and mutations when the invocation already knows its
-identity. Command source becomes available to core after the integration selects its launch command.
-Validate that returned source immediately, before launch or destructive session replacement; do not
+Check winning env references before secret prompts and mutations when the invocation knows its
+identity. Each integration renders its declared command fields while selecting its launch command,
+before launch or destructive session replacement. Create may already have realized workspace access;
+a command failure then follows the normal rollback. Core consumes returned commands directly. Do not
 inspect integration-owned config generically or add a separate validation hook. Deriving context and
 validating text require no target connection.
 
@@ -74,12 +76,11 @@ Env values are literal strings. Shell commands are authored source, so quoting d
 appears. In command source, use `"$AGENTWORKS_WORKSPACE_DIR"` for arbitrary workspace paths; raw
 substitution between single quotes cannot represent an embedded apostrophe safely.
 
-Bind the invocation context before the integration selects its launch command. Integrations render
-structured extra arguments as data before quoting them, and shield the resulting argv data from the
-command-source renderer. Prompts, profiles, and opaque workload fields are data; intentional extra
-args remain interpolated according to the integration's existing contract. Future argv consumers
-render each argument as data before serializing it, rather than interpolating a completed shell
-program.
+Bind the invocation context before the integration selects its launch command. Shell renders its
+selected command field; native integrations render structured extra arguments as data before quoting
+them. Prompts, profiles, and opaque workload fields are literal argv data. Core performs no further
+interpolation of returned commands. Future consumers render only their declared template fields,
+before serializing structured arguments into shell source.
 
 Secret values bypass both interpolation and unescaping. This is a consumer distinction, not a
 request for another template syntax. Do not infer a context source from exported identity env or

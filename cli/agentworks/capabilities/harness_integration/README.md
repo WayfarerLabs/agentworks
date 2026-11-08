@@ -101,8 +101,8 @@ then validate that remaining delivery. A namespace that resolves the collision m
 at the receiving facet; an earlier deferral is not a permanent refusal. Hard failures in input,
 transport or private filesystem publication remain errors of the running facet.
 
-Generated literal argv values must use `quote_literal_argv` so artifact text is not interpreted as
-Agentworks template substitutions. Native conversation IDs remain integration-owned.
+Generated literal argv values use ordinary shell quoting. Only fields declared as templates are
+rendered, before command assembly. Native conversation IDs remain integration-owned.
 
 And note that regardless of integration, all sessions run inside the standard tmux session. This
 provides both access to stdin/stdout/stderr for interactivity as well as the persistent execution
@@ -504,11 +504,11 @@ unsupported intent leaves the managed tmux runtime and integration-owned state i
 #### Operation: Returning the Launch Decision
 
 - The return value is a `HarnessStartResult`, not an execution. `HarnessStart(command, note)` is the
-  implemented result: the session manager wraps the command (template-var substitution, then the
-  tmux pane's `$SHELL -lic 'cd <dir> && exec <command>'`) and runs it. Empty string means "just the
-  login shell". `HarnessStartNotImplemented` reports that the integration does not implement that
-  intent; every intent may produce it. Any other return shape is a contract error, not an
-  unsupported intent.
+  implemented result: the session manager passes the command to the tmux pane's
+  `$SHELL -lic 'cd <dir> && exec <command>'` wrapper and runs it, without further interpolation.
+  Empty string means "just the login shell". `HarnessStartNotImplemented` reports that the
+  integration does not implement that intent; every intent may produce it. Any other return shape is
+  a contract error, not an unsupported intent.
 - Core passes a `HarnessLaunchIntent`: `CREATE` for `session create`, `RESUME_ONLY` for an explicit
   `--resume-only`, `FORCE_NEW` for an explicit `--force-new`, and `RESUME_OR_NEW` for an ordinary
   `session start` or `session restart`. Core obtains and validates the result before teardown.
@@ -574,9 +574,10 @@ The surrounding wiring supplies the following behavior and debugging boundaries:
   context (its only readiness pass is the pre-kill preflight sweep), and on both paths only the op
   context carries secrets. An integration cannot depend on runup firing before `start`.
 - **Context binding and rendering:** before `start`, the manager supplies the invocation's explicit
-  context through `prepare_context`. Returned command source uses `${agw:NAME}` interpolation at the
-  call site, before artifact staging or runtime replacement. Structured extra arguments render as
-  data before quoting; literal generated arguments are shielded from the source pass. See
+  context through `prepare_context`. Each integration renders its declared `${agw:NAME}` template
+  fields during launch selection, before artifact staging or runtime replacement. Shell renders its
+  selected command field; native integrations render structured extra arguments before quoting.
+  Returned command strings receive no further interpolation. See
   [runtime context and interpolation](../../../../docs/arch/runtime-context.md).
 - **Display:** `session list` / `session describe` show the resolved integration name by
   re-resolving the template read-only (no instance is built, no gate runs);
@@ -640,15 +641,14 @@ sessions. Five rules, each earned:
   and `exec` takes one simple command: with a bare `echo ...; exec tool ...` the shell would `exec`
   the `echo` and nothing after the `;` would ever run. Return `sh -c '<inner>'` with the inner
   `shlex.quote`d, and `exec` the tool inside it so the pane process becomes the tool.
-- **Quote and shield generated argv data.** Build a token list and use `quote_literal_argv` for each
-  generated or modeled argument. It quotes the token and shields `${agw:` from the later
-  command-source renderer, preserving literal profile names, model values, settings, and workload
-  input. Normal shell and Go-template syntax needs only ordinary shell quoting.
-- **Render structured template arguments before quoting.** Use `self.quote_context_argv` for
-  designated `extra_args` values. It renders against the bound context, then quotes and shields the
-  result. A workspace path containing an apostrophe remains one argument, and placeholder-looking
-  replacement data is not interpreted twice. Raw shell command fields remain operator-authored
-  source with ordinary shell quoting responsibilities.
+- **Quote generated argv data.** Build a token list and use `shlex.quote` for each generated or
+  modeled argument, preserving literal profile names, model values, settings, and workload input.
+- **Render declared template fields in the integration.** Use `self.quote_context_argv` for
+  designated `extra_args` values. It renders against the bound context, then shell-quotes the
+  result. A workspace path containing an apostrophe remains one argument, and namespace-looking
+  replacement data is not interpreted twice. Shell renders its selected command field as
+  operator-authored source with ordinary shell quoting responsibilities. The manager never
+  interpolates returned commands.
 - **Model the common flags; leave the rest to `extra_args`.** A small optional vocabulary
   (`permission_mode`, `model`, `reasoning_effort`, workload inputs, and session preferences) plus an
   explicit `extra_args` list emitted after generated options keeps the integration useful without

@@ -40,7 +40,9 @@ Whitespace inside a reference is not normalized.
 Use `$${agw:user_name}` in a plaintext template to obtain literal `${agw:user_name}`. Escaping
 applies only to the reserved namespace. In command source, this suppresses Agentworks expansion; the
 resulting text still follows shell quoting rules. Ordinary `$HOME`, `${HOME}`, `${PATH:-default}`,
-`$$`, Go-template text, and unrelated braces are unchanged by Agentworks.
+`$$`, Go-template text, and unrelated braces are unchanged by Agentworks unless a dollar sign
+immediately precedes a reserved reference: `$$${agw:user_name}` becomes `$${agw:user_name}` because
+the last two dollar signs start the namespace escape.
 
 Rendering takes one pass. Namespace-looking text in a replacement value is not interpreted again.
 There are no expressions, filters, ambient lookups, or references between env entries.
@@ -55,7 +57,8 @@ VM < workspace < agent or admin < session
 ```
 
 Later scopes win on a matching key. Agent and admin are alternatives selected by the consuming Linux
-user. Discarded entries are not rendered. Managed identity variables retain their own precedence.
+user. Applicable managed identity variables win before rendering or secret collection. Discarded
+entries are neither rendered nor resolved.
 
 | Invocation                   | Context                                                             |
 | ---------------------------- | ------------------------------------------------------------------- |
@@ -67,16 +70,22 @@ user. Discarded entries are not rendered. Managed identity variables retain thei
 | Agent setup                  | Agent's Linux user and resource name                                |
 | Workspace setup              | VM admin and workspace                                              |
 
-Existing processes keep their initial environment. A new invocation recomputes values. Invalid
-references are checked before prompts and mutations where context is known, including before a
-restart replaces the current runtime. Returned command source is validated after the integration
-selects its launch command and before launch or destructive replacement. Native transports retain
-their documented env-delivery limitations.
+Existing processes keep their initial environment. A new invocation recomputes values. Invalid env
+references are checked before secret prompts and mutations where context is known. Integrations
+render their declared command fields while selecting the launch command, before launch or
+destructive replacement. A create may already have realized workspace access; a command error then
+uses the normal rollback. Native transports retain their documented env-delivery limitations.
 
 `agw env show --session NAME` previews winning plaintext values and their scopes from managed state
 without connecting to the VM. `--vm`, `--workspace`, and `--agent` select other contexts. Secrets
 remain redacted unless `--resolve` is explicit. This is a managed-config preview, not an observation
 of a process's live environment or user shell startup effects.
+
+SSH delivery uses the client's `SetEnv` option. Clients that expand SetEnv values can reinterpret
+literal `${...}` text using the controller's environment, or refuse it when that variable is absent.
+This affects escaped plaintext and opaque secrets as well as ordinary shell-looking text. Preview
+and setup rendering do not perform that client expansion. Literal-value delivery on those clients
+is an unresolved transport dependency; changing Agentworks template escaping does not suppress it.
 
 ## Secrets
 
@@ -104,11 +113,11 @@ The shell expands the variable as data within that argument. Raw substitution be
 cannot represent an embedded apostrophe safely.
 
 Native integration prompt/profile fields and other opaque workload input remain literal. The
-integration shields reserved namespace text while quoting such values as argv data. Structured extra
-arguments are rendered against the bound invocation context before quoting, so a workspace path
-containing an apostrophe remains part of one argument. Rendered data is then shielded from the
-command-source pass; inserted placeholder-looking text is not expanded again. Shell variables and Go
-templates are processed only by their downstream consumers.
+integration quotes such values as argv data. Structured extra arguments render against the bound
+invocation context before quoting, so a workspace path containing an apostrophe remains part of one
+argument. Shell renders its selected command field as source. The manager consumes the integration's
+returned command directly, so generated data and inserted namespace-looking text are not scanned
+again. Shell variables and Go templates are processed only by their downstream consumers.
 
 ## Identity env delivery
 
@@ -132,8 +141,9 @@ exists. Both use the same finite catalogue and context projection.
 Render only fields whose contract calls for interpolation. Render winning plaintext env entries
 without requiring secret values; keep provenance independent. Validate before side effects when
 context is available. Treat env strings, argv elements, and shell source as different destinations:
-quote argv elements once if they must be serialized into shell source, and shield literal workload
-input from later textual rendering. No consumer may reinterpret secret contents as expressions.
+quote argv elements once if they must be serialized into shell source. Each integration owns the
+rendering of its declared template fields; returned command strings are ready for execution and
+receive no further interpolation. No consumer may reinterpret secret contents as expressions.
 
 See the [CLI session-template reference](../../cli/command-reference.md#session-templates) for the
 shell integration configuration.
