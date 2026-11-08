@@ -4,9 +4,10 @@ Governing requirements: [FRD](frd.md). Architecture: [HLA](hla.md). Detailed con
 [interpolation LLD](interpolation-lld.md). Background: [prior art](prior-art-research.md).
 Lifecycle: [delivery](migration-strategy.md).
 
-Delivery: one PR containing the full feature, full SDD, permanent documentation, and validation. The
-completed implementation is handed off ready on PR #867. Completion is tracked against the accepted
-namespaced contract; lock only after all feature work and final feedback are complete.
+Delivery: one PR containing the full feature, full SDD, permanent documentation, and validation. PR
+#867 is a draft correction checkpoint after its first ready handoff. Completion is tracked against
+the accepted namespaced contract; transport acceptance and validation timing remain unresolved. Lock
+only after all feature work and final feedback are complete.
 
 ## Design checkpoint
 
@@ -77,7 +78,8 @@ precedence, reserved-prefix escaping, shell/Go literals, and opaque secret revea
 The full non-integration suite passed: 10,264 tests, with 11 skipped. File-quality, typer isolation,
 rulesync drift, and locked-SDD checks passed. Website validation passed 160 Python tests, 103 Node
 tests, and deterministic double builds at both supported site bases. The ready handoff records the
-exact published head; live integration evidence is pending the standard pipeline.
+exact published head. Subsequent integration findings and the current acceptance gaps are recorded
+below.
 
 ## Final review iteration 1
 
