@@ -416,7 +416,7 @@ def test_workspace_setup_joins_eager_env_and_follows_directory_creation(
         config,
         name="project",
         vm_name="box",
-        spec='{"harness_integrations":[{"name":"shell"}],"env":{"PROJECT_TOKEN":{"secret":"project-token"}}}',
+        spec='{"harness_integrations": {"shell": {}}, "env": {"PROJECT_TOKEN": {"secret": "project-token"}}}',
         interaction=TtyInteractionPolicy.REFUSE,
     )
     assert len(calls) == 1

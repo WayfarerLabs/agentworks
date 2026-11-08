@@ -52,6 +52,22 @@ they find.
   actually matches the origin tip for the branch in question, and refresh `main` if it is stale. A
   stale checkout silently reviews the wrong tree and produces a verdict about code that is not the
   code under review.
+- **Test the build under test, not a stand-in for it.** Getting the commit under test onto a remote
+  or awkward test host is part of the lane, not an optional refinement. Validating against the last
+  published release and then caveating the difference does not deliver the coverage: it produces a
+  green result about code nobody asked about, and the caveat is easy to lose in a report that
+  otherwise reads as a pass. Install the commit, then confirm what actually landed before trusting a
+  single measurement from that host, and confirm it by exercising a feature only the commit under
+  test has. A matching version string is not sufficient on its own: a development head reports the
+  last released version until its release lands, so that check passes identically whether the commit
+  or the published release is installed, which is the failure this principle exists to prevent.
+  Where a build genuinely cannot be placed, name the lane as untested rather than substituting an
+  adjacent build and describing the substitution as a boundary.
+- **Verify a constraint before you design around it.** An assumed limit ("that would need a token",
+  "that host has no egress", "the package is private") is a hypothesis, and checking it is usually
+  one command. Designing a weaker test around a barrier that does not exist costs more than the
+  check would have, and it hides the weakening inside a rationale that sounds careful. This is the
+  constraint-side form of the rule below: verify before you rely on it.
 - **Verify every finding before you relay it.** Before a finding, a caveat, or a "note for
   reviewers" leaves your hands, confirm it against the actual code, not against your memory of
   reading it earlier in the session. An unverified caveat posted to a PR is a claim with your name

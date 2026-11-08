@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from agentworks.env.entry import EnvEntry
     from agentworks.resources.inheritance import LayeredResolution
     from agentworks.resources.registry import Registry
-    from agentworks.schema import CapabilityBlock
+    from agentworks.schema import CapabilityConfig
     from agentworks.vms.template import VMTemplate
 
 
@@ -42,7 +42,7 @@ class ResolvedVMTemplate:
     snap: list[str] = field(default_factory=list)
     system_install_commands: list[str] = field(default_factory=list)
     # Env (declared per-template; merged child-overrides-parent)
-    harness_integrations: list[CapabilityBlock] = field(default_factory=list)
+    harness_integrations: dict[str, CapabilityConfig] = field(default_factory=dict)
     artifacts: ArtifactsConfig = field(default_factory=ArtifactsConfig)
     env: dict[str, EnvEntry] = field(default_factory=dict)
     # Secret name for the Tailscale auth key (default ``"tailscale-auth-key"``).
@@ -132,6 +132,8 @@ def _resolve_with_provenance(
 ) -> LayeredResolution[ResolvedVMTemplate]:
     # Imported here, not at module level: ``agentworks.resources``'s package
     # init loads every kind module, and every kind module reaches this one.
+    from functools import partial
+
     from agentworks.resources.inheritance import (
         DeclarationLayer,
         LayerSource,
@@ -159,7 +161,7 @@ def _resolve_with_provenance(
     return run_layer_fold(
         ResolvedVMTemplate(name=name),
         layers,
-        merge_resolved_template_layer,
+        partial(merge_resolved_template_layer, facet="vm"),
         default_paths=resolved_spec_default_paths(ResolvedVMTemplate),
         default_resource_kind="vm-template",
         default_name=name,

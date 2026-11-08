@@ -29,7 +29,6 @@ from agentworks.artifacts.native.common import (
     NativeSessionArtifacts,
     defer,
     delivery_files,
-    has_artifacts,
     native_home,
     validate_discovery_paths,
     validate_native_command,
@@ -64,8 +63,6 @@ if TYPE_CHECKING:
 class GrokBuildSetupConfig(AgwModel):
     """Activate an artifact-only native facet."""
 
-    name: Literal["grok-build"]
-
 
 class GrokBuildConfig(AgwModel):
     """What a session template tells the ``grok-build`` integration.
@@ -78,9 +75,6 @@ class GrokBuildConfig(AgwModel):
     documentation. No 1.0.10 binary was installed for this recheck, so runtime
     observations below remain explicitly pinned to 1.0.4.
     """
-
-    name: Literal["grok-build"]
-    """The harness integration this config is for."""
 
     permission_mode: str | None = None
     """Forwarded as ``--permission-mode``. A child template's declared
@@ -115,6 +109,11 @@ class GrokBuildConfig(AgwModel):
     rules: str | None = None
     """Forwarded as ``--rules`` on every process launch, including resume."""
 
+    enabled_workarounds: Annotated[
+        list[Literal["session-rules", "session-agent-definitions"]], MergeStrategy.REPLACE
+    ] = Field(default_factory=list)
+    """Explicitly enabled session artifact carriers. An authored list replaces inherited opt-ins."""
+
     extra_args: Annotated[list[str], MergeStrategy.REPLACE] = Field(default_factory=list)
     """Raw argv tokens appended verbatim after every managed flag and before
     any fresh positional prompt. Grok Build 1.0.4 rejects repeated managed
@@ -132,7 +131,7 @@ _SESSIONS_DIR = "${GROK_HOME:-$HOME/.grok}/sessions"
 class GrokBuildIntegration(HarnessIntegration):
     """Run Grok Build, resuming its persisted session when one exists."""
 
-    contract_version: ClassVar[int] = 6
+    contract_version: ClassVar[int] = 7
     name: ClassVar[str] = "grok-build"
     description: ClassVar[str] = "Run Grok Build, resuming its session when one exists"
     config_model: ClassVar[type[GrokBuildConfig]] = GrokBuildConfig
@@ -147,9 +146,11 @@ class GrokBuildIntegration(HarnessIntegration):
         the session's launch target.
 
         User and workspace facets publish native rules, skills and agent personas.
-        Session guidance is added through `--rules`, and session personas through
-        `--agents`. Private interactive session skills are unsupported; activate the
-        user or workspace facet to publish those skills at their native scope.
+        Session artifacts are optional and unhandled by default. `enabled_workarounds`
+        can opt into `session-rules` for rules/hints through `--rules`, and
+        `session-agent-definitions` for personas through `--agents`. Private session
+        skills have no supported workaround; activate the user or workspace facet
+        to publish those skills at their native scope.
         """,
     )
 
@@ -164,7 +165,7 @@ class GrokBuildIntegration(HarnessIntegration):
         return (
             ArtifactApplication()
             if self.retiring
-            else defer(invocation.artifacts, "user", "Grok Build discovers native artifacts for an actual user")
+            else defer(invocation.artifacts, "user", "Grok Build has no supported machine-wide artifact file location")
         )
 
     def user_init(self, invocation: UserSetupInvocation) -> ArtifactApplication:
@@ -231,9 +232,12 @@ class GrokBuildIntegration(HarnessIntegration):
             self._session_binding.artifact_context,
             configured=self.config.rules,
             extra_args=self.config.extra_args,
+            enabled_workarounds=self.config.enabled_workarounds,
         )
         artifact_context = self._session_binding.artifact_context
-        if artifact_context is not None and has_artifacts(artifact_context):
+        if artifact_context is not None and (
+            artifact_context.ancestor_files or self._artifact_plan.application.files or self._artifact_plan.argv
+        ):
             runner = ctx.admin_target() if self._admin else ctx.agent_target()
             if runner is None:
                 raise StateError("artifact delivery requires the actual native launch target")
@@ -245,7 +249,6 @@ class GrokBuildIntegration(HarnessIntegration):
                 home=artifact_context.home,
                 workspace=self._workspace_path,
                 files=files,
-                flags=self._artifact_plan.required_flags,
                 session_plugin="--plugin-dir" in self._artifact_plan.argv,
             )
             validate_discovery_paths(artifact_context, (native_root, f"{self._workspace_path}/.grok"))
@@ -259,7 +262,7 @@ class GrokBuildIntegration(HarnessIntegration):
             note = "Existing Grok Build session found. Resuming..."
         else:
             note = "No existing Grok Build session. Starting a new one..."
-        if has_artifacts(self._session_binding.artifact_context):
+        if self._artifact_plan.argv:
             validate_native_command(command)
         return HarnessStart(command, note, self._artifact_plan.application)
 

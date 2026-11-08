@@ -61,8 +61,8 @@ def evaluate_setup(
         return result("absent")
     if not record.complete or record.pending_cleanup:
         return result("incomplete", record)
-    block = next((item for item in inputs.activations if item.name == integration_name), None)
-    if block is None or inputs.declaration(block) != record.declaration:
+    block = inputs.activations.get(integration_name)
+    if block is None or inputs.declaration(integration_name, block) != record.declaration:
         return result("stale", record)
     try:
         if destination_id(vm, runner, location=location, username=username) != record.destination_id:
@@ -126,7 +126,7 @@ def _applicable_evidence(
             kind="vm",
             name=vm.name,
             component="vm",
-            activations=tuple(vm_template.harness_integrations),
+            activations=vm_template.harness_integrations,
             target=SecretTarget(vm=vm_template.env),
         )
         remedy = f"Enable the integration activation and run 'agw vm reinit {vm.name}'."
@@ -137,7 +137,7 @@ def _applicable_evidence(
                 kind="vm",
                 name=vm.name,
                 component="admin",
-                activations=tuple(admin.harness_integrations),
+                activations=admin.active_harness_integrations,
                 target=SecretTarget(vm=vm_template.env, admin=admin.env),
             )
             username = vm.admin_username
@@ -151,7 +151,7 @@ def _applicable_evidence(
                 kind="agent",
                 name=agent.name,
                 component="agent",
-                activations=tuple(template.harness_integrations),
+                activations=template.harness_integrations,
                 target=SecretTarget(vm=vm_template.env, agent=template.env),
             )
             username = agent.linux_user
@@ -165,7 +165,7 @@ def _applicable_evidence(
             kind="workspace",
             name=workspace.name,
             component="workspace",
-            activations=tuple(project.harness_integrations),
+            activations=project.harness_integrations,
             target=SecretTarget(vm=vm_template.env, workspace=project.env),
         )
         location = workspace.workspace_path

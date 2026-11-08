@@ -21,7 +21,7 @@ ALLOWED_DEFERRALS: dict[ArtifactFacet, tuple[ArtifactFacet, ...]] = {
     "vm": ("user", "workspace", "session"),
     "user": ("session",),
     "workspace": ("session",),
-    "session": (),
+    "session": ("session",),  # Terminal unhandled disposition; no further routing.
 }
 
 

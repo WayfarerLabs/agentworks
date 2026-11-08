@@ -6,22 +6,25 @@ native plans and acceptance boundaries.
 
 ## Integration boundary
 
-Every first-party integration implements all four facets at contract version 6. VM facets publish no
-files. Claude Code, Codex and Grok Build defer VM inputs to the user facet; shell defers them
-directly to the session. Neither decision examines downstream activation.
+Every first-party integration implements all four facets at contract version 7. VM facets publish
+supported artifacts directly and defer unsupported types to user handling, without inspecting
+downstream activation. Shell publishes all types under `/opt/agentworks/artifacts`. Claude uses its
+managed memory, skill and agent locations; Codex uses its machine skill directory. Grok defers VM
+inputs to user handling until machine discovery registration can preserve configuration and trust.
 
 Outer hooks return `ArtifactApplication` after their existing native settings/plugin setup. The
 integration selects the exact file bytes, paths, executable intent and native identities. Core
 publishes those files and retains ownership in the existing applied-state slice. Retirement returns
 an empty plan, letting core remove previously owned artifact files.
 
-Session launch returns the same application with its native command. The optional `artifacts_dir`
-field must identify the core-provided private run directory; core exposes it as
-`AGENTWORKS_ARTIFACTS_DIR` in the launch environment. Outer facets cannot set this field. All
-artifact argv values use `quote_literal_argv`, including JSON and TOML values, so core
-command-template substitution cannot interpret literal `{{...}}` in artifact content. Initial
-prompts keep their existing fresh-conversation behavior. Artifact guidance applies to each launched
-process, including resume.
+Native harness session delivery is disabled by default. Shell publishes its session files directly.
+An enabled native workaround returns the same application with its native command; disabled inputs
+return terminal session deferrals with actionable reasons. The optional `artifacts_dir` field must
+identify the core-provided private run directory; core exposes it as `AGENTWORKS_ARTIFACTS_DIR` in
+the launch environment. Outer facets cannot set this field. All artifact argv values use
+`quote_literal_argv`, including JSON and TOML values, so core command-template substitution cannot
+interpret literal `{{...}}` in artifact content. Initial prompts keep their existing
+fresh-conversation behavior. Artifact guidance applies to each launched process, including resume.
 
 The adapters do not call one another, fetch sources or modify captured inputs. The modules under
 `artifacts/native/` are rendering/probe utilities used by integrations. Core routing does not import
@@ -38,7 +41,7 @@ rendering must preserve every surviving contribution or explicitly refuse the co
 | ----------- | ------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
 | Shell       | `~/.agentworks-artifacts/user/` and `<workspace>/.agentworks-artifacts/`, containing typed files and an index            | Same layout in the private run directory; `AGENTWORKS_ARTIFACTS_DIR` points there when the run has inputs                           |
 | Claude Code | `.claude/rules/agentworks-rule-<name>.md`, one hints rule, complete `.claude/skills/<name>/`, `.claude/agents/<name>.md` | Additive prompt file, private generated plugin for skills, inline `--agents` JSON                                                   |
-| Codex       | Complete `.agents/skills/<name>/` and `.codex/agents/<name>.toml`; hints/rules defer to session                          | Composed `developer_instructions`; private role config files selected through `agents.<name>.config_file` and description overrides |
+| Codex       | Complete `.agents/skills/<name>/`, `.codex/agents/<name>.toml` and a generated AGENTS instruction section                | Composed `developer_instructions`; private role config files selected through `agents.<name>.config_file` and description overrides |
 | Grok Build  | Flat `.grok/rules/`, complete `.grok/skills/<name>/`, `.grok/agents/<name>.md`                                           | Composed `--rules` text and inline `--agents` JSON                                                                                  |
 
 User native roots honor `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and `GROK_HOME`. Codex's standard user
@@ -51,12 +54,34 @@ Shell preserves each original owner under `scopes/<component>/<resource-name>/`,
 maps, so equal keys from different owners resolve to different files. Shell publishes content for
 filesystem consumers; it does not load assistant context.
 
+VM publication uses the existing admin transport with privileged destination operations, not an
+admin-user placement. Files are root-owned and readable by VM users; newly created directories are
+traversable. Destination selection remains integration-owned within one global core allowlist:
+`/etc/claude-code`, `/etc/codex` and `/opt/agentworks/artifacts`. `NativeFiles` checks elevated
+reads, writes, directory operations and cleanup before dispatch or payload staging. Publication also
+checks all desired and persisted destinations and package boundaries before opening staging. The
+existing destination-side checks reject symlink traversal. This is a file-helper restriction, not a
+sandbox for in-process integration code. The helper is the replacement seam for the proposed
+Transport file APIs in PR 795; this correction adds no new execution interface or per-integration
+grants. VM deletion still removes the filesystem without artifact cleanup becoming a prerequisite.
+
+Codex hints/rules use the selected native instruction file: `$CODEX_HOME/AGENTS.md` for users and
+`<workspace>/AGENTS.md` for workspaces, unless an existing nonempty `AGENTS.override.md` takes
+precedence. Claude VM hints/rules use `/etc/claude-code/CLAUDE.md`. These files opt into generated
+section publication with fixed `<!-- BEGIN AGENTWORKS GENERATED -->` and
+`<!-- END AGENTWORKS GENERATED -->` delimiters. Core replaces a complete section regardless of
+changes inside it and preserves surrounding bytes, ownership, permissions and extended attributes.
+Missing partners, reversed or duplicate markers warn and skip the file, recording the reason
+separately from deferrals. Cleanup removes only the generated section; it may leave an empty file.
+The existing whole-file ownership checks remain unchanged for skills, personas and separate native
+rule files.
+
 Skill members retain their captured bytes and executable intent. Adapters neither flatten skills
 into prompts nor omit supporting files. The Claude session plugin is named `agentworks-artifacts`;
 its skills use the native `agentworks-artifacts:<name>` namespace. Its manifest contains only the
 generated plugin identity, with no hook or MCP configuration. Codex and interactive Grok Build have
 no supported private session skill carrier in this implementation; those inputs remain deferred and
-core rejects the final session result.
+core warns and records them as unhandled while allowing launch.
 
 Native names are checked across local/deferred owner groups and persisted ancestor ownership
 metadata, with supported native discovery locations checked for existing entries that can shadow
@@ -124,15 +149,15 @@ Codex and Grok guidance is carried directly in native argv; no unused guidance f
 Claude's additive prompt file and Codex's selected role configuration files are consumed by their
 native CLI carriers.
 
-The native checks use `--version`, applicable `--help` flags, selected configuration facts and a
-bounded inventory of relevant skill/persona entrypoints; no model is launched. Inventory compares
-actual metadata names and paths against planned files and already handled ancestor files. YAML
-headers are parsed on the workstation with the same alias, size and depth guards used during
-capture, so the guest needs no YAML dependency; Codex TOML and configuration-registered role names
-use the standard library. Publication writes skill entrypoints before supporting members, so an
-interrupted large-package write remains inspectable and retryable. Retirement reverses that order:
-`SKILL.md` stays present and owned while any owned supporting member or required parent cleanup
-remains. Modified or unowned files remain untouched.
+The native checks use selected configuration facts and a bounded inventory of relevant skill/persona
+entrypoints; no model is launched. Inventory compares actual metadata names and paths against
+planned files and already handled ancestor files. YAML headers are parsed on the workstation with
+the same alias, size and depth guards used during capture, so the guest needs no YAML dependency;
+Codex TOML and configuration-registered role names use the standard library. Publication writes
+skill entrypoints before supporting members, so an interrupted large-package write remains
+inspectable and retryable. Retirement reverses that order: `SKILL.md` stays present and owned while
+any owned supporting member or required parent cleanup remains. Modified or unowned files remain
+untouched.
 
 Retirement prunes empty parents of each removed owned skill member only within the exact package
 root supplied by the integration and retained on that file's existing record. Core validates that
@@ -168,11 +193,10 @@ separate verification. These are Agentworks support limits, not assertions that 
 invalid in the native harness, and the check is not a continuous watcher or concurrent-mutation
 guarantee.
 
-The initial compatibility baselines are Claude Code 2.1.265, Codex 0.153.4 and Grok Build 1.0.10.
-Older versions or absent carrier flags fail before publication or session teardown. Claude documents
-its file carrier as `--append-system-prompt[-file]`; the probe recognizes that specific spelling as
-both supported options while retaining whole-option matching for unknown flags. These checks
-establish a supported CLI surface, not proof of model consumption.
+There is no blanket native-version minimum for artifact delivery. Tested versions in the evidence
+section record observations only. The probe does not certify carrier support by searching `--help`:
+Claude explicitly documents that help omits supported flags. An opt-in forwards the documented
+carrier to the native CLI, which owns acceptance of its configuration.
 
 Settings checks concern the selected native identities. An unrelated disabled plugin or skill does
 not require enabling it. Claude rule exclusions are checked against requested rule paths; extended
@@ -189,12 +213,25 @@ reinitialization can remove an obsolete exclusion and then publish artifacts. Wo
 inspect project policy without assuming the admin's native user setup. Session checks include
 ownership metadata for handled ancestors as well as the prospective run's files.
 
-Claude always receives `--system-prompt-snapshot off` when the session consumes artifact context or
-has ancestor rules. Its documented default can reuse a previously recorded prompt on resume even if
-a later process supplies new append text. Raw carrier overrides and native disable flags are
-rejected while artifacts are in use; unrelated raw arguments keep their existing behavior. Codex
-profiles and raw feature/config overrides that can disable artifact discovery are explicitly
-unsupported with artifact delivery rather than guessed at by a second native settings resolver.
+Claude consults its version only when `session-prompt` is enabled and actually emits session rules
+or hints. Before 2.1.265, passing appended prompt text already disables recording. At or above that
+boundary, add `--system-prompt-snapshot off`. Unknown versions warn that resumed guidance may stay
+stale and continue without the flag. Native ancestor rule files, skills and personas do not request
+this adjustment. No helper flags or version checks are added for skipped session inputs.
+
+`enabled_workarounds` is a default-empty, replacing list in each native session config. Claude
+accepts `session-prompt`, `session-skill-plugin`, and `session-agent-definitions`; Codex accepts
+`session-developer-instructions` and `session-agent-config`; Grok accepts `session-rules` and
+`session-agent-definitions`. Shell publishes directly without a workaround. Codex/Grok session
+skills have no workaround. These names opt into the existing carriers in the table above. Hooks,
+automatic fallbacks and release-by-release compatibility tables are not part of this correction.
+
+Raw carrier conflicts are checked for enabled session delivery and already applied ancestor
+discovery. Disabled session inputs do not introduce restrictions on native launch arguments. Outer
+native placement and its safety/ownership checks remain in place. Core emits final unhandled
+warnings after full output validation and stores the deferrals so inspection does not claim success.
+Known domain failures retain their error type and focused remediation through the agent lifecycle;
+version/configuration refusals are not recast as unexplained SSH failures.
 
 Native argv and the fully quoted returned command each have a conservative 32 KiB UTF-8 limit,
 leaving room for launcher wrapping below the operating system's per-argument limit. Oversized text

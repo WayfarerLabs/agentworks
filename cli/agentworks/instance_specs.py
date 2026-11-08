@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from agentworks.db import Database, DesiredOverlayRecord
     from agentworks.resources.reference import ResourceReference
     from agentworks.resources.registry import Registry
-    from agentworks.schema import CapabilityBlock
+    from agentworks.schema import CapabilityConfig
     from agentworks.sessions.template import SessionTemplate
     from agentworks.vms.admin import AdminConfig
     from agentworks.vms.template import VMTemplate
@@ -84,6 +84,10 @@ class UnsupportedStoredOverlayError(StateError):
     """Stored desired state was written for a declaration schema this release cannot read."""
 
 
+class ActivationMapMigrationRequired(UnsupportedStoredOverlayError):
+    """A saved activation list needs an explicit replacement with map semantics."""
+
+
 def parse_instance_spec(instance_kind: InstanceKind, value: str) -> InstanceOverlay[BaseModel]:
     """Parse strict inline JSON and validate it through the kind's spec model."""
     raw = _parse_json_object(value)
@@ -132,7 +136,7 @@ def parse_vm_instance_specs(
 
 
 def decode_stored_overlay(
-    record: DesiredOverlayRecord, *, legacy_user_base: list[CapabilityBlock] | None = None
+    record: DesiredOverlayRecord, *, legacy_user_base: dict[str, CapabilityConfig] | None = None
 ) -> InstanceOverlay[BaseModel] | VMInstanceOverlays:
     """Decode a persisted overlay at the state-database trust boundary."""
     from agentworks.legacy_claude import LegacyClaudeContextRequired, legacy_component, translated_record
@@ -152,15 +156,22 @@ def decode_stored_overlay(
             entity_name=record.instance_name,
             hint="Upgrade Agentworks to a compatible or newer release before applying this instance spec.",
         )
+    raw = record.payload.value
+    # A retired list permits explicit replacement only if the rest is readable.
+    readable = (
+        {key: value for key, value in raw.items() if key != "harness_integrations"}
+        if isinstance(raw.get("harness_integrations"), list)
+        else raw
+    )
     try:
         encoded = json.dumps(
-            record.payload.value,
+            readable,
             ensure_ascii=False,
             allow_nan=False,
             sort_keys=True,
             separators=(",", ":"),
         )
-        return parse_instance_spec(record.instance_kind, encoded)
+        parsed = parse_instance_spec(record.instance_kind, encoded)
     except UnsupportedOverlayFieldsError as error:
         raise UnsupportedStoredOverlayError(
             f"stored {record.instance_kind} {record.instance_name!r} instance spec uses unsupported fields: {error}",
@@ -175,10 +186,12 @@ def decode_stored_overlay(
             entity_name=record.instance_name,
             hint="Back up the state database before repairing it, or restore a known-good backup.",
         ) from error
+    _refuse_stored_activation_list(record, raw)
+    return parsed
 
 
 def decode_stored_vm_overlays(
-    record: DesiredOverlayRecord, *, legacy_user_base: list[CapabilityBlock] | None = None
+    record: DesiredOverlayRecord, *, legacy_user_base: dict[str, CapabilityConfig] | None = None
 ) -> VMInstanceOverlays:
     """Decode one persisted composite VM declaration at its trust boundary."""
     if record.instance_kind != "vm":
@@ -202,6 +215,9 @@ def decode_stored_vm_overlays(
         raise _unsupported_stored_overlay(record, f"unsupported fields: {', '.join(unknown)}")
     raw_vm = raw.get("vm")
     raw_admin = raw.get("admin")
+    for component in (raw_vm, raw_admin):
+        if isinstance(component, dict):
+            _refuse_stored_activation_list(record, component)
     component_unknown: list[str] = []
     if isinstance(raw_vm, dict):
         component_unknown.extend(f"vm.{field}" for field in _unknown_vm_component_fields(raw_vm))
@@ -251,12 +267,31 @@ def decode_stored_vm_overlays(
     return _vm_instance_overlays(vm_overlay, admin)
 
 
+def _refuse_stored_activation_list(record: DesiredOverlayRecord, raw: JsonObject) -> None:
+    """Refuse a saved list whose replacement semantics cannot be preserved by map conversion."""
+    if not isinstance(raw.get("harness_integrations"), list):
+        return
+    remedy = (
+        "Use 'agw agent reinit' with --spec containing the complete replacement instance spec, "
+        "or --spec '{}' to clear it."
+        if record.instance_kind == "agent"
+        else "Back up the state database and explicitly migrate the saved instance spec to activation maps "
+        "before using this resource, or recreate the resource with the new config."
+    )
+    raise ActivationMapMigrationRequired(
+        f"stored {record.instance_kind} {record.instance_name!r} uses the retired harness activation list format",
+        entity_kind=record.instance_kind,
+        entity_name=record.instance_name,
+        hint=f"{remedy} Maps merge inherited activations; old lists replaced them as a whole.",
+    )
+
+
 def get_instance_overlay(
     db: Database,
     instance_kind: InstanceKind,
     instance_name: str,
     *,
-    legacy_user_base: list[CapabilityBlock] | None = None,
+    legacy_user_base: dict[str, CapabilityConfig] | None = None,
 ) -> InstanceOverlay[BaseModel] | None:
     record = db.instance_state.get_desired_overlay(instance_kind, instance_name)
     if record is None:
@@ -269,7 +304,7 @@ def get_instance_overlay(
 
 
 def get_vm_instance_overlays(
-    db: Database, instance_name: str, *, legacy_user_base: list[CapabilityBlock] | None = None
+    db: Database, instance_name: str, *, legacy_user_base: dict[str, CapabilityConfig] | None = None
 ) -> VMInstanceOverlays | None:
     """Load both final VM declaration components from their one desired row."""
     record = db.instance_state.get_desired_overlay("vm", instance_name)
@@ -346,8 +381,12 @@ def replace_agent_overlay(
 
     prior = db.instance_state.get_desired_overlay("agent", instance_name)
     if prior is not None:
-        with suppress(LegacyClaudeContextRequired):
-            decode_stored_overlay(prior)
+        try:
+            with suppress(LegacyClaudeContextRequired):
+                decode_stored_overlay(prior)
+        except ActivationMapMigrationRequired:
+            if not supplied:
+                raise
     if not supplied:
         if prior is None:
             return None
@@ -487,6 +526,7 @@ def _vm_instance_overlays(
 
 def _decode_legacy_stored_vm_overlay(record: DesiredOverlayRecord) -> VMInstanceOverlays:
     """Read the payload-v1 flat VM layer written before paired admin layers."""
+    _refuse_stored_activation_list(record, record.payload.value)
     try:
         unknown = _unknown_vm_component_fields(record.payload.value)
         if unknown:
@@ -550,6 +590,10 @@ def _validate_json_tree(value: object) -> None:
     while pending:
         item, path = pending.pop()
         if item is None:
+            # Each call validates one owning component. Only direct activation-map
+            # entries use null as an opt-out; nested config and other fields do not.
+            if len(path) == 2 and path[0] == "harness_integrations":
+                continue
             location = ".".join(path) or "<root>"
             raise ValidationError(f"instance spec cannot contain null at {location}")
         if isinstance(item, float) and not math.isfinite(item):

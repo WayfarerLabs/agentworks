@@ -419,7 +419,7 @@ def test_batch_empty_vm_set_is_a_complete_noop(
         ),
         pytest.param(
             "restart_all_sessions",
-            {},
+            {"yes": True},
             ["broken", "legacy", "residual", "running", "stopped", "unobserved-stopped"],
             id="restart-every-session",
         ),
@@ -470,6 +470,191 @@ def test_batch_launch_status_selection(
     )
 
     assert launched == expected
+
+
+def _stub_batch_restart(
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+    statuses: dict[str, SessionStatus],
+) -> list[tuple[str, bool | None]]:
+    _seed_vm(db, "box", "100.64.0.9")
+    for name in statuses:
+        _seed_session(db, name, "ws-box")
+    launched: list[tuple[str, bool | None]] = []
+    monkeypatch.setattr(session_manager, "_batch_vm_boundary", lambda *args, **kwargs: contextlib.nullcontext())
+    monkeypatch.setattr(session_manager, "ensure_pids_batch", lambda selected, **kwargs: selected)
+    monkeypatch.setattr(session_manager, "observe_session_statuses", lambda selected, **kwargs: statuses)
+    monkeypatch.setattr(
+        "agentworks.sessions.manager._lifecycle._launch_existing_session",
+        lambda *args, name, running_restart_authorized, **kwargs: launched.append((name, running_restart_authorized)),
+    )
+    return launched
+
+
+def test_batch_restart_confirms_once_and_authorizes_only_observed_running_names(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    launched = _stub_batch_restart(
+        db,
+        monkeypatch,
+        {"running": SessionStatus.RUNNING, "stopped": SessionStatus.STOPPED},
+    )
+    confirmations: list[None] = []
+    monkeypatch.setattr(
+        "agentworks.sessions.manager._lifecycle.output.confirm",
+        lambda *_args, **_kwargs: confirmations.append(None) is None,
+    )
+
+    session_manager.restart_all_sessions(
+        db,
+        make_config(),
+        interaction=TtyInteractionPolicy.ALLOW,
+    )
+
+    assert len(confirmations) == 1
+    assert launched == [("running", True), ("stopped", False)]
+
+
+def test_batch_restart_refuses_a_recreated_session_before_preparation(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_vm(db, "box", "100.64.0.9")
+    _seed_session(db, "running", "ws-box")
+    selected = db.get_session("running")
+    assert selected is not None
+    replacement_rows = []
+
+    monkeypatch.setattr(
+        session_manager,
+        "observe_session_statuses",
+        lambda sessions, **kwargs: {"running": SessionStatus.RUNNING},
+    )
+
+    def _replace_and_confirm(*args: object, **kwargs: object) -> bool:
+        db.delete_session("running")
+        _seed_session(db, "running", "ws-box")
+        replacement = db.get_session("running")
+        assert replacement is not None
+        replacement_rows.append(replacement)
+        return True
+
+    monkeypatch.setattr(
+        "agentworks.sessions.manager._lifecycle.output.confirm",
+        _replace_and_confirm,
+    )
+    monkeypatch.setattr(
+        session_manager,
+        "_batch_vm_boundary",
+        lambda *args, **kwargs: pytest.fail("identity refusal must precede batch preflight"),
+    )
+    monkeypatch.setattr(
+        session_manager,
+        "ensure_pids_batch",
+        lambda *args, **kwargs: pytest.fail("identity refusal must precede PID repair"),
+    )
+    monkeypatch.setattr(
+        "agentworks.sessions.manager._lifecycle._teardown_session",
+        lambda *args, **kwargs: pytest.fail("identity refusal must precede teardown"),
+    )
+
+    with pytest.raises(StateError):
+        session_manager.restart_all_sessions(
+            db,
+            make_config(),
+            interaction=TtyInteractionPolicy.ALLOW,
+        )
+
+    replacement = db.get_session("running")
+    assert replacement is not None
+    assert replacement.session_uuid != selected.session_uuid
+    assert replacement_rows == [replacement]
+
+
+def test_batch_restart_noninteractive_refusal_precedes_every_launch(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    launched = _stub_batch_restart(db, monkeypatch, {"running": SessionStatus.RUNNING})
+    monkeypatch.setattr(
+        session_manager,
+        "_batch_vm_boundary",
+        lambda *args, **kwargs: pytest.fail("refusal must precede activation"),
+    )
+    monkeypatch.setattr(
+        session_manager,
+        "ensure_pids_batch",
+        lambda *args, **kwargs: pytest.fail("refusal must precede PID repair"),
+    )
+
+    with pytest.raises(StateError):
+        session_manager.restart_all_sessions(
+            db,
+            make_config(),
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert launched == []
+
+
+def test_declined_batch_restart_precedes_every_launch(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.errors import UserAbort
+
+    launched = _stub_batch_restart(db, monkeypatch, {"running": SessionStatus.RUNNING})
+    monkeypatch.setattr(
+        session_manager,
+        "_batch_vm_boundary",
+        lambda *args, **kwargs: pytest.fail("decline must precede activation"),
+    )
+    monkeypatch.setattr(
+        session_manager,
+        "ensure_pids_batch",
+        lambda *args, **kwargs: pytest.fail("decline must precede PID repair"),
+    )
+    monkeypatch.setattr(
+        "agentworks.sessions.manager._lifecycle.output.confirm",
+        lambda *_args, **_kwargs: False,
+    )
+
+    with pytest.raises(UserAbort):
+        session_manager.restart_all_sessions(
+            db,
+            make_config(),
+            interaction=TtyInteractionPolicy.ALLOW,
+        )
+
+    assert launched == []
+
+
+@pytest.mark.parametrize("yes", [False, True])
+def test_batch_restart_with_only_non_running_sessions_does_not_confirm_or_authorize_running_race(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    yes: bool,
+) -> None:
+    launched = _stub_batch_restart(db, monkeypatch, {"stopped": SessionStatus.STOPPED})
+    monkeypatch.setattr(
+        "agentworks.sessions.manager._lifecycle.output.confirm",
+        lambda *_args, **_kwargs: pytest.fail("non-running batch must not confirm"),
+    )
+
+    session_manager.restart_all_sessions(
+        db,
+        make_config(),
+        yes=yes,
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
+
+    assert launched == [("stopped", False)]
 
 
 def test_batch_start_refuses_actionable_unknown_before_status_selection(

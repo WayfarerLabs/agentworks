@@ -29,11 +29,11 @@ configure native tooling before a session launches; the session facet chooses th
 The base setup methods reject activation of an unimplemented facet with an error naming the
 integration and facet. Implement only supported setup methods; an implemented method can succeed
 without changes for default-only or already-satisfied config. An inactive integration with no prior
-owned effects to retire is skipped and not marked applied. A config model, including a name-only
+owned effects to retire is skipped and not marked applied. A config model, including an empty
 schema, does not establish facet support. See
 [harness facets](../../../../docs/guides/harness-facets.md) for complete configuration examples.
 
-Contract version 6 supplies grouped artifact delivery. Core captures each owner's
+The harness contract supplies grouped artifact delivery. Core captures each owner's
 `artifacts.bundles` into an immutable `ArtifactGroup` with hints, rules, skills and agents maps.
 `SetupInvocation.artifacts` is an `ArtifactInputs` value: one local group and deferred groups keyed
 by their original owner. `SessionArtifactContext.inputs` uses the same boundary. Later selected
@@ -41,13 +41,26 @@ bundles replace whole same-type/key definitions within an owner; different owner
 each other. Normalized content and map keys enforce the same portable lowercase artifact-name
 contract used by declarations and persisted captures. An integration must consume those groups
 without flattening away equal names. Setup methods return an `ArtifactApplication`: concrete native
-files plus deferrals for inputs requiring a later facet. Core performs guarded whole-file
-publication and checkpoints confirmed ownership. The integration owns native formats, placement,
-compatibility checks and routing decisions. A successful application reports inputs omitted from its
-deferral list as handled. The integration must fulfill that delivery obligation, through native
-files, launch arguments or another supported native mechanism; omission is its handling report, not
-independent proof of consumption. Core validates the result and refuses final-session deferrals.
-Returning the old `None` result is a contract error even for an empty invocation.
+files plus deferrals for inputs requiring a later facet. Core performs guarded whole-file or
+generated-section publication and checkpoints confirmed ownership. The integration owns native
+formats, placement, compatibility checks and routing decisions. A successful application reports
+inputs omitted from its deferral list as handled. The integration must fulfill that delivery
+obligation, through native files, launch arguments or another supported native mechanism; omission
+is its handling report, not independent proof of consumption. Core validates the result and warns
+about final-session deferrals. A session deferral targets `session` as a terminal unhandled result;
+it is persisted for inspection and never routed again. Returning the old `None` result is a contract
+error even for an empty invocation.
+
+`ArtifactFile.generated_section` selects a bounded Agentworks-generated section in an instruction
+file. Core replaces a complete section while preserving surrounding bytes, ownership, permissions
+and extended attributes; malformed delimiters warn and produce a recorded skip. A skip is separate
+from the integration's deferral result and does not claim delivery or send the artifact to another
+facet. Whole-file publication still requires ownership of any existing destination. VM publication
+uses privileged destination operations and makes new files readable by VM users. Elevated file
+access is bounded by one core-owned allowlist shared by every integration: `/etc/claude-code`,
+`/etc/codex` and `/opt/agentworks/artifacts`. Integrations select destinations within those trees;
+root reads, writes and cleanup outside them are refused. Shell publishes all types directly at every
+activated facet.
 
 An `ArtifactFile` may supply an exact `package_root` for guarded empty-parent cleanup. The shared
 skill renderer sets it on every package member, and publication persists it in that member's
@@ -69,8 +82,15 @@ Missing or stale active artifact results require the owning setup operation.
 Before `start`, core calls `prepare_artifacts` with the immutable `SessionArtifactContext` available
 on the session binding. This includes completed environment, actual home, prospective session/run
 IDs, grouped remaining inputs and ancestor file ownership metadata. Return the session application
-in `HarnessStart.artifacts`. Core refuses final deferrals before replacing a running workload and
+in `HarnessStart.artifacts`. Core warns about unhandled inputs after validating the full result and
 restricts session file publication to that run's private directory under the actual user's home.
+First-party session facets default to no artifact delivery. Their typed `enabled_workarounds` config
+lists specific supported delivery methods, with an empty default and replacement inheritance. Return
+an explicit deferral for each disabled or unsupported input, including its relevant workaround in
+the reason when one exists. Filter disabled inputs before applying delivery-specific validation or
+compatibility probes. Keep unsafe paths, conflicting ownership, malformed results and invalid
+configuration as errors. Do not turn an optional artifact into a blanket version requirement.
+
 Generated literal argv values must use `quote_literal_argv` so artifact text is not interpreted as
 Agentworks template substitutions. Native conversation IDs remain integration-owned.
 
@@ -243,11 +263,10 @@ The capability ladder, harness-integration edition:
   factories.
 - The **session consuming resource** is the `session-template` (it owns the config: in manifests,
   `spec.harness_integration` is one tagged table whose `name` key selects the integration and whose
-  remaining keys are that integration's config, which is the only accepted shape; the
-  operator-facing view is in `docs/guides/resources.md`) and, at runtime, the session node that
-  holds the instance. VM, admin, agent, and workspace templates host ordered integration
-  activations; their owning lifecycles construct separate instances bound to the corresponding
-  facet.
+  remaining keys hold its config; the operator-facing view is in `docs/guides/resources.md`) and, at
+  runtime, the session node that holds the instance. VM, admin, agent, and workspace templates host
+  maps of integration activations; their owning lifecycles construct separate instances bound to the
+  corresponding facet.
 
 Layering is a hard rule: this package imports neither `sessions/` nor `orchestration/` (the `target`
 type is a local `Protocol` for exactly this reason), and `test_shell_integration.py` asserts it. An
@@ -268,20 +287,25 @@ missing any of them, naming the plugin:
 
 - `contract_version`: the capability contract version this implementation is written against.
   Registration requires an exact match with the version its kind's descriptor declares supported, so
-  a contract change is a hard cutover rather than a silent re-certification. The current contract is
-  version 4, and every shipped integration declares 4. This contract requires explicit facet
-  selection for config; it does not imply compatibility with earlier shapes.
+  a contract change is a hard cutover rather than a silent re-certification. The kind descriptor in
+  `kinds.py` defines the current version. This contract requires explicit facet selection and
+  untagged config models at every facet, with selection owned by the host; it does not imply
+  compatibility with earlier shapes.
 - `config_model`: the session config when using the base selector (see below). An override of
-  `config_for` supplies its own facet answers; `None` accepts the tag alone.
+  `config_for` supplies its own facet answers; `None` accepts only the session tag or an empty setup
+  config.
 - `name` / `description`: the registry row's identity.
 
 #### Setup Binding
 
 VM, admin, agent, and workspace templates explicitly select native setup integrations through
-`harness_integrations`, an ordered list of tagged capability blocks. Admin and agent select the same
-user facet. An omitted list inherits; an authored list replaces the whole inherited list, and `[]`
-selects none. Duplicate integration names are invalid. Each block is validated against its hosting
-facet, and its capability and secret references participate in the usual graph gates.
+`harness_integrations`, a map keyed by integration name with untagged facet config values. Admin and
+agent select the same user facet. An omitted or empty map inherits; an authored map preserves other
+inherited keys and merges config for the same key according to the owning facet's schema. A `null`
+value disables that key; an explicit config in a later layer reactivates it without its former
+config. Disabled entries contribute no setup or config references. Prior owned effects retire during
+the owning lifecycle. Each active entry is validated against its hosting facet, and its capability
+and secret references participate in the usual graph gates.
 
 Each block is an **integration activation**, with defaults or explicit configuration. It activates
 the integration's facet on the owning resource; it does not prove that setup completed. A facet is a
@@ -292,7 +316,7 @@ enablement and the VM power-state activation gate remain separate concepts.
 integration activation without session identity or conversation state. The instance's owner
 identifies its config and secret references. A removed activation binds with `config=None`, exposes
 `retiring=True`, and refuses config access instead of synthesizing new defaults. Active setup with
-`{}` still selects the integration's defaults or its name-only config.
+`{}` still selects the integration's defaults or its empty config.
 
 `vm_init`, `user_init`, and `workspace_init` receive their corresponding typed setup invocations.
 The base methods have no native effects or claims. Session construction retains its existing
@@ -347,12 +371,15 @@ rules and the [instance-state contract](../../db/README.md) for persistence and 
 
 #### Config: Facet Selection
 
-The integration declares its session `config_model`, an `AgwModel` carrying its own `name` as a
-`Literal` tag plus one field per accepted key, each with its type and an attribute docstring that IS
-its operator-facing description. `config_for(facet="session")` selects that model. The base returns
-`None` for vm, user, and workspace; overrides may offer models at those facets. No config means a
-closed name-only selection, not a support or enablement declaration. A missing facet selector is
-refused. Resource hosts choose the facet, and capability references show all four answers.
+The integration declares its session `config_model`, an untagged `AgwModel` with one field per
+accepted key, each with its type and an attribute docstring that IS its operator-facing description.
+All facet models omit `name`. The session host owns the tagged selector, extracts its name, and
+validates only its remaining config against `config_for(facet="session")`. Setup hosts select by
+activation map key. Session schema generation wraps the selected model with the host-owned name
+discriminator. The base returns `None` for vm, user, and workspace; overrides may offer models at
+those facets. A `None` answer accepts empty own config, authored as `{name: shell}` at session scope
+or `shell: {}` in a setup map. It does not declare support or enablement. A missing facet selector
+is refused. Resource hosts choose the facet, and capability references show all four answers.
 
 The core validates against the selected model (closed-world, so an unknown key is a hard error
 naming the valid fields) and extracts whatever references it marks. No integration code runs for

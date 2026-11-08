@@ -13,7 +13,7 @@ from agentworks.db import VersionedPayload
 from agentworks.origin import Origin
 from agentworks.resources.inheritance import LayerSourceKind
 from agentworks.resources.registry import Registry
-from agentworks.schema import CapabilityBlock
+from agentworks.schema import CapabilityConfig
 
 if TYPE_CHECKING:
     from agentworks.db import Database
@@ -32,7 +32,7 @@ def test_live_resolution_walks_base_only_when_legacy_context_is_needed(
         AgentTemplate.model_validate(
             {
                 "name": "base",
-                "harness_integrations": [CapabilityBlock.of("claude-code", plugins=["base@market"])],
+                "harness_integrations": {"claude-code": CapabilityConfig.model_validate({"plugins": ["base@market"]})},
             }
         ),
         Origin.built_in(source="fixture"),
@@ -60,6 +60,6 @@ def test_live_resolution_walks_base_only_when_legacy_context_is_needed(
     legacy = overlay is not None and "claude_plugins" in overlay
     assert walk.call_count == (2 if legacy else 1)
     assert value.shell == ("zsh" if overlay == {"shell": "zsh"} else "bash")
-    assert value.harness_integrations[0].config["plugins"] == (
+    assert value.harness_integrations["claude-code"].config["plugins"] == (
         ["base@market", "extra@market"] if legacy else ["base@market"]
     )

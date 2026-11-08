@@ -43,6 +43,9 @@ connects to a running runtime. Session start and restart resume the harness conv
 possible. For sessions, add `--resume-only` to refuse unless a resume is possible, or `--force-new`
 when a new conversation is required. These options are mutually exclusive. An integration that does
 not implement the requested policy reports that explicitly before an existing runtime is replaced.
+Restart asks before replacing a live running session; `--yes` skips that confirmation. A batch
+restart asks once for all running matches. `--force` remains separate and only permits recovery from
+broken runtime state.
 
 For setup, return to `agw guide show concept-onboarding`. For failures, use
 `agw guide show concept-troubleshooting`. Exceptional conversion from retired configuration belongs

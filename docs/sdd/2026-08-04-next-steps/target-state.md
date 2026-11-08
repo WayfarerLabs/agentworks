@@ -384,12 +384,58 @@ omission from a successful result means handled; there is no separate acknowledg
 entry still deferred at the session facet must receive an explicit disposition; silent loss is never
 one. Whether it blocks launch or is treated another way is deliberately open (operator, 2026-09-07)
 and belongs to the artifacts successor SDD, which supersedes the earlier single-enforcement-point
-wording recorded here. Core attaches immutable origin metadata (owning scope, resource identity,
-producer), and a facet is derived from core's fixed mapping rather than authored as a second origin.
-Limited hooks and MCP server configurations are recognized as future artifact kinds this delivery
-model must not foreclose. This ruling supersedes the earlier wording, here and in
+wording recorded here. (Settled 2026-10-31: reported, never blocking; see the facet independence
+ruling below.) Core attaches immutable origin metadata (owning scope, resource identity, producer),
+and a facet is derived from core's fixed mapping rather than authored as a second origin. Limited
+hooks and MCP server configurations are recognized as future artifact kinds this delivery model must
+not foreclose. This ruling supersedes the earlier wording, here and in
 `scope-participation-contract.md`, that every session receives all artifact payloads; both artifacts
 are corrected in place. Their other constraints stand.
+
+**Facets are independent and converge (operator, 2026-10-31).** Wave 4 and agent artifacts shipped
+two kinds of hard gate the rulings above did not ask for. Session start refused unless every
+upstream facet's artifact placement was current, so one changed template blocked every descendant
+session. [Issue 841](https://github.com/WayfarerLabs/agentworks/issues/841) records that impact: a
+bundle added to a widely inherited agent template made every descendant session refuse to restart,
+and the reinit its hint named was itself failing for an unrelated reason. Native setup validated
+existing state before applying and refused any entry it held no claim for, even an identical one,
+failing whole VM initialization
+([issue 840](https://github.com/WayfarerLabs/agentworks/issues/840)). The saga lead proposed the
+following contract, and the operator accepted it:
+
+> Yeah, I agree completely.
+
+- **No facet blocks another.** A stale or incomplete upstream facet is reported at session start,
+  naming its owner and repair command, and the session launches with what is placed.
+- **Applying a facet converges what it owns** to its declaration rather than refusing on current
+  state. Matching content is adopted, and an interrupted run heals on retry.
+- **Refusal is reserved** for the facet's own failures and for overwriting content Agentworks does
+  not own that differs from the declaration. Such a refusal is scoped to that entry, not to the
+  whole initialization.
+- **"Never silently lost" means reported, not blocked**, which settles the 2026-09-07 open question
+  above.
+
+The operator also confirmed the unsupported-facet rule that wave 4 shipped:
+
+<!-- cspell:ignore existant asomething IIRC -->
+
+> Fwiw, IIRC, the decision was that activating a non-existant facet would be an error. That seems
+> like asomething the user should know. The core underlying problem we were trying to solve with
+> that was allowing for stuff to be passed through, but that's now handled by the core when a facet
+> isn't activated.
+
+Activating a facet an integration does not implement is an error the operator should see;
+pass-through for a facet that is not activated is core's routing (an inactive VM facet hands its
+inputs to user, inner facets to session), not a reason for the base class to accept every facet
+silently. This supersedes the base no-op defaults in `scope-participation-contract.md`, corrected in
+place.
+
+The required/recommended setup readiness gate stays for now (operator, 2026-11-01). It has no
+producers today, and a `required` gap is a block between facets, but the operator is keeping it and
+will settle its future with the harness scope framework's lead:
+
+> I'm not ready to abandon that recommend/required thing yet. I'll discuss it with the harness facet
+> lead.
 
 **Explicit integration enablement (operator, 2026-09-06).** A harness integration is enabled only by
 being selected on the resource, even when its config is entirely default. An available plugin, a
@@ -413,6 +459,7 @@ and deliberately not folded in: wave 8 is the external plugin API (registration 
 discovery, namespacing, versioning), while this effort is OS-level containment of what an agent can
 do on the VM. Trust is a shared theme, not a shared deliverable, and folding them would make wave 8
 mean two things. Nothing downstream waits on this effort, and it depends on no wave before it.
+(Superseded 2026-09-19, and that ruling in turn on 2026-10-20; see below.)
 
 **Transport and SSH rebuilt in parallel, then cut over and deleted (operator, 2026-09-14).** The
 execution layer is replaced rather than cleaned up in place, by two coordinated adjacent standalone
@@ -422,7 +469,9 @@ execution contract through permission-scoped views, and ssh-connection-contracts
 carrier. The new stack must not import, wrap, subclass, or call legacy execution code, directly or
 indirectly; that constraint is what keeps the rebuild from inheriting the assumptions it exists to
 replace. Cutover across resources and physical deletion of the old stack are transport-owned
-deliverables, not cleanup deferred past the interesting work.
+deliverables, not cleanup deferred past the interesting work. (Superseded 2026-10-20 by the
+transport reset below, which keeps the cutover and deletion deliverables and narrows the no-legacy
+constraint to the execution layer.)
 
 The rationale is that this layer's defect is a missing contract rather than accumulated mess.
 Behavior was discovered rather than specified, repeatedly: the Windows-only forced-TTY workaround
@@ -434,14 +483,16 @@ being discovered.
 **These are adjacent standalone children, but unlike the others they bear prerequisites.** Nothing
 waits on session-cgroups; waves 5 and 7 wait on this. Wave 5's session-level PTY observation and
 input interception, and wave 7's structured control, both build on the execution contract this work
-defines. Neither wave should be chartered against today's transport.
+defines. Neither wave should be chartered against today's transport. (Reopened 2026-10-23; see the
+ruling on waves 5 and 7 below.)
 
 **Saga-lead condition recorded at adoption (2026-09-14):** the old stack's tests carry
 incident-derived knowledge that exists nowhere else, including the forced-TTY versus closed-stdin
 finding, Windows stdin `TextIOWrapper` newline rewriting, and the Git-for-Windows POSIX toolchain
 dependency. Permission to copy useful tests does not protect that. Inventory those behaviors before
 deletion and re-prove each against the new stack, rather than discovering after the fact that a
-lesson was deleted with the code that encoded it.
+lesson was deleted with the code that encoded it. (Carried forward as transport-take2's R10, which
+starts from the inventory in the transport-improv migration strategy.)
 
 **Simplification becomes a standing loop (operator, 2026-09-14).** One-shot sweeps of a moving
 codebase race themselves: a survey starts going stale the moment it is written, which is why the
@@ -458,6 +509,81 @@ saga deliverable would otherwise look like an item the lock waits on forever.
 The loop needs the smol-dev gate to be safe: the operator names the area, the loop proposes, and the
 operator blesses before anything is deleted. Without that gate it wanders, and it re-litigates
 choices that were already settled deliberately.
+
+**Containment is an execution option, not a session feature (operator, 2026-09-19).** Cgroups are a
+generic execution option provided through the transport layer, which sessions then use, rather than
+session-specific machinery. The session-cgroups effort is closed and its lane shut down; the work
+continues in the transport-improv SDD. This supersedes the 2026-09-14 ruling that adopted
+session-cgroups as an adjacent standalone child.
+
+The rationale is recorded because it generalizes: the question was whether containment is a property
+of the session as a resource or of execution itself. Once the transport rework made execution a
+first-class owned layer, the session-specific framing became the narrower special case of something
+the execution layer has to provide anyway.
+
+**A preservation consequence, recorded because it is easy to miss.** PR #770 never merged, so
+`docs/sdd/2026-09-06-session-cgroups/` is not on `main`. The only copy of those requirements on
+`main` is the transport effort's pinned snapshot,
+`docs/sdd/2026-09-12-transport-improv/inputs/session-cgroups-frd-2c406948.md`, captured verbatim at
+`2c406948`, which is the exact head at which the effort closed. Nothing was lost, and that is luck
+rather than design: the snapshot existed to let transport consume requirements without editing
+another effort's artifacts, and it became the surviving record by accident. Its own header
+anticipates this disposition and says to "carry accepted requirements into their designated home
+before retiring either record." Under the 2026-10-20 reset below, that transfer belongs to the
+follow-up containment effort, and the transport-improv directory must not be wiped until it is done.
+
+**Transport reset to one successor, transport-take2 (operator, 2026-10-20).** The operator stopped
+both rebuild efforts and replaced them with one,
+[transport-take2](../2026-10-20-transport-take2/frd.md), whose FRD records the rulings verbatim.
+Both predecessors are locked as superseded. The successor's shape:
+
+- Installed OpenSSH to the VM's tailnet address is the only full transport, and it carries no
+  platform-specific behavior.
+- Every VM satisfies one machine-checked contract after create or reinit; platform differences are
+  fixed in provisioning, not carried as branches in core.
+- Each platform supplies one native capability, recovery of canonical SSH access; its other native
+  needs stay private to it.
+- The execution layer is still built in parallel and still may not import, wrap, subclass, or call
+  the current execution modules, but platform and provisioning code are not rebuilt.
+- The new surface reaches consumers as new `RunContext` accessors and lands together with its first
+  migrated consumers, not after every workflow is validated. Cutover and deletion of the old stack
+  remain this effort's deliverables.
+
+The rationale, in the operator's words: "part of the original flaw was wanting to have a full-blown
+native Transport." Treating every platform's native channel as a full execution target forced every
+operation to fit the tightest channel limits. Together with a validate-everything-first gate, that
+produced a large unmerged stack with no shippable increment.
+
+transport-take2 is an adjacent standalone child, the standing its predecessors had. Whether it also
+bears prerequisites depends on the waves 5 and 7 ruling below.
+
+**Containment moves to a follow-up effort (operator, 2026-10-20).** Session containment, resource
+limits, and an installed VM program, `agw-atc`, form a separate follow-up effort, not yet seeded. It
+takes the session-cgroups snapshot preserved in the transport-improv directory as input, together
+with two earlier rulings: the 2026-09-19 containment ruling above, and the 2026-09-18 ruling that
+the execution boundary is an escalating set of protection profiles, recorded in the
+[transport-improv FRD](../2026-09-12-transport-improv/frd.md#operator-rulings-2026-09-18). Resource
+limits are in scope because disks filling with agents' worktrees and caches has been a recurring
+operational problem. When seeded it is an adjacent standalone child, as session-cgroups was.
+
+**Waves 5 and 7 wait on transport-take2 only if observability needs a VM-side wrapper (operator,
+2026-10-23).** The operator left the dependency open:
+
+> Yeah, I just don't know. I think there's good chance we'll need wrapper program to properly
+> implement transcripts and observability. If that's the case, I wouldn't want to develop that on
+> the old transport. But if not, we can probably start on the old transport and then migrate once
+> the new one is available. Decide later.
+
+Wave 5 already contains the question that decides it, its input-interception investigation. That
+investigation needs no new transport, so it may run first, on today's transport. It also tests the
+successor lead's read (`message-2026-10-20-transport-reset.md`): that the waves need nothing beyond
+transport-take2's R4, because interception belongs to core's session runtime, which owns tmux and
+the PTY on the VM. If the investigation concludes that transcripts and observability need a wrapper
+program on the VM, wave 5's implementation waits for transport-take2 and wave 7 follows it. If not,
+both waves build on today's transport and migrate with every other consumer. A wrapper program would
+be an installed VM program, the same kind of thing as `agw-atc`. If both prove necessary they should
+be one program, with one install path and one place in the VM contract, so a wrapper finding is a
+reason to coordinate with the containment effort rather than to build a second guest program.
 
 ### Observability (destinations 5 and 6)
 

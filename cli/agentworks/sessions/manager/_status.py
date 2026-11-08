@@ -364,8 +364,9 @@ def observe_session_statuses(
     *,
     db: Database,
     config: Config,
+    include_legacy: bool = False,
 ) -> dict[str, SessionStatus]:
-    """Observe every selected session, grouped and bounded by backing VM."""
+    """Observe selected sessions, optionally including legacy shared-server rows."""
     from concurrent.futures import as_completed
     from functools import partial
 
@@ -374,6 +375,7 @@ def observe_session_statuses(
     # Resolve each session's VM and group
     by_vm: dict[str, list[SessionRow]] = {}
     vm_targets: dict[str, Transport] = {}
+    legacy_targets: dict[str, Transport] = {}
     unavailable_vms: set[str] = set()
     result_map = {session.name: SessionStatus.UNKNOWN for session in sessions}
 
@@ -402,12 +404,45 @@ def observe_session_statuses(
                 unavailable_vms.add(ws.vm_name)
                 continue
         by_vm.setdefault(ws.vm_name, []).append(s)
+        if include_legacy and s.socket_path is None:
+            try:
+                legacy_targets[s.name] = _mgr._build_session_target(
+                    s,
+                    vm=vm,
+                    config=config,
+                    db=db,
+                    admin_target=vm_targets[ws.vm_name],
+                )
+            except UserAbort:
+                raise
+            except AgentworksError:
+                continue
 
     if not by_vm:
         return result_map
 
     def _check_vm(vm_name: str) -> dict[str, SessionStatus]:
-        return batch_check_status(by_vm[vm_name], target=vm_targets[vm_name])
+        statuses = batch_check_status(by_vm[vm_name], target=vm_targets[vm_name])
+        for session in by_vm[vm_name]:
+            target = legacy_targets.get(session.name)
+            if target is None:
+                continue
+            try:
+                presence = probe_tmux_session(
+                    session.name,
+                    run_command=_BoundedStatusTarget(target).run,
+                    socket_path=None,
+                )
+            except UserAbort:
+                raise
+            except AgentworksError:
+                continue
+            statuses[session.name] = {
+                ProbeStatus.PRESENT: SessionStatus.RUNNING,
+                ProbeStatus.ABSENT: SessionStatus.STOPPED,
+                ProbeStatus.UNKNOWN: SessionStatus.UNKNOWN,
+            }[presence]
+        return statuses
 
     tasks = {vm_name: partial(_check_vm, vm_name) for vm_name in by_vm}
     with cancelling_futures(tasks) as futures:

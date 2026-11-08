@@ -26,7 +26,7 @@ from agentworks.harness_setup.model import NativeClaim, NativeSetupState, SetupR
 from agentworks.harness_setup.state import read_native_setup, replace_setup_record, write_native_setup
 from agentworks.origin import Origin
 from agentworks.resources.registry import Registry
-from agentworks.schema import CapabilityBlock
+from agentworks.schema import CapabilityConfig
 from agentworks.secrets.orchestration import SecretTarget
 from agentworks.vms.admin import AdminConfig
 from agentworks.vms.template import VMTemplate
@@ -60,7 +60,7 @@ class Graph:
             component=inputs.component,
             integration="shell",
             destination_id="d" * 64,
-            declaration=inputs.declaration(CapabilityBlock.of("shell")),
+            declaration=inputs.declaration("shell", CapabilityConfig()),
             complete=complete,
             artifact_inputs=tuple(item.identity for item in prepared.items()),
             artifact_files=files,
@@ -102,7 +102,7 @@ def graph(db: Database, *, active: tuple[str, ...] = (), counts: dict[str, int] 
         }
         registry.add("artifact-bundle", bundle_name, ArtifactBundle(name=bundle_name, hints=entries), origin)
         config = ArtifactsConfig(bundles=[bundle_name])
-        activations = [CapabilityBlock.of("shell")] if component in active else []
+        activations = {"shell": CapabilityConfig.model_validate({})} if component in active else {}
         model = {"vm": VMTemplate, "admin": AdminConfig, "agent": AgentTemplate, "workspace": WorkspaceTemplate}[
             component
         ]
@@ -116,7 +116,7 @@ def graph(db: Database, *, active: tuple[str, ...] = (), counts: dict[str, int] 
             agent={} if component == "agent" else None,
             workspace={} if component == "workspace" else None,
         )
-        inputs = SetupInputs(kind, name, component, tuple(activations), target, artifacts=config)
+        inputs = SetupInputs(kind, name, component, activations, target, artifacts=config)
         snapshot = capture_owner(registry, kind, name, component, config)
         write_capture(db, kind, name, component, snapshot, operation="fixture")
         owners[component] = inputs
@@ -303,9 +303,44 @@ def test_workspace_only_vm_change_does_not_stale_user_branch(db):
 def test_config_and_env_freshness_still_apply(db):
     fixture = graph(db, active=("agent",))
     fixture.save("agent")
-    changed = replace(fixture.owners["agent"], target=SecretTarget(vm={}, agent={"A": EnvEntry.model_validate("new")}))
+    changed = replace(
+        fixture.owners["agent"],
+        target=SecretTarget(vm={}, agent={"ENV_KEY_NEVER": EnvEntry.model_validate("operator-private-value")}),
+    )
     view = inspect_owner_artifacts(db, fixture.registry, changed, "shell")
     assert view.status == "stale"
+    assert "operator-private-value" not in view.reason
+
+
+def test_inactive_session_does_not_inherit_an_unrelated_artifact_gap(db):
+    fixture = graph(db)
+    owner = SetupInputs("session", "review", "session", {}, SecretTarget(vm={}, session={}))
+    view = inspect_owner_artifacts(db, fixture.registry, owner, "shell", inherited=None)
+    assert view.status == "inactive"
+
+
+def test_inactive_session_with_stale_capture_has_no_setup_obligation(db):
+    fixture = graph(db)
+    owner = SetupInputs("session", "review", "session", {}, SecretTarget(vm={}, session={}))
+    stale_capture = replace(fixture.captures["agent"], declaration="outdated")
+    owner = replace(owner, artifact_snapshot=stale_capture)
+    view = inspect_owner_artifacts(db, fixture.registry, owner, "shell", inherited=None)
+    assert view.capture_status == "stale"
+    assert view.status == "inactive"
+
+    item = tuple(fixture.captures["agent"].inputs.items())[0]
+    file = OwnedArtifactFile(path="/home/worker/.agents/rule.md", sha256="a" * 64, origins=(item.origin_identity,))
+    record = SetupRecord(
+        component="session",
+        integration="shell",
+        destination_id="d" * 64,
+        declaration={},
+        artifact_files=(file,),
+    )
+    write_native_setup(db, "session", "review", NativeSetupState(records=(record,)), operation="fixture")
+    retirement = inspect_owner_artifacts(db, fixture.registry, owner, "shell", inherited=None)
+    assert retirement.capture_status == "stale"
+    assert retirement.status == "retirement"
 
 
 @pytest.mark.parametrize("active_vm", [False, True])
@@ -400,7 +435,7 @@ def test_session_projection_shares_canonical_diamond_order(db):
         "session",
         "session",
         "session",
-        (CapabilityBlock.of("shell"),),
+        {"shell": CapabilityConfig.model_validate({})},
         SecretTarget(vm={}, agent={}, workspace={}, session={}),
         artifacts=fixture.owners["agent"].artifacts,
     )
@@ -409,7 +444,7 @@ def test_session_projection_shares_canonical_diamond_order(db):
         component="session",
         integration="shell",
         destination_id="d" * 64,
-        declaration=inputs.declaration(CapabilityBlock.of("shell")),
+        declaration=inputs.declaration("shell", CapabilityConfig()),
         complete=True,
         artifact_inputs=tuple(item.identity for item in ArtifactInputs(local=local.inputs, deferred=inherited).items()),
     )
@@ -535,3 +570,26 @@ def test_database_round_trip_retains_map_order_and_current_routing(db):
     deferred = deferred_inputs(view, "session")
     assert deferred is not None
     assert list(deferred[capture.inputs.owner].hints) == ["zebra", "alpha"]
+
+
+def test_skipped_reapplication_keeps_cleanup_evidence_without_ancestor_delivery(db):
+    from agentworks.artifacts.application import ArtifactSkip
+
+    fixture = graph(db, active=("agent",))
+    item = tuple(fixture.captures["agent"].inputs.items())[0]
+    prior = OwnedArtifactFile(
+        path="/home/worker/AGENTS.md",
+        sha256="a" * 64,
+        origins=(item.origin_identity,),
+        generated_section=True,
+    )
+    record = fixture.save("agent", inherited=fixture.captures["vm"].inputs, files=(prior,))
+    skipped = ArtifactSkip(path=prior.path, origins=prior.origins, reason="partial section")
+    state = replace_setup_record(
+        read_native_setup(db, "agent", "agent"), record.model_copy(update={"skipped": (skipped,)})
+    )
+    write_native_setup(db, "agent", "agent", state, operation="fixture")
+    result = fixture.route()
+    assert result.ancestor_files == ()
+    assert item.identity not in {value.identity for value in result.inputs.items()}
+    assert read_native_setup(db, "agent", "agent").records[0].artifact_files == (prior,)

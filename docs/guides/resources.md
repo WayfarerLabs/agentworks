@@ -353,11 +353,11 @@ spec:
     required_commands: [htop]
 ```
 
-- `spec.harness_integration` is one table: its `name` key names a `harness-integration` capability
-  row, and the remaining keys are the config block that integration owns and validates (unknown keys
-  are errors). Every effective session template must select an integration explicitly or inherit a
-  selection. The built-in `default` template explicitly selects `shell`; omission alone is not a
-  shell fallback.
+- `spec.harness_integration` is one tagged table: its `name` key names a `harness-integration`
+  capability row, and the remaining keys are the config block that integration owns and validates
+  (unknown keys are errors). Every effective session template must select an integration explicitly
+  or inherit a selection. The built-in `default` template explicitly selects `shell`; omission alone
+  is not a shell fallback.
 - `agw resource explain harness-integration` lists the integrations this build has, and
   `agw resource explain harness-integration/<name>` documents one integration's config field by
   field. That is the reference; what follows is what an operator wants to know beyond the fields
@@ -612,6 +612,14 @@ root. The command must explicitly use `sudo` for each step that needs root privi
 `user-install-command` runs as the admin or agent user whose template selects it and should not
 assume elevation.
 
+An install-command's `path` entries persist in the target user's managed `~/.agentworks-profile.sh`.
+User install commands contribute to the selected admin or agent user's profile; system install
+commands contribute to the VM admin's profile. Agentworks rewrites the profile after install
+commands run, including paths from commands skipped by completion checks. Later shells that source
+the profile prepend these directories to `PATH`, and child processes inherit them. A leading `~`
+resolves to the target user's home. Install commands themselves use the login shell's existing
+`PATH`; declaring `path` does not inject those directories into that command.
+
 `test_exec` resolves a command on `PATH` in the target user's login shell. `test_file` and
 `test_dir` check for an existing path; a leading `~` resolves to the target user's home. Declare a
 check only when its success proves that no work is needed. For example:
@@ -764,7 +772,7 @@ spec:
   backend:
     name: onepassword
     account: work.example.com
-    timeout: 30
+    timeout: 300
     app_authentication_impact: operator-action
 ```
 
@@ -773,7 +781,7 @@ Enable the `onepassword` plugin, add `work-op` to the chain, and map a secret wi
 `prompt` source names remain valid unchanged. A direct configured-backend reference such as
 `onepassword` breaks in 0.14; the error gives the exact source declaration and reference rewrite,
 with no compatibility row or legacy parser. When rewriting the old OnePassword mapping table, move
-its account to the source. The timeout bounds the complete source turn and defaults to 30 seconds.
+its account to the source. The timeout bounds the complete source turn and defaults to 300 seconds.
 
 `app_authentication_impact` is conservative by default: zero-impact preview returns
 `indeterminate/operator-impact-limited` without checking availability when app authentication may

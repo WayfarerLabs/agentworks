@@ -40,9 +40,10 @@ def effective_references(
     provenance: Mapping[ProvenancePath, tuple[LayerSource, ...]],
 ) -> tuple[ResourceReference, ...]:
     """References required by one effective session declaration."""
-    from agentworks.capabilities.config import capability_config_references
-    from agentworks.resources.reference import ResourceReference as _ResourceRef
-    from agentworks.resources.reference import sourced_references
+    from agentworks.capabilities.config import capability_config_model
+    from agentworks.resources.reference import ResourceReference, sourced_references
+    from agentworks.schema import filled_defaults
+    from agentworks.schema.extract import extract_reference_paths
     from agentworks.sessions.templates import EffectiveSessionTemplate
     from agentworks.value_provenance import longest_prefix_value
 
@@ -64,48 +65,21 @@ def effective_references(
     refs.extend(artifact_references(resolved.artifacts, source, provenance))
     if integration is None:
         return tuple(refs)
-    selector_owner = owner(("harness_integration",))
     refs.append(
-        _ResourceRef(
-            name=integration,
+        ResourceReference(
             kind="harness-integration",
+            name=integration,
             usage="the session harness integration",
             source=source,
-            declared_by=selector_owner,
+            declared_by=owner(("harness_integration",)),
         )
     )
-    refs.extend(
-        sourced_references(
-            capability_config_references(
-                kind="harness-integration",
-                facet="session",
-                config={"name": integration, **integration_config},
-                owner=RefOwner(kind=source[0], name=source[1]),
-            ),
-            source,
-            selector_owner,
-        )
-    )
+    model = capability_config_model("harness-integration", integration, facet="session")
+    if model is not None:
+        blob = filled_defaults(model, integration_config, RefOwner(kind=source[0], name=source[1]))
+        for path, reference in extract_reference_paths(model, blob):
+            refs.extend(sourced_references((reference,), source, owner(("harness_integration_config", *path))))
     return tuple(refs)
-
-
-def _capability_provenance(
-    provenance: Mapping[ProvenancePath, tuple[LayerSource, ...]],
-) -> dict[ProvenancePath, RefOwner]:
-    """Project session-layer paths into the harness config's local model."""
-    from agentworks.value_provenance import longest_prefix_value
-
-    local: dict[ProvenancePath, RefOwner] = {}
-    selector = longest_prefix_value(provenance, ("harness_integration",)) or ()
-    if selector:
-        source = selector[-1]
-        local[("name",)] = RefOwner(kind=source.resource_kind, name=source.name)
-    prefix = ("harness_integration_config",)
-    for path, sources in provenance.items():
-        if sources and path[:1] == prefix:
-            source = sources[-1]
-            local[path[1:]] = RefOwner(kind=source.resource_kind, name=source.name)
-    return local
 
 
 def validate_effective_harness(
@@ -118,6 +92,7 @@ def validate_effective_harness(
     """Validate one merged harness block with its projected ownership."""
     from agentworks.capabilities.config import validate_capability_config
     from agentworks.sessions.templates import EffectiveSessionTemplate
+    from agentworks.value_provenance import longest_prefix_value
 
     if isinstance(effective, EffectiveSessionTemplate):
         name = effective.harness.name
@@ -134,13 +109,24 @@ def validate_effective_harness(
             hint="Set harness_integration: {name: shell}, select another integration, or inherit a selection.",
         )
 
+    def config_owner(kind: str, owner_name: str) -> RefOwner:
+        return RefOwner(kind=kind, name=owner_name, label=f"{kind}/{owner_name}.harness_integration")
+
+    local: dict[ProvenancePath, RefOwner] = {}
+    layers = longest_prefix_value(provenance, ("harness_integration",)) or ()
+    if layers:
+        local[()] = config_owner(layers[-1].resource_kind, layers[-1].name)
+    for path, layers in provenance.items():
+        if layers and path[:1] == ("harness_integration_config",):
+            local[path[1:]] = config_owner(layers[-1].resource_kind, layers[-1].name)
     validate_capability_config(
         kind="harness-integration",
+        name=name,
+        config=config,
         facet="session",
-        config={"name": name, **config},
-        owner=RefOwner(kind=source[0], name=source[1]),
+        owner=config_owner(*source),
+        provenance=local,
         location=location,
-        provenance=_capability_provenance(provenance),
     )
 
 
@@ -164,8 +150,8 @@ class SessionTemplate(DeclaredResource):
     """Session template definition. Every field is optional and ``None``
     means "not declared here", never "off".
 
-    ``harness_integration.name`` selects the workload capability and its
-    remaining keys configure it. ``None`` inherits a selection; a complete
+    ``harness_integration.name`` selects one workload; the remaining keys
+    configure that integration. ``None`` inherits a selection; a complete
     lineage must select an integration. The synthesized default selects ``shell``.
     """
 
@@ -182,9 +168,8 @@ class SessionTemplate(DeclaredResource):
     """Parent templates this one composes, nearest last."""
 
     harness_integration: CapabilityBlock | None = None
-    """The workload this session runs: one table whose ``name`` selects the
-    harness integration and whose remaining keys are that integration's own
-    config (``{name: shell, command: htop}``)."""
+    """The workload this session runs: a tagged table such as
+    ``{name: shell, command: htop}``. Omission inherits the selected workload."""
 
     artifacts: ArtifactsConfig | None = None
     """Artifact bundles selected at this scope; an omitted selection inherits."""

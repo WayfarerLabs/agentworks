@@ -663,7 +663,9 @@ Merged work the ledger owes a line, recorded from the merges themselves.
   explicit-enablement rulings, corrected in place. The single-enforcement-point rule they originally
   recorded is gone: the operator reopened whether an artifact entry still deferred at the session
   facet blocks launch, and the artifacts successor SDD settles it. What survives is that such an
-  entry receives an explicit disposition and that silent loss is never one.
+  entry receives an explicit disposition and that silent loss is never one. **Settled 2026-10-31:**
+  such an entry is reported, never a launch block, under `target-state.md`'s facet independence
+  ruling.
 - **`2026-09-06-degraded-runnable-recovery` locked** (PR #764, merged 2026-09-10, `locked.md` dated
   2026-09-09). The effort the saga lead's review of PR #756 split out, settled on the axis recorded
   there: inventory tolerates a degraded runnable, while focused operations and mutations stay
@@ -689,12 +691,16 @@ Merged work the ledger owes a line, recorded from the merges themselves.
   - **That fourth fix supersedes this saga's own ruling** at
     `scope-participation-contract.md:72-74`, which chose base no-op defaults over an
     absence-means-unsupported rule on the premise that "review and testing catch a mistyped
-    override." Eight of twelve integration-by-facet cells shipped accepted and inert, so the premise
-    did not hold. The effort relayed the operator's direction in
+    override." Eight of twelve integration-by-facet cells were accepted and inert at that head, so
+    the premise did not hold. The effort relayed the operator's direction in
     `message-2026-09-11-harness-unsupported-facets.md` and correctly did not edit this saga's
     artifacts. Reconciling the contract is the saga lead's, pending the operator's direction.
+    **Reconciled 2026-10-31:** the operator confirmed the error rule, and the contract is corrected
+    in place under `target-state.md`'s facet independence ruling.
   - **Open after merge:** live VM acceptance of the harness integrations, which no lane has
-    performed, and the effort's final SDD lock.
+    performed, and the effort's final SDD lock. At 2026-10-31 the plan has 8 open items: seven of
+    live proof and closeout (including interruption and native drift, the territory of issue #840)
+    and one stale publish box for PR #816, which merged 2026-09-15.
 - **Agent artifacts merged** (PR #794, merged 2026-09-14 as `908258a9`; SDD **not yet locked**). The
   wave 4 successor, seeded and delivered by the same lead, carrying the artifact half that
   facets-first deferred: `artifact-bundle` resources and `artifacts` blocks, workstation and Git
@@ -710,8 +716,19 @@ Merged work the ledger owes a line, recorded from the merges themselves.
     date-sorting: `message-2026-09-11-harness-unsupported-facets.md` routes inactive-VM inputs
     directly to session; `message-2026-09-13-agent-artifacts-user-default.md` supersedes it with
     user. The newer states the supersession; the older does not yet say it was superseded.
-  - **Open after merge:** live acceptance, the effort's SDD lock, and the saga-side reconciliation
-    of the superseded no-op-defaults rule at `scope-participation-contract.md:72-74`.
+    **Reconciled 2026-10-31:** `main` routes an inactive VM facet's inputs to user
+    (`artifacts/routing.py:240-242`), as the newer message says, and the facet independence ruling
+    in `target-state.md` records it.
+  - **Open after merge:** live acceptance and the effort's SDD lock. The saga-side reconciliation of
+    the superseded no-op-defaults rule is done (2026-10-31).
+  - **The 2026-10-31 facet independence ruling reverses two of its gates:** session start refusing
+    on any non-current upstream artifact placement (the impact issue #841 records), and native setup
+    refusing unclaimed identical entries before applying (issue #840). The fix changes shipped
+    behavior in this effort and wave 4, ahead of later facet work. The operator plans to hand it to
+    both efforts' lead within their existing SDDs (2026-11-01: "I have an existing session
+    (agw-ns-harness-facets) that I plan on handing the work to"), and the saga lead delivered a
+    message into each SDD. The required/recommended readiness gate is kept for now (operator,
+    2026-11-01), so it is not among the gates reversed.
 - **Session cgroups adopted** (PR #770, adopted 2026-09-14 by operator ruling recorded in
   `target-state.md`). An adjacent standalone child: saga-lead-seeded and reviewed, not a numbered
   wave, and not gating the saga lock. It contains what an agent can do on its VM through cgroups and
@@ -721,6 +738,11 @@ Merged work the ledger owes a line, recorded from the merges themselves.
   lifetime, Bookworm versus a required Trixie upgrade, and side-by-side pricing of restricted
   same-UID execution against per-run users. Its session-identity dependency is discharged, since
   `session_uuid` and `run_id` landed on `main` with PR #794; that lane has been told.
+  - **Closed 2026-09-19 without merging.** The operator ruled containment an execution option owned
+    by transport rather than a session feature, superseding this adoption. PR #770 was closed at
+    `2c406948` and the lane shut down. Its SDD never reached `main`; the surviving copy of its
+    requirements is transport's pinned verbatim snapshot at that same head, which is now the source
+    for the transfer its own header prescribes.
 - **Transport and SSH rebuild adopted** (PRs #795 and #796, adopted 2026-09-14 by operator ruling
   recorded in `target-state.md`). Two coordinated adjacent standalone children replacing the
   execution layer rather than cleaning it in place: transport-improv
@@ -730,9 +752,12 @@ Merged work the ledger owes a line, recorded from the merges themselves.
   an independent installed-OpenSSH carrier. The new stack may not import, wrap, subclass, or call
   legacy execution code. Cutover and physical deletion of the old stack are transport-owned
   deliverables.
+  - **Superseded 2026-10-20 by transport-take2**; see the transport reset entry below. Both
+    directories are locked as superseded.
   - **Unlike the other adjacent standalone efforts, these bear prerequisites.** Waves 5 and 7 build
     on the execution contract they define, so neither wave should be chartered against today's
-    transport. Recorded in `phasing.md` against both waves.
+    transport. Recorded in `phasing.md` against both waves. Reopened 2026-10-23: the dependency now
+    turns on wave 5's input-interception investigation, per `target-state.md`.
   - **Saga-lead condition at adoption:** inventory the old stack's incident-derived behaviors before
     deletion and re-prove each against the new stack. Those lessons live only in tests and comments
     (forced TTY versus closed stdin, Windows stdin newline rewriting, the Git-for-Windows POSIX
@@ -761,6 +786,129 @@ Merged work the ledger owes a line, recorded from the merges themselves.
   non-string keys rather than silently accepting ineffective configuration. It also refuses YAML
   aliases and anchors and bounds document depth, which matters because artifact sources can be Git
   references, so this parser reads content the operator did not author.
+- **Artifact command group singularized** (PR #806, merged 2026-09-15 as `b2df951d`).
+  `agw artifacts show` became `agw artifact show` to match the singular command groups, with no
+  plural alias retained. Complete across command registration, completion selectors, the
+  machine-facing JSON `command` identifier, tests, and current docs. Recorded because it falsified a
+  line in `current-state.md` that the saga lead had merged hours earlier. That line is corrected now
+  rather than ahead of the merge, because until this landed the plural was what `main` actually had.
+- **The 0.19.0 pre-release smoke test found a real wsl2 defect, and the miss that nearly hid it**
+  (PRs #811 and #813, merged 2026-09-15 as `4b7fc378` and `1b345445`; issue #812 closed). Recorded
+  as one item because the two halves only make sense together.
+  - **The miss.** The WSL2 lane ran against published `agentworks-cli` v0.18.0 rather than the
+    commit under test, and reported green with a caveat. The stated reason, that getting code onto
+    the Windows bed needed a credential through a cloud control plane, was wrong twice: this
+    repository is public, and a built wheel carries the code regardless.
+  - **The defect the substitution hid.** Re-running the lane against `main` failed immediately:
+    minimal WSL Debian guests have no `python3`, which the native artifact probe requires, so agent
+    creation with a harness integration could not proceed. This was on a shipped platform, in the
+    harness path wave 4 and agent artifacts own, in the exact code 0.19.0 would carry. PR #813
+    installs `python3` through the mandatory system-package list and makes mandatory-package failure
+    fail initialization rather than warn and continue; existing VMs repair with `agw vm reinit`.
+  - **Why the general lesson is the durable part.** `main` reports the last released version until
+    the release PR merges, so a version string cannot discriminate "am I testing the right build";
+    identity must be checked by a feature only the commit under test has. The integration-testing
+    skill now carries both principles: test the build under test rather than a stand-in, and verify
+    a constraint before designing around it.
+  - **Saga-lead note:** a lane can report green and still be blind, and what caught this was
+    re-running against the real artifact rather than any additional depth of review.
+- **Integration activations became maps** (PR #816, merged 2026-09-15 as `a22d5cb6`). Child
+  templates replacing the whole `harness_integrations` list silently dropped inherited activations,
+  so adding one integration removed the rest. Keyed by integration name, inheritance is additive:
+  omitting the map or `{}` inherits, same-key config merges under the facet's schema, and
+  `codex: null` disables that integration while a later layer can reactivate it with fresh config.
+  - **The shape change was free, and that window is closing.** `harness_integrations` is absent from
+    v0.18.0 and entered with wave 4, which is still unreleased in PR #748, so no operator manifest
+    uses the list form and no migration was needed. The same reasoning made the
+    `artifact`/`artifacts` rename free. Both windows close when 0.19.0 cuts; a shape regret found
+    afterward costs a migration.
+  - **It also answers the contract's open ordering question.** `scope-participation-contract.md`
+    left "ordering and conflict reporting when multiple integrations attach at one broader scope" to
+    wave 4. Dispatch iterates the activation map for desired work and retires removed activations in
+    recorded prior order, so the order that carries meaning is retirement order, not declaration
+    order. That is the defensible split: retirement has a real sequencing constraint, while
+    application order between independent integrations at one scope has no principled basis to
+    prefer. Recorded here because the answer otherwise lives only in a merged diff.
+- **Artifact delivery hardened before the cut** (PRs #822 and #825, merged 2026-09-15 and
+  2026-09-16). #822 made native session delivery opt-in per integration through
+  `enabled_workarounds`, defaulting to off, and removed blanket native version floors so an
+  unrecognized harness version warns rather than refusing launch. It also settled the reopened
+  final-session disposition as warn-and-launch, with each unhandled artifact naming its owner, type,
+  name, and reason, and `agw artifact show` recording the same deferrals so they survive the
+  terminal output. #825 then applied artifacts at native scopes, put Codex hints and rules in a
+  generated section of `AGENTS.md`, confined elevated file access to one core-owned allowlist, and
+  removed `enabled_workarounds` from shell, which now publishes directly at every activated facet.
+  - **Saga note:** #822's disposition is the second answer settled in code that the
+    scope-participation contract still poses as an open question, alongside the integration-ordering
+    answer from #816. Both reconciliations wait on operator direction.
+- **`agw session restart` now confirms before replacing a running session** (PR #824, merged
+  2026-09-16). Named and batch forms both prompt when a session is positively detected as running,
+  with `--yes`/`-y` to skip and `--force` staying independent for broken-state recovery. Recorded
+  because it changes behavior for anyone scripting restarts, which is why the release notes carry it
+  under breaking changes despite its `fix` commit type.
+- **The transport rebuild's design merged** (PR #795, merged 2026-09-17). The transport-improv
+  effort adopted on 2026-09-14 landed its FRD and HLA; implementation began immediately on PR #826
+  with the bounded shared carrier proof. Its SSH counterpart (PR #796) remains open. Waves 5 and 7
+  build on the execution contract this defines, as recorded in `phasing.md`.
+- **The transport rebuild's joint buffered proof landed** (PRs #826, #796, and #830, merged
+  2026-09-17 through 2026-09-19). Both carriers are on `main` and the package is **unwired**: no
+  production module outside `cli/agentworks/execution/` references it, so the parallel stack exists
+  without touching any live execution path. That is the parallel-build ruling holding at the merge
+  boundary rather than only in design.
+  - **The independence constraint is enforced by a test, and the enforcement generalized before it
+    was needed.** `cli/tests/execution/test_independence.py` blocks the retired execution modules in
+    an isolated interpreter, imports the new package, and asserts none of them reached
+    `sys.modules`, matching submodules rather than only package roots. It originally imported three
+    named modules; the effort rewrote it to walk the package with `pkgutil` so "a present carrier
+    cannot silently evade this guard." Two days later SSH merged and was covered automatically, with
+    no edit to the test. Worth recording as the pattern: a guard that enumerates what it checks is a
+    checklist, and checklists go stale against the thing they guard.
+  - **Protection profiles publish what they do not provide.** `DIRECT`, `MANAGED`, and `CONTAINED`
+    are additive, and each states its guarantees beside an explicit column of what it does not give.
+    CONTAINED is marked proposed and is explicitly not a sandbox for the Python plugin itself. The
+    design refuses silent downgrade: an unavailable systemd cannot quietly grant a restricted plugin
+    DIRECT.
+  - **The effort recorded an operator ruling on permission timing** (in its own FRD, not in saga
+    artifacts): permissions are groundwork, not enforced or relied upon until the old stack is
+    removed, while consumers make conscious per-operation choices now. That second half is what
+    keeps the deferral safe, since unconsidered defaults would all become load-bearing on the day
+    enforcement turns on. The FRD states which of its own requirements this supersedes, the cutover
+    and enforcement timing in R7/R9/R10, and which it does not, the final-state requirements.
+  - **Resolved 2026-09-19: transport owns it.** The operator ruled that cgroups are a generic
+    execution option through the transport layer rather than session-specific machinery, closed PR
+    #770, and shut down that lane. The ruling and its rationale are in `target-state.md`. The
+    question as it stood before that ruling: #830 proposed that transport own shared systemd and
+    cgroup lifecycle and session adoption, mapping the session-cgroups effort's R1-R7. That effort
+    was adopted 2026-09-14 as an adjacent standalone child and its R1-R4 are the same subject.
+    Transport consumes the requirements through a pinned verbatim snapshot
+    (`inputs/session-cgroups-frd-2c406948.md`) that declares itself non-authoritative and states
+    that the session effort retains its charter until explicit operator disposition, so neither
+    effort has presumed the answer. The saga lead routed the question to both lanes and to the
+    operator on 2026-09-18, and the ruling followed on 2026-09-19. Both efforts handling it without
+    presuming an answer is why the ruling cost nothing to apply: no artifact had to be unwound.
+  - **Both efforts stopped 2026-10-20 and are superseded by transport-take2** (PR #851). The
+    implementation PRs never merged: #833 (transport-improv's implementation) and #832
+    (ssh-connection-contracts' carrier) were closed 2026-10-22. The proof packages above remain on
+    `main`, unwired, for the successor to adopt or delete. The successor's entry follows.
+- **Transport reset: transport-take2 adopted** (PR #851, merged 2026-10-30). An adjacent standalone
+  child replacing both rebuild efforts, by operator ruling recorded in `target-state.md`. It landed
+  its requirements baseline, the operator's 2026-10-20 and 2026-10-23 rulings verbatim, and
+  lockfiles marking transport-improv and ssh-connection-contracts as superseded. Two things outlive
+  the stopped efforts: the proof packages under `cli/agentworks/execution/`, which the successor
+  adopts or deletes, and the transport-improv directory, which must not be wiped until the follow-up
+  containment effort has taken what it accepts from the preserved session-cgroups snapshot.
+  - **Its lead listed the saga records the reset made stale**
+    (`message-2026-10-20-transport-reset.md` in this directory). The 2026-10-20 and 2026-10-23
+    rulings in `target-state.md`, the supersession notes above, and the wave 5 and 7 headers in
+    `phasing.md` reconcile them.
+  - **The saga-lead condition carries forward** as the successor's R10, which starts from the
+    inventory in the transport-improv migration strategy.
+  - **Its prerequisite role for waves 5 and 7 is open**, decided by wave 5's input-interception
+    investigation (operator, 2026-10-23).
+  - **The saga lead delivered a salvage list** (`message-2026-10-23-transport-salvage.md` in the
+    successor's directory): measured platform facts and contract lessons from the predecessors'
+    integration reports, each linked to its source and marked measured, reasoned, or unresolved, so
+    the reset does not have to rediscover them.
 
 ### Efforts that ran without ledger entries (reconstructed 2026-09-06)
 
@@ -811,10 +959,18 @@ Planned children, seeded when their prerequisites land (see `phasing.md`):
   secret delivery, SSH command errors, and command logging, and because no current wave owns that
   span: `phasing.md`'s wave 4 is the setup pipeline and one vertical integration, and it places
   session runtime and tmux on the observability track rather than its own. The fix touches the
-  shared SSH transport contract, so it was filed rather than fixed in passing under Scope discipline
-- Wave 5: session observability phase 1 (depends on the new execution contract; see `phasing.md`)
+  shared SSH transport contract, so it was filed rather than fixed in passing under Scope
+  discipline. **It overlaps transport-take2** (2026-10-23): that FRD's R3 and R4 require environment
+  values to arrive byte-exact and keep sensitive input and environment out of command arguments,
+  logs, and exceptions, which removes this leak path for any consumer that migrates. Whether this
+  child folds into that migration or still runs first is an operator decision.
+- Wave 5: session observability phase 1 (its input-interception investigation decides whether it
+  waits for transport-take2; see `phasing.md`)
 - Wave 6: agentic artifacts and distillation
-- Wave 7: structured control (depends on the new execution contract; see `phasing.md`)
+- Wave 7: structured control (follows wave 5's finding on transport-take2; see `phasing.md`)
+- Follow-up containment effort (operator ruling 2026-10-20): session containment, resource limits,
+  and the installed VM program `agw-atc`, taking the session-cgroups snapshot and the 2026-09-18 and
+  2026-09-19 containment rulings as input. An adjacent standalone child when seeded.
 - Wave 8: external plugin API
 - CLI grammar child: spawned, completed, and locked; see its ledger section above.
 - Security-architecture doc child: seeds after wave 3 merges; carries the per-platform

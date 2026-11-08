@@ -71,7 +71,7 @@ from agentworks.schema.base import (
     PositiveInt,
     reference_marker_error,
 )
-from agentworks.schema.block import CapabilityBlock
+from agentworks.schema.block import CapabilityBlock, CapabilityConfig
 from agentworks.schema.errors import (
     MAX_ERROR_LINES,
     config_error_from,
@@ -111,6 +111,7 @@ __all__ = [
     "AgwModel",
     "AgwRootModel",
     "CapabilityBlock",
+    "CapabilityConfig",
     "FieldDoc",
     "ModelDoc",
     "MergeStrategy",

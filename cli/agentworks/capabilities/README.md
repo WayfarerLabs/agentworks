@@ -269,15 +269,17 @@ The derived validation and extraction views have these contracts:
   model serves config hosted in a dedicated kind, inline in a consumer, or in a keyed map (see
   hosting shapes under Related).
 
-**How the config reaches the model, on a manifest surface.** A host kind's spec selects a capability
-with ONE tagged table on its naming field (`platform: {name: lima, placement: {mode: local}}`),
-which the row carries as a `CapabilityBlock`. That table has two owners, and the split is the
-contract: **`name` belongs to the HOST kind** (it is the selector, and the host's own model
-validates it), and **every other key belongs to the capability** the tag names. Decode deliberately
-does NOT check the extras, even though it could see them: they are checked closed-world at finalize
-against the capability's own declared model. Validating them twice, against two models, is how a
-host kind would end up encoding what its capabilities accept, which is the coupling this whole layer
-exists to avoid.
+**How the config reaches the model, on a manifest surface.** The host owns capability selection; the
+selected capability owns its config. Tagged surfaces use a table such as
+`platform: {name: lima, placement: {mode: local}}`, carried as a `CapabilityBlock`: the host
+validates `name`, and the remaining keys belong to that capability. Harness session selection uses
+this tagged shape too. Harness setup surfaces use an activation map such as
+`harness_integrations: {codex: {}}`: the host validates the integration keys, and each active value
+is untagged facet config. A `null` value disables that integration. Session hosts require one
+effective tagged selection. Every harness facet's native config model is untagged: core extracts the
+session selector before validating config and generates the host-owned name discriminator when
+emitting its schema. Decode checks the host shape; finalize validates effective config against the
+selected capability's own model. Hosts do not duplicate the field definitions of their capabilities.
 
 A **facet** is a scoped part of a capability: the operations and configuration it offers for that
 level. The term applies to capabilities generally. Harness integrations are the current consumer of
@@ -290,9 +292,10 @@ single-config overrides can still take no arguments. Harness integrations requir
 no config for setup facets. An override can supply a different model at each facet.
 
 Consumers choose the facet, not a resource kind. Admin and agent both select `user`; a session
-launch selects `session`. A `None` answer accepts only the integration's literal `name` tag, with
-all extra keys rejected. It is different from an unknown implementation, whose reference fails
-resolution, and it says nothing about which operations the integration supports or enables.
+launch selects `session`. A `None` answer accepts only the session's `name` tag or empty setup
+config under the integration key, with all other config fields rejected. It is different from an
+unknown implementation, whose reference fails resolution, and it says nothing about which operations
+the integration supports or enables.
 
 Registration checks all four harness answers and caches each selection while the implementation's
 `config_model` identity remains unchanged. Validation, merge, references, construction, and secret
@@ -578,9 +581,10 @@ implementation of it:
 - **`registry`, `entry_factory`, `readiness`, `publisher_source`**, how the kind's implementations
   are stored, published as read-only rows, and asked whether this host supports them.
 - **`manifest_sections`** (a sequence of `HostSurface` records), which declarable fields select this
-  capability, each with its chosen facet and singular or list cardinality. `secret-backend` is
-  selected by `secret-source.backend`; its separate per-secret `backend_mappings` surface is
-  described by `mapping_host`.
+  capability, each with its chosen facet and selection cardinality. Harness setup hosts use
+  integration maps; the session host uses a singular tagged block. `secret-backend` is selected by
+  `secret-source.backend`; its separate per-secret `backend_mappings` surface is described by
+  `mapping_host`.
 
 Every registry stores the implementation CLASS under each name: adapters, graph nodes, and published
 rows preserve the exact registered class and registration never constructs it. The kind list is

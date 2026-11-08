@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from agentworks.env.entry import EnvEntry
     from agentworks.resources.inheritance import LayeredResolution
     from agentworks.resources.registry import Registry
-    from agentworks.schema import CapabilityBlock
+    from agentworks.schema import CapabilityConfig
     from agentworks.workspaces.template import WorkspaceTemplate
 
 
@@ -33,7 +33,7 @@ class ResolvedTemplate:
     tmuxinator: bool = True
     git_user_name: str | None = None
     git_user_email: str | None = None
-    harness_integrations: list[CapabilityBlock] = field(default_factory=list)
+    harness_integrations: dict[str, CapabilityConfig] = field(default_factory=dict)
     artifacts: ArtifactsConfig = field(default_factory=ArtifactsConfig)
     env: dict[str, EnvEntry] = field(default_factory=dict)
 
@@ -257,6 +257,8 @@ def _resolve_with_provenance(
 ) -> LayeredResolution[ResolvedTemplate]:
     # Imported here, not at module level: ``agentworks.resources``'s package
     # init loads every kind module, and every kind module reaches this one.
+    from functools import partial
+
     from agentworks.resources.inheritance import (
         DeclarationLayer,
         LayerSource,
@@ -284,7 +286,7 @@ def _resolve_with_provenance(
     return run_layer_fold(
         ResolvedTemplate(name=name),
         layers,
-        merge_resolved_template_layer,
+        partial(merge_resolved_template_layer, facet="workspace"),
         default_paths=resolved_spec_default_paths(ResolvedTemplate),
         default_resource_kind="workspace-template",
         default_name=name,

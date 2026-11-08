@@ -12,7 +12,8 @@ from typing import TYPE_CHECKING
 from agentworks.artifacts.application import ArtifactFile
 from agentworks.artifacts.frontmatter import parse_metadata
 from agentworks.artifacts.native.common import MAX_CODEX_PERSONA_BYTES
-from agentworks.errors import StateError
+from agentworks.errors import ExternalError, StateError
+from agentworks.native_files import require_python3
 from agentworks.package_sources import CaptureLimits
 from agentworks.sources import SourceRefError
 
@@ -24,11 +25,12 @@ if TYPE_CHECKING:
 
 # Executed in the same login-shell environment as the native workload. Only selected
 # bounded artifact frontmatter and discovery facts return for local identity checks.
-# Native help output, settings bodies and artifact instruction bodies are not returned.
+# Settings bodies and artifact instruction bodies are not returned.
 _PROBE = r"""
-import fnmatch, json, os, pathlib, re, shutil, subprocess, sys, tomllib
+import fnmatch, json, os, pathlib, shutil, subprocess, sys, tomllib
 request = json.load(sys.stdin)
 tool = request['tool']
+vm_only = request['vm_only']
 home = os.environ.get('HOME', '')
 variable, default = {'claude': ('CLAUDE_CONFIG_DIR', '.claude'),
                      'codex': ('CODEX_HOME', '.codex'), 'grok': ('GROK_HOME', '.grok')}[tool]
@@ -36,37 +38,23 @@ native_home = os.environ.get(variable) or home + '/' + default
 problems = []
 skill_names = {name[6:] for name in request['identities'] if name.startswith('skill:')}
 agent_names = {name[6:] for name in request['identities'] if name.startswith('agent:')}
-if request['home'] is not None and home != request['home']:
+if not vm_only and request['home'] is not None and home != request['home']:
     problems.append('home-mismatch')
-if not native_home.startswith('/') or any(p in ('', '.', '..') for p in native_home.split('/')[1:]):
+if not vm_only and (not native_home.startswith('/') or any(p in ('', '.', '..') for p in native_home.split('/')[1:])):
     problems.append('invalid-native-home')
 executable = shutil.which(tool)
-if request['workspace_only']:
+if request['workspace_only'] or vm_only:
     pass
 elif executable is None:
     problems.append('missing-command')
-else:
-    version = subprocess.run([executable, '--version'], text=True, capture_output=True, timeout=20)
-    match = re.search(r'\b(\d+)\.(\d+)\.(\d+)\b', version.stdout)
-    minimum = {'claude': (2, 1, 265), 'codex': (0, 153, 4), 'grok': (1, 0, 10)}[tool]
-    if version.returncode or match is None or tuple(map(int, match.groups())) < minimum:
-        problems.append('unsupported-native-version')
-if executable and request['flags']:
-    help_result = subprocess.run([executable, '--help'], text=True, capture_output=True, timeout=20)
-    help_text = help_result.stdout
-    if tool == 'claude':
-        # Claude documents the file carrier with an optional suffix in its help.
-        help_text = help_text.replace('--append-system-prompt[-file]',
-                                      '--append-system-prompt --append-system-prompt-file')
-    if help_result.returncode or any(
-        not re.search(r'(?<![\w-])' + re.escape(flag) + r'(?![\w-])', help_text)
-        for flag in request['flags']
-    ):
-        problems.append('unsupported-native-cli')
-roots = [] if request['workspace_only'] else [pathlib.Path(native_home)]
+machine_root = {'claude': pathlib.Path('/etc/claude-code/.claude'),
+                'codex': pathlib.Path('/etc/codex')}.get(tool)
+roots = [] if request['workspace_only'] or vm_only else [pathlib.Path(native_home)]
 workspace = request['workspace']
-if workspace:
+if workspace and not vm_only:
     roots.append(pathlib.Path(workspace) / default)
+if machine_root is not None:
+    roots.append(machine_root)
 if not request['check_policy']:
     roots = []
 
@@ -83,13 +71,14 @@ def check_discovery_path(path, anchor):
 safe_roots = []
 for root in roots:
     try:
-        user_root = root == pathlib.Path(native_home)
-        anchor = pathlib.Path(home) if user_root else pathlib.Path(workspace)
+        user_root = root == pathlib.Path(native_home) and root != machine_root
+        anchor = (pathlib.Path('/') if root == machine_root else
+                  pathlib.Path(home) if user_root else pathlib.Path(workspace))
         # Session configuration may select an explicit native home outside HOME;
         # outer user publication applies its own stricter containment rule.
         root_anchor = pathlib.Path(root.anchor) if user_root and not root.is_relative_to(anchor) else anchor
         check_discovery_path(root, root_anchor)
-        if tool == 'codex' and any(':' not in name for name in skill_names):
+        if tool == 'codex' and root != machine_root and any(':' not in name for name in skill_names):
             check_discovery_path(anchor / '.agents' / 'skills', anchor)
         safe_roots.append(root)
     except Exception:
@@ -100,8 +89,10 @@ known_entries = request['entries']
 registered_agents = {}
 paths = []
 for root in roots:
+    if root == machine_root:
+        continue
     paths.extend([root / 'settings.json', root / 'settings.local.json'] if tool == 'claude' else [root / 'config.toml'])
-if tool == 'claude' and not request['workspace_only'] and request['check_policy']:
+if tool == 'claude' and request['check_policy']:
     paths.append(pathlib.Path('/etc/claude-code/managed-settings.json'))
 for path in paths:
     try:
@@ -140,7 +131,8 @@ for path in paths:
                 )
                 if selected:
                     problems.append('native-skill-policy')
-            if agent_names and document.get('features', {}).get('multi_agent') is False:
+            if agent_names and (document.get('agents', {}).get('enabled') is False or
+                                document.get('features', {}).get('multi_agent') is False):
                 problems.append('native-agent-policy')
         elif path.parent == pathlib.Path(native_home):
             subagents = document.get('subagents', {})
@@ -161,7 +153,9 @@ try:
     discovery_roots = []
     for root in roots:
         skill_root = (root.parent / '.agents' / 'skills') if tool == 'codex' else root / 'skills'
-        if tool == 'codex' and root == pathlib.Path(native_home):
+        if tool == 'codex' and root == machine_root:
+            skill_root = root / 'skills'
+        elif tool == 'codex' and root == pathlib.Path(native_home):
             skill_root = pathlib.Path(home) / '.agents' / 'skills'
         if any(':' not in name for name in skill_names):
             discovery_roots.append(('skill', skill_root))
@@ -199,9 +193,10 @@ try:
                 if len(candidates) > 512:
                     raise ValueError()
         agent_root = root / 'agents'
-        if agent_names:
+        discover_agents = agent_names and not (tool == 'codex' and root == machine_root)
+        if discover_agents:
             discovery_roots.append(('agent', agent_root))
-        if agent_names and agent_root.exists():
+        if discover_agents and agent_root.exists():
             if agent_root.is_symlink():
                 raise ValueError()
             for path in agent_root.iterdir():
@@ -282,6 +277,18 @@ try:
         raise ValueError()
 except Exception:
     problems.append('unreadable-native-inventory')
+if tool == 'codex' and request['check_policy']:
+    for spelling in request['paths']:
+        path = pathlib.Path(spelling)
+        if path.name != 'AGENTS.md':
+            continue
+        try:
+            override = path.with_name('AGENTS.override.md')
+            check_discovery_path(override, path.parent)
+            if override.exists() and override.read_bytes().strip():
+                problems.append('native-guidance-shadowed')
+        except Exception:
+            problems.append('unreadable-native-policy')
 if tool == 'grok' and workspace and request['paths']:
     result = subprocess.run(['git', '-C', workspace, 'rev-parse', '--show-toplevel'], capture_output=True, text=True)
     if result.returncode == 0:
@@ -295,7 +302,8 @@ if tool == 'grok' and workspace and request['paths']:
             elif ignored.returncode != 1:
                 problems.append('unreadable-native-policy')
 print('AGW_ARTIFACT_PROBE=' + json.dumps({
-    'home': home, 'native_home': native_home, 'problems': sorted(set(problems)), 'inventory': inventory
+    'home': home, 'native_home': str(machine_root) if vm_only else native_home,
+    'problems': sorted(set(problems)), 'inventory': inventory
 }))
 """
 
@@ -303,12 +311,11 @@ print('AGW_ARTIFACT_PROBE=' + json.dumps({
 _PROBLEM_MESSAGES = {
     "home-mismatch": "the login shell changed the actual user's HOME",
     "invalid-native-home": "the native home is not an absolute normalized directory",
-    "missing-command": "the native command is unavailable in the login environment",
-    "unsupported-native-version": "the native version is older than the supported artifact baseline",
-    "unsupported-native-cli": "the native CLI lacks a required artifact carrier flag",
+    "missing-command": "command {tool!r} was not found in the target login shell; install it for this user",
     "native-discovery-exclusions": "a configured discovery exclusion matches an artifact file",
     "unsupported-discovery-pattern": "the adapter cannot evaluate an extended native exclusion pattern",
     "native-plugin-policy": "native configuration restricts the generated artifact plugin",
+    "native-guidance-shadowed": "AGENTS.override.md now suppresses an applied AGENTS.md; reinitialize its owning facet",
     "native-skill-policy": "native configuration restricts a supplied skill or its discovery instructions",
     "native-agent-policy": "native configuration restricts a supplied agent persona",
     "native-artifact-identity-mismatch": "a supplied native artifact file now declares a different name",
@@ -368,12 +375,13 @@ def probe_native(
     home: str | None = None,
     workspace: str = "",
     files: Sequence[ArtifactFile | OwnedArtifactFile] = (),
-    flags: tuple[str, ...] = (),
     session_plugin: bool = False,
     workspace_only: bool = False,
+    vm_only: bool = False,
     check_policy: bool = True,
 ) -> str:
     """Check the actual native home and relevant native policy without starting a model."""
+    require_python3(runner)
     entries = {file.path: file.native_identity for file in files if file.native_identity}
     identities = tuple(entries.values())
     request = {
@@ -385,9 +393,9 @@ def probe_native(
         "paths": tuple(file.path for file in files),
         "entries": entries,
         "proposed": _proposed_sizes(files, tool),
-        "flags": flags,
         "session_plugin": session_plugin,
         "workspace_only": workspace_only,
+        "vm_only": vm_only,
         "identities": identities,
         "check_policy": check_policy,
     }
@@ -400,6 +408,15 @@ def probe_native(
         check=False,
         timeout=30,
     )
+    # Login startup scripts can echo the supplied runtime environment on failure.
+    # Redact known values and their shell-quoted forms before publishing diagnostics.
+    diagnostic = result.stderr
+    redactions = {form for value in environment.values() if value for form in (value, shlex.quote(value))}
+    for value in sorted(redactions, key=len, reverse=True):
+        diagnostic = diagnostic.replace(value, "[REDACTED]")
+    diagnostic = diagnostic.strip()
+    if result.returncode:
+        raise ExternalError(f"{tool} artifact discovery probe failed (exit {result.returncode}): {diagnostic}")
     try:
         lines = [
             line.removeprefix("AGW_ARTIFACT_PROBE=")
@@ -409,12 +426,15 @@ def probe_native(
         observed = json.loads(lines[-1])
         root = observed["native_home"]
         problems = observed["problems"]
-        if result.returncode or not isinstance(root, str) or not root.startswith("/") or not isinstance(problems, list):
+        if not isinstance(root, str) or not root.startswith("/") or not isinstance(problems, list):
             raise ValueError()
         if any(not isinstance(problem, str) or problem not in _PROBLEM_MESSAGES for problem in problems):
             raise ValueError()
     except (ValueError, KeyError, IndexError, TypeError):
-        raise StateError(f"could not verify {tool} artifact discovery on the launch target") from None
+        raise ExternalError(
+            f"{tool} artifact discovery probe returned an invalid response",
+            hint=diagnostic or None,
+        ) from None
     inventory_problems = _inventory_problems(observed.get("inventory"), identities, entries)
     problems.extend(problem.code for problem in inventory_problems)
     details = []
@@ -429,11 +449,8 @@ def probe_native(
     if problems:
         raise StateError(
             f"{tool} artifact delivery: "
-            + "; ".join([*(_PROBLEM_MESSAGES[problem] for problem in problems), *details]),
-            hint=(
-                "Inspect the native home, relevant restrictions, and installed CLI version. "
-                "This preflight cannot verify whether another native configuration layer overrides a restriction."
-            ),
+            + "; ".join([*(_PROBLEM_MESSAGES[problem].format(tool=tool) for problem in problems), *details]),
+            hint=f"Native configuration directory: {root!r}",
         )
     return root
 

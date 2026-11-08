@@ -199,10 +199,16 @@ def test_native_ancestor_name_conflict_is_refused_with_no_session_inputs(adapter
     project = artifact(kind, owner="workspace")
     if adapter is codex:
         user_files = adapter.outer_artifacts(
-            received(user), skills_root="/home/.agents/skills", agents_root="/home/.codex/agents"
+            received(user),
+            skills_root="/home/.agents/skills",
+            agents_root="/home/.codex/agents",
+            instructions_path="/home/.codex/AGENTS.md",
         ).files
         project_files = adapter.outer_artifacts(
-            received(project), skills_root="/project/.agents/skills", agents_root="/project/.codex/agents"
+            received(project),
+            skills_root="/project/.agents/skills",
+            agents_root="/project/.codex/agents",
+            instructions_path="/project/AGENTS.md",
         ).files
     else:
         user_files = adapter.outer_artifacts(received(user), "/home/.native").files

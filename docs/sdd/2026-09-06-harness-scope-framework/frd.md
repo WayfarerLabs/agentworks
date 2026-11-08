@@ -134,6 +134,17 @@ integrations, each with its own config; an available plugin or default config ne
 activates one. A session has one explicit effective integration selection, including when it selects
 the generic shell.
 
+The operator's 2026-09-15 amendment, with the subsequent scope and opt-out clarifications, makes VM,
+admin, agent, and workspace activation collections maps keyed by integration name. A setup resource
+can activate each integration once; an empty config value activates its defaults. Template
+inheritance preserves parent integrations and merges a same-named integration's config according to
+its facet schema. An omitted or empty map inherits. A `null` entry disables that integration,
+including an inherited activation; a later config entry reactivates it without restoring the
+disabled config. The session selector remains the existing tagged
+`harness_integration: {name: codex, ...}` shape, with same-name config merge and changed-name
+replacement. The setup map and opt-out rules apply to authored templates and instance specs
+together. The session selector requires no shape migration.
+
 **R6. Env is the pipeline's shared input.** Core assembles env for each owning resource and passes
 it to the harness invocation using the existing env precedence and reserved-variable conventions.
 Integrations consume the completed env without duplicating core's composition rules. User and

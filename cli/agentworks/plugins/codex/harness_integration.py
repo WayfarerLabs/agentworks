@@ -111,11 +111,10 @@ from typing import TYPE_CHECKING, Annotated, ClassVar, Literal, NamedTuple
 from pydantic import Field
 
 from agentworks.artifacts.application import ArtifactApplication
+from agentworks.artifacts.model import ArtifactType
 from agentworks.artifacts.native.common import (
     NativeSessionArtifacts,
-    defer,
     delivery_files,
-    has_artifacts,
     native_home,
     validate_discovery_paths,
     validate_native_command,
@@ -132,7 +131,7 @@ from agentworks.capabilities.harness_integration.base import (
 from agentworks.errors import StateError
 from agentworks.plugins._harness_native.native import setup_user, setup_workspace
 from agentworks.plugins._harness_native.native_config import NativeUserConfig, NativeWorkspaceConfig
-from agentworks.plugins.codex.artifacts import outer_artifacts, session_artifacts
+from agentworks.plugins.codex.artifacts import guidance_path, outer_artifacts, session_artifacts, vm_artifacts
 from agentworks.plugins.codex.recorder import home_word, notify_value_word, provision_fragment, thread_tail
 from agentworks.schema import AgwModel, MergeStrategy
 from agentworks.topics import TopicProse
@@ -153,21 +152,13 @@ if TYPE_CHECKING:
 class CodexUserConfig(NativeUserConfig):
     """Native Codex setup for one actual user."""
 
-    name: Literal["codex"]
-    """The harness integration selected for this user's facet."""
-
 
 class CodexWorkspaceConfig(NativeWorkspaceConfig):
     """Native Codex project settings."""
 
-    name: Literal["codex"]
-    """The harness integration selected for this workspace's facet."""
-
 
 class CodexSetupConfig(AgwModel):
     """Activate an artifact-only native facet."""
-
-    name: Literal["codex"]
 
 
 class CodexConfig(AgwModel):
@@ -181,9 +172,6 @@ class CodexConfig(AgwModel):
     ``developer_instructions`` config and the positional ``--`` boundary were
     rechecked with Codex CLI 0.149.1.
     """
-
-    name: Literal["codex"]
-    """The harness integration this config is for."""
 
     model: str | None = None
     """Forwarded as ``-m``."""
@@ -249,6 +237,11 @@ class CodexConfig(AgwModel):
     disable_strict_config: bool | None = None
     """Turn OFF ``--strict-config``, for a target whose own
     ``config.toml`` a newer codex wrote."""
+
+    enabled_workarounds: Annotated[
+        list[Literal["session-developer-instructions", "session-agent-config"]], MergeStrategy.REPLACE
+    ] = Field(default_factory=list)
+    """Explicitly enabled session artifact carriers. An authored list replaces inherited opt-ins."""
 
     extra_args: Annotated[list[str], MergeStrategy.REPLACE] = Field(default_factory=list)
     """Raw argv tokens appended verbatim after every generated CLI option,
@@ -413,7 +406,7 @@ class _Layer2(NamedTuple):
 class CodexIntegration(HarnessIntegration):
     """Runs Codex, resuming or launching fresh per on-disk state."""
 
-    contract_version: ClassVar[int] = 6
+    contract_version: ClassVar[int] = 7
     name: ClassVar[str] = "codex"
     description: ClassVar[str] = "Run Codex, resuming its session when one exists"
     config_model: ClassVar[type[CodexConfig]] = CodexConfig
@@ -431,11 +424,14 @@ class CodexIntegration(HarnessIntegration):
         Ships as the opt-in `codex` system plugin, and needs the `codex` CLI on the
         session's target.
 
-        User and workspace facets publish standard skills and native agent personas.
-        Hints and rules flow to the session, where they add to `developer_instructions`.
-        Private session skills are unsupported; activate an outer facet for native
-        skill placement. Session persona definitions configure delegated roles;
-        primary `agent` selection remains prompt-mediated.
+        The VM facet publishes machine-wide skills. User and workspace facets publish
+        standard skills, native agent personas, and generated instruction sections in
+        the selected `AGENTS.md` or `AGENTS.override.md`. Session artifacts remain
+        unhandled by default.
+        `enabled_workarounds` can opt into `session-developer-instructions` for
+        rules/hints and `session-agent-config` for delegated personas. Private session
+        skills have no supported workaround; activate an outer facet for native skill
+        placement. Primary `agent` selection remains prompt-mediated.
         """,
     )
 
@@ -467,11 +463,12 @@ class CodexIntegration(HarnessIntegration):
         return super().config_for(facet)
 
     def vm_init(self, invocation: VMSetupInvocation) -> ArtifactApplication:
-        return (
-            ArtifactApplication()
-            if self.retiring
-            else defer(invocation.artifacts, "user", "Native artifact discovery belongs to an actual user")
-        )
+        plan = ArtifactApplication() if self.retiring else vm_artifacts(invocation.artifacts)
+        if plan.files:
+            probe_native(
+                invocation.runner, tool="codex", environment=invocation.environment, files=plan.files, vm_only=True
+            )
+        return plan
 
     def user_init(self, invocation: UserSetupInvocation) -> ArtifactApplication:
         """Apply native setup and return the user's artifact publication plan."""
@@ -496,6 +493,14 @@ class CodexIntegration(HarnessIntegration):
                 invocation.artifacts,
                 skills_root=f"{invocation.home}/.agents/skills",
                 agents_root=f"{root}/agents",
+                instructions_path=(
+                    guidance_path(invocation.runner, root)
+                    if any(
+                        item.content.type in (ArtifactType.HINT, ArtifactType.RULE)
+                        for item in invocation.artifacts.items()
+                    )
+                    else f"{root}/AGENTS.md"
+                ),
             )
         )
         validate_user_placement(plan, invocation.home)
@@ -523,6 +528,14 @@ class CodexIntegration(HarnessIntegration):
                 invocation.artifacts,
                 skills_root=f"{invocation.root}/.agents/skills",
                 agents_root=f"{invocation.root}/.codex/agents",
+                instructions_path=(
+                    guidance_path(invocation.runner, invocation.root)
+                    if any(
+                        item.content.type in (ArtifactType.HINT, ArtifactType.RULE)
+                        for item in invocation.artifacts.items()
+                    )
+                    else f"{invocation.root}/AGENTS.md"
+                ),
             )
         )
         setup_workspace("codex", config, invocation)
@@ -587,9 +600,12 @@ class CodexIntegration(HarnessIntegration):
             self._session_binding.artifact_context,
             configured=self.config.developer_instructions,
             extra_args=self.config.extra_args,
+            enabled_workarounds=self.config.enabled_workarounds,
         )
         artifact_context = self._session_binding.artifact_context
-        if artifact_context is not None and has_artifacts(artifact_context):
+        if artifact_context is not None and (
+            artifact_context.ancestor_files or self._artifact_plan.application.files or self._artifact_plan.argv
+        ):
             runner = ctx.admin_target() if self._admin else ctx.agent_target()
             if runner is None:
                 raise StateError("artifact delivery requires the actual native launch target")
@@ -601,7 +617,6 @@ class CodexIntegration(HarnessIntegration):
                 home=artifact_context.home,
                 workspace=self._workspace_path,
                 files=files,
-                flags=self._artifact_plan.required_flags,
                 session_plugin="--plugin-dir" in self._artifact_plan.argv,
             )
             validate_discovery_paths(
@@ -611,6 +626,13 @@ class CodexIntegration(HarnessIntegration):
                     f"{native_root}/agents",
                     f"{self._workspace_path}/.agents/skills",
                     f"{self._workspace_path}/.codex/agents",
+                    "/etc/codex/skills",
+                ),
+                files=(
+                    f"{native_root}/AGENTS.md",
+                    f"{native_root}/AGENTS.override.md",
+                    f"{self._workspace_path}/AGENTS.md",
+                    f"{self._workspace_path}/AGENTS.override.md",
                 ),
             )
 
@@ -629,7 +651,7 @@ class CodexIntegration(HarnessIntegration):
                 self._state.clear()
                 self._state.update(prior_state)
             raise
-        if has_artifacts(self._session_binding.artifact_context):
+        if self._artifact_plan.argv:
             validate_native_command(command)
         return HarnessStart(command, self._decision_note(intent=intent), self._artifact_plan.application)
 
@@ -996,8 +1018,8 @@ class CodexIntegration(HarnessIntegration):
         """
         parts = [shlex.quote(token) for token in (*head, *self._managed_flags())]
         parts += ["-c", notify_value_word(self._session_name)]
-        if self.config.developer_instructions is not None and "developer_instructions=" not in " ".join(
-            self._artifact_plan.argv
+        if self.config.developer_instructions is not None and not any(
+            token.startswith("developer_instructions=") for token in self._artifact_plan.argv
         ):
             value = _toml_basic_string(self.config.developer_instructions)
             parts += ["-c", quote_literal_argv(f"developer_instructions={value}")]

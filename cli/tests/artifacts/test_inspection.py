@@ -223,12 +223,14 @@ def test_cli_refuses_stale_state_without_migration(tmp_path, monkeypatch) -> Non
         assert connection.execute("SELECT MAX(version) FROM schema_version").fetchone()[0] == 37
 
 
-def test_session_inspection_uses_runtime_diamond_order(db: Database) -> None:
+@pytest.mark.parametrize("unhandled", [False, True])
+def test_session_inspection_uses_runtime_diamond_order(db: Database, unhandled: bool) -> None:
+    from agentworks.artifacts.application import ArtifactDeferral
     from agentworks.artifacts.inspection import inspect_artifacts
     from agentworks.harness_setup.inputs import SetupInputs
     from agentworks.harness_setup.model import NativeSetupState, SetupRecord
-    from agentworks.harness_setup.state import write_native_setup
-    from agentworks.schema import CapabilityBlock
+    from agentworks.harness_setup.state import read_native_setup, write_native_setup
+    from agentworks.schema import CapabilityConfig
     from agentworks.secrets.orchestration import SecretTarget
     from tests.artifacts.test_routing import graph
 
@@ -238,24 +240,58 @@ def test_session_inspection_uses_runtime_diamond_order(db: Database) -> None:
     fixture.save("agent", inherited=group(vm.hints["vm-0"]), routes={"vm-0": "session", "agent-0": "session"})
     fixture.save("workspace", inherited=group(vm.hints["vm-1"]), routes={"vm-1": "session", "workspace-0": "session"})
     db.insert_session("review", "workspace", "default", SessionMode.AGENT, agent_name="agent", socket_path="/socket")
-    block = CapabilityBlock.of("shell")
+    block = CapabilityConfig()
     owner = SetupInputs(
-        "session", "review", "session", (block,), SecretTarget(vm={}, agent={}, workspace={}, session={})
+        "session", "review", "session", {"shell": block}, SecretTarget(vm={}, agent={}, workspace={}, session={})
     )
     prepared = fixture.route().inputs
     record = SetupRecord(
         component="session",
         integration="shell",
         destination_id="d" * 64,
-        declaration=owner.declaration(block),
+        declaration=owner.declaration("shell", block),
         complete=True,
         artifact_inputs=tuple(item.identity for item in prepared.items()),
+        deferred=tuple(
+            ArtifactDeferral(input_id=item.identity, destination="session", reason="fixture disabled")
+            for item in prepared.items()
+            if unhandled
+        ),
     )
     write_native_setup(db, "session", "review", NativeSetupState(records=(record,)), operation="fixture")
     result = inspect_artifacts(db, fixture.registry, session_name="review")
     assert [owner.scope for owner in result.owners] == ["vm", "agent", "workspace", "session"]
     assert result.owners[-1].integrations[0].status == "current"
-    assert result.owners[-1].integrations[0].recorded_handled == tuple(item.identity for item in prepared.items())
+    integration = result.owners[-1].integrations[0]
+    assert integration.recorded_handled == (() if unhandled else tuple(item.identity for item in prepared.items()))
+    assert tuple(item.input_id for item in integration.recorded_deferred) == tuple(
+        item.input_id for item in record.deferred
+    )
+    assert tuple(item.reason for item in integration.recorded_deferred) == tuple(
+        item.reason for item in record.deferred
+    )
+    agent_record = read_native_setup(db, "agent", "agent").records[0]
+    write_native_setup(
+        db,
+        "agent",
+        "agent",
+        NativeSetupState(records=(agent_record.model_copy(update={"complete": False}),)),
+        operation="fixture",
+    )
+    blocked = inspect_artifacts(db, fixture.registry, session_name="review")
+    assert blocked.owners[1].integrations[0].status == "incomplete"
+    assert blocked.owners[-1].integrations[0].status == "unavailable"
+
+    from agentworks.artifacts.routing import inspect_owner_artifacts
+    from agentworks.db import AppliedStateKey, VersionedPayload
+
+    db.instance_state.replace_applied_slices(
+        "session", "review", "fixture", {AppliedStateKey.HARNESS_NATIVE_SETUP: VersionedPayload(2, {"broken": True})}
+    )
+    own_failure = inspect_owner_artifacts(db, fixture.registry, owner, "shell", inherited=None)
+    assert own_failure.status == "unavailable" and not own_failure.ancestor_blocked
+    result = inspect_artifacts(db, fixture.registry, session_name="review")
+    assert result.owners[-1].integrations[0].reason == own_failure.reason
 
 
 def test_worked_manifests_build_without_acquiring_their_sources(tmp_path, monkeypatch) -> None:
@@ -346,3 +382,28 @@ def test_inactive_inspection_projects_only_applicable_vm_inputs(db: Database, co
     integration = encoded["owners"][-1]["integrations"][0]
     assert integration["passthrough_inputs"] == [item.identity for item in expected]
     assert integration["passthrough_destination"] == destination
+
+
+def test_skipped_section_is_inspectable_without_being_handled_or_deferred(db: Database) -> None:
+    from agentworks.artifacts.application import ArtifactSkip
+    from agentworks.artifacts.inspection import inspect_artifacts, inspection_data
+    from agentworks.harness_setup.state import read_native_setup, write_native_setup
+    from tests.artifacts.test_routing import graph
+
+    fixture = graph(db, active=("agent",))
+    fixture.save("agent", inherited=fixture.captures["vm"].inputs)
+    item = tuple(fixture.captures["agent"].inputs.items())[0]
+    skipped = ArtifactSkip(
+        path="/home/worker/AGENTS.md", origins=(item.origin_identity,), reason="malformed delimiters"
+    )
+    state = read_native_setup(db, "agent", "agent")
+    record = state.records[0].model_copy(update={"skipped": (skipped,)})
+    write_native_setup(db, "agent", "agent", state.model_copy(update={"records": (record,)}), operation="fixture")
+    result = inspect_artifacts(db, fixture.registry, agent_name="agent")
+    integration = result.owners[-1].integrations[0]
+    assert integration.status == "current"
+    assert item.identity not in integration.recorded_handled
+    assert not integration.recorded_deferred
+    assert integration.recorded_skipped == (skipped,)
+    encoded = json.dumps(inspection_data(result))
+    assert skipped.path in encoded and item.content.text not in encoded

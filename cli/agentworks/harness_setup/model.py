@@ -6,7 +6,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field, JsonValue, model_validator
 
-from agentworks.artifacts.application import ArtifactDeferral, OwnedArtifactFile
+from agentworks.artifacts.application import ArtifactDeferral, ArtifactSkip, OwnedArtifactFile
 from agentworks.schema import AgwModel
 
 type SetupFacet = Literal["vm", "user", "workspace", "session"]
@@ -49,6 +49,7 @@ class SetupRecord(AgwModel):
     artifact_files: Annotated[tuple[OwnedArtifactFile, ...], Field(strict=False)] = ()
     artifact_inputs: Annotated[tuple[_Hash, ...], Field(strict=False)] | None = None
     deferred: Annotated[tuple[ArtifactDeferral, ...], Field(strict=False)] = ()
+    skipped: Annotated[tuple[ArtifactSkip, ...], Field(strict=False)] = ()
 
     @model_validator(mode="after")
     def _unique_claims(self) -> SetupRecord:
@@ -59,6 +60,9 @@ class SetupRecord(AgwModel):
         paths = [item.path for item in self.artifact_files]
         if len(paths) != len(set(paths)):
             raise ValueError("native setup contains duplicate artifact paths")
+        skipped = [item.path for item in self.skipped]
+        if len(skipped) != len(set(skipped)):
+            raise ValueError("native setup contains duplicate skipped artifact paths")
         deferred = [item.input_id for item in self.deferred]
         if len(deferred) != len(set(deferred)) or not set(deferred) <= set(self.artifact_inputs or ()):
             raise ValueError("native setup contains invalid artifact deferrals")

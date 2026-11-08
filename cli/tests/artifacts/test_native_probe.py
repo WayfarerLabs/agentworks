@@ -14,8 +14,7 @@ from agentworks.artifacts.model import ArtifactType
 from agentworks.artifacts.native.common import MAX_CODEX_PERSONA_BYTES
 from agentworks.artifacts.native.probe import _PROBE, _inventory_problems
 from agentworks.package_sources import CaptureLimits
-from agentworks.plugins.claude.artifacts import session_artifacts
-from tests.artifacts.test_native_delivery import artifact, context
+from tests.artifacts.test_native_delivery import artifact
 from tests.conftest import requires_posix_shell
 
 pytestmark = requires_posix_shell
@@ -32,10 +31,8 @@ def probe(
     entries: dict[str, str] | None = None,
     inventory_bytes: int = CaptureLimits().total_bytes,
     workspace_only: bool = False,
-    flags: tuple[str, ...] = (),
+    vm_only: bool = False,
     session_plugin: bool = False,
-    version: str = "99.1.0",
-    help_text: str = "--rules --agents --config",
     environment: dict[str, str] | None = None,
 ) -> dict:
     home = tmp_path / "home"
@@ -53,7 +50,7 @@ def probe(
     binary.mkdir(exist_ok=True)
     executable = binary / tool
     executable.write_text(
-        f'#!{sys.executable}\nimport sys\nprint({version!r} if "--version" in sys.argv else {help_text!r})\n'
+        f'#!{sys.executable}\nraise SystemExit("artifact discovery must not execute the native CLI")\n'
     )
     executable.chmod(0o700)
     workspace = tmp_path / "workspace"
@@ -67,9 +64,9 @@ def probe(
         "paths": paths,
         "entries": entries or {},
         "proposed": proposed or {},
-        "flags": flags,
         "session_plugin": session_plugin,
         "workspace_only": workspace_only,
+        "vm_only": vm_only,
         "identities": identities,
         "check_policy": True,
     }
@@ -82,8 +79,12 @@ def probe(
         "GROK_HOME": str(native),
         **(environment or {}),
     }
+    # Guest machine paths are isolated alongside HOME and the workspace.
+    program = _PROBE.replace("/etc/claude-code", str(tmp_path / "etc/claude-code")).replace(
+        "/etc/codex", str(tmp_path / "etc/codex")
+    )
     result = subprocess.run(
-        [sys.executable, "-c", _PROBE], input=json.dumps(request), env=env, capture_output=True, text=True, check=True
+        [sys.executable, "-c", program], input=json.dumps(request), env=env, capture_output=True, text=True, check=True
     )
     observed = json.loads(result.stdout.removeprefix("AGW_ARTIFACT_PROBE="))
     assert isinstance(observed, dict)
@@ -148,9 +149,9 @@ def test_native_home_from_effective_environment_is_observed(tmp_path):
     assert result["native_home"] == expected
 
 
-def test_old_or_incompatible_native_binary_is_rejected_before_publication(tmp_path):
-    assert "unsupported-native-version" in probe(tmp_path, version="0.100.0")["problems"]
-    assert "unsupported-native-cli" in probe(tmp_path, flags=("--unsupported-carrier",))["problems"]
+@pytest.mark.parametrize("tool", ["claude", "codex", "grok"])
+def test_native_file_discovery_does_not_certify_versions_or_help(tmp_path, tool):
+    assert probe(tmp_path, tool=tool)["problems"] == []
 
 
 def test_grok_gitignore_check_only_inspects_workspace_owned_files(tmp_path):
@@ -164,44 +165,10 @@ def test_grok_gitignore_check_only_inspects_workspace_owned_files(tmp_path):
     assert "native-discovery-exclusions" in probe(tmp_path, tool="grok", paths=(inside,))["problems"]
 
 
-# Carrier spellings from Claude Code 2.1.265 --help, including its compact file suffix.
-CLAUDE_CARRIER_HELP = """
-  --append-system-prompt <prompt>       Append a system prompt to the default
-                                        via: --system-prompt[-file],
-                                        --append-system-prompt[-file], --add-dir
-                                        (CLAUDE.md dirs), --mcp-config,
-                                        --settings, --agents, --plugin-dir.
-  --system-prompt-snapshot <on|off>     Record the system prompt once per
-"""
-
-
-@pytest.mark.parametrize("type", [ArtifactType.RULE, ArtifactType.HINT])
-@pytest.mark.parametrize("help_text", [CLAUDE_CARRIER_HELP, "--append-system-prompt-file --system-prompt-snapshot"])
-def test_claude_help_accepts_generated_text_carriers(tmp_path, type, help_text):
-    plan = session_artifacts(context(artifact(type)), configured=None, extra_args=[])
-    result = probe(tmp_path, tool="claude", version="2.1.265", help_text=help_text, flags=plan.required_flags)
-    assert result["problems"] == []
-
-
-@pytest.mark.parametrize(
-    "help_text,flag",
-    [
-        ("--append-system-prompt <prompt>", "--append-system-prompt-file"),
-        (CLAUDE_CARRIER_HELP, "--unsupported-carrier"),
-        (CLAUDE_CARRIER_HELP, "--append-system-prompt-file-unknown"),
-        ("--system-prompt-snapshot-extra", "--system-prompt-snapshot"),
-    ],
-)
-def test_claude_help_refuses_absent_or_partial_carrier(tmp_path, help_text, flag):
-    assert "unsupported-native-cli" in probe(tmp_path, tool="claude", help_text=help_text, flags=(flag,))["problems"]
-
-
-def test_claude_supported_carriers_do_not_bypass_plugin_policy(tmp_path):
+def test_claude_plugin_policy_is_independent_of_carrier_certification(tmp_path):
     result = probe(
         tmp_path,
         tool="claude",
-        help_text=CLAUDE_CARRIER_HELP,
-        flags=("--append-system-prompt-file", "--system-prompt-snapshot", "--plugin-dir"),
         session_plugin=True,
         settings={"enabledPlugins": {"agentworks-artifacts@fixture": False}},
     )
@@ -321,11 +288,21 @@ def test_launch_checks_unmanaged_workspace_collision_with_only_handled_ancestor(
     }
     observed_requests = []
 
-    def run(command, *, env, **kwargs):
+    def run(command, *, env=None, **kwargs):
+        if "input_data" not in kwargs:
+            from agentworks.ssh import SSHResult
+
+            checked = subprocess.run(["bash", "-c", command], capture_output=True, text=True, check=False)
+            return SSHResult(checked.returncode, checked.stdout, checked.stderr)
         argv = shlex.split(shlex.split(command)[-1])
         observed_requests.append(json.loads(kwargs["input_data"]))
         return subprocess.run(
-            argv, input=kwargs["input_data"], env={**os.environ, **env}, capture_output=True, text=True, check=False
+            argv,
+            input=kwargs["input_data"],
+            env={**os.environ, **(env or {})},
+            capture_output=True,
+            text=True,
+            check=False,
         )
 
     prepared = SessionArtifactContext(
@@ -387,6 +364,7 @@ def test_codex_generated_outer_persona_above_header_limit_remains_discoverable(t
         received(item),
         skills_root=str(tmp_path / "home/.agents/skills"),
         agents_root=str(tmp_path / "home/.codex/agents"),
+        instructions_path=str(tmp_path / "home/.codex/AGENTS.md"),
     )
     file = application.files[0]
     assert len(file.data) > 32768
@@ -527,7 +505,7 @@ def test_large_skill_retirement_does_not_leave_an_inventory_lockout(tmp_path):
         tuple(previous),
         lambda files: None,
         roots=(str(target.home),),
-    )
+    ).files
     assert len(retained) == 1 and not removed.exists()
     assert probe(tmp_path, tool="claude", entries={str(keep): "skill:review"})["problems"] == []
 
@@ -723,7 +701,7 @@ def test_user_setup_preflight_allows_retry_after_interrupted_skill_retirement(
         artifacts=received(removed, kept),
     )
     first = integration.user_init(invocation)
-    current = publish_artifacts(target, first.files, (), lambda files: None, roots=(str(target.home),))
+    current = publish_artifacts(target, first.files, (), lambda files: None, roots=(str(target.home),)).files
     if rootless:
         current = tuple(record.model_copy(update={"package_root": None}) for record in current)
     entrypoint = target.home / ".claude/skills/review/SKILL.md"
@@ -761,7 +739,9 @@ def test_user_setup_preflight_allows_retry_after_interrupted_skill_retirement(
     invocation = replace(invocation, prior=invocation.prior.model_copy(update={"artifact_files": checkpoints[-1]}))
     # This actual user_init invokes native preflight before retrying publication.
     retried = integration.user_init(invocation)
-    finished = publish_artifacts(target, retried.files, checkpoints[-1], checkpoints.append, roots=(str(target.home),))
+    finished = publish_artifacts(
+        target, retried.files, checkpoints[-1], checkpoints.append, roots=(str(target.home),)
+    ).files
     assert not entrypoint.exists()
     assert entrypoint.parent.exists() == (rootless or unowned_leftovers)
     if unowned_leftovers:
@@ -772,7 +752,8 @@ def test_user_setup_preflight_allows_retry_after_interrupted_skill_retirement(
     invocation = replace(invocation, prior=invocation.prior.model_copy(update={"artifact_files": finished}))
     subsequent = integration.user_init(invocation)
     assert (
-        publish_artifacts(target, subsequent.files, finished, checkpoints.append, roots=(str(target.home),)) == finished
+        publish_artifacts(target, subsequent.files, finished, checkpoints.append, roots=(str(target.home),)).files
+        == finished
     )
 
 
@@ -916,3 +897,73 @@ def test_production_probe_streams_large_valid_package_through_login_shell(tmp_pa
         == expected_home
     )
     assert all(files[-1].path not in command for command in target.commands)
+
+
+@pytest.mark.parametrize("operation", ["files", "probe"])
+def test_missing_python_refuses_before_staging_or_discovery(tmp_path, operation):
+    from agentworks.artifacts.native.probe import probe_native
+    from agentworks.errors import StateError
+    from agentworks.native_files import NativeFiles
+    from tests.native_setup_fixtures import LocalFixtureTransport
+
+    target = LocalFixtureTransport(tmp_path)
+    binary = tmp_path / "bin"
+    binary.mkdir()
+    (binary / "bash").symlink_to("/bin/bash")
+    target.environment["PATH"] = str(binary)
+    before = set(tmp_path.rglob("*"))
+    with pytest.raises(StateError) as caught:
+        if operation == "files":
+            with NativeFiles(target):
+                pytest.fail("missing prerequisite allowed staging")
+        else:
+            probe_native(target, tool="claude", environment=target.environment)
+    assert caught.value.hint
+    assert len(target.commands) == 1
+    assert set(tmp_path.rglob("*")) == before
+
+
+@pytest.mark.parametrize("returncode,stdout", [(127, ""), (1, "AGW_ARTIFACT_PROBE={}\n"), (0, "not-json")])
+def test_failed_native_probe_retains_external_diagnostic(returncode, stdout):
+    from unittest.mock import Mock
+
+    from agentworks.artifacts.native.probe import probe_native
+    from agentworks.errors import ExternalError
+    from agentworks.ssh import SSHResult
+    from agentworks.transports import Transport
+
+    target = Mock(spec=Transport)
+    stderr = "fixture interpreter or login-shell failure"
+    target.run.side_effect = [SSHResult(0, "", ""), SSHResult(returncode, stdout, stderr)]
+    with pytest.raises(ExternalError) as caught:
+        probe_native(target, tool="claude", environment={})
+    assert stderr in str(caught.value) + (caught.value.hint or "")
+    if returncode:
+        assert str(returncode) in str(caught.value)
+
+
+@pytest.mark.parametrize("returncode", [0, 1])
+@pytest.mark.parametrize("padding", ["", " "])
+def test_native_probe_errors_redact_runtime_environment(returncode, padding):
+    import shlex
+    import traceback
+    from unittest.mock import Mock
+
+    from agentworks.artifacts.native.probe import probe_native
+    from agentworks.errors import ExternalError
+    from agentworks.ssh import SSHResult
+    from agentworks.transports import Transport
+
+    short = "fixture-token"
+    long = padding + ("padded-secret" if padding else short) + "-'long value'" + padding
+    environment = {"API_TOKEN": short, "OTHER_TOKEN": long}
+    stderr = f"{long}\nstartup failed: {shlex.quote(long)}; {short}\n{long}"
+    target = Mock(spec=Transport)
+    target.run.side_effect = [SSHResult(0, "", ""), SSHResult(returncode, "invalid", stderr)]
+    with pytest.raises(ExternalError) as caught:
+        probe_native(target, tool="claude", environment=environment)
+    exposed = str(caught.value) + (caught.value.hint or "") + "".join(traceback.format_exception(caught.value))
+    assert short not in exposed
+    assert long.strip() not in exposed
+    assert shlex.quote(long) not in exposed
+    assert "startup failed" in exposed

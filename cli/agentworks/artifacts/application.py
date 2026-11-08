@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
 
 class ArtifactDeferral(AgwModel):
-    """An unchanged input routed by an integration, validated at its boundary."""
+    """An unchanged input routed inward, or left unhandled at the session facet."""
 
     input_id: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
     destination: ArtifactFacet
@@ -32,15 +32,17 @@ class ArtifactFile:
     executable: bool = False
     native_identity: str | None = None
     package_root: str | None = None
+    generated_section: bool = False
 
 
 class OwnedArtifactFile(AgwModel):
-    """Confirmed whole-file effects within the owner's existing applied state."""
+    """Confirmed file or generated-section effects in the owner's applied state."""
 
     path: Annotated[str, Field(max_length=4096)]
     sha256: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
     origins: Annotated[tuple[Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")], ...], Field(strict=False, min_length=1)]
     executable: bool = False
+    generated_section: bool = False
     native_identity: Annotated[str, Field(min_length=1, max_length=1024, pattern=r"^[^\x00-\x1f\x7f]+$")] | None = None
 
     package_root: Annotated[str, Field(max_length=4096)] | None = None
@@ -68,9 +70,30 @@ class OwnedArtifactFile(AgwModel):
         return self
 
 
+class ArtifactSkip(AgwModel):
+    """A destination left unchanged, with its input origins and actionable reason."""
+
+    path: Annotated[str, Field(max_length=4096)]
+    origins: Annotated[tuple[Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")], ...], Field(strict=False, min_length=1)]
+    reason: Annotated[str, Field(min_length=1)]
+
+    @field_validator("path")
+    @classmethod
+    def _skip_path(cls, value: str) -> str:
+        return OwnedArtifactFile._owned_path(value)
+
+
+@dataclass(frozen=True)
+class ArtifactPublication:
+    """Confirmed ownership and skipped destinations after publication."""
+
+    files: tuple[OwnedArtifactFile, ...] = ()
+    skipped: tuple[ArtifactSkip, ...] = ()
+
+
 @dataclass(frozen=True)
 class ArtifactApplication:
-    """A native delivery plan; only deferred inputs need a later facet."""
+    """A native delivery plan with deferred inputs, terminally unhandled at session."""
 
     files: tuple[ArtifactFile, ...] = ()
     deferred: tuple[ArtifactDeferral, ...] = ()

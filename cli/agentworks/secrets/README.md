@@ -41,7 +41,7 @@ spec:
   backend:
     name: onepassword
     account: work.example.com
-    timeout: 30
+    timeout: 300
     app_authentication_impact: operator-action
 ```
 

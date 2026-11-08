@@ -25,6 +25,9 @@ own `inventory.local.md` copy.
 | `<remote-user>` | `<your-remote-user>` | ssh/lima user on `<remote-lima-host>`. |
 | `<host-owner>` | `<your-host-owner>` | Who else, if anyone, shares the host (only relevant on a shared machine). |
 | `<system-slug>` | `<your-system-slug>` | The agentworks system slug seeded on this host (prefixes VM/tailnet names). |
+| `<proxmox-bed-host>` | `<your-proxmox-bed-host>` | The Proxmox VE bed backing the `proxmox` platform lane, if you have one. Nested virtualization on a cloud VM works; dedicated hardware is not required. |
+| `<windows-wsl2-bed>` | `<your-windows-wsl2-bed>` | The Windows host with nested virtualization backing the `wsl2` platform lane, if you have one. |
+| `<windows-workstation-bed>` | `<your-windows-workstation-bed>` | The Windows host used for the workstation axis (agw running natively on Windows), if it is separate from `<windows-wsl2-bed>`. |
 
 ## Notes specific to this host
 
@@ -35,6 +38,11 @@ environment that the generic skill cannot know in advance.
 Record which agentworks checkout the `agw` on this host is installed editable from, by path.
 The skill says `agw` runs whatever branch that checkout has out, so the path is what tells a
 reader which code a run actually drove.
+
+If you keep a Proxmox or Windows bed, record here how it is reached, how it is started and
+stopped, and anything its access path requires that a generic reader could not guess. A bed with no
+public ingress is reached through its cloud provider's own command channel rather than SSH, and that
+changes how every command on it is issued.
 
 If you run local lima, this is where its install lives: the `uv` binary path, the path of the
 checkout agw runs from there, and the exact method for refreshing that checkout to the branch

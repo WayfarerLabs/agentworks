@@ -11,7 +11,7 @@ from agentworks.agents.templates import ResolvedAgentTemplate
 from agentworks.agents.templates import resolve_from_dict_with_provenance as resolve_agent
 from agentworks.env.entry import EnvEntry
 from agentworks.resources.inheritance import LayerSource, LayerSourceKind
-from agentworks.schema import AgwModel, MergeStrategy
+from agentworks.schema import AgwModel, CapabilityConfig, MergeStrategy
 from agentworks.template_layers import merge_resolved_template_layer
 from agentworks.vms.admin import AdminConfig
 from agentworks.vms.admin import effective_references as admin_references
@@ -38,6 +38,7 @@ class _ResolvedProjection:
     values: list[str] = field(default_factory=list)
     mode: str = "default"
     resolved_only: str = "retained"
+    harness_integrations: dict[str, CapabilityConfig] = field(default_factory=dict)
 
 
 class _ProjectionDeclaration(AgwModel):
@@ -45,6 +46,7 @@ class _ProjectionDeclaration(AgwModel):
     values: list[str] | None = None
     mode: str | None = None
     declaration_only: str | None = None
+    harness_integrations: dict[str, CapabilityConfig] | None = None
 
 
 class _ReplacingProjectionDeclaration(_ProjectionDeclaration):
@@ -63,7 +65,7 @@ def test_resolved_layer_projection_does_not_require_identical_field_sets() -> No
         declaration_only="not part of the resolved value",
     )
 
-    resolved, _operations = merge_resolved_template_layer(target, declaration, object())
+    resolved, _operations = merge_resolved_template_layer(target, declaration, object(), facet="user")
 
     assert resolved.name == "selected"
     assert resolved.values == ["base", "child"]
@@ -76,7 +78,7 @@ def test_root_replacement_resets_omitted_resolved_fields_without_touching_resolv
     target = _ResolvedProjection(name="selected", values=["base"], mode="parent", resolved_only="retained")
     declaration = _ReplacingProjectionDeclaration(name="declaration-name")
 
-    resolved, _operations = merge_resolved_template_layer(target, declaration, object())
+    resolved, _operations = merge_resolved_template_layer(target, declaration, object(), facet="user")
 
     assert resolved.values == []
     assert resolved.mode == "default"

@@ -114,7 +114,7 @@ def test_shells_config_is_entirely_optional_beyond_its_tag() -> None:
     from agentworks.capabilities.harness_integration.shell import ShellConfig
 
     required = [name for name, field in ShellConfig.model_fields.items() if field.is_required()]
-    assert required == ["name"]  # the discriminator, which no template writes
+    assert required == []
 
 
 # -- config vocabulary: extraction + validation -------------------------------
@@ -123,7 +123,8 @@ def test_shells_config_is_entirely_optional_beyond_its_tag() -> None:
 def _refs(blob: dict[str, object]) -> tuple[object, ...]:
     return capability_config_references(
         kind="harness-integration",
-        config={"name": "shell", **blob},
+        name="shell",
+        config=blob,
         owner=RefOwner(kind="session-template", name="claude"),
         facet="session",
     )
@@ -140,7 +141,8 @@ def test_it_implies_no_reference() -> None:
 def _validate(blob: dict[str, object]) -> None:
     validate_capability_config(
         kind="harness-integration",
-        config={"name": "shell", **blob},
+        name="shell",
+        config=blob,
         owner=RefOwner(kind="session-template", name="claude"),
         facet="session",
     )
@@ -187,6 +189,12 @@ def test_validation_rejects_non_string_command() -> None:
 def test_validation_rejects_non_string_required_commands() -> None:
     with pytest.raises(ConfigError, match=r"required_commands\[0\]: must be a string"):
         _validate({"required_commands": [1, 2]})
+
+
+@pytest.mark.parametrize("value", [["unknown"], "session-artifact-files", None])
+def test_validation_rejects_unsupported_workarounds(value: object) -> None:
+    with pytest.raises(ConfigError):
+        _validate({"enabled_workarounds": value})
 
 
 def test_construct_revalidates_config() -> None:

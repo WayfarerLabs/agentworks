@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, cast
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
+    from agentworks.capabilities.descriptor import Facet
     from agentworks.resources.inheritance import LayerContribution
 
 
@@ -15,6 +16,8 @@ def merge_resolved_template_layer[T](
     target: T,
     declaration: BaseModel,
     _source: object,
+    *,
+    facet: Facet,
 ) -> tuple[T, tuple[LayerContribution, ...]]:
     """Merge one declaration onto a dataclass-backed resolved template.
 
@@ -25,9 +28,9 @@ def merge_resolved_template_layer[T](
     domain meaning of absence.
     """
     from agentworks.artifacts.declarations import ArtifactsConfig
+    from agentworks.capabilities.harness_integration.activations import merge_activation_layer
     from agentworks.env.entry import EnvEntry
     from agentworks.instance_overlay_codec import OVERLAY_EXCLUDED_FIELDS
-    from agentworks.schema import CapabilityBlock, merge_model
 
     declaration_fields = type(declaration).model_fields
     merge_fields = tuple(
@@ -49,8 +52,7 @@ def merge_resolved_template_layer[T](
         exclude_unset=True,
     )
     authored = {name: value for name, value in dumped.items() if name in merge_field_names and value is not None}
-    merged, operations = merge_model(type(declaration), previous, authored)
-    raw = cast("dict[str, object]", merged)
+    raw, operations = merge_activation_layer(type(declaration), previous, authored, facet=facet)
     for field in merge_fields:
         if field.name not in raw:
             raw[field.name] = _field_default(field)
@@ -60,10 +62,6 @@ def merge_resolved_template_layer[T](
         raw["env"] = {
             key: EnvEntry.model_validate(value) for key, value in cast("dict[str, object]", raw["env"]).items()
         }
-    if "harness_integrations" in raw:
-        raw["harness_integrations"] = [
-            CapabilityBlock.model_validate(value) for value in cast("list[object]", raw["harness_integrations"])
-        ]
     return cast("T", replace(cast("Any", target), **raw)), operations
 
 

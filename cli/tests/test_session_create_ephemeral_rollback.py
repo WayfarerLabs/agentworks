@@ -218,7 +218,7 @@ def test_realizers_receive_the_same_prepared_setup_after_one_resolve(
     db._conn.commit()
     _install_session_prep_stubs(monkeypatch)
 
-    prepared = {kind: SetupInputs(kind, "s1", kind, (), SecretTarget(vm={})) for kind in ("agent", "workspace")}
+    prepared = {kind: SetupInputs(kind, "s1", kind, {}, SecretTarget(vm={})) for kind in ("agent", "workspace")}
     for kind, inputs in prepared.items():
         monkeypatch.setattr(
             f"agentworks.harness_setup.lifecycle.prepare_{kind}_setup",

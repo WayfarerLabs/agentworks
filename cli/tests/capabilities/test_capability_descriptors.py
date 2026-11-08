@@ -338,10 +338,11 @@ def test_each_kinds_config_contract_matches_how_its_config_is_dispatched() -> No
     """
     contracts = {d.kind: d.config_schema for d in _descriptors()}
 
-    for tagged in ("vm-platform", "harness-integration"):
+    for tagged in ("vm-platform",):
         assert contracts[tagged].base is AgwModel, tagged
         assert contracts[tagged].discriminator == "name", tagged
 
+    assert contracts["harness-integration"].discriminator is None
     assert contracts["harness-integration"].layered_merge is True
     assert all(not contract.layered_merge for kind, contract in contracts.items() if kind != "harness-integration")
 

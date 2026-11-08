@@ -177,9 +177,18 @@ pretending it is unchanged. Session personas can use `--agents` JSON, avoiding p
 persona-field omissions. The subagent documentation cited above establishes primary and delegated
 use, but does not make every native option portable.
 
-Resume can reuse a saved system prompt. The documented `--system-prompt-snapshot off` changes that
-behavior; the native compatibility tests must establish the supported version and prove changed
-rules take effect. Merely rewriting an appended prompt file is insufficient evidence.
+Session rules/hints in the current adapter use an appended prompt file, whereas native `CLAUDE.md`
+is delivered as a user message and ordinary skill bodies load into the conversation on invocation.
+Those native mechanisms do not justify changing system-prompt recording. The
+[CLI reference](https://code.claude.com/docs/en/cli-reference#system-prompt-flags-in-resumed-conversations)
+documents that before 2.1.265, supplied prompt flags already disabled recording; the explicit
+snapshot-off adjustment is therefore limited to the opted-in appended-session-prompt method on newer
+versions. Installed versions observed in earlier acceptance are not minimum supported versions. Help
+output is incomplete and cannot certify flag absence.
+
+The [plugin reference](https://code.claude.com/docs/en/plugins-reference#standard-plugin-layout)
+explicitly excludes plugin-root `CLAUDE.md` from automatic project context. Plugin hooks could
+inject context but introduce another execution lifecycle; this correction adds no hook workaround.
 
 ### Codex
 
@@ -226,6 +235,40 @@ that exact entry point is proven, and requires native verification of persona in
   acquisition constraints and byte-sensitive fixtures.
 - Keep Codex and Grok interactive session skill delivery unsupported unless a documented and tested
   native mechanism is established. Do not redirect their whole user home or emulate native skills.
+
+## Defining-scope audit, 2026-09-15
+
+The follow-up audit compared the merged implementation at `b00b39be` with current native
+documentation. It found two implementation restrictions that were not native limitations:
+unconditional Codex hint/rule deferral and core's refusal of all VM artifact files.
+
+- [Codex instructions](https://learn.chatgpt.com/docs/agent-configuration/agents-md) documents user
+  and project `AGENTS.md` discovery. A nonempty `AGENTS.override.md` takes precedence; fallback
+  names do not add a second instruction file from the same directory. Therefore an owned generated
+  section must coexist with the selected instruction file. Creating an override sidecar would
+  suppress existing guidance. Native context limits remain relevant after file publication.
+- [Codex skills](https://learn.chatgpt.com/docs/build-skills) documents `/etc/codex/skills` as a
+  machine-wide location, alongside actual-user and repository skill roots. No corresponding
+  standalone machine agent directory was established by this audit; those inputs continue toward
+  user handling.
+- [Claude memory](https://code.claude.com/docs/en/memory) documents the Linux managed instruction
+  file `/etc/claude-code/CLAUDE.md`. The [skills](https://code.claude.com/docs/en/skills) and
+  [subagents](https://code.claude.com/docs/en/sub-agents) references document `.claude/skills` and
+  `.claude/agents` within the managed settings directory. Do not infer that an arbitrary
+  `/etc/claude-code/rules` directory is discovered.
+- [Grok system configuration](https://docs.x.ai/build/enterprise#configuration) and its
+  [settings reference](https://docs.x.ai/build/settings/reference) offer configured discovery paths.
+  Higher-layer replacement and per-user plugin trust prevent treating registration as universal
+  machine delivery. The audited
+  [upstream source](https://github.com/xai-org/grok-build/tree/482711333c7195dc16a272777f86086d615e2afb)
+  also exposes extra rule directories, but this was not established as a shipped stable guarantee.
+  The correction retains explicit Grok VM-to-user deferral rather than guessing.
+
+The operator selected generated instruction sections and accepted visibility to other harnesses
+reading the same `AGENTS.md`. Application replaces all content inside a complete generated section;
+broken delimiters warn and skip. This is an Agentworks publication contract, not native section
+management. The implementation does not add blanket version floors or promise exhaustive native
+configuration certification. Research used documentation and source; it made no model calls.
 
 ## Sources
 

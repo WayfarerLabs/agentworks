@@ -464,7 +464,7 @@ def test_legacy_vm_conversion_joins_only_a_complete_terminal_checkpoint(db, monk
     db.instance_state.put_desired_overlay("vm", "box", payload)
     original = db.instance_state.get_desired_overlay("vm", "box")
     assert original is not None
-    canonical = decode_stored_vm_overlays(original, legacy_user_base=[]).payload
+    canonical = decode_stored_vm_overlays(original, legacy_user_base={}).payload
     private = tmp_path / "id_ed25519"
     write_test_ssh_keypair(private)
     identity = read_private_ssh_identity(private)

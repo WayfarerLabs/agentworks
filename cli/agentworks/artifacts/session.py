@@ -9,13 +9,14 @@ from uuid import uuid4
 
 from agentworks.artifacts.application import ArtifactApplication, OwnedArtifactFile, SessionArtifactContext
 from agentworks.artifacts.publication import publish_artifacts, validate_application
+from agentworks.artifacts.reporting import report_applied, report_deferrals
 from agentworks.artifacts.state import CapturedArtifacts, capture_owner, write_capture
 from agentworks.errors import StateError
 from agentworks.harness_setup.inputs import SetupInputs
 from agentworks.harness_setup.model import NativeSetupState, SetupRecord
 from agentworks.harness_setup.state import read_native_setup, replace_setup_record, write_native_setup
 from agentworks.native_files import native_path
-from agentworks.schema import CapabilityBlock
+from agentworks.schema import CapabilityConfig
 
 if TYPE_CHECKING:
     from agentworks.db import Database, SessionRow, VMRow, WorkspaceRow
@@ -91,7 +92,7 @@ def prepare_session_artifacts(
         "session",
         name,
         "session",
-        (CapabilityBlock.of(template.harness_integration, **template.harness_integration_config),),
+        {template.harness_integration: CapabilityConfig.model_validate(template.harness_integration_config)},
         secret_target,
         template.artifacts,
         capture,
@@ -110,6 +111,9 @@ def validate_session_application(
         raise StateError("session artifacts conflict with an ancestor artifact destination")
     if any(not item.path.startswith(context.directory + "/") for item in result.files):
         raise StateError("session artifact publication must use its private run directory")
+    report_deferrals(
+        context.inputs, integration=integration, owner="session facet", deferred=result.deferred, terminal=True
+    )
     return result
 
 
@@ -132,9 +136,10 @@ def stage_session_artifacts(
         component="session",
         integration=integration,
         destination_id=hashlib.sha256(context.directory.encode()).hexdigest(),
-        declaration=prepared.setup_inputs.declaration(prepared.setup_inputs.activations[0]),
+        declaration=prepared.setup_inputs.declaration(integration, prepared.setup_inputs.activations[integration]),
         artifact_inputs=tuple(item.identity for item in context.inputs.items()),
         artifact_files=retained,
+        deferred=application.deferred,
     )
 
     def checkpoint(files: tuple[OwnedArtifactFile, ...]) -> None:
@@ -144,7 +149,18 @@ def stage_session_artifacts(
         write_native_setup(db, "session", name, state, operation="session-prepare")
 
     checkpoint(())
-    publish_artifacts(runner, application.files, (), checkpoint, roots=(context.directory,))
+    published = publish_artifacts(runner, application.files, (), checkpoint, roots=(context.directory,))
+    if published.skipped:
+        current = current.model_copy(update={"skipped": published.skipped})
+        state = replace_setup_record(state, current)
+        write_native_setup(db, "session", name, state, operation="session-prepare")
+    report_applied(
+        context.inputs,
+        integration=integration,
+        owner=f"session '{name}'",
+        deferred=application.deferred,
+        skipped=published.skipped,
+    )
 
 
 def commit_session_artifacts(
@@ -180,9 +196,9 @@ def commit_session_artifacts(
         )
         updated = record.model_copy(
             update={
-                "artifact_files": (*keep, *remaining),
+                "artifact_files": (*keep, *remaining.files),
                 "complete": record.integration == integration,
-                "pending_cleanup": record.integration != integration and bool(remaining),
+                "pending_cleanup": record.integration != integration and bool(remaining.files),
             }
         )
         state = replace_setup_record(state, updated)
@@ -216,5 +232,5 @@ def cleanup_session_artifacts(db: Database, session: SessionRow, runner: Transpo
             checkpoint,
             roots=(f"{home}/.agentworks-artifacts/session/{session.session_uuid}",),
         )
-        if remaining:
+        if remaining.files:
             raise StateError("modified session artifacts remain; inspect them before deleting their ownership record")

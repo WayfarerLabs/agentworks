@@ -72,17 +72,18 @@ def test_existing_session_setup_precedes_both_secret_passes_and_runtime_changes(
     before = db.get_session("s1")
     evidence = _record_setup_check(monkeypatch, events, severity=severity)
     launch = manager.start_session if operation == "start" else manager.restart_session
+    launch_kwargs = {"yes": True} if operation == "restart" else {}
     try:
         if severity == "required":
             with pytest.raises(RequiredSetupMissingError) as caught:
-                launch(db, config, name="s1", interaction=TtyInteractionPolicy.REFUSE)
+                launch(db, config, name="s1", interaction=TtyInteractionPolicy.REFUSE, **launch_kwargs)
             assert (caught.value.entity_kind, caught.value.entity_name) == ("agent", "a1")
             assert events == ["probe", "setup"]
             assert db.get_session("s1") == before
             assert not db.has_any_grant("a1", "ws1")
             assert captured_output.warnings == []
         else:
-            launch(db, config, name="s1", interaction=TtyInteractionPolicy.REFUSE)
+            launch(db, config, name="s1", interaction=TtyInteractionPolicy.REFUSE, **launch_kwargs)
             assert events == [
                 "probe",
                 "setup",
@@ -181,7 +182,7 @@ def test_pending_owners_check_fresh_applied_setup_before_launch(
             component=inputs.component,
             integration="shell",
             destination_id="a" * 64,
-            declaration=inputs.declaration(inputs.activations[0]),
+            declaration=inputs.declaration("shell", inputs.activations["shell"]),
             complete=complete,
         )
         write_native_setup(db_, inputs.kind, inputs.name, NativeSetupState(records=(record,)), operation="create")
@@ -200,7 +201,7 @@ def test_pending_owners_check_fresh_applied_setup_before_launch(
     monkeypatch.setattr("agentworks.workspaces.manager.delete_workspace", delete_workspace)
     monkeypatch.setattr("agentworks.agents.grants.add_to_workspace_group", lambda *a, **k: events.append("grant"))
     monkeypatch.setattr("agentworks.sessions.tmux.deploy_restricted_config", lambda *a, **k: events.append("deploy"))
-    spec = '{"harness_integrations":[{"name":"shell"}]}'
+    spec = '{"harness_integrations": {"shell": {}}}'
     try:
 
         def create() -> None:

@@ -10,6 +10,14 @@ this file records the final reviewed and operator-accepted implementation state.
 later in 0.19. This corrects the release labels assumed during planning; the shipped behavior and
 verification evidence are unchanged.
 
+**Exceptional restart-consent supersession (2026-09-15):** Authenticated operator direction
+supersedes every canonical no-prompt and compatibility-only restart-consent statement throughout
+this SDD, including the earlier summary in this lock file. Named and batch session restart require
+consent before replacing sessions live-detected as running, and `--yes` skips that consent.
+`--force` remains a distinct broken-state recovery control and does not imply consent. Non-running
+sessions do not prompt. This lock-file note records the exceptional post-lock correction; the
+historical FRD, HLA, LLD, and plan remain unchanged.
+
 ## What shipped
 
 - Sessions use explicit `start`, `stop`, `restart`, and `attach` operations. Ordinary start is

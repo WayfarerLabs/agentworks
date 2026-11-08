@@ -322,6 +322,7 @@ def test_incomplete_synchronous_teardown_persists_fingerprint_before_kill(
         target_owns_session=True,
         db=db,
         force=False,
+        legacy_running_authorized=True,
     )
 
     assert events == ["fingerprint", "kill", "stopped"]

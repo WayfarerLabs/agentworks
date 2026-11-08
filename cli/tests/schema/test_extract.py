@@ -738,3 +738,20 @@ def test_the_owner_kind_is_available_to_a_template() -> None:
         secret: Annotated[str, SecretRef(usage="u", default_template="{owner_kind}-{owner_name}")] | None = None
 
     assert names(_extracted(KindTemplated, {})) == ["git-credential-prod"]
+
+
+def test_python_mapping_keys_do_not_hide_value_references() -> None:
+    from agentworks.schema import MergeStrategy, merge_contract_error
+    from agentworks.schema.extract import extract_reference_paths
+
+    class IntegerKeys(AgwModel):
+        tokens: Annotated[dict[int, Annotated[str, SecretRef(usage="fixture")]], MergeStrategy.REPLACE]
+
+    class FloatKeys(AgwModel):
+        tokens: Annotated[dict[float, Annotated[str, SecretRef(usage="fixture")]], MergeStrategy.REPLACE]
+
+    for model, key in ((IntegerKeys, 2), (FloatKeys, 2.5)):
+        assert merge_contract_error(model) is None
+        value = model.model_validate({"tokens": {key: "secret-one"}})
+        assert [ref.name for ref in extract_references(model, value.model_dump())] == ["secret-one"]
+    assert extract_reference_paths(IntegerKeys, {"tokens": {2: "secret-one"}})[0][0] == ("tokens", 2)

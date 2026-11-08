@@ -39,7 +39,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from agentworks import output
-from agentworks.errors import ExternalError
+from agentworks.errors import AgentworksError, ExternalError
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -187,6 +187,12 @@ def realize_agent(
             except KeyboardInterrupt:
                 output.warn(f"Cancelling agent create '{name}'... rolling back.")
                 _safe_rollback()
+                raise
+            except AgentworksError as error:
+                _safe_rollback()
+                if error.entity_kind is None and error.entity_name is None:
+                    error.entity_kind = "agent"
+                    error.entity_name = name
                 raise
             except Exception as e:
                 _safe_rollback()

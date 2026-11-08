@@ -59,3 +59,18 @@ class CapabilityBlock(BaseModel):
         """The whole table as written, tag included: what the capability
         core validates and extracts references from."""
         return {"name": self.name, **self.config}
+
+
+class CapabilityConfig(BaseModel):
+    """Untagged capability-owned config selected by its enclosing map key.
+
+    The host accepts these keys here; finalization validates them against
+    the selected capability facet model.
+    """
+
+    model_config = ConfigDict(extra="allow", **_SHARED_SETTINGS)
+
+    @property
+    def config(self) -> dict[str, object]:
+        """The capability-owned keys as authored."""
+        return dict(self.model_extra or {})

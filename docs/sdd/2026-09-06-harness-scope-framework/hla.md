@@ -113,19 +113,18 @@ user facet; core supplies the actual user identity.
 | Workspace    | `workspace-template.harness_integrations`                       | workspace, `workspace_init`  | Workspace                 |
 | Session      | Existing `session-template.harness_integration`                 | session, `start(intent=...)` | Session                   |
 
-**List membership explicitly activates an integration at that setup resource.** Broader activations
-are ordered lists of tagged capability config blocks. Each block has the existing `name`
-discriminator and only that facet's fields. A name-only block activates the integration with
-defaults; there is no separate `enabled` flag. Multiple entries activate multiple integrations, each
-bound to its own config and executed in list order. Duplicate names in one effective list are a
-config error. An empty effective list selects none; default config or an implemented method cannot
-activate anything.
+**A config entry in the setup map explicitly activates an integration at that resource.** Each key
+is the integration name and its value contains only that facet's config. A `null` value disables
+that integration, including an inherited activation. For example,
+`harness_integrations: {claude-code: {plugins: [tools@market]}, codex: {}}` activates two
+integrations. An empty config value activates defaults; availability and implemented methods never
+activate an integration. Keys make duplicate integration identities structurally unnecessary.
 
-Session selection remains singular and explicit through `harness_integration: {name: ...}`. A
-selection declared by the selected template or inherited from a parent counts as explicit. If the
-effective selection is absent, report a config error rather than silently choosing shell. Preserve
-ordinary default shell use by giving the code-synthesized `session-template/default` an explicit
-`name: shell` block (`sessions/kinds.py:82`), not by substituting shell during resolution.
+Session selection retains `harness_integration: {name: shell}`. It remains explicit and singular:
+exactly one effective integration must be selected. Selecting a different `name` replaces the
+previous session integration; selecting the same name merges its config using the session facet
+schema. Setup-map opt-outs do not apply to the session selector. The synthesized default template
+explicitly selects shell. No fallback fills an absent selection.
 
 A setup integration activation does not enable its plugin globally, select a session workload, or
 implicitly activate the integration on an ancestor or descendant. Existing plugin enablement and
@@ -134,7 +133,7 @@ distinct from resource selection: making a plugin available never activates its 
 resource. One integration's setup also cannot satisfy another integration's readiness prerequisite.
 
 **Admin activation proposal, for confirmation:** place selection and user config together on the
-already-selected admin-template, using the same list shape and user-facet schema as agent templates.
+already-selected admin-template, using the same map shape and user-facet schema as agent templates.
 The VM already records `admin_template`, selects it with `--admin-template`, and supports an
 independent `--admin-spec` overlay (`cli/agentworks/instance_specs.py:105`). This avoids a second
 admin selection/config join on the vm-template. FRD open question 3 explicitly asks about a
@@ -149,11 +148,17 @@ selection, including the synthesized default. Config-only child templates still 
 parent's selection. Existing named templates with no effective selection need an explicit block or
 an explicit parent selection before use.
 
-For inheriting templates, the activation list replaces as a whole when authored by a nearer layer;
-omission inherits and an explicit empty list removes the inherited selection. Each block still uses
-its model's defaults and validation. This makes effective execution order explicit without adding
-list-item patching, dependency declarations, or integration priority knobs. The admin-template keeps
-its existing non-inheriting behavior, and instance overlays follow the same field policy.
+For inheriting templates, integration maps preserve parent keys and compose same-key config through
+the selected facet's own merge schema. Omission and an empty map inherit; an empty config value
+activates defaults when the key is new and contributes no overrides when inherited. A `null` entry
+removes that key from the effective activations and discards its former config. A later layer can
+reactivate it with empty or explicit config. Disabled entries do not invoke setup or contribute
+config references, while prior owned effects retire through owning reconciliation. Instance specs
+permit null only directly at an integration key, not inside its config or elsewhere. Admin templates
+retain their non-inheriting behavior, while their instance layer uses the same map merge. Core
+preserves per-setting provenance through these merges and reports the declaring layer for errors and
+referenced resources. Map iteration provides deterministic execution without dependency or priority
+controls.
 
 ## Facet config is ordinary capability config
 
@@ -165,22 +170,27 @@ its `config_model` is the session answer and setup facets offer no config. A mul
 overrides `config_for` for the fixed vm, user, workspace, and session vocabulary. Calling a
 multi-facet selection without the consumer's facet must not silently select session config.
 
-No offered model means an activation accepts its selection tag and no config fields. It still may
-invoke a method. Offering a model is neither a support claim nor a permission to invoke anything.
-Only the harness kind enumerates the four facet answers during registration/finalize; ordinary
-capabilities do not acquire per-facet declaration tables or new obligations.
+All native harness facet config models are untagged. Setup hosts select by activation map key; the
+session host retains its tagged `CapabilityBlock`, extracts `name`, and validates only the remaining
+config against the session facet model. Session schema projection generates the host-owned name
+discriminator around the selected model. No offered model means an activation accepts empty own
+config and no fields, authored as a name-only session block or an empty setup map entry. It still
+may invoke a method. Offering a model is neither a support claim nor a permission to invoke
+anything. Only the harness kind enumerates the four facet answers during registration/finalize;
+ordinary capabilities do not acquire per-facet declaration tables or new obligations.
 
 Core records each hosting field's selected facet alongside its existing capability-block metadata.
 Admin and agent hosting fields both select user. Harness reference output groups all four facet
 schemas, including an answer with no config; a reference to a particular resource field renders
 exactly that field's answer. The frozen descriptor carries a sequence of hosting surfaces with
-singular or list cardinality, replacing its current one-field assumption. That metadata describes
-consumers; implementations never receive a consumer kind as their config selector.
+singular tagged-block or setup-map cardinality, replacing its current one-field assumption. That
+metadata describes consumers; implementations never receive a consumer kind as their config
+selector.
 
 The model selected and checked at registration remains the model used for validation, merge,
 references, secret extraction, and schema output. Extend the current offered-model cache by facet;
 retain the current declaration-sensitive cache identity so registration, declaration replacement,
-and snapshot restoration cannot reuse a mismatched answer. Cache tagged unions by kind, selected
+and snapshot restoration cannot reuse a mismatched answer. Cache model selection by kind, selected
 facet, and the actual selected model arms. Preserve effective-layer validation and provenance,
 including errors pointing to the block and declaring resource.
 
@@ -192,7 +202,7 @@ The pre-design call-site walk identifies these obligations:
 | `capabilities/conformance.py`                                                         | Validate all harness answers at registration and retain the public `register_plugin` boundary checks for non-callable hooks, invalid models, and hook failures. |
 | `capabilities/base.py` constructor                                                    | Bind config and extract secrets from the same cached selected model; do not make a second uncached hook call.                                                   |
 | `manifests/field_tree.py` and `manifests/reference.py`                                | Render the correct facet at a resource field and all facets at the harness capability root.                                                                     |
-| `manifests/spec_model.py`, `manifests/decode.py`, and schema walkers                  | Walk every activation element with its index, facet, and owner; preserve tagged shape, shorthand policy, reference edges, and value-safe errors.                |
+| `manifests/spec_model.py`, `manifests/decode.py`, and schema walkers                  | Walk every activation element with its integration key, facet, and owner; preserve keyed shape, shorthand policy, reference edges, and value-safe errors.       |
 | Secret backend primary and mapping config                                             | Keep their ordinary config behavior and distinct `mapping_model` contract. They are not harness facets.                                                         |
 
 The registries themselves are already typed. Narrow the heterogeneous descriptor accessor's class
@@ -252,10 +262,10 @@ spec:
   env:
     TEAM_REVIEW_MODE: careful
   harness_integrations:
-    - name: claude-code
+    claude-code:
       marketplaces: [example-org/team-plugins]
       plugins: [reviewer@team-plugins]
-    - name: codex
+    codex:
       marketplaces: [example-org/codex-plugins]
       plugins: [reviewer@codex-plugins]
       settings:
@@ -268,11 +278,11 @@ metadata:
   name: team-project
 spec:
   harness_integrations:
-    - name: claude-code
+    claude-code:
       settings:
         source: file::~/.config/agentworks/claude-project.json
         strategy: merge-overwrite
-    - name: codex
+    codex:
       settings:
         source: file::~/.config/agentworks/codex-project.toml
         strategy: skip-existing
@@ -292,17 +302,17 @@ Creating a user from `team-claude` installs both CLIs through core setup, prepar
 invokes Claude and Codex user facets with their own marketplace/plugin lists. Codex maps the
 selected workstation file to its native user settings using the stated strategy. Creating a
 workspace from `team-project` runs Claude and Codex workspace facets with separate config to map
-their project settings. A name-only activation enables a supported facet's default behavior and is
-distinct from omitting the integration. Shell setup activation would fail because its setup facets
-are unimplemented.
+their project settings. An empty config activation enables a supported facet's default behavior and
+is distinct from omitting the integration. Shell setup activation would fail because its setup
+facets are unimplemented.
 
 A `team-review` session using those resources gets session config, applicable env, and upstream
 readiness facts; user config does not become launch flags. The same user block is valid on the
 proposed admin-template activation surface. Putting `permission_mode` in the user block or `plugins`
 in the session block is a facet-specific validation error. The user's Codex activation does not
 implicitly activate Codex on the workspace or select it for the session. With no inherited
-activation, omitting the workspace list selects none; an explicit empty list removes inherited
-selection. To use Codex for a session, select `name: codex` in that session's singular block.
+activation, omitting the workspace map selects none. An empty map preserves inherited selection. To
+use Codex for a session, select `harness_integration: {name: codex}`.
 
 All four integrations retain ordinary session-only use when setup is not requested. These are
 alternative `session-template.spec.harness_integration` blocks, each paired with its existing
@@ -324,7 +334,7 @@ name: shell
 
 Absent integration activations at setup scopes do not by themselves prevent these sessions from
 launching. Each checks its executable and any upstream prerequisite the integration declares.
-Name-only shell or Grok setup activation fails explicitly; the default shell retains its ordinary
+Empty-config shell or Grok setup activation fails explicitly; the default shell retains its ordinary
 launch behavior without setup activation. No artifact input, deferral result, shell discovery
 variable, or artifact cleanup method is introduced.
 
@@ -741,9 +751,13 @@ intentional settings retention. Include the new evidence in VM backup exports an
 payloads through domain codecs; exercise existing database backup/restore separately. Copied or
 restored applied-state records cannot bless a different native destination.
 
-Enablement covers name-only default config, two integrations with distinct configs and ordered
-calls, disabled/unavailable capabilities, duplicates, inherited selection, an empty setup list, and
-missing effective session selection. Unselected integrations do no new setup; retirement of prior
+Enablement covers empty default config, two integrations with distinct configs and ordered calls,
+disabled/unavailable capabilities, invalid keys, inherited selection, an empty setup map, null
+opt-outs, reactivation after an opt-out, and missing effective session selection. Saved setup lists
+require explicit migration because same-key config merge differs from whole-list replacement; null
+opt-outs can remove inherited integrations but do not restore the former config merge policy.
+Session selectors require no migration. Existing applied setup records retain their comparison
+format and ownership records. Unselected integrations do no new setup; retirement of prior
 activations still runs cleanup. The synthesized default explicitly selects shell, whose ordinary
 launch and resume behavior remains unchanged.
 

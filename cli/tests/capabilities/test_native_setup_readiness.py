@@ -23,7 +23,7 @@ from agentworks.harness_setup.readiness import (
     require_setup_ready,
 )
 from agentworks.harness_setup.state import write_native_setup
-from agentworks.schema import CapabilityBlock
+from agentworks.schema import CapabilityConfig
 from agentworks.secrets.orchestration import SecretTarget
 
 
@@ -74,7 +74,7 @@ def test_only_actual_user_current_applied_state_satisfies_evidence(tmp_path, mon
             kind="agent",
             name="one",
             component="agent",
-            activations=(CapabilityBlock.of("shell"),),
+            activations={"shell": CapabilityConfig.model_validate({})},
             target=SecretTarget(vm={}, agent={}),
         )
         runner = Mock()
@@ -82,7 +82,7 @@ def test_only_actual_user_current_applied_state_satisfies_evidence(tmp_path, mon
             component="agent",
             integration="shell",
             destination_id="a" * 64,
-            declaration=inputs.declaration(inputs.activations[0]),
+            declaration=inputs.declaration("shell", inputs.activations["shell"]),
             complete=True,
         )
         write_native_setup(db, "agent", "one", NativeSetupState(records=(record,)), operation="agent-reinit")

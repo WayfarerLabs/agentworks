@@ -329,6 +329,7 @@ def _walk(
             # sample that listed ``origin`` would be telling operators to
             # fill in something only the framework sets.
             continue
+        name = field.alias or name
         shape = shape_of(field)
         yield _field_doc((*path, name), field, shape)
         block, segment = _expandable(shape)

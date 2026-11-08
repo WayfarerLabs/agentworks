@@ -1,22 +1,12 @@
-"""The ``shell`` harness integration: run an operator-authored command (or a bare
-login shell) as the session workload.
-
-The plain, default member. Its config vocabulary is exactly
-the flat session-template fields the harness integration model replaces: ``command``
-(the pane command; empty = login shell), ``resume_command`` (the
-command on ordinary session start/restart, falling back to ``command``), and
-``required_commands`` (the executables the launch target must have on
-PATH). All optional.
-"""
+"""Run an operator-authored command or a bare login shell as the session workload."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, ClassVar, Literal
+from typing import TYPE_CHECKING, ClassVar
 
 from pydantic import Field
 
 from agentworks.artifacts.application import ArtifactApplication
-from agentworks.artifacts.native.common import defer
 from agentworks.artifacts.native.shell import shell_artifacts
 from agentworks.capabilities.harness_integration.base import (
     HarnessIntegration,
@@ -61,9 +51,6 @@ class ShellConfig(AgwModel):
     empty" at every read.
     """
 
-    name: Literal["shell"]
-    """The harness integration this config is for."""
-
     command: str = Field(default="", examples=["htop"])
     """The command the session's pane runs. Empty (the default) is a bare
     login shell."""
@@ -80,13 +67,11 @@ class ShellConfig(AgwModel):
 class ShellSetupConfig(AgwModel):
     """Activate shell artifact publication at an outer facet."""
 
-    name: Literal["shell"]
-
 
 class ShellIntegration(HarnessIntegration):
     """Runs an operator command (or a login shell) as the session."""
 
-    contract_version: ClassVar[int] = 6
+    contract_version: ClassVar[int] = 7
     name: ClassVar[str] = "shell"
     description: ClassVar[str] = "Run an operator command or a login shell"
     prose: ClassVar[TopicProse | None] = TopicProse(
@@ -105,10 +90,11 @@ class ShellIntegration(HarnessIntegration):
         turns a missing binary into a clear message instead of a pane that dies
         immediately.
 
-        Artifact bundles publish as files, with no model-context claim. User files
-        live in `~/.agentworks-artifacts/user/`; workspace files live in
-        `<workspace>/.agentworks-artifacts/`. A session with remaining artifacts
-        receives its private run directory through `AGENTWORKS_ARTIFACTS_DIR`.
+        Artifact bundles publish as files, with no model-context claim. VM files
+        live in `/opt/agentworks/artifacts/`; user files live in
+        `~/.agentworks-artifacts/user/`; workspace files live in
+        `<workspace>/.agentworks-artifacts/`. Session artifacts publish in a private
+        run directory exposed through `AGENTWORKS_ARTIFACTS_DIR`.
         """,
     )
 
@@ -122,9 +108,7 @@ class ShellIntegration(HarnessIntegration):
         return (
             ArtifactApplication()
             if self.retiring
-            else defer(
-                invocation.artifacts, "session", "Shell publishes VM artifacts in the consuming session directory"
-            )
+            else shell_artifacts(invocation.artifacts, "/opt/agentworks/artifacts")
         )
 
     def user_init(self, invocation: UserSetupInvocation) -> ArtifactApplication:
@@ -162,9 +146,9 @@ class ShellIntegration(HarnessIntegration):
             return HarnessStartNotImplemented()
         command = self.config.command if intent.starts_fresh else self.config.resume_command or self.config.command
         context = self._session_binding.artifact_context
-        application = (
-            shell_artifacts(context.inputs, context.directory, session=True) if context else ArtifactApplication()
-        )
+        application = ArtifactApplication()
+        if context:
+            application = shell_artifacts(context.inputs, context.directory, session=True)
         return HarnessStart(command, artifacts=application)
 
     def _probe_target(self, transport: Transport) -> None:

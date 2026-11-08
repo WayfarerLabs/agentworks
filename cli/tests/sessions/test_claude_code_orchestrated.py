@@ -253,6 +253,11 @@ def _restart_stubs(
 
     monkeypatch.setattr(session_manager, "_ensure_pid", lambda session, **k: session)
     monkeypatch.setattr(session_manager, "check_session_status", lambda *a, **k: SessionStatus.RUNNING)
+    monkeypatch.setattr(
+        session_manager,
+        "observe_session_statuses",
+        lambda sessions, **kwargs: {session.name: SessionStatus.RUNNING for session in sessions},
+    )
 
     def _spy_teardown(*args: object, **kwargs: object) -> None:
         events.append("kill")
@@ -275,6 +280,7 @@ def test_restart_reads_stored_id_before_the_kill_and_resumes(tmp_path: Path, mon
         db,
         SimpleNamespace(session=SimpleNamespace(history_limit=1)),
         name="s1",
+        yes=True,
         interaction=TtyInteractionPolicy.REFUSE,
     )  # type: ignore[arg-type]
 
@@ -307,6 +313,7 @@ def test_restart_of_a_pre_column_session_mints_and_persists_the_id(
         db,
         SimpleNamespace(session=SimpleNamespace(history_limit=1)),
         name="s1",
+        yes=True,
         interaction=TtyInteractionPolicy.REFUSE,
     )  # type: ignore[arg-type]
 
@@ -340,6 +347,7 @@ def test_restart_hoists_a_pre_namespacing_row_and_resumes_its_id(
         db,
         SimpleNamespace(session=SimpleNamespace(history_limit=1)),
         name="s1",
+        yes=True,
         interaction=TtyInteractionPolicy.REFUSE,
     )  # type: ignore[arg-type]
 
@@ -369,6 +377,7 @@ def test_restart_leaves_a_foreign_namespace_untouched(tmp_path: Path, monkeypatc
         db,
         SimpleNamespace(session=SimpleNamespace(history_limit=1)),
         name="s1",
+        yes=True,
         interaction=TtyInteractionPolicy.REFUSE,
     )  # type: ignore[arg-type]
 
@@ -407,6 +416,7 @@ def test_restart_under_another_harness_integration_leaves_the_flat_legacy_key_in
         db,
         SimpleNamespace(session=SimpleNamespace(history_limit=1)),
         name="s1",
+        yes=True,
         interaction=TtyInteractionPolicy.REFUSE,
     )  # type: ignore[arg-type]
 

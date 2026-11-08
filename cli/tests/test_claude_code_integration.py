@@ -73,7 +73,8 @@ def _session_scope() -> OperationScope:
 def _refs(blob: dict[str, object]) -> tuple[object, ...]:
     return capability_config_references(
         kind="harness-integration",
-        config={"name": "claude-code", **blob},
+        name="claude-code",
+        config=blob,
         owner=RefOwner(kind="session-template", name="claude"),
         facet="session",
     )
@@ -92,7 +93,8 @@ def _validate(blob: dict[str, object]) -> None:
     declares, and no integration code runs."""
     validate_capability_config(
         kind="harness-integration",
-        config={"name": "claude-code", **blob},
+        name="claude-code",
+        config=blob,
         owner=RefOwner(kind="session-template", name="claude"),
         facet="session",
     )

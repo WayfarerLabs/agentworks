@@ -40,6 +40,8 @@ combination is unsupported even when the native tool would allow it. Inspect the
 policy before changing restrictions; the error does not establish that the tool itself disables the
 artifact.
 
+<!-- agw:include path="artifacts/README.md" heading="Session workarounds" -->
+
 <!-- agw:include path="artifacts/README.md" heading="Inspect before changing state" -->
 
 Before reinitializing or recreating an owner, establish authorization for that operation and inspect

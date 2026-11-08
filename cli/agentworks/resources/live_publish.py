@@ -198,7 +198,10 @@ def project_vm_live_resource(
         )
     if layered_admin is not None:
         validate_activations(
-            layered_admin.value.harness_integrations, facet="user", source=source, provenance=layered_admin.provenance
+            layered_admin.value.active_harness_integrations,
+            facet="user",
+            source=source,
+            provenance=layered_admin.provenance,
         )
     vm_desired = (
         *(
@@ -369,7 +372,7 @@ def vm_live_resource(db: Database, registry: Registry, row: VMRow) -> LiveResour
     selected_vm = "default" if row.template is None else row.template
     selected_admin = "default" if row.admin_template is None else row.admin_template
     base = (
-        resolve_admin(registry, selected_admin).value.harness_integrations
+        resolve_admin(registry, selected_admin).value.active_harness_integrations
         if _is_published(registry, "admin-template", selected_admin)
         else None
     )

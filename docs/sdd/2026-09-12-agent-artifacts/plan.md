@@ -42,7 +42,8 @@ this follow-up.
 - [x] Rename the command and keep completion, machine output, tests and current documentation
       aligned.
 - [x] Complete private project and complexity review and validate the renamed CLI.
-- [ ] Publish a ready PR and monitor its authorized feedback/fix rounds.
+- [x] Publish a ready PR and monitor its authorized feedback/fix rounds. PR 806 merged on
+      2026-09-15; the one-hour feedback window was clean and no fix round was needed.
 
 ## Authoring amendment, 2026-09-14
 
@@ -790,3 +791,204 @@ command references belong to the saga lead and are called out in the handoff.
 Full non-integration suite: 9,593 passed, seven skipped. Ruff lint/format, mypy over 848 files,
 Typer isolation, locked-SDD and Rulesync checks passed. Website validation passed 160 Python tests,
 103 Node tests and deterministic double builds for both site bases.
+
+## Guest Python prerequisite correction, 2026-09-15
+
+Issue [812](https://github.com/WayfarerLabs/agentworks/issues/812) reports that the minimal WSL
+Debian root filesystem does not include Python. Native file operations and artifact discovery
+already use inline Python programs. Cloud images incidentally supplied the interpreter; that was not
+a declared platform guarantee. The operator directed making required guest dependencies
+unconditional.
+
+- [x] Install `python3` through the common required system-package list on every create/reinit.
+      Guest programs use the standard library; pip and virtual-environment packages are unnecessary.
+- [x] Stop initialization if mandatory package installation fails, before dependent setup. Optional
+      template-package failures retain their existing warning behavior.
+- [x] Share the missing-interpreter check between native staging and artifact discovery; preserve
+      probe process failure diagnostics separately from malformed response errors.
+- [x] Update permanent prerequisite and reinit guidance, including repair of older VMs.
+- [x] Complete private project, complexity and correctness reviews.
+- [x] Finish regression checks: 9,604 tests passed with seven skips; lint, types, Rulesync and
+      website checks passed.
+- [ ] Publish the ready follow-up PR for issue 812 and assess its feedback.
+
+This correction ships on `fix/vm-python-prerequisite`, under the artifact SDD. The initial issue's
+WSL observations are external evidence, not a live WSL rerun by this lead. Full SDD acceptance and
+locking remain separate.
+
+Private review is clean at `5b51afca`. The correctness lane caught runtime-value disclosure through
+probe stderr; the project lane then caught trimming before redaction of whitespace-bearing values.
+Both are corrected and covered on the nonzero-exit and invalid-response paths, including formatted
+tracebacks. Diagnostics retain process exit status and useful stderr after redacting known runtime
+values and their shell-quoted forms. Muntz verified the mandatory package call with bounded fake
+transport probes; the other reviews were source review, not independent full-suite or WSL runs.
+
+## Conservative session workarounds correction, 2026-09-15
+
+The operator superseded automatic session delivery and terminal launch errors with explicit
+`enabled_workarounds` and warnings for optional unhandled artifacts across every integration.
+Earlier checked work remains its historical implementation record. This correction uses one new
+implementation PR after PR 816; broader template-null policy remains a separate follow-up.
+
+- [x] Add typed, default-empty workaround lists with replacement inheritance to every session facet.
+- [x] Gate each existing native session carrier independently; shell session publication also opts
+      in.
+- [x] Warn for valid terminal unhandled inputs with origins and applicable workaround names; persist
+      the disposition and retire previously owned effects when an opt-in is removed.
+- [x] Remove blanket version/help certification; limit Claude snapshot handling to opted-in session
+      rules/hints and preserve focused domain errors through agent reinit.
+- [x] Update permanent guides, support matrices and design artifacts to the same contract.
+- [x] Complete independent project, correctness and complexity reviews.
+- [x] Finish required gates and isolated-HOME CLI validation.
+- [x] Publish the complete ready handoff and assess published feedback.
+
+Acceptance covers default behavior, selective opt-ins, inherited opt-out, unavailable native session
+skills, terminal warning inspection, valid safety failures, cleanup on disable/restart, older native
+versions and conditional prompt flags. Existing native outer placement remains ordinary behavior.
+
+Private review is clean at `aadffb58`. The project lane corrected two stale design statements; Muntz
+removed an unreachable Grok skill condition. Correctness review found that a Codex persona
+description could suppress configured primary guidance and that login-shell output could mislead the
+narrow Claude version check. Both are corrected with regressions. Muntz independently ran the 25
+affected cases and restored the old expressions to verify that 11 fail without the fixes. The
+project lane reviewed source; correctness additionally reproduced both corrected paths locally. No
+reviewer claimed a live VM or native model run.
+
+Lead validation passed: 9,750 non-integration tests, seven skipped; Ruff lint/format, mypy over 850
+files, file lint, locked-SDD, Rulesync and Typer isolation checks. Website gates passed 160 Python
+tests, 103 Node tests and deterministic double builds for both site bases. The real CLI exercised 16
+isolated-HOME configuration cases covering default-off, explicit enablement, inheritance and
+explicit disablement across all four integrations; unknown workaround names were refused and the
+artifact guide rendered successfully. Fixture HOME removal was independently verified. No live VM or
+native model run was performed here; the ready handoff requests the normal independent validation
+lane. Full SDD acceptance and locking remain separate.
+
+## Workarounds feedback round 1, 2026-09-15
+
+The operator authorized one fix round for PR 822 after the first handoff at `e6e1284d`. All lanes
+reported: saga review was clean, and independent integration validation verified default-off and
+opted-in Claude delivery on a real Lima VM, agent-facet delivery and owned-file retirement. Muntz
+identified an unguarded relationship between config-accepted workaround names and delivery mappings.
+Current names match, but adding an unimplemented config name must fail validation tests.
+
+- [x] Compare native config literals with the actual delivery maps, without copying workaround names
+      into the new check.
+- [x] Drive shell delivery separately for every schema-declared workaround and artifact type.
+- [x] Verify the new checks fail on a one-sided config-name addition; complete private reviews and
+      required gates.
+- [ ] Publish round 1 of 1 as ready and assess its feedback.
+
+The existing selective-delivery tests remain because they check each method's artifact types.
+Runtime behavior and operator configuration do not change in this round. The accepted check needs no
+new runtime registry. The other suggestions remain optional: input presence and emitted delivery are
+distinct predicates; two short lifecycle error handlers retain local ownership; Codex needs
+assignment-aware override parsing; warning acknowledgement would add a new knob. The tester's empty
+non-package session directories are a pre-existing cleanup opportunity, with no retained content,
+and remain outside this correction. The public critical reading records these dispositions.
+
+Round 1 private reviews are clean. Muntz ran 167 delivery cases, then added an unimplemented name to
+all four config declarations: the three native checks and four shell cases failed, while the four
+existing shell cases passed. Removing those mutations restored all seven focused checks. The
+correctness lane also ran the new cases and suggested excluding the index from the payload
+assertion; that strengthening is included and the seven cases pass. The project lane reviewed source
+and SDD bookkeeping without claiming a live run.
+
+Round 1 validation: 9,757 tests passed, seven skipped; Ruff lint/format, mypy (850 files), file
+lint, locked-SDD, Typer isolation and Rulesync checks passed. Rulesync 7.14.0 ran through npx with
+an isolated package cache after the Bun runner stalled and an older cached installation failed
+before checking repository output. Website Python (160) and Node (103) tests and both deterministic
+build comparisons passed. The 16 real CLI configuration cases and unknown-name refusal passed again;
+temporary HOME and build outputs were independently verified removed. The first handoff's
+independent live Lima evidence covers the unchanged runtime; this tests-and-plan correction did not
+run another VM workload.
+
+## Native defining-scope placement correction, 2026-09-15
+
+The operator approved replacing unnecessary native deferrals, generated instruction sections,
+per-type application and deferral progress, and direct shell publication at every facet. This
+supersedes shell's session opt-in and the initial VM routing-only implementation. Earlier completed
+checkboxes remain the historical record.
+
+- [x] Support generated instruction sections, replacing a complete managed extent while preserving
+      surrounding bytes and metadata; warn, retain and record malformed sections as skipped.
+- [x] Publish VM artifact files using the existing transport and ownership lifecycle, with
+      machine-readable permissions and no new VM deletion prerequisite.
+- [x] Apply Codex hints/rules at user and workspace scope through the selected native instruction
+      file; apply verified Claude and Codex artifacts at VM scope.
+- [x] Publish shell artifacts directly at VM, user, workspace and session scope without an opt-in.
+- [x] Report actual application by artifact type and bounded name list; report deferral reasons and
+      destinations without promising that restart alone guarantees delivery.
+- [x] Update native inventory, inspection, permanent guides, support matrices and design response.
+- [x] Close the unavailable post-merge PR 822 feedback question per operator direction.
+- [x] Complete independent project, complexity and correctness reviews plus required validation.
+- [x] Publish the complete ready PR 825 and assess its initial feedback.
+
+Acceptance includes empty and pre-existing instruction files; edited complete sections; missing,
+reversed and duplicate delimiters; unrelated content and mode preservation; generated-section
+retirement; privileged VM publication readable by consumers; native cross-scope identity checks;
+shell publication without deferral; and progress counts per artifact rather than per package file.
+No native model calls are necessary for these filesystem and lifecycle claims.
+
+Private review is clean at `0179eee5`. Project review ran 105 targeted cases. Correctness review
+reproduced extended-attribute loss and a section-to-whole ownership promotion; both are fixed with
+real guest-program regressions, including ACL preservation and failure before replacement. Muntz
+found that file-based reporting omitted argument-only Codex/Grok delivery. Reporting now counts
+handled inputs minus explicit deferrals and skips. Both real renderers report hints and rules even
+with no generated files. Its follow-up passed 57 tests and verified the ownership and attribute
+checks through deletion experiments. A final fixture permission adjustment makes both existing-file
+ownership-transition directions fail when that guard is removed; Muntz independently confirmed it.
+The remaining changes clarify existing limitations and migration wording, not runtime policy.
+
+Validation passed: 9,810 non-integration tests, seven skipped; Ruff lint/format; strict mypy over
+856 files; file lint; locked-SDD and Typer checks; Rulesync 7.14.0. Website validation passed 160
+Python tests, 103 Node tests and deterministic builds for both site bases. One website
+keyboard-input timing test initially failed under concurrent load, passed its isolated retry, and
+then passed in another complete 160-test run. Real isolated-HOME CLI checks covered native
+default/opt-in/inherited/ explicitly-disabled workaround configuration, direct shell configuration,
+refusal of the removed shell setting, and rendered artifact guidance. Temporary HOME and build
+artifacts were removed. Guest filesystem tests execute the actual publication helper; root elevation
+is intercepted within local fixtures, so they are not evidence of live privileged VM publication. No
+live VM inventory is configured for this session, and no model calls were made. The ready handoff
+requests the normal independent integration-validation lane.
+
+PR 822's visible Muntz finding and dispositions were re-read and accounted for: native workaround
+name parity remains covered, shell's obsolete setting and its associated checks are removed, and its
+optional unrelated simplifications remain outside this correction. As of the final local review,
+GitHub returned no separate post-merge report in issue comments, reviews or inline comments. The
+operator was asked for its link; the additional report remains pending rather than being claimed
+reviewed.
+
+## PR 825: global elevated-file boundary correction
+
+The operator approved one global fixed allowlist shared by all integrations, instead of either
+unrestricted VM destinations or per-integration grants. PR 825 is draft during this directed
+correction. The allowed trees are `/etc/claude-code`, `/etc/codex` and `/opt/agentworks/artifacts`.
+The existing `NativeFiles` helper remains the migration seam for the proposed Transport file APIs in
+PR 795.
+
+- [x] Enforce the global boundary on elevated reads, writes and cleanup, including persisted paths.
+- [x] Verify refusals before I/O and preserve normal unprivileged operation.
+- [x] Update the integration and artifact guides and architecture.
+- [x] Complete private project, correctness and complexity reviews and validation.
+- [ ] Publish and describe the exact corrected head, then return PR 825 to ready.
+
+The first handoff's independent live Lima test verified Codex user guidance, surrounding-content and
+metadata preservation, malformed-section refusal without changing bytes, and recorded skips. It did
+not exercise VM publication or large progress groups. Its clean report is evidence for those
+user-scope paths, not live proof of privileged publication. The operator closed the unavailable
+post-merge PR 822 report question; no additional report is claimed reviewed.
+
+Private review is clean through `cf6dd921`. The project reviewer ran 191 targeted cases; Muntz ran
+160 cases and confirmed that removing direct helper enforcement fails 33 tests, while removing
+publication-wide preflight fails six. The correctness lane independently checked 121 invalid
+elevated operations, persisted paths, cleanup bounds, broader caller scopes and retained symlink
+refusal. The first review found one stale dispatch expectation requiring unrestricted VM roots; that
+test now checks the shared allowlist and uses an approved fixture path.
+
+Final validation: 9,900 non-integration tests passed, seven skipped; Ruff lint/format, strict mypy
+(857 files), file lint, locked-SDD, exact CI Typer isolation and Rulesync 7.14.0 passed. The first
+full test run failed only the stale dispatch expectation already corrected; the final full rerun is
+clean. Website Python (160), Node (103) and both deterministic double builds passed. The real CLI
+rendered the updated artifact guide in an isolated HOME, which was removed afterwards. Filesystem
+tests use real local helper execution with simulated elevation; no live VM publication is claimed
+for this correction.

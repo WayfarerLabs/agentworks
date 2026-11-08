@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from agentworks import output
@@ -10,10 +10,11 @@ from agentworks.artifacts.bundle import resolve_bundle
 from agentworks.errors import NotFoundError, StateError, ValidationError
 from agentworks.harness_setup.inputs import SetupInputs
 from agentworks.harness_setup.state import read_native_setup
-from agentworks.schema import CapabilityBlock
+from agentworks.schema import CapabilityConfig
 from agentworks.secrets.orchestration import SecretTarget
 
 if TYPE_CHECKING:
+    from agentworks.artifacts.application import ArtifactSkip
     from agentworks.artifacts.declarations import ArtifactsConfig
     from agentworks.artifacts.model import (
         ArtifactComponent,
@@ -126,6 +127,7 @@ class IntegrationMetadata:
     placements: tuple[PlacementMetadata, ...] = ()
     passthrough_inputs: tuple[str, ...] = ()
     passthrough_destination: ArtifactFacet | None = None
+    recorded_skipped: tuple[ArtifactSkip, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -155,9 +157,7 @@ def _owner_inputs(db: Database, registry: Registry, context: ArtifactContext) ->
     from agentworks.workspaces.templates import resolve_live_template as workspace_template
 
     vm = vm_template(db, registry, context.vm.name, context.vm.template)
-    owners = [
-        SetupInputs("vm", context.vm.name, "vm", tuple(vm.harness_integrations), SecretTarget(vm=vm.env), vm.artifacts)
-    ]
+    owners = [SetupInputs("vm", context.vm.name, "vm", vm.harness_integrations, SecretTarget(vm=vm.env), vm.artifacts)]
     user_env, admin_env, workspace_env = None, None, None
     if context.admin:
         user = admin_template(db, registry, context.vm.name, context.vm.admin_template)
@@ -167,7 +167,7 @@ def _owner_inputs(db: Database, registry: Registry, context: ArtifactContext) ->
                 "vm",
                 context.vm.name,
                 "admin",
-                tuple(user.harness_integrations),
+                user.active_harness_integrations,
                 SecretTarget(vm=vm.env, admin=user.env),
                 user.artifacts,
             )
@@ -180,7 +180,7 @@ def _owner_inputs(db: Database, registry: Registry, context: ArtifactContext) ->
                 "agent",
                 context.agent.name,
                 "agent",
-                tuple(agent.harness_integrations),
+                agent.harness_integrations,
                 SecretTarget(vm=vm.env, agent=agent.env),
                 agent.artifacts,
             )
@@ -193,7 +193,7 @@ def _owner_inputs(db: Database, registry: Registry, context: ArtifactContext) ->
                 "workspace",
                 context.workspace.name,
                 "workspace",
-                tuple(workspace.harness_integrations),
+                workspace.harness_integrations,
                 SecretTarget(vm=vm.env, workspace=workspace.env),
                 workspace.artifacts,
             )
@@ -205,7 +205,7 @@ def _owner_inputs(db: Database, registry: Registry, context: ArtifactContext) ->
                 "session",
                 context.session.name,
                 "session",
-                (CapabilityBlock.of(session.harness_integration, **session.harness_integration_config),),
+                {session.harness_integration: CapabilityConfig.model_validate(session.harness_integration_config)},
                 SecretTarget(vm=vm.env, admin=admin_env, agent=user_env, workspace=workspace_env, session=session.env),
                 session.artifacts,
             )
@@ -240,7 +240,7 @@ def inspect_artifacts(
         names: dict[str, None] = {}
         diagnostics: dict[ArtifactComponent, tuple[str, ...]] = {}
         for owner in owners:
-            names.update((block.name, None) for block in owner.activations)
+            names.update((name, None) for name in owner.activations)
             try:
                 names.update(
                     (record.integration, None)
@@ -262,13 +262,20 @@ def inspect_artifacts(
             views: dict[ArtifactComponent, ArtifactOwnerView] = {}
             for owner in owners:
                 inherited: dict[ArtifactOwner, ArtifactGroup] | None = {}
+                blocker: ArtifactOwnerView | None = None
                 if owner.component in ("admin", "agent", "workspace"):
                     inherited = deferred_inputs(views["vm"], "workspace" if owner.component == "workspace" else "user")
                 elif owner.component == "session":
-                    inherited = session_inherited_inputs(
-                        views["vm"], views["admin" if context.admin else "agent"], views["workspace"]
-                    )
+                    ancestors = (views["vm"], views["admin" if context.admin else "agent"], views["workspace"])
+                    blocker = next((view for view in ancestors if view.status not in ("current", "inactive")), None)
+                    inherited = session_inherited_inputs(*ancestors)
                 view = inspect_owner_artifacts(db, registry, owner, name, inherited=inherited)
+                if view.ancestor_blocked and blocker is not None:
+                    source = blocker.owner
+                    view = replace(
+                        view,
+                        reason=f"Blocked by {source.component}/{source.name} ({blocker.status}): {blocker.reason}",
+                    )
                 views[owner.component] = view
                 integrations[owner.component].append(_integration_metadata(owner, name, view))
         projected = []
@@ -350,10 +357,17 @@ def _integration_metadata(owner: SetupInputs, name: str, view: ArtifactOwnerView
         else tuple(DeferralMetadata(item.input_id, item.destination, item.reason) for item in record.deferred)
     )
     deferred_ids = {item.input_id for item in deferred}
+    skipped = () if record is None else record.skipped
+    skipped_origins = {origin for item in skipped for origin in item.origins}
+    skipped_ids = {
+        item.identity
+        for item in (() if view.prepared is None else view.prepared.items())
+        if item.origin_identity in skipped_origins
+    }
     handled = (
         ()
-        if record is None or not record.complete
-        else tuple(input_id for input_id in record.artifact_inputs or () if input_id not in deferred_ids)
+        if record is None or not record.complete or (skipped and view.prepared is None)
+        else tuple(input_id for input_id in record.artifact_inputs or () if input_id not in deferred_ids | skipped_ids)
     )
     placements = (
         ()
@@ -362,7 +376,7 @@ def _integration_metadata(owner: SetupInputs, name: str, view: ArtifactOwnerView
     )
     return IntegrationMetadata(
         name,
-        any(block.name == name for block in owner.activations),
+        name in owner.activations,
         view.status,
         view.reason,
         handled,
@@ -370,6 +384,7 @@ def _integration_metadata(owner: SetupInputs, name: str, view: ArtifactOwnerView
         placements,
         tuple(item.identity for group in (passthrough or {}).values() for item in group.items()),
         destination if passthrough else None,
+        skipped,
     )
 
 
@@ -419,7 +434,12 @@ def render_artifacts(inspection: ArtifactInspection) -> None:
             for input_id in integration.recorded_handled:
                 output.info(f"    Recorded handled: {input_id[:12]}")
             for item in integration.recorded_deferred:
-                output.info(f"    Recorded deferred: {item.input_id[:12]} to {item.destination}: {item.reason}")
+                if owner.facet == "session":
+                    output.info(f"    Recorded unhandled: {item.input_id[:12]}: {item.reason}")
+                else:
+                    output.info(f"    Recorded deferred: {item.input_id[:12]} to {item.destination}: {item.reason}")
+            for skipped in integration.recorded_skipped:
+                output.info(f"    Recorded skipped: {skipped.path}: {skipped.reason}")
             for placement in integration.placements:
                 output.info(f"    Recorded placement: {placement.path} ({placement.native_identity or 'file'})")
     output.info("Recorded application does not verify current native files or model context.")
@@ -479,6 +499,10 @@ def inspection_data(inspection: ArtifactInspection) -> JsonObject:
                         "recorded_deferred": [
                             {"input_id": value.input_id, "destination": value.destination, "reason": value.reason}
                             for value in item.recorded_deferred
+                        ],
+                        "recorded_skipped": [
+                            {"path": value.path, "origins": list(value.origins), "reason": value.reason}
+                            for value in item.recorded_skipped
                         ],
                         "placements": [
                             {

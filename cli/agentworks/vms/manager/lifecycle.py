@@ -761,7 +761,7 @@ def reinit_vm(
     from agentworks.vms.templates import resolve_template_with_provenance
 
     original_overlay = db.instance_state.get_desired_overlay("vm", vm.name)
-    base = resolve_admin_base(registry, vm.admin_template).value.harness_integrations
+    base = resolve_admin_base(registry, vm.admin_template).value.active_harness_integrations
     stored_overlays = (
         None if original_overlay is None else decode_stored_vm_overlays(original_overlay, legacy_user_base=base)
     )

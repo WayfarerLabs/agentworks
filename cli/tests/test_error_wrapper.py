@@ -13,6 +13,8 @@ import pytest
 import typer
 
 from agentworks.cli import _record_unhandled_error
+from agentworks.cli._errors import echo_hint
+from agentworks.errors import ExternalError, SecretUnavailableError, StateError
 from agentworks.output import AgentworksError
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.ssh import SSHError
@@ -71,6 +73,31 @@ def test_record_unhandled_error_handles_unusable_log_dir(tmp_path: Path, monkeyp
         result = _record_unhandled_error(exc)
 
     assert result is None
+
+
+def test_main_wrapper_renders_secret_unavailability_without_a_traceback(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Expected secret unavailability is a clean domain failure."""
+    from agentworks import cli as cli_mod
+    from agentworks.cli import _entry
+
+    def fake_app() -> None:
+        raise SecretUnavailableError("secret unavailable", hint="retry")
+
+    record_calls: list[BaseException] = []
+    monkeypatch.setattr(cli_mod, "app", fake_app)
+    monkeypatch.setattr(_entry, "record_unhandled_error", lambda exc: record_calls.append(exc))
+    monkeypatch.setattr("sys.argv", ["agentworks", "fixture"])
+    monkeypatch.setenv("AGW_DEBUG", "")
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli_mod.main()
+
+    assert exc_info.value.code == 1
+    assert "Traceback" not in capsys.readouterr().err
+    assert record_calls == []
 
 
 def test_main_wrapper_catches_unhandled_exception(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -751,3 +778,48 @@ def test_create_session_surfaces_dead_workload_output_through_rollback(
     assert not any("server-access" in c for c in agent_commands)
     assert not any("chmod g+rwx" in c for c in agent_commands)
     db.close()
+
+
+@pytest.mark.windows
+def test_echo_hint_keeps_the_remediation_from_a_wrapped_cause(capsys: pytest.CaptureFixture[str]) -> None:
+    """A wrapping layer's own hint must not discard the cause's remediation.
+
+    Initialization wraps the underlying failure with a hint about retrying the
+    operation, which is useful but says nothing about what to repair. Rendering
+    only the outermost hint dropped the half that named the fix.
+    """
+    cause = StateError("destination is a symlink", hint="remove the link on the VM")
+    try:
+        raise ExternalError("initialization failed: destination is a symlink", hint="retry with vm reinit") from cause
+    except ExternalError as exc:
+        echo_hint(exc)
+
+    rendered = capsys.readouterr().err
+    assert "retry with vm reinit" in rendered
+    assert "remove the link on the VM" in rendered
+
+
+@pytest.mark.windows
+def test_echo_hint_renders_an_identical_hint_once(capsys: pytest.CaptureFixture[str]) -> None:
+    """A layer restating its cause's hint should not double the output."""
+    shared = "remove the link on the VM"
+    cause = StateError("inner", hint=shared)
+    try:
+        raise ExternalError("outer", hint=shared) from cause
+    except ExternalError as exc:
+        echo_hint(exc)
+
+    assert capsys.readouterr().err.count("Hint:") == 1
+
+
+@pytest.mark.windows
+def test_echo_hint_survives_a_self_referential_cause_chain(capsys: pytest.CaptureFixture[str]) -> None:
+    """Walking causes must terminate even when the chain points back at itself."""
+    outer = ExternalError("outer", hint="retry with vm reinit")
+    inner = StateError("inner", hint="remove the link on the VM")
+    outer.__cause__ = inner
+    inner.__cause__ = outer
+
+    echo_hint(outer)
+
+    assert capsys.readouterr().err.count("Hint:") == 2

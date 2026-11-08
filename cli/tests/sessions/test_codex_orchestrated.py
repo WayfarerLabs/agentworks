@@ -196,6 +196,11 @@ def _restart_stubs(
 
     monkeypatch.setattr(session_manager, "_ensure_pid", lambda session, **k: session)
     monkeypatch.setattr(session_manager, "check_session_status", lambda *a, **k: SessionStatus.RUNNING)
+    monkeypatch.setattr(
+        session_manager,
+        "observe_session_statuses",
+        lambda sessions, **kwargs: {session.name: SessionStatus.RUNNING for session in sessions},
+    )
 
     def _spy_teardown(*args: object, **kwargs: object) -> None:
         events.append("kill")
@@ -211,6 +216,7 @@ def _restart(db: Database) -> None:
         db,
         SimpleNamespace(session=SimpleNamespace(history_limit=1)),
         name="s1",
+        yes=True,
         interaction=TtyInteractionPolicy.REFUSE,
     )  # type: ignore[arg-type]
 

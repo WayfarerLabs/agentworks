@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from textwrap import dedent
-from typing import Annotated, ClassVar, Literal
+from typing import Annotated, ClassVar
 
 import pytest
 from pydantic import Field
@@ -46,7 +46,6 @@ class _FakeConfig(AgwModel):
     """The fake integration's config: its tag plus one field the
     inheritance tests can put a recognizable value in."""
 
-    name: Literal["fake"]
     marker: str | None = None
     nested: dict[str, str] = Field(default_factory=dict)
     items: Annotated[list[str], MergeStrategy.REPLACE] = Field(default_factory=list)
@@ -199,19 +198,21 @@ def test_child_same_harness_integration_merges_child_wins_and_unions_required() 
     templates = {
         "base": SessionTemplate(
             name="base",
-            harness_integration=CapabilityBlock.of("shell", **{"command": "claude", "required_commands": ["claude"]}),
+            harness_integration=CapabilityBlock.of(
+                "shell", **{**{"command": "claude", "required_commands": ["claude"]}}
+            ),
         ),
         "child": SessionTemplate(
             name="child",
             inherits=["base"],
-            harness_integration=CapabilityBlock.model_validate(
-                {
-                    "name": "shell",
+            harness_integration=CapabilityBlock.of(
+                "shell",
+                **{
                     **{
                         "command": "claude --resume",
                         "required_commands": ["rg"],
-                    },
-                }
+                    }
+                },
             ),
         ),
     }
@@ -227,18 +228,12 @@ def test_same_registered_integration_recurses_through_its_model(
     templates = {
         "base": SessionTemplate(
             name="base",
-            harness_integration=CapabilityBlock.of(
-                "fake",
-                **{"nested": {"left": "base", "shared": "base"}},
-            ),
+            harness_integration=CapabilityBlock.of("fake", **{**{"nested": {"left": "base", "shared": "base"}}}),
         ),
         "child": SessionTemplate(
             name="child",
             inherits=["base"],
-            harness_integration=CapabilityBlock.of(
-                "fake",
-                **{"nested": {"right": "child", "shared": "child"}},
-            ),
+            harness_integration=CapabilityBlock.of("fake", **{**{"nested": {"right": "child", "shared": "child"}}}),
         ),
     }
 
@@ -254,18 +249,12 @@ def test_same_unknown_integration_replaces_the_complete_raw_config() -> None:
     templates = {
         "base": SessionTemplate(
             name="base",
-            harness_integration=CapabilityBlock.of(
-                "not-installed",
-                **{"left": "base", "nested": {"old": True}},
-            ),
+            harness_integration=CapabilityBlock.of("not-installed", **{**{"left": "base", "nested": {"old": True}}}),
         ),
         "child": SessionTemplate(
             name="child",
             inherits=["base"],
-            harness_integration=CapabilityBlock.of(
-                "not-installed",
-                **{"right": "child"},
-            ),
+            harness_integration=CapabilityBlock.of("not-installed", **{**{"right": "child"}}),
         ),
     }
 
@@ -280,39 +269,39 @@ def test_harness_list_provenance_tracks_union_and_child_wins(
     templates = {
         "shell-base": SessionTemplate(
             name="shell-base",
-            harness_integration=CapabilityBlock.of("shell", **{"required_commands": ["git"]}),
+            harness_integration=CapabilityBlock.of("shell", **{**{"required_commands": ["git"]}}),
         ),
         "shell-child": SessionTemplate(
             name="shell-child",
             inherits=["shell-base"],
-            harness_integration=CapabilityBlock.of("shell", **{"required_commands": ["git", "rg"]}),
+            harness_integration=CapabilityBlock.of("shell", **{**{"required_commands": ["git", "rg"]}}),
         ),
         "fake-base": SessionTemplate(
             name="fake-base",
-            harness_integration=CapabilityBlock.of("fake", **{"items": ["parent"]}),
+            harness_integration=CapabilityBlock.of("fake", **{**{"items": ["parent"]}}),
         ),
         "fake-child": SessionTemplate(
             name="fake-child",
             inherits=["fake-base"],
-            harness_integration=CapabilityBlock.of("fake", **{"items": ["child"]}),
+            harness_integration=CapabilityBlock.of("fake", **{**{"items": ["child"]}}),
         ),
         "same-base": SessionTemplate(
             name="same-base",
-            harness_integration=CapabilityBlock.of("fake", **{"items": ["same"]}),
+            harness_integration=CapabilityBlock.of("fake", **{**{"items": ["same"]}}),
         ),
         "same-child": SessionTemplate(
             name="same-child",
             inherits=["same-base"],
-            harness_integration=CapabilityBlock.of("fake", **{"items": ["same"]}),
+            harness_integration=CapabilityBlock.of("fake", **{**{"items": ["same"]}}),
         ),
         "shape-base": SessionTemplate(
             name="shape-base",
-            harness_integration=CapabilityBlock.of("fake", **{"items": "scalar"}),
+            harness_integration=CapabilityBlock.of("fake", **{**{"items": "scalar"}}),
         ),
         "shape-child": SessionTemplate(
             name="shape-child",
             inherits=["shape-base"],
-            harness_integration=CapabilityBlock.of("fake", **{"items": ["child"]}),
+            harness_integration=CapabilityBlock.of("fake", **{**{"items": ["child"]}}),
         ),
     }
 
@@ -334,7 +323,9 @@ def test_harness_list_provenance_tracks_union_and_child_wins(
 
 def test_child_silent_inherits_the_pair_unchanged() -> None:
     templates = {
-        "base": SessionTemplate(name="base", harness_integration=CapabilityBlock.of("shell", **{"command": "claude"})),
+        "base": SessionTemplate(
+            name="base", harness_integration=CapabilityBlock.of("shell", **{**{"command": "claude"}})
+        ),
         "child": SessionTemplate(name="child", inherits=["base"]),
     }
     resolved = resolve_from_dict(templates, "child")
@@ -348,7 +339,7 @@ def test_root_replacement_resets_all_omitted_session_fields() -> None:
             name="base",
             description="Parent session",
             env={"MODE": EnvEntry.model_validate("parent")},
-            harness_integration=CapabilityBlock.of("shell", **{"command": "parent-command"}),
+            harness_integration=CapabilityBlock.of("shell", **{**{"command": "parent-command"}}),
         ),
         "child": _ReplacingSessionTemplate(name="child", inherits=["base"]),
     }
@@ -358,7 +349,7 @@ def test_root_replacement_resets_all_omitted_session_fields() -> None:
     templates["child"] = _ReplacingSessionTemplate(
         name="child",
         inherits=["base"],
-        harness_integration=CapabilityBlock.of("shell"),
+        harness_integration=CapabilityBlock.of("shell", **{}),
     )
     resolution = resolve_from_dict_with_provenance(templates, "child")
 
@@ -394,16 +385,16 @@ def test_a_switch_inside_one_parents_chain_discards_an_earlier_parents_blob(
     templates = {
         "shell-parent": SessionTemplate(
             name="shell-parent",
-            harness_integration=CapabilityBlock.of("shell", **{"command": "from-first"}),
+            harness_integration=CapabilityBlock.of("shell", **{**{"command": "from-first"}}),
         ),
         "detour": SessionTemplate(
             name="detour",
-            harness_integration=CapabilityBlock.of("fake", **{"marker": "detour"}),
+            harness_integration=CapabilityBlock.of("fake", **{**{"marker": "detour"}}),
         ),
         "back-to-shell": SessionTemplate(
             name="back-to-shell",
             inherits=["detour"],
-            harness_integration=CapabilityBlock.of("shell", **{"resume_command": "from-second"}),
+            harness_integration=CapabilityBlock.of("shell", **{**{"resume_command": "from-second"}}),
         ),
         "child": SessionTemplate(name="child", inherits=["shell-parent", "back-to-shell"]),
     }
@@ -466,7 +457,7 @@ def test_session_env_values_merge_as_complete_env_entry_models() -> None:
     templates = {
         "base": SessionTemplate(
             name="base",
-            harness_integration=CapabilityBlock.of("shell"),
+            harness_integration=CapabilityBlock.of("shell", **{}),
             env={
                 "TOKEN": EnvEntry({"secret": "base-token"}),
                 "BASE_ONLY": EnvEntry({"value": "preserved"}),
@@ -498,7 +489,7 @@ def test_undeclared_default_resolves_to_shell_empty() -> None:
 
 
 def test_declared_harness_integration_emits_a_reference() -> None:
-    tmpl = SessionTemplate(name="claude", harness_integration=CapabilityBlock.of("shell", **{"command": "claude"}))
+    tmpl = SessionTemplate(name="claude", harness_integration=CapabilityBlock.of("shell", **{**{"command": "claude"}}))
     refs = tmpl.dependencies(FinalizeContext())
     harness_refs = [r for r in refs if r.kind == "harness-integration"]
     assert len(harness_refs) == 1

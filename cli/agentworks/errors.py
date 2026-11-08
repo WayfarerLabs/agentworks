@@ -3,8 +3,8 @@
 Errors are categorized by *kind* (what went wrong) rather than by source module:
 
 - NotFoundError, AlreadyExistsError, ValidationError, StateError,
-  AuthorizationError: clean domain errors that render as a one-liner with no
-  traceback.
+  AuthorizationError, SecretUnavailableError: clean domain errors that render
+  as a one-liner with no traceback.
 - ConnectivityError, ExternalError: failures in external systems where the
   full traceback is preserved to the error log for diagnosis.
 - ConfigError: config file validation; rendered cleanly.
@@ -145,9 +145,10 @@ class SecretUnavailableError(AgentworksError):
     """A secret outcome was unavailable or interaction was refused.
 
     Complete resolution selects this type when its first failed outcome is
-    unavailable for any value-free reason, or when the only eligible source
-    required interaction that the operation's exact policy refused. The hint
-    retains every failed outcome in request order without values.
+    unavailable for any value-free reason, when a provider deadline expires,
+    or when the only eligible source required interaction that the operation's
+    exact policy refused. The hint retains every failed outcome in request
+    order without values.
     """
 
 
@@ -156,9 +157,9 @@ class SecretMappingError(SecretUnavailableError):
 
     This differs from a soft unavailable outcome, which permits the next
     configured source to try. Connectivity alone maps to
-    ``ConnectivityError``. Authentication, deadlines, provider failures,
-    malformed values, protocol violations, and unexpected failures map to
-    ``ExternalError``.
+    ``ConnectivityError``. Deadlines map to ``SecretUnavailableError``.
+    Authentication, provider failures, malformed values, protocol violations,
+    and unexpected failures map to ``ExternalError``.
     """
 
 

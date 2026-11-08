@@ -148,7 +148,7 @@ class OnePasswordSourceConfig(AgwModel):
     name: Literal["onepassword"]
     account: NonEmptyStr | None = None
     """Optional 1Password account shorthand passed to ``op read``."""
-    timeout: float = Field(default=30.0, gt=0, allow_inf_nan=False)
+    timeout: float = Field(default=300.0, gt=0, allow_inf_nan=False)
     """Maximum seconds for the complete source turn."""
     app_authentication_impact: Annotated[
         AppAuthenticationImpact,

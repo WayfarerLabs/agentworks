@@ -177,16 +177,11 @@ def _install_system_packages(
 
     output.info(f"Installing {output.count(len(INIT_SYSTEM_PACKAGES), 'system package')}...")
     apt_str = " ".join(shlex.quote(p) for p in INIT_SYSTEM_PACKAGES)
-    try:
-        target.run(
-            f"DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -o Dpkg::Options::=--force-confnew {apt_str}",
-            sudo=True,
-            timeout=300,
-        )
-    except SSHError as e:
-        msg = f"system packages failed: {e}"
-        logger.warning(msg)
-        output.warn(msg)
+    target.run(
+        f"DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -o Dpkg::Options::=--force-confnew {apt_str}",
+        sudo=True,
+        timeout=300,
+    )
 
 
 def _install_apt_packages(
