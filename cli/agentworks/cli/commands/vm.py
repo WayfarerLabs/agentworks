@@ -284,8 +284,8 @@ def vm_delete(
         typer.Option(
             "--force",
             help=(
-                "Also delete dependent workspaces, agents and sessions, and remove a row whose create "
-                "left no platform metadata"
+                "Also delete dependent workspaces, agents and sessions, and remove the row of a VM whose "
+                "backend cannot be reached (its site does not bind, or its create left no platform metadata)"
             ),
         ),
     ] = False,

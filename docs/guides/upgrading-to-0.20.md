@@ -264,6 +264,11 @@ before they resolve the auth key.
   so `~/.ssh/config` does not apply and an encrypted key must be loaded in the SSH agent, and it
   refuses a VM with no recorded host key. A platform without a native shell (Proxmox) is refused
   before anything is resolved.
+- **`vm delete` refuses a VM whose site cannot be bound.** An unset token secret, a removed vm-site
+  or a disabled plugin used to warn and remove the row while the VM kept running. Now delete
+  refuses, naming the site's failure and the backend identifiers the row holds; fix the site and run
+  it again, or pass `--force` to remove only the row and its host-key record, then delete the VM in
+  its provider yourself.
 - **`vm delete`** deletes the backend VM first and alone, with no session teardown or Tailscale
   logout before it, so a refused delete leaves the surviving VM as it was. It warns that the VM's
   external Tailscale node entry may remain; remove the retired node in the Tailscale admin console.

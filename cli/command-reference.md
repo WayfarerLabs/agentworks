@@ -792,8 +792,12 @@ and does not try a logout. A rekeyed VM that does not answer at its new address 
 `agw vm recover`, as `vm start` does; the new address is recorded either way.
 
 `vm delete` requires `--force` if the VM has workspaces, agents, or sessions. The confirmation
-message shows what will be deleted. Pass `--yes` to skip the prompt. If backend binding fails, the
-command warns and removes local state without attempting remote deletion. The backend VM is deleted
+message shows what will be deleted. Pass `--yes` to skip the prompt. A VM whose site cannot be bound
+(an unset token, a removed site or plugin) is not deleted, since its backend may still run: delete
+refuses, naming the site's failure and the backend identifiers the row holds (its hostname and
+platform metadata, such as a Proxmox VM ID, a cloud instance ID or a Lima instance name). Fix the
+site and run it again, or pass `--force` to remove only the row and its host-key record; delete then
+warns with those identifiers and reports that the backend was not deleted. The backend VM is deleted
 first and alone: delete does not stop individual workloads or log the node out of Tailscale before
 it, so a refused delete leaves a surviving VM as it was, and an external tailnet entry can remain
 for separate removal in the Tailscale admin console. A backend delete that fails, such as a locked

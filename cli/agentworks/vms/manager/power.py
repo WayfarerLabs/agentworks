@@ -18,7 +18,7 @@ from .tailscale import VMNotAnswering
 
 if TYPE_CHECKING:
     from agentworks.config import Config
-    from agentworks.db import Database
+    from agentworks.db import Database, VMRow
     from agentworks.secrets.policy import TtyInteractionPolicy
 
 
@@ -143,16 +143,18 @@ def delete_vm(
 
     Child-count and confirmation checks run before binding or secret
     resolution, so a refused or declined delete prompts for and resolves
-    nothing; ``interaction`` is checked before the best-effort binding span,
-    which would otherwise downgrade a malformed argument to a warning. A
-    binding failure (a broken backend, a stranded site, an unresolvable
-    secret) warns and continues local cleanup. A bound provider delete that
-    raises keeps the row and the host-key record for a retry (the
-    ``VMPlatform.delete`` contract), because a removed row would leave a
-    surviving backend VM with nothing to target it (#329). The one refusal
-    ``--force`` removes the row past is a platform's refusal of a row with no
-    platform metadata at all, which only a create that ended before its
-    platform returned leaves. Deletion never starts the guest, tears down
+    nothing; ``interaction`` is checked before binding, whose failures are
+    handled below and must not swallow a malformed argument. A row is
+    removed only once its backend VM is deleted, because a removed row would
+    leave a surviving backend VM with nothing to target it (#329): a binding
+    failure (a broken backend, a removed site or plugin, an unresolvable
+    secret) refuses, naming the backend identifiers the row holds, and a
+    bound provider delete that raises keeps the row and the host-key record
+    for a retry (the ``VMPlatform.delete`` contract). ``--force`` removes the
+    row past two of these, warning what may remain: a binding failure, and a
+    platform's refusal of a row with no platform metadata at all, which only
+    a create that ended before its platform returned leaves. It never
+    removes a row past a bound delete that failed. Deletion never starts the guest, tears down
     individual workloads, or logs the node out first: a refused delete must
     leave a surviving VM untouched. ``UserAbort`` at the boundary's secret
     prompt keeps the row.
@@ -201,10 +203,23 @@ def delete_vm(
             raise
         except Exception as e:
             # Preflight or build failure (unreachable API, missing tool,
-            # stranded site, unresolvable secret): warn and skip backend
-            # cleanup; broken backends are what delete exists to clean up.
-            hint = getattr(e, "hint", None)
-            output.warn(f"platform binding failed, skipping backend cleanup: {e}" + (f"\n{hint}" if hint else ""))
+            # stranded site, unset or unresolvable secret): nothing can reach
+            # the backend, which may still run, so only --force removes the row.
+            site_hint = getattr(e, "hint", None)
+            if not force:
+                raise StateError(
+                    f"VM '{name}' was not deleted: vm-site '{vm.site}' cannot be bound: {e}",
+                    entity_kind="vm",
+                    entity_name=name,
+                    hint=(f"{site_hint}\n" if site_hint else "")
+                    + f"Its backend may still run {_backend_named(vm)}. Fix the site and rerun "
+                    f"'agw vm delete {name}', or pass --force to remove only its row and delete the backend there.",
+                ) from e
+            output.warn(
+                f"vm-site '{vm.site}' cannot be bound ({e}), so the backend of VM '{name}' was not deleted. "
+                f"It may still run {_backend_named(vm)}; remove it there."
+            )
+            backend_left = True
         else:
             # Whole-VM removal runs first and alone: no session teardown or
             # Tailscale logout precedes it, so a refused delete leaves the
@@ -230,8 +245,8 @@ def delete_vm(
                     )
                     raise
                 output.warn(
-                    f"VM '{name}' has no platform metadata, so its backend was not deleted. Resources named "
-                    f"or tagged '{vm.hostname}' may remain on vm-site '{vm.site}'; remove them there."
+                    f"VM '{name}' has no platform metadata, so its backend was not deleted. "
+                    f"Resources may remain {_backend_named(vm)}; remove them there."
                 )
                 backend_left = True
         if vm.tailscale_host:
@@ -266,12 +281,19 @@ def delete_vm(
         # The store file goes whenever the VM's row goes, even if the SSH config
         # rebuild raises. Reaching here means the platform delete succeeded (it
         # raises, keeping the row and the record, when it cannot remove the
-        # backend VM) or backend cleanup was skipped after a binding failure.
+        # backend VM) or --force removed a row whose backend was not deleted.
         try:
             trust.remove(name)
         finally:
             sync_ssh_config(config, db)
         output.result(f"VM '{name}' removed; its backend was not deleted" if backend_left else f"VM '{name}' deleted")
+
+
+def _backend_named(vm: VMRow) -> str:
+    """Where to find a VM's backend by hand: its site, the hostname platforms name or tag it with, and its metadata."""
+    identifiers = [f"hostname '{vm.hostname}'"]
+    identifiers += [f"{key} '{value}'" for key, value in sorted(vm.platform_metadata.items())]
+    return f"on vm-site '{vm.site}' ({', '.join(identifiers)})"
 
 
 def rekey_vm(

@@ -222,8 +222,10 @@ alone.
 Whole-VM deletion does not first tear down guest sessions or log out of Tailscale. The external
 tailnet record can remain after the guest is deleted; remove a retired node from the Tailscale admin
 console separately. `--force` permits deleting dependent workspaces, agents and sessions; it does
-not skip the confirmation prompt, so pass `--yes` for that. A backend binding failure warns and
-removes local state without attempting remote deletion.
+not skip the confirmation prompt, so pass `--yes` for that. A VM whose site cannot be bound, such as
+one whose API token secret is unset, is not deleted: delete refuses, naming its VM ID and node. Fix
+the site and run it again, or pass `--force` to remove only the row, then delete the VM in Proxmox
+yourself.
 
 ### Native recovery and interactive access
 

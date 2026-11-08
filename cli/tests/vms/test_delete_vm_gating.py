@@ -655,7 +655,34 @@ def test_refused_backend_delete_never_mutates_guest_state(db: Database, make_con
 
 
 @pytest.mark.parametrize("failure", [ConfigError("site could not bind"), RuntimeError("unexpected boundary failure")])
-def test_binding_failure_warns_and_retires_local_resources(db: Database, make_config, monkeypatch, failure, tmp_path):
+def test_binding_failure_refuses_without_force_naming_the_backend(
+    db: Database, make_config, monkeypatch, failure, captured_output: CapturedOutput
+):
+    """Material 7 of #866's round two: an unset token is no proof the VM is gone, so the row stays."""
+    _seed(db)
+    db.update_vm_platform_metadata("dvm", {"vmid": "100", "node": "pve1"})
+    seed_vm_trust("dvm")
+    counts = _fake_backend(monkeypatch)
+
+    def refuse(*args, **kwargs):
+        raise failure
+
+    monkeypatch.setattr("agentworks.vms.manager.power._live_vm_boundary", refuse)
+    with pytest.raises(StateError) as caught:
+        vm_manager.delete_vm(db, make_config(), "dvm", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert caught.value.__cause__ is failure
+    assert "'100'" in (caught.value.hint or "")
+    assert "--force" in (caught.value.hint or "")
+    assert db.get_vm("dvm") is not None
+    assert trust.has_record("dvm")
+    assert counts["delete"] == 0
+
+
+@pytest.mark.parametrize("failure", [ConfigError("site could not bind"), RuntimeError("unexpected boundary failure")])
+def test_binding_failure_with_force_retires_local_resources_and_says_the_backend_stays(
+    db: Database, make_config, monkeypatch, failure, tmp_path, captured_output: CapturedOutput
+):
     config = make_config(f'\n[paths]\nvscode_workspaces = "{(tmp_path / "vscode").as_posix()}"\n')
     _seed(db)
     db.insert_workspace("kept", "/srv/kept", "dvm", "ws-kept")
@@ -670,6 +697,7 @@ def test_binding_failure_warns_and_retires_local_resources(db: Database, make_co
         raise failure
 
     monkeypatch.setattr("agentworks.vms.manager.power._live_vm_boundary", refuse)
+    db.update_vm_platform_metadata("dvm", {"vmid": "100", "node": "pve1"})
     vm_manager.delete_vm(db, config, "dvm", force=True, yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
     assert db.get_vm("dvm") is None
@@ -677,6 +705,7 @@ def test_binding_failure_warns_and_retires_local_resources(db: Database, make_co
     assert not artifact.exists()
     assert counts["delete"] == 0
     assert len(synced) == 1
+    assert any("'100'" in warning for warning in captured_output.warnings)
 
 
 # -- The host-key record goes whenever the row goes ---------------------------
@@ -709,7 +738,7 @@ def test_delete_removes_the_host_key_record_when_backend_cleanup_was_skipped(
     _seed(db, site="gone")
     seed_vm_trust("dvm")
 
-    vm_manager.delete_vm(db, make_config(), "dvm", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+    vm_manager.delete_vm(db, make_config(), "dvm", force=True, yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
     assert db.get_vm("dvm") is None
     assert not trust.has_record("dvm")
