@@ -21,7 +21,6 @@ from agentworks.errors import (
     UserAbort,
     ValidationError,
 )
-from agentworks.interpolation import render_template
 from agentworks.sessions.tmux import ADMIN_SOCKET_ROOT, AGENT_SOCKET_ROOT
 
 if TYPE_CHECKING:
@@ -954,7 +953,6 @@ def _launch_existing_session(
                 linux_user=linux_user,
             )
 
-
             prepared_artifacts = prepare_session_artifacts(
                 db,
                 registry,
@@ -991,7 +989,9 @@ def _launch_existing_session(
                 agent_target=None if is_admin else session_target,
                 secrets=ScopedSecrets(graph_secret_values, session_node.secret_refs()),
             )
-            template_values = _mgr._session_context_values(db, vm, ws, name, SessionMode(session.mode), session.agent_name)
+            template_values = _mgr._session_context_values(
+                db, vm, ws, name, SessionMode(session.mode), session.agent_name
+            )
             session_node.harness_integration.prepare_context(template_values)
             harness_start = require_implemented_start(
                 session_node.harness_integration.start(start_ctx, intent=intent),
@@ -1007,7 +1007,7 @@ def _launch_existing_session(
             stage_session_artifacts(
                 db, name, template.harness_integration, session_target, prepared_artifacts, artifact_application
             )
-            command = render_template(harness_start.command, template_values, field=f"session={name}.command")
+            command = harness_start.command
 
             with output.section("Starting Session"):
                 output.info(f"{operation.title()}ing session '{name}'...")

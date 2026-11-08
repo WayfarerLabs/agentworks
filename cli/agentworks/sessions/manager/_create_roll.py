@@ -16,7 +16,6 @@ from agentworks.db import SessionMode
 from agentworks.errors import AgentworksError, ExternalError, NotFoundError, ValidationError
 from agentworks.harness_setup.outcomes import describe_setup_failures
 from agentworks.harness_setup.readiness import RequiredSetupMissingError
-from agentworks.interpolation import render_template
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -340,11 +339,7 @@ def _start_session_slice(
                 harness_integration_name=template.harness_integration,
                 session_name=name,
             )
-            command = render_template(
-                harness_start.command,
-                template_values,
-                field=f"session={name}.command",
-            )
+            command = harness_start.command
             artifact_application = validate_session_application(
                 harness_start.artifacts, prepared_artifacts.context, integration=template.harness_integration
             )

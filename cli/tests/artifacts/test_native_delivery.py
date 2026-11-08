@@ -508,11 +508,10 @@ def test_large_claude_context_uses_private_file_without_an_argument_size_penalty
 
 def test_quoted_native_command_limit_accounts_for_shell_expansion():
     from agentworks.artifacts.native.common import validate_native_command
-    from agentworks.capabilities.harness_integration import quote_literal_argv
 
     text = "'" * (16 * 1024)
     with pytest.raises(ConfigError):
-        validate_native_command(quote_literal_argv(text))
+        validate_native_command(shlex.quote(text))
 
 
 @pytest.mark.parametrize(

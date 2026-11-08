@@ -8,7 +8,6 @@ imports neither ``sessions`` nor ``orchestration``.
 
 from __future__ import annotations
 
-import shlex
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
 
@@ -22,7 +21,6 @@ from agentworks.capabilities.harness_integration import (
     HarnessStart,
     HarnessStartNotImplemented,
     ShellIntegration,
-    quote_literal_argv,
     require_implemented_start,
 )
 from agentworks.capabilities.harness_integration.shell import ShellConfig
@@ -44,24 +42,6 @@ class _Probe:
         self.commands.append(cmd)
         ok = not any(f"command -v {m} " in cmd for m in self._missing)
         return SimpleNamespace(ok=ok, returncode=0 if ok else 20)
-
-
-@pytest.mark.parametrize(
-    "value",
-    [
-        "",
-        "plain",
-        "${agw:session_name}",
-        "before ${agw:component} after",
-        "$${agw:session_name}",
-        "quote ' and newline\n",
-    ],
-)
-def test_quote_literal_argv_hides_template_syntax_and_reconstructs_exact_value(value: str) -> None:
-    encoded = quote_literal_argv(value)
-    from agentworks.interpolation import render_template
-
-    assert shlex.split(render_template(encoded, {}, field="command")) == [value]
 
 
 def _harness_integration(
@@ -522,3 +502,25 @@ def test_capability_imports_neither_sessions_nor_orchestration() -> None:
         check=False,
     )
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("intent", [HarnessLaunchIntent.CREATE, HarnessLaunchIntent.RESUME_OR_NEW])
+def test_shell_renders_only_its_selected_command_once(intent: HarnessLaunchIntent) -> None:
+    integration = _harness_integration(
+        {
+            "command": "fresh ${agw:workspace_dir} $${agw:unknown}",
+            "resume_command": "resume ${agw:workspace_dir} $${agw:unknown}",
+        }
+    )
+    integration.prepare_context({"workspace_dir": "/srv/path ${agw:user_name}"})
+    result = integration.start(RunContext(), intent=intent)
+    assert isinstance(result, HarnessStart)
+    action = "fresh" if intent.starts_fresh else "resume"
+    assert result.command == f"{action} /srv/path ${{agw:user_name}} ${{agw:unknown}}"
+
+
+def test_shell_does_not_validate_an_unselected_command() -> None:
+    integration = _harness_integration({"command": "fresh", "resume_command": "${agw:unknown}"})
+    result = integration.start(RunContext(), intent=HarnessLaunchIntent.CREATE)
+    assert isinstance(result, HarnessStart)
+    assert result.command == "fresh"

@@ -145,3 +145,33 @@ def test_rendered_plaintext_is_checked_for_environment_delivery(value: str) -> N
         )
     assert caught.value.entity_name == "env.CONFIG"
     assert value not in repr((caught.value.args, vars(caught.value)))
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [EnvEntry("${agw:agent_name}"), EnvEntry("${agw:unknown}"), EnvEntry({"secret": "ignored"})],
+)
+def test_managed_identity_discards_authored_entries_before_render_or_secret_use(entry: EnvEntry) -> None:
+    out = compose_env(
+        values={},
+        ctx=_ctx(workspace_name="ws", workspace_dir="/srv/ws", session_name="s", session_kind="admin"),
+        vm={
+            "AGENTWORKS_WORKSPACE": entry,
+            "AGENTWORKS_WORKSPACE_DIR": entry,
+            "AGENTWORKS_SESSION": entry,
+            "AGENTWORKS_SESSION_KIND": entry,
+        },
+    )
+    assert out == {
+        "AGENTWORKS_WORKSPACE": "ws",
+        "AGENTWORKS_WORKSPACE_DIR": "/srv/ws",
+        "AGENTWORKS_SESSION": "s",
+        "AGENTWORKS_SESSION_KIND": "admin",
+    }
+
+
+@pytest.mark.parametrize("key", ["AGENTWORKS_WORKSPACE", "AGENTWORKS_SESSION_KIND", "AGENTWORKS_CUSTOM"])
+def test_authored_values_without_applicable_identity_remain_winners(key: str) -> None:
+    assert compose_env(values={}, ctx=_ctx(), vm={key: EnvEntry("${agw:user_name}")})[key] == "agentworks"
+    with pytest.raises(ValidationError):
+        compose_env(values={}, ctx=_ctx(), vm={key: EnvEntry("${agw:agent_name}")})

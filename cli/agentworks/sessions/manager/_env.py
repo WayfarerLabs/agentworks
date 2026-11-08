@@ -184,13 +184,10 @@ def _resolve_session_env_scopes(
         agent=agent_env,
         session=session_template.env,
     )
-    from agentworks.env.merge import effective_env
-    from agentworks.env.render import render_plaintext
+    from agentworks.secrets import SecretTarget
 
-    render_plaintext(
-        effective_env(**scopes._asdict()),
-        _session_context_values(db, vm, ws, session_name, mode, agent_name),
-        field=f"session={session_name}.env",
+    SecretTarget(**scopes._asdict(), label=f"session={session_name}").validate_context(
+        _session_context_values(db, vm, ws, session_name, mode, agent_name)
     )
     return scopes
 

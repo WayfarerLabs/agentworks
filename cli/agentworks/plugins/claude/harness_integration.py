@@ -51,7 +51,6 @@ from agentworks.capabilities.harness_integration.base import (
     HarnessIntegration,
     HarnessLaunchIntent,
     HarnessStart,
-    quote_literal_argv,
     require_commands,
 )
 from agentworks.errors import StateError
@@ -421,27 +420,24 @@ class ClaudeCodeIntegration(HarnessIntegration):
         else:
             identity = ["--session-id", sid]
             msg = f"agentworks harness integration (claude-code): starting new session {self._session_name}"
-        parts = [
-            quote_literal_argv(token) for token in (*identity, "--name", self._session_name, *self._managed_flags())
-        ]
+        parts = [shlex.quote(token) for token in (*identity, "--name", self._session_name, *self._managed_flags())]
         if self.config.agent is not None:
-            parts += ["--agent", quote_literal_argv(self.config.agent)]
+            parts += ["--agent", shlex.quote(self.config.agent)]
         if (
             self.config.append_system_prompt is not None
             and "--append-system-prompt-file" not in self._artifact_plan.argv
         ):
-            parts += ["--append-system-prompt", quote_literal_argv(self.config.append_system_prompt)]
-        parts += [quote_literal_argv(token) for token in self._artifact_plan.argv]
+            parts += ["--append-system-prompt", shlex.quote(self.config.append_system_prompt)]
+        parts += [shlex.quote(token) for token in self._artifact_plan.argv]
         parts += [self.quote_context_argv(token) for token in self.config.extra_args]
         if not resume and (prompt := self._fresh_prompt()) is not None:
-            parts += ["--", quote_literal_argv(prompt)]
+            parts += ["--", shlex.quote(prompt)]
         argv = " ".join(parts)
         # A single ``sh -c`` so the whole thing survives the ``exec``
         # wrapping the tmux pane applies (``exec`` takes one simple
         # command): the login shell execs this sh, which echoes then
-        # execs claude, so the pane becomes Claude. The message and the
-        # generated argv shield reserved context prefixes from the final
-        # command-source interpolation pass.
+        # execs claude, so the pane becomes Claude. The manager consumes
+        # this completed command without further interpolation.
         inner = f"echo {shlex.quote(msg)}; exec claude {argv}"
         return f"sh -c {shlex.quote(inner)}"
 

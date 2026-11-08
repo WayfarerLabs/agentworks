@@ -16,6 +16,7 @@ from agentworks.capabilities.harness_integration.base import (
     HarnessStartResult,
     require_commands,
 )
+from agentworks.interpolation import render_template
 from agentworks.schema import AgwModel
 from agentworks.topics import TopicProse
 
@@ -142,10 +143,15 @@ class ShellIntegration(HarnessIntegration):
         The remaining ``or`` is the cross-field derivation the model's
         own description states, not a fallback to a literal: an empty
         ``resume_command`` means "rerun ``command``", and ``command`` is
-        already resolved by the time it is read."""
+        selected before rendering."""
         if intent is HarnessLaunchIntent.RESUME_ONLY:
             return HarnessStartNotImplemented()
         command = self.config.command if intent.starts_fresh else self.config.resume_command or self.config.command
+        command = render_template(
+            command,
+            self._session_binding.context_values,
+            field=f"session={self._session_name}.command",
+        )
         context = self._session_binding.artifact_context
         application = ArtifactApplication()
         if context:

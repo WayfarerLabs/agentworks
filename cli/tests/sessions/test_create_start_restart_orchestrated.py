@@ -1517,12 +1517,11 @@ def test_create_passes_new_session_intent_to_the_harness_integration(
     db.close()
 
 
-# -- pane-command parity: integration op string + relocated substitution -----
+# -- pane-command parity: selected fields render inside their integration -----
 #
-# The command reaching tmux is the harness integration's start output with the
-# ${agw:session_name} / ${agw:workspace_name} substitution applied at the CALL
-# SITE (lifted out of the deleted _build_session_command). These pin that
-# each selected template supplies the pane command consumed by tmux.
+# The command reaching tmux is the integration's completed start output.
+# Shell renders its selected command, and structured native extra arguments
+# render before quoting. Other integration fields remain literal data.
 
 
 def _template(
@@ -1565,9 +1564,7 @@ def _capture_pane_command(monkeypatch: pytest.MonkeyPatch, captured: dict[str, s
 def test_create_pane_command_is_the_harness_integration_output_substituted(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """create: the pane command is the shell integration's start() output
-    (the template's ``command``) with BOTH template vars substituted at
-    the call site."""
+    """Create consumes the shell integration's rendered command directly."""
     from agentworks.sessions.manager import create_session
 
     events: list[str] = []
@@ -2072,7 +2069,9 @@ def test_restart_multiline_environment_secret_refuses_before_kill(
     assert caught.value.__context__ is None
 
 
-def test_invalid_returned_command_preserves_running_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_invalid_selected_shell_command_preserves_running_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from agentworks.errors import ValidationError
     from agentworks.sessions.manager import restart_session
 
@@ -2122,3 +2121,34 @@ def test_invalid_env_reference_refuses_before_secret_resolution(
     assert "kill" not in events
     assert "tmux_create" not in events
     db.close()
+
+
+@pytest.mark.parametrize("entry", ["${agw:agent_name}", {"secret": "ignored-collision"}])
+def test_admin_session_create_discards_managed_identity_before_preparation(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+    entry: str | dict[str, str],
+) -> None:
+    import json
+
+    from agentworks.instance_specs import parse_instance_spec
+    from agentworks.sessions.manager import create_session
+
+    config = make_config()
+    _seed_stopped_proxmox_vm(db)
+    db.update_vm_init_status("box", InitStatus.COMPLETE)
+    overlay = parse_instance_spec("vm", json.dumps({"env": {"AGENTWORKS_SESSION_KIND": entry}}))
+    db.instance_state.put_desired_overlay("vm", "box", overlay.payload)
+    monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: True)
+    events: list[str] = []
+    captured_env: dict[str, str] = {}
+    _patch_session_ops(monkeypatch, events, captured_env)
+
+    create_session(db, config, name="s1", workspace="ws1", admin=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert db.get_session("s1") is not None
+    assert captured_env["AGENTWORKS_SESSION_KIND"] == "admin"
+    assert all("ignored-collision" not in batch for batch in resolve_counter)
+    assert "tmux_create" in events

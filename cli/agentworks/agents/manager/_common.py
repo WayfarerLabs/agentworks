@@ -167,12 +167,9 @@ def _resolve_agent_direct_env_scopes(
     if ws is not None:
         ws_env = _resolve_ws_template(db, registry, ws.name, ws.template).env
     scopes = _AgentDirectEnvScopes(vm=vm_tmpl.env, workspace=ws_env, agent=agent_tmpl.env)
-    from agentworks.env.merge import effective_env
-    from agentworks.env.render import render_plaintext
     from agentworks.interpolation import context_values
 
-    render_plaintext(
-        effective_env(vm=vm_tmpl.env, workspace=ws_env, agent=agent_tmpl.env),
+    _agent_direct_secret_target(scopes, label=f"agent={agent.name}").validate_context(
         context_values(
             vm_name=vm.name,
             user=agent.linux_user,

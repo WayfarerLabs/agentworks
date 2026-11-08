@@ -123,6 +123,7 @@ def show_env(
         admin=admin_env,
         agent=agent_env,
         session=session_env,
+        identity_keys=identity_env.keys(),
     )
     plaintext = render_plaintext(user_env_merged, runtime_values(resource_ctx))
     user_provenance = _per_key_provenance(

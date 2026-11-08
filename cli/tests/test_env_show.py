@@ -640,3 +640,29 @@ def test_show_plaintext_matches_execution_with_live_instance_context(db: Databas
     )
     assert actual == expected
     assert all(row.scope == "vm" for row in rows if row.key in source)
+
+
+@pytest.mark.parametrize("entry", ["${agw:agent_name}", "${agw:unknown}", {"secret": "ignored"}])
+def test_admin_preview_discards_identity_collisions_before_render_or_reveal(
+    db: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, entry: str | dict[str, str]
+) -> None:
+    config = load_config(
+        _write_config(
+            tmp_path,
+            vm_template=ManifestDoc(
+                "vm-template", "default", {"env": {"AGENTWORKS_SESSION_KIND": entry, "AGENTWORKS_WORKSPACE": entry}}
+            ),
+        ),
+        warn_issues=False,
+    )
+    _seed_db(db)
+    db.insert_session("admin-s", "ws-a", "default", SessionMode.ADMIN)
+
+    def unexpected_reveal(*args: object, **kwargs: object) -> None:
+        pytest.fail("An ignored secret must not reach resolution")
+
+    monkeypatch.setattr("agentworks.secrets.resolve.resolve_partial_for_reveal", unexpected_reveal)
+    rows = show_env(db, config, session_name="admin-s", reveal_secrets=True, interaction=TtyInteractionPolicy.REFUSE)
+    actual = {row.key: row for row in rows}
+    assert actual["AGENTWORKS_SESSION_KIND"] == ResolvedEnvRow("AGENTWORKS_SESSION_KIND", "admin", "identity", False)
+    assert actual["AGENTWORKS_WORKSPACE"] == ResolvedEnvRow("AGENTWORKS_WORKSPACE", "ws-a", "identity", False)

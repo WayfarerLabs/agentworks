@@ -191,25 +191,6 @@ def require_commands(
     )
 
 
-def quote_literal_argv(value: str) -> str:
-    """Quote one literal shell argv value while shielding the reserved prefix.
-
-    The session manager interpolates the command returned by an integration.
-    Workload input is literal data, so separate a reserved prefix across
-    concatenated shell quote fragments. Ordinary shell and Go template text
-    needs no special handling beyond ordinary argv quoting.
-    """
-    chunks: list[str] = []
-    start = 0
-    cursor = 0
-    while (index := value.find("${agw:", cursor)) >= 0:
-        chunks.append(value[start : index + 1])
-        start = index + 1
-        cursor = start
-    chunks.append(value[start:])
-    return "".join(shlex.quote(chunk) for chunk in chunks)
-
-
 @dataclass(frozen=True, kw_only=True)
 class SessionBinding:
     """The existing session identity and mutable conversation namespace."""
@@ -368,12 +349,12 @@ class HarnessIntegration(Capability):
     def quote_context_argv(self, value: str) -> str:
         """Render one structured extra argument as data, then quote it once.
 
-        Shield the resulting literal argument from the later command-source
-        pass, including any namespace text introduced by a replacement.
+        The returned command is consumed directly, so replacement contents
+        remain literal without another rendering pass.
         """
         from agentworks.interpolation import render_template
 
-        return quote_literal_argv(
+        return shlex.quote(
             render_template(
                 value,
                 self._session_binding.context_values,
