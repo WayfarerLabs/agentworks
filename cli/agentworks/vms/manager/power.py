@@ -12,7 +12,7 @@ from agentworks.execution import trust
 from agentworks.naming import NAME_RE
 from agentworks.secrets.policy import require_exact_tty_interaction_policy
 
-from ._helpers import _guard_incomplete_vm, _operation_log, _require_vm
+from ._helpers import _guard_incomplete_vm, _operation_log, _require_known_power_state, _require_vm
 from .boundary import _auth_key_boundary, _live_vm_boundary, _warn_legacy_release
 from .tailscale import VMNotAnswering
 
@@ -411,6 +411,7 @@ def rekey_vm(
     )
     platform = vm_node.site.platform
     status = platform.status(vm, ops_ctx)
+    _require_known_power_state(status, name)
     if status != VMStatus.RUNNING:
         raise StateError(
             f"VM '{name}' is not running (status: {status.value})",

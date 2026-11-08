@@ -23,7 +23,7 @@ from agentworks.execution import reachability, trust
 from agentworks.execution.access import Admin
 from agentworks.vms import recovery
 
-from ._helpers import _guard_incomplete_vm, _operation_log, _require_vm
+from ._helpers import _guard_incomplete_vm, _operation_log, _require_known_power_state, _require_vm
 from .boundary import _auth_key_boundary
 
 if TYPE_CHECKING:
@@ -79,7 +79,7 @@ def recover_vm(db: Database, config: Config, name: str, *, interaction: TtyInter
     vm_node, _resolver, ops_ctx, auth_key = _auth_key_boundary(db, config, vm, interaction=interaction)
     platform = vm_node.site.platform
     status = platform.status(vm, ops_ctx)
-    _require_known_state(status, name)
+    _require_known_power_state(status, name)
 
     with _operation_log(name, "recover", redactions=(auth_key,)) as log:
         # Started before the hold, as start_vm does: WSL2's keepalive boots a
@@ -157,16 +157,6 @@ def _repair_hint(platform: VMPlatform, name: str, result: RootScriptResult) -> s
             "does not use it, such as a cloud provider's serial console, or recreating the VM."
         )
     return hint
-
-
-def _require_known_state(status: VMStatus, name: str) -> None:
-    if status is VMStatus.UNKNOWN:
-        raise StateError(
-            f"the platform could not report the power state of VM '{name}'",
-            entity_kind="vm",
-            entity_name=name,
-            hint=f"Check the VM in its provider, or run 'agw vm describe {name}'.",
-        )
 
 
 def _record_ssh_identity(db: Database, name: str, prepared: PreparedConfiguredSSHIdentity) -> None:

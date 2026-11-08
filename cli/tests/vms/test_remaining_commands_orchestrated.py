@@ -259,6 +259,25 @@ def test_rekey_running_check_runs_after_the_resolve_boundary(
     assert order == ["preflight", "resolve", "status"]
 
 
+def test_rekey_on_a_vm_whose_power_state_is_unknown_says_so_rather_than_stopped(
+    db: Database,
+    make_config,  # noqa: ANN001
+    _ts_key: None,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """A placement host that is down reports no state: "not running" sent the operator to start a running VM."""
+    from agentworks.errors import StateError
+
+    _seed_vm(db)
+    _fake_status(monkeypatch, VMStatus.UNKNOWN)
+
+    with pytest.raises(StateError) as caught:
+        vm_manager.rekey_vm(db, make_config(), "box", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert caught.value.hint  # where to look, which a VM that is merely stopped does not need
+
+
 def test_rekey_without_a_host_key_record_raises_before_resolving_or_touching_the_vm(
     db: Database,
     make_config,  # noqa: ANN001
