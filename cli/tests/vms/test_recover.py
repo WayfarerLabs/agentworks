@@ -164,6 +164,28 @@ def test_the_ssh_config_is_synced_even_when_the_address_did_not_change(
     assert _world == ["sync"]
 
 
+@pytest.mark.parametrize("agents", [[], ["coder", "reviewer"]], ids=["no-agents", "agents"])
+def test_a_recovered_vm_s_agents_are_named_as_keeping_the_previous_key(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+    agents: list[str],
+) -> None:
+    """The repair rewrites only the admin's keys, so after a key change the agents need their own reinit."""
+    _seed(db)
+    for agent in agents:
+        db.insert_agent(agent, "box", f"agt-{agent}")
+    _guest(monkeypatch)
+    _waits(monkeypatch)
+
+    _recover(db, make_config())
+
+    noted = [line for line in captured_output.info if "agw agent reinit" in line]
+    assert len(noted) == (1 if agents else 0)
+    assert all(agent in noted[0] for agent in agents)
+
+
 def test_the_operation_log_never_holds_the_key(
     db: Database,
     make_config,  # noqa: ANN001

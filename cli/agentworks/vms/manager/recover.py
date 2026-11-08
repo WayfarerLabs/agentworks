@@ -135,6 +135,23 @@ def recover_vm(db: Database, config: Config, name: str, *, interaction: TtyInter
             log.step("Record the SSH identity")
             _record_ssh_identity(db, name, prepared)
     output.result(f"VM '{name}' recovered")
+    _note_agent_keys(db, name)
+
+
+def _note_agent_keys(db: Database, name: str) -> None:
+    """Say which agent accounts keep their previous key, worded for a key change recover cannot detect.
+
+    The repair rewrites only the admin's ``authorized_keys``. Whether the
+    operator's key changed since the agents were set up is not recorded per
+    agent, so the note is conditional and printed whenever the VM has agents.
+    """
+    agents = sorted(agent.name for agent in db.list_agents(vm_name=name))
+    if agents:
+        output.info(
+            f"Recover repairs only the admin's keys. If operator.ssh_private_key changed, the agent accounts on "
+            f"VM '{name}' ({', '.join(agents)}) still accept only the previous key until you run "
+            "'agw agent reinit <agent>' for each."
+        )
 
 
 def _repair_hint(platform: VMPlatform, name: str, result: RootScriptResult) -> str:

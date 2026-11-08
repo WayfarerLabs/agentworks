@@ -741,8 +741,11 @@ canonical SSH commands refuse that unknown state until one successful `agw vm re
 that reinit while the installed key still works. If it no longer works, or you changed
 `operator.ssh_private_key` so that the VM's recorded identity no longer matches,
 `agw vm recover <name>` restores the configured public key through the platform's own channel and
-records it as the VM's identity once the VM answers over SSH with it. On a cloud that channel is SSH
-with the same key, so use the provider's console or recreate the VM when the VM refuses it.
+records it as the VM's identity once the VM answers over SSH with it. Recover rewrites only the
+admin's `authorized_keys`: the VM's agent accounts keep the previous key until
+`agw agent reinit <agent>` runs for each, and recover names them when the VM has any. On a cloud
+that channel is SSH with the same key, so use the provider's console or recreate the VM when the VM
+refuses it.
 
 `vm confirm-release` reads `/etc/os-release` over SSH at the VM's tailnet address, through the same
 path as `vm exec` (so the VM needs `python3`), and shows the recorded and live Debian releases. It
@@ -780,6 +783,10 @@ resolves up front, with the site's secrets. In one run it:
 4. Waits once for the VM to answer over SSH.
 5. Records the configured SSH identity as the VM's, since the VM has just accepted it. A key file
    replaced while recover ran is not recorded, and recover fails asking for a rerun.
+
+When the VM has agents, recover's output names them: their accounts' `authorized_keys` are not
+repaired, so after a change to `operator.ssh_private_key` they accept only the previous key until
+`agw agent reinit <agent>` runs for each.
 
 A failed step stops there and names the script; its output, such as the reason a configuration test
 failed, is in the operation log (`agw vm logs <name>`). A script that ran and failed went through a
