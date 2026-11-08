@@ -235,6 +235,7 @@ def test_sshd_is_repaired_whatever_the_channel(guest: Guest, needs_guest_sshd: b
     assert [call for call in guest.calls if call.endswith(" ssh.service")] == [
         "systemctl unmask ssh.service",
         "systemctl enable ssh.service",
+        "systemctl reset-failed ssh.service",  # a unit that crash-looped refuses a restart until this
         "systemctl restart ssh.service",
     ]
 

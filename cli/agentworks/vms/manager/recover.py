@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 import agentworks.execution as execution
 from agentworks import output
+from agentworks.capabilities.vm_platform.base import offers_native_shell
 from agentworks.capabilities.vm_platform.tailscale_join import read_tailnet_address, settle_tailnet_address
 from agentworks.db import VMStatus
 from agentworks.errors import ConnectivityError, StateError, UserAbort
@@ -30,6 +31,7 @@ if TYPE_CHECKING:
     from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
+    from agentworks.execution.root_script import RootScriptResult
     from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.vms.applied_state import PreparedConfiguredSSHIdentity
 
@@ -98,13 +100,7 @@ def recover_vm(db: Database, config: Config, name: str, *, interaction: TtyInter
             result = recovery.repair(
                 platform, vm, ops_ctx, authorized_keys=authorized_keys, auth_key=auth_key, log=log.record
             )
-            hint = f"Run 'agw vm logs {name}' for its output."
-            if platform.recovery_needs_guest_sshd:
-                hint += (
-                    " A broken SSH server on this platform needs a way in that does not use it (a cloud "
-                    "provider's serial console), or recreating the VM."
-                )
-            recovery.require_success(result, script="repair", vm_name=name, hint=hint)
+            recovery.require_success(result, script="repair", vm_name=name, hint=_repair_hint(platform, name, result))
             joined = recovery.joined(result)
 
             log.step("Read the tailnet address")
@@ -139,6 +135,28 @@ def recover_vm(db: Database, config: Config, name: str, *, interaction: TtyInter
             log.step("Record the SSH identity")
             _record_ssh_identity(db, name, prepared)
     output.result(f"VM '{name}' recovered")
+
+
+def _repair_hint(platform: VMPlatform, name: str, result: RootScriptResult) -> str:
+    """What to do after a repair that did not succeed: its log, then a way in by hand.
+
+    A repair that exited with a status ran, so the channel works: the
+    platform's native shell goes through the same one (on Lima, its
+    persistent connection still reaches a VM whose sshd has stopped). One
+    whose outcome is unknown may have lost a channel that needs the guest's
+    sshd, which then needs a way in that does not use it.
+    """
+    hint = f"Run 'agw vm logs {name}' for its output."
+    if result.status is not None:
+        if offers_native_shell(platform):
+            return f"{hint} To fix it by hand (a broken SSH configuration, say), run 'agw vm shell --platform {name}'."
+        return f"{hint} {platform.native_shell_unavailable_hint or ''}".rstrip()
+    if platform.recovery_needs_guest_sshd:
+        hint += (
+            " This platform's channel goes through the VM's SSH server: if that is broken, it needs a way in that "
+            "does not use it, such as a cloud provider's serial console, or recreating the VM."
+        )
+    return hint
 
 
 def _require_known_state(status: VMStatus, name: str) -> None:

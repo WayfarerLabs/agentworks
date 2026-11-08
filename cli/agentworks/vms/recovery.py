@@ -98,6 +98,9 @@ install -d -m 0755 /run/sshd
 sshd -t || {{ echo "sshd's configuration test failed" >&2; exit 1; }}
 systemctl unmask ssh.service
 systemctl enable ssh.service
+# A unit that crash-looped on a bad configuration hit its start limit, and
+# systemd refuses to restart it until that is cleared.
+systemctl reset-failed ssh.service
 systemctl restart ssh.service
 
 # The interpreter agw-launch runs is what is tested, not the package: dpkg

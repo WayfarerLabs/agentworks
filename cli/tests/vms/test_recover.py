@@ -286,6 +286,28 @@ def test_a_repair_that_does_not_succeed_stops_before_the_address_read(
     assert waits == []
 
 
+@pytest.mark.parametrize("platform_name", ["wsl2", "aws-ec2"])
+@pytest.mark.parametrize("status", [1, None], ids=["failed", "unknown"])
+def test_a_failed_repair_names_the_native_shell_only_when_the_channel_answered(
+    platform_name: str, status: int | None
+) -> None:
+    """A repair that exited ran through the channel the native shell uses; one with no outcome may have lost it."""
+    from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
+    from agentworks.execution.root_script import RootScriptResult
+    from agentworks.plugins.aws.platform import EC2Platform
+    from agentworks.vms.manager.recover import _repair_hint
+
+    platform = (
+        WSL2Platform("wsl2", {})
+        if platform_name == "wsl2"
+        else EC2Platform("aws-site", {"region": "us-east-1", "auth": {"mode": "ambient"}})
+    )
+
+    hint = _repair_hint(platform, "box", RootScriptResult(status, b"", b"", ""))
+
+    assert ("agw vm shell --platform box" in hint) is (status is not None)
+
+
 def test_a_repaired_vm_that_does_not_answer_raises(
     db: Database,
     make_config,  # noqa: ANN001

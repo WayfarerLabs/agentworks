@@ -473,13 +473,18 @@ class VMPlatform(Capability):
         return nullcontext()
 
 
+def offers_native_shell(platform: VMPlatform) -> bool:
+    """Whether the platform overrides :meth:`VMPlatform.native_shell`; reads only the class."""
+    return type(platform).native_shell is not VMPlatform.native_shell
+
+
 def require_native_shell(platform: VMPlatform, vm_name: str) -> None:
     """Refuse a platform that does not override :meth:`VMPlatform.native_shell`.
 
     Reads only the class, so a command calls it before its operation boundary
     resolves anything.
     """
-    if type(platform).native_shell is VMPlatform.native_shell:
+    if not offers_native_shell(platform):
         raise _native_shell_unavailable(platform, vm_name)
 
 

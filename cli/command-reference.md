@@ -768,12 +768,12 @@ resolves up front, with the site's secrets. In one run it:
 2. Runs one repair script as root, in this order: it rewrites the admin's `authorized_keys` as
    `vm reinit` does, with your SSH public key and `operator.extra_ssh_public_keys`, so a key they no
    longer list (one you replaced, say) stops working; checks the SSH server's configuration (a
-   failed check stops the repair), then unmasks, enables and restarts it, which ends no open
-   session, so a stopped or masked server is repaired even where the channel goes through it, as
-   Lima's persistent connection can; installs `python3` when it is missing or lacks its standard
-   library; starts `tailscaled` if it is not running and waits up to about 30 seconds for its state
-   to settle; and rejoins Tailscale only when the node needs a login. A missing Tailscale is
-   reported, not installed.
+   failed check stops the repair), then unmasks and enables it, clears a failed state left by a
+   crash loop, and restarts it, which ends no open session, so a stopped or masked server is
+   repaired even where the channel goes through it, as Lima's persistent connection can; installs
+   `python3` when it is missing or lacks its standard library; starts `tailscaled` if it is not
+   running and waits up to about 30 seconds for its state to settle; and rejoins Tailscale only when
+   the node needs a login. A missing Tailscale is reported, not installed.
 3. Reads the VM's tailnet address and records it, then rebuilds the SSH config, whose aliases name
    that address and your configured key. After a rejoin, an address that cannot be read logs the
    node out again, as create does.
@@ -781,10 +781,13 @@ resolves up front, with the site's secrets. In one run it:
 5. Records the configured SSH identity as the VM's, since the VM has just accepted it. A key file
    replaced while recover ran is not recorded, and recover fails asking for a rerun.
 
-A failed step stops there and names the script; its output is in the operation log
-(`agw vm logs <name>`). On Lima, Remote Lima and the clouds the channel itself is the VM's SSH
-server, so a broken one there needs a way in that does not use it (a cloud provider's serial
-console) or recreation.
+A failed step stops there and names the script; its output, such as the reason a configuration test
+failed, is in the operation log (`agw vm logs <name>`). A script that ran and failed went through a
+channel that works, so the hint names `agw vm shell --platform <name>`, which uses the same channel,
+for fixing it by hand (Proxmox has no native shell, so its hint names the web UI's console). On
+Lima, Remote Lima and the clouds the channel itself goes through the VM's SSH server, so when the
+outcome is unknown there, a broken server needs a way in that does not use it (a cloud provider's
+serial console) or recreation.
 
 `vm rekey` restarts `tailscaled`, logs the node out, joins with the new key and restarts it again,
 in one script through the platform's own channel, then reads and records the new address and waits
