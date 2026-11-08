@@ -278,13 +278,14 @@ class ProxmoxAPI:
         """Update VM configuration."""
         self._request("PUT", f"/nodes/{node}/qemu/{vmid}/config", params)
 
-    def resize_disk(self, node: str, vmid: int, disk: str, size: str) -> None:
-        """Resize a VM disk (e.g. disk='scsi0', size='+20G')."""
-        self._request(
+    def resize_disk(self, node: str, vmid: int, disk: str, size: str) -> str | None:
+        """Resize a VM disk (e.g. disk='scsi0', size='+20G'). Returns the task UPID, or ``None`` with no task."""
+        result = self._request(
             "PUT",
             f"/nodes/{node}/qemu/{vmid}/resize",
             {"disk": disk, "size": size},
         )
+        return None if result is None else str(result)
 
     def start_vm(self, node: str, vmid: int) -> str:
         """Start a VM. Returns the task UPID."""

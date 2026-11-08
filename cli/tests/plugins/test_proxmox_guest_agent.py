@@ -57,8 +57,13 @@ class FakeAPI:
 
 
 @pytest.fixture(autouse=True)
-def _no_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("agentworks.plugins.proxmox.guest_agent.time.sleep", lambda seconds: None)
+def _virtual_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Sleeping advances a clock the channel reads, so waits cost no real time."""
+    now = [0.0]
+    monkeypatch.setattr(
+        "agentworks.plugins.proxmox.guest_agent.time.sleep", lambda seconds: now.append(now.pop() + seconds)
+    )
+    monkeypatch.setattr("agentworks.plugins.proxmox.guest_agent.time.monotonic", lambda: now[-1])
 
 
 def run(api: FakeAPI, deadline: float = 60) -> RawRun:
@@ -90,7 +95,7 @@ def test_the_deadline_returns_empty_streams_without_dispatching_again(monkeypatc
     "api",
     [
         FakeAPI([], dispatch=ProxmoxAPIError(f"POST failed for {SCRIPT.decode()}")),
-        FakeAPI([RuntimeError(f"socket error near {SCRIPT.decode()}")]),
+        FakeAPI([RuntimeError(f"socket error near {SCRIPT.decode()}")] * 100),
     ],
     ids=["dispatch", "unexpected"],
 )
@@ -112,7 +117,7 @@ def test_a_failed_status_poll_says_why_without_chaining() -> None:
     reason = (
         "Proxmox API GET /nodes/pve1/qemu/101/agent/exec-status?pid=41 failed (500): Agent error: PID 41 does not exist"
     )
-    api = FakeAPI([ProxmoxAPIError(reason)])
+    api = FakeAPI([ProxmoxAPIError(reason)] * 100)
 
     with pytest.raises(ConnectivityError) as caught:
         run(api)
@@ -125,7 +130,7 @@ def test_a_failed_status_poll_says_why_without_chaining() -> None:
 def test_a_failed_status_poll_shows_the_provider_s_text_as_a_terminal_can_take_it() -> None:
     """The API's text is the provider's, not ours: controls are removed and only its last lines are kept."""
     body = "\n".join(f"line {number}" for number in range(40)) + "\n\x1b]0;owned\x07\x1b[31mAgent error\x1b[0m"
-    api = FakeAPI([ProxmoxAPIError(body)])
+    api = FakeAPI([ProxmoxAPIError(body)] * 100)
 
     with pytest.raises(ConnectivityError) as caught:
         run(api)
@@ -135,6 +140,27 @@ def test_a_failed_status_poll_shows_the_provider_s_text_as_a_terminal_can_take_i
     assert "\x07" not in message
     assert "line 39" in message
     assert "line 0\n" not in message
+
+
+def test_a_status_poll_that_fails_once_is_asked_again() -> None:
+    """A poll carries only the PID, so one missed answer (an API blip) does not end the script's wait."""
+    api = FakeAPI([ProxmoxAPIError("Proxmox API failed: connection reset"), {"exited": True, "exitcode": 0}])
+
+    raw = run(api)
+
+    assert api.polls == 2
+    assert raw == RawRun(b"", b"")
+    assert len(api.execs) == 1
+
+
+def test_status_polls_that_keep_failing_give_up_within_the_retry_window() -> None:
+    api = FakeAPI([ProxmoxAPIError("Agent error: PID 41 does not exist")] * 1000)
+
+    with pytest.raises(ConnectivityError):
+        run(api, deadline=600)
+
+    assert api.polls <= guest_agent.STATUS_RETRY_SECONDS / guest_agent.POLL_INTERVAL_SECONDS + 1
+    assert len(api.execs) == 1
 
 
 def test_an_agent_that_answers_on_the_third_ping_gets_the_script_once() -> None:

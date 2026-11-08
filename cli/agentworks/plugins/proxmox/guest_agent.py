@@ -8,13 +8,15 @@ comes first, so a VM with no agent at all fails in about two minutes. Then
 one ``exec`` dispatches the script as ``input-data`` (limited to 65,536
 characters), with whatever remains of the deadline, then
 ``exec-status`` is polled every two seconds until the guest reports an exit
-or the deadline passes. QGA has no cancellation endpoint: at the deadline the
-result is empty, so the outcome is unknown, and nothing is dispatched again.
-No message holds the script, because it can carry a secret: a failed
-dispatch, whose request carries the script, says nothing of the provider's
-error, while a failed status poll, whose request carries only the PID,
-quotes it, since it says why (a guest agent that restarted mid-script no
-longer knows the PID).
+or the deadline passes. A poll carries only the PID, so a failed one is asked
+again, since one missed answer says nothing of the script; polls that keep
+failing for ``STATUS_RETRY_SECONDS`` give up (a guest agent that restarted
+mid-script no longer knows the PID). QGA has no cancellation endpoint: at the
+deadline the result is empty, so the outcome is unknown, and nothing is
+dispatched again. No message holds the script, because it can carry a
+secret: a failed dispatch, whose request carries the script, says nothing of
+the provider's error, while a status failure, whose request carries only the
+PID, quotes it, since it says why.
 """
 
 from __future__ import annotations
@@ -33,16 +35,19 @@ if TYPE_CHECKING:
 INPUT_DATA_LIMIT = 65_536
 POLL_INTERVAL_SECONDS = 2.0
 AGENT_WAIT_SECONDS = 120
+STATUS_RETRY_SECONDS = 30
+"""How long status polls may keep failing before the channel gives up on the script."""
 _ROOT_SHELL = ["/bin/bash", "-s"]
 
 
 def run_as_root(api: ProxmoxAPI, node: str, vmid: int, script: bytes, deadline: float) -> RawRun:
     """Run ``script`` through QGA once and return what the guest reported, or empty streams at the deadline.
 
-    A dispatch or status failure raises ``ConnectivityError`` saying how far
-    the request got, and never chains the original error, whose request could
-    quote the script. A status failure from the API adds the API's own error
-    text, since that request carries only the PID. The API refusing the site's token (401 or 403) is a
+    A dispatch failure, or status polls failing for ``STATUS_RETRY_SECONDS``,
+    raises ``ConnectivityError`` saying how far the request got, and never
+    chains the original error, whose request could quote the script. A status
+    failure from the API adds the API's own error text, since that request
+    carries only the PID. The API refusing the site's token (401 or 403) is a
     ``TokenRejectedError`` instead, since no connection problem explains it.
     A guest agent that does not answer its ping by the deadline raises
     ``ChannelUnreachable`` before anything is dispatched.
@@ -66,10 +71,12 @@ def run_as_root(api: ProxmoxAPI, node: str, vmid: int, script: bytes, deadline: 
         ) or ConnectivityError(f"Proxmox QGA dispatch failed for VM {where}; the script may have started")
     if failure is not None:
         raise failure
+    failing_since: float | None = None
     while True:
         remaining = expires - time.monotonic()
         if remaining <= 0:
             return RawRun(b"", b"")
+        status: dict[str, object] | None = None
         try:
             status = api.guest_agent_exec_status(node, vmid, pid=pid, timeout=remaining)
         except _TruncatedQGAOutput:
@@ -77,23 +84,28 @@ def run_as_root(api: ProxmoxAPI, node: str, vmid: int, script: bytes, deadline: 
                 f"Proxmox QGA reported that the script on VM {where} (PID {pid}) exited, with its output cut short"
             )
         except Exception as error:
-            # The provider's text, shown as ssh's is: on a terminal, its last lines only.
-            reason = f": {ssh_process.tail_lines(str(error))}" if isinstance(error, ProxmoxAPIError) else ""
+            failing_since = time.monotonic() if failing_since is None else failing_since
             failure = _token_rejected(
                 error,
                 f"Proxmox rejected the API token while polling the root script on VM {where} (PID {pid});"
                 " the script may still be running",
-            ) or ConnectivityError(
-                f"Proxmox QGA status failed for VM {where} (PID {pid}); the script may still be running{reason}"
             )
+            if failure is None and time.monotonic() - failing_since >= STATUS_RETRY_SECONDS:
+                # The provider's text, shown as ssh's is: on a terminal, its last lines only.
+                reason = f": {ssh_process.tail_lines(str(error))}" if isinstance(error, ProxmoxAPIError) else ""
+                failure = ConnectivityError(
+                    f"Proxmox QGA status failed for VM {where} (PID {pid}); the script may still be running{reason}"
+                )
         if failure is not None:
             raise failure
-        if cast("bool", status["exited"]):
-            # The API's JSON can carry a lone surrogate, which UTF-8 cannot encode.
-            return RawRun(
-                cast("str", status.get("out-data", "")).encode("utf-8", errors="replace"),
-                cast("str", status.get("err-data", "")).encode("utf-8", errors="replace"),
-            )
+        if status is not None:
+            failing_since = None
+            if cast("bool", status["exited"]):
+                # The API's JSON can carry a lone surrogate, which UTF-8 cannot encode.
+                return RawRun(
+                    cast("str", status.get("out-data", "")).encode("utf-8", errors="replace"),
+                    cast("str", status.get("err-data", "")).encode("utf-8", errors="replace"),
+                )
         time.sleep(min(POLL_INTERVAL_SECONDS, max(0.0, expires - time.monotonic())))
 
 

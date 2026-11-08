@@ -21,6 +21,7 @@ NEWID = 100
 TEMPLATE_VMID = 9001
 CLONE_UPID = "UPID:pve1:clone"
 START_UPID = "UPID:pve1:start"
+RESIZE_UPID = "UPID:pve1:resize"
 
 
 def refused(method: str, path: str) -> ProxmoxAPIError:
@@ -111,8 +112,9 @@ class FakeProxmoxAPI:
             raise self.configure_error
         self.calls.append(("configure_vm", node, vmid))
 
-    def resize_disk(self, node: str, vmid: int, disk: str, size: str) -> None:
+    def resize_disk(self, node: str, vmid: int, disk: str, size: str) -> str:
         self.calls.append(("resize_disk", node, vmid, disk, size))
+        return RESIZE_UPID
 
     def start_vm(self, node: str, vmid: int) -> str:
         self.calls.append(("start_vm", node, vmid))

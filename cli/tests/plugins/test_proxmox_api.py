@@ -441,11 +441,16 @@ class TestVMOperations:
 
     @patch("urllib.request.urlopen")
     def test_resize_disk(self, mock_urlopen: MagicMock, api: ProxmoxAPI) -> None:
-        mock_urlopen.return_value = _mock_response(None)
-        api.resize_disk("pve", 100, "scsi0", "+20G")
+        mock_urlopen.return_value = _mock_response("UPID:pve:resize")
+        assert api.resize_disk("pve", 100, "scsi0", "+20G") == "UPID:pve:resize"
         req = mock_urlopen.call_args[0][0]
         assert req.get_method() == "PUT"
         assert "/resize" in req.full_url
+
+    @patch("urllib.request.urlopen")
+    def test_resize_disk_without_a_task(self, mock_urlopen: MagicMock, api: ProxmoxAPI) -> None:
+        mock_urlopen.return_value = _mock_response(None)
+        assert api.resize_disk("pve", 100, "scsi0", "+20G") is None
 
 
 def _http_error(code: int, body: bytes) -> urllib.error.HTTPError:

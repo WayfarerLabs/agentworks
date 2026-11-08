@@ -394,7 +394,10 @@ class ProxmoxPlatform(VMPlatform):
 
                 # 4. Resize the clone's disk to the template's size
                 output.detail(f"Resizing disk to {request.disk_gib}G...")
-                self._api(ctx).resize_disk(node, newid, "scsi0", f"{request.disk_gib}G")
+                pending_upid = self._api(ctx).resize_disk(node, newid, "scsi0", f"{request.disk_gib}G")
+                if pending_upid is not None:
+                    self._api(ctx).wait_for_task(node, pending_upid)
+                    pending_upid = None
 
                 # 5. Start VM
                 output.detail("Starting VM...")

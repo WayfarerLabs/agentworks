@@ -40,6 +40,7 @@ from tests._proxmox_fakes import (
     CLONE_UPID,
     NEWID,
     PROXMOX_CONFIG,
+    RESIZE_UPID,
     START_UPID,
     TEMPLATE_VMID,
     FakeProxmoxAPI,
@@ -432,6 +433,15 @@ class TestPlainFailure:
 
         for op in ("clone_vm", "stop_vm", "delete_vm", "stop_task"):
             assert op not in fake.ops()
+
+
+def test_create_waits_for_the_resize_task_before_starting(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A resize still running holds the VM's lock, which the start would time out on under load."""
+    platform, fake = _platform_with_fake(monkeypatch)
+
+    platform.create(_request(tailscale=False), RunContext())
+
+    assert fake.calls.index(("wait_for_task", "pve1", RESIZE_UPID)) < fake.ops().index("start_vm")
 
 
 class TestCloneThatLostItsVMID:
