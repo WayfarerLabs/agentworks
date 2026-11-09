@@ -110,9 +110,9 @@ class GrokBuildConfig(AgwModel):
     rules: str | None = None
     """Forwarded as ``--rules`` on every process launch, including resume."""
 
-    enabled_workarounds: Annotated[
-        list[Literal["session-rules", "session-agent-definitions"]], MergeStrategy.REPLACE
-    ] = Field(default_factory=list)
+    enabled_workarounds: Annotated[list[Literal["session-home-skills"]], MergeStrategy.REPLACE] = Field(
+        default_factory=list
+    )
     """Explicitly enabled session artifact carriers; replaces inherited opt-ins.
 
     ``session-agent-definitions`` remains accepted for config compatibility,
@@ -219,7 +219,9 @@ class GrokBuildIntegration(HarnessIntegration):
         plan = (
             ArtifactApplication()
             if self.retiring
-            else render_setup_artifacts(invocation, lambda inputs: outer_artifacts(inputs, f"{invocation.root}/.grok"))
+            else render_setup_artifacts(
+                invocation, lambda inputs: outer_artifacts(inputs, f"{invocation.root}/.grok", workspace=True)
+            )
         )
         if plan.files:
             plan = defer_setup_conflicts(
@@ -258,7 +260,6 @@ class GrokBuildIntegration(HarnessIntegration):
             context=artifact_context,
             render=lambda prepared: session_artifacts(
                 prepared,
-                configured=self.config.rules,
                 extra_args=self.config.extra_args,
                 enabled_workarounds=self.config.enabled_workarounds,
             ),

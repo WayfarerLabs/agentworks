@@ -157,10 +157,12 @@ def defer_setup_conflicts(
     return application
 
 
-def _name_conflicts(inputs: ArtifactInputs) -> tuple[tuple[ArtifactInput, ...], ...]:
+def _name_conflicts(
+    inputs: ArtifactInputs, types: tuple[ArtifactType, ...] = (ArtifactType.SKILL, ArtifactType.AGENT)
+) -> tuple[tuple[ArtifactInput, ...], ...]:
     names: dict[tuple[ArtifactType, str], list[ArtifactInput]] = {}
     for item in inputs.items():
-        if item.content.type in (ArtifactType.SKILL, ArtifactType.AGENT):
+        if item.content.type in types:
             names.setdefault((item.content.type, item.content.name), []).append(item)
     return tuple(tuple(items) for items in names.values() if len(items) > 1)
 
@@ -201,11 +203,13 @@ def _setup_deferral_destination(invocation: SetupInvocation) -> ArtifactFacet:
     return "user" if isinstance(invocation, VMSetupInvocation) else "session"
 
 
-def validate_names(inputs: ArtifactInputs) -> None:
+def validate_names(
+    inputs: ArtifactInputs, *, types: tuple[ArtifactType, ...] = (ArtifactType.SKILL, ArtifactType.AGENT)
+) -> None:
     """Reject colliding native names at the integration input boundary."""
     from agentworks.artifacts.native.probe import NativeArtifactConflictError
 
-    conflicts = _name_conflicts(inputs)
+    conflicts = _name_conflicts(inputs, types)
     if conflicts:
         raise NativeArtifactConflictError(
             "; ".join(_name_conflict_reason(items) for items in conflicts),
@@ -333,9 +337,11 @@ def prepare_session_delivery(
         return render(None), None
     root: str | None = None
     rejected: dict[str, str] = {}
+    plan: NativeSessionArtifacts | None = None
     while True:
         selected = {item.identity for item in context.inputs.items() if item.identity not in rejected}
         current = replace(context, inputs=_select_inputs(context.inputs, selected))
+        plan = None
         try:
             plan = render(current)
             if plan.application.files or plan.argv:
@@ -355,10 +361,17 @@ def prepare_session_delivery(
         except NativeArtifactConflictError as error:
             for identity in error.identities:
                 parts = identity.split(":")
+                origins = {
+                    origin
+                    for file in (() if plan is None else plan.application.files)
+                    if file.native_identity == identity
+                    for origin in file.origins
+                }
                 matching = tuple(
                     item
                     for item in current.inputs.items()
-                    if item.content.type.value == parts[0] and item.content.name == parts[-1]
+                    if item.origin_identity in origins
+                    or (item.content.type.value == parts[0] and item.content.name == parts[-1])
                 )
                 if not matching:
                     raise StateError("native name conflict does not identify a selected session input") from error
@@ -368,6 +381,7 @@ def prepare_session_delivery(
                 raise StateError("native name conflict does not identify a selected session input") from error
             continue
         break
+    assert plan is not None
     plan = replace(
         plan,
         application=replace(

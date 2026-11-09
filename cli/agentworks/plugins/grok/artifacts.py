@@ -6,22 +6,23 @@ from typing import TYPE_CHECKING
 
 import yaml
 
+from agentworks import output
 from agentworks.artifacts.application import ArtifactApplication
 from agentworks.artifacts.model import ArtifactType
 from agentworks.artifacts.native.common import (
     NativeSessionArtifacts,
     ancestor_diagnostics,
     artifact_file,
-    context_text,
     has_artifacts,
+    native_home,
     persona_options,
     reject_flags,
     select_session_artifacts,
     skill_files,
     validate_ancestor_names,
     validate_names,
-    validate_native_argv,
 )
+from agentworks.artifacts.native.guidance import guidance_rules, guidance_skills, session_skill_files
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -35,8 +36,9 @@ _OPTIONS = {"model": str, "tools": list}
 
 
 _SESSION_WORKAROUNDS = {
-    ArtifactType.HINT: "session-rules",
-    ArtifactType.RULE: "session-rules",
+    ArtifactType.HINT: "session-home-skills",
+    ArtifactType.RULE: "session-home-skills",
+    ArtifactType.SKILL: "session-home-skills",
 }
 
 
@@ -48,26 +50,9 @@ def _persona(item: ArtifactInput) -> dict[str, object]:
     }
 
 
-def outer_artifacts(inputs: ArtifactInputs, root: str) -> ArtifactApplication:
+def outer_artifacts(inputs: ArtifactInputs, root: str, *, workspace: bool = False) -> ArtifactApplication:
     validate_names(inputs)
-    files = []
-    hints = tuple(item for item in inputs.items() if item.content.type is ArtifactType.HINT)
-    if hints:
-        files.append(
-            artifact_file(f"{root}/rules/agentworks-hints.md", "# Agentworks setup\n\n" + context_text(hints), hints)
-        )
-    rules: dict[str, list[ArtifactInput]] = {}
-    for group in inputs.groups():
-        for name, item in group.rules.items():
-            rules.setdefault(name, []).append(item)
-    for name, contributions in rules.items():
-        files.append(
-            artifact_file(
-                f"{root}/rules/agentworks-rule-{name}.md",
-                f"# {name}\n\n" + context_text(tuple(contributions)),
-                tuple(contributions),
-            )
-        )
+    files = list(guidance_skills(f"{root}/skills", inputs) if workspace else guidance_rules(f"{root}/rules", inputs))
     for item in inputs.items():
         content = item.content
         if content.type is ArtifactType.SKILL:
@@ -90,7 +75,6 @@ def outer_artifacts(inputs: ArtifactInputs, root: str) -> ArtifactApplication:
 def session_artifacts(
     context: SessionArtifactContext | None,
     *,
-    configured: str | None,
     extra_args: Sequence[str],
     enabled_workarounds: Sequence[str] = (),
 ) -> NativeSessionArtifacts:
@@ -99,28 +83,28 @@ def session_artifacts(
     inputs, deferred = select_session_artifacts(context.inputs, enabled_workarounds, _SESSION_WORKAROUNDS)
     if not inputs and not context.ancestor_files:
         return NativeSessionArtifacts(ArtifactApplication(deferred=deferred))
-    validate_names(inputs)
     selected_types = {item.content.type for item in inputs.items()}
     ancestor_names = {file.native_identity or "" for file in context.ancestor_files}
-    forbidden = set()
-    if selected_types & {ArtifactType.HINT, ArtifactType.RULE}:
-        forbidden.update({"--rules", "--append-system-prompt", "--system-prompt", "--system-prompt-override"})
-    if inputs:
-        reject_flags(extra_args, forbidden, "grok-build")
+    if selected_types & {ArtifactType.HINT, ArtifactType.RULE, ArtifactType.SKILL}:
+        reject_flags(extra_args, {"--disable-skills"}, "grok-build")
     if context.ancestor_files:
         ancestor_flags = set()
         if any(name.startswith("agent:") for name in ancestor_names):
             ancestor_flags.update({"--agents", "--no-subagents"})
         if any(name.startswith("skill:") for name in ancestor_names):
-            ancestor_flags.update({"--plugin-dir", "--disable-skills"})
+            ancestor_flags.add("--disable-skills")
         with ancestor_diagnostics("grok-build"):
             reject_flags(extra_args, ancestor_flags, "grok-build")
-    argv: list[str] = []
-    guidance = tuple(item for item in inputs.items() if item.content.type in (ArtifactType.HINT, ArtifactType.RULE))
-    if guidance:
-        text = context_text(guidance, configured)
-        argv += ["--rules", text]
-    application = ArtifactApplication(deferred=deferred)
+    root = native_home(context.home, context.environment, "GROK_HOME", ".grok")
+    files = list(guidance_skills(f"{root}/skills", inputs, context=context))
+    for item in inputs.items():
+        if item.content.type is ArtifactType.SKILL:
+            files.extend(session_skill_files(f"{root}/skills", item, context))
+    if files:
+        output.warn(
+            "Grok session-home-skills uses the shared user skill catalog. "
+            "Session/run applicability is best effort; other sessions can discover these entries."
+        )
+    application = ArtifactApplication(tuple(files), deferred)
     validate_ancestor_names(context, application)
-    validate_native_argv(tuple(argv))
-    return NativeSessionArtifacts(application, tuple(argv))
+    return NativeSessionArtifacts(application)

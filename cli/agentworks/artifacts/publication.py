@@ -99,7 +99,7 @@ def publish_artifacts(
         if package_root is not None:
             if root:
                 root_native_path(package_root)
-            if not package_root.startswith(boundaries):
+            if not any(package_root == boundary[:-1] or package_root.startswith(boundary) for boundary in boundaries):
                 raise StateError("artifact package root is outside its owning scope")
     current = {item.path: item for item in previous}
     planned = {item.path: item for item in desired}

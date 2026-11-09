@@ -56,7 +56,7 @@ from agentworks.capabilities.harness_integration.base import (
 from agentworks.errors import StateError
 from agentworks.plugins._harness_native.native import setup_user, setup_workspace
 from agentworks.plugins._harness_native.native_config import NativeUserConfig, NativeWorkspaceConfig
-from agentworks.plugins.claude.artifacts import outer_artifacts, session_artifacts, session_prompt_snapshot
+from agentworks.plugins.claude.artifacts import outer_artifacts, session_artifacts
 from agentworks.schema import AgwModel, MergeStrategy
 from agentworks.topics import TopicProse
 
@@ -143,7 +143,7 @@ class ClaudeCodeConfig(AgwModel):
     override. A child template's value replaces its parent's."""
 
     enabled_workarounds: Annotated[
-        list[Literal["session-prompt", "session-skill-plugin", "session-agent-definitions"]], MergeStrategy.REPLACE
+        list[Literal["session-skill-plugin", "session-agent-definitions"]], MergeStrategy.REPLACE
     ] = Field(default_factory=list)
     """Explicitly enabled session artifact carriers. An authored list replaces inherited opt-ins."""
 
@@ -215,9 +215,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
             if self.retiring
             else render_setup_artifacts(
                 invocation,
-                lambda inputs: outer_artifacts(
-                    inputs, "/etc/claude-code/.claude", instructions_path="/etc/claude-code/CLAUDE.md"
-                ),
+                lambda inputs: outer_artifacts(inputs, "/etc/claude-code/.claude", guidance_as_skills=True),
             )
         )
         if plan.files:
@@ -368,7 +366,6 @@ class ClaudeCodeIntegration(HarnessIntegration):
             context=artifact_context,
             render=lambda prepared: session_artifacts(
                 prepared,
-                configured=self.config.append_system_prompt,
                 extra_args=self.config.extra_args,
                 enabled_workarounds=self.config.enabled_workarounds,
             ),
@@ -380,11 +377,6 @@ class ClaudeCodeIntegration(HarnessIntegration):
                 (native_root, f"{self._workspace_path}/.claude", "/etc/claude-code/.claude"),
                 files=("/etc/claude-code/CLAUDE.md",),
             )
-            if runner is not None and "--append-system-prompt-file" in self._artifact_plan.argv:
-                self._artifact_plan = replace(
-                    self._artifact_plan,
-                    argv=self._artifact_plan.argv + session_prompt_snapshot(runner, artifact_context.environment),
-                )
         command = self._resume_or_launch(ctx, intent=intent)
         if intent is HarnessLaunchIntent.FORCE_NEW:
             note = "Fresh Claude Code session requested. Starting a new one without resuming prior state..."

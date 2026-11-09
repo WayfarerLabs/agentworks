@@ -111,7 +111,6 @@ from typing import TYPE_CHECKING, Annotated, ClassVar, Literal, NamedTuple
 from pydantic import Field
 
 from agentworks.artifacts.application import ArtifactApplication
-from agentworks.artifacts.model import ArtifactType
 from agentworks.artifacts.native.common import (
     NativeSessionArtifacts,
     defer_setup_conflicts,
@@ -132,7 +131,7 @@ from agentworks.capabilities.harness_integration.base import (
 from agentworks.errors import StateError
 from agentworks.plugins._harness_native.native import setup_user, setup_workspace
 from agentworks.plugins._harness_native.native_config import NativeUserConfig, NativeWorkspaceConfig
-from agentworks.plugins.codex.artifacts import guidance_path, outer_artifacts, session_artifacts, vm_artifacts
+from agentworks.plugins.codex.artifacts import outer_artifacts, session_artifacts, vm_artifacts
 from agentworks.plugins.codex.recorder import home_word, notify_value_word, provision_fragment, thread_tail
 from agentworks.schema import AgwModel, MergeStrategy
 from agentworks.topics import TopicProse
@@ -240,7 +239,7 @@ class CodexConfig(AgwModel):
     ``config.toml`` a newer codex wrote."""
 
     enabled_workarounds: Annotated[
-        list[Literal["session-developer-instructions", "session-agent-config"]], MergeStrategy.REPLACE
+        list[Literal["session-home-skills", "session-agent-config"]], MergeStrategy.REPLACE
     ] = Field(default_factory=list)
     """Explicitly enabled session artifact carriers. An authored list replaces inherited opt-ins."""
 
@@ -508,11 +507,6 @@ class CodexIntegration(HarnessIntegration):
                     inputs,
                     skills_root=f"{invocation.home}/.agents/skills",
                     agents_root=f"{root}/agents",
-                    instructions_path=(
-                        guidance_path(invocation.runner, root)
-                        if any(item.content.type in (ArtifactType.HINT, ArtifactType.RULE) for item in inputs.items())
-                        else f"{root}/AGENTS.md"
-                    ),
                 ),
             )
         )
@@ -548,11 +542,6 @@ class CodexIntegration(HarnessIntegration):
                     inputs,
                     skills_root=f"{invocation.root}/.agents/skills",
                     agents_root=f"{invocation.root}/.codex/agents",
-                    instructions_path=(
-                        guidance_path(invocation.runner, invocation.root)
-                        if any(item.content.type in (ArtifactType.HINT, ArtifactType.RULE) for item in inputs.items())
-                        else f"{invocation.root}/AGENTS.md"
-                    ),
                 ),
             )
         )
@@ -628,7 +617,6 @@ class CodexIntegration(HarnessIntegration):
             context=artifact_context,
             render=lambda prepared: session_artifacts(
                 prepared,
-                configured=self.config.developer_instructions,
                 extra_args=self.config.extra_args,
                 enabled_workarounds=self.config.enabled_workarounds,
             ),

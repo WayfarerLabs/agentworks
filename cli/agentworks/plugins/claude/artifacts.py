@@ -2,21 +2,17 @@
 
 from __future__ import annotations
 
-import json
-import re
-from dataclasses import replace
+import hashlib
 from typing import TYPE_CHECKING
 
 import yaml
 
-from agentworks import output
-from agentworks.artifacts.application import ArtifactApplication
+from agentworks.artifacts.application import ArtifactApplication, ArtifactFile
 from agentworks.artifacts.model import ArtifactType
 from agentworks.artifacts.native.common import (
     NativeSessionArtifacts,
     ancestor_diagnostics,
     artifact_file,
-    context_text,
     has_artifacts,
     json_text,
     persona_options,
@@ -27,22 +23,21 @@ from agentworks.artifacts.native.common import (
     validate_names,
     validate_native_argv,
 )
-from agentworks.ssh import SSHError
+from agentworks.artifacts.native.guidance import guidance_rules, guidance_skills
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Sequence
 
     from agentworks.artifacts.application import SessionArtifactContext
     from agentworks.artifacts.model import ArtifactInput, ArtifactInputs
-    from agentworks.transports import Transport
 
 
 _OPTIONS = {"model": str, "tools": list, "disallowedTools": list, "maxTurns": int}
 
 
 _SESSION_WORKAROUNDS = {
-    ArtifactType.HINT: "session-prompt",
-    ArtifactType.RULE: "session-prompt",
+    ArtifactType.HINT: "session-skill-plugin",
+    ArtifactType.RULE: "session-skill-plugin",
     ArtifactType.SKILL: "session-skill-plugin",
     ArtifactType.AGENT: "session-agent-definitions",
 }
@@ -56,58 +51,34 @@ def _persona(item: ArtifactInput) -> dict[str, object]:
     }
 
 
-def outer_artifacts(inputs: ArtifactInputs, root: str, *, instructions_path: str | None = None) -> ArtifactApplication:
+def _persona_file(root: str, item: ArtifactInput, *, namespace: str = "") -> ArtifactFile:
+    options = _persona(item)
+    del options["prompt"]
+    header = yaml.safe_dump({"name": item.content.name, **options}, sort_keys=False)
+    return artifact_file(
+        f"{root}/{item.content.name}.md",
+        f"---\n{header}---\n{item.content.text}",
+        (item,),
+        identity=f"agent:{namespace}{item.content.name}",
+    )
+
+
+def outer_artifacts(inputs: ArtifactInputs, root: str, *, guidance_as_skills: bool = False) -> ArtifactApplication:
     validate_names(inputs)
-    files = []
-    if instructions_path is not None:
-        guidance = tuple(item for item in inputs.items() if item.content.type in (ArtifactType.HINT, ArtifactType.RULE))
-        if guidance:
-            files.append(
-                replace(artifact_file(instructions_path, context_text(guidance), guidance), generated_section=True)
-            )
-    else:
-        hints = tuple(item for item in inputs.items() if item.content.type is ArtifactType.HINT)
-        if hints:
-            files.append(
-                artifact_file(
-                    f"{root}/rules/agentworks-hints.md", "# Agentworks setup\n\n" + context_text(hints), hints
-                )
-            )
-        rules: dict[str, list[ArtifactInput]] = {}
-        for group in inputs.groups():
-            for name, item in group.rules.items():
-                rules.setdefault(name, []).append(item)
-        for name, contributions in rules.items():
-            files.append(
-                artifact_file(
-                    f"{root}/rules/agentworks-rule-{name}.md",
-                    f"# {name}\n\n" + context_text(tuple(contributions)),
-                    tuple(contributions),
-                )
-            )
+    files = list(
+        guidance_skills(f"{root}/skills", inputs) if guidance_as_skills else guidance_rules(f"{root}/rules", inputs)
+    )
     for item in inputs.items():
-        content = item.content
-        if content.type is ArtifactType.SKILL:
+        if item.content.type is ArtifactType.SKILL:
             files.extend(skill_files(f"{root}/skills", item))
-        elif content.type is ArtifactType.AGENT:
-            options = _persona(item)
-            del options["prompt"]
-            header = yaml.safe_dump({"name": content.name, **options}, sort_keys=False)
-            files.append(
-                artifact_file(
-                    f"{root}/agents/{content.name}.md",
-                    f"---\n{header}---\n{content.text}",
-                    (item,),
-                    identity=f"agent:{content.name}",
-                )
-            )
+        elif item.content.type is ArtifactType.AGENT:
+            files.append(_persona_file(f"{root}/agents", item))
     return ArtifactApplication(tuple(files))
 
 
 def session_artifacts(
     context: SessionArtifactContext | None,
     *,
-    configured: str | None,
     extra_args: Sequence[str],
     enabled_workarounds: Sequence[str] = (),
 ) -> NativeSessionArtifacts:
@@ -117,97 +88,40 @@ def session_artifacts(
     if not inputs and not context.ancestor_files:
         return NativeSessionArtifacts(ArtifactApplication(deferred=deferred))
     validate_names(inputs)
-    selected_types = {item.content.type for item in inputs.items()}
-    ancestor_names = {file.native_identity or "" for file in context.ancestor_files}
-    has_skills = ArtifactType.SKILL in selected_types
-    has_agents = ArtifactType.AGENT in selected_types
-    forbidden = {"--bare", "--settings", "--setting-sources"} if inputs else set()
-    if selected_types & {ArtifactType.HINT, ArtifactType.RULE}:
-        forbidden.update(
-            {
-                "--append-system-prompt",
-                "--append-system-prompt-file",
-                "--system-prompt",
-                "--system-prompt-file",
-                "--system-prompt-snapshot",
-            }
-        )
-    if has_skills:
-        forbidden.update({"--plugin-dir", "--disable-slash-commands"})
-    if has_agents:
-        forbidden.add("--agents")
     if inputs:
-        reject_flags(extra_args, forbidden, "claude-code")
-    if context.ancestor_files:
-        ancestor_flags = {"--bare", "--settings", "--setting-sources"}
-        if any(name.startswith("skill:") for name in ancestor_names):
-            ancestor_flags.update({"--plugin-dir", "--disable-slash-commands"})
-        if any(name.startswith("agent:") for name in ancestor_names):
-            ancestor_flags.add("--agents")
-        with ancestor_diagnostics("claude-code"):
-            reject_flags(extra_args, ancestor_flags, "claude-code")
-    files = []
-    argv: list[str] = []
-    guidance = tuple(item for item in inputs.items() if item.content.type in (ArtifactType.HINT, ArtifactType.RULE))
-    if guidance:
-        path = f"{context.directory}/instructions.md"
-        files.append(artifact_file(path, context_text(guidance, configured), guidance))
-        argv += ["--append-system-prompt-file", path]
-    skills = tuple(item for item in inputs.items() if item.content.type is ArtifactType.SKILL)
-    if skills:
-        plugin = f"{context.directory}/plugin"
-        files.append(
-            artifact_file(
-                f"{plugin}/.claude-plugin/plugin.json",
-                json_text({"name": "agentworks-artifacts", "version": "1.0.0"}),
-                skills,
-            )
+        reject_flags(
+            extra_args,
+            {"--bare", "--settings", "--setting-sources", "--plugin-dir", "--disable-slash-commands"},
+            "claude-code",
         )
-        for item in skills:
-            files.extend(skill_files(f"{plugin}/skills", item, namespace="agentworks-artifacts:"))
-        argv += ["--plugin-dir", plugin]
-    agents = tuple(item for item in inputs.items() if item.content.type is ArtifactType.AGENT)
-    if agents:
-        value = {item.content.name: _persona(item) for item in agents}
-        for item in agents:
-            files.append(
-                artifact_file(
-                    f"{context.directory}/agents/{item.content.name}.json",
-                    json_text(value[item.content.name]),
-                    (item,),
-                    identity=f"agent:{item.content.name}",
-                )
+    if context.ancestor_files:
+        with ancestor_diagnostics("claude-code"):
+            reject_flags(
+                extra_args, {"--bare", "--settings", "--setting-sources", "--disable-slash-commands"}, "claude-code"
             )
-        argv += ["--agents", json.dumps(value, ensure_ascii=False)]
+    if not inputs:
+        return NativeSessionArtifacts(ArtifactApplication(deferred=deferred))
+    plugin = f"{context.directory}/plugin"
+    plugin_name = (
+        "agentworks-"
+        + hashlib.sha256(context.session_uuid.encode()).hexdigest()[:12]
+        + "-"
+        + hashlib.sha256(context.run_id.encode()).hexdigest()[:8]
+    )
+    items = tuple(inputs.items())
+    files = [
+        artifact_file(
+            f"{plugin}/.claude-plugin/plugin.json", json_text({"name": plugin_name, "version": "1.0.0"}), items
+        )
+    ]
+    files.extend(guidance_skills(f"{plugin}/skills", inputs, namespace=plugin_name + ":"))
+    for item in items:
+        if item.content.type is ArtifactType.SKILL:
+            files.extend(skill_files(f"{plugin}/skills", item, namespace=plugin_name + ":"))
+        elif item.content.type is ArtifactType.AGENT:
+            files.append(_persona_file(f"{plugin}/agents", item, namespace=plugin_name + ":"))
     application = ArtifactApplication(tuple(files), deferred)
     validate_ancestor_names(context, application)
-    validate_native_argv(tuple(argv))
-    return NativeSessionArtifacts(application, tuple(argv))
-
-
-def session_prompt_snapshot(runner: Transport, environment: Mapping[str, str]) -> tuple[str, ...]:
-    """Refresh appended guidance on Claude versions that otherwise snapshot it.
-
-    Before 2.1.265, explicit system-prompt flags disabled recording automatically.
-    https://code.claude.com/docs/en/cli-reference#system-prompt-flags-in-resumed-conversations
-    """
-    version = None
-    try:
-        result = runner.run(
-            "\"$SHELL\" -lic 'claude --version'",
-            env=dict(environment),
-            tty=False,
-            check=False,
-            timeout=20,
-        )
-        if result.returncode == 0:
-            version = re.search(r"^\s*(\d+)\.(\d+)\.(\d+) \(Claude Code\)\s*$", result.stdout, re.MULTILINE)
-    except SSHError:
-        pass
-    if version is None:
-        output.warn(
-            "Claude session-prompt workaround: unable to determine the installed version; "
-            "continuing without --system-prompt-snapshot. Updated session rules and hints may stay stale on resume."
-        )
-        return ()
-    return ("--system-prompt-snapshot", "off") if tuple(map(int, version.groups())) >= (2, 1, 265) else ()
+    argv = ("--plugin-dir", plugin)
+    validate_native_argv(argv)
+    return NativeSessionArtifacts(application, argv)
