@@ -26,16 +26,16 @@ prerequisite for accepting this multi-session correction.
 - [x] Record the operator's PR split: workspace modes are an additional PR. Current artifact work
       solves multi-session workspaces now with documented best-effort semantics and must not depend
       on future workspace exclusivity.
-- [ ] Implement current multi-session delivery. Use a native private plugin for Claude session
+- [x] Implement current multi-session delivery. Use a native private plugin for Claude session
       artifacts; replace Codex/Grok session rule/hint prompt injection with explicitly enabled home
       skills. Codex uses bounded per-run packages; Grok uses one stable session entry and current
       private files/index because native resume retains its original catalog. Preserve complete
       skills, supported native persona registration and ordinary state; document first-adoption
       limits and index-based access instead of individual Grok skill registration.
-- [ ] Replace shared generated instruction sections with separate per-rule guidance skills where
+- [x] Replace shared generated instruction sections with separate per-rule guidance skills where
       native separate rules are unavailable. Aggregate hints per original owner. Retire only
       recorded Agentworks section content and preserve repository/operator bytes.
-- [ ] Keep generated workspace output out of commits through exact locally owned exclusions where
+- [x] Keep generated workspace output out of commits through exact locally owned exclusions where
       native discovery supports them; verify and report incompatible native discovery rather than
       hiding tracked-file changes or ignoring whole native configuration directories.
 - [ ] Update the amended FRD, HLA, native LLD, support matrix and permanent teaching together.
