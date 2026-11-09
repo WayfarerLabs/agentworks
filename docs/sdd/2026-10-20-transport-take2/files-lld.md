@@ -180,7 +180,8 @@ printable (`native_files.py:218-226`), which is the intended stance.
 - **stdout** is the file's bytes for `read` and one JSON line for `stat`. The other operations print
   nothing: their exit status is the whole result, and `files` parses nothing for them. agw-launch's
   filter drops everything before the start marker.
-- **stderr** carries only a Python traceback, for status 1.
+- **stderr** carries only a Python traceback, for status 1, or the word `lock` when status 4 or 5 is
+  about the lock file rather than the operation's path, so the refusal names the lock file.
 - **Statuses.** The program's own exit status is the answer:
 
 | Status  | Meaning                                                                                     | Workstation result                          |
@@ -648,7 +649,11 @@ hold `marker`, under `log_streams=False`, does not contain the marker's bytes; `
 guest program against local files on Linux (`cli/tests/native_setup_fixtures.py:20-80`,
 `cli/tests/test_native_harness_setup.py:34`). They move from `LocalFixtureTransport` to a local
 `VMAccess` built on the L lane (`cli/tests/execution/conformance/lanes.py`), promoted to
-`cli/tests/vm_access_support.py`.
+`cli/tests/vm_access_support.py`, where a test needs the account's startup (the probe). Publication
+and session-artifact tests need only the file program, so they use a recording access that runs the
+real program on the test's files (`vm_access_support.local_files`, and the fixture transport's
+`access()` and `files()`), as many as a test needs and without the launcher; `test_files.py` covers
+`Files` over the L lane.
 
 ### Conformance vectors
 
@@ -663,7 +668,7 @@ on every platform's V lane.
 | F4 `PythonProgram` with `login`, `interactive` and both, under `sh`, `dash`, `bash` and `zsh`, with startup files that export, print and run a failing command substitution (`x=$(false)`) in `.profile`, `.zprofile` and `.zshrc`: the export is visible, the arguments are intact, the program runs, so a return to `&&` fails the vector under zsh                  | L V   |
 | F5 `Script.interactive` under each shell: an interactive startup file's function is callable, and the sourced script's `exit N` is the status                                                                                                                                                                                                                          | L V   |
 | F9 A startup file that closes descriptors 3 to 9 leaves a login and interactive `PythonProgram` and an interactive `Script` their source                                                                                                                                                                                                                               | L V   |
-| F6 The lock under the image's `protected_regular`: created by the agent, then taken by the admin unelevated and elevated, and the reverse; a `write_if` by each in turn completes                                                                                                                                                                                      | V     |
+| F6 The lock under the image's `protected_regular`: created by the admin, then taken by root (an elevated request), and the reverse; a `write_if` by each in turn completes. The V lane reaches the VM as its admin only, so root stands in for a second account                                                                                                        | V     |
 | F7 Elevated `write_if` and `read` of a root-owned file, and an agent's elevated `write_if` refused before dispatch                                                                                                                                                                                                                                                     | S V   |
 | F8 An elevated `Command(("env",), env={"AGW_F8": "a b"})` prints `AGW_F8=a b`                                                                                                                                                                                                                                                                                          | L V   |
 
@@ -691,7 +696,7 @@ inventory, whose last row is I34 (`hla.md:850`):
 | I42 | Native file contents and native CLI commands and output stay out of the operation log (`25e972553`; `native_files.py:334-354`; `plugins/_harness_native/native_cli.py:170-185`; `docs/guides/native-harness-setup.md:55-57`)                                                                                                                                           | 5            |
 | I43 | Native executables are resolved once from the actual user's login `PATH`, and an explicit `PATH` in the setup environment wins (`7f4a79b5c`; `plugins/_harness_native/native_cli.py:29-57`, `:118-144`)                                                                                                                                                                | 5            |
 | I44 | Session-resume probes (Claude's transcript, Codex's recorder and rollouts, Grok's session) read their exit code, so a probe that could not run never reads as no conversation and never launches over one (`86de4c6a3`, `a3965d7d8`, `fb801c5e3`; `plugins/claude/harness_integration.py:495-537`; `plugins/codex/harness_integration.py:1148-1340`)                   | 5            |
-| I45 | Probe diagnostics have the setup environment's values removed, raw and shell-quoted, before they reach an error (`15b714480`, `5b51afcab`; `artifacts/native/probe.py:411-417`)                                                                                                                                                                                        | 5            |
+| I45 | Probe diagnostics have the operation's resolved secrets removed, raw, shell-quoted and normalized, and are bounded to one line, before they reach an error; plain environment values are kept (`15b714480`, `5b51afcab`, `d323e5832`; `artifacts/native/probe.py:411-417`)                                                                                             | 5            |
 | I46 | Native discovery requests travel on stdin, so a large package needs no argument (`14a4b1336`; `artifacts/native/probe.py:402-410`)                                                                                                                                                                                                                                     | 5            |
 | I47 | A settings write that finds nothing to change leaves the file and its permissions alone (`9e20740e7`, `e77d1a24f`; `plugins/_harness_native/native.py:122-123`; `docs/guides/native-harness-setup.md:52-53`)                                                                                                                                                           | 5            |
 | I48 | GitHub and Azure CLI readiness is checked read-only in the target user's shell with the CLI's output suppressed, never blocks helper installation, and warns when the result is indeterminate (`f72884fdd`, `11e1e62ba`, `b2f1dc992`; `capabilities/git_credential/github.py:156-186`; `plugins/azure/azdo.py:138-166`; `capabilities/git_credential/README.md:96-99`) | 5            |
