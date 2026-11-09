@@ -103,7 +103,9 @@ def session_skill_files(root: str, item: ArtifactInput, context: SessionArtifact
     metadata = {
         **item.content.metadata,
         "name": name,
-        "description": (condition + f"Skill {item.content.name}: " + item.content.description)[:1024],
+        "description": (condition + f"Skill {item.content.name} from {_owner(item)}: " + item.content.description)[
+            :1024
+        ],
     }
     header = yaml.safe_dump(metadata, sort_keys=False)
     body = condition + "Otherwise do not use this skill.\n\n" + item.content.text

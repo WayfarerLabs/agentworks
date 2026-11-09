@@ -57,6 +57,7 @@ def test_session_and_run_qualification_prevents_package_overlap_and_preserves_as
         assert values["name"] == PurePosixPath(entry.package_root).name
         assert len(values["name"]) <= 64
         assert current.session_uuid in values["description"] and current.run_id in values["description"]
+        assert item.origin.resource_name in values["description"]
         for member in item.content.members:
             if member.path != "SKILL.md":
                 actual = next(file for file in plan.application.files if file.path.endswith("/" + member.path))
