@@ -5,7 +5,8 @@ artifact types, avoid generated `AGENTS.md` content, and seriously consider gene
 skills. The operator endorsed that direction and asked to refine per-rule granularity and consider
 ordinary-home session skills and workspaces reserved for one session. Session visibility policy
 remains under discussion; this response does not claim that new carriers ship or that the FRD has
-been amended. Baseline implementation: main `89bb63e4`, including merged PR #862.
+been amended. Current main: `f78ffb3f`. Artifact and session implementation is unchanged from the
+source-review baseline `89bb63e4`, including merged PR #862.
 
 ## Recommendation
 
