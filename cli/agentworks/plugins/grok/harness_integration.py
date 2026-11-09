@@ -52,6 +52,7 @@ from agentworks.topics import TopicProse
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
+    from agentworks.artifacts.application import SessionArtifactContext
     from agentworks.capabilities.base import RunContext
     from agentworks.capabilities.descriptor import Facet
     from agentworks.capabilities.harness_integration.setup import (
@@ -253,6 +254,19 @@ class GrokBuildIntegration(HarnessIntegration):
         """Choose the requested fresh, strict-resume, or fallback policy."""
         artifact_context = self._session_binding.artifact_context
         runner = ctx.admin_target() if self._admin else ctx.agent_target()
+
+        def resolve_home(current: SessionArtifactContext) -> str:
+            if runner is None:
+                raise StateError("artifact delivery requires the actual native launch target")
+            return probe_native(
+                runner,
+                tool="grok",
+                environment=current.environment,
+                redactions=current.redactions,
+                home=current.home,
+                check_policy=False,
+            )
+
         self._artifact_plan, native_root = prepare_session_delivery(
             runner,
             tool="grok",
@@ -262,6 +276,7 @@ class GrokBuildIntegration(HarnessIntegration):
                 prepared,
                 extra_args=self.config.extra_args,
                 enabled_workarounds=self.config.enabled_workarounds,
+                resolve_home=resolve_home,
             ),
             workspace=self._workspace_path,
         )

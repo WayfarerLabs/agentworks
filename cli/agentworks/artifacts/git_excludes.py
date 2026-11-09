@@ -31,7 +31,7 @@ if p.returncode:
 repository, exclude = p.stdout.splitlines()
 tracked = set()
 for start in range(0, len(r['paths']), 64):
-    p = subprocess.run(['git', '-C', r['workspace'], 'ls-files', '-z', '--',
+    p = subprocess.run(['git', '--literal-pathspecs', '-C', r['workspace'], 'ls-files', '--full-name', '-z', '--',
                         *r['paths'][start:start + 64]], capture_output=True)
     if p.returncode:
         raise SystemExit(p.returncode)

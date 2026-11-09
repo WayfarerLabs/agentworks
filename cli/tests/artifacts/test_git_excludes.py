@@ -108,6 +108,21 @@ def test_tracked_artifact_is_not_hidden_or_untracked(repository, captured_output
     assert captured_output.warnings
 
 
+def test_nested_workspace_queries_track_exact_literal_paths_from_repository_root(repository, captured_output):
+    target, repository_root = repository
+    workspace = repository_root / "nested"
+    tracked = file(workspace / ".agents/skills/tracked/data [x]*?.txt")
+    untracked = file(workspace / ".agents/skills/tracked/data [y]*?.txt")
+    neighbor = file(workspace / ".agents/skills/tracked/data y1.txt")
+    git("--literal-pathspecs", "-C", repository_root, "add", "--", tracked.path, neighbor.path)
+    claims, _, _ = apply(target, workspace, (tracked, untracked))
+    assert len(claims) == 1
+    assert git("--literal-pathspecs", "-C", workspace, "ls-files", "--full-name", "--", tracked.path).stdout
+    assert captured_output.warnings
+    assert git("-C", workspace, "check-ignore", "--no-index", "--", untracked.path).returncode == 0
+    assert all(path in git("-C", repository_root, "ls-files").stdout for path in ("data [x]*?.txt", "data y1.txt"))
+
+
 def test_modified_owned_exclusion_retains_its_bytes_and_ownership(repository):
     target, workspace = repository
     record = file(workspace / ".agents/skills/x/SKILL.md")
@@ -150,11 +165,16 @@ def test_linked_worktree_resolves_common_metadata_and_preserves_other_owner(repo
     git("-C", workspace, "worktree", "add", "--detach", linked, "HEAD")
     first = file(workspace / ".agents/skills/first/SKILL.md")
     second = file(linked / ".agents/skills/second/SKILL.md")
+    unrelated = linked / ".agents/skills/first/SKILL.md"
+    unrelated.parent.mkdir(parents=True)
+    unrelated.write_bytes(b"unrelated operator skill")
     first_claims, _, _ = apply(target, workspace, (first,))
+    assert git("-C", linked, "check-ignore", "--no-index", "--", unrelated).returncode == 0
     second_claims, _, _ = apply(target, linked, (second,), integration="grok-build")
     assert first_claims[0].destination == second_claims[0].destination
     remaining, _, _ = apply(target, workspace, (), first_claims)
     assert not remaining
     assert git("-C", linked, "check-ignore", "--no-index", "--", second.path).returncode == 0
+    assert unrelated.read_bytes() == b"unrelated operator skill"
     assert second_claims[0].identifier.encode() in Path(second_claims[0].destination).read_bytes()
     git("-C", workspace, "worktree", "remove", "--force", linked)

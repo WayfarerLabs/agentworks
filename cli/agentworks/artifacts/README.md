@@ -359,10 +359,12 @@ never consults descendant activation. Grok defers VM inputs to native user place
 
 Confirmed workspace artifact files receive exact repository-local exclusions in Git-resolved
 `info/exclude`. Git metadata files and linked worktrees are supported; linked worktrees can share
-that metadata. Ordinary applied state records ownership of each marked pattern pair. Updates/removal
-retire only those pairs; unrelated exclusions and operator modifications remain. Tracked artifact
-files stay tracked and visible, with a warning. Exclusions cannot conceal tracked changes.
-Agentworks does not edit shared `.gitignore`, hide whole native directories or change index flags.
+that metadata. An exclusion also ignores an unrelated untracked file at the same repository-relative
+path in another worktree sharing it. Ordinary applied state records ownership of each marked pattern
+pair. Updates/removal retire only those pairs; unrelated exclusions and operator modifications
+remain. Tracked artifact files stay tracked and visible, with a warning. Exclusions cannot conceal
+tracked changes. Agentworks does not edit shared `.gitignore`, hide whole native directories or
+change index flags.
 
 Elevated native file operations share a fixed allowlist: `/etc/claude-code`, `/etc/codex` and
 `/opt/agentworks/artifacts`. Reads, writes and cleanup outside those trees are refused, including

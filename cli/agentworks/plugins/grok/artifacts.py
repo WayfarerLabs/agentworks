@@ -28,7 +28,7 @@ from agentworks.artifacts.native.shell import filesystem_artifacts
 from agentworks.artifacts.session_paths import session_package_prefix
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from agentworks.artifacts.application import SessionArtifactContext
     from agentworks.artifacts.model import ArtifactInput, ArtifactInputs
@@ -80,6 +80,7 @@ def session_artifacts(
     *,
     extra_args: Sequence[str],
     enabled_workarounds: Sequence[str] = (),
+    resolve_home: Callable[[SessionArtifactContext], str] | None = None,
 ) -> NativeSessionArtifacts:
     if context is None or not has_artifacts(context):
         return NativeSessionArtifacts()
@@ -117,37 +118,39 @@ def session_artifacts(
             ancestor_flags.add("--disable-skills")
         with ancestor_diagnostics("grok-build"):
             reject_flags(extra_args, ancestor_flags, "grok-build")
-    root = native_home(context.home, context.environment, "GROK_HOME", ".grok")
+    if not inputs:
+        return NativeSessionArtifacts(ArtifactApplication(deferred=deferred))
+    environment = context.environment if resolve_home is None else {"GROK_HOME": resolve_home(context)}
+    root = native_home(context.home, environment, "GROK_HOME", ".grok")
     private = filesystem_artifacts(inputs, context.directory, session=True, aggregate_hints=True)
     files = [replace(file, native_identity=None) for file in private.files]
-    if inputs:
-        name = session_package_prefix(context.session_uuid) + "entry"
-        description = (
-            f"Use only when AGENTWORKS_SESSION_UUID={context.session_uuid}. "
-            "Read the current Agentworks session artifact index before work or resuming work."
+    name = session_package_prefix(context.session_uuid) + "entry"
+    description = (
+        f"Use only when AGENTWORKS_SESSION_UUID={context.session_uuid}. "
+        "Read the current Agentworks session artifact index before work or resuming work."
+    )
+    body = (
+        f"Use this skill only when AGENTWORKS_SESSION_UUID={context.session_uuid}.\n\n"
+        "Read AGENTWORKS_ARTIFACTS_DIR from this workload's current environment, then open "
+        "index.json in that directory. Read every listed rule and hints file. For skills, use "
+        "the index's names and descriptions to choose a SKILL.md and its supporting files. "
+        "Re-read the current index after a managed restart; do not reuse an earlier run's path.\n"
+    )
+    header = yaml.safe_dump({"name": name, "description": description}, sort_keys=False)
+    package = f"{root}/skills/{name}"
+    files.append(
+        ArtifactFile(
+            f"{package}/SKILL.md",
+            f"---\n{header}---\n{body}".encode(),
+            tuple(item.origin_identity for item in inputs.items()),
+            native_identity=f"skill:{name}",
+            package_root=package,
         )
-        body = (
-            f"Use this skill only when AGENTWORKS_SESSION_UUID={context.session_uuid}.\n\n"
-            "Read AGENTWORKS_ARTIFACTS_DIR from this workload's current environment, then open "
-            "index.json in that directory. Read every listed rule and hints file. For skills, use "
-            "the index's names and descriptions to choose a SKILL.md and its supporting files. "
-            "Re-read the current index after a managed restart; do not reuse an earlier run's path.\n"
-        )
-        header = yaml.safe_dump({"name": name, "description": description}, sort_keys=False)
-        package = f"{root}/skills/{name}"
-        files.append(
-            ArtifactFile(
-                f"{package}/SKILL.md",
-                f"---\n{header}---\n{body}".encode(),
-                tuple(item.origin_identity for item in inputs.items()),
-                native_identity=f"skill:{name}",
-                package_root=package,
-            )
-        )
-        output.warn(
-            "Grok session-home-skills advertises one session entry in the shared user skill catalog. "
-            "Applicability is best effort; skills are accessed through the private index, "
-            "not individual native commands."
-        )
+    )
+    output.warn(
+        "Grok session-home-skills advertises one session entry in the shared user skill catalog. "
+        "Applicability is best effort; skills are accessed through the private index, "
+        "not individual native commands."
+    )
     application = ArtifactApplication(tuple(files), deferred, artifacts_dir=private.artifacts_dir)
     return NativeSessionArtifacts(application)

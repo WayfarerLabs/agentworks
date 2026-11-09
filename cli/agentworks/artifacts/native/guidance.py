@@ -37,7 +37,10 @@ def _guidance_name(items: tuple[ArtifactInput, ...]) -> str:
     first = items[0]
     label = "hints" if first.content.type is ArtifactType.HINT else f"rule-{first.content.name}"
     owner = [first.origin.component, first.origin.resource_kind, first.origin.resource_name]
-    suffix = hashlib.sha256(json.dumps(owner).encode()).hexdigest()[:10]
+    identity = [*owner, first.content.type.value]
+    if first.content.type is ArtifactType.RULE:
+        identity.append(first.content.name)
+    suffix = hashlib.sha256(json.dumps(identity).encode()).hexdigest()[:10]
     return f"agentworks-{label[:42].rstrip('-')}-{suffix}"
 
 

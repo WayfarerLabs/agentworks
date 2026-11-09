@@ -11,6 +11,7 @@ import yaml
 from agentworks.artifacts.application import ArtifactFile
 from agentworks.artifacts.model import ArtifactType
 from agentworks.artifacts.native.guidance import guidance_skills
+from agentworks.artifacts.publication import validate_application
 from agentworks.artifacts.session import validate_session_application
 from agentworks.errors import StateError
 from agentworks.plugins.codex import artifacts as codex
@@ -40,6 +41,45 @@ def test_same_named_rules_and_hints_from_different_scopes_have_distinct_owned_pa
         assert metadata(file)["name"] == name and len(name) <= 64
         assert file.native_identity == "skill:" + name
     assert first.content.text.encode() in next(file.data for file in files if file.origins == (first.origin_identity,))
+
+
+@pytest.mark.parametrize(
+    "integration,skills",
+    [("claude-code", False), ("claude-code", True), ("codex", True), ("grok-build", False), ("grok-build", True)],
+)
+def test_long_rule_keys_with_the_same_readable_prefix_keep_distinct_native_outputs(integration, skills):
+    from agentworks.plugins.claude import artifacts as claude
+    from agentworks.plugins.grok import artifacts as grok
+
+    items = tuple(artifact(ArtifactType.RULE, name="r" * 40 + suffix) for suffix in ("-one", "-two"))
+    inputs = received(*items)
+    if integration == "codex":
+        plan = codex.outer_artifacts(inputs, skills_root="/native/skills", agents_root="/native/agents")
+    elif integration == "claude-code":
+        plan = claude.outer_artifacts(inputs, "/native", guidance_as_skills=skills)
+    else:
+        plan = grok.outer_artifacts(inputs, "/native", workspace=skills)
+    validate_application(plan, inputs, "user", integration=integration)
+    assert not plan.deferred and len(plan.files) == 2
+    assert len({file.path for file in plan.files}) == 2
+    assert {file.origins for file in plan.files} == {(item.origin_identity,) for item in items}
+    if skills:
+        assert len({file.native_identity for file in plan.files}) == 2
+        for file in plan.files:
+            name = metadata(file)["name"]
+            assert name == PurePosixPath(file.package_root).name and len(name) <= 64
+            assert file.native_identity == "skill:" + name
+    else:
+        assert all(len(PurePosixPath(file.path).stem) <= 64 for file in plan.files)
+
+
+def test_owner_hint_aggregate_keeps_one_native_name_when_its_keys_change():
+    first = artifact(ArtifactType.HINT, name="first")
+    second = artifact(ArtifactType.HINT, name="second")
+    before = guidance_skills("/skills", received(first))[0]
+    after = guidance_skills("/skills", received(second))[0]
+    assert before.path == after.path and before.native_identity == after.native_identity
+    assert before.origins == (first.origin_identity,) and after.origins == (second.origin_identity,)
 
 
 def test_session_and_run_qualification_prevents_package_overlap_and_preserves_assets():
