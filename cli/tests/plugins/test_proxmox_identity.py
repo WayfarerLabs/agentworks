@@ -19,6 +19,8 @@ from agentworks.capabilities.base import RunContext
 from agentworks.db import VMStatus
 from agentworks.errors import StateError
 from agentworks.execution import root_script
+from agentworks.execution.root_script import RawRun
+from agentworks.plugins.proxmox import platform as proxmox_platform
 from agentworks.plugins.proxmox.api import ProxmoxAPIError
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from tests._proxmox_fakes import NEWID, PROXMOX_CONFIG, FakeProxmoxAPI
@@ -132,3 +134,25 @@ def test_an_api_failure_reads_as_unknown_status_but_refuses_a_start(fake: FakePr
         platform.start(ROW, RunContext())
 
     assert "start_vm" not in fake.ops()
+
+
+def test_the_identity_check_spends_the_root_scripts_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    now = [1000.0]
+    passed: list[float] = []
+
+    def slow_check(self: ProxmoxPlatform, vm: VMRow, ctx: RunContext) -> dict[str, object]:
+        now[0] += 20
+        return {}
+
+    monkeypatch.setattr(proxmox_platform, "time", SimpleNamespace(monotonic=lambda: now[0]))
+    monkeypatch.setattr(ProxmoxPlatform, "_guest", slow_check)
+    monkeypatch.setattr(ProxmoxPlatform, "_api", lambda self, ctx: None)
+    monkeypatch.setattr(
+        proxmox_platform.guest_agent,
+        "run_as_root",
+        lambda api, node, vmid, script, deadline: passed.append(deadline) or RawRun(b"", b""),
+    )
+
+    _platform().run_as_root(ROW, RunContext(), b"true", 30)
+
+    assert passed == [10]

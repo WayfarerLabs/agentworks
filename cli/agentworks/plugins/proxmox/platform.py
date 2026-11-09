@@ -532,9 +532,14 @@ class ProxmoxPlatform(VMPlatform):
         return f"{vmid}@{node}"
 
     def run_as_root(self, vm: VMRow, ctx: RunContext, script: bytes, deadline: float) -> RawRun:
-        """Run ``script`` as root through the QEMU Guest Agent, which needs no guest sshd, once the guest is ours."""
+        """Run ``script`` as root through the QEMU Guest Agent, which needs no guest sshd, once the guest is ours.
+
+        The identity check spends the same ``deadline`` the script runs under.
+        """
+        expires = time.monotonic() + deadline
         self._guest(vm, ctx)
-        return guest_agent.run_as_root(self._api(ctx), self._vm_node(vm), self._vmid(vm), script, deadline)
+        remaining = max(expires - time.monotonic(), 0.1)
+        return guest_agent.run_as_root(self._api(ctx), self._vm_node(vm), self._vmid(vm), script, remaining)
 
     # -- Helpers ---------------------------------------------------------------
 
