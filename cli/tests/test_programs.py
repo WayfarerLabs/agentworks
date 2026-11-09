@@ -18,6 +18,8 @@ from agentworks.programs import find_program, resolve_program
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from tests.conftest import CapturedOutput
+
 pytestmark = pytest.mark.windows
 
 WINDOWS = sys.platform == "win32"
@@ -114,10 +116,11 @@ def _taskkill(monkeypatch: pytest.MonkeyPatch) -> None:
     _kill_process_tree(SimpleNamespace(pid=4242, kill=lambda: None))  # type: ignore[arg-type]
 
 
-def _vscode() -> None:
+def _vscode(monkeypatch: pytest.MonkeyPatch) -> None:
     from agentworks.workspaces.manager.create import _open_in_vscode
 
-    _open_in_vscode("workspace")
+    monkeypatch.setattr(sys, "platform", "linux")  # the platforms agw starts VS Code on
+    _open_in_vscode(Path("workspace.code-workspace"))
 
 
 def _legacy_ssh() -> None:
@@ -210,13 +213,30 @@ def test_no_site_starts_a_decoy_from_the_current_directory(
 
     # Whether the site copes with a program that cannot start is not the question here.
     with contextlib.suppress(AgentworksError, OSError):
-        if site is _taskkill:
+        if site is _taskkill or site is _vscode:
             site(monkeypatch)
         else:
             site()
 
     assert started
     assert all(Path(program).parent == genuine for program in started), started
+
+
+def test_vscode_is_not_started_on_windows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+) -> None:
+    """Its ``code`` is a batch file, which only cmd.exe can start, parsing the workspace path by its own rules."""
+    from agentworks.workspaces.manager.create import _open_in_vscode
+
+    _plant(tmp_path / "bin", ("code",))
+    monkeypatch.setenv("PATH", str(tmp_path / "bin"))
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(subprocess, "Popen", lambda *_args, **_kwargs: pytest.fail("VS Code was started"))
+
+    _open_in_vscode(tmp_path / "project.code-workspace")
+
+    (warning,) = captured_output.warnings
+    assert "project.code-workspace" in warning  # names the file to open instead
 
 
 def _onepassword_ready() -> bool:

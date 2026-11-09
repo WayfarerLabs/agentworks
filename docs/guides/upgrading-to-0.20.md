@@ -135,7 +135,10 @@ has started.
   `limactl`, VS Code's `code`, your `EDITOR`, and the `ssh` and `scp` of the commands that still use
   the older SSH path (VM and agent initialization, sessions, workspaces and backups). A program
   found only in the current directory counts as not installed, so `agw doctor` and the 1Password
-  backend's readiness no longer vouch for one. An `EDITOR` given as a path is run as given.
+  backend's readiness no longer vouch for one. An `EDITOR` given as a path is run as given. On
+  Windows, `workspace create --open-vscode` does not start VS Code: its `code` command is a batch
+  file, which only `cmd.exe` can run, and `cmd.exe` parses the workspace path by its own rules. The
+  warning names the workspace file to open in VS Code yourself.
 - **`python3` on the VM.** Every request starts a small Python program on the VM. A VM without
   `python3`, or with one that lacks its standard library, is reported as unable to run Agentworks
   requests. New VMs get it at provisioning. `vm reinit` and `vm confirm-release` now connect the

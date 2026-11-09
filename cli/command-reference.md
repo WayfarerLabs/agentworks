@@ -947,7 +947,9 @@ Manage workspaces on VMs.
 | `agw workspace delete <name>`        | Delete a workspace                  |
 
 `workspace create <name>` takes the workspace name as a required positional. Optional flags: `--vm`,
-`--template`, `--spec`, and `--open-vscode`.
+`--template`, `--spec`, and `--open-vscode`. `--open-vscode` opens the new workspace's VS Code
+workspace file with VS Code's `code` command; on Windows `agw` does not start VS Code and instead
+names the file to open.
 
 `workspace copy <source> <name>` copies a workspace to a new VM workspace. Accepts `--vm`. Source
 and destination can be the same VM (a clone) or different VMs.
