@@ -5,7 +5,7 @@ provisioning orchestration and the hardening rules self-contained
 (constants + pure decision logic + apply functions).
 
 Public surface:
-- ``apply_vm_hardening(target, logger)``: the top-level entry point
+- ``apply_vm_hardening(files, log)``: the top-level entry point
   invoked by ``_phase_b_setup``. Idempotent; non-fatal on failure
   (warns + continues to match the rest of phase B).
 - ``_apply_hardening_sysctl`` / ``_apply_hardening_fstab``: each
@@ -13,19 +13,23 @@ Public surface:
   so unit tests can exercise them without standing up the full phase.
 - ``_ensure_proc_hidepid_in_fstab``: the pure parse-and-edit core of
   the fstab decision; no I/O, exhaustively unit-tested.
+
+Both files are read through the file program and published with
+``Files.update``, so an unchanged file is never rewritten and a file
+another writer changed since the read is left as it is.
 """
 
 from __future__ import annotations
 
-import shlex
 from typing import TYPE_CHECKING
 
 from agentworks import output
-from agentworks.ssh import SSHError
+from agentworks.execution.requests import Command
+from agentworks.vms.initializer.steps import STEP_FAILURES, warn_step
 
 if TYPE_CHECKING:
-    from agentworks.ssh import SSHLogger
-    from agentworks.transports import Transport
+    from agentworks.execution.files import Files
+    from agentworks.vms.initializer.steps import InitLog
 
 
 HARDENING_SYSCTL_PATH = "/etc/sysctl.d/99-agentworks.conf"
@@ -140,103 +144,86 @@ def _ensure_proc_hidepid_in_fstab(content: str) -> tuple[str, str, int]:
     return "\n".join(lines) + "\n", action, effective
 
 
-def apply_vm_hardening(target: Transport, logger: SSHLogger) -> None:
+def apply_vm_hardening(files: Files, log: InitLog) -> None:
     """Apply VM hardening: sysctl baseline + /proc hidepid=1.
 
     Idempotent: a second run is a no-op unless the on-disk content differs.
     Called at vm create and re-applied at vm reinit. Non-fatal: failures
     warn and continue (matches the rest of _phase_b_setup).
     """
-    logger.step("VM hardening")
+    log.step("VM hardening")
     try:
-        _apply_hardening_sysctl(target, logger)
-    except SSHError as e:
-        msg = f"sysctl baseline failed: {e}"
-        logger.warning(msg)
-        output.warn(msg)
+        _apply_hardening_sysctl(files, log)
+    except STEP_FAILURES as error:
+        warn_step(log, "sysctl baseline failed", error)
     try:
-        _apply_hardening_fstab(target, logger)
-    except SSHError as e:
-        msg = f"fstab hidepid edit failed: {e}"
-        logger.warning(msg)
-        output.warn(msg)
+        _apply_hardening_fstab(files, log)
+    except STEP_FAILURES as error:
+        warn_step(log, "fstab hidepid edit failed", error)
 
 
-def _apply_hardening_sysctl(target: Transport, logger: SSHLogger) -> None:
-    """Write the sysctl baseline if content differs from desired; reload if changed."""
-    # sudo on the read for consistency with the fstab read below; the file
-    # itself is mode 0644 and would be world-readable when present.
-    existing = target.run(f"cat {HARDENING_SYSCTL_PATH}", sudo=True, check=False)
-    if getattr(existing, "ok", False) and getattr(existing, "stdout", "") == HARDENING_SYSCTL_CONTENT:
+def _apply_hardening_sysctl(files: Files, log: InitLog) -> None:
+    """Write the sysctl baseline if content differs from desired; reload only if it was written."""
+    current = files.read(HARDENING_SYSCTL_PATH, elevated=True)
+    desired = HARDENING_SYSCTL_CONTENT.encode()
+    if current == desired:
         output.info("Sysctl baseline already applied; no change.")
         return
-
     output.info("Applying sysctl baseline...")
-    mktemp_result = target.run("mktemp --tmpdir agw-sysctl.XXXXXX")
-    staging = (getattr(mktemp_result, "stdout", "") or "").strip()
-    if not staging:
-        raise SSHError("mktemp produced empty path for sysctl staging")
-    try:
-        target.write_file(staging, HARDENING_SYSCTL_CONTENT)
-        target.run(
-            f"install -m 0644 -o root -g root {shlex.quote(staging)} {HARDENING_SYSCTL_PATH}",
-            sudo=True,
-        )
-    finally:
-        target.run(f"rm -f {shlex.quote(staging)}", check=False)
-    target.run("sysctl --system", sudo=True)
+    files.update(HARDENING_SYSCTL_PATH, desired, observed=current, mode=0o644, parent_mode=0o755, elevated=True)
+    files.access.run(Command(("sysctl", "--system"), elevated=True, deadline=files.deadline), check=True)
 
 
-def _apply_hardening_fstab(target: Transport, logger: SSHLogger) -> None:
+def _apply_hardening_fstab(files: Files, log: InitLog) -> None:
     """Ensure /proc is mounted with ``hidepid>=1`` and live-remount.
 
     Parses the existing ``/etc/fstab`` /proc line (if any) and edits its
     options conservatively rather than inserting a parallel managed line.
     Preserves admin-set ``hidepid=2`` (stricter than agentworks's default).
-    Always live-remounts /proc to the effective value at the end.
+    An edit keeps the file's owner, mode and attributes. Always
+    live-remounts /proc to the effective value at the end.
     """
     output.info("Ensuring hidepid=1 on /proc...")
 
-    result = target.run(f"cat {HARDENING_FSTAB_PATH}", sudo=True, check=False)
-    if not getattr(result, "ok", False):
+    current = files.read(HARDENING_FSTAB_PATH, elevated=True)
+    if current is None:
         msg = f"could not read {HARDENING_FSTAB_PATH}; skipping hidepid edit"
-        logger.warning(msg)
+        log.warning(msg)
         output.warn(msg)
         return
-    current = getattr(result, "stdout", "") or ""
 
-    new_content, action, effective = _ensure_proc_hidepid_in_fstab(current)
+    # surrogateescape keeps any byte that is not UTF-8 exactly as it was.
+    new_content, action, effective = _ensure_proc_hidepid_in_fstab(current.decode("utf-8", "surrogateescape"))
 
     if action == "malformed":
         msg = f"{HARDENING_FSTAB_PATH} /proc line did not parse cleanly; leaving fstab unchanged. Will still remount."
-        logger.warning(msg)
+        log.warning(msg)
         output.warn(msg)
     elif action == "preserved-stricter":
         output.detail(f"/proc already mounted with hidepid={effective} (stricter than agentworks default); preserved.")
-    elif action == "no-op":
-        # Already exactly what we want; nothing to log.
-        pass
-    else:
-        # action in {"appended", "added-option", "upgraded"}: write the file.
-        action_msg = {
-            "appended": "Added /proc entry to /etc/fstab",
-            "added-option": "Added hidepid=1 to /proc options in /etc/fstab",
-            "upgraded": "Upgraded /proc from hidepid=0 to hidepid=1 in /etc/fstab",
-        }[action]
-        output.detail(action_msg)
-        mktemp_result = target.run("mktemp --tmpdir agw-fstab.XXXXXX")
-        staging = (getattr(mktemp_result, "stdout", "") or "").strip()
-        if not staging:
-            raise SSHError("mktemp produced empty path for fstab staging")
-        try:
-            target.write_file(staging, new_content)
-            target.run(
-                f"install -m 0644 -o root -g root {shlex.quote(staging)} {HARDENING_FSTAB_PATH}",
-                sudo=True,
-            )
-        finally:
-            target.run(f"rm -f {shlex.quote(staging)}", check=False)
+    elif action != "no-op":
+        # action in {"appended", "added-option", "upgraded"}: the content changed.
+        output.detail(
+            {
+                "appended": "Added /proc entry to /etc/fstab",
+                "added-option": "Added hidepid=1 to /proc options in /etc/fstab",
+                "upgraded": "Upgraded /proc from hidepid=0 to hidepid=1 in /etc/fstab",
+            }[action]
+        )
+    # Every action but an edit returns the content unchanged, which writes nothing.
+    files.update(
+        HARDENING_FSTAB_PATH,
+        new_content.encode("utf-8", "surrogateescape"),
+        observed=current,
+        mode=0o644,
+        parent_mode=0o755,
+        preserve_metadata=True,
+        elevated=True,
+    )
 
     # Live remount with the effective value (idempotent at the kernel level
     # when options match the existing mount; cheap to call unconditionally).
-    target.run(f"mount -o remount,hidepid={effective} /proc", sudo=True)
+    files.access.run(
+        Command(("mount", "-o", f"remount,hidepid={effective}", "/proc"), elevated=True, deadline=files.deadline),
+        check=True,
+    )

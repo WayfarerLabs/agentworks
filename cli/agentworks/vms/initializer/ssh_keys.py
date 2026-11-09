@@ -8,15 +8,21 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from agentworks import output
+from agentworks.execution.requests import Command, Script, Shell
 from agentworks.ssh import SSHError, SSHLogger
+
+from .steps import STEP_FAILURES, status, warn_step
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
 
     from agentworks.config import Config
+    from agentworks.execution.files import Files
     from agentworks.ssh_identity import SSHIdentity
     from agentworks.transports import Transport
+
+    from .steps import InitLog
 
 AUTHORIZED_KEYS_HEADER = """\
 # Managed by agentworks -- manual edits will be overwritten on reinit.
@@ -136,15 +142,12 @@ def _reconcile_authorized_keys(
     return AuthorizedKeysApplied(prepared.identity, prepared.private_key_ref)
 
 
-def _preserve_ssh_host_keys(
-    target: Transport,
-    logger: SSHLogger,
-) -> None:
+def _preserve_ssh_host_keys(files: Files, log: InitLog) -> None:
     """Stop cloud-init from regenerating SSH host keys on stop/start.
 
     Writes the cloud-init drop-in that pins existing host keys. This also runs
     during create-time bootstrap, but reconciling it here means VMs provisioned
-    before the drop-in existed get repaired on ``vm reinit`` -- otherwise their
+    before the drop-in existed get repaired on ``vm reinit``: otherwise their
     host key changes on the next reboot and no longer matches the key recorded
     in the VM's host-key store, so every connection is refused.
 
@@ -152,30 +155,22 @@ def _preserve_ssh_host_keys(
     read. Written unconditionally to keep the step platform-agnostic, matching
     the create-time bootstrap step.
     """
-    from pathlib import PurePosixPath
-
     from agentworks.capabilities.vm_platform.bootstrap_script import (
-        SSH_PRESERVE_KEYS_LINES,
+        SSH_PRESERVE_KEYS_CONTENT,
         SSH_PRESERVE_KEYS_PATH,
     )
 
-    logger.step("Preserve SSH host keys")
+    log.step("Preserve SSH host keys")
     output.info("Ensuring SSH host key preservation...")
-
-    parent = str(PurePosixPath(SSH_PRESERVE_KEYS_PATH).parent)
-    printf_args = " ".join(shlex.quote(line) for line in SSH_PRESERVE_KEYS_LINES)
     try:
-        target.run(
-            f"mkdir -p {shlex.quote(parent)} && printf '%s\\n' {printf_args} > {shlex.quote(SSH_PRESERVE_KEYS_PATH)}",
-            sudo=True,
+        files.write(
+            SSH_PRESERVE_KEYS_PATH, SSH_PRESERVE_KEYS_CONTENT.encode(), mode=0o644, parent_mode=0o755, elevated=True
         )
-    except SSHError as e:
-        msg = f"SSH host key preservation failed: {e}"
-        logger.warning(msg)
-        output.warn(msg)
+    except STEP_FAILURES as error:
+        warn_step(log, "SSH host key preservation failed", error)
 
 
-def _apply_sve_mask(target: Transport, logger: SSHLogger) -> None:
+def _apply_sve_mask(files: Files, log: InitLog) -> None:
     """Repair the Apple-vz SVE trap on VMs provisioned before the mask existed.
 
     Apple's Virtualization.framework advertises SVE the guest cannot execute,
@@ -199,50 +194,36 @@ def _apply_sve_mask(target: Transport, logger: SSHLogger) -> None:
     again (matching ``apply_tailscaled_dns_fix``, which likewise defers to the
     next boot).
     """
-    from pathlib import PurePosixPath
-
     from agentworks.capabilities.vm_platform.bootstrap_script import (
         SVE_APPLE_VZ_GREP,
         SVE_CPUINFO_GREP,
-        SVE_NOSVE_GRUB_LINES,
+        SVE_NOSVE_GRUB_CONTENT,
         SVE_NOSVE_GRUB_PATH,
     )
 
-    logger.step("Mask SVE")
-
-    # Gate: an Apple Virtualization guest still advertising SVE. Both greps
-    # read /sys and /proc (no sudo); either one failing (non-Apple host, or a
-    # VM already masked and rebooted) makes this a silent no-op.
-    gate = target.run(f"{SVE_APPLE_VZ_GREP} && {SVE_CPUINFO_GREP}", check=False)
-    if not gate.ok:
-        return
-
-    output.info("Masking unusable SVE (arm64.nosve)...")
-    parent = str(PurePosixPath(SVE_NOSVE_GRUB_PATH).parent)
-    printf_args = " ".join(shlex.quote(line) for line in SVE_NOSVE_GRUB_LINES)
+    log.step("Mask SVE")
     try:
-        target.run(
-            f"mkdir -p {shlex.quote(parent)} && printf '%s\\n' {printf_args} > {shlex.quote(SVE_NOSVE_GRUB_PATH)}",
-            sudo=True,
-        )
-        update = target.run("update-grub", sudo=True, check=False)
-        if not update.ok:
+        # Gate: an Apple Virtualization guest still advertising SVE. Both greps
+        # read /sys and /proc unelevated; either one failing (non-Apple host, or
+        # a VM already masked and rebooted) makes this a silent no-op.
+        if status(files, Script(f"{SVE_APPLE_VZ_GREP} && {SVE_CPUINFO_GREP}", Shell.SH, deadline=files.deadline)):
+            return
+        output.info("Masking unusable SVE (arm64.nosve)...")
+        files.write(SVE_NOSVE_GRUB_PATH, SVE_NOSVE_GRUB_CONTENT.encode(), mode=0o644, parent_mode=0o755, elevated=True)
+        if status(files, Command(("update-grub",), elevated=True, deadline=files.deadline)):
             msg = "SVE mask: update-grub failed; VM may crash on SVE (SIGILL)."
-            logger.warning(msg)
+            log.warning(msg)
             output.warn(msg)
             return
-    except SSHError as e:
-        msg = f"SVE mask failed: {e}"
-        logger.warning(msg)
-        output.warn(msg)
+        # The drop-in is installed but the running kernel picked it up only if
+        # arm64.nosve is already on the cmdline (i.e. the VM was rebooted since).
+        # We cannot reboot from here without dropping the tailnet mid-init, so tell
+        # the operator; a restart plus one more reinit converges the VM.
+        active = status(files, Command(("grep", "-qw", "arm64.nosve", "/proc/cmdline"), deadline=files.deadline))
+    except STEP_FAILURES as error:
+        warn_step(log, "SVE mask failed", error)
         return
-
-    # The drop-in is installed but the running kernel picked it up only if
-    # arm64.nosve is already on the cmdline (i.e. the VM was rebooted since).
-    # We cannot reboot from here without dropping the tailnet mid-init, so tell
-    # the operator; a restart plus one more reinit converges the VM.
-    active = target.run("grep -qw arm64.nosve /proc/cmdline", check=False)
-    if not active.ok:
+    if active:
         output.warn(
             "Masked unusable SVE (arm64.nosve). Restart the VM and reinit "
             "again to apply it; until then, OpenSSL/git/apt may crash (SIGILL)."

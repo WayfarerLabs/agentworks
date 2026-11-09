@@ -49,16 +49,16 @@ diagnosis and the apt failure that follows.
 
 from __future__ import annotations
 
-import shlex
 from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.errors import StateError
-from agentworks.ssh import SSHError
+from agentworks.execution.requests import Command
+from agentworks.vms.initializer.steps import STEP_FAILURES, status, warn_step
 
 if TYPE_CHECKING:
-    from agentworks.ssh import SSHLogger
-    from agentworks.transports import Transport
+    from agentworks.execution.files import Files
+    from agentworks.vms.initializer.steps import InitLog
 
 
 TAILSCALED_DROPIN_DIR = "/etc/systemd/system/tailscaled.service.d"
@@ -80,51 +80,35 @@ Wants=network-online.target
 """
 
 
-def apply_tailscaled_dns_fix(target: Transport, logger: SSHLogger) -> None:
+def apply_tailscaled_dns_fix(files: Files, log: InitLog) -> None:
     """Apply the tailscaled cold-boot DNS race fix.
 
     Idempotent: a second run is a no-op unless on-disk content differs.
     Called at vm create and re-applied at vm reinit. Non-fatal: failure
     warns and continues (matches the rest of phase B).
     """
-    logger.step("Tailscale DNS")
+    log.step("Tailscale DNS")
     try:
-        _ensure_tailscaled_dropin(target, logger)
-    except SSHError as e:
-        msg = f"tailscaled drop-in install failed: {e}"
-        logger.warning(msg)
-        output.warn(msg)
+        _ensure_tailscaled_dropin(files, log)
+    except STEP_FAILURES as error:
+        warn_step(log, "tailscaled drop-in install failed", error)
 
 
-def _ensure_tailscaled_dropin(target: Transport, logger: SSHLogger) -> None:
+def _ensure_tailscaled_dropin(files: Files, log: InitLog) -> None:
     """Install/refresh the tailscaled startup-ordering drop-in.
 
     Writes only when content differs; runs ``daemon-reload`` only when
-    the file was actually rewritten.
+    the file was actually rewritten. A missing drop-in directory is created
+    root-owned 0755 with the file.
     """
-    existing = target.run(f"cat {TAILSCALED_DROPIN_PATH}", sudo=True, check=False)
-    if getattr(existing, "ok", False) and getattr(existing, "stdout", "") == TAILSCALED_DROPIN_CONTENT:
+    current = files.read(TAILSCALED_DROPIN_PATH, elevated=True)
+    desired = TAILSCALED_DROPIN_CONTENT.encode()
+    if current == desired:
         output.info("tailscaled drop-in already installed; no change.")
         return
-
     output.info("Installing tailscaled startup-ordering drop-in...")
-    target.run(
-        f"install -d -m 0755 -o root -g root {TAILSCALED_DROPIN_DIR}",
-        sudo=True,
-    )
-    mktemp_result = target.run("mktemp --tmpdir agw-tsdns.XXXXXX")
-    staging = (getattr(mktemp_result, "stdout", "") or "").strip()
-    if not staging:
-        raise SSHError("mktemp produced empty path for tailscaled drop-in staging")
-    try:
-        target.write_file(staging, TAILSCALED_DROPIN_CONTENT)
-        target.run(
-            f"install -m 0644 -o root -g root {shlex.quote(staging)} {TAILSCALED_DROPIN_PATH}",
-            sudo=True,
-        )
-    finally:
-        target.run(f"rm -f {shlex.quote(staging)}", check=False)
-    target.run("systemctl daemon-reload", sudo=True)
+    files.update(TAILSCALED_DROPIN_PATH, desired, observed=current, mode=0o644, parent_mode=0o755, elevated=True)
+    files.access.run(Command(("systemctl", "daemon-reload"), elevated=True, deadline=files.deadline), check=True)
 
 
 # Probe target for the libc DNS check. Stable A record, frequently cached on
@@ -167,7 +151,7 @@ _LATCHED_HEAL_HINT = (
 )
 
 
-def check_vm_dns(target: Transport, logger: SSHLogger) -> None:
+def check_vm_dns(files: Files, log: InitLog) -> None:
     """Check whether VM DNS is working and surface a diagnosis if it isn't.
 
     Called before any phase B step that needs external DNS (apt-get
@@ -194,21 +178,38 @@ def check_vm_dns(target: Transport, logger: SSHLogger) -> None:
     - DNS fails for any other reason (resolv.conf unreadable, or not
       tailscaled-managed): warn that DNS is broken so the operator can
       diagnose before subsequent apt steps fail cryptically.
+    - A probe that cannot run (the request fails or does not complete):
+      warn that DNS could not be checked, and go on.
     """
-    logger.step("VM DNS")
+    log.step("VM DNS")
+    try:
+        latched = _diagnose_dns(files, log)
+    except STEP_FAILURES as error:
+        warn_step(log, "VM DNS could not be checked", error)
+        return
+    if latched:
+        raise StateError(
+            f"VM DNS is latched (issue #117): /etc/resolv.conf is "
+            f"tailscaled-managed and libc lookup of '{_DNS_PROBE_NAME}' "
+            f"failed.",
+            entity_kind="vm",
+            hint=_LATCHED_HEAL_HINT,
+        )
 
+
+def _diagnose_dns(files: Files, log: InitLog) -> bool:
+    """Probe DNS; warn about any breakage the heal does not fit, and return whether it is the #117 latch."""
     # The actual question: can the VM resolve external names?
     # Everything else is diagnosis-of-failure. Announce before we
     # block on the lookup; getent over libc -> tailscaled -> upstream
     # can take a few seconds and the operator should know what we're
     # waiting on.
     output.info(f"Checking DNS resolution ({_DNS_PROBE_NAME})...")
-    probe = target.run(f"getent hosts {shlex.quote(_DNS_PROBE_NAME)}", check=False)
-    if getattr(probe, "ok", False):
+    if status(files, Command(("getent", "hosts", _DNS_PROBE_NAME), deadline=files.deadline)) == 0:
         # No "VM DNS is healthy." line on the happy path: phase B's
         # convention is "say what we're doing, stay silent on success,
         # warn or raise on failure."
-        return
+        return False
 
     # DNS is broken. Subsequent steps that need external resolution
     # (apt-get update, source fetches, etc.) will fail. From here on,
@@ -217,19 +218,19 @@ def check_vm_dns(target: Transport, logger: SSHLogger) -> None:
     #
     # The resolv.conf read is mode 0644 on every standard distribution
     # (including in the latched state, where tailscaled rewrites it as
-    # a regular file with default mode); no sudo is needed.
-    resolv = target.run("cat /etc/resolv.conf", check=False)
-    if not getattr(resolv, "ok", False):
+    # a regular file with default mode); no elevation is needed.
+    resolv = files.access.run(Command(("cat", "/etc/resolv.conf"), deadline=files.deadline))
+    if resolv.require_completed(files.access.vm_name) != 0:
         msg = (
             f"VM DNS lookup of '{_DNS_PROBE_NAME}' failed, and "
             f"/etc/resolv.conf could not be read for further diagnosis. "
             f"Subsequent steps that need external DNS will likely fail."
         )
-        logger.warning(msg)
+        log.warning(msg)
         output.warn(msg)
-        return
+        return False
 
-    if _TAILSCALED_RESOLV_SIGNATURE not in getattr(resolv, "stdout", ""):
+    if _TAILSCALED_RESOLV_SIGNATURE not in resolv.stdout.decode("utf-8", "replace"):
         msg = (
             f"VM DNS lookup of '{_DNS_PROBE_NAME}' failed. The failure "
             f"shape doesn't match the issue #117 latch (/etc/resolv.conf "
@@ -237,9 +238,9 @@ def check_vm_dns(target: Transport, logger: SSHLogger) -> None:
             f"Investigate the platform resolver; subsequent steps that "
             f"need external DNS will likely fail."
         )
-        logger.warning(msg)
+        log.warning(msg)
         output.warn(msg)
-        return
+        return False
 
     # /etc/resolv.conf IS tailscaled-managed and libc DNS is broken.
     # This matches the issue #117 latched shape. Platform gate: the
@@ -247,8 +248,7 @@ def check_vm_dns(target: Transport, logger: SSHLogger) -> None:
     # only correct when resolved IS the active resolver. For other
     # resolver setups we don't yet have a tested heal implementation,
     # so warn rather than raise with a hint we know would be wrong.
-    resolved = target.run("systemctl is-active --quiet systemd-resolved", check=False)
-    if not getattr(resolved, "ok", False):
+    if status(files, Command(("systemctl", "is-active", "--quiet", "systemd-resolved"), deadline=files.deadline)):
         msg = (
             f"VM DNS appears latched (issue #117): /etc/resolv.conf is "
             f"tailscaled-managed and libc lookup of '{_DNS_PROBE_NAME}' "
@@ -257,14 +257,7 @@ def check_vm_dns(target: Transport, logger: SSHLogger) -> None:
             f"resolver). Subsequent steps that need external DNS will "
             f"likely fail."
         )
-        logger.warning(msg)
+        log.warning(msg)
         output.warn(msg)
-        return
-
-    raise StateError(
-        f"VM DNS is latched (issue #117): /etc/resolv.conf is "
-        f"tailscaled-managed and libc lookup of '{_DNS_PROBE_NAME}' "
-        f"failed.",
-        entity_kind="vm",
-        hint=_LATCHED_HEAL_HINT,
-    )
+        return False
+    return True

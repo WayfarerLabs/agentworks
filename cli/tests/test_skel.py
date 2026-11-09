@@ -18,14 +18,11 @@ Pins:
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
 from agentworks.capabilities.vm_platform.skel import BASHRC, SKEL_HEADER, ZSHRC
 from agentworks.vms.initializer import (
     AGENTWORKS_RC,
     SKEL_BASHRC_PATH,
     SKEL_ZSHRC_PATH,
-    _write_skel_seeds,
 )
 
 # ---------------------------------------------------------------------------
@@ -200,28 +197,6 @@ def test_zsh_seed_includes_compinit() -> None:
 # ---------------------------------------------------------------------------
 # _write_skel_seeds wiring
 # ---------------------------------------------------------------------------
-
-
-def test_write_skel_seeds_writes_both_files_to_etc_skel() -> None:
-    """Both /etc/skel/.bashrc and /etc/skel/.zshrc get written via
-    ``sudo tee`` (so the file ends up root-owned, which is correct for
-    a system template directory)."""
-    target = MagicMock()
-    target.run.return_value = MagicMock(ok=True)
-    logger = MagicMock()
-
-    _write_skel_seeds(target, logger)
-
-    commands = [call.args[0] for call in target.run.call_args_list]
-    # Each seed -> one printf | sudo tee + one sudo chmod, so 4 calls total.
-    assert len(commands) == 4
-    bashrc_tee = [c for c in commands if SKEL_BASHRC_PATH in c and "tee" in c]
-    zshrc_tee = [c for c in commands if SKEL_ZSHRC_PATH in c and "tee" in c]
-    assert len(bashrc_tee) == 1
-    assert len(zshrc_tee) == 1
-    # chmod 644 on each seed file.
-    assert f"sudo chmod 644 {SKEL_BASHRC_PATH}" in commands
-    assert f"sudo chmod 644 {SKEL_ZSHRC_PATH}" in commands
 
 
 def test_write_skel_seeds_skel_paths_are_etc_skel() -> None:

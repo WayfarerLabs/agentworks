@@ -23,6 +23,9 @@ from .phase_a import OperationLog
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from agentworks.execution.files import Files
+    from agentworks.execution.requests import RunRequest
+
 STEP_DEADLINE = 60
 """Seconds that bound each Phase B request that has no bound of its own."""
 
@@ -70,6 +73,15 @@ def describe_failure(error: Exception, sanitize: Callable[[str], str]) -> str:
     stderr = sanitize(error.result.stderr.decode("utf-8", errors="replace"))
     tail = ssh_process.tail_lines(stderr, WARNING_TAIL_LINES)
     return f"{message}\n{tail}" if tail else message
+
+
+def status(files: Files, request: RunRequest) -> int:
+    """Run ``request`` on ``files.access`` and return the guest's exit status.
+
+    For a request whose status is the answer (a probe, a validation); an
+    outcome that is not a completion raises its typed error.
+    """
+    return files.access.run(request).require_completed(files.access.vm_name)
 
 
 def warn_step(log: InitLog, summary: str, error: Exception) -> None:

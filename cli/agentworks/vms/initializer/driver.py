@@ -352,7 +352,7 @@ def _phase_b_setup(
         # Runs first so VMs predating the create-time bootstrap step are
         # repaired on reinit even if a later step warns. Idempotent overwrite
         # with identical content.
-        _preserve_ssh_host_keys(legacy_target, logger)
+        _preserve_ssh_host_keys(files, logger)
 
         # Non-fatal: repair the Apple-vz SVE trap (arm64.nosve grub drop-in) on
         # VMs provisioned before the create-time bootstrap mask existed. Runs
@@ -360,7 +360,7 @@ def _phase_b_setup(
         # least gets the fix installed this pass; it needs a restart plus one
         # more reinit to converge. A silent no-op on every non-Apple host and on
         # already-masked VMs.
-        _apply_sve_mask(legacy_target, logger)
+        _apply_sve_mask(files, logger)
 
         # Non-fatal: VM hardening (sysctl baseline + /proc hidepid>=1).
         # Runs before the rest of init so subsequent steps execute under the
@@ -369,7 +369,7 @@ def _phase_b_setup(
         # reinit.
         from agentworks.vms.hardening import apply_vm_hardening
 
-        apply_vm_hardening(legacy_target, logger)
+        apply_vm_hardening(files, logger)
 
         # Check VM DNS works before subsequent steps that need external
         # resolution (apt-get update, source fetches, etc.) fail cryptically.
@@ -383,7 +383,7 @@ def _phase_b_setup(
             check_vm_dns,
         )
 
-        check_vm_dns(legacy_target, logger)
+        check_vm_dns(files, logger)
 
         # Non-fatal: tailscaled cold-boot DNS race fix (GitHub issue #117).
         # Drops in a systemd override that orders tailscaled after the DNS
@@ -391,16 +391,16 @@ def _phase_b_setup(
         # falling back to direct mode. Applied early in Phase B so existing
         # VMs pick up the fix on the first reinit. Does not restart
         # tailscaled (would disconnect us); takes effect on next cold boot.
-        apply_tailscaled_dns_fix(legacy_target, logger)
+        apply_tailscaled_dns_fix(files, logger)
 
         # Non-fatal: VM-wide SetEnv plumbing.
         # Runs before apt install so subsequent SSH commands within init can
         # rely on the SetEnv path. These targets don't touch zsh-shipped files,
         # so dpkg conffile handling doesn't apply.
-        _write_sshd_accept_env(legacy_target, logger)
-        _write_sudoers_env_keep(legacy_target, logger)
+        _write_sshd_accept_env(files, logger)
+        _write_sudoers_env_keep(files, logger)
         # Pairs with the --preserve-env in _split_shell_pane's agent-pane branch.
-        _write_sudoers_console_setenv(legacy_target, logger, admin_username)
+        _write_sudoers_console_setenv(files, logger, admin_username)
         vm_row = db.get_vm(vm_name)
         # Init runs against a VM that exists in the DB (bootstrap_vm fetches the
         # row up front). A None here is an internal invariant violation, not a
@@ -451,7 +451,7 @@ def _phase_b_setup(
         # on top of whatever the package shipped. The mirror is idempotent on
         # reinit (strip-and-rewrite via begin/end markers).
         _write_agentworks_identity_profile(
-            legacy_target,
+            files,
             vm_stable_identity_env(identity_ctx),
             logger,
         )
@@ -462,7 +462,7 @@ def _phase_b_setup(
         # `--force-confnew` would let a bash upgrade silently replace the
         # seed with Debian's stock skel (saving ours as .dpkg-old). Future
         # `useradd -m` would then inherit Debian's skel instead.
-        _write_skel_seeds(legacy_target, logger)
+        _write_skel_seeds(files, logger)
 
         # Non-fatal: snap packages
         if vm_template.snap:
