@@ -26,7 +26,8 @@ as `python3 -c` argv with a scp staging directory (`:258-298`, `:338`, `:371`).
 
 **Out of this slice.** Every slice 5 write is conditional. Slice 6 adds `write` and `upload_tree`,
 and slice 7 the unconditional `remove`, each designed with its first caller on this program and
-lock. `FromFile`, `ToFile` and the `observation` option stay slice 7.
+lock. `FromFile`, `ToFile` and the `observation` option stay slice 7. Superseded for slice 6 by
+[init-lld.md](./init-lld.md), where the tree upload is a script outside this program.
 
 ## Module layout
 
@@ -277,7 +278,8 @@ is 2. Vector F6 runs on every platform's V lane, since `/run/lock` comes from ea
 Because every slice 5 operation that mutates walks under the lock, none can stage in a directory
 another then replaces, and nothing has to be re-checked before the rename. Slice 6's `upload_tree`
 will extract outside the lock, but only into a new directory of its own, creating new entries and
-replacing nothing; it takes the lock for the swap.
+replacing nothing; it takes the lock for the swap. Superseded by [init-lld.md](./init-lld.md): the
+tree upload is a script of its own and takes no lock.
 
 **The wait.** The longest hold is writing the content already in memory (up to the 64 MiB artifact
 bound), a compare of the existing file (SHA-256 of 16 MiB takes tens of milliseconds) and an
@@ -431,7 +433,9 @@ absent):
   malformed input (`settings.py:78-104`, `:125-144`), so R5's merge rules hold by construction.
 
 `ensure_directory` takes no `elevated`, since native settings, its only caller, needs none. D6's
-`update` (read, transform, `write_if`) arrives with its first callers in slice 6.
+`update` (read, transform, `write_if`) arrives with its first callers in slice 6. Superseded by
+[init-lld.md](./init-lld.md): `update` takes the caller's read, and `ensure_directory` gains
+`elevated` and an owner.
 
 ### Digests and size limits
 
