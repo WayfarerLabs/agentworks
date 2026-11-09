@@ -298,7 +298,9 @@ def _kill_wrapper(files: _DetachedFiles) -> str:
     this run's :func:`_wrapper_invocation`; a reused PID whose arguments merely mention the wrapper's
     path (an editor or a ``tail`` of it) is left alone. While that wrapper leads its own process
     group, the group is signalled, reaching the command it started, which signalling the wrapper alone
-    leaves running; a host bash that did not give the job its own group gets the wrapper alone.
+    leaves running. A host bash that did not give the job its own group gets the wrapper alone, so
+    the ``limactl`` it started keeps running on the host, and the caller's ``limactl delete`` of the
+    instance then runs alongside it; nothing here stops that ``limactl``.
     ``-ww`` keeps ``ps`` from cutting the command line to ``COLUMNS``.
     """
     return (
