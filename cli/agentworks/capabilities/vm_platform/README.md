@@ -634,14 +634,16 @@ The seam between the two stages is the source of the most important gotcha below
 
 Because create-time bootstrap is baked into the backend's create mechanism, **a change to it reaches
 new VMs only.** `agw vm reinit` (`manager.reinit_vm`) re-runs initialization (`run_initialization`
--> the platform-agnostic setup and hardening) over a transport; it does not call `platform.create()`
-again or re-run the backend's create-time user-data. So decide deliberately where a fix belongs:
+-> the platform-agnostic setup and hardening) over the admin's `VMAccess`; it does not call
+`platform.create()` again or re-run the backend's create-time user-data. So decide deliberately
+where a fix belongs:
 
 - **Must reach already-provisioned VMs?** Put it in initialization, as an idempotent reconciliation
   step. The models are `initializer._preserve_ssh_host_keys` and the sysctl / `hidepid` steps in
-  `agentworks.vms.hardening` (ADR 0012): each is written at create and re-applied on `reinit`,
-  content-diffed so a steady-state VM produces no change. Initialization is platform-agnostic, so
-  weigh whether the fix is truly generic before putting it there.
+  `agentworks.vms.hardening` (ADR 0012): each is written at create and re-applied on `reinit`, the
+  sysctl baseline through `Files.update` so a steady-state VM produces no change, and the host-key
+  drop-in rewritten with the same content. Initialization is platform-agnostic, so weigh whether the
+  fix is truly generic before putting it there.
 - **Genuinely platform-specific, and new-VMs-only is acceptable?** Put it in the platform's
   create-time provisioning and remediate existing VMs out of band. The Lima `subuid` cap took this
   route on purpose (below).

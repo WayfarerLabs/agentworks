@@ -104,15 +104,19 @@ store only. Your `~/.ssh/known_hosts` is no longer touched. `vm delete` removes 
 `agw vm exec`, `vm shell`, `agent exec`, `agent shell`, `vm verify-connection`, `vm port-forward`,
 `vm create`, `vm reinit`, `vm confirm-release`, `vm start`, `vm rekey` and `vm recover` now reach
 the VM through a new connection layer that sends each request over the OpenSSH client's standard
-input instead of on the `ssh` command line. For `vm create` that is everything after the platform
-has created the VM and joined it to the tailnet; for `vm reinit`, its checks of the VM (see
-[Create, reinit and the VM contract](#create-reinit-and-the-vm-contract)). `vm start`, and the
-automatic start of a VM that stopped on its own, use it to wait for the VM to answer; `vm rekey` and
-`vm recover` use it for the same wait after their scripts, which run through the platform's own
-channel (see [Start, recover, rekey and delete](#start-recover-rekey-and-delete)).
-`vm shell --platform` uses the platform's own channel instead and needs no `python3`; on a cloud VM
-that channel is SSH to its public address under the same rules. Everything else keeps its current
-path for now.
+input instead of on the `ssh` command line. For `vm create` that is the checks of the VM after the
+platform has created it and joined it to the tailnet; for `vm reinit`, its checks of the VM (see
+[Create, reinit and the VM contract](#create-reinit-and-the-vm-contract)). For both it is also every
+step of the VM Initialization section, and in Admin Initialization the workspaces directory and the
+user install commands (see [Initialization steps](#initialization-steps)). `workspace create`,
+`workspace repair`, `workspace rehome` and `workspace copy` apply the workspace ACLs through it, and
+`agent create`, `session create` and the session launches set up the tmux socket directories through
+it. `vm start`, and the automatic start of a VM that stopped on its own, use it to wait for the VM
+to answer; `vm rekey` and `vm recover` use it for the same wait after their scripts, which run
+through the platform's own channel (see
+[Start, recover, rekey and delete](#start-recover-rekey-and-delete)). `vm shell --platform` uses the
+platform's own channel instead and needs no `python3`; on a cloud VM that channel is SSH to its
+public address under the same rules. Everything else keeps its current path for now.
 
 ### What these commands need
 
@@ -134,13 +138,13 @@ has started.
   directory before `PATH`, and on POSIX an empty or relative `PATH` entry means the current
   directory. Agentworks now starts every workstation program by its path in an absolute `PATH`
   directory: `tailscale`, PowerShell, the 1Password CLI `op`, `git`, `taskkill`, local Lima's
-  `limactl`, VS Code's `code`, your `EDITOR`, and the `ssh` and `scp` of the commands that still use
-  the older SSH path (VM and agent initialization, sessions, workspaces and backups). A program
-  found only in the current directory counts as not installed, so `agw doctor` and the 1Password
-  backend's readiness no longer vouch for one. An `EDITOR` given as a path is run as given. On
-  Windows, `workspace create --open-vscode` does not start VS Code: its `code` command is a batch
-  file, which only `cmd.exe` can run, and `cmd.exe` parses the workspace path by its own rules. The
-  warning names the workspace file to open in VS Code yourself.
+  `limactl`, VS Code's `code`, your `EDITOR`, and the `ssh` and `scp` of the requests that still use
+  the older SSH path (the rest of Admin Initialization, agent initialization, sessions, workspaces
+  and backups). A program found only in the current directory counts as not installed, so
+  `agw doctor` and the 1Password backend's readiness no longer vouch for one. An `EDITOR` given as a
+  path is run as given. On Windows, `workspace create --open-vscode` does not start VS Code: its
+  `code` command is a batch file, which only `cmd.exe` can run, and `cmd.exe` parses the workspace
+  path by its own rules. The warning names the workspace file to open in VS Code yourself.
 - **`python3` on the VM.** Every request starts a small Python program on the VM. A VM without
   `python3`, or with one that lacks its standard library, is reported as unable to run Agentworks
   requests. New VMs get it at provisioning. `vm reinit` and `vm confirm-release` now connect the
@@ -238,6 +242,32 @@ has started.
   script's shell, with the working directory, the names of its environment variables and its
   deadline. A script's text and an environment variable's value are not written. Commands still on
   the old path log as before.
+
+### Initialization steps
+
+The VM Initialization steps of `vm create` and `vm reinit` run through the new layer, as do the
+workspaces directory and the user install commands of Admin Initialization.
+
+- **System files are written without following links.** The files initialization owns under `/etc`
+  (the cloud-init host-key drop-in, the sysctl baseline, `/etc/fstab`'s `/proc` line, the tailscaled
+  drop-in, the sshd and sudoers fragments, the identity profile, the `/etc/zsh/zprofile` block, the
+  skel seeds, the grub SVE drop-in and the apt source lists) are written by the file program, which
+  refuses a symbolic link at the file or any parent; a sudoers fragment is staged that way and
+  renamed into place once `visudo` accepts it. A refused file is a step warning, and the link's
+  target is left as it is.
+- **sshd is reloaded only when its fragment changes.** The sshd fragment is written, checked with
+  `sshd -t` and sshd reloaded only when its content differs, where every initialization used to
+  reload sshd. It leaves no `.bak` file: a fragment `sshd -t` rejects is replaced by what was there
+  before, or removed.
+- **`/etc/fstab` keeps its owner, group and mode** when its `/proc` line changes.
+- **Step warnings show what failed.** A failed step's warning ends with the last three lines of the
+  command's error output, with secrets removed.
+- **The DNS check warns when it cannot run.** A DNS probe that fails to run or times out warns and
+  initialization goes on. The issue #117 latch still stops it.
+- **Some failures stop initialization instead of warning.** A host key that does not match the VM's
+  record, a VM with no record, and a VM that cannot run Agentworks requests fail initialization at
+  the first request, with that error, instead of turning every later step into a warning. A failed
+  install of the required system packages stops it, as before.
 
 ## Start, recover, rekey and delete
 
