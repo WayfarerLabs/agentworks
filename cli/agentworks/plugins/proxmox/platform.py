@@ -538,8 +538,11 @@ class ProxmoxPlatform(VMPlatform):
 def _clone_names(vm: VMRow) -> tuple[str, ...]:
     """The names the row's clone may carry: create names it the VM's hostname.
 
-    A row migrated from before vm-sites recorded ``proxmox--NAME``, the
-    guest's OS hostname, while its clone was named ``NAME``.
+    Rows the vm-sites migration converted (``migrations.py``, which backfills
+    ``hostname`` as ``proxmox--NAME``) belong to VMs the pre-vm-sites
+    provisioner created: their recorded hostname is the guest's OS hostname,
+    while their clone was named ``NAME``. Rows created since then carry one
+    name for both.
     """
     if vm.hostname == f"proxmox--{vm.name}":
         return (vm.hostname, vm.name)

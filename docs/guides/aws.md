@@ -115,4 +115,5 @@ remove the retained group. Agentworks can only target provider IDs it received.
 Rows created before account binding carry no account ID. Agentworks deletes one only when the live
 instance's ID, ownership tag, and security-group association prove that the current account owns the
 target. An already-absent legacy target is intentionally ambiguous, so Agentworks retains the row
-instead of risking a wrong-account orphan.
+instead of risking a wrong-account orphan; once you have checked the account yourself,
+`agw vm delete --force <name>` removes the row.

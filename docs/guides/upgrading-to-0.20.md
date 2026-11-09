@@ -208,11 +208,10 @@ has started.
   `vm backup` and `vm confirm-release` refuse either, while `vm describe`, `vm list` and
   `vm verify-connection` still run; delete it with `agw vm delete NAME`. A create killed before its
   platform finished leaves a row that records nothing addressing the backend: `vm delete` refuses
-  it, and `vm delete --force NAME` removes the row and its host-key record and warns that resources
-  named or tagged with the VM's hostname may remain on its vm-site, for you to remove there. When
-  the check that failed is a missing `python3` or a missing host-key record, the error gives only
-  that delete-and-recreate guidance, since `vm recover` refuses a VM whose provisioning never
-  completed.
+  it, and `vm delete --force NAME` removes the row and its host-key record and warns with what may
+  remain on its vm-site, for you to remove there. When the check that failed is a missing `python3`
+  or a missing host-key record, the error gives only that delete-and-recreate guidance, since
+  `vm recover` refuses a VM whose provisioning never completed.
 - **Cloud create** (AWS, Azure, GCP) waits up to 10 minutes for the new VM to answer over SSH at its
   public address, instead of 30 tries 10 seconds apart. It fails at once, instead of trying again,
   when the admin cannot run `sudo` without a password or the VM's host key changes during the
@@ -264,11 +263,13 @@ before they resolve the auth key.
   so `~/.ssh/config` does not apply and an encrypted key must be loaded in the SSH agent, and it
   refuses a VM with no recorded host key. A platform without a native shell (Proxmox) is refused
   before anything is resolved.
-- **`vm delete` refuses a VM whose site cannot be bound.** An unset token secret, a removed vm-site
-  or a disabled plugin used to warn and remove the row while the VM kept running. Now delete
-  refuses, naming the site's failure and the backend identifiers the row holds; fix the site and run
-  it again, or pass `--force` to remove only the row and its host-key record, then delete the VM in
-  its provider yourself.
+- **`vm delete` keeps a VM whose backend it could not delete, unless forced.** An unset token
+  secret, a removed vm-site or a disabled plugin used to warn and remove the row while the VM kept
+  running. Now delete keeps the row and its host-key record whenever the backend VM was not deleted,
+  a site that cannot be bound included, naming the backend identifiers the row holds; fix the cause
+  and run it again, or remove the backend yourself and pass `--force`. `vm delete --force` now has
+  one meaning: it also deletes the VM's children, and removes the row and the host-key record even
+  when the backend delete could not complete, warning with those identifiers.
 - **`vm delete`** logs the node out of Tailscale over the platform's own channel before the backend
   delete, and no longer stops each session first. It reports whether the logout worked, and goes on
   with the delete either way. It does not log out a cloud VM whose host key was never recorded, and

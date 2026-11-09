@@ -710,8 +710,7 @@ Either way its temporary provisioning access is closed, and `vm start`, `vm stop
 `vm describe`, `vm list` and `vm verify-connection` still run. `agw vm delete <name>` removes it. A
 create killed before its platform finished (`SIGKILL`, or any kill on Windows) leaves a row that
 records nothing addressing the backend, so `vm delete` refuses it; `vm delete --force` then removes
-the row and its host-key record, and warns that resources named or tagged with the VM's hostname may
-remain on its vm-site, for you to remove there.
+the row and its host-key record, as it does for any VM whose backend cannot be deleted.
 
 The first interactive `vm create` asks once for an optional **system slug** (3-20 chars, lowercase
 alphanumeric plus dash, no leading/trailing dash): a short identifier for this Agentworks
@@ -792,12 +791,18 @@ and does not try a logout. A rekeyed VM that does not answer at its new address 
 `agw vm recover`, as `vm start` does; the new address is recorded either way.
 
 `vm delete` requires `--force` if the VM has workspaces, agents, or sessions. The confirmation
-message shows what will be deleted. Pass `--yes` to skip the prompt. A VM whose site cannot be bound
-(an unset token, a removed site or plugin) is not deleted, since its backend may still run: delete
-refuses, naming the site's failure and the backend identifiers the row holds (its hostname and
-platform metadata, such as a Proxmox VM ID, a cloud instance ID or a Lima instance name). Fix the
-site and run it again, or pass `--force` to remove only the row and its host-key record; delete then
-warns with those identifiers and reports that the backend was not deleted.
+message shows what will be deleted. Pass `--yes` to skip the prompt.
+
+Without `--force`, delete removes the VM's row and its host-key record only once its backend VM is
+deleted, since a backend that may still run needs the row to find it. A VM whose site cannot be
+bound (an unset token, a removed site or plugin), or whose backend delete fails (a locked Proxmox
+VM, an unreachable Lima host, a provider refusal), is kept, and the error names the backend
+identifiers the row holds: its hostname and platform metadata, such as a Proxmox VM ID, a cloud
+instance ID or a Lima instance name. Fix the cause and run `vm delete` again, or remove the backend
+yourself and run `vm delete --force`. `--force` deletes the VM as far as it can, also deleting its
+children, and removes the row and the host-key record whatever kept the backend delete from
+completing; it then warns with those identifiers and reports that the backend was not deleted. An
+operator abort keeps the row either way.
 
 Once the site binds, delete logs the VM's node out of the tailnet through the platform's own
 channel, then deletes the backend VM; it does not stop individual workloads first, since deleting
@@ -805,14 +810,9 @@ the VM ends them. The logout is best effort: when it does not run or fails, dele
 the row is gone, names the node to remove in the Tailscale admin console. A VM that is stopped or
 deallocated is not logged out, since nothing reaches it (a stopped WSL2 distro is usually booted by
 the hold delete keeps on it, and is then logged out), and neither is a cloud VM whose host key was
-never recorded, since nothing could verify the VM that answered. A backend delete that fails, such
-as a locked Proxmox VM or an unreachable Lima host, keeps the VM's row and its host-key record. To
-finish the delete, fix the cause, or remove the backend yourself, and run `vm delete` again: a
-backend already gone counts as deleted (on AWS, only for a VM created since rows record their
-account; see [the AWS guide](../docs/guides/aws.md)). When the node was logged out before the delete
-failed, the error says so, and `agw vm rekey <name>` puts the VM back on Tailscale if you would
-rather keep it. The one row `--force` removes past such a failure is one a killed create left with
-no platform metadata, as `vm create` describes above.
+never recorded, since nothing could verify the VM that answered. When the node was logged out before
+a backend delete failed, the error says so, and `agw vm rekey <name>` puts the VM back on Tailscale
+if you would rather keep it.
 
 `vm backup` exports the VM row and exact owner tree of agents, workspaces, sessions, events, grants,
 desired instance specs, and workspace files. It does not create or copy a provider VM snapshot,

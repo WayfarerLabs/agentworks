@@ -144,23 +144,22 @@ def delete_vm(
     Child-count and confirmation checks run before binding or secret
     resolution, so a refused or declined delete prompts for and resolves
     nothing; ``interaction`` is checked before binding, whose failures are
-    handled below and must not swallow a malformed argument. A row is
-    removed only once its backend VM is deleted, because a removed row would
-    leave a surviving backend VM with nothing to target it (#329): a binding
-    failure (a broken backend, a removed site or plugin, an unresolvable
-    secret) refuses, naming the backend identifiers the row holds, and a
-    bound provider delete that raises keeps the row and the host-key record
-    for a retry (the ``VMPlatform.delete`` contract). ``--force`` removes the
-    row past two of these, warning what may remain: a binding failure, and a
-    platform's refusal of a row with no platform metadata at all, which only
-    a create that ended before its platform returned leaves. It never
-    removes a row past a bound delete that failed. Once the binding holds,
-    the node is logged out of the tailnet through the platform's root
+    handled below and must not swallow a malformed argument. Once the binding
+    holds, the node is logged out of the tailnet through the platform's root
     channel, best effort, and the provider delete follows: whoever deletes a
     VM wants it gone, and ``vm rekey`` rejoins one whose delete then fails.
     Deletion never starts the guest or tears down individual workloads, which
-    the provider delete ends. ``UserAbort`` at the boundary's secret prompt or
-    in the logout keeps the row.
+    the provider delete ends.
+
+    Without ``force``, a row is removed only once its backend VM is deleted,
+    because a removed row would leave a surviving backend VM with nothing to
+    target it (#329): a binding failure (a broken backend, a removed site or
+    plugin, an unresolvable secret) and a bound delete that raises (the
+    ``VMPlatform.delete`` contract) both keep the row and the host-key
+    record, with a hint naming the backend identifiers the row holds. With
+    ``force`` the children go too, and the row and record go whatever kept
+    the backend delete from completing, with a warning naming those
+    identifiers. ``UserAbort`` always propagates and keeps the row.
     """
     import agentworks.vms.manager as _mgr
 
@@ -212,23 +211,19 @@ def delete_vm(
         except Exception as e:
             # Preflight or build failure (unreachable API, missing tool,
             # stranded site, unset or unresolvable secret): nothing can reach
-            # the backend, which may still run, so only --force removes the row.
-            site_hint = getattr(e, "hint", None)
+            # the backend, which may still run.
+            not_logged_out = f"vm-site '{vm.site}' cannot be bound"
             if not force:
-                raise StateError(
+                refusal = StateError(
                     f"VM '{name}' was not deleted: vm-site '{vm.site}' cannot be bound: {e}",
                     entity_kind="vm",
                     entity_name=name,
-                    hint=(f"{site_hint}\n" if site_hint else "")
-                    + f"Its backend may still run {_backend_named(vm)}. Fix the site and rerun "
-                    f"'agw vm delete {name}', or pass --force to remove only its row and delete the backend there.",
-                ) from e
-            output.warn(
-                f"vm-site '{vm.site}' cannot be bound ({e}), so the backend of VM '{name}' was not deleted. "
-                f"It may still run {_backend_named(vm)}; remove it there."
-            )
+                    hint=getattr(e, "hint", None),
+                )
+                refusal.add_hint(_finish_delete_hint(vm, fix="Fix the site", logged_out=False))
+                raise refusal from e
+            _warn_backend_left(vm, f"vm-site '{vm.site}' cannot be bound: {e}")
             backend_left = True
-            not_logged_out = f"vm-site '{vm.site}' cannot be bound"
         else:
             platform = vm_node.site.platform
             # The logout, best effort and inside a hold-only span: it wants the
@@ -246,35 +241,22 @@ def delete_vm(
                 except Exception as e:
                     not_logged_out = f"the VM could not be held for its logout ({e})"
             # NOT best-effort: a platform delete that cannot remove the backend
-            # VM raises a typed error (VMPlatform.delete), which aborts here
-            # and keeps the row. ``--force`` does not soften this, with one
-            # exception: a row the platform refuses because it holds no
-            # metadata at all, which only a create that ended before the
-            # platform returned leaves (create persists the metadata the
-            # moment the platform returns). Nothing can target its backend,
-            # so the row is all a retry could ever remove.
+            # VM raises (VMPlatform.delete), which keeps the row unless forced.
             try:
                 platform.delete(vm, ops_ctx)
-            except StateError as refusal:
-                if vm.platform_metadata or not force:
-                    if not vm.platform_metadata:
-                        refusal.add_hint(
-                            f"Its create ended before the platform returned. Remove anything named or tagged "
-                            f"'{vm.hostname}' on vm-site '{vm.site}' there, then run "
-                            f"'agw vm delete --force {name}' to remove the row."
-                        )
-                    elif not_logged_out is None:
-                        refusal.add_hint(_logged_out_hint(vm))
-                    raise
-                output.warn(
-                    f"VM '{name}' has no platform metadata, so its backend was not deleted. "
-                    f"Resources may remain {_backend_named(vm)}; remove them there."
-                )
-                backend_left = True
-            except AgentworksError as failure:
-                if not_logged_out is None:
-                    failure.add_hint(_logged_out_hint(vm))
+            except UserAbort:
                 raise
+            except Exception as failure:
+                if not force:
+                    if isinstance(failure, AgentworksError):
+                        failure.add_hint(
+                            _finish_delete_hint(
+                                vm, fix="Fix what the provider refused", logged_out=not_logged_out is None
+                            )
+                        )
+                    raise
+                _warn_backend_left(vm, str(failure))
+                backend_left = True
         if vm.tailscale_host and not_logged_out is not None:
             output.warn(
                 f"Tailscale node {vm.hostname} was not logged out: {not_logged_out}; "
@@ -315,13 +297,25 @@ def delete_vm(
         output.result(f"VM '{name}' removed; its backend was not deleted" if backend_left else f"VM '{name}' deleted")
 
 
-def _logged_out_hint(vm: VMRow) -> str:
-    """How to finish a delete that failed after the node logged out, then how to undo the logout instead."""
-    return (
-        f"VM '{vm.name}' was logged out of Tailscale before its delete failed. To finish the delete, fix "
-        f"what the provider refused, or remove its backend yourself {_backend_named(vm)}, and run "
-        f"'agw vm delete {vm.name}' again: a backend already gone counts as deleted. To put the VM back on "
-        f"Tailscale instead, run 'agw vm rekey {vm.name}'."
+def _finish_delete_hint(vm: VMRow, *, fix: str, logged_out: bool) -> str:
+    """How to finish a delete whose backend was not deleted, then, after a logout, how to undo it instead."""
+    hint = (
+        f"{fix} and run 'agw vm delete {vm.name}' again, or remove its backend yourself "
+        f"{_backend_named(vm)} and run 'agw vm delete {vm.name} --force'."
+    )
+    if logged_out:
+        hint += (
+            f" The VM was logged out of Tailscale before its delete failed; to put it back on Tailscale "
+            f"instead, run 'agw vm rekey {vm.name}'."
+        )
+    return hint
+
+
+def _warn_backend_left(vm: VMRow, reason: str) -> None:
+    """The warning ``--force`` gives for a row it removes whose backend was not deleted."""
+    output.warn(
+        f"The backend of VM '{vm.name}' was not deleted ({reason}). It may still run "
+        f"{_backend_named(vm)}; remove it there."
     )
 
 

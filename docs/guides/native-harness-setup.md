@@ -192,18 +192,18 @@ plugins inside it. There is no separate native plugin retirement step before par
 applied-state records, including unreadable or unknown versions, do not add deletion prerequisites.
 The existing database deletion removes the owner's records and any affected child records together.
 
-A VM whose site cannot be bound is not deleted unless `--force` is passed, which removes only its
-local state; see `vm delete` in the command reference. An exception raised by a bound platform's
-delete operation aborts local removal. Agent and workspace remote cleanup retains its existing
-best-effort warnings. Files deliberately configured outside the removed parent remain outside that
-filesystem cleanup; setup does not introduce a new forget command or force option.
+A VM whose backend cannot be deleted, a site that cannot be bound included, keeps its local state
+unless `--force` is passed, which removes it anyway; see `vm delete` in the command reference. Agent
+and workspace remote cleanup retains its existing best-effort warnings. Files deliberately
+configured outside the removed parent remain outside that filesystem cleanup; setup does not
+introduce a new forget command or force option.
 
 Whole-VM deletion logs the node out of Tailscale first, best effort, and does not stop individual
 guest sessions, which deleting the VM ends. When that logout does not run or fails, the tailnet
 entry can remain; delete names the node to remove from the Tailscale admin console. A delete forced
-past a site that cannot be bound did not attempt remote deletion, so inspect and clean up the
-provider resource as well. Platform-specific best-effort deletion may also leave remote resources; a
-removed local row alone does not prove provider removal.
+past a backend it could not delete leaves that backend, so inspect and clean up the provider
+resource as well. Platform-specific best-effort deletion may also leave remote resources; a removed
+local row alone does not prove provider removal.
 
 Setup and parent deletion share a VM-family mutation guard so they cannot race. This serializes
 mutating operations on the same VM, including owners without harness activations; contention refuses

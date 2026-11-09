@@ -208,24 +208,24 @@ holding the ID still carries the name its create gave it, the VM's hostname. A V
 holds any more, or whose ID another guest now holds, is gone: `agw vm delete` removes its row and
 host-key record without touching that other guest, warning with the ID and the guest's name, and
 every other command refuses it and names `agw vm delete`. When the API token cannot audit the guest
-holding the ID, every command refuses, delete included, since nothing shows whether that guest is
-the VM; check it in the Proxmox web UI.
+holding the ID, every command refuses, since nothing shows whether that guest is the VM; check it in
+the Proxmox web UI, and run `agw vm delete --force` to remove the row once you know.
 
 Otherwise `agw vm delete` stops and deletes the VM, and succeeds once Proxmox's destroy task
 completes or a failed delete leaves the ID free. A delete that Proxmox refuses (a locked VM) or that
-gets no answer keeps the VM's row and its host-key record, so run it again once the cause is fixed.
-When a failed or interrupted create cannot remove its clone, it names the VM ID and node and keeps
-the VM in a failed state for `agw vm delete` to remove. A create rollback likewise touches only a
-guest carrying the new VM's name, so a create that lost its ID to another create leaves that VM
-alone.
+gets no answer keeps the VM's row and its host-key record, so run it again once the cause is fixed,
+or delete the VM in Proxmox yourself and run `agw vm delete --force`. When a failed or interrupted
+create cannot remove its clone, it names the VM ID and node and keeps the VM in a failed state for
+`agw vm delete` to remove. A create rollback likewise touches only a guest carrying the new VM's
+name, so a create that lost its ID to another create leaves that VM alone.
 
 Delete logs the VM's node out of Tailscale through the guest agent before it deletes the VM, best
 effort, and does not tear down guest sessions first. When the logout does not run or fails, delete
-names the node to remove from the Tailscale admin console. `--force` permits deleting dependent
-workspaces, agents and sessions; it does not skip the confirmation prompt, so pass `--yes` for that.
-A VM whose site cannot be bound, such as one whose API token secret is unset, is not deleted: delete
-refuses, naming its VM ID and node. Fix the site and run it again, or pass `--force` to remove only
-the row, then delete the VM in Proxmox yourself.
+names the node to remove from the Tailscale admin console. A VM whose site cannot be bound, such as
+one whose API token secret is unset, is not deleted either: delete refuses, naming its VM ID and
+node. `--force` also deletes dependent workspaces, agents and sessions, and removes the row whenever
+the VM could not be deleted, naming its VM ID and node; it does not skip the confirmation prompt, so
+pass `--yes` for that.
 
 ### Native recovery and interactive access
 
