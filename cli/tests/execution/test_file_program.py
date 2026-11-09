@@ -486,6 +486,41 @@ def test_a_termination_during_a_write_exits_nonzero_and_leaves_no_temporary_file
     assert temporaries(guest.tree) == []
 
 
+def test_the_next_write_replaces_what_a_killed_write_left_behind(guest: Guest) -> None:
+    destination = guest.tree / "file"
+    marker = guest.root / "writing"
+    patch = (
+        f"import os, time\ndef fsync(fd):\n    open({str(marker)!r}, 'w').close()\n    time.sleep(30)\nos.fsync = fsync"
+    )
+    killed = guest.start(
+        "write_if",
+        {
+            "path": str(destination),
+            "expected": None,
+            "mode": 0o600,
+            "group": None,
+            "parent_mode": 0o700,
+            "preserve": False,
+            "size": 6,
+            "sha256": digest(b"killed"),
+        },
+        stdin=b"killed",
+        patch=patch,
+    )
+    deadline = time.monotonic() + 20
+    while not marker.exists() and time.monotonic() < deadline:
+        time.sleep(0.02)
+    killed.kill()
+    killed.wait(timeout=20)
+    assert len(temporaries(guest.tree)) == 1
+
+    result = guest.write_if(destination, b"after")
+
+    assert result.returncode == 0, result.stderr
+    assert destination.read_bytes() == b"after"
+    assert temporaries(guest.tree) == []
+
+
 # -- Pruning ---------------------------------------------------------------------------------------
 
 

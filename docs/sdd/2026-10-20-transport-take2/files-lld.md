@@ -291,7 +291,10 @@ this is what keeps a truncated body from being published. Only then does it take
 Under the lock, `write_if`:
 
 1. Creates `.agentworks-tmp-<24 hex>` relative to the parent descriptor with
-   `O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC`, mode 0600, and writes the content.
+   `O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC`, mode 0600, and writes the content. The
+   hex is the start of the destination name's SHA-256, so the name is fixed per destination and fits
+   whatever the name's length; a file already there is a killed write's (no live write holds it
+   under the lock), so it is unlinked first.
 2. `fchown(-1, gid)` when `group` names one (`native_files.py:146`), then `fchmod(mode)`; chown
    first, because it clears set-id bits.
 3. Compares the destination with `expected` (a digest, or `None` for absent): a mismatch is
@@ -333,7 +336,8 @@ Under the lock, `write_if`:
   nothing. A drop after it lets the operation finish under the lock; it prints nothing, so no write
   to the closed stdout can fail it. If a `SIGHUP` or `SIGTERM` does arrive, the program's handlers
   raise `SystemExit(128 + signal)`, so the `finally` runs and the status is nonzero. Only `SIGKILL`
-  between the create and the rename can leave a `.agentworks-tmp-*` file, which no operation reads.
+  between the create and the rename can leave a `.agentworks-tmp-*` file, which no operation reads
+  and the next write to the same destination replaces.
 - **An ambiguous outcome.** A write whose `run` ends `Unknown` may or may not have renamed. `files`
   raises `ExecutionIncomplete` and nothing retries it, `update` included (R4).
 - **`remove_if`, `ensure_directory`, `prune_empty_parents`** create nothing to clean up.

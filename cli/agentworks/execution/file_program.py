@@ -26,7 +26,6 @@ import errno
 import hashlib
 import json
 import os
-import secrets
 import stat
 import sys
 import time
@@ -230,6 +229,15 @@ def _destination_digest(parent: int, name: str) -> str | None:
         os.close(descriptor)
 
 
+def _temporary_name(name: str) -> str:
+    """The one temporary name beside the destination ``name``, whatever its length.
+
+    It is fixed, so the next write to the same destination replaces what a
+    write killed before its rename left behind.
+    """
+    return _TEMPORARY_PREFIX + hashlib.sha256(name.encode("utf-8", "surrogateescape")).hexdigest()[:24]
+
+
 def _write_if(params: Params) -> int:
     import grp
 
@@ -241,8 +249,11 @@ def _write_if(params: Params) -> int:
         walk.close()
         return EXIT_CONFLICT
     parent = walk.parent
-    temporary = _TEMPORARY_PREFIX + secrets.token_hex(12)
+    temporary = _temporary_name(walk.name)
     try:
+        # Under the lock no live write owns this name: anything there is a killed write's.
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(temporary, dir_fd=parent)
         output = os.open(
             temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=parent
         )
