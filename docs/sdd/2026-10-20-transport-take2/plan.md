@@ -491,20 +491,25 @@ reads a legacy transport.
 
 - [ ] Write `init-lld.md`. It covers:
   - Phase B's move onto VMAccess, request by request, with each bound;
-  - `write`, `update` and `upload_tree` on the file program and its lock;
+  - `write` and `update` on the file program and its lock, and the dotfiles tree upload as one
+    `Script`;
   - each hand-written write it replaces, with mode, owner and secret handling;
   - the git-credential and agent-grant paths;
   - the incident audit of the entry points this slice moves.
 - [ ] Migrate:
   - `vms/initializer/`, `vms/hardening.py` and `vms/tailscale_dns.py`;
-  - `sources.py` (with `upload_tree`) and `git_config.py`;
+  - `sources.py` (with `upload_tree` as one script) and `git_config.py`, and the
+    `dotfiles_destination` validation in `vms/admin.py` and `agents/template.py`;
   - `git_credentials/`;
-  - the agent initializer and grants.
+  - the agent initializer and grants;
+  - `workspaces/acls.py` and the tmux socket helpers with their stale-socket cleanup, which Phase B
+    and agent create call;
+  - `ensure_directory`'s owner and elevation, for the agent's `.ssh`.
 - [ ] Replace hand-written `printf | sudo tee`, `tee -a` and `write_file` plus `chmod` sequences
-      with `files.write` and `files.update`, adding `Files.update` here with its first callers
-      (slice 5's native settings call `read` and `write_if` themselves).
-- [ ] Tests: `write` applies mode and owner before the rename, and a tree upload replacing the
-      directory above a `write_if` target is detected.
+      with `files.write` and `files.update`, adding `Files.update` here with its first callers and
+      moving slice 5's native settings publish onto it.
+- [ ] Tests: `write` applies mode and owner before the rename, a failed or interrupted tree upload
+      leaves the previous tree in place, and a corrupt archive changes nothing.
 - [ ] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
       issues and fix history), and add incident inventory rows before deleting anything.
 - [ ] Collateral: guides or reference pages whose described init behavior changes.
