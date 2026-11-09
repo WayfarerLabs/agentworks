@@ -4,8 +4,7 @@
 are the operation's name and one JSON object of parameters; content travels on
 stdin, never as an argument. The exit status is the answer (the ``EXIT_*``
 constants). stdout carries ``read``'s bytes or ``stat``'s one JSON line and
-nothing else. stderr carries a traceback for status 1, and ``lock`` alone when
-the lock file itself was refused (status 4 or 5).
+nothing else. stderr carries a traceback for status 1.
 
 Every path component is opened relative to its parent without following links,
 so nothing is read or written through a symbolic link anywhere on the path. Every
@@ -31,7 +30,10 @@ import secrets
 import stat
 import sys
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 LOCK_PATH = "/run/lock/agentworks-files.lock"
 """The one lock file every mutating operation of every identity takes."""
@@ -44,7 +46,7 @@ EXIT_CONFLICT = 2
 EXIT_ROOT_RETAINED = 3
 """``prune_empty_parents`` kept a verified-empty root whose parent will not release it."""
 EXIT_UNSUITABLE = 4
-"""A link, or the wrong type, at the destination, a parent or the lock file."""
+"""A link, or the wrong type, at the destination or a parent."""
 EXIT_DENIED = 5
 """``EACCES``, ``EPERM`` or ``EROFS``."""
 EXIT_CORRUPT_INPUT = 6
@@ -53,9 +55,6 @@ EXIT_LOCK_TIMEOUT = 7
 """The lock was not acquired within its wait."""
 EXIT_ABSENT = 8
 """``read`` of a file that, or a parent of which, does not exist."""
-
-LOCK_REFUSED = "lock"
-"""What stderr holds when status 4 or 5 is about the lock file, not the operation's path."""
 
 _TRAVERSE = getattr(os, "O_PATH", os.O_RDONLY) | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 _OPEN_DIRECTORY = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
@@ -144,24 +143,24 @@ def _digest(descriptor: int) -> str:
     return digest.hexdigest()
 
 
-def _lock(path: str, wait: float) -> int:
+def _lock(path: str, wait: float) -> int | None:
+    """The lock's descriptor, held, or ``None`` when ``wait`` passed first.
+
+    A lock file that cannot be opened (a link, a denial) raises: only a writer
+    outside Agentworks can make it so, which is out of scope, so it is status 1.
+    """
     import fcntl
 
     try:
+        descriptor = os.open(path, _OPEN_FILE)
+    except FileNotFoundError:
         try:
+            # protected_regular refuses an O_CREAT open of another identity's file in a sticky
+            # directory, even for root; with O_EXCL the kernel reports EEXIST first.
+            descriptor = os.open(path, _OPEN_FILE | os.O_CREAT | os.O_EXCL, 0o644)
+            os.fchmod(descriptor, 0o644)
+        except FileExistsError:
             descriptor = os.open(path, _OPEN_FILE)
-        except FileNotFoundError:
-            try:
-                # protected_regular refuses an O_CREAT open of another identity's file in a sticky
-                # directory, even for root; with O_EXCL the kernel reports EEXIST first.
-                descriptor = os.open(path, _OPEN_FILE | os.O_CREAT | os.O_EXCL, 0o644)
-                os.fchmod(descriptor, 0o644)
-            except FileExistsError:
-                descriptor = os.open(path, _OPEN_FILE)
-    except OSError as error:
-        status = _classify(error)
-        sys.stderr.write(LOCK_REFUSED + "\n")
-        raise _Exit(status) from None
     deadline = time.monotonic() + wait
     while True:
         try:
@@ -170,7 +169,7 @@ def _lock(path: str, wait: float) -> int:
         except BlockingIOError:
             if time.monotonic() >= deadline:
                 os.close(descriptor)
-                raise _Exit(EXIT_LOCK_TIMEOUT) from None
+                return None
             time.sleep(0.05)
 
 
@@ -366,22 +365,29 @@ def main(argv: list[str], *, lock_path: str = LOCK_PATH, lock_wait: float = LOCK
     signal.signal(signal.SIGHUP, end)
     signal.signal(signal.SIGTERM, end)
     operation, params = argv[0], json.loads(argv[1])
+    if operation in _READERS:
+        return _status(_READERS[operation], params)
+    mutate = _MUTATORS[operation]
+    if operation == "write_if":
+        # The whole content arrives before anything is created, so a dropped connection
+        # (a short stdin) publishes nothing.
+        data = sys.stdin.buffer.read()
+        if len(data) != params["size"] or hashlib.sha256(data).hexdigest() != params["sha256"]:
+            return EXIT_CORRUPT_INPUT
+        params["data"] = data
+    lock = _lock(lock_path, lock_wait)
+    if lock is None:
+        return EXIT_LOCK_TIMEOUT
     try:
-        if operation in _READERS:
-            return _READERS[operation](params)
-        if operation == "write_if":
-            # The whole content arrives before anything is created, so a dropped connection
-            # (a short stdin) publishes nothing.
-            data = sys.stdin.buffer.read()
-            if len(data) != params["size"] or hashlib.sha256(data).hexdigest() != params["sha256"]:
-                return EXIT_CORRUPT_INPUT
-            params["data"] = data
-        mutate = _MUTATORS[operation]
-        lock = _lock(lock_path, lock_wait)
-        try:
-            return mutate(params)
-        finally:
-            os.close(lock)
+        return _status(mutate, params)
+    finally:
+        os.close(lock)
+
+
+def _status(operation: Callable[[Params], int], params: Params) -> int:
+    """Run one operation on its path, classifying a refusal of that path."""
+    try:
+        return operation(params)
     except _Exit as done:
         return done.status
     except OSError as error:

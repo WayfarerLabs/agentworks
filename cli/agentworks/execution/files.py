@@ -220,9 +220,8 @@ class Files:
         if status == file_program.EXIT_CONFLICT:
             raise FileConflict(vm_name, operation, path)
         if status in (file_program.EXIT_UNSUITABLE, file_program.EXIT_DENIED):
-            refused = file_program.LOCK_PATH if result.stderr.strip() == file_program.LOCK_REFUSED.encode() else path
             reason = PathRefusal.UNSUITABLE if status == file_program.EXIT_UNSUITABLE else PathRefusal.DENIED
-            raise PathRefused(vm_name, operation, refused, reason)
+            raise PathRefused(vm_name, operation, path, reason)
         if status == file_program.EXIT_LOCK_TIMEOUT:
             raise FileLockTimeout(vm_name, operation, path)
         raise CommandFailed(vm_name, status, result)

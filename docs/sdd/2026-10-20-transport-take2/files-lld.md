@@ -180,8 +180,7 @@ printable (`native_files.py:218-226`), which is the intended stance.
 - **stdout** is the file's bytes for `read` and one JSON line for `stat`. The other operations print
   nothing: their exit status is the whole result, and `files` parses nothing for them. agw-launch's
   filter drops everything before the start marker.
-- **stderr** carries only a Python traceback, for status 1, or the word `lock` when status 4 or 5 is
-  about the lock file rather than the operation's path, so the refusal names the lock file.
+- **stderr** carries only a Python traceback, for status 1.
 - **Statuses.** The program's own exit status is the answer:
 
 | Status  | Meaning                                                                                     | Workstation result                          |
@@ -245,9 +244,10 @@ identity (D6). The program acquires it in this order:
    `open(LOCK_PATH, O_RDONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC, 0o644)`, then
    `fchmod(fd, 0o644)` whatever the umask.
 3. On `EEXIST` from step 2 (it lost the race): step 1 once more.
-4. A symlink at the path (`ELOOP`) is status 4, and a denial status 5, each naming the lock file.
-   Whatever else is there is opened and locked like the file; `O_NONBLOCK` keeps a FIFO from
-   blocking the open, and only a hostile writer could have put one there.
+4. A symlink at the path (`ELOOP`) or a denial is status 1, an uncaught error, not a status of its
+   own: only a writer outside Agentworks can make the lock file a link or unreadable, which D6 and
+   the permissions effort put out of scope (above). Whatever else is there is opened and locked like
+   the file; `O_NONBLOCK` keeps a FIFO from blocking the open.
 5. `flock(fd, LOCK_EX | LOCK_NB)`, retried every 50 ms until `LOCK_WAIT_SECONDS` (30) have passed,
    then status 7. Closing the descriptor, or the process ending, releases it.
 
@@ -627,7 +627,7 @@ uses, the system python3 and a 3.11 (`lanes.python_interpreters`,
 - the lock file is created 0644 under umask 077, and one another identity created first is opened,
   not recreated (sudo lane, below; the runner's own `protected_regular` applies, and F6 proves
   Debian's 2);
-- a symlink planted at the lock path is `PathRefused(UNSUITABLE)` and is not followed;
+- a symlink planted at the lock path fails the operation (status 1) and is not followed;
 - a held lock past `lock_wait` (0.2 s in the test) is `FileLockTimeout`, with nothing created;
 - `read` and `stat` succeed while another process holds the lock;
 - a search-only (0711) ancestor works (I36);

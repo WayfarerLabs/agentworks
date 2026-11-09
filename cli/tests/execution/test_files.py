@@ -69,18 +69,13 @@ def test_each_failing_status_raises_its_error(status: int, error: type[Exception
     "status,reason",
     [(file_program.EXIT_UNSUITABLE, PathRefusal.UNSUITABLE), (file_program.EXIT_DENIED, PathRefusal.DENIED)],
 )
-def test_a_refusal_names_the_path_or_the_lock_file(status: int, reason: PathRefusal) -> None:
-    files, _ = recording(
-        Result(Completed(status)), Result(Completed(status), stderr=file_program.LOCK_REFUSED.encode() + b"\n")
-    )
+def test_a_refusal_names_the_path_and_its_reason(status: int, reason: PathRefusal) -> None:
+    files, _ = recording(Result(Completed(status)))
 
-    with pytest.raises(PathRefused) as at_path:
-        files.remove_if("/home/a/file", expected=DIGEST)
-    with pytest.raises(PathRefused) as at_lock:
+    with pytest.raises(PathRefused) as refused:
         files.remove_if("/home/a/file", expected=DIGEST)
 
-    assert (at_path.value.path, at_path.value.reason) == ("/home/a/file", reason)
-    assert (at_lock.value.path, at_lock.value.reason) == (file_program.LOCK_PATH, reason)
+    assert (refused.value.path, refused.value.reason) == ("/home/a/file", reason)
 
 
 def test_successful_statuses_and_their_results() -> None:

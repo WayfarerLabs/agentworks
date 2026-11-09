@@ -309,14 +309,13 @@ def test_the_lock_file_is_created_world_readable_whatever_the_umask(guest: Guest
     assert stat.S_IMODE(guest.lock.stat().st_mode) == 0o644
 
 
-def test_a_link_at_the_lock_path_is_refused_and_not_followed(guest: Guest) -> None:
+def test_a_link_at_the_lock_path_fails_the_operation_and_is_not_followed(guest: Guest) -> None:
     target = guest.root / "lock-target"
     guest.lock.symlink_to(target)
 
     result = guest.write_if(guest.tree / "made", b"content")
 
-    assert result.returncode == file_program.EXIT_UNSUITABLE
-    assert result.stderr.strip() == file_program.LOCK_REFUSED.encode()
+    assert result.returncode == 1
     assert not target.exists() and not (guest.tree / "made").exists()
 
 
