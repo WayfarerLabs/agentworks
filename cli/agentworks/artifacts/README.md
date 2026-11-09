@@ -609,7 +609,7 @@ their explicit replaceable-section contract.
 
 `git_excludes.py` owns exact Git exclusion associations through ordinary native setup claims.
 `harness_setup/cleanup.py` retires known workspace associations before destructive owner cleanup,
-checkpointing partial progress in that same state.
+recording partial progress in that same state.
 
 `session.py` prepares the launch context, stages a new private run before old-runtime teardown, then
 retires obsolete owned files after teardown. No artifact bookkeeping changes VM deletion.

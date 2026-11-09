@@ -47,8 +47,8 @@ Worker `772f2aab` corrects all three through canonical four-field associations, 
 recognition/span removal and a local filesystem-monitor override. Fifty combined real-Git, workspace
 deletion, setup-probe and source-package tests passed. Regressions were observed failing before
 correction. Ruff and full mypy over 941 files passed; the final full suite and private delta
-re-reviews remain pending. The actual native renderer evidence retains source `818ccee9`; later
-changes to that renderer only add a list type annotation.
+re-reviews were still pending at that checkpoint. The actual native renderer evidence retains source
+`818ccee9`; later changes to that renderer only add a list type annotation.
 
 The first frozen full suite at `17456c60` returned 1: 11,471 passed, 11 skipped and one
 source-distribution packaging failure in 1,029.82 seconds. An old owned wheel environment beneath
@@ -57,6 +57,49 @@ original result is retained. Moving those owned receipts/environments outside th
 the fixture condition; no product packaging or dependency change was made. Own-tree test temporary
 directories now have the process's group and scoped Git discovery, preserving the actual
 file-ownership guard and avoiding discovery of the enclosing developer repository.
+
+A second full run at `772f2aab` returned 1 with 11,477 passed, 11 skipped and three
+fixture-environment failures in 496.94 seconds. Its owned temporary tree inherited a default POSIX
+ACL, violating two tests' starting conditions; a native tmux test also exceeded the Unix socket path
+limit under the longer owned namespace. Only the owned proof root's ACLs were cleared before a fresh
+temporary tree. Worker `90dbddb2` gives the tmux test a unique short socket namespace with cleanup
+verification and gives the actual workspace collision test its correct original workspace owner.
+Product bytes remain unchanged from `772f2aab`; the completed final run is recorded below.
+
+The website Python gate at `13b9c416` failed one browser departure observer during the concurrent
+CLI run, and a focused concurrent replay failed too. Website inputs were unchanged from the earlier
+passing gate. After that CLI run ended, the same browser test passed in 2.094 seconds and the full
+160-test website suite passed in 41.526 seconds, with no website change. The observed load
+correlation does not establish a root cause. Original failures and both passing replays remain in
+the proof record. Node's 103 tests, deterministic builds, Rulesync, locked-SDD and Typer-isolation
+checks passed. A guide spell-check finding was corrected with ordinary wording and file lint passed.
+
+### Final local validation for round 1
+
+The frozen final worker `90dbddb2d687bc6a4cf2a05222b032fb9e8b9a25` passed the complete CI-selected
+non-integration suite: **11,480 passed, 11 skipped**, exit 0 in 393.65 seconds. Ruff lint/format and
+full mypy over 941 files also passed. No source or test bytes changed during that run. The
+integrated branch has identical Python source/tests; README and SDD records are the lead's separate
+documentation changes. Earlier failed full runs remain recorded above rather than reclassified as
+passes.
+
+Project, Muntz and generic correctness reviews independently cleared `13b9c416` after the three Git
+corrections. Their focused selections were 83, 101 and 172 tests, respectively, with real-Git and
+database-boundary observations; these selections overlap and are not a full-suite total. The final
+test-fixture/record delta receives its own re-read before handoff. No product source changed after
+their approved candidate.
+
+Root gates passed: file lint after the documented spelling correction, Rulesync drift, locked-SDD
+checks, Typer isolation, 103 Node website tests, the quiet 160-test website Python run and
+deterministic double builds for both site bases. A fresh locked-runtime wheel at `13b9c416`
+contained 479 members, with all 471 corresponding source/wheel/installed static files identical.
+Both artifact/integration guide topics rendered for human and agent audiences. The unconstrained
+Typer 0.29 installation remains a distinct failed result tracked in issue 880. The actual corrected
+Claude native Read/publisher proof retains its exact source and limits in acceptance.md.
+
+These results establish private/local validation, not a substitute for the next independent
+integration report or either SDD lock. The ready handoff identifies the exact pushed head and
+remaining acceptance emphasis.
 
 ## Delivery reassessment, 2026-11-08
 
