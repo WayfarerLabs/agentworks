@@ -33,7 +33,7 @@ def workspace_create(
         str | None,
         typer.Option("--spec", help="Inline JSON instance spec applied after the selected template"),
     ] = None,
-    open_vscode: Annotated[bool, typer.Option("--open-vscode", help="Open in VS Code")] = False,
+    open_vscode: Annotated[bool, typer.Option("--open-vscode", help="Open in VS Code (not on Windows)")] = False,
 ) -> None:
     """Create a workspace on a VM."""
     interaction = ordinary_tty_interaction_policy()

@@ -289,10 +289,13 @@ def _launch_wrapper(files: _DetachedFiles) -> str:
 def _kill_wrapper(files: _DetachedFiles) -> str:
     """The command that kills the process group the PID in ``files.pid`` leads, only while that PID is still
     ``files.wrapper``: the wrapper and the command it started, which signalling the wrapper alone leaves running.
+
+    Where no such group exists (a host bash that did not give the job its own group), it falls back to
+    the wrapper alone.
     """
     return (
         f'test -f {files.pid} && pid=$(cat {files.pid}) && ps -p "$pid" -o args= | grep -qF -- {files.wrapper} '
-        '&& kill -- -"$pid" 2>/dev/null'
+        '&& { kill -- -"$pid" 2>/dev/null || kill "$pid" 2>/dev/null; }'
     )
 
 
