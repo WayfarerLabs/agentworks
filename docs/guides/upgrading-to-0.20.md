@@ -311,6 +311,12 @@ before they resolve the auth key.
   created by 0.20 runs it at create only. Recreate an older Lima VM to stop the reruns; until then,
   `agw vm reinit NAME` after a start restores the lines it adds and removes a replaced key again,
   but not your own edits.
+- **A WSL2 VM keeps its own hostname.** WSL names a distro after the Windows computer at every start
+  unless `/etc/wsl.conf` names it, and a later Tailscale join takes that name too. A WSL2 VM created
+  by 0.20 has `hostname` set under `[network]` there; one created before does not. Add it yourself
+  (the hostname is in `agw vm describe NAME --output json`) and restart the distro with
+  `wsl --terminate`, or recreate the VM. `vm create` on WSL2 now refuses a hostname that WSL would
+  rename: one with an underscore, or with consecutive hyphens from the system slug.
 - **Output nobody reads no longer fails a command.** When the reader of `agw`'s output has gone (a
   pipe into `head` that has exited, `2>&1 | tee create.log` in a closed window, or the closed
   terminal itself), the rest of that output is dropped and the command carries on to the end, a

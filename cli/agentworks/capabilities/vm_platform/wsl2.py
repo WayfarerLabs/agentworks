@@ -7,6 +7,7 @@ import functools
 import json
 import os
 import platform
+import re
 import shlex
 import subprocess
 import sys
@@ -30,7 +31,7 @@ from agentworks.capabilities.vm_platform.tailscale_join import (
 )
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
-from agentworks.errors import ExternalError, StateError
+from agentworks.errors import ExternalError, StateError, ValidationError
 from agentworks.execution import root_script, ssh_process
 from agentworks.programs import resolve_program
 from agentworks.schema import AgwModel
@@ -303,6 +304,21 @@ _blob_opener = urllib.request.build_opener(_StripAuthRedirectHandler)
 
 class WSLCommandFailed(ExternalError):
     """A ``wsl.exe`` command exited non-zero; the message quotes what it printed."""
+
+
+# The hostnames WSL keeps as given: its init cleans ``network.hostname`` to
+# alphanumerics joined by single hyphens (dropping underscores and collapsing
+# repeated hyphens), and the guest would then disagree with ``vms.hostname``.
+_WSL_HOSTNAME_RE = re.compile(r"[a-z0-9]+(-[a-z0-9]+)*")
+
+
+def _wsl_conf(admin_username: str, hostname: str) -> str:
+    """The distro's ``/etc/wsl.conf``: the default user, systemd, and the hostname.
+
+    Without ``[network] hostname`` WSL names the guest after the Windows
+    computer at every distro start, and a later Tailscale join takes that name.
+    """
+    return f"[user]\ndefault={admin_username}\n\n[boot]\nsystemd=true\n\n[network]\nhostname={hostname}\n"
 
 
 def _wsl(args: list[str], *, check: bool = True, timeout: int = 300) -> str:
@@ -707,6 +723,14 @@ class WSL2Platform(VMPlatform):
                 entity_name=request.vm_name,
                 hint=("unregister it first (wsl --unregister) or pick a different VM name"),
             )
+        if not _WSL_HOSTNAME_RE.fullmatch(request.hostname):
+            raise ValidationError(
+                f"WSL2 would rename the VM's hostname '{request.hostname}': it keeps only lowercase letters "
+                "and digits joined by single hyphens",
+                entity_kind="vm",
+                entity_name=request.vm_name,
+                hint="Pick a VM name without underscores (and a system slug without consecutive hyphens).",
+            )
         vm_name = distro_name
         swap = request.swap_gib
         admin_username = request.admin_username
@@ -842,7 +866,7 @@ class WSL2Platform(VMPlatform):
                     ]
                 )
 
-                # Configure wsl.conf: default user + systemd
+                # Configure wsl.conf: default user, systemd and the hostname
                 output.info("Enabling systemd...")
                 _wsl(
                     [
@@ -853,8 +877,7 @@ class WSL2Platform(VMPlatform):
                         "--",
                         "bash",
                         "-c",
-                        f"printf '[user]\\ndefault={shlex.quote(admin_username)}"
-                        f"\\n\\n[boot]\\nsystemd=true\\n' > /etc/wsl.conf",
+                        f"printf '%s' {shlex.quote(_wsl_conf(admin_username, request.hostname))} > /etc/wsl.conf",
                     ]
                 )
 
