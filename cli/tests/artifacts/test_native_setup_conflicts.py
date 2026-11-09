@@ -173,7 +173,8 @@ def test_real_workspace_setup_defers_generated_helper_and_authored_skill_identit
     )
     workspace = target.home / "project"
     workspace.mkdir()
-    rule = artifact(ArtifactType.RULE)
+    owner = ArtifactOrigin("workspace", "workspace", "ws", entry="review")
+    rule = replace(artifact(ArtifactType.RULE), origin=owner)
     generated = outer_artifacts(received(rule), skills_root="/skills", agents_root="/agents").files[0]
     assert generated.native_identity is not None
     name = generated.native_identity.removeprefix("skill:")
@@ -181,8 +182,9 @@ def test_real_workspace_setup_defers_generated_helper_and_authored_skill_identit
     skill = replace(
         artifact(ArtifactType.SKILL, name=name),
         content=content_from_members(ArtifactType.SKILL, name, (ArtifactMember("SKILL.md", body, text=True),), name),
+        origin=replace(owner, entry=name),
     )
-    hint = artifact(ArtifactType.HINT, name="independent")
+    hint = replace(artifact(ArtifactType.HINT, name="independent"), origin=replace(owner, entry="independent"))
     inputs = received(rule, skill, hint)
     incomplete: list[str] = []
     invocation = WorkspaceSetupInvocation(
