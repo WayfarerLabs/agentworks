@@ -3,9 +3,9 @@
 2026-11-08. Proposal responding to the operator's request to reconsider delivery across all four
 artifact types, avoid generated `AGENTS.md` content, and seriously consider generated guidance
 skills. The operator endorsed that direction and asked to refine per-rule granularity and consider
-ordinary-home session skills. Session visibility policy remains under discussion; this response does
-not claim that new carriers ship or that the FRD has been amended. Baseline implementation: main
-`89bb63e4`, including merged PR #862.
+ordinary-home session skills and workspaces reserved for one session. Session visibility policy
+remains under discussion; this response does not claim that new carriers ship or that the FRD has
+been amended. Baseline implementation: main `89bb63e4`, including merged PR #862.
 
 ## Recommendation
 
@@ -160,13 +160,50 @@ home-directory allowance. Its native package roots must be narrowly authorized a
 checked on publication and cleanup. Test two concurrent sessions, an unsuccessful replacement,
 restart, deletion, name reuse and preserved operator files/configuration.
 
-I recommend retaining native private loading as the first choice and accepting ordinary-home skills
-as a possible named opt-in when native private loading is unavailable, provided the shared-catalog
-tradeoff is accepted. This qualifies the current session-boundary requirement; it must not silently
-be recorded as proof of private native delivery. Per-rule granularity increases catalog entries,
-which is a practical reason to avoid the home fallback where a private loader works. Do not add a
-generic shared dispatcher merely to reduce that count: it creates shared ownership and lifecycle
-questions, and a second layer the agent must read, without establishing native persona registration.
+Retain native private loading as the first choice. Ordinary-home skills remain a viable named opt-in
+when native private loading is unavailable, provided the shared-catalog tradeoff is accepted. This
+qualifies the current session-boundary requirement; it must not silently be recorded as proof of
+private native delivery. Per-rule granularity increases catalog entries, which is a practical reason
+to avoid the home fallback where a private loader works. Do not add a generic shared dispatcher
+merely to reduce that count: it creates shared ownership and lifecycle questions, and a second layer
+the agent must read, without establishing native persona registration.
+
+## Workspace reserved for a session
+
+A workspace durably reserved for one logical session can give that session the native project
+location. This is cleaner than shared-home applicability conditions when a private native loader is
+unavailable. Different agents may retain granted filesystem access; managed session admission
+accepts only the owning session. The constraint belongs to workspace ownership, not to a new
+artifact scope. It is not a filesystem isolation promise against users already granted access.
+
+This is stronger than allowing only one running session at a time. Serial access by different
+logical sessions leaves previous project guidance, skills and personas available to the next one
+unless an explicit ownership transfer reconciles them. Binding to the durable Agentworks session
+UUID avoids that transfer during ordinary harness switching: current restart already re-resolves the
+selected template/integration, preserves integration-specific native state and keeps the logical
+session UUID. The native conversations of different harnesses remain distinct; this is not automatic
+conversation transfer.
+
+Workspace and session declarations still have separate original scopes, native identities, ownership
+and cleanup, even when both use project directories. Session output can refresh on its own restart
+without introducing general workspace reinit. It must preserve recorded workspace output and
+repository content, and follow the existing replacement and failed-start rules. Git exclusions,
+native discovery, trust and collision behavior still need the same verification; reserving a
+workspace does not make Grok load ignored rule files.
+
+The baseline has no workspace ownership binding or workspace-wide start admission check. Merely
+observing one session, or no other currently running session, does not establish this guarantee.
+Durable binding, atomic admission on every managed create/restart path, deletion/orphan behavior and
+any explicit transfer need a workspace lifecycle design before an integration relies on exclusivity.
+Do not infer ownership from the current session list or implement it solely in one harness adapter.
+
+Given the operator's stated preference for one session per workspace with explicit harness handoff,
+prefer this direction over building a shared-home session workaround as the next default candidate.
+Native invocation-local loading remains appropriate where already supported. For ordinary shared
+workspaces without such a loader, leave optional session inputs explained as unhandled unless the
+operator chooses the weaker home fallback. Do not build both alternatives while the product choice
+is unresolved. The ownership work must be explicitly scoped with its requirements and acceptance; it
+is not an incidental renderer cleanup or a completed dependency of these SDDs.
 
 ## Workspace Git behavior
 
