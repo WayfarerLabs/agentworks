@@ -813,7 +813,8 @@ class AzureVMPlatform(PublicAddressPlatform):
             self._remove_ssh_allow(vm, ctx, BOOTSTRAP_ALLOW_RULE_NAME)
         except Exception as exc:
             raise ProvisioningError(
-                f"the '{BOOTSTRAP_ALLOW_RULE_NAME}' rule on the NSG of VM '{vm.name}' stays open: {exc}"
+                f"could not close or check the '{BOOTSTRAP_ALLOW_RULE_NAME}' rule on the NSG of VM '{vm.name}', "
+                f"so it may remain open: {exc}"
             ) from exc
 
     @contextlib.contextmanager

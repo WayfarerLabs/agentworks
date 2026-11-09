@@ -719,8 +719,8 @@ class EC2Platform(PublicAddressPlatform):
             ec2 = self._client("ec2", self._region_of(vm), ctx)
         except Exception as exc:
             raise ProvisioningError(
-                f"the bootstrap SSH allow for {', '.join(prefixes)} on security group "
-                f"'{security_group_id}' stays open: {exc}"
+                f"could not close or check the bootstrap SSH allow for {', '.join(prefixes)} on security group "
+                f"'{security_group_id}', so it may remain open: {exc}"
             ) from exc
         remove_ssh_allow(ec2, str(security_group_id), prefixes)
 

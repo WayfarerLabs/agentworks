@@ -434,7 +434,7 @@ class VMPlatform(Capability):
         Implementations must not assume the VM is reachable or complete, and
         the callers treat the hook as best effort
         (:func:`close_provisioning_access_or_warn`): a failure warns with what
-        it raised, so an error should name what stays open, and an error or
+        it raised, so an error should name what may remain open, and an error or
         interrupt already propagating keeps going. The
         ordinary-command gate refuses a VM Phase A did not complete,
         ``vm shell --platform`` included, so debugging such a VM goes
