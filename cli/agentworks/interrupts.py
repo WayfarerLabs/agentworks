@@ -29,10 +29,14 @@ from __future__ import annotations
 import contextlib
 import signal
 import threading
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
+    from types import FrameType
+
+    # What ``signal.getsignal`` returns and ``signal.signal`` takes, less the ``None`` neither can put back.
+    _Handler = Callable[[int, FrameType | None], Any] | int
 
 # SIGHUP exists only on POSIX, and SIGBREAK (Ctrl-Break) only on Windows.
 _TERMINATIONS = tuple(
@@ -54,6 +58,40 @@ def _interrupt(_signal_number: int, _frame: object) -> None:
     raise KeyboardInterrupt
 
 
+def _replace_handlers(handler: Callable[[int, object], None], *, keep: tuple[object, ...]) -> dict[int, _Handler]:
+    """Install ``handler`` for each of the interrupts whose current handler is not in ``keep``; return what it replaced.
+
+    A handler installed outside Python reads as ``None`` and could not be put
+    back, so that signal is left to whoever installed it.
+    """
+    previous: dict[int, _Handler] = {}
+    for number in _INTERRUPTS:
+        current = signal.getsignal(number)
+        if current is not None and current not in keep:
+            previous[number] = current
+            signal.signal(number, handler)
+    return previous
+
+
+def _restore_handlers(previous: dict[int, _Handler]) -> None:
+    """Put back each handler in ``previous``, SIGINT's last.
+
+    A handler that runs partway through would raise out of the loop and leave
+    ours installed for the rest, so on POSIX the signals are blocked for the
+    restore and reach the restored handlers once it is done. Windows cannot
+    block them; there SIGINT's handler, the one that raises, goes back after
+    the others.
+    """
+    order = sorted(previous, key=lambda number: number == signal.SIGINT)
+    mask = signal.pthread_sigmask(signal.SIG_BLOCK, _INTERRUPTS) if hasattr(signal, "pthread_sigmask") else None
+    try:
+        for number in order:
+            signal.signal(number, previous[number])
+    finally:
+        if mask is not None:
+            signal.pthread_sigmask(signal.SIG_SETMASK, mask)
+
+
 @contextlib.contextmanager
 def termination_as_interrupt() -> Iterator[None]:
     """Raise ``KeyboardInterrupt`` on Ctrl-C, ``SIGTERM``, ``SIGHUP`` and ``SIGBREAK`` where they exist, unless ignored.
@@ -66,16 +104,11 @@ def termination_as_interrupt() -> Iterator[None]:
         # Only the main thread may set handlers, and only it receives signals.
         yield
         return
-    previous = {
-        number: signal.signal(number, _interrupt)
-        for number in _INTERRUPTS
-        if signal.getsignal(number) not in (signal.SIG_IGN, _interrupt)
-    }
+    previous = _replace_handlers(_interrupt, keep=(signal.SIG_IGN, _interrupt))
     try:
         yield
     finally:
-        for number, handler in previous.items():
-            signal.signal(number, handler)
+        _restore_handlers(previous)
 
 
 @contextlib.contextmanager
@@ -97,13 +130,10 @@ def interrupts_deferred() -> Iterator[None]:
     def hold(signal_number: int, _frame: object) -> None:
         arrived.append(signal_number)
 
-    previous = {
-        number: signal.signal(number, hold) for number in _INTERRUPTS if signal.getsignal(number) is not signal.SIG_IGN
-    }
+    previous = _replace_handlers(hold, keep=(signal.SIG_IGN,))
     try:
         yield
     finally:
-        for number, handler in previous.items():
-            signal.signal(number, handler)
+        _restore_handlers(previous)
         if arrived:
             signal.raise_signal(arrived[0])

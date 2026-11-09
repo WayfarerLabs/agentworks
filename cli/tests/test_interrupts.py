@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import signal
 import sys
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
 from agentworks.interrupts import interrupts_deferred, termination_as_interrupt
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 posix_only = pytest.mark.skipif(sys.platform == "win32", reason="SIGHUP and os.kill delivery are POSIX")
 # SIGBREAK, Ctrl-Break's signal, exists only on Windows.
@@ -190,3 +195,50 @@ def test_an_ignored_signal_stays_ignored_through_a_deferred_step() -> None:
         assert signal.getsignal(signal.SIGHUP) is signal.SIG_IGN
     finally:
         signal.signal(signal.SIGHUP, before)
+
+
+@posix_only
+@pytest.mark.parametrize("block", [termination_as_interrupt, interrupts_deferred], ids=["termination", "deferred"])
+def test_a_signal_during_the_restore_reaches_the_restored_handlers(
+    block: Callable[[], contextlib.AbstractContextManager[None]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A Ctrl-C landing between two restores raised out of the loop and left the later handlers ours."""
+    before = {number: signal.getsignal(number) for number in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)}
+    install = signal.signal
+    restoring = False
+
+    def install_then_interrupt(number: int, handler: Any) -> Any:
+        replaced = install(number, handler)
+        if restoring and number == signal.SIGTERM:
+            signal.raise_signal(signal.SIGINT)
+        return replaced
+
+    monkeypatch.setattr(signal, "signal", install_then_interrupt)
+
+    with pytest.raises(KeyboardInterrupt), block():
+        restoring = True
+
+    assert {number: signal.getsignal(number) for number in before} == before
+
+
+@pytest.mark.windows
+@pytest.mark.parametrize("block", [termination_as_interrupt, interrupts_deferred], ids=["termination", "deferred"])
+def test_a_handler_installed_outside_python_is_left_alone(
+    block: Callable[[], contextlib.AbstractContextManager[None]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``getsignal`` reads such a handler as ``None``, which ``signal.signal`` cannot put back."""
+    read = signal.getsignal
+    monkeypatch.setattr(signal, "getsignal", lambda number: None if number == signal.SIGTERM else read(number))
+    install = signal.signal
+    installed: list[int] = []
+
+    def record(number: int, handler: Any) -> Any:
+        installed.append(number)
+        return install(number, handler)
+
+    monkeypatch.setattr(signal, "signal", record)
+
+    with block():
+        pass
+
+    assert signal.SIGTERM not in installed
