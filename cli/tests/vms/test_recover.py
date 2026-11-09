@@ -147,6 +147,45 @@ def test_a_healthy_node_is_repaired_read_and_verified_with_the_key_resolved_once
     assert row is not None and row.tailscale_host == NEW_ADDRESS
 
 
+def test_the_ssh_config_is_synced_even_when_the_address_did_not_change(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+    _world: list[str],
+) -> None:
+    """The aliases name the configured key, which the repair just installed: after a key change it is a new one."""
+    _seed(db)
+    _guest(monkeypatch, address=Answer(stdout=f"{ADDRESS}\n".encode()))
+    _waits(monkeypatch)
+
+    _recover(db, make_config())
+
+    assert _world == ["sync"]
+
+
+@pytest.mark.parametrize("agents", [[], ["coder", "reviewer"]], ids=["no-agents", "agents"])
+def test_a_recovered_vm_s_agents_are_named_as_keeping_the_previous_key(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+    agents: list[str],
+) -> None:
+    """The repair rewrites only the admin's keys, so after a key change the agents need their own reinit."""
+    _seed(db)
+    for agent in agents:
+        db.insert_agent(agent, "box", f"agt-{agent}")
+    _guest(monkeypatch)
+    _waits(monkeypatch)
+
+    _recover(db, make_config())
+
+    noted = [line for line in captured_output.info if "agw agent reinit" in line]
+    assert len(noted) == (1 if agents else 0)
+    assert all(agent in noted[0] for agent in agents)
+
+
 def test_the_operation_log_never_holds_the_key(
     db: Database,
     make_config,  # noqa: ANN001
@@ -267,6 +306,28 @@ def test_a_repair_that_does_not_succeed_stops_before_the_address_read(
 
     assert len(guest.scripts) == 1
     assert waits == []
+
+
+@pytest.mark.parametrize("platform_name", ["wsl2", "aws-ec2"])
+@pytest.mark.parametrize("status", [1, None], ids=["failed", "unknown"])
+def test_a_failed_repair_names_the_native_shell_only_when_the_channel_answered(
+    platform_name: str, status: int | None
+) -> None:
+    """A repair that exited ran through the channel the native shell uses; one with no outcome may have lost it."""
+    from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
+    from agentworks.execution.root_script import RootScriptResult
+    from agentworks.plugins.aws.platform import EC2Platform
+    from agentworks.vms.manager.recover import _repair_hint
+
+    platform = (
+        WSL2Platform("wsl2", {})
+        if platform_name == "wsl2"
+        else EC2Platform("aws-site", {"region": "us-east-1", "auth": {"mode": "ambient"}})
+    )
+
+    hint = _repair_hint(platform, "box", RootScriptResult(status, b"", b"", ""))
+
+    assert ("agw vm shell --platform box" in hint) is (status is not None)
 
 
 def test_a_repaired_vm_that_does_not_answer_raises(

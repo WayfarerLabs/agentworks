@@ -61,7 +61,7 @@ def test_verify_connection_surfaces_failure_without_activation_or_mutation(
     vm_access_recorder: AccessRecorder,
     failure: Exception,
 ) -> None:
-    vm = SimpleNamespace(name="worker", site="local", debian_release=None)
+    vm = SimpleNamespace(name="worker", site="local", debian_release=None, provisioning_status="complete")
     calls: list[tuple[object, ...]] = []
 
     class DatabaseSpy:
@@ -182,6 +182,33 @@ def test_an_incomplete_vm_s_refusal_names_delete_not_a_command_that_refuses_it(
     assert "agw vm delete worker" in hint
     assert not any(command in hint for command in ("reinit", "recover", "import-host-keys"))
     assert vm_access_recorder.built == []
+
+
+@pytest.mark.parametrize("provisioning", ["pending", "failed"])
+def test_an_incomplete_vm_s_failed_connection_names_delete_not_a_command_that_refuses_it(
+    monkeypatch: pytest.MonkeyPatch,
+    vm_access_recorder: AccessRecorder,
+    provisioning: str,
+) -> None:
+    """The connection's own hint names recover, which refuses a VM whose provisioning did not complete."""
+    vm = SimpleNamespace(name="worker", site="local", debian_release=None, provisioning_status=provisioning)
+    monkeypatch.setattr("agentworks.vms.sites.resolve_site", lambda site, registry: None)
+    monkeypatch.setattr("agentworks.vms.manager.boundary.require_vm_ssh_boundary", lambda *args: None)
+    vm_access_recorder.access(Admin()).run_outcomes = [
+        ConnectivityError("VM is unreachable", hint="Run 'agw vm recover worker'.")
+    ]
+
+    with pytest.raises(ConnectivityError) as caught:
+        verify_vm_connection(
+            cast("Database", SimpleNamespace(get_vm=lambda name: vm)),
+            cast("Config", SimpleNamespace()),
+            cast("Registry", SimpleNamespace()),
+            "worker",
+        )
+
+    hint = caught.value.hint or ""
+    assert "agw vm delete worker" in hint
+    assert "recover" not in hint
 
 
 def test_verify_connection_refuses_an_unsupported_client_before_reading_the_database(

@@ -12,7 +12,7 @@ from agentworks.execution import trust
 from agentworks.naming import NAME_RE
 from agentworks.secrets.policy import require_exact_tty_interaction_policy
 
-from ._helpers import _guard_incomplete_vm, _operation_log, _require_vm
+from ._helpers import _guard_incomplete_vm, _operation_log, _require_known_power_state, _require_vm
 from .boundary import _auth_key_boundary, _live_vm_boundary, _warn_legacy_release
 from .tailscale import VMNotAnswering
 
@@ -379,6 +379,7 @@ def rekey_vm(
     )
     platform = vm_node.site.platform
     status = platform.status(vm, ops_ctx)
+    _require_known_power_state(status, name)
     if status != VMStatus.RUNNING:
         raise StateError(
             f"VM '{name}' is not running (status: {status.value})",
@@ -404,8 +405,9 @@ def rekey_vm(
         try:
             result = recovery.rekey(platform, vm, ops_ctx, auth_key=auth_key, log=logger.record)
         except ChannelUnreachable as error:
-            # The script never ran, so the node is as it was; recover starts a stopped VM and repairs it.
-            error.add_hint(f"Run 'agw vm recover {name}'.")
+            # The script never ran, so the node is as it was: once the channel's own hint gets the VM
+            # answering, the rekey itself is what is left to do.
+            error.add_hint(f"Once it answers, run 'agw vm rekey {name}' again.")
             raise
         recovery.require_success(
             result,

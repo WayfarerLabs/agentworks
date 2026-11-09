@@ -39,6 +39,7 @@ pytestmark = pytest.mark.skipif(
 
 KEY = "tskey-auth-scripts-0123456789"
 PUBLIC_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOU3HUqrGubKZio8MVx9WOFPYHGIHl5tIyF3skwoAxv0 operator@host"
+AUTHORIZED_KEYS = f"# managed\n{PUBLIC_KEY}\n"
 
 _STUB = """#!/bin/bash
 name=$(basename "$0")
@@ -145,7 +146,7 @@ def _repair(guest: Guest, *, needs_guest_sshd: bool = True, admin: str | None = 
         _platform(guest, needs_guest_sshd=needs_guest_sshd),
         _vm(admin),
         RunContext(),
-        public_key=PUBLIC_KEY,
+        authorized_keys=AUTHORIZED_KEYS,
         auth_key=KEY,
         log=None,
     )
@@ -161,7 +162,7 @@ def test_a_running_node_is_not_joined_and_the_key_is_restored_once(guest: Guest)
     assert (first.status, second.status) == (0, 0)
     assert not recovery.joined(first)
     assert guest.called("tailscale") == ["tailscale status --json"] * 2
-    assert guest.authorized_keys == [PUBLIC_KEY]
+    assert guest.authorized_keys == AUTHORIZED_KEYS.splitlines()
 
 
 def test_a_node_that_needs_a_login_joins_with_the_key_on_stdin(guest: Guest) -> None:
@@ -234,6 +235,7 @@ def test_sshd_is_repaired_whatever_the_channel(guest: Guest, needs_guest_sshd: b
     assert [call for call in guest.calls if call.endswith(" ssh.service")] == [
         "systemctl unmask ssh.service",
         "systemctl enable ssh.service",
+        "systemctl reset-failed ssh.service",  # a unit that crash-looped refuses a restart until this
         "systemctl restart ssh.service",
     ]
 
@@ -248,14 +250,17 @@ def test_sshd_is_repaired_before_python3_is_installed(guest: Guest) -> None:
     assert commands.index("sshd") < commands.index("apt-get")
 
 
-def test_a_key_file_without_a_final_newline_keeps_its_last_key_whole(guest: Guest) -> None:
+def test_a_key_the_managed_file_does_not_list_is_removed(guest: Guest) -> None:
+    """Rotating a compromised key: the key the configured one replaced stops working at the recover."""
     keys = guest.root / "home" / ".ssh" / "authorized_keys"
     keys.parent.mkdir()
-    keys.write_text("ssh-ed25519 AAAAexisting other@host")
+    keys.write_text(f"ssh-ed25519 AAAAreplaced old@host\n{PUBLIC_KEY}\n")
 
     assert _repair(guest).status == 0
 
-    assert guest.authorized_keys == ["ssh-ed25519 AAAAexisting other@host", PUBLIC_KEY]
+    assert guest.authorized_keys == AUTHORIZED_KEYS.splitlines()
+    assert stat.S_IMODE(keys.stat().st_mode) == 0o600
+    assert [path.name for path in keys.parent.iterdir()] == ["authorized_keys"]  # no staging file left
 
 
 @pytest.mark.parametrize("active", [True, False])

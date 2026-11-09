@@ -316,6 +316,11 @@ def reinit_vm(
         finally:
             logger.close()
 
+    # The aliases name the configured key, which the initialization just installed and may be a new one.
+    from agentworks.ssh_config import sync_ssh_config_or_warn
+
+    sync_ssh_config_or_warn(config, db)
+
     refreshed_vm = db.get_vm(name)
     assert refreshed_vm is not None
     # Terminal outcome line at column 0 via result().

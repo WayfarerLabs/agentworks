@@ -268,7 +268,7 @@ def test_remote_interrupt_kills_the_detached_limactl_before_deleting(
 
     assert caught.value is interrupt
     commands = host.commands
-    kill = _index(commands, lambda c: f"kill $(cat {_BASE}.pid)" in c)
+    kill = _index(commands, lambda c: f"pid=$(cat {_BASE}.pid)" in c)
     artifacts = _index(commands, lambda c: c == f"rm -f {_BASE}.out {_BASE}.sh {_BASE}.pid {_BASE}.status")
     delete = _index(commands, lambda c: c == "limactl delete --force myvm")
     assert kill < artifacts < delete
@@ -308,7 +308,7 @@ def test_remote_exception_kills_cleans_artifacts_then_deletes_without_masking(
 
     assert caught.value is original
     commands = host.commands
-    kill = _index(commands, lambda c: f"kill $(cat {_BASE}.pid)" in c)
+    kill = _index(commands, lambda c: f"pid=$(cat {_BASE}.pid)" in c)
     artifacts = _index(commands, lambda c: c.startswith(f"rm -f {_BASE}.out"))
     delete = _index(commands, lambda c: c == "limactl delete --force myvm")
     assert kill < artifacts < delete
@@ -383,6 +383,22 @@ def test_delete_op_issues_the_shared_teardown_command(host: _Host, captured_outp
     LimaPlatform("lima", {"placement": {"mode": "local"}}).delete(vm, RunContext())  # type: ignore[arg-type]
 
     assert host.commands == ["limactl delete --force myvm"]
+
+
+def test_a_remote_delete_removes_what_an_abandoned_create_left_on_the_host(
+    host: _Host, captured_output: CapturedOutput
+) -> None:
+    """A retained rollback or a second Ctrl-C leaves the detached create's files; the delete that follows removes
+    them, after the instance, and only kills a PID that is still that create's wrapper."""
+    vm = SimpleNamespace(name="myvm", platform_metadata={"instance_name": "myvm"})
+
+    LimaPlatform("lima", _REMOTE).delete(vm, RunContext())  # type: ignore[arg-type]
+
+    commands = host.commands
+    delete = _index(commands, lambda c: c == "limactl delete --force myvm")
+    kill = _index(commands, lambda c: f"pid=$(cat {_BASE}.pid)" in c and f"grep -qF -- {_BASE}.sh" in c)
+    artifacts = _index(commands, lambda c: c == f"rm -f {_BASE}.out {_BASE}.sh {_BASE}.pid {_BASE}.status")
+    assert delete < kill < artifacts
 
 
 @pytest.mark.parametrize(

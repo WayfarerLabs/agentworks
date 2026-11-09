@@ -469,9 +469,9 @@ class TestCreateRollback:
         [
             ("true", "did not answer over SSH", None),
             (
-                "cloud-init status --wait",
+                "cloud-init status --wait --long",
                 "cloud-init did not complete",
-                ["true", "cloud-init status --wait"],
+                ["true", "cloud-init status --wait --long"],
             ),
         ],
         ids=("ssh-readiness-exhaustion", "cloud-init-wait-failure"),
@@ -524,7 +524,7 @@ class TestCreateRollback:
         ("failure_command", "expected_commands"),
         [
             ("true", ["true"]),
-            ("cloud-init status --wait", ["true", "cloud-init status --wait"]),
+            ("cloud-init status --wait --long", ["true", "cloud-init status --wait --long"]),
         ],
         ids=("ssh-readiness", "cloud-init-wait"),
     )
@@ -570,7 +570,7 @@ class TestCreateRollback:
         ("failure_command", "expected_commands"),
         [
             ("true", ["true"]),
-            ("cloud-init status --wait", ["true", "cloud-init status --wait"]),
+            ("cloud-init status --wait --long", ["true", "cloud-init status --wait --long"]),
         ],
         ids=("ssh-readiness", "cloud-init-wait"),
     )

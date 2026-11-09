@@ -139,7 +139,8 @@ def test_vm_reports_native_failures_only_after_command_completion(
     else:
         run()
 
-    assert events == ["initialize", "close"] + (["ssh", "overlay"] if operation == "create" else []) + ["report"]
+    # Both sync the SSH config after initialization, since its aliases name the configured key.
+    assert events == ["initialize", "close", "ssh"] + (["overlay"] if operation == "create" else []) + ["report"]
     row = db.get_vm("box")
     assert row is not None
     assert row.provisioning_status == ProvisioningStatus.COMPLETE.value

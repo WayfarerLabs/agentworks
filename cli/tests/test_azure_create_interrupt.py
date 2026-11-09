@@ -126,7 +126,7 @@ class TestInterruptDuringInlineWait:
         ("failure_command", "expected_commands"),
         [
             ("true", ["true"]),
-            ("cloud-init status --wait", ["true", "cloud-init status --wait"]),
+            ("cloud-init status --wait --long", ["true", "cloud-init status --wait --long"]),
         ],
         ids=("ssh-readiness", "cloud-init-wait"),
     )
@@ -172,7 +172,7 @@ class TestInterruptDuringInlineWait:
         ("failure_command", "expected_commands"),
         [
             ("true", ["true"]),
-            ("cloud-init status --wait", ["true", "cloud-init status --wait"]),
+            ("cloud-init status --wait --long", ["true", "cloud-init status --wait --long"]),
         ],
         ids=("ssh-readiness", "cloud-init-wait"),
     )
@@ -224,7 +224,6 @@ class TestInterruptDuringInlineWait:
         assert "Azure VM 'vm1'" in warned
         assert "resource group 'rg1'" in warned
         assert "vm delete boom" in warned
-        assert "delete it there manually" in warned
         # The cleanup was NOT abandoned: the sweep ran past the failed
         # VM delete and the stragglers stayed collectable.
         assert fakes.network.network_interfaces.deleted == [("rg1", "vm1-nic")]
@@ -316,13 +315,13 @@ class TestFailureDuringInlineWait:
     ) -> None:
         fakes = _install_fakes(monkeypatch, vm_exists_lookup=False)
         guest = install_at_run_process(
-            monkeypatch, FakeGuest(answer_by_payload(answers={"cloud-init status --wait": Answer(status=1)}))
+            monkeypatch, FakeGuest(answer_by_payload(answers={"cloud-init status --wait --long": Answer(status=1)}))
         )
 
         with pytest.raises(AzureError, match="cloud-init did not complete") as caught:
             _platform().create(_request(tailscale=True), RunContext())
 
-        assert guest.payloads == ["true", "cloud-init status --wait"]
+        assert guest.payloads == ["true", "cloud-init status --wait --long"]
         assert guest.deadlines == [10, 600]
         self._assert_safe_provider_failure(fakes, guest, caught.value, captured_output)
 
@@ -390,7 +389,6 @@ class TestVMDeleteFailureWarns:
         assert "'vm1'" in warned
         assert "AuthorizationFailed" in warned
         assert "'rg1'" in warned
-        assert "manually" in warned
         # Still best-effort: the name-based sweep ran regardless.
         assert fakes.network.network_interfaces.deleted == [("rg1", "vm1-nic")]
         assert fakes.network.public_ip_addresses.deleted == [("rg1", "vm1-ip")]

@@ -158,9 +158,17 @@ class TestInterruptDuringBootstrapWait:
         # Abandoned at the stop: nothing else was touched.
         assert "delete_vm" not in fake.ops()
         assert "stop_task" not in fake.ops()
-        warned = "\n".join(captured_output.warnings)
-        assert f"VM {NEWID}" in warned
-        assert "node 'pve1'" in warned
+        assert _retention_warned(captured_output, interrupted=True)
+
+
+def _retention_warned(captured_output: CapturedOutput, *, interrupted: bool) -> bool:
+    """Whether a warning names the VMID and node, besides an interrupt's notice, which names them too.
+
+    The interrupt path warns its notice first, before any cleanup; the
+    failure path has none.
+    """
+    warnings = captured_output.warnings[1:] if interrupted else captured_output.warnings
+    return any(f"VM {NEWID}" in w and "node 'pve1'" in w for w in warnings)
 
 
 class TestFailClosedBootstrap:
@@ -339,9 +347,7 @@ class TestUnremovedVMIsRetained:
             platform.create(_request(tailscale=True), RunContext())
 
         assert exc.value.platform_metadata == {"vmid": str(NEWID), "node": "pve1"}
-        warned = "\n".join(captured_output.warnings)
-        assert f"VM {NEWID}" in warned
-        assert "node 'pve1'" in warned
+        assert _retention_warned(captured_output, interrupted=True)
 
     def test_failure_path_retains_a_vm_that_survives_the_delete_and_keeps_the_failure(
         self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
@@ -377,7 +383,7 @@ class TestUnremovedVMIsRetained:
             platform.create(_request(tailscale=True), RunContext())
 
         assert exc.value.platform_metadata == {"vmid": str(NEWID), "node": "pve1"}
-        assert any(f"VM {NEWID}" in w for w in captured_output.warnings)
+        assert _retention_warned(captured_output, interrupted=path == "interrupt")
 
     @pytest.mark.parametrize("path", ["failure", "interrupt"])
     def test_a_raw_transport_failure_during_the_rollback_retains_the_vm(

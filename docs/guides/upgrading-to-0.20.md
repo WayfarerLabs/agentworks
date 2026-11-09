@@ -242,8 +242,9 @@ before they resolve the auth key.
   on an ephemeral auth key whose node expired while it was offline, and one whose node was removed
   in the Tailscale admin console. No start resolves the auth key any more.
 - **`agw vm recover NAME`** is new. It starts a stopped VM first; then, through the platform's own
-  channel, it records missing host keys once you confirm their fingerprints, then restores your SSH
-  public key, restarts a broken SSH server, installs `python3`, starts `tailscaled` if it is not
+  channel, it records missing host keys once you confirm their fingerprints, then rewrites the
+  admin's `authorized_keys` with your configured keys as `vm reinit` does (removing a key you
+  replaced), restarts a broken SSH server, installs `python3`, starts `tailscaled` if it is not
   running, and rejoins Tailscale only when the node needs a login. Then it waits once for the VM to
   answer. See the [command reference](../../cli/command-reference.md) for what it refuses.
 - **`vm rekey`** runs its steps as one script through the platform's own channel and keeps an
@@ -341,7 +342,9 @@ state the full contract, and the
   `PublicSSH.wait_until_answering(seconds=..., retry_refused_key=True)`, where a refused key raises
   `public_ssh.KeyRefused` and is retried until the bound, since a cloud's guest agent may install
   the key after sshd starts; then it waits for cloud-init, joins and settles the address. A
-  cloud-init that finished with recoverable errors (exit status 2) warns and lets create carry on.
+  cloud-init that finished with recoverable errors (exit status 2) warns and lets create carry on;
+  any other failure's error quotes the exit status and cloud-init's own detail and errors
+  (`cloud-init status --wait --long`), since the rollback then removes the VM.
 - **`close_provisioning_access(vm, ctx)` replaces `post_tailscale_ready` and `secure_failed_vm`.**
   Phase A calls it exactly once with the create's own context, however Phase A ends: after the VM
   contract passes, when Phase A fails, and when it is interrupted. A platform that opens

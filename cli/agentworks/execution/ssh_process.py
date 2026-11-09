@@ -61,6 +61,9 @@ HOST_KEY_FAILURE = "Host key verification failed"
 # What the client logs when the server refused every key it offered, whatever follows the
 # parenthesis (a server that also allows other methods lists them there).
 AUTH_FAILURE = "Permission denied (publickey"
+# What the client logs when the address answered and nothing listens on the port: ssh's
+# "connect to host H port P: Connection refused", from the operating system's own text.
+CONNECTION_REFUSED = "Connection refused"
 
 _HOST = re.compile(r"[A-Za-z0-9_:][A-Za-z0-9_.:-]*")
 _USER = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]*\$?")

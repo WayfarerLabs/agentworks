@@ -690,13 +690,9 @@ def create_vm(
     # Provisioning completed; this re-sync captures any state Phase B changed
     # (nothing today) and stays silent (announce=False) to avoid a duplicate
     # line.
-    try:
-        from agentworks.ssh_config import sync_ssh_config
+    from agentworks.ssh_config import sync_ssh_config_or_warn
 
-        sync_ssh_config(config, db, announce=False)
-    except Exception as e:
-        output.warn(f"SSH config sync failed: {e}")
-        output.info("VM is likely still usable.")
+    sync_ssh_config_or_warn(config, db, announce=False)
 
     # Final status is set by run_initialization (COMPLETE or PARTIAL). The
     # terminal outcome line renders at column 0 via result().

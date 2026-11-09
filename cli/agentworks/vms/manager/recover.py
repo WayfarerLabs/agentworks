@@ -3,8 +3,9 @@
 In order: start the VM when it is stopped; re-establish the VM's host-key
 record when it is missing, under the operator's confirmation; run the repair
 script; read the tailnet address, settling it (and logging the node out when
-it cannot be read) only when the repair joined; wait once for the VM to answer
-over SSH; then record the configured SSH identity as the VM's.
+it cannot be read) only when the repair joined, and sync the SSH config, whose
+aliases name the address and the configured key; wait once for the VM to
+answer over SSH; then record the configured SSH identity as the VM's.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from typing import TYPE_CHECKING
 
 import agentworks.execution as execution
 from agentworks import output
+from agentworks.capabilities.vm_platform.base import offers_native_shell
 from agentworks.capabilities.vm_platform.tailscale_join import read_tailnet_address, settle_tailnet_address
 from agentworks.db import VMStatus
 from agentworks.errors import ConnectivityError, StateError, UserAbort
@@ -21,7 +23,7 @@ from agentworks.execution import reachability, trust
 from agentworks.execution.access import Admin
 from agentworks.vms import recovery
 
-from ._helpers import _guard_incomplete_vm, _operation_log, _require_vm
+from ._helpers import _guard_incomplete_vm, _operation_log, _require_known_power_state, _require_vm
 from .boundary import _auth_key_boundary
 
 if TYPE_CHECKING:
@@ -29,6 +31,7 @@ if TYPE_CHECKING:
     from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
+    from agentworks.execution.root_script import RootScriptResult
     from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.vms.applied_state import PreparedConfiguredSSHIdentity
 
@@ -51,6 +54,7 @@ def recover_vm(db: Database, config: Config, name: str, *, interaction: TtyInter
     import agentworks.vms.manager as _mgr
     from agentworks.ssh_config import sync_ssh_config
     from agentworks.vms.applied_state import prepare_configured_ssh_identity
+    from agentworks.vms.initializer.ssh_keys import authorized_keys_content
 
     vm = _require_vm(db, name)
     _guard_incomplete_vm(vm, allow_failed_init=True)
@@ -70,11 +74,12 @@ def recover_vm(db: Database, config: Config, name: str, *, interaction: TtyInter
     # refuses before a secret or the platform is touched.
     execution.resolve_ssh()
     prepared = prepare_configured_ssh_identity(config.operator.ssh_public_key, config.operator.ssh_private_key)
+    authorized_keys = authorized_keys_content(prepared.public_text, config.operator.extra_ssh_public_keys)
 
     vm_node, _resolver, ops_ctx, auth_key = _auth_key_boundary(db, config, vm, interaction=interaction)
     platform = vm_node.site.platform
     status = platform.status(vm, ops_ctx)
-    _require_known_state(status, name)
+    _require_known_power_state(status, name)
 
     with _operation_log(name, "recover", redactions=(auth_key,)) as log:
         # Started before the hold, as start_vm does: WSL2's keepalive boots a
@@ -93,15 +98,9 @@ def recover_vm(db: Database, config: Config, name: str, *, interaction: TtyInter
             log.step("Repair")
             output.info("Repairing SSH access, python3 and Tailscale (this may take several minutes)...")
             result = recovery.repair(
-                platform, vm, ops_ctx, public_key=prepared.public_text, auth_key=auth_key, log=log.record
+                platform, vm, ops_ctx, authorized_keys=authorized_keys, auth_key=auth_key, log=log.record
             )
-            hint = f"Run 'agw vm logs {name}' for its output."
-            if platform.recovery_needs_guest_sshd:
-                hint += (
-                    " A broken SSH server on this platform needs a way in that does not use it (a cloud "
-                    "provider's serial console), or recreating the VM."
-                )
-            recovery.require_success(result, script="repair", vm_name=name, hint=hint)
+            recovery.require_success(result, script="repair", vm_name=name, hint=_repair_hint(platform, name, result))
             joined = recovery.joined(result)
 
             log.step("Read the tailnet address")
@@ -120,7 +119,8 @@ def recover_vm(db: Database, config: Config, name: str, *, interaction: TtyInter
                     raise
             if address != vm.tailscale_host:
                 db.update_vm_tailscale(name, address)
-                sync_ssh_config(config, db)
+            # Whatever the address did: the repair installed the configured key, which may be a new one.
+            sync_ssh_config(config, db)
 
             log.step("Wait for SSH")
             wording = reachability.Wording.RECONNECT if joined else reachability.Wording.VERIFY
@@ -135,16 +135,45 @@ def recover_vm(db: Database, config: Config, name: str, *, interaction: TtyInter
             log.step("Record the SSH identity")
             _record_ssh_identity(db, name, prepared)
     output.result(f"VM '{name}' recovered")
+    _note_agent_keys(db, name)
 
 
-def _require_known_state(status: VMStatus, name: str) -> None:
-    if status is VMStatus.UNKNOWN:
-        raise StateError(
-            f"the platform could not report the power state of VM '{name}'",
-            entity_kind="vm",
-            entity_name=name,
-            hint=f"Check the VM in its provider, or run 'agw vm describe {name}'.",
+def _note_agent_keys(db: Database, name: str) -> None:
+    """Say which agent accounts keep their previous key, worded for a key change recover cannot detect.
+
+    The repair rewrites only the admin's ``authorized_keys``. Whether the
+    operator's key changed since the agents were set up is not recorded per
+    agent, so the note is conditional and printed whenever the VM has agents.
+    """
+    agents = sorted(agent.name for agent in db.list_agents(vm_name=name))
+    if agents:
+        output.info(
+            f"Recover repairs only the admin's keys. If operator.ssh_private_key changed, the agent accounts on "
+            f"VM '{name}' ({', '.join(agents)}) still accept only the previous key until you run "
+            "'agw agent reinit <agent>' for each."
         )
+
+
+def _repair_hint(platform: VMPlatform, name: str, result: RootScriptResult) -> str:
+    """What to do after a repair that did not succeed: its log, then a way in by hand.
+
+    A repair that exited with a status ran, so the channel works: the
+    platform's native shell goes through the same one (on Lima, its
+    persistent connection still reaches a VM whose sshd has stopped). One
+    whose outcome is unknown may have lost a channel that needs the guest's
+    sshd, which then needs a way in that does not use it.
+    """
+    hint = f"Run 'agw vm logs {name}' for its output."
+    if result.status is not None:
+        if offers_native_shell(platform):
+            return f"{hint} To fix it by hand (a broken SSH configuration, say), run 'agw vm shell --platform {name}'."
+        return f"{hint} {platform.native_shell_unavailable_hint or ''}".rstrip()
+    if platform.recovery_needs_guest_sshd:
+        hint += (
+            " This platform's channel goes through the VM's SSH server: if that is broken, it needs a way in that "
+            "does not use it, such as a cloud provider's serial console, or recreating the VM."
+        )
+    return hint
 
 
 def _record_ssh_identity(db: Database, name: str, prepared: PreparedConfiguredSSHIdentity) -> None:

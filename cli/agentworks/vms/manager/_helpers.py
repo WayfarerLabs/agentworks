@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
     from agentworks.capabilities.base import OperationScope
     from agentworks.config import Config
-    from agentworks.db import Database, VMRow, WorkspaceRow
+    from agentworks.db import Database, VMRow, VMStatus, WorkspaceRow
     from agentworks.env import EnvEntry
     from agentworks.resources import Registry
     from agentworks.secrets import SecretTarget
@@ -225,6 +225,20 @@ def _operation_log(vm_name: str, command_stem: str, *, redactions: tuple[str, ..
         yield log
     finally:
         log.close()
+
+
+def _require_known_power_state(status: VMStatus, name: str) -> None:
+    """Refuse a VM whose power state the platform could not report (its API or placement host is unreachable)."""
+    from agentworks.db import VMStatus
+    from agentworks.errors import StateError
+
+    if status is VMStatus.UNKNOWN:
+        raise StateError(
+            f"the platform could not report the power state of VM '{name}'",
+            entity_kind="vm",
+            entity_name=name,
+            hint=f"Check the VM in its provider, or run 'agw vm describe {name}'.",
+        )
 
 
 def _guard_incomplete_vm(vm: VMRow, *, allow_failed_init: bool = False) -> None:

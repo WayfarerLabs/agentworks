@@ -17,7 +17,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from agentworks.capabilities.vm_platform import VMPlatform
-from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
+from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform, WSLCommandFailed
+from agentworks.errors import ExternalError
 from agentworks.schema import AgwModel
 
 
@@ -38,13 +39,13 @@ def _running_proc() -> MagicMock:
     initial fast-fail probe (raises TimeoutExpired) and exits cleanly on the
     final terminate-then-wait. ``_handle`` is set to a dummy int so the
     job-object assignment path has something to pass to AssignProcessToJobObject.
-    ``stderr`` is set to a MagicMock because spec=Popen doesn't auto-expose
+    ``stdout`` is set to a MagicMock because spec=Popen doesn't auto-expose
     it (it's an instance attribute on Popen, set in __init__) and the
-    keepalive's exit path now calls proc.stderr.close() to release the fd."""
+    keepalive's exit path calls proc.stdout.close() to release the fd."""
     proc = MagicMock(spec=subprocess.Popen)
     proc.wait.side_effect = [subprocess.TimeoutExpired(cmd="wsl", timeout=0.5), None]
     proc._handle = 0x1234  # bypass spec=Popen blocking _handle attribute access
-    proc.stderr = MagicMock()
+    proc.stdout = MagicMock()
     return proc
 
 
@@ -80,11 +81,11 @@ def test_vm_active_spawns_keepalive_subprocess() -> None:
         args = popen.call_args[0][0]
         assert args == ["wsl", "--distribution", "mydistro", "--", "sleep", "infinity"]
         kwargs = popen.call_args.kwargs
-        # stdin/stdout detached so the subprocess doesn't compete for the user's terminal.
-        # stderr is piped so we can read it on a fast-fail.
+        # stdin detached so the subprocess doesn't compete for the user's terminal. Both
+        # output streams share one pipe, read on a fast-fail: wsl.exe prints its errors on stdout.
         assert kwargs["stdin"] == subprocess.DEVNULL
-        assert kwargs["stdout"] == subprocess.DEVNULL
-        assert kwargs["stderr"] == subprocess.PIPE
+        assert kwargs["stdout"] == subprocess.PIPE
+        assert kwargs["stderr"] == subprocess.STDOUT
     # On clean exit: terminate then wait. No kill needed.
     proc.terminate.assert_called_once()
     # wait is called twice: once for the fast-fail probe, once after terminate.
@@ -110,7 +111,7 @@ def test_vm_active_kills_if_terminate_doesnt_take() -> None:
     """If terminate's wait times out, fall back to kill()."""
     proc = MagicMock(spec=subprocess.Popen)
     proc._handle = 0x1234
-    proc.stderr = MagicMock()  # spec=Popen hides the instance attr; see _running_proc
+    proc.stdout = MagicMock()  # spec=Popen hides the instance attr; see _running_proc
     # 1: fast-fail probe (still running), 2: post-terminate wait (timeout),
     # 3: post-kill wait (exits).
     proc.wait.side_effect = [
@@ -137,24 +138,30 @@ def test_vm_active_fast_fails_if_keepalive_subprocess_dies_immediately() -> None
     proc = MagicMock(spec=subprocess.Popen)
     proc._handle = 0x1234
     proc.wait.return_value = 1  # rc 1, exited
-    # `spec=subprocess.Popen` doesn't auto-expose stderr (it's an instance attr).
-    proc.stderr = MagicMock()
-    proc.stderr.read.return_value = b"wsl: distro not found\n"
+    # `spec=subprocess.Popen` doesn't auto-expose stdout (it's an instance attr).
+    proc.stdout = MagicMock()
+    # wsl.exe prints its own errors on stdout, in UTF-16 when redirected.
+    proc.stdout.read.return_value = "\x00".join("There is no distribution with the supplied name.").encode() + b"\r\n"
     with (
         patch("agentworks.capabilities.vm_platform.wsl2.subprocess.Popen", return_value=proc),
         _job_object_mocks(),
-        pytest.raises(RuntimeError, match="exited immediately"),
+        pytest.raises(WSLCommandFailed) as caught,
         WSL2Platform("wsl2", {}).vm_active(_fake_vm("missing-distro")),
     ):
         pass
-    # The fast-fail path closes the stderr PIPE handle before raising, so a
+    # A typed error quoting what wsl.exe printed, NULs and all stripped, not a raw RuntimeError.
+    assert isinstance(caught.value, ExternalError)
+    assert "There is no distribution with the supplied name." in str(caught.value)
+    assert "missing-distro" in str(caught.value)
+    assert caught.value.hint
+    # The fast-fail path closes the output PIPE handle before raising, so a
     # caller that retries the keepalive doesn't accumulate one leaked fd per
     # failed attempt.
-    proc.stderr.close.assert_called_once()
+    proc.stdout.close.assert_called_once()
 
 
-def test_vm_active_closes_stderr_on_normal_exit() -> None:
-    """On the normal exit path the stderr PIPE handle is closed too, so the
+def test_vm_active_closes_its_output_pipe_on_normal_exit() -> None:
+    """On the normal exit path the output PIPE handle is closed too, so the
     subprocess's fd doesn't outlive the keepalive context."""
     proc = _running_proc()
     with (
@@ -163,7 +170,7 @@ def test_vm_active_closes_stderr_on_normal_exit() -> None:
         WSL2Platform("wsl2", {}).vm_active(_fake_vm()),
     ):
         pass
-    proc.stderr.close.assert_called_once()
+    proc.stdout.close.assert_called_once()
 
 
 def test_vm_active_cleanup_tolerates_already_dead_subprocess() -> None:
@@ -175,7 +182,7 @@ def test_vm_active_cleanup_tolerates_already_dead_subprocess() -> None:
     """
     proc = MagicMock(spec=subprocess.Popen)
     proc._handle = 0x1234
-    proc.stderr = MagicMock()
+    proc.stdout = MagicMock()
     # Fast-fail probe sees the process still running; later terminate()
     # races and the process is gone -- POSIX raises ProcessLookupError
     # (an OSError subclass), Windows TerminateProcess raises OSError on
@@ -190,7 +197,7 @@ def test_vm_active_cleanup_tolerates_already_dead_subprocess() -> None:
         pass
     proc.terminate.assert_called_once()
     # Even though terminate raised, the rest of the cleanup ran.
-    proc.stderr.close.assert_called_once()
+    proc.stdout.close.assert_called_once()
 
 
 def test_vm_active_does_not_verify_connectivity() -> None:
@@ -248,12 +255,12 @@ def test_vm_active_closes_job_handle_on_fast_fail() -> None:
     proc = MagicMock(spec=subprocess.Popen)
     proc._handle = 0xDEAD
     proc.wait.return_value = 2
-    proc.stderr = MagicMock()
-    proc.stderr.read.return_value = b""
+    proc.stdout = MagicMock()
+    proc.stdout.read.return_value = b""
     with (
         patch("agentworks.capabilities.vm_platform.wsl2.subprocess.Popen", return_value=proc),
         _job_object_mocks(create_returns=0xBEEF) as (_create, _assign, close),
-        pytest.raises(RuntimeError, match="exited immediately"),
+        pytest.raises(WSLCommandFailed),
         WSL2Platform("wsl2", {}).vm_active(_fake_vm()),
     ):
         pass

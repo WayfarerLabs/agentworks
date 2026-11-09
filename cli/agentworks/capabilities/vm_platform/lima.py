@@ -733,7 +733,13 @@ class LimaPlatform(VMPlatform):
 
     def delete(self, vm: VMRow, ctx: RunContext) -> None:
         output.info(f"Deleting Lima VM '{vm.name}'...")
-        self._delete_instance(self._instance_name(vm))
+        instance_name = self._instance_name(vm)
+        self._delete_instance(instance_name)
+        if self.is_remote:
+            # A create whose rollback failed or was abandoned left its detached create's files on the
+            # placement host. Best-effort: the instance is gone, which is what the row's removal needs.
+            with contextlib.suppress(Exception):
+                self._host.kill_detached(self._remote_base_path(instance_name))
         output.info(f"Lima VM '{vm.name}' deleted")
 
     def display_backend_name(self, vm: VMRow) -> str:

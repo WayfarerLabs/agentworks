@@ -740,8 +740,11 @@ canonical SSH commands refuse that unknown state until one successful `agw vm re
 that reinit while the installed key still works. If it no longer works, or you changed
 `operator.ssh_private_key` so that the VM's recorded identity no longer matches,
 `agw vm recover <name>` restores the configured public key through the platform's own channel and
-records it as the VM's identity once the VM answers over SSH with it. On a cloud that channel is SSH
-with the same key, so use the provider's console or recreate the VM when the VM refuses it.
+records it as the VM's identity once the VM answers over SSH with it. Recover rewrites only the
+admin's `authorized_keys`: the VM's agent accounts keep the previous key until
+`agw agent reinit <agent>` runs for each, and recover names them when the VM has any. On a cloud
+that channel is SSH with the same key, so use the provider's console or recreate the VM when the VM
+refuses it.
 
 `vm confirm-release` reads `/etc/os-release` over SSH at the VM's tailnet address, through the same
 path as `vm exec` (so the VM needs `python3`), and shows the recorded and live Debian releases. It
@@ -764,31 +767,43 @@ resolves up front, with the site's secrets. In one run it:
    to compare with the VM's console, and records them only once you confirm. Without a terminal to
    confirm on, recover refuses such a VM before resolving anything; import its keys from a verified
    file with `agw vm import-host-keys <name> --known-hosts FILE` instead.
-2. Runs one repair script as root, in this order: it restores your SSH public key in the admin's
-   `authorized_keys`; checks the SSH server's configuration (a failed check stops the repair), then
-   unmasks, enables and restarts it, which ends no open session, so a stopped or masked server is
+2. Runs one repair script as root, in this order: it rewrites the admin's `authorized_keys` as
+   `vm reinit` does, with your SSH public key and `operator.extra_ssh_public_keys`, so a key they no
+   longer list (one you replaced, say) stops working; checks the SSH server's configuration (a
+   failed check stops the repair), then unmasks and enables it, clears a failed state left by a
+   crash loop, and restarts it, which ends no open session, so a stopped or masked server is
    repaired even where the channel goes through it, as Lima's persistent connection can; installs
    `python3` when it is missing or lacks its standard library; starts `tailscaled` if it is not
    running and waits up to about 30 seconds for its state to settle; and rejoins Tailscale only when
    the node needs a login. A missing Tailscale is reported, not installed.
-3. Reads the VM's tailnet address and records it. After a rejoin, an address that cannot be read
-   logs the node out again, as create does.
+3. Reads the VM's tailnet address and records it, then rebuilds the SSH config, whose aliases name
+   that address and your configured key. After a rejoin, an address that cannot be read logs the
+   node out again, as create does.
 4. Waits once for the VM to answer over SSH.
 5. Records the configured SSH identity as the VM's, since the VM has just accepted it. A key file
    replaced while recover ran is not recorded, and recover fails asking for a rerun.
 
-A failed step stops there and names the script; its output is in the operation log
-(`agw vm logs <name>`). On Lima, Remote Lima and the clouds the channel itself is the VM's SSH
-server, so a broken one there needs a way in that does not use it (a cloud provider's serial
-console) or recreation.
+When the VM has agents, recover's output names them: their accounts' `authorized_keys` are not
+repaired, so after a change to `operator.ssh_private_key` they accept only the previous key until
+`agw agent reinit <agent>` runs for each.
+
+A failed step stops there and names the script; its output, such as the reason a configuration test
+failed, is in the operation log (`agw vm logs <name>`). A script that ran and failed went through a
+channel that works, so the hint names `agw vm shell --platform <name>`, which uses the same channel,
+for fixing it by hand (Proxmox has no native shell, so its hint names the web UI's console). On
+Lima, Remote Lima and the clouds the channel itself goes through the VM's SSH server, so when the
+outcome is unknown there, a broken server needs a way in that does not use it (a cloud provider's
+serial console) or recreation.
 
 `vm rekey` restarts `tailscaled`, logs the node out, joins with the new key and restarts it again,
 in one script through the platform's own channel, then reads and records the new address and waits
 for the VM to answer there. If the new address cannot be read, the node is logged out and the error
 names `agw vm recover`, which rejoins it. When the platform's channel cannot reach the VM at all
-(after its own wait of about two minutes), rekey stops at that first call, naming `agw vm recover`,
-and does not try a logout. A rekeyed VM that does not answer at its new address fails naming
-`agw vm recover`, as `vm start` does; the new address is recorded either way.
+(after its own wait of about two minutes), rekey stops at that first call and does not try a logout;
+the error says what gets the VM answering again (on a cloud, a restart with `agw vm stop` and
+`agw vm start`, or the provider's serial console) and to run the rekey again after that. A rekeyed
+VM that does not answer at its new address fails naming `agw vm recover`, as `vm start` does; the
+new address is recorded either way.
 
 `vm delete` requires `--force` if the VM has workspaces, agents, or sessions. The confirmation
 message shows what will be deleted. Pass `--yes` to skip the prompt.
@@ -880,11 +895,13 @@ Linux, or by Ctrl-Break on Windows. The same holds for the routes `vm create`, `
 `vm rekey` and `vm delete` open on a cloud VM. On Windows, killing `agw` runs no cleanup, and
 closing the console window may start it, but Windows ends the process within seconds, so it cannot
 be relied on to finish. Either can leave the rule in place until you delete it from the VM's
-firewall in the provider's console, so end the session by exiting the shell. If your SSH traffic
-egresses through a different address than the detection sees (VPN split tunnel, proxy, CGNAT), set
-`ssh_allow_cidrs` in the config's `[operator]` section to a list of IPv4 addresses and/or CIDRs to
-allow additionally; if detection fails entirely, those entries are used alone. A shell that ends
-with status 255 gets a notice that the connection may have dropped.
+firewall in the provider's console, so end the session by exiting the shell. A VM whose address
+refuses the connection has no SSH server listening; that error names a restart (`agw vm stop`, then
+`agw vm start`) or the provider's serial console. If your SSH traffic egresses through a different
+address than the detection sees (VPN split tunnel, proxy, CGNAT), set `ssh_allow_cidrs` in the
+config's `[operator]` section to a list of IPv4 addresses and/or CIDRs to allow additionally; if
+detection fails entirely, those entries are used alone. A shell that ends with status 255 gets a
+notice that the connection may have dropped.
 
 #### Host keys
 
@@ -1012,7 +1029,9 @@ prefixes are configurable via `operator.ssh_host_prefix` (default `awvm--`) and
 `operator.ssh_agent_host_prefix` (default `awagent--`).
 
 Entries are rebuilt declaratively from the database on every agent / VM lifecycle operation, so a
-fresh `agw agent create` or `agw vm delete` keeps the file in sync without manual intervention. Run
+fresh `agw agent create` or `agw vm delete` keeps the file in sync without manual intervention. Each
+entry's `IdentityFile` is `operator.ssh_private_key`, so after changing that key, `agw vm recover`
+or `agw vm reinit` (which install the new key on the VM) rebuild the file too. Run
 `agw config sync-ssh-config` to force a rebuild.
 
 Entries for a VM that has a host-key record also carry `HostKeyAlias`, `UserKnownHostsFile` (the

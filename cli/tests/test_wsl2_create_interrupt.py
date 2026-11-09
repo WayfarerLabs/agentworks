@@ -448,11 +448,12 @@ def test_a_delete_that_leaves_the_distro_registered_raises_so_core_keeps_the_row
         (0, 0, "Debian\n", True),
         (1, 0, "Debian\n", True),  # never registered: the unregister fails, the listing does not name it
         (0, 1, "", True),  # the last distro went: the listing fails, but the unregister succeeded
+        (1, 0, "", True),  # no distro at all on WSL 2.7.14.0: the listing exits 0 with no output
         (1, 1, "", False),  # neither succeeded, so nothing shows it gone
         (1, 1, "The operation was aborted.\n", False),
         (0, 0, "vm1\n", False),
     ],
-    ids=["clean", "never-registered", "last-distro", "both-failed", "listing-failed", "listed"],
+    ids=["clean", "never-registered", "last-distro", "empty-listing", "both-failed", "listing-failed", "listed"],
 )
 def test_the_delete_counts_the_distro_gone_only_on_evidence(
     monkeypatch: pytest.MonkeyPatch,
@@ -488,6 +489,33 @@ def test_the_delete_reads_an_empty_wsl_from_either_stream(
     vm = SimpleNamespace(name="vm1", platform_metadata={"distro_name": "vm1"})
 
     WSL2Platform("wsl2", {}).delete(vm, RunContext())  # type: ignore[arg-type]
+
+
+def test_a_delete_whose_install_directory_survives_warns_naming_it(
+    monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+) -> None:
+    """Something outside WSL holds the disk image: the distro is gone, so the row goes, but the leftover is named."""
+    _wire(monkeypatch)
+    leftover = wsl2._wsl_base_path() / "vm1"
+    leftover.mkdir(parents=True)
+    vm = SimpleNamespace(name="vm1", platform_metadata={"distro_name": "vm1"})
+
+    WSL2Platform("wsl2", {}).delete(vm, RunContext())  # type: ignore[arg-type]
+
+    (warning,) = captured_output.warnings
+    assert str(leftover) in warning
+    assert "wsl --shutdown" in warning
+
+
+def test_a_delete_whose_install_directory_is_gone_warns_nothing(
+    monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+) -> None:
+    _wire(monkeypatch)
+    vm = SimpleNamespace(name="vm1", platform_metadata={"distro_name": "vm1"})
+
+    WSL2Platform("wsl2", {}).delete(vm, RunContext())  # type: ignore[arg-type]
+
+    assert captured_output.warnings == []
 
 
 def test_a_rollback_whose_listing_fails_retains_the_row(
