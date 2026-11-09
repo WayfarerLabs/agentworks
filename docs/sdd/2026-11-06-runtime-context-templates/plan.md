@@ -5,11 +5,10 @@ Governing requirements: [FRD](frd.md). Architecture: [HLA](hla.md). Detailed con
 Lifecycle: [delivery](migration-strategy.md).
 
 Delivery: one PR containing the full feature, full SDD, permanent documentation, and validation.
-[PR 867](https://github.com/WayfarerLabs/agentworks/pull/867) is a draft correction checkpoint after
-its first ready handoff. Completion follows the accepted namespaced contract and the operator
-rulings recorded in the FRD. Transport observations are tracked separately in issue #873; shell
-rendering preflight is being completed before the next ready handoff. Lock only after all feature
-work and final feedback are complete.
+[PR 867](https://github.com/WayfarerLabs/agentworks/pull/867) contains the complete feature and SDD.
+Completion follows the accepted namespaced contract and the operator rulings recorded in the FRD.
+Transport observations are tracked separately in issue #873. Shell rendering preflight is
+implemented and reviewed. Lock only after all feature work and final feedback are complete.
 
 ## Design checkpoint
 
@@ -40,7 +39,7 @@ work and final feedback are complete.
       integration's literal workload fields and intentionally expanded extra args.
 - [x] Cover VM/agent shell and exec, session create/start/restart, console extra panes, and setup
       composition, including new agents and contexts missing workspace/session values.
-- [ ] Check winning env references before workload secret prompts and mutations. Preflight shell's
+- [x] Check winning env references before workload secret prompts and mutations. Preflight shell's
       selected template rendering before workload/env secret resolution, including planned users and
       workspaces. Keep required-command checks in the existing readiness path, deferring a pending
       target's remote probe until it exists. Do not parse, dry-run, or predict command success.
@@ -54,7 +53,7 @@ work and final feedback are complete.
 - [x] Run focused behavior tests from the LLD vectors and required Python/file-quality checks.
 - [x] Run the independent project and complexity lanes, plus the generic correctness lane for code,
       and resolve material findings under the development-process rules.
-- [ ] Load `integration-testing` and `agw-test-env` before PR validation/live testing; derive a
+- [x] Load `integration-testing` and `agw-test-env` before PR validation/live testing; derive a
       bounded charter from the accepted change. Do not infer permission to probe live user
       environments.
 - [ ] Hand off one exact reviewed and validated state with its documentation and migration notes.
@@ -136,10 +135,10 @@ pending target. Startup uses the same renderer without caching a rendered comman
 preflight precedes workload/env secret resolution. The existing VM activation gate may need its own
 credentials before remote preflight; this refinement does not redesign activation.
 
-- [ ] Implement and verify early shell rendering preflight for create, start, and restart,
+- [x] Implement and verify early shell rendering preflight for create, start, and restart,
       preserving unused-field selection, pending identities, required-command deferral, and existing
       runtime on refusal.
-- [ ] Update permanent integration/lifecycle guidance to distinguish template rendering and required
+- [x] Update permanent integration/lifecycle guidance to distinguish template rendering and required
       command availability from executing a command to discover its result.
 
 ### Correction evidence
@@ -171,3 +170,25 @@ cycle 1 of the two additional authorized cycles; it is not a new feedback batch.
 handoff must contain the complete reviewed refinement. A subsequent feedback/fix cycle still waits
 for that head's integration report. The SDD remains unlocked pending final feedback and closeout. No
 merge is authorized or claimed.
+
+## Ready handoff for final review iteration 2
+
+Reviewed runtime head: `45b0bbb12671fb04ebdc0fd40421c6320627b8d4`. Project and complexity each
+passed 122 focused tests; generic correctness passed 139 and checked fresh-context, unused-field,
+and one-pass behavior independently. All three lanes returned clean verdicts. The subsequent merge
+of main `f78ffb3fd` brings only the transport effort's already-landed SDD documents; runtime code
+and tests are identical to the reviewed head. No other effort's SDD is edited by this effort.
+
+Full local non-integration validation passed 11,415 tests with 11 skipped. Ruff lint/format passed
+for 968 files; strict Mypy passed for 932 files. Exact CI Typer isolation, file quality, Rulesync
+drift, and locked-SDD checks passed. Website validation passed 160 Python tests, 103 Node tests, and
+deterministic double builds at both site bases. Five actual offline CLI invocations passed context,
+precedence, redaction/reveal, ignored identity and expected refusal checks with zero transport
+attempts.
+
+The local validation charter covers the changed shell preflight boundary, planned identities and
+paths, existing runtime preservation, and the shared env/rendering regressions. It uses owned
+fixture state and no operator infrastructure. The standard ready-triggered pipeline owns live
+validation under its own environment inventory and budget. Its report must be received before the
+next feedback/fix cycle. Remaining acceptance and SDD closeout are tracked by the unchecked delivery
+items; the transport observations are disposed to issue #873 under the operator's ruling.
