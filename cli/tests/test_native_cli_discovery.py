@@ -96,6 +96,19 @@ def test_explicit_prepared_path_wins_over_login_path(target: LocalFixtureTranspo
     assert result["environment"]["PATH"] == explicit_path
 
 
+def test_resolution_reaches_past_a_login_startup_that_reads_stdin(
+    target: LocalFixtureTransport, access, logged: list[str]
+) -> None:
+    executable(target.home / "explicit/codex", "explicit")
+    (target.home / ".profile").write_text('cat > /dev/null\nexport PATH="/usr/bin:/bin"\n')
+    explicit_path = str(target.home / "explicit") + ":/usr/bin:/bin"
+    with native_cli(target, "codex", target.home / ".codex", env={"PATH": explicit_path}, access=access) as cli:
+        result = cli.command(["inspect"], structured=True)
+    assert isinstance(result, dict)
+    assert result["selected"] == "explicit"
+    assert explicit_path not in "".join(logged)
+
+
 @pytest.mark.parametrize("tool", ["codex", "claude"])
 def test_real_marketplace_discovery_reuses_user_login_tool_under_isolated_home(
     target: LocalFixtureTransport, tool: NativeTool, access

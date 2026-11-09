@@ -21,7 +21,7 @@ from agentworks import output
 from agentworks.capabilities.harness_integration.settings import parse_settings
 from agentworks.errors import ConfigError, ExternalError, StateError
 from agentworks.execution.files import guest_path
-from agentworks.execution.requests import Bytes, CaptureOutput, Command, DiscardOutput, PythonProgram, Script, Shell
+from agentworks.execution.requests import CaptureOutput, Command, DiscardOutput, PythonProgram, Script, Shell
 from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
 
 if TYPE_CHECKING:
@@ -38,13 +38,17 @@ type NativeTool = Literal["codex", "claude"]
 
 _RESOLVED_PREFIX = "AGW_NATIVE_EXECUTABLE="
 
+_EXPLICIT_PATH = "AGW_NATIVE_EXPLICIT_PATH"
+"""The setup environment's own PATH, when it sets one, for resolution to search instead of the login PATH."""
+
 # Run after the user's login startup, so PATH is the login PATH; an explicit
-# PATH from the setup environment arrives on stdin with the tool and wins.
+# PATH from the setup environment wins. The tool is the one argument, the PATH
+# an environment value, so nothing reaches the program on stdin, which login
+# startup could read first, and the log records the tool but no value.
 _LOGIN_RESOLVE_PROGRAM = r"""
 import json, os, shutil, sys
-request = json.load(sys.stdin)
-path = os.environ.get('PATH', '') if request['path'] is None else request['path']
-executable = shutil.which(request['tool'], path=path)
+path = os.environ.get('AGW_NATIVE_EXPLICIT_PATH', os.environ.get('PATH', ''))
+executable = shutil.which(sys.argv[1], path=path)
 if executable is None:
     sys.exit(1)
 observed = {'executable': os.path.abspath(executable), 'path': path}
@@ -260,13 +264,13 @@ class NativeCLI(AbstractContextManager["NativeCLI"]):
         """Capture the actual user's executable and login PATH once per setup."""
         if self._resolved is not None:
             return self._resolved
-        request = {"tool": self.tool, "path": self.invocation.environment.get("PATH")}
+        explicit = self.invocation.environment.get("PATH")
         result = self.invocation.access.run(
             PythonProgram(
                 _LOGIN_RESOLVE_PROGRAM,
+                args=(self.tool,),
                 login=True,
-                env=self.invocation.request_environment(),
-                stdin=Bytes(json.dumps(request).encode()),
+                env=self.invocation.request_environment(None if explicit is None else {_EXPLICIT_PATH: explicit}),
                 deadline=30,
                 log_streams=False,
             ),
