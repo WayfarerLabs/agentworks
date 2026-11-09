@@ -289,8 +289,8 @@ def classify(
     when it was still running or was killed (a signal's negative status is not
     evidence either). A deadline or an output limit is the caller's to report.
 
-    An abandoned stream is one whose consumer left, so the client closed it
-    unread. An abandoned stdout stands in for the ``end`` line; the stderr
+    An abandoned stream is one whose consumer left, so the client discards
+    it. An abandoned stdout stands in for the ``end`` line; the stderr
     trailer still decides. A departed consumer without a trailer is
     ``Unknown(CONSUMER_LEFT)``.
     """
