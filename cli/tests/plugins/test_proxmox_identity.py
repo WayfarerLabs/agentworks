@@ -20,6 +20,7 @@ from agentworks.db import VMStatus
 from agentworks.errors import StateError
 from agentworks.execution import root_script
 from agentworks.execution.root_script import RawRun
+from agentworks.plugins.proxmox import guest_agent
 from agentworks.plugins.proxmox import platform as proxmox_platform
 from agentworks.plugins.proxmox.api import ProxmoxAPIError
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
@@ -148,7 +149,7 @@ def test_the_identity_check_spends_the_root_scripts_deadline(monkeypatch: pytest
     monkeypatch.setattr(ProxmoxPlatform, "_guest", slow_check)
     monkeypatch.setattr(ProxmoxPlatform, "_api", lambda self, ctx: None)
     monkeypatch.setattr(
-        proxmox_platform.guest_agent,
+        guest_agent,
         "run_as_root",
         lambda api, node, vmid, script, deadline: passed.append(deadline) or RawRun(b"", b""),
     )
