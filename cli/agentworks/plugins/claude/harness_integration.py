@@ -244,7 +244,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
                 lambda files: probe_native(
                     invocation.access,
                     tool="claude",
-                    environment=invocation.environment,
+                    environment=invocation.request_environment(),
                     redactions=invocation.redactions,
                     files=files,
                     vm_only=True,
@@ -258,7 +258,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
             probe_native(
                 invocation.access,
                 tool="claude",
-                environment=invocation.environment,
+                environment=invocation.request_environment(),
                 redactions=invocation.redactions,
                 home=invocation.home,
                 check_policy=False,
@@ -292,7 +292,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
                 lambda files: probe_native(
                     invocation.access,
                     tool="claude",
-                    environment=invocation.environment,
+                    environment=invocation.request_environment(),
                     redactions=invocation.redactions,
                     home=invocation.home,
                     files=files,
@@ -318,7 +318,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
                 lambda files: probe_native(
                     invocation.access,
                     tool="claude",
-                    environment=invocation.environment,
+                    environment=invocation.request_environment(),
                     redactions=invocation.redactions,
                     workspace=invocation.root,
                     files=files,

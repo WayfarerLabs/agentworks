@@ -535,7 +535,7 @@ class CodexIntegration(HarnessIntegration):
                 lambda files: probe_native(
                     invocation.access,
                     tool="codex",
-                    environment=invocation.environment,
+                    environment=invocation.request_environment(),
                     redactions=invocation.redactions,
                     files=files,
                     vm_only=True,
@@ -549,7 +549,7 @@ class CodexIntegration(HarnessIntegration):
             probe_native(
                 invocation.access,
                 tool="codex",
-                environment=invocation.environment,
+                environment=invocation.request_environment(),
                 redactions=invocation.redactions,
                 home=invocation.home,
                 check_policy=False,
@@ -589,7 +589,7 @@ class CodexIntegration(HarnessIntegration):
                 lambda files: probe_native(
                     invocation.access,
                     tool="codex",
-                    environment=invocation.environment,
+                    environment=invocation.request_environment(),
                     redactions=invocation.redactions,
                     home=invocation.home,
                     files=files,
@@ -625,7 +625,7 @@ class CodexIntegration(HarnessIntegration):
                 lambda files: probe_native(
                     invocation.access,
                     tool="codex",
-                    environment=invocation.environment,
+                    environment=invocation.request_environment(),
                     redactions=invocation.redactions,
                     workspace=invocation.root,
                     files=files,

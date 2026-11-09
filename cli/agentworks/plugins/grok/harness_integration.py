@@ -199,7 +199,7 @@ class GrokBuildIntegration(HarnessIntegration):
             probe_native(
                 invocation.access,
                 tool="grok",
-                environment=invocation.environment,
+                environment=invocation.request_environment(),
                 redactions=invocation.redactions,
                 home=invocation.home,
                 check_policy=False,
@@ -226,7 +226,7 @@ class GrokBuildIntegration(HarnessIntegration):
                 lambda files: probe_native(
                     invocation.access,
                     tool="grok",
-                    environment=invocation.environment,
+                    environment=invocation.request_environment(),
                     redactions=invocation.redactions,
                     home=invocation.home,
                     files=files,
@@ -247,7 +247,7 @@ class GrokBuildIntegration(HarnessIntegration):
                 lambda files: probe_native(
                     invocation.access,
                     tool="grok",
-                    environment=invocation.environment,
+                    environment=invocation.request_environment(),
                     redactions=invocation.redactions,
                     workspace=invocation.root,
                     files=files,

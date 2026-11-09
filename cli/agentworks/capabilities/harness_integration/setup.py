@@ -54,6 +54,15 @@ class SetupInvocation:
         # Narrowing ``secrets`` for an integration never narrows what is redacted.
         object.__setattr__(self, "redactions", tuple(dict.fromkeys((*self.redactions, *self.secrets.values()))))
 
+    def request_environment(self, local: Mapping[str, str] | None = None) -> dict[str, str]:
+        """The ``env`` for a request: this setup's ``environment``, with ``local`` added over it.
+
+        ``AGENTWORKS_*`` names carry core's identity values, so ``local`` can
+        neither override nor add one: each keeps core's value or is absent.
+        """
+        overrides = {name: value for name, value in (local or {}).items() if not name.startswith("AGENTWORKS_")}
+        return {**self.environment, **overrides}
+
 
 @dataclass(frozen=True, kw_only=True)
 class VMSetupInvocation(SetupInvocation):
