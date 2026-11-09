@@ -87,7 +87,7 @@ def test_main_wrapper_renders_secret_unavailability_without_a_traceback(
     from agentworks import cli as cli_mod
     from agentworks.cli import _entry
 
-    def fake_app() -> None:
+    def fake_app(**_: object) -> None:
         raise SecretUnavailableError("secret unavailable", hint="retry")
 
     record_calls: list[BaseException] = []
@@ -230,7 +230,7 @@ def test_main_wrapper_maps_escaped_exit_to_its_carried_code(
     from code running outside ``app()``, degrades to a clean exit."""
     from agentworks import cli as cli_mod
 
-    def fake_app() -> None:
+    def fake_app(**_: object) -> None:
         raise exc_factory()
 
     monkeypatch.setattr(cli_mod, "app", fake_app)
@@ -266,7 +266,7 @@ def test_main_wrapper_maps_escaped_abort_to_exit_1(
     Same simulated-escape setup as the Exit test above."""
     from agentworks import cli as cli_mod
 
-    def fake_app() -> None:
+    def fake_app(**_: object) -> None:
         raise exc_factory()
 
     monkeypatch.setattr(cli_mod, "app", fake_app)

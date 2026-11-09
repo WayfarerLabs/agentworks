@@ -166,6 +166,12 @@ has started.
   nothing ran on it. When a connection fails or the key is refused, and the configured key is
   passphrase-protected, the error's hint mentions `ssh-add`; `vm port-forward` shows ssh's own log
   instead.
+- **Windows passes arguments through unexpanded.** `agw` no longer expands `*`, `?`, `~`, `%VAR%` or
+  `$VAR` in its own arguments on Windows, which it did before forwarding them, even after `--`. A
+  quoted `*` now reaches the guest as `*`, as on macOS and Linux, where the shell decides. Expand a
+  pattern yourself (PowerShell's `Get-ChildItem`, for example) where you relied on `agw` doing it,
+  and write `$HOME\...` (PowerShell) or `%USERPROFILE%\...` (cmd) instead of `~` in a path such as
+  `database restore`'s.
 - **Exit statuses.** `vm exec` and `agent exec` still run the command line under the account shell,
   so a command that cannot start exits 127 or 126 with the shell's message, as before. A missing
   workspace directory exits 125 with one line from `agw`. A command that exits 255 is no longer
