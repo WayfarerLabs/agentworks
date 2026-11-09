@@ -219,10 +219,10 @@ published head; the earlier local evidence above remains evidence for its record
 - [ ] Recheck hosted CI and record the remaining live coverage before the final handoff.
 
 The installed-wheel retest at `315c1cc64` reproduced a conservative shutdown-timing failure:
-`kill-server` returned successfully while the exact process remained briefly alive, then the
-process exited before coordinator return. The follow-up correction adds bounded read-only
-post-kill observation grace, never another destructive attempt. Private correctness and complexity
-review judged this part of the shared teardown completion contract rather than transport migration.
+`kill-server` returned successfully while the exact process remained briefly alive, then the process
+exited before coordinator return. The follow-up correction adds bounded read-only post-kill
+observation grace, never another destructive attempt. Private correctness and complexity review
+judged this part of the shared teardown completion contract rather than transport migration.
 
 - [ ] Validate delayed exit, persistent liveness, and unknown observation during post-kill grace,
       including one mutation only and no cleanup before proven absence.

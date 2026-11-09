@@ -120,13 +120,13 @@ presence probe; one further explicit absence observation can prove that exit, wh
 unknown observations still refuse cleanup. Socket removal applies the current native-socket check
 again and removes only a socket, never a symlink or another filesystem object.
 
-Successful `kill-server` acknowledgment can precede process exit. After that one mutation, a concrete
-still-present result permits further read-only absence observations at 50-millisecond intervals
-within a one-second monotonic grace. No new observation is scheduled after that grace expires.
-Unknown-state and transport errors propagate immediately. Each observation retains its finite
-per-call transport timeout, so the grace is not a one-second bound on total teardown duration.
-Socket cleanup still requires proven absence; a process surviving the grace retains its persisted
-identity and produces failure.
+Successful `kill-server` acknowledgment can precede process exit. After that one mutation, a
+concrete still-present result permits further read-only absence observations at 50-millisecond
+intervals within a one-second monotonic grace. No new observation is scheduled after that grace
+expires. Unknown-state and transport errors propagate immediately. Each observation retains its
+finite per-call transport timeout, so the grace is not a one-second bound on total teardown
+duration. Socket cleanup still requires proven absence; a process surviving the grace retains its
+persisted identity and produces failure.
 
 ### Unreachable or indeterminate fingerprint
 
