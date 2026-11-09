@@ -306,8 +306,9 @@ before they resolve the auth key.
 - **A Lima VM's create-time bootstrap runs once.** Lima runs its provisioning on every boot, and a
   Lima VM created before 0.20 runs Agentworks' bootstrap again at each start: it resets the admin's
   `.bashrc` and `.zshrc` to the seed, which drops your edits and the lines `vm reinit` adds, puts
-  back the key it was created with if you replaced it, and upgrades packages. A Lima VM created by
-  0.20 runs it at create only. Recreate an older Lima VM to stop the reruns; until then,
+  back the key it was created with if you replaced it, and upgrades packages, taking each upgraded
+  package's new configuration files over any you changed (`/etc/skel/.bashrc` among them). A Lima VM
+  created by 0.20 runs it at create only. Recreate an older Lima VM to stop the reruns; until then,
   `agw vm reinit NAME` after a start restores the lines it adds and removes a replaced key again,
   but not your own edits.
 - **Output nobody reads no longer fails a command.** When the reader of `agw`'s output has gone (a

@@ -449,8 +449,8 @@ class LimaPlatform(VMPlatform):
                         f"could not check whether '{instance_name}' needs a restart to finish provisioning: {e}"
                     )
                     output.warn(
-                        f"if the VM misbehaves, 'limactl restart {instance_name}' "
-                        "reapplies any deferred bootstrap step."
+                        f"if the VM misbehaves, 'limactl restart {instance_name}' boots it into "
+                        "any bootstrap change that takes effect only at boot (the Apple-vz SVE mask)."
                     )
                     restart_pending = False
                 if restart_pending:

@@ -1,14 +1,18 @@
 """The ``env-var`` secret backend.
 
 Its conventional variables, ``AW_SECRET_<NAME>``, are carriers: they exist
-only to bring a value to this backend. Agentworks hands a secret to a guest
-explicitly, on a root script's stdin, so no program it starts needs one, and
-a long-lived one (Lima's host agent, a WSL2 keepalive, an editor) would keep
-it for as long as it runs. The entry point therefore moves them out of the
+only to bring a value to this backend. Agentworks hands each resolved secret
+to what needs it explicitly, so no program it starts needs a carrier, and a
+long-lived one (Lima's host agent, a WSL2 keepalive, an editor) would keep it
+for as long as it runs. The entry point therefore moves them out of the
 process environment with :func:`withhold_carriers` before anything starts,
 and every child inherits an environment without them. A variable that a
-secret's ``env-var`` mapping names instead is the operator's own, there for
-other programs too, and stays where it is.
+secret's ``env-var`` mapping names outside the ``AW_SECRET_`` prefix is the
+operator's own, there for other programs too, and stays where it is.
+
+Only children are covered: the environment block this process started with
+stays readable to the same user and to root (``/proc/<pid>/environ``,
+``ps eww``) for as long as it runs.
 """
 
 from __future__ import annotations
