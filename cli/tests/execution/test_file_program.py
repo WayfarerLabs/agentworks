@@ -116,6 +116,19 @@ class Guest:
         options = {key: overrides.pop(key) for key in ("patch", "sudo", "umask") if key in overrides}
         return self.run("write_if", {**params, **overrides}, stdin=data, **options)
 
+    def write(self, path: Path, data: bytes, **overrides: object) -> subprocess.CompletedProcess[bytes]:
+        params = {
+            "path": str(path),
+            "mode": 0o600,
+            "owner": None,
+            "group": None,
+            "parent_mode": 0o700,
+            "size": len(data),
+            "sha256": digest(data),
+        }
+        options = {key: overrides.pop(key) for key in ("patch", "sudo", "umask") if key in overrides}
+        return self.run("write", {**params, **overrides}, stdin=data, **options)
+
 
 def digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
@@ -231,6 +244,162 @@ def test_content_that_did_not_arrive_as_sent_publishes_nothing(guest: Guest, dam
     )
 
     assert result.returncode == file_program.EXIT_CORRUPT_INPUT
+    assert os.listdir(guest.tree) == []
+
+
+# -- Unconditional writes ------------------------------------------------------------------
+
+_RECORD_RENAME = (
+    "import json, os\n"
+    "real = os.rename\n"
+    "def rename(src, dst, *, src_dir_fd=None, dst_dir_fd=None):\n"
+    "    seen = os.stat(src, dir_fd=src_dir_fd, follow_symlinks=False)\n"
+    "    with open({record!r}, 'w') as handle:\n"
+    "        json.dump({{'mode': seen.st_mode & 0o7777, 'uid': seen.st_uid, 'gid': seen.st_gid}}, handle)\n"
+    "    real(src, dst, src_dir_fd=src_dir_fd, dst_dir_fd=dst_dir_fd)\n"
+    "os.rename = rename"
+)
+
+
+def _owner_and_group() -> tuple[str, str]:
+    import grp
+    import pwd
+
+    return pwd.getpwuid(os.getuid()).pw_name, grp.getgrgid(os.getgid()).gr_name
+
+
+def test_write_gives_the_file_its_mode_and_group_before_the_rename(guest: Guest) -> None:
+    destination = guest.tree / "file"
+    destination.write_bytes(b"before")
+    record = guest.root / "at-rename.json"
+    _, group = _owner_and_group()
+
+    result = guest.write(
+        destination, b"after", mode=0o2750, group=group, patch=_RECORD_RENAME.format(record=str(record))
+    )
+
+    assert result.returncode == 0, result.stderr
+    at_rename = json.loads(record.read_text())
+    assert (at_rename["mode"], at_rename["gid"]) == (0o2750, os.getgid())
+    assert destination.read_bytes() == b"after"
+    assert (stat.S_IMODE(destination.stat().st_mode), destination.stat().st_gid) == (0o2750, os.getgid())
+    assert temporaries(guest.tree) == []
+
+
+def test_an_elevated_write_gives_the_file_its_owner_before_the_rename(guest: Guest, as_root: None) -> None:
+    destination = guest.tree / "home" / "file"
+    record = guest.root / "at-rename.json"
+    owner, group = _owner_and_group()
+
+    result = guest.write(
+        destination,
+        b"keys",
+        mode=0o600,
+        owner=owner,
+        group=group,
+        parent_mode=0o755,
+        sudo=True,
+        patch=_RECORD_RENAME.format(record=str(record)),
+    )
+
+    assert result.returncode == 0, result.stderr
+    at_rename = json.loads(record.read_text())
+    assert (at_rename["mode"], at_rename["uid"], at_rename["gid"]) == (0o600, os.getuid(), os.getgid())
+    written = destination.stat()
+    assert (stat.S_IMODE(written.st_mode), written.st_uid, written.st_gid) == (0o600, os.getuid(), os.getgid())
+    assert (guest.tree / "home").stat().st_uid == 0
+    assert temporaries(destination.parent) == []
+
+
+def test_write_replaces_whatever_the_file_holds_and_drops_its_old_metadata(guest: Guest) -> None:
+    destination = guest.tree / "file"
+    destination.write_bytes(b"someone else's content")
+    destination.chmod(0o666)
+    try:
+        os.setxattr(destination, "user.agentworks-test", b"dropped")
+    except OSError:
+        pytest.skip("this filesystem keeps no user extended attributes")
+
+    result = guest.write(destination, b"ours", mode=0o644)
+
+    assert result.returncode == 0, result.stderr
+    assert destination.read_bytes() == b"ours"
+    assert stat.S_IMODE(destination.stat().st_mode) == 0o644
+    assert "user.agentworks-test" not in os.listxattr(destination)
+
+
+def test_write_creates_missing_parents_with_the_parent_mode(guest: Guest) -> None:
+    destination = guest.tree / "a" / "b" / "file"
+
+    result = guest.write(destination, b"content", mode=0o644, parent_mode=0o751, umask=0o077)
+
+    assert result.returncode == 0, result.stderr
+    assert destination.read_bytes() == b"content"
+    assert stat.S_IMODE((guest.tree / "a").stat().st_mode) == 0o751
+    assert stat.S_IMODE((guest.tree / "a" / "b").stat().st_mode) == 0o751
+
+
+@pytest.mark.parametrize("where", ["destination", "parent"])
+def test_write_refuses_a_link_leaving_its_target_untouched(guest: Guest, where: str) -> None:
+    target = guest.root / "target"
+    target.mkdir()
+    (target / "file").write_bytes(b"target")
+    if where == "destination":
+        (guest.tree / "link").symlink_to(target / "file")
+        path = guest.tree / "link"
+    else:
+        (guest.tree / "link").symlink_to(target, target_is_directory=True)
+        path = guest.tree / "link" / "file"
+
+    result = guest.write(path, b"replacement")
+
+    assert result.returncode == file_program.EXIT_UNSUITABLE
+    assert sorted(os.listdir(target)) == ["file"]
+    assert (target / "file").read_bytes() == b"target"
+    assert (guest.tree / "link").is_symlink()
+    assert temporaries(guest.tree) == []
+
+
+def test_write_refuses_a_directory_at_the_destination(guest: Guest) -> None:
+    (guest.tree / "directory").mkdir()
+
+    result = guest.write(guest.tree / "directory", b"content")
+
+    assert result.returncode == file_program.EXIT_UNSUITABLE
+    assert (guest.tree / "directory").is_dir()
+    assert temporaries(guest.tree) == []
+
+
+@pytest.mark.parametrize("damage", ["short", "different"])
+def test_a_write_whose_content_did_not_arrive_as_sent_creates_nothing(guest: Guest, damage: str) -> None:
+    sent = b"the whole content"
+    arrived = sent[:5] if damage == "short" else b"the whole c0ntent"
+    params = {
+        "path": str(guest.tree / "new" / "file"),
+        "mode": 0o600,
+        "owner": None,
+        "group": None,
+        "parent_mode": 0o700,
+        "size": len(sent),
+        "sha256": digest(sent),
+    }
+
+    result = guest.run("write", params, stdin=arrived)
+
+    assert result.returncode == file_program.EXIT_CORRUPT_INPUT
+    assert os.listdir(guest.tree) == []
+
+
+def test_a_write_waiting_on_a_held_lock_times_out_creating_nothing(guest: Guest) -> None:
+    import fcntl
+
+    guest.lock.touch()
+    guest.lock_wait = 0.2
+    with guest.lock.open("rb") as held:
+        fcntl.flock(held, fcntl.LOCK_EX)
+        result = guest.write(guest.tree / "new" / "file", b"content")
+
+    assert result.returncode == file_program.EXIT_LOCK_TIMEOUT
     assert os.listdir(guest.tree) == []
 
 

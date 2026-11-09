@@ -121,15 +121,67 @@ def test_an_incomplete_outcome_raises_its_transport_error() -> None:
 
 
 def test_the_operation_log_holds_no_content_and_no_digest_of_it() -> None:
-    files, access = recording(Result(Completed(0)), Result(Completed(0)))
+    files, access = recording(Result(Completed(0)), Result(Completed(0)), Result(Completed(0)))
 
     files.write_if("/home/a/file", b"secret content", expected=DIGEST, mode=0o640, parent_mode=0o750, group="ws")
+    files.write("/home/a/file", b"secret content", mode=0o640, parent_mode=0o750, owner="a", group="ws")
     files.remove_if("/home/a/file", expected=DIGEST)
 
     records = "".join(format_record(request, Result(Completed(0)), label="file") for request in access.requests())
     assert "/home/a/file" in records
     for secret in ("secret content", DIGEST, hashlib.sha256(b"secret content").hexdigest()):
         assert secret not in records
+
+
+# -- Update ------------------------------------------------------------------------------------
+
+
+def test_an_update_to_what_was_read_sends_nothing_and_reports_no_write() -> None:
+    files, access = recording()
+
+    wrote = files.update("/etc/x", b"same", observed=b"same", mode=0o644, parent_mode=0o755, elevated=True)
+
+    assert wrote is False
+    assert access.requests() == []
+
+
+def test_an_update_publishes_against_the_digest_of_what_was_read(tmp_path: Path) -> None:
+    files = recorded_local_files()
+    present, absent = tmp_path / "present", tmp_path / "absent" / "file"
+    present.write_bytes(b"read")
+
+    assert files.update(str(present), b"new", observed=b"read", mode=0o640, parent_mode=0o700) is True
+    assert files.update(str(absent), b"made", observed=None, mode=0o600, parent_mode=0o700) is True
+
+    assert (present.read_bytes(), absent.read_bytes()) == (b"new", b"made")
+
+
+def test_an_update_over_a_file_changed_since_the_read_conflicts_and_keeps_the_other_writers_bytes(
+    tmp_path: Path,
+) -> None:
+    files = recorded_local_files()
+    destination = tmp_path / "file"
+    destination.write_bytes(b"read")
+    destination.write_bytes(b"another writer's")
+    created = tmp_path / "created"
+    created.write_bytes(b"appeared after the read")
+
+    with pytest.raises(FileConflict):
+        files.update(str(destination), b"ours", observed=b"read", mode=0o644, parent_mode=0o755)
+    with pytest.raises(FileConflict):
+        files.update(str(created), b"ours", observed=None, mode=0o644, parent_mode=0o755)
+
+    assert destination.read_bytes() == b"another writer's"
+    assert created.read_bytes() == b"appeared after the read"
+
+
+def test_a_conflicting_update_is_sent_once() -> None:
+    files, access = recording(Result(Completed(file_program.EXIT_CONFLICT)))
+
+    with pytest.raises(FileConflict):
+        files.update("/etc/x", b"ours", observed=b"read", mode=0o644, parent_mode=0o755)
+
+    assert [operation for operation, _ in operations(access)] == ["write_if"]
 
 
 # -- Refusals before dispatch ------------------------------------------------------------------
@@ -168,6 +220,10 @@ def test_an_agent_access_refuses_an_elevated_file_operation_before_dispatch() ->
 
     with pytest.raises(PermissionDenied):
         access.files().write_if("/etc/x", b"x", expected=None, mode=0o644, parent_mode=0o755, elevated=True)
+    with pytest.raises(PermissionDenied):
+        access.files().write("/etc/x", b"x", mode=0o644, parent_mode=0o755, elevated=True)
+    with pytest.raises(PermissionDenied):
+        access.files().update("/etc/x", b"x", observed=None, mode=0o644, parent_mode=0o755, elevated=True)
 
 
 # -- Over the L lane ------------------------------------------------------------------------------
@@ -196,6 +252,9 @@ def test_operations_round_trip_on_a_real_filesystem(local_files: Files, tmp_path
     assert not package.exists()
     local_files.ensure_directory(str(package / "made"), mode=0o700)
     assert local_files.stat(str(package / "made")) == Directory()
+    local_files.write(str(package / "written"), b"whatever was there", mode=0o644, parent_mode=0o700)
+    local_files.write(str(package / "written"), b"replaced", mode=0o600, parent_mode=0o700)
+    assert local_files.stat(str(package / "written")) == RegularFile(hashlib.sha256(b"replaced").hexdigest(), 0o600)
 
 
 def test_programs_run_on_this_machine_take_the_private_lock(

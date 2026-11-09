@@ -3,7 +3,9 @@
 ``files.Files`` sends this file's source as a ``PythonProgram`` whose arguments
 are the operation's name and one JSON object of parameters. Content travels on
 stdin, never as an argument, and so do content digests (``SEALED``): stdin
-starts with one JSON line of them, then the content. The operation log records
+starts with one JSON line of them, then the content. ``write`` replaces a file
+whatever it holds; every other mutation is conditional on what its caller
+observed. The operation log records
 arguments, so neither ever reaches it. The exit status is the answer (the
 ``EXIT_*`` constants). stdout carries ``read``'s bytes or ``stat``'s one JSON line and
 nothing else. stderr carries a traceback for status 1.
@@ -51,7 +53,7 @@ EXIT_UNSUITABLE = 4
 EXIT_DENIED = 5
 """``EACCES``, ``EPERM`` or ``EROFS``."""
 EXIT_CORRUPT_INPUT = 6
-"""``write_if``'s content did not arrive as sent: its size or SHA-256 differs from the parameters."""
+"""Content (``write``'s or ``write_if``'s) did not arrive as sent: its size or SHA-256 differs from the parameters."""
 EXIT_LOCK_TIMEOUT = 7
 """The lock was not acquired within its wait."""
 EXIT_ABSENT = 8
@@ -66,11 +68,16 @@ if sys.platform != "win32":
 _TEMPORARY_PREFIX = ".agentworks-tmp-"
 
 
-SEALED = {"write_if": ("expected", "sha256"), "remove_if": ("expected",)}
+SEALED = {
+    "write_if": ("expected", "sha256"),
+    "write": ("sha256",),
+    "remove_if": ("expected",),
+}
 """The parameters each operation takes from stdin's first line rather than its arguments: content digests."""
 
 Params = dict[str, Any]
-"""One operation's decoded JSON parameters, its ``SEALED`` ones included (``write_if`` adds its content as ``data``)."""
+"""One operation's decoded JSON parameters, its ``SEALED`` ones included (an operation that takes content
+gets it as ``data``)."""
 
 
 class _Exit(Exception):
@@ -251,12 +258,32 @@ def _temporary_name(name: str) -> str:
     return _TEMPORARY_PREFIX + hashlib.sha256(name.encode("utf-8", "surrogateescape")).hexdigest()[:24]
 
 
+def _write(params: Params) -> int:
+    """Replace the file whatever it holds, with the requested mode and ownership; never through a link."""
+    import pwd
+
+    uid = -1 if params["owner"] is None else pwd.getpwnam(params["owner"]).pw_uid
+    return _replace(params, uid=uid, expected=None, compare=False, preserve=False)
+
+
 def _write_if(params: Params) -> int:
+    """Replace the file only while it still has digest ``expected`` (``None``: still absent)."""
+    return _replace(params, uid=-1, expected=params["expected"], compare=True, preserve=params["preserve"])
+
+
+def _replace(params: Params, *, uid: int, expected: str | None, compare: bool, preserve: bool) -> int:
+    """Publish ``data`` at the path through a temporary sibling renamed over it.
+
+    The temporary file gets its owner, group and mode before the rename, so
+    the destination never holds content without them. ``compare`` checks the
+    destination's digest against ``expected``; without it, an existing
+    destination need only be a regular file.
+    """
     import grp
 
     gid = -1 if params["group"] is None else grp.getgrnam(params["group"]).gr_gid
-    # Only a write to an absent destination creates parents: a missing one contradicts ``expected``.
-    create_mode = params["parent_mode"] if params["expected"] is None else None
+    # A conditional write creates parents only for an absent destination: a missing one contradicts ``expected``.
+    create_mode = params["parent_mode"] if not compare or expected is None else None
     walk = _Walk(params["path"], create_mode=create_mode, gid=gid)
     if not walk.complete:
         walk.close()
@@ -275,15 +302,15 @@ def _write_if(params: Params) -> int:
             while view:
                 view = view[os.write(output, view) :]
             # chown first: it clears set-id bits that fchmod then sets.
-            if gid != -1:
-                os.fchown(output, -1, gid)
+            if uid != -1 or gid != -1:
+                os.fchown(output, uid, gid)
             os.fchmod(output, params["mode"])
+            # Opening the destination is also its type check: a link or anything but a regular file is unsuitable.
             existing = _open_regular(parent, walk.name)
             try:
-                actual = None if existing is None else _digest(existing)
-                if actual != params["expected"]:
+                if compare and (None if existing is None else _digest(existing)) != expected:
                     return EXIT_CONFLICT
-                if params["preserve"] and existing is not None:
+                if preserve and existing is not None:
                     _copy_metadata(existing, output)
             finally:
                 if existing is not None:
@@ -408,6 +435,7 @@ def _is_same_empty_directory(parent: int, component: str, walked: int) -> bool:
 
 _READERS = {"read": _read, "stat": _stat}
 _MUTATORS = {
+    "write": _write,
     "write_if": _write_if,
     "remove_if": _remove_if,
     "ensure_directory": _ensure_directory,
@@ -436,7 +464,7 @@ def main(argv: list[str], *, lock_path: str = LOCK_PATH, lock_wait: float = LOCK
         header, _, data = sys.stdin.buffer.read().partition(b"\n")
         sealed = json.loads(header)
         params.update((name, sealed[name]) for name in SEALED[operation])
-        if operation == "write_if":
+        if "sha256" in SEALED[operation]:
             if len(data) != params["size"] or hashlib.sha256(data).hexdigest() != params["sha256"]:
                 return EXIT_CORRUPT_INPUT
             params["data"] = data

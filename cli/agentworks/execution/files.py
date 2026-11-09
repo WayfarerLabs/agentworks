@@ -4,8 +4,9 @@
 ``file_program.py`` as a ``PythonProgram``: the source travels on the
 connection, the parameters as one JSON argument, and content and its digests
 on stdin, so the operation log, which records arguments, holds neither.
-Nothing is read or written through a symbolic link, every mutation is
-conditional on what the caller observed and holds the VM-wide file lock, and
+Nothing is read or written through a symbolic link, and every mutation holds
+the VM-wide file lock. :meth:`Files.write` replaces a file whatever it holds;
+every other mutation is conditional on what the caller observed.
 ``elevated=True`` runs the operation as root, which an agent's access refuses
 before dispatch.
 
@@ -184,6 +185,73 @@ class Files:
         }
         status, result = self._run("write_if", params, data=data, elevated=elevated)
         self._require_done("write_if", path, status, result)
+
+    def write(
+        self,
+        path: str,
+        data: bytes,
+        *,
+        mode: int,
+        parent_mode: int,
+        owner: str | None = None,
+        group: str | None = None,
+        elevated: bool = False,
+    ) -> None:
+        """Replace ``path`` with ``data`` whatever it holds, creating missing parents with ``parent_mode``.
+
+        The file is written beside the destination with ``owner`` and
+        ``group`` (each kept as the writing identity's when not given), then
+        ``mode``, and renamed over it, so the destination never holds the
+        content without them. The existing file's metadata is not kept, and a
+        link or anything but a regular file at the destination is
+        ``PathRefused``. A created parent belongs to the writing identity.
+        """
+        path = guest_path(path)
+        params = {
+            "path": path,
+            "mode": mode,
+            "owner": owner,
+            "group": group,
+            "parent_mode": parent_mode,
+            "size": len(data),
+            "sha256": hashlib.sha256(data).hexdigest(),
+        }
+        status, result = self._run("write", params, data=data, elevated=elevated)
+        self._require_done("write", path, status, result)
+
+    def update(
+        self,
+        path: str,
+        data: bytes,
+        *,
+        observed: bytes | None,
+        mode: int,
+        parent_mode: int,
+        group: str | None = None,
+        preserve_metadata: bool = False,
+        elevated: bool = False,
+    ) -> bool:
+        """Publish ``data`` over ``observed``, what the caller read at ``path`` (``None``: absent); whether it wrote.
+
+        Data equal to ``observed`` sends nothing and returns ``False``, so an
+        unchanged file keeps its inode, mode and ACLs. Otherwise this is
+        :meth:`write_if` against the digest of ``observed``: a file changed
+        since the read is ``FileConflict``, nothing is written and nothing
+        retries.
+        """
+        if data == observed:
+            return False
+        self.write_if(
+            path,
+            data,
+            expected=None if observed is None else hashlib.sha256(observed).hexdigest(),
+            mode=mode,
+            parent_mode=parent_mode,
+            group=group,
+            preserve_metadata=preserve_metadata,
+            elevated=elevated,
+        )
+        return True
 
     def ensure_directory(self, path: str, *, mode: int) -> None:
         """Create the directory ``path``, and its missing parents, with ``mode``; an existing one is left as it is."""
