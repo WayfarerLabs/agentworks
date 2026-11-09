@@ -455,7 +455,9 @@ no platform's private access imports a legacy module.
   - harness integrations' readiness and start stages;
   - the git-credential providers;
   - `command_checks.py`;
-  - the harness setup dispatch, readiness and lifecycle, with `SetupInvocation.access`.
+  - the harness setup dispatch, readiness and lifecycle, with `SetupInvocation.access`;
+  - the tmux stale-socket cleanup's path check and the workspace backend's generated-config removal,
+    the last other `native_files` importers.
 - [ ] Delete `admin_target()`, `agent_target()`, `SetupInvocation.runner`, `SetupRunner` and
       `native_files.py` with their last readers, after re-proving their incident rows, and bump the
       harness-integration contract to 8, git-credential to 4 and secret-backend to 3.
