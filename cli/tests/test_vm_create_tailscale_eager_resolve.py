@@ -15,6 +15,7 @@ import pytest
 
 from agentworks.config import load_config
 from agentworks.errors import ConfigError
+from agentworks.secrets.base import SecretDecl
 from agentworks.secrets.policy import TtyInteractionPolicy
 from tests.conftest import ManifestDoc, write_cfg
 
@@ -146,69 +147,50 @@ def test_template_preflight_detects_an_ordinary_env_miss(
 # -- --ignore-env (rekey) masking ------------------------------------------
 
 
-def test_mask_env_var_backend_pops_framework_default_name(
-    monkeypatch: pytest.MonkeyPatch,
+def _env_var_values(*decls: SecretDecl) -> dict[str, str]:
+    """What the env-var source resolves for ``decls`` through the real resolution path; ``{}`` when all miss."""
+    from agentworks.capabilities.secret_backend import TtyInteractionAccess
+    from agentworks.capabilities.secret_backend.env_var import EnvVarBackend, EnvVarSourceConfig
+    from agentworks.resources.graph import Readiness
+    from agentworks.schema import CapabilityBlock
+    from agentworks.secrets import SecretSourceDecl
+    from agentworks.secrets.outcomes import ResolutionStatus
+    from agentworks.secrets.resolve import ActiveSource, resolve_batch
+
+    source = ActiveSource(
+        source=SecretSourceDecl(name="env-var", backend=CapabilityBlock.of("env-var")),
+        backend_class=EnvVarBackend,
+        config=EnvVarSourceConfig(name="env-var"),
+        readiness=Readiness.ready(),
+    )
+    batch = resolve_batch(list(decls), [source], tty_access=TtyInteractionAccess.DISABLED, interaction_broker=None)
+    if all(outcome.status is ResolutionStatus.MISSING for outcome in batch.outcomes):
+        return {}
+    return batch.complete_or_raise()
+
+
+@pytest.mark.parametrize("masked", [True, False])
+def test_mask_env_var_backend_hides_the_carrier_and_the_mapped_name(
+    monkeypatch: pytest.MonkeyPatch, masked: bool
 ) -> None:
-    """The ``--ignore-env`` masker pops the framework's
-    ``AW_SECRET_<UPPER_NAME>`` convention for the resolved secret name,
-    so the env-var backend silently skips and the next backend runs.
+    """``--ignore-env`` makes the env-var source miss both names, a withheld carrier included, then restores them.
+
+    The default secret reads ``AW_SECRET_TAILSCALE_AUTH_KEY``, which the entry
+    point has withheld; the mapped one reads the operator's ``CUSTOM_TS_VAR``.
     """
-    import os
-
-    from agentworks.secrets.base import SecretDecl
-    from agentworks.vms.manager import _mask_env_var_backend_for
-
-    monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", "stale-value")
-    decl = SecretDecl(name="tailscale-auth-key", description="")
-    with _mask_env_var_backend_for(decl, masked=True):
-        assert "AW_SECRET_TAILSCALE_AUTH_KEY" not in os.environ
-    # Restored on exit.
-    assert os.environ["AW_SECRET_TAILSCALE_AUTH_KEY"] == "stale-value"
-
-
-def test_mask_env_var_backend_pops_operator_typed_override(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """When the operator sets ``backend_mappings.env-var = "CUSTOM_VAR"``
-    in ``[secrets.<name>]``, the masker pops THAT name (in addition to
-    the framework's default convention).
-    """
-    import os
-
-    from agentworks.secrets.base import SecretDecl
+    from agentworks.capabilities.secret_backend import env_var
     from agentworks.vms.manager import _mask_env_var_backend_for
 
     monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", "default-stale")
     monkeypatch.setenv("CUSTOM_TS_VAR", "operator-stale")
-    decl = SecretDecl(
-        name="tailscale-auth-key",
-        description="",
-        backend_mappings={"env-var": "CUSTOM_TS_VAR"},
-    )
-    with _mask_env_var_backend_for(decl, masked=True):
-        assert "AW_SECRET_TAILSCALE_AUTH_KEY" not in os.environ
-        assert "CUSTOM_TS_VAR" not in os.environ
-    # Restored on exit.
-    assert os.environ["AW_SECRET_TAILSCALE_AUTH_KEY"] == "default-stale"
-    assert os.environ["CUSTOM_TS_VAR"] == "operator-stale"
+    env_var.withhold_carriers()
+    default = SecretDecl(name="tailscale-auth-key", description="")
+    mapped = SecretDecl(name="mapped-key", description="", backend_mappings={"env-var": "CUSTOM_TS_VAR"})
+    both = {"tailscale-auth-key": "default-stale", "mapped-key": "operator-stale"}
 
-
-def test_mask_env_var_backend_no_op_when_unmasked(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """``masked=False`` (the default ``vm rekey`` shape) is a pass-through
-    -- the env vars stay set throughout the block.
-    """
-    import os
-
-    from agentworks.secrets.base import SecretDecl
-    from agentworks.vms.manager import _mask_env_var_backend_for
-
-    monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", "present")
-    decl = SecretDecl(name="tailscale-auth-key", description="")
-    with _mask_env_var_backend_for(decl, masked=False):
-        assert os.environ["AW_SECRET_TAILSCALE_AUTH_KEY"] == "present"
-    assert os.environ["AW_SECRET_TAILSCALE_AUTH_KEY"] == "present"
+    with _mask_env_var_backend_for(default, masked=masked), _mask_env_var_backend_for(mapped, masked=masked):
+        assert _env_var_values(default, mapped) == ({} if masked else both)
+    assert _env_var_values(default, mapped) == both
 
 
 def test_mask_env_var_backend_no_error_when_var_unset() -> None:
