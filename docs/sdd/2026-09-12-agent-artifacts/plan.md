@@ -16,15 +16,31 @@
       as native catalog isolation.
 - [x] Evaluate workspace admission and record the operator's single-session/multi-session direction:
       at most one registered session, including stopped sessions, until deletion permits
-      replacement. Verify existing harness switching preserves logical identity. Preserve separate
-      artifact scopes and ordinary applied state despite colocated native output; defer the
-      speculative home fallback.
-- [ ] Settle the workspace mode default and design/implement admission, lifecycle and native project
-      placement together before relying on the invariant. Preserve existing workspaces' contract and
-      verify safe cleanup/replacement through the ordinary state mechanism.
-- [ ] Review the concrete [delivery proposal](delivery-reassessment.md), obtain the operator's
-      amended contract, then update the HLA, native LLD, permanent teaching and implementation
-      together. The current FRD and support matrix remain unchanged until that decision.
+      replacement. New workspaces will default to single-session; existing workspaces retain
+      multi-session behavior.
+- [x] Record the operator's PR split: workspace modes are an additional PR. Current artifact work
+      solves multi-session workspaces now with documented best-effort semantics and must not depend
+      on future workspace exclusivity.
+- [ ] Implement current multi-session delivery. Use a native private plugin for Claude session
+      artifacts; replace Codex/Grok session rule/hint prompt injection with explicitly enabled home
+      skill packages whose bounded names and descriptions carry session/run applicability. Preserve
+      full skill support files, native persona registration where supported, and ordinary state.
+- [ ] Replace shared generated instruction sections with separate per-rule guidance skills where
+      native separate rules are unavailable. Aggregate hints per original owner. Retire only
+      recorded Agentworks section content and preserve repository/operator bytes.
+- [ ] Keep generated workspace output out of commits through exact locally owned exclusions where
+      native discovery supports them; verify and report incompatible native discovery rather than
+      hiding tracked-file changes or ignoring whole native configuration directories.
+- [ ] Update the amended FRD, HLA, native LLD, support matrix and permanent teaching together.
+      Verify both concurrent-session applicability metadata and safe restart, failed replacement,
+      removal, deletion and name reuse. Run private project/Muntz/correctness reviews and required
+      gates.
+- [ ] Publish one implementation PR for the current artifact correction, with both governing SDD
+      labels and an explicit independent integration-testing handoff. Wait for its actual report, up
+      to six hours per iteration, before starting another of the three authorized fix rounds.
+- [ ] Complete both acceptance records and locks after the retained current requirements have real
+      evidence. Implement workspace modes in an additional PR; no existing workspace mode changes
+      belong to the current artifact PR.
 
 ## Acceptance reconciliation, 2026-11-08
 

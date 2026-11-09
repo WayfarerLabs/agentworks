@@ -4,6 +4,56 @@
 applied state, routing and session lifecycle. This document specifies the first-party adapters'
 native plans and acceptance boundaries.
 
+## Approved correction: native files and best-effort multi-session delivery
+
+The 2026-11-08 operator ruling in the FRD supersedes the prior prompt-injection and
+generated-section choices below. The lead is updating their detailed descriptions with the
+implementation. This PR supports today's multi-session workspaces; workspace modes are a separate
+PR.
+
+- Preserve one native file or generated skill per rule and one hints aggregate per original owner.
+  Use generated guidance skills when dedicated native rule files are unavailable or incompatible
+  with keeping generated workspace files out of commits. Do not mutate shared AGENTS documents.
+- Claude uses one private session plugin for enabled guidance, skills and personas. Guidance becomes
+  skills through `session-skill-plugin`; `session-agent-definitions` selects native plugin personas.
+  Retire `session-prompt` and its version/snapshot probing rather than keeping parallel carriers.
+- Codex/Grok use `session-home-skills` for explicitly enabled session rules, hints and skills.
+  Native names are bounded, distinct by original owner and session/run, and match rendered SKILL
+  metadata. Put the exact session/run applicability condition first in descriptions and before the
+  body. The catalog is shared with other sessions of that user; this is best-effort semantic
+  applicability. Codex retains its separate private `session-agent-config` carrier. Grok personas
+  remain unhandled.
+- Keep canonical declarations/captures unchanged. Preserve complete skill assets and executable
+  intent. Rendering can qualify native names; disclose invocation-name changes and do not rewrite
+  arbitrary skill body references. Never claim that a description guarantees loading or adherence.
+- Export supported public managed session/run UUID variables alongside existing private recovery
+  fields, with identical values. Use the durable UUID and fresh run ID, not the reusable display
+  name or native conversation ID, for session skill applicability and ownership.
+- Extend session publication only for narrowly recognized session-owned native skill packages
+  beneath the actual user's home. Derive their ownership namespace from the session UUID and qualify
+  each run; enforce bounded native naming. Existing package_root, native_identity, fingerprints and
+  applied state suffice to track them. Avoid a separate receipt, root registry or global
+  current-session pointer. Validate desired and persisted placement before publication or cleanup,
+  retain old live run files while staging, and retire only unchanged recorded old packages after
+  teardown.
+- Keep session files in the private run subtree when not using the explicit home-skill workaround. A
+  broad HOME allowance is not authorized. Exact package roots must be checked for the same session
+  and used as the publisher's allowed boundaries on staging, replacement and deletion.
+- Retire only recorded Agentworks sections from old instruction documents, including their markers,
+  preserving all surrounding bytes. Do not delete an otherwise empty shared file without whole-file
+  ownership. Preserve malformed markers with diagnostics and retain ordinary cleanup evidence.
+- Locally exclude exact confirmed owned workspace paths through Git-resolved metadata, preserving
+  unrelated exclusions and tracked files. Reuse ordinary applied state for exclusion ownership; do
+  not hide whole native directories or use index flags. Grok skips ignored rule files, so use a
+  verified skill representation or diagnose unsupported delivery instead of bypassing discovery
+  checks.
+
+The only new session workaround name is `session-home-skills` for Codex/Grok. Remove replaced prompt
+workaround spellings and update schema/help/examples/guides together, documenting the config change.
+Do not reconstruct user selector arrays, toggle shared native configuration during launch, or add a
+new native-version framework. Native file/catalog/current-content evidence is distinct from model
+obedience and old text remaining in a resumed conversation.
+
 ## Integration boundary
 
 Every first-party integration implements all four facets at contract version 7. VM facets publish

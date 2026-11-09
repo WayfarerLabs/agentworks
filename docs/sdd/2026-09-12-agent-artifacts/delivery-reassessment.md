@@ -194,9 +194,9 @@ not sweep native project directories or add a second tracking mechanism.
 Admission belongs to workspace lifecycle code, checked on every managed create/start/restart path,
 including batch entry points, with creation rechecked at the existing mutation boundary. A stopped
 owner still occupies the slot. Deletion releases it for a new registered session under ordinary
-lifecycle and cleanup policy. The baseline has no mode or reservation field; observing one session
-or no other running session cannot substitute for this implemented invariant. Filesystem grants
-remain independent, and granted users can still read the project files.
+lifecycle and cleanup policy. The baseline has no mode or admission check; observing one session or
+no other running session cannot substitute for this implemented invariant. Filesystem grants remain
+independent, and granted users can still read the project files.
 
 Prefer native project placement for session inputs in this mode where the integration supports it.
 Native invocation-local loading remains appropriate for multi-session workspaces or where it better
@@ -205,11 +205,13 @@ still need verification; single-session mode does not make Grok load ignored rul
 multi-session workspaces lacking an invocation-local loader, keep optional unsupported inputs
 explained as unhandled rather than building the home fallback speculatively.
 
-The workspace mode default remains a product decision: the lead recommends single-session for new
-workspaces and preserving existing workspaces as multi-session. That proposal is not recorded as an
-operator ruling. The mode/admission and placement work must be designed and implemented together
-before either SDD can claim it as accepted behavior; this is a real workspace extension, not an
-incidental renderer cleanup or an existing implementation guarantee.
+The operator selected single-session as the default for new workspaces and preserving existing
+workspaces as multi-session. The operator also explicitly separated this into an additional PR:
+current artifact delivery must solve multi-session workspaces now on a best-effort basis. Do not add
+workspace modes or rely on their invariant in the current PR. Native invocation-local loading
+remains the first choice, with the documented ordinary-home session skill workaround for
+integrations that lack a suitable native loader. The later workspace mode/admission and placement
+work must be designed and implemented together before relying on exclusivity.
 
 ## Workspace Git behavior
 

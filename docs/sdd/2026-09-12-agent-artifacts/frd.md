@@ -79,14 +79,15 @@ capabilities. The same types serve explicitly supplied content and future automa
 
 Hints are small contextual facts, such as the availability of an environment variable or configured
 GitHub authentication. They remain distinct from rules, skills and a session's initial prompt. A
-producer needing stronger behavior can emit a rule or skill. A rule is guidance always loaded into
-context wherever that rule applies. A rule accepts plain Markdown or optional YAML frontmatter
-containing only a nonempty `description`; the artifact map key is its name. The description is
-inspection metadata, separate from the always-loaded body. A skill is standard
-[Agent Skills](https://agentskills.io/specification) content: a directory with a `SKILL.md` entry
-document and any supporting files, preserving the standard's metadata and progressive disclosure
-model. Loading a rule does not guarantee obedience; publishing files for shell retains the delivery
-limitation described below.
+producer needing stronger behavior can emit a rule or skill. A rule is standing guidance intended to
+apply throughout work in its scope, delivered through a suitable native file or a generated
+required-read skill. Automatic body insertion is not a universal guarantee. A rule accepts plain
+Markdown or optional YAML frontmatter containing only a nonempty `description`; the artifact map key
+is its name. The description is metadata separate from the body, and can inform native discovery. A
+skill is standard [Agent Skills](https://agentskills.io/specification) content: a directory with a
+`SKILL.md` entry document and any supporting files, preserving the standard's metadata and
+progressive disclosure model. Loading a rule does not guarantee obedience; publishing files for
+shell retains the delivery limitation described below.
 
 **Agents** is shorthand for **agent personas**: reusable definitions containing behavioral
 instructions and supported execution settings. They can serve primary or delegated agents where the
@@ -283,22 +284,27 @@ users.
 
 Integrations must be explicitly activated, including defaults-only configuration. Applying artifacts
 must respect the selected owner's actual identity and native placement. Session handling must not
-silently provision shared user or workspace state. Existing instance state supports idempotent
-application and cleanup of previously provisioned effects wherever ownership and native tooling make
-that possible. Parent deletion retains the existing core lifecycle; artifact bookkeeping must not
-become a prerequisite for deleting a VM and everything within it.
+silently provision shared user or workspace state. Ordinary-home skill publication requires the
+explicit documented workaround and remains owned by the session, not an implicit user activation.
+Existing instance state supports idempotent application and cleanup of previously provisioned
+effects wherever ownership and native tooling make that possible. Parent deletion retains the
+existing core lifecycle; artifact bookkeeping must not become a prerequisite for deleting a VM and
+everything within it.
 
 A session runs as an existing Linux user in a workspace. Both the user and the workspace may be
 shared with other sessions; a session has no separate filesystem or private home of its own.
 Sessions of the same agent resource already share access through that Linux user. A directory named
 after one session cannot create a security boundary between those sessions.
 
-Session-specific artifacts therefore belong beneath the actual user's home in an
-`.agentworks-artifacts` area with a session component. This adds no new access for the same user's
-other sessions. Placing those files in a shared workspace would instead expose them to other agent
-resources with access to that workspace, even when the path includes a session name. Native delivery
-must still ensure that session-specific content takes effect only for the intended workload. The
-exact layout and identity/reuse semantics belong in the design.
+Session-specific artifacts belong beneath the actual user's home. Prefer the private
+`.agentworks-artifacts` session/run area and a native invocation-local loader where suitable. An
+explicitly enabled best-effort workaround may instead publish session-qualified native skills in
+that user's ordinary discovery directory. Names and descriptions identify the intended managed
+session/run; they do not enforce native catalog isolation. Other sessions under the same user may
+discover those entries, and the model decides whether they apply. State that tradeoff clearly rather
+than claiming native visibility restrictions or guaranteed obedience. Do not place session artifacts
+in shared workspace directories. A future single-session workspace mode is a separate PR and is not
+a prerequisite for current delivery.
 
 The shell integration publishes artifacts as files with a documented discovery contract. File
 publication must not be described as proof that a shell workload interpreted or obeyed the content.
@@ -373,18 +379,21 @@ against the joined user and workspace context without making outer scopes inspec
 Conflicts solely between already-placed ancestor artifacts are reported without blocking launch.
 
 **R6. Give hints an appropriate representation.** Integrations may aggregate small hints into a
-native rule or include them in launch context when supported. Prefer one clearly named
-`agentworks-hints` rule-like file per native destination where a file is appropriate, rather than a
-separate rule for every hint. The representation must preserve hints from all applicable scopes
-without native filename or identity precedence dropping a group's contribution. Keep provenance and
-lifecycle clear without manufacturing one rule per fact. Hints are supplied through the artifact
-mechanism; automatic emission by install commands, env declarations or features is separate future
-work.
+native rule-like file or generated skill. Prefer one clearly named hints aggregate per original
+owner, rather than a separate rule for every hint. Rules retain one native file or generated skill
+per rule. Avoid modifying shared instruction documents such as AGENTS.md for generated guidance. The
+representation must preserve hints from all applicable scopes without native filename or identity
+precedence dropping a group's contribution. Keep provenance and lifecycle clear without
+manufacturing one rule per fact. Hints are supplied through the artifact mechanism; automatic
+emission by install commands, env declarations or features is separate future work.
 
 **R7. Keep sessions and owners isolated.** Session publication under a user's home must respect that
-user's access boundaries and must not unintentionally affect another session in the same workspace.
-Define cleanup and replacement behavior for session restart, deletion and name reuse. A session
-consumes applicable ancestor results without repairing ancestor setup implicitly. Use the saga's
+user's access boundaries. Native private loaders remain preferred; explicitly enabled ordinary-home
+skills have the documented best-effort semantic applicability boundary above, not private catalogs.
+Qualify names and descriptions by managed session/run identity and do not overwrite another
+session's outputs. Define cleanup and replacement behavior for session restart, deletion and name
+reuse. A session consumes applicable ancestor results without repairing ancestor setup implicitly.
+Use the saga's
 [session identity contract](../2026-08-04-next-steps/scope-participation-contract.md#session-and-run-identity)
 when designing durable session ownership. It distinguishes `session_uuid` from per-incarnation
 `run_id`; neither the reusable session name nor VM `boot_id` is a substitute. Verify implementation
@@ -531,3 +540,23 @@ creates an implicit dependency between sibling facets. Cancellation, shared pers
 invalid activation/binding preflight, and unexpected internal errors still abort through their
 existing paths. This supersedes the earlier fail-fast treatment of setup-facet execution errors; it
 does not change session launch safety or introduce a dependency framework.
+
+## Operator ruling: native file delivery and multi-session support, 2026-11-08
+
+The operator approved native file delivery, generated guidance skills where shared instruction
+mutation would otherwise be required, and the distinction between delivery and voluntary model
+cooperation. The operator requested one skill/file per rule with hints aggregated separately.
+
+After considering ordinary-home session skills and a future single-session workspace mode, the
+operator directed: "we still have to solve for multi-session workspaces" and "let's solve for those
+now with the knowledge that it's best effort". Native private loaders remain suitable where
+supported; elsewhere, a named opt-in ordinary-home skill workaround can express session
+applicability through names and descriptions, without claiming a native visibility boundary. This
+supersedes the universal always-loaded-rule and private-native-session-delivery claims above where
+inconsistent.
+
+Workspace modes are explicitly an additional PR. Single-session will mean at most one registered
+session, including a stopped session; deletion permits a replacement. New workspaces will default to
+single-session, while existing workspaces retain multi-session behavior. Current artifact delivery
+must not rely on that unimplemented invariant. Both paths use ordinary applied state for safe
+cleanup; there is no second ownership tracker or active-session lease.
