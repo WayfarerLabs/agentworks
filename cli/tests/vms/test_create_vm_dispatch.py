@@ -31,7 +31,14 @@ from agentworks.errors import (
 from agentworks.execution import trust
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
-from tests.conftest import CapturedOutput, ManifestDoc, fake_installed_programs, pin_wsl2_unsupported, write_manifests
+from tests.conftest import (
+    CapturedOutput,
+    ManifestDoc,
+    fake_installed_programs,
+    isolate_home,
+    pin_wsl2_unsupported,
+    write_manifests,
+)
 from tests.orchestrated_fixtures import proxmox_site
 from tests.ssh_fixtures import TEST_SSH_PUBLIC_KEY, write_test_ssh_keypair
 
@@ -52,6 +59,8 @@ system = ["proxmox"]
 
 @pytest.fixture
 def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    # A create or reinit that completes syncs the operator's SSH config, which defaults to ~/.ssh/config.
+    isolate_home(monkeypatch, tmp_path / "home")
     key = tmp_path / "id_ed25519"
     write_test_ssh_keypair(key)
     monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", "tskey-test")
