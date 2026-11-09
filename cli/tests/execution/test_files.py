@@ -67,6 +67,17 @@ def test_each_failing_status_raises_its_error(status: int, error: type[Exception
         files.write_if("/home/a/file", b"x", expected=None, mode=0o600, parent_mode=0o700)
 
 
+def test_a_failed_operation_says_whether_its_streams_were_logged() -> None:
+    files, _ = recording(Result(Completed(1)), Result(Completed(1)))
+
+    with pytest.raises(CommandFailed) as read:
+        files.read("/home/a/file")
+    with pytest.raises(CommandFailed) as written:
+        files.write("/home/a/file", b"x", mode=0o600, parent_mode=0o700)
+
+    assert (read.value.streams_logged, written.value.streams_logged) == (False, True)
+
+
 @pytest.mark.parametrize(
     "status,reason",
     [(file_program.EXIT_UNSUITABLE, PathRefusal.UNSUITABLE), (file_program.EXIT_DENIED, PathRefusal.DENIED)],

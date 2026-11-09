@@ -131,7 +131,7 @@ class VMAccess:
                 self._log(request, result)
             if check and result.require_completed(self.vm_name) != 0:
                 assert isinstance(result.completion, Completed)
-                raise CommandFailed(self.vm_name, result.completion.status, result)
+                raise CommandFailed(self.vm_name, result.completion.status, result, streams_logged=request.log_streams)
             return result
 
     def stream(self, request: RunRequest, *, stdin: BinaryIO | None, stdout: BinaryIO, stderr: BinaryIO) -> int:

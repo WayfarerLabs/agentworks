@@ -375,7 +375,7 @@ def test_errors_show_ssh_diagnostics_but_never_the_payload() -> None:
 
     for error in (
         ExecutionIncomplete("box", loud),
-        CommandFailed("box", 3, result(Completed(3), stdout=SECRET.encode())),
+        CommandFailed("box", 3, result(Completed(3), stdout=SECRET.encode()), streams_logged=True),
         RequestRefused("box", "exec ENOENT", result(NotDelivered(NotDeliveredReason.REFUSED, "exec ENOENT"))),
         VMNotReady("box", NotDeliveredReason.STDLIB_MISSING),
         TrustMismatch("box", tail),
@@ -383,7 +383,7 @@ def test_errors_show_ssh_diagnostics_but_never_the_payload() -> None:
         for text in (str(error), repr(error), error.hint or ""):
             assert SECRET not in text
     assert tail in str(ExecutionIncomplete("box", loud))
-    assert CommandFailed("box", 3, result(Completed(3))).status == 3
+    assert CommandFailed("box", 3, result(Completed(3)), streams_logged=True).status == 3
 
 
 def test_a_result_does_not_repr_its_streams() -> None:
@@ -771,3 +771,16 @@ def test_a_staged_source_needs_an_open_file_limit_above_its_descriptor(
 
     assert access.run(Command(("true",))).completion == Completed(0)
     assert access.run(Script("true\n", Shell.SH)).completion == NotDelivered(NotDeliveredReason.LAUNCHER_FAILED)
+
+
+@pytest.mark.parametrize("log_streams", [True, False])
+def test_a_checked_failure_carries_whether_the_request_logged_its_streams(
+    supported_client: SSHClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, log_streams: bool
+) -> None:
+    monkeypatch.setattr(VMAccess, "_execute", lambda self, *a, **k: result(Completed(2)))
+    access = vm_access(vm(), config(tmp_path / "key"), Admin())
+
+    with pytest.raises(CommandFailed) as failed:
+        access.run(Command(("false",), log_streams=log_streams), check=True)
+
+    assert failed.value.streams_logged is log_streams

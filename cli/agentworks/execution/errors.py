@@ -241,12 +241,19 @@ class ExecutionIncomplete(ConnectivityError):
 
 
 class CommandFailed(ExternalError):
-    """``check=True`` and the command exited non-zero. Names the status, never stream text."""
+    """A command that had to succeed exited non-zero. Names the status, never stream text.
 
-    def __init__(self, vm_name: str, status: int, result: Result) -> None:
+    ``streams_logged`` is the failed request's ``log_streams``: a caller that
+    shows any of ``result``'s streams (an initialization warning's stderr
+    tail) shows them only when it is true, so a request that kept its streams
+    out of the log keeps them out of a warning too.
+    """
+
+    def __init__(self, vm_name: str, status: int, result: Result, *, streams_logged: bool) -> None:
         self.vm_name = vm_name
         self.status = status
         self.result = result
+        self.streams_logged = streams_logged
         super().__init__(
             f"command on VM '{vm_name}' failed with exit status {status}",
             entity_kind="vm",

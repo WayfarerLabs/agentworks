@@ -121,14 +121,14 @@ class Files:
         )
         if status == file_program.EXIT_ABSENT:
             return None
-        self._require_done("read", path, status, result)
+        self._require_done("read", path, status, result, streams_logged=False)
         return result.stdout
 
     def stat(self, path: str, *, elevated: bool = False) -> PathState:
         """What is at ``path``; a regular file's digest is computed on the guest, so no content travels."""
         path = guest_path(path)
         status, result = self._run("stat", {"path": path}, elevated=elevated, log_streams=False)
-        self._require_done("stat", path, status, result)
+        self._require_done("stat", path, status, result, streams_logged=False)
         try:
             observed = json.loads(result.stdout)
             kind, mode, digest = observed["kind"], observed["mode"], observed["digest"]
@@ -184,7 +184,7 @@ class Files:
             "sha256": hashlib.sha256(data).hexdigest(),
         }
         status, result = self._run("write_if", params, data=data, elevated=elevated)
-        self._require_done("write_if", path, status, result)
+        self._require_done("write_if", path, status, result, streams_logged=True)
 
     def write(
         self,
@@ -217,7 +217,7 @@ class Files:
             "sha256": hashlib.sha256(data).hexdigest(),
         }
         status, result = self._run("write", params, data=data, elevated=elevated)
-        self._require_done("write", path, status, result)
+        self._require_done("write", path, status, result, streams_logged=True)
 
     def update(
         self,
@@ -257,13 +257,13 @@ class Files:
         """Create the directory ``path``, and its missing parents, with ``mode``; an existing one is left as it is."""
         path = guest_path(path)
         status, result = self._run("ensure_directory", {"path": path, "mode": mode}, elevated=False)
-        self._require_done("ensure_directory", path, status, result)
+        self._require_done("ensure_directory", path, status, result, streams_logged=True)
 
     def remove_if(self, path: str, *, expected: str, elevated: bool = False) -> None:
         """Remove the regular file at ``path`` only while it has digest ``expected``; absent is a conflict."""
         path = guest_path(path)
         status, result = self._run("remove_if", {"path": path, "expected": expected}, elevated=elevated)
-        self._require_done("remove_if", path, status, result)
+        self._require_done("remove_if", path, status, result, streams_logged=True)
 
     def prune_empty_parents(self, path: str, *, root: str, elevated: bool = False) -> Pruned:
         """Remove the empty parents of ``path``, deepest first, up to and including ``root``.
@@ -277,7 +277,7 @@ class Files:
         status, result = self._run("prune_empty_parents", {"path": path, "root": root}, elevated=elevated)
         if status == file_program.EXIT_ROOT_RETAINED:
             return Pruned.ROOT_RETAINED
-        self._require_done("prune_empty_parents", path, status, result)
+        self._require_done("prune_empty_parents", path, status, result, streams_logged=True)
         return Pruned.COMPLETE
 
     def _run(
@@ -305,8 +305,8 @@ class Files:
         result = self.access.run(request, stdout=stdout)
         return result.require_completed(self.access.vm_name), result
 
-    def _require_done(self, operation: str, path: str, status: int, result: Result) -> None:
-        """Raise the error for any status but 0."""
+    def _require_done(self, operation: str, path: str, status: int, result: Result, *, streams_logged: bool) -> None:
+        """Raise the error for any status but 0; ``streams_logged`` is the request's ``log_streams``."""
         vm_name = self.access.vm_name
         if status == 0:
             return
@@ -319,4 +319,4 @@ class Files:
             raise FileLockTimeout(vm_name, operation, path)
         if status == file_program.EXIT_CORRUPT_INPUT:
             raise FileContentMismatch(vm_name, path)
-        raise CommandFailed(vm_name, status, result)
+        raise CommandFailed(vm_name, status, result, streams_logged=streams_logged)
