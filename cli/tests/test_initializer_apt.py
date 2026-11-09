@@ -1,129 +1,183 @@
-"""Tests for the VM initializer's apt / install-command integration.
+"""Apt sources, apt packages and install commands in Phase B.
 
-Split out of ``test_initializer.py`` (see ``_initializer_support.py`` for
-the shared ``Transport``/entry builders). This file covers apt source
-configuration, apt package installation, and system/user install-command
-execution, the three pieces the original module's docstring already
-grouped together.
+Each step runs over a recording admin access (``tests/phase_b_support.py``):
+apt source lists publish to the test's own directory through the real file
+program, and every other request is recorded and answered as the test
+scripts it, matched by equality with the request the step builds.
 """
 
 from __future__ import annotations
 
+import stat
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
 from agentworks.apt import AptSourceEntry
+from agentworks.capabilities.vm_platform.cloud_init import INIT_SYSTEM_PACKAGES
 from agentworks.debian import DebianRelease
 from agentworks.errors import ConfigError
+from agentworks.execution.errors import CommandFailed, ExecutionIncomplete
+from agentworks.execution.requests import Command, Script, Shell
+from agentworks.execution.results import Completed, Result, Unknown, UnknownReason
 from agentworks.install_commands import UserInstallCommandEntry
 from agentworks.vms.initializer import (
+    MISE_GPG_KEY_PATH,
+    MISE_GPG_KEY_URL,
     _configure_apt_sources,
     _install_apt_packages,
     _run_install_commands,
+    packages,
 )
 from agentworks.vms.initializer.driver import VMInitializationOperation, _phase_b_setup
-from tests.vm_access_support import Admin, RecordingVMAccess
+from tests.phase_b_support import StepGuest, requires_file_program
 
-from ._initializer_support import _make_entries, _make_target, _make_vm_template
+from ._initializer_support import _make_entries, _make_vm_template
 
-# -- Apt source tests --
+ARCH = Command(("dpkg", "--print-architecture"), deadline=60)
+APT_UPDATE = Command(("apt-get", "update", "-qq"), elevated=True, deadline=120)
+TEST_KEY = "/etc/apt/keyrings/test.gpg"
+TEST_LIST = "deb [arch=arm64 signed-by=/etc/apt/keyrings/test.gpg] https://example.com stable main\n"
 
 
-def test_configure_apt_sources_installs_key(tmp_path) -> None:
-    target = _make_target(key_exists=False)
-    vm_template = _make_vm_template(apt_packages=["test-pkg"])
+def _key_present(path: str) -> Command:
+    return Command(("test", "-f", path), deadline=60)
+
+
+def _failed() -> CommandFailed:
+    return CommandFailed("box", 1, Result(Completed(1)), streams_logged=True)
+
+
+@pytest.fixture
+def guest(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> StepGuest:
+    monkeypatch.setattr(packages, "APT_SOURCES_DIR", str(tmp_path / "sources.list.d"))
+    guest = StepGuest()
+    guest.respond(ARCH, Result(Completed(0), b"arm64\n"))
+    return guest
+
+
+def _configure(guest: StepGuest, *, apt_packages: list[str]) -> None:
     entries = _make_entries()
-    logger = MagicMock()
-    logger.has_warnings = False
-
     _configure_apt_sources(
-        target,
-        vm_template,
+        guest.files,
+        _make_vm_template(apt_packages=apt_packages),
         entries.apt_packages,
         entries.apt_sources,
-        logger,
+        guest.log,
         debian_release=DebianRelease.TRIXIE,
     )
 
-    # Should have called curl to download the key (now via run with sudo=True)
-    curl_calls = [c for c in target.run.call_args_list if "curl" in str(c)]
-    assert len(curl_calls) >= 1
-    # Should have run apt-get update
-    update_calls = [c for c in target.run.call_args_list if "apt-get update" in str(c)]
-    assert len(update_calls) == 1
+
+def _source_list(name: str = "test.list") -> Path:
+    return Path(packages.APT_SOURCES_DIR) / name
 
 
-def test_configure_apt_sources_skips_existing(tmp_path) -> None:
-    target = _make_target(key_exists=True)
-    vm_template = _make_vm_template(apt_packages=["test-pkg"])
+# -- Apt sources ------------------------------------------------------------------
+
+
+@requires_file_program
+def test_a_missing_key_is_fetched_as_root_and_the_list_published_with_the_architecture(guest: StepGuest) -> None:
+    guest.respond(_key_present(TEST_KEY), Result(Completed(1)))
+
+    _configure(guest, apt_packages=["test-pkg"])
+
+    assert _source_list().read_text() == TEST_LIST
+    assert stat.S_IMODE(_source_list().stat().st_mode) == 0o644
+    assert guest.commands() == [
+        ARCH,
+        _key_present(TEST_KEY),
+        Command(("install", "-m", "0755", "-d", "/etc/apt/keyrings"), elevated=True, deadline=60),
+        Command(("curl", "-fsSL", "https://example.com/key.gpg", "-o", TEST_KEY), elevated=True, deadline=60),
+        Command(("chmod", "a+r", TEST_KEY), elevated=True, deadline=60),
+        APT_UPDATE,
+    ]
+    assert guest.log.warned == []
+
+
+@requires_file_program
+def test_a_configured_source_is_neither_rewritten_nor_followed_by_an_update(guest: StepGuest) -> None:
+    _source_list().parent.mkdir()
+    _source_list().write_text(TEST_LIST)
+
+    _configure(guest, apt_packages=["test-pkg"])
+
+    assert guest.writes() == []
+    assert guest.commands() == [ARCH, _key_present(TEST_KEY)]
+
+
+@requires_file_program
+def test_a_changed_source_line_is_republished_and_followed_by_an_update(guest: StepGuest) -> None:
+    _source_list().parent.mkdir()
+    _source_list().write_text("deb https://old.example.com stable main\n")
+
+    _configure(guest, apt_packages=["test-pkg"])
+
+    assert _source_list().read_text() == TEST_LIST
+    assert guest.commands()[-1] == APT_UPDATE
+
+
+@requires_file_program
+def test_a_dearmored_key_is_fetched_through_gpg_in_one_root_script(guest: StepGuest, monkeypatch) -> None:  # noqa: ANN001
     entries = _make_entries()
-    logger = MagicMock()
-    logger.has_warnings = False
+    dearmor = entries.apt_sources["dearmor-source"]
+    guest.respond(_key_present(dearmor.key_path), Result(Completed(1)))
 
     _configure_apt_sources(
-        target,
-        vm_template,
-        entries.apt_packages,
+        guest.files,
+        _make_vm_template(apt_packages=["dearmored"]),
+        {"dearmored": entries.apt_packages["test-pkg"].model_copy(update={"apt_sources": ["dearmor-source"]})},
         entries.apt_sources,
-        logger,
+        guest.log,
         debian_release=DebianRelease.TRIXIE,
     )
 
-    # Should not have run apt-get update (nothing new configured)
-    update_calls = [c for c in target.run.call_args_list if "apt-get update" in str(c)]
-    assert len(update_calls) == 0
+    scripts = [request for request in guest.commands() if isinstance(request, Script)]
+    assert len(scripts) == 1
+    assert (scripts[0].shell, scripts[0].elevated) == (Shell.SH, True)
+    assert _source_list("dearmor.list").exists()
 
 
-def test_configure_apt_sources_no_packages() -> None:
-    target = MagicMock()
-    vm_template = _make_vm_template(apt_packages=[])
-    entries = _make_entries()
-    logger = MagicMock()
-
-    _configure_apt_sources(
-        target,
-        vm_template,
-        entries.apt_packages,
-        entries.apt_sources,
-        logger,
-        debian_release=DebianRelease.TRIXIE,
+@requires_file_program
+def test_a_failed_key_fetch_warns_and_skips_that_sources_list(guest: StepGuest) -> None:
+    guest.respond(_key_present(TEST_KEY), Result(Completed(1)))
+    guest.respond(
+        Command(("curl", "-fsSL", "https://example.com/key.gpg", "-o", TEST_KEY), elevated=True, deadline=60),
+        _failed(),
     )
 
-    # No calls at all
-    target.run.assert_not_called()
+    _configure(guest, apt_packages=["test-pkg"])
+
+    assert len(guest.log.warned) == 1
+    assert not _source_list().exists()
+    assert APT_UPDATE not in guest.commands()
 
 
-def test_configure_apt_sources_resolves_arch() -> None:
-    target = _make_target(key_exists=False)
-    vm_template = _make_vm_template(apt_packages=["test-pkg"])
-    entries = _make_entries()
-    logger = MagicMock()
-    logger.has_warnings = False
+def test_no_selected_packages_means_no_request() -> None:
+    guest = StepGuest(local_files=False)
 
-    _configure_apt_sources(
-        target,
-        vm_template,
-        entries.apt_packages,
-        entries.apt_sources,
-        logger,
-        debian_release=DebianRelease.TRIXIE,
-    )
+    _configure(guest, apt_packages=[])
 
-    # The source line written should have arm64, not {arch}
-    write_calls = [str(c) for c in target.run.call_args_list if "sources.list.d" in str(c)]
-    assert any("arm64" in c for c in write_calls)
-    assert not any("{arch}" in c for c in write_calls)
+    assert guest.access.requests() == []
+
+
+def test_an_architecture_probe_that_cannot_run_warns_without_raising() -> None:
+    guest = StepGuest(local_files=False)
+    guest.respond(ARCH, ExecutionIncomplete("box", Result(Unknown(UnknownReason.CONNECTION))))
+
+    _configure(guest, apt_packages=["test-pkg"])
+
+    assert len(guest.log.warned) == 1
 
 
 def test_configure_apt_sources_resolves_all_mappings_before_guest_mutation() -> None:
-    target = MagicMock()
+    guest = StepGuest(local_files=False)
     vm_template = _make_vm_template(apt_packages=["test-pkg"])
     entries = _make_entries()
     entries.apt_sources["test-source"] = AptSourceEntry(
         name="test-source",
         key_url="https://example.com/key.gpg",
-        key_path="/etc/apt/keyrings/test.gpg",
+        key_path=TEST_KEY,
         source=None,
         sources={DebianRelease.TRIXIE: "deb https://example.com trixie main"},
         source_file="test.list",
@@ -131,27 +185,27 @@ def test_configure_apt_sources_resolves_all_mappings_before_guest_mutation() -> 
 
     with pytest.raises(ConfigError) as caught:
         _configure_apt_sources(
-            target,
+            guest.files,
             vm_template,
             entries.apt_packages,
             entries.apt_sources,
-            MagicMock(),
+            guest.log,
             debian_release=DebianRelease.BOOKWORM,
         )
 
     assert caught.value.entity_kind == "apt-source"
-    target.run.assert_not_called()
+    assert guest.access.requests() == []
 
 
 def test_phase_b_resolves_all_release_maps_before_any_guest_call(monkeypatch: pytest.MonkeyPatch) -> None:
     target = MagicMock()
-    access = RecordingVMAccess([], Admin())
+    guest = StepGuest(local_files=False)
     vm_template = _make_vm_template(apt_packages=["test-pkg"])
     entries = _make_entries()
     entries.apt_sources["test-source"] = AptSourceEntry(
         name="test-source",
         key_url="https://example.com/key.gpg",
-        key_path="/etc/apt/keyrings/test.gpg",
+        key_path=TEST_KEY,
         source=None,
         sources={DebianRelease.TRIXIE: "deb https://example.com trixie main"},
         source_file="test.list",
@@ -162,10 +216,7 @@ def test_phase_b_resolves_all_release_maps_before_any_guest_call(monkeypatch: py
         "system-install-command": entries.system_install_commands,
         "user-install-command": entries.user_install_commands,
     }
-    monkeypatch.setattr(
-        "agentworks.resources.access.kind_dict",
-        lambda registry, kind: resources[kind],
-    )
+    monkeypatch.setattr("agentworks.resources.access.kind_dict", lambda registry, kind: resources[kind])
 
     with pytest.raises(ConfigError) as caught:
         _phase_b_setup(
@@ -175,7 +226,7 @@ def test_phase_b_resolves_all_release_maps_before_any_guest_call(monkeypatch: py
             vm_template,
             MagicMock(),
             "mapped-vm",
-            access.files(),
+            guest.files,
             (),
             "/home/operator",
             "operator",
@@ -186,410 +237,187 @@ def test_phase_b_resolves_all_release_maps_before_any_guest_call(monkeypatch: py
         )
 
     assert caught.value.entity_kind == "apt-source"
-    assert access.requests() == []
-    target.run.assert_not_called()
-    target.write_file.assert_not_called()
-
-
-# -- Apt package tests --
-
-
-def test_install_apt_packages_combines_sources() -> None:
-    target = MagicMock()
-    target.run.return_value = MagicMock(stdout="", stderr="", returncode=0, ok=True)
-    vm_template = _make_vm_template(apt=["vim", "curl"], apt_packages=["test-pkg"])
-    entries = _make_entries()
-    logger = MagicMock()
-    logger.has_warnings = False
-
-    _install_apt_packages(target, vm_template, entries.apt_packages, logger)
-
-    # Should have a single apt-get install with all packages
-    install_calls = [str(c) for c in target.run.call_args_list if "apt-get install" in str(c)]
-    assert len(install_calls) == 1
-    assert "vim" in install_calls[0]
-    assert "curl" in install_calls[0]
-    assert "test-tool" in install_calls[0]
-
-
-def test_install_apt_packages_empty() -> None:
-    target = MagicMock()
-    vm_template = _make_vm_template()
-    entries = _make_entries()
-    logger = MagicMock()
-
-    _install_apt_packages(target, vm_template, entries.apt_packages, logger)
-
+    assert guest.access.requests() == []
     target.run.assert_not_called()
 
 
-# -- Install command tests --
+# -- System and apt packages ------------------------------------------------------------
 
 
-def test_run_install_commands_returns_path() -> None:
-    target = MagicMock()
-    target.run.return_value = MagicMock(stdout="", stderr="", returncode=0, ok=True)
+def _apt_install(*names: str) -> Command:
+    return Command(
+        ("apt-get", "install", "-y", "-qq", "-o", "Dpkg::Options::=--force-confnew", *names),
+        env={"DEBIAN_FRONTEND": "noninteractive"},
+        elevated=True,
+        deadline=300,
+    )
+
+
+def test_apt_packages_install_the_direct_list_and_each_entrys_packages_in_one_request() -> None:
+    guest = StepGuest(local_files=False)
     entries = _make_entries()
-    logger = MagicMock()
-    logger.has_warnings = False
 
-    result = _run_install_commands(
-        target,
-        ["user-tool"],
-        entries.user_install_commands,
-        "zsh",
-        "/home/agentworks",
-        logger,
+    _install_apt_packages(
+        guest.files, _make_vm_template(apt=["vim", "curl"], apt_packages=["test-pkg"]), entries.apt_packages, guest.log
     )
 
-    assert result == ["~/.user-tool/bin"]
+    assert guest.commands() == [_apt_install("vim", "curl", "test-tool")]
 
 
-def test_run_install_commands_missing_entry() -> None:
-    target = MagicMock()
-    entries = _make_entries()
-    logger = MagicMock()
-    logger.has_warnings = False
+def test_no_apt_packages_means_no_request() -> None:
+    guest = StepGuest(local_files=False)
 
-    result = _run_install_commands(
-        target,
-        ["nonexistent"],
-        entries.user_install_commands,
-        "zsh",
-        "/home/agentworks",
-        logger,
+    _install_apt_packages(guest.files, _make_vm_template(), _make_entries().apt_packages, guest.log)
+
+    assert guest.access.requests() == []
+
+
+def test_a_failed_apt_package_install_warns_without_raising() -> None:
+    guest = StepGuest(local_files=False)
+    guest.respond(_apt_install("vim"), _failed())
+
+    _install_apt_packages(guest.files, _make_vm_template(apt=["vim"]), _make_entries().apt_packages, guest.log)
+
+    assert len(guest.log.warned) == 1
+
+
+def test_a_failed_system_package_install_stops_initialization(monkeypatch: pytest.MonkeyPatch) -> None:
+    guest = StepGuest(local_files=False)
+    guest.respond(_apt_install(*INIT_SYSTEM_PACKAGES), _failed())
+
+    with pytest.raises(CommandFailed):
+        packages._install_system_packages(guest.files, guest.log)
+
+    assert guest.commands()[-2:] == [APT_UPDATE, _apt_install(*INIT_SYSTEM_PACKAGES)]
+
+
+def test_a_failed_mise_source_or_update_warns_and_the_install_still_runs() -> None:
+    guest = StepGuest(local_files=False)
+    guest.respond(
+        Command(("curl", "-fsSL", MISE_GPG_KEY_URL, "-o", MISE_GPG_KEY_PATH), elevated=True, deadline=30),
+        _failed(),
+    )
+    guest.respond(APT_UPDATE, _failed())
+
+    packages._install_system_packages(guest.files, guest.log)
+
+    assert len(guest.log.warned) == 2
+    assert guest.commands()[-1] == _apt_install(*INIT_SYSTEM_PACKAGES)
+
+
+# -- Install commands -------------------------------------------------------------------
+
+
+def _install(shell: str, command: str) -> Command:
+    return Command((shell, "-lc", command), deadline=120)
+
+
+def _tool(**tests: str) -> dict[str, UserInstallCommandEntry]:
+    return {"my-tool": UserInstallCommandEntry(name="my-tool", command="run-install", path=["~/.my-tool/bin"], **tests)}
+
+
+def _run(guest: StepGuest, entries: dict, names: list[str] | None = None) -> list[str]:  # type: ignore[type-arg]
+    return _run_install_commands(guest.files, names or list(entries), entries, "zsh", "/home/agentworks", guest.log)
+
+
+def test_an_install_command_runs_in_the_login_shell_and_returns_its_path() -> None:
+    guest = StepGuest(local_files=False)
+
+    assert _run(guest, _make_entries().user_install_commands) == ["~/.user-tool/bin"]
+
+    assert guest.commands() == [_install("zsh", "curl -fsSL https://example.com/install.sh | bash")]
+    assert all(not request.env for request in guest.commands())  # hermetic: nothing injected
+
+
+def test_an_undeclared_install_command_warns_and_runs_nothing() -> None:
+    guest = StepGuest(local_files=False)
+
+    assert _run(guest, _make_entries().user_install_commands, ["nonexistent"]) == []
+
+    assert len(guest.log.warned) == 1
+    assert guest.access.requests() == []
+
+
+def test_no_install_commands_means_no_request() -> None:
+    guest = StepGuest(local_files=False)
+
+    assert _run(guest, {}, []) == []
+    assert guest.access.requests() == []
+
+
+def test_an_install_command_whose_tests_all_pass_is_skipped_keeping_its_path() -> None:
+    guest = StepGuest(local_files=False)
+
+    assert _run(guest, _tool(test_exec="my-tool", test_file="~/.my-tool/installed")) == ["~/.my-tool/bin"]
+
+    ((check,),) = [guest.commands()]
+    assert isinstance(check, Script) and (check.shell, check.deadline, check.elevated) == (Shell.SH, 10, False)
+
+
+def test_an_install_command_whose_test_fails_runs() -> None:
+    guest = StepGuest(local_files=False)
+    guest.access.answer = lambda call: Result(Completed(1)) if isinstance(call.request, Script) else None
+
+    _run(guest, _tool(test_exec="my-tool"))
+
+    assert guest.commands()[-1] == _install("zsh", "run-install")
+
+
+def test_a_test_that_cannot_run_counts_as_not_installed() -> None:
+    guest = StepGuest(local_files=False)
+    guest.access.answer = lambda call: (
+        ExecutionIncomplete("box", Result(Unknown(UnknownReason.DEADLINE)))
+        if isinstance(call.request, Script)
+        else None
     )
 
-    assert result == []
-    logger.warning.assert_called_once()
+    _run(guest, _tool(test_dir="~/.my-tool"))
+
+    assert guest.commands()[-1] == _install("zsh", "run-install")
+    assert guest.log.warned == []
 
 
-def test_run_install_commands_empty() -> None:
-    target = MagicMock()
-    entries = _make_entries()
-    logger = MagicMock()
+def test_an_install_command_with_no_test_always_runs() -> None:
+    guest = StepGuest(local_files=False)
 
-    result = _run_install_commands(
-        target,
-        [],
-        entries.user_install_commands,
-        "zsh",
-        "/home/agentworks",
-        logger,
-    )
+    _run(guest, _tool(test_exec="", test_file="", test_dir=""))
 
-    assert result == []
-    target.run.assert_not_called()
+    assert guest.commands() == [_install("zsh", "run-install")]
 
 
-def test_run_install_commands_skips_when_test_exec_found() -> None:
-    """When test_exec command exists, install is skipped but PATH additions are kept."""
-    target = MagicMock()
-    # command -v returns 0 (command found)
-    target.run.return_value = MagicMock(stdout="", stderr="", returncode=0, ok=True)
-
+def test_a_failed_install_command_warns_keeps_its_path_and_the_next_runs() -> None:
+    guest = StepGuest(local_files=False)
     entries = {
-        "my-tool": UserInstallCommandEntry(
-            name="my-tool",
-            description="My tool",
-            command="curl install.sh | bash",
-            path=["~/.my-tool/bin"],
-            test_exec="my-tool",
-        ),
+        "first": UserInstallCommandEntry(name="first", command="one", path=["/opt/one"]),
+        "second": UserInstallCommandEntry(name="second", command="two", path=["/opt/two"]),
     }
-    logger = MagicMock()
-    logger.has_warnings = False
+    guest.respond(_install("zsh", "one"), _failed())
 
-    result = _run_install_commands(
-        target,
-        ["my-tool"],
-        entries,
-        "zsh",
-        "/home/agentworks",
-        logger,
-    )
+    assert _run(guest, entries) == ["/opt/one", "/opt/two"]
 
-    # PATH additions should still be returned
-    assert result == ["~/.my-tool/bin"]
-    # The install command itself should NOT have been run (only command -v was run)
-    run_calls = [str(c) for c in target.run.call_args_list]
-    assert any("command -v" in c for c in run_calls)
-    assert not any("curl" in c for c in run_calls)
+    assert len(guest.log.warned) == 1
+    assert guest.commands() == [_install("zsh", "one"), _install("zsh", "two")]
 
 
-def test_run_install_commands_runs_when_test_exec_missing() -> None:
-    """When test_exec command is not found, install runs normally."""
-    target = MagicMock()
-
-    def run_side_effect(cmd, **kwargs):
-        result = MagicMock()
-        result.stdout = ""
-        result.stderr = ""
-        # command -v fails (not found), everything else succeeds
-        result.returncode = 1 if "command -v" in cmd else 0
-        result.ok = result.returncode == 0
-        return result
-
-    target.run.side_effect = run_side_effect
-
-    entries = {
-        "my-tool": UserInstallCommandEntry(
-            name="my-tool",
-            description="My tool",
-            command="curl install.sh | bash",
-            path=["~/.my-tool/bin"],
-            test_exec="my-tool",
-        ),
-    }
-    logger = MagicMock()
-    logger.has_warnings = False
-
-    result = _run_install_commands(
-        target,
-        ["my-tool"],
-        entries,
-        "zsh",
-        "/home/agentworks",
-        logger,
-    )
-
-    assert result == ["~/.my-tool/bin"]
-    # The install command should have been run
-    run_calls = [str(c) for c in target.run.call_args_list]
-    assert any("curl" in c for c in run_calls)
+# -- The completion test itself, run by /bin/sh ------------------------------------------
 
 
-def test_run_install_commands_skips_when_all_declared_tests_pass() -> None:
-    target = MagicMock()
-    target.run.return_value = MagicMock(stdout="", stderr="", returncode=0, ok=True)
-    entries = {
-        "my-tool": UserInstallCommandEntry(
-            name="my-tool",
-            command="run-install",
-            test_exec="my-tool",
-            test_file="~/.my-tool/installed",
-            test_dir="~/.my-tool",
-        ),
-    }
-    logger = MagicMock()
+@pytest.mark.skipif(not Path("/bin/sh").exists(), reason="runs the completion test under /bin/sh")
+@pytest.mark.parametrize(
+    ("present", "expected"),
+    [((), 1), (("file",), 1), (("dir",), 1), (("file", "dir"), 0)],
+    ids=["neither", "file-only", "dir-only", "both"],
+)
+def test_the_completion_test_passes_only_when_every_declared_test_passes(
+    tmp_path: Path, present: tuple[str, ...], expected: int
+) -> None:
+    import subprocess
 
-    _run_install_commands(target, ["my-tool"], entries, "zsh", "/home/agentworks", logger)
+    (tmp_path / "tool").mkdir() if "dir" in present else None
+    (tmp_path / "installed").write_text("") if "file" in present else None
+    entry = UserInstallCommandEntry(name="t", command="x", test_exec="sh", test_file="~/installed", test_dir="~/tool")
 
-    commands = [call.args[0] for call in target.run.call_args_list]
-    assert len(commands) == 1
-    assert "command -v" in commands[0]
-    assert "test -f /home/agentworks/.my-tool/installed" in commands[0]
-    assert "test -d /home/agentworks/.my-tool" in commands[0]
-    assert " && " in commands[0]
-    assert not any("run-install" in command for command in commands)
+    command = packages._build_test_command(entry, "sh", str(tmp_path))
 
-
-def test_run_install_commands_runs_when_any_declared_test_fails() -> None:
-    target = MagicMock()
-
-    def run_side_effect(cmd, **kwargs):
-        result = MagicMock(stdout="", stderr="")
-        result.returncode = 1 if "command -v" in cmd else 0
-        result.ok = result.returncode == 0
-        return result
-
-    target.run.side_effect = run_side_effect
-    entries = {
-        "my-tool": UserInstallCommandEntry(
-            name="my-tool",
-            command="run-install",
-            test_exec="my-tool",
-            test_file="~/.my-tool/installed",
-        ),
-    }
-    logger = MagicMock()
-
-    _run_install_commands(target, ["my-tool"], entries, "zsh", "/home/agentworks", logger)
-
-    commands = [call.args[0] for call in target.run.call_args_list]
-    assert any("command -v" in command and "test -f" in command for command in commands)
-    assert any("run-install" in command for command in commands)
-
-
-def test_run_install_commands_no_test_always_runs() -> None:
-    """When no non-empty test is set, the command always runs."""
-    target = MagicMock()
-    target.run.return_value = MagicMock(stdout="", stderr="", returncode=0, ok=True)
-
-    entries = {
-        "my-tool": UserInstallCommandEntry(
-            name="my-tool",
-            description="My tool",
-            command="curl install.sh | bash",
-            path=["~/.my-tool/bin"],
-            test_exec="",
-            test_file="",
-            test_dir="",
-        ),
-    }
-    logger = MagicMock()
-    logger.has_warnings = False
-
-    result = _run_install_commands(
-        target,
-        ["my-tool"],
-        entries,
-        "zsh",
-        "/home/agentworks",
-        logger,
-    )
-
-    assert result == ["~/.my-tool/bin"]
-    # Should NOT have run any test check
-    run_calls = [str(c) for c in target.run.call_args_list]
-    assert not any("command -v" in c for c in run_calls)
-    assert not any("test -f" in c for c in run_calls)
-    assert not any("test -d" in c for c in run_calls)
-    # Should have run the command
-    assert any("curl" in c for c in run_calls)
-
-
-def test_run_install_commands_skips_when_test_file_found() -> None:
-    """When test_file path exists, install is skipped but PATH additions are kept."""
-    target = MagicMock()
-    target.run.return_value = MagicMock(stdout="", stderr="", returncode=0, ok=True)
-
-    entries = {
-        "nvm": UserInstallCommandEntry(
-            name="nvm",
-            description="NVM",
-            command="curl install.sh | bash",
-            path=["~/.nvm/bin"],
-            test_file="~/.nvm/nvm.sh",
-        ),
-    }
-    logger = MagicMock()
-    logger.has_warnings = False
-
-    result = _run_install_commands(
-        target,
-        ["nvm"],
-        entries,
-        "zsh",
-        "/home/agentworks",
-        logger,
-    )
-
-    assert result == ["~/.nvm/bin"]
-    run_calls = [str(c) for c in target.run.call_args_list]
-    assert any("test -f" in c for c in run_calls)
-    assert any("/home/agentworks/.nvm/nvm.sh" in c for c in run_calls)
-    assert not any("curl" in c for c in run_calls)
-
-
-def test_run_install_commands_runs_when_test_file_missing() -> None:
-    """When test_file path does not exist, install runs normally."""
-    target = MagicMock()
-
-    def run_side_effect(cmd, **kwargs):
-        result = MagicMock()
-        result.stdout = ""
-        result.stderr = ""
-        result.returncode = 1 if "test -f" in cmd else 0
-        result.ok = result.returncode == 0
-        return result
-
-    target.run.side_effect = run_side_effect
-
-    entries = {
-        "nvm": UserInstallCommandEntry(
-            name="nvm",
-            description="NVM",
-            command="curl install.sh | bash",
-            path=["~/.nvm/bin"],
-            test_file="~/.nvm/nvm.sh",
-        ),
-    }
-    logger = MagicMock()
-    logger.has_warnings = False
-
-    result = _run_install_commands(
-        target,
-        ["nvm"],
-        entries,
-        "zsh",
-        "/home/agentworks",
-        logger,
-    )
-
-    assert result == ["~/.nvm/bin"]
-    run_calls = [str(c) for c in target.run.call_args_list]
-    assert any("curl" in c for c in run_calls)
-
-
-def test_run_install_commands_skips_when_test_dir_found() -> None:
-    """When test_dir path exists, install is skipped but PATH additions are kept."""
-    target = MagicMock()
-    target.run.return_value = MagicMock(stdout="", stderr="", returncode=0, ok=True)
-
-    entries = {
-        "oh-my-zsh": UserInstallCommandEntry(
-            name="oh-my-zsh",
-            description="Oh My Zsh",
-            command="sh -c install.sh",
-            path=[],
-            test_dir="~/.oh-my-zsh",
-        ),
-    }
-    logger = MagicMock()
-    logger.has_warnings = False
-
-    result = _run_install_commands(
-        target,
-        ["oh-my-zsh"],
-        entries,
-        "zsh",
-        "/home/agentworks",
-        logger,
-    )
-
-    assert result == []
-    run_calls = [str(c) for c in target.run.call_args_list]
-    assert any("test -d" in c for c in run_calls)
-    assert any("/home/agentworks/.oh-my-zsh" in c for c in run_calls)
-    assert not any("sh -c" in c for c in run_calls)
-
-
-def test_run_install_commands_runs_when_test_dir_missing() -> None:
-    """When test_dir path does not exist, install runs normally."""
-    target = MagicMock()
-
-    def run_side_effect(cmd, **kwargs):
-        result = MagicMock()
-        result.stdout = ""
-        result.stderr = ""
-        result.returncode = 1 if "test -d" in cmd else 0
-        result.ok = result.returncode == 0
-        return result
-
-    target.run.side_effect = run_side_effect
-
-    entries = {
-        "oh-my-zsh": UserInstallCommandEntry(
-            name="oh-my-zsh",
-            description="Oh My Zsh",
-            command="sh -c install.sh",
-            path=[],
-            test_dir="~/.oh-my-zsh",
-        ),
-    }
-    logger = MagicMock()
-    logger.has_warnings = False
-
-    result = _run_install_commands(
-        target,
-        ["oh-my-zsh"],
-        entries,
-        "zsh",
-        "/home/agentworks",
-        logger,
-    )
-
-    assert result == []
-    run_calls = [str(c) for c in target.run.call_args_list]
-    assert any("sh -c" in c for c in run_calls)
+    assert command is not None
+    assert subprocess.run(["/bin/sh", "-c", command], capture_output=True, check=False).returncode == expected

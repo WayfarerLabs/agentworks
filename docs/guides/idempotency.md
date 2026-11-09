@@ -63,7 +63,7 @@ layer.
 
 | Step                   | Notes                                                                                  |
 | ---------------------- | -------------------------------------------------------------------------------------- |
-| Apt sources            | Key downloaded if missing, source list overwritten                                     |
+| Apt sources            | Key downloaded if missing; source list rewritten, and apt refreshed, only on a change  |
 | SSH host key preserve  | cloud-init drop-in written so host keys survive stop/start                             |
 | Shell                  | Overwritten from config                                                                |
 | SSH authorized keys    | Overwritten from config                                                                |
@@ -73,7 +73,7 @@ layer.
 | Mise activation        | Overwritten from config (disabled comment written when off)                            |
 | PATH additions         | Overwritten from config                                                                |
 | Tailscale DNS          | Startup-ordering drop-in rewritten only when content differs                           |
-| sshd AcceptEnv         | Drop-in overwritten; sshd reloaded                                                     |
+| sshd AcceptEnv         | Drop-in rewritten, validated and sshd reloaded only when its content differs           |
 | sudoers env_keep       | Fragment overwritten, staged and `visudo -cf` validated before promotion               |
 | sudoers console setenv | Same; scoped to the VM's admin user                                                    |
 

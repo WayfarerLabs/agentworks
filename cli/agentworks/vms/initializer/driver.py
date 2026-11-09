@@ -31,6 +31,7 @@ from agentworks.db import InitStatus
 from agentworks.env import ResourceContext, vm_stable_identity_env
 from agentworks.execution import trust
 from agentworks.execution.access import Admin
+from agentworks.execution.requests import Command
 from agentworks.git_config import ensure_safe_directory_wildcard
 from agentworks.git_credentials import configure_user_git_credentials
 from agentworks.ssh import SSHError, SSHLogger
@@ -69,7 +70,7 @@ from .ssh_keys import (
     _preserve_ssh_host_keys,
     _reconcile_authorized_keys,
 )
-from .steps import STEP_DEADLINE
+from .steps import STEP_DEADLINE, STEP_FAILURES, warn_step
 from .workspaces_dir import _setup_workspaces_directory
 
 if TYPE_CHECKING:
@@ -428,11 +429,11 @@ def _phase_b_setup(
         # consoles), never build-time install machinery.
 
         # Required system packages must succeed before dependent setup runs.
-        _install_system_packages(legacy_target, logger)
+        _install_system_packages(files, logger)
 
         # Non-fatal: apt sources required by selected apt_packages
         _configure_apt_sources(
-            legacy_target,
+            files,
             vm_template,
             apt_packages,
             apt_sources,
@@ -442,7 +443,7 @@ def _phase_b_setup(
         )
 
         # Non-fatal: apt packages (direct list + apt-package entries)
-        _install_apt_packages(legacy_target, vm_template, apt_packages, logger)
+        _install_apt_packages(files, vm_template, apt_packages, logger)
 
         # Identity profile fragments. Runs AFTER apt install because apt uses
         # `--force-confnew`, which would replace the agentworks block in
@@ -470,11 +471,9 @@ def _phase_b_setup(
             output.info(f"Installing {output.count(len(vm_template.snap), 'snap package')}...")
             for pkg in vm_template.snap:
                 try:
-                    legacy_target.run(f"snap install {shlex.quote(pkg)}", sudo=True, timeout=120)
-                except SSHError as e:
-                    msg = f"snap install '{pkg}' failed: {e}"
-                    logger.warning(msg)
-                    output.warn(msg)
+                    files.access.run(Command(("snap", "install", pkg), elevated=True, deadline=120), check=True)
+                except STEP_FAILURES as error:
+                    warn_step(logger, f"snap install '{pkg}' failed", error)
 
         # admin_shell is a pure config read, hoisted above the system install
         # commands below (which run in it) so they stay in the VM section; the
@@ -486,7 +485,7 @@ def _phase_b_setup(
         # they do not depend on the login-shell usermod, and they install
         # system-wide tools rather than touching the admin's rc.
         system_path = _run_install_commands(
-            legacy_target,
+            files,
             vm_template.system_install_commands,
             system_install_commands,
             admin_shell,
@@ -644,7 +643,7 @@ def _phase_b_setup(
 
         # Non-fatal: user install commands for admin user (may depend on mise tools)
         user_path = _run_install_commands(
-            legacy_target,
+            files,
             admin.user_install_commands,
             user_install_commands,
             admin_shell,

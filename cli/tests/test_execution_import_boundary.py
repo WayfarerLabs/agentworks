@@ -77,6 +77,10 @@ MIGRATED_FILES = (
     "plugins/_harness_native/native.py",
     "plugins/_harness_native/native_cli.py",
     "capabilities/harness_integration/setup.py",
+    "vms/initializer/steps.py",
+    "vms/initializer/packages.py",
+    "vms/hardening.py",
+    "vms/tailscale_dns.py",
 )
 
 
