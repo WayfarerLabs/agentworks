@@ -604,9 +604,9 @@ def test_upstream_placement_readiness_is_reported_without_blocking_restart(lifec
 @pytest.mark.parametrize(
     "tool,integration,workaround",
     [
-        ("claude", "claude-code", "session-prompt"),
-        ("codex", "codex", "session-developer-instructions"),
-        ("grok", "grok-build", "session-rules"),
+        ("claude", "claude-code", "session-skill-plugin"),
+        ("codex", "codex", "session-home-skills"),
+        ("grok", "grok-build", "session-home-skills"),
     ],
 )
 def test_real_native_probe_failure_preserves_existing_runtime_before_teardown(

@@ -152,9 +152,12 @@ class GrokBuildIntegration(HarnessIntegration):
         User facets publish native rules, skills and personas. Workspace guidance uses
         skills so exact local Git exclusions do not disable native rule discovery.
         Session artifacts are unhandled by default. `session-home-skills` publishes
-        session-qualified rules, hints and skills in the shared user skill catalog;
-        applicability through UUID/run metadata is best effort. Session personas remain
-        unhandled. Native trust, discovery and model cooperation still govern consumption.
+        one stable session-specific entry in the shared user skill catalog. That entry
+        reads rules, hints and complete skills through the current private run index;
+        individual indexed skills are not native registrations. Applicability is best
+        effort, and old conversations may need fresh setup or manual index reading on
+        first adoption. Session personas remain unhandled. Native trust and model
+        cooperation still govern consumption.
         """,
     )
 
@@ -306,7 +309,7 @@ class GrokBuildIntegration(HarnessIntegration):
         parts = [shlex.quote(token) for token in (*identity, *self._managed_flags())]
         if self.config.agent is not None:
             parts += ["--agent", shlex.quote(self.config.agent)]
-        if self.config.rules is not None and "--rules" not in self._artifact_plan.argv:
+        if self.config.rules is not None:
             parts += ["--rules", shlex.quote(self.config.rules)]
         parts += [shlex.quote(token) for token in self._artifact_plan.argv]
         parts += [self.quote_context_argv(token) for token in self.config.extra_args]

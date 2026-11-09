@@ -20,7 +20,6 @@ from agentworks.artifacts.native.common import (
     reject_flags,
     select_session_artifacts,
     skill_files,
-    validate_ancestor_names,
     validate_names,
     validate_native_argv,
 )
@@ -177,6 +176,5 @@ def session_artifacts(
                 f"{key}.description={json.dumps(item.content.description, ensure_ascii=False)}",
             ]
     application = ArtifactApplication(tuple(files), deferred)
-    validate_ancestor_names(context, application)
     validate_native_argv(tuple(argv))
     return NativeSessionArtifacts(application, tuple(argv))

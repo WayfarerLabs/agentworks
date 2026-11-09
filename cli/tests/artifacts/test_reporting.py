@@ -73,10 +73,8 @@ def test_aggregate_file_reports_each_artifact_type(monkeypatch):
     rule = artifact(ArtifactType.RULE, name="policy")
     hint = replace(rule, content=replace(rule.content, type=ArtifactType.HINT))
     inputs = received(rule, hint)
-    rendered = codex.outer_artifacts(
-        inputs, skills_root="/skills", agents_root="/agents", instructions_path="/AGENTS.md"
-    )
-    assert len(rendered.files) == 1 and len(rendered.files[0].origins) == 2
+    rendered = codex.outer_artifacts(inputs, skills_root="/skills", agents_root="/agents")
+    assert len(rendered.files) == 2 and all(len(file.origins) == 1 for file in rendered.files)
     messages: list[str] = []
     monkeypatch.setattr(output, "info", messages.append)
     report_applied(inputs, integration="native", owner="user", deferred=rendered.deferred)
@@ -105,14 +103,14 @@ def test_terminal_deferrals_group_names_but_retain_original_owner(monkeypatch):
 
 @pytest.mark.parametrize(
     "render,workaround",
-    [(codex.session_artifacts, "session-developer-instructions"), (grok.session_artifacts, "session-rules")],
+    [(codex.session_artifacts, "session-home-skills"), (grok.session_artifacts, "session-home-skills")],
 )
 def test_argument_only_delivery_reports_each_applied_type(monkeypatch, render, workaround):
     rule = artifact(ArtifactType.RULE, name="policy")
     hint = artifact(ArtifactType.HINT, name="setup")
     prepared = context(rule, hint)
-    plan = render(prepared, configured=None, extra_args=(), enabled_workarounds=(workaround,))
-    assert plan.argv and not plan.application.files and not plan.application.deferred
+    plan = render(prepared, extra_args=(), enabled_workarounds=(workaround,))
+    assert not plan.argv and plan.application.files and not plan.application.deferred
     messages: list[str] = []
     monkeypatch.setattr(output, "info", messages.append)
     report_applied(prepared.inputs, integration="native", owner="session", deferred=plan.application.deferred)

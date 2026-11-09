@@ -7,7 +7,9 @@ from dataclasses import replace
 
 import pytest
 
+from agentworks.artifacts.application import ArtifactFile, SessionArtifactContext
 from agentworks.artifacts.model import ArtifactType
+from agentworks.artifacts.native.common import NativeSessionArtifacts
 from agentworks.artifacts.session import validate_session_application
 from agentworks.capabilities.harness_integration import HarnessStart, ShellIntegration
 from agentworks.plugins.grok.artifacts import session_artifacts
@@ -15,11 +17,11 @@ from tests.artifacts.test_native_delivery import artifact, context
 from tests.artifacts.test_session_lifecycle import lifecycle as lifecycle
 
 
-def render(current):
+def render(current: SessionArtifactContext) -> NativeSessionArtifacts:
     return session_artifacts(current, extra_args=[], enabled_workarounds=["session-home-skills"])
 
 
-def entry(plan):
+def entry(plan: NativeSessionArtifacts) -> ArtifactFile:
     return next(file for file in plan.application.files if file.native_identity is not None)
 
 

@@ -4,37 +4,45 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
 
-from agentworks.artifacts.application import ArtifactFile
+from agentworks.artifacts.application import ArtifactFile, OwnedArtifactFile
 from agentworks.artifacts.git_excludes import reconcile_workspace_excludes
 from agentworks.errors import StateError
+from agentworks.harness_setup.model import NativeClaim
 from tests.artifacts.test_native_delivery import owned
 from tests.native_setup_fixtures import LocalFixtureTransport
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="local Linux guest filesystem")
 
 
-def git(*args):
+def git(*args: object) -> subprocess.CompletedProcess[str]:
     return subprocess.run(["git", *map(str, args)], check=True, capture_output=True, text=True)
 
 
 @pytest.fixture
-def repository(tmp_path):
+def repository(tmp_path: Path) -> tuple[LocalFixtureTransport, Path]:
     target = LocalFixtureTransport(tmp_path / "guest")
     workspace = target.home / "project"
     git("init", "-q", workspace)
     return target, workspace
 
 
-def apply(target, workspace, files, claims=(), integration="codex"):
+def apply(
+    target: LocalFixtureTransport,
+    workspace: Path,
+    files: Sequence[OwnedArtifactFile],
+    claims: tuple[NativeClaim, ...] = (),
+    integration: str = "codex",
+) -> tuple[tuple[NativeClaim, ...], list[tuple[NativeClaim, ...]], list[str]]:
     current = claims
-    checkpoints = []
-    incomplete = []
+    checkpoints: list[tuple[NativeClaim, ...]] = []
+    incomplete: list[str] = []
 
-    def checkpoint(value):
+    def checkpoint(value: tuple[NativeClaim, ...]) -> None:
         nonlocal current
         checkpoints.append(value)
         current = value
@@ -45,7 +53,7 @@ def apply(target, workspace, files, claims=(), integration="codex"):
     return current, checkpoints, incomplete
 
 
-def file(path):
+def file(path: Path) -> OwnedArtifactFile:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(b"fixture artifact")
     return owned(ArtifactFile(str(path), path.read_bytes(), ("a" * 64,)))
@@ -77,7 +85,6 @@ def test_exact_literal_exclusions_are_idempotent_and_retire_only_owned_pairs(rep
 
 
 def test_preexisting_identical_pattern_and_unrelated_claim_survive_retirement(repository):
-    from agentworks.harness_setup.model import NativeClaim
 
     target, workspace = repository
     record = file(workspace / ".agents/skills/x/SKILL.md")

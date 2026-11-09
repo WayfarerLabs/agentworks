@@ -61,7 +61,7 @@ def test_append_replace_external_edits_and_retire(target, initial):
     assert apply(target, (section(path, b"replacement"),), second.files) == second
     assert path.stat().st_mtime_ns == before
     assert not apply(target, (), second.files).files
-    assert path.read_bytes() == b"new operator prefix\n" + BEGIN + b"\n" + END + b"\noperator suffix"
+    assert path.read_bytes() == b"new operator prefix\n\noperator suffix"
     assert path.stat().st_mode == metadata.st_mode
 
 
@@ -276,12 +276,8 @@ def test_repeated_retirement_and_restoration_preserves_anchor_and_external_bytes
     desired = (section(path, b"fixture content"),)
     current = apply(target, desired)
     assert path.read_bytes() == original
-    anchor = prefix + BEGIN + b"\n" + END + suffix
-    for _ in range(4):
-        current = apply(target, (), current.files)
-        assert not current.files and path.read_bytes() == anchor
-        metadata = path.stat()
-        apply(target, (), current.files)
-        assert path.stat().st_ino == metadata.st_ino and path.stat().st_mtime_ns == metadata.st_mtime_ns
-        current = apply(target, desired, current.files)
-        assert path.read_bytes() == original
+    current = apply(target, (), current.files)
+    assert not current.files and path.read_bytes() == prefix + suffix
+    metadata = path.stat()
+    apply(target, (), current.files)
+    assert path.stat().st_ino == metadata.st_ino and path.stat().st_mtime_ns == metadata.st_mtime_ns

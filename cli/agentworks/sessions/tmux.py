@@ -954,7 +954,7 @@ def create_session(
     # acknowledgement cannot establish whether the server was created.
     if before_spawn is not None:
         before_spawn()
-    result = run_command(cmd, env=env)
+    result = run_command(cmd, env=launch_env if launch_env else env)
     try:
         pid = _parse_pid(getattr(result, "stdout", "") or "", context="after session create")
     except RuntimeError:

@@ -185,10 +185,10 @@ def test_same_key_from_three_scopes_survives_vm_user_session_routing(db):
 def test_native_rule_and_hint_aggregation_preserves_same_keys_from_different_groups(adapter):
     items = [artifact(kind, owner=owner) for owner in ("one", "two") for kind in (ArtifactType.HINT, ArtifactType.RULE)]
     application = adapter.outer_artifacts(received(*items), "/native")
-    assert len(application.files) == 2
+    assert len(application.files) == 4
     for file in application.files:
-        assert len(file.origins) == 2
-        assert file.data.count(items[0].content.text.encode()) == 2
+        assert len(file.origins) == 1
+        assert file.data.count(items[0].content.text.encode()) == 1
 
 
 @pytest.mark.parametrize("adapter", [claude, codex, grok])
@@ -201,20 +201,17 @@ def test_native_ancestor_name_conflict_does_not_block_without_new_session_inputs
             received(user),
             skills_root="/home/.agents/skills",
             agents_root="/home/.codex/agents",
-            instructions_path="/home/.codex/AGENTS.md",
         ).files
         project_files = adapter.outer_artifacts(
             received(project),
             skills_root="/project/.agents/skills",
             agents_root="/project/.codex/agents",
-            instructions_path="/project/AGENTS.md",
         ).files
     else:
         user_files = adapter.outer_artifacts(received(user), "/home/.native").files
         project_files = adapter.outer_artifacts(received(project), "/project/.native").files
     result = adapter.session_artifacts(
         context(ancestors=tuple(owned(file) for file in (*user_files, *project_files))),
-        configured=None,
         extra_args=[],
     )
     assert not result.application.files and not result.argv

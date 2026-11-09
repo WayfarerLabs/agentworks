@@ -36,6 +36,7 @@ from typing import TYPE_CHECKING, Annotated, ClassVar, Literal
 from pydantic import Field
 
 from agentworks.artifacts.application import ArtifactApplication
+from agentworks.artifacts.model import ArtifactType
 from agentworks.artifacts.native.common import (
     NativeSessionArtifacts,
     defer_setup_conflicts,
@@ -414,11 +415,31 @@ class ClaudeCodeIntegration(HarnessIntegration):
             msg = f"agentworks harness integration (claude-code): starting new session {self._session_name}"
         parts = [shlex.quote(token) for token in (*identity, "--name", self._session_name, *self._managed_flags())]
         if self.config.agent is not None:
-            parts += ["--agent", shlex.quote(self.config.agent)]
-        if (
-            self.config.append_system_prompt is not None
-            and "--append-system-prompt-file" not in self._artifact_plan.argv
-        ):
+            selected_agent = self.config.agent
+            context = self._session_binding.artifact_context
+            selected_origins = (
+                {
+                    item.origin_identity
+                    for item in context.inputs.items()
+                    if item.content.type is ArtifactType.AGENT and item.content.name == selected_agent
+                }
+                if context is not None
+                else set()
+            )
+            delivered = {
+                file.native_identity.removeprefix("agent:")
+                for file in self._artifact_plan.application.files
+                if file.native_identity is not None
+                and file.native_identity.startswith("agent:")
+                and selected_origins.intersection(file.origins)
+            }
+            if len(delivered) > 1:
+                raise StateError(
+                    f"Claude persona selection '{selected_agent}' has multiple delivered native identities"
+                )
+            selected_agent = next(iter(delivered), selected_agent)
+            parts += ["--agent", shlex.quote(selected_agent)]
+        if self.config.append_system_prompt is not None:
             parts += ["--append-system-prompt", shlex.quote(self.config.append_system_prompt)]
         parts += [shlex.quote(token) for token in self._artifact_plan.argv]
         parts += [self.quote_context_argv(token) for token in self.config.extra_args]

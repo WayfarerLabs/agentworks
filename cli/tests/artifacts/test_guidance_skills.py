@@ -18,8 +18,10 @@ from tests.artifacts._fixtures import received
 from tests.artifacts.test_native_delivery import artifact, context
 
 
-def metadata(file):
-    return yaml.safe_load(file.data.decode().split("---", 2)[1])
+def metadata(file: ArtifactFile) -> dict:
+    value = yaml.safe_load(file.data.decode().split("---", 2)[1])
+    assert isinstance(value, dict)
+    return value
 
 
 def test_same_named_rules_and_hints_from_different_scopes_have_distinct_owned_packages():
@@ -68,11 +70,13 @@ def test_home_publication_refuses_unrelated_or_forged_packages(change):
     current = context(item)
     plan = codex.session_artifacts(current, extra_args=[], enabled_workarounds=["session-home-skills"])
     file = plan.application.files[0]
+    package = file.package_root
+    assert package is not None
     if change == "outside-home":
         file = replace(
             file,
             path=file.path.replace(current.home, "/outside", 1),
-            package_root=file.package_root.replace(current.home, "/outside", 1),
+            package_root=package.replace(current.home, "/outside", 1),
         )
     elif change in ("other-session", "other-run"):
         foreign = (
@@ -100,3 +104,105 @@ def test_ordinary_home_file_without_a_native_skill_package_is_never_authorized()
     arbitrary = ArtifactFile(current.home + "/.profile", b"changed", (item.origin_identity,))
     with pytest.raises(StateError):
         validate_session_application(replace(plan.application, files=(arbitrary,)), current, integration="codex")
+
+
+@pytest.mark.parametrize("selection,delivered", [("review", True), ("review", False), (None, True)])
+def test_explicit_claude_persona_selection_tracks_only_its_delivered_native_identity(selection, delivered):
+    import shlex
+
+    from agentworks.capabilities.base import RunContext
+    from agentworks.capabilities.harness_integration import HarnessLaunchIntent
+    from agentworks.plugins.claude.artifacts import session_artifacts
+    from agentworks.plugins.claude.harness_integration import ClaudeCodeIntegration
+
+    item = artifact(ArtifactType.AGENT)
+    current = context(item)
+    integration = ClaudeCodeIntegration(
+        "claude-code",
+        {"agent": selection},
+        session_name="s1",
+        vm_name="vm",
+        workspace_name="ws",
+        workspace_path="/ws",
+        target=None,
+        admin=True,
+        state={},
+        artifact_context=current,
+    )
+    integration._artifact_plan = session_artifacts(
+        current, extra_args=[], enabled_workarounds=["session-agent-definitions"] if delivered else []
+    )
+    command = integration._resume_or_launch(RunContext(), intent=HarnessLaunchIntent.CREATE)
+    argv = shlex.split(shlex.split(command)[2])
+    if selection is None:
+        assert "--agent" not in argv
+    elif delivered:
+        identity = next(
+            file.native_identity.removeprefix("agent:")
+            for file in integration._artifact_plan.application.files
+            if file.native_identity and file.native_identity.startswith("agent:")
+        )
+        assert argv[argv.index("--agent") + 1] == identity
+    else:
+        assert argv[argv.index("--agent") + 1] == selection
+
+
+def test_explicit_claude_persona_selection_refuses_ambiguous_surviving_mapping():
+    from agentworks.artifacts.application import ArtifactApplication
+    from agentworks.artifacts.native.common import NativeSessionArtifacts
+    from agentworks.capabilities.base import RunContext
+    from agentworks.capabilities.harness_integration import HarnessLaunchIntent
+    from agentworks.plugins.claude.harness_integration import ClaudeCodeIntegration
+
+    item = artifact(ArtifactType.AGENT)
+    integration = ClaudeCodeIntegration(
+        "claude-code",
+        {"agent": item.content.name},
+        session_name="s1",
+        vm_name="vm",
+        workspace_name="ws",
+        workspace_path="/ws",
+        target=None,
+        admin=True,
+        state={},
+        artifact_context=context(item),
+    )
+    integration._artifact_plan = NativeSessionArtifacts(
+        ArtifactApplication(
+            files=tuple(
+                ArtifactFile(
+                    f"/private/{index}.md",
+                    b"fixture",
+                    (item.origin_identity,),
+                    native_identity=f"agent:plugin{index}:review",
+                )
+                for index in (1, 2)
+            )
+        )
+    )
+    with pytest.raises(StateError):
+        integration._resume_or_launch(RunContext(), intent=HarnessLaunchIntent.CREATE)
+
+
+def test_generated_helper_collision_defers_both_origins_and_keeps_independent_guidance(monkeypatch):
+    from agentworks.artifacts.native.common import prepare_session_delivery
+    from agentworks.plugins.claude.artifacts import session_artifacts
+
+    rule = artifact(ArtifactType.RULE)
+    generated = guidance_skills("/skills", received(rule))[0]
+    colliding = artifact(ArtifactType.SKILL, name=metadata(generated)["name"])
+    hint = artifact(ArtifactType.HINT, name="independent")
+    current = context(rule, colliding, hint)
+    monkeypatch.setattr("agentworks.artifacts.native.probe.probe_native", lambda *a, **k: "/home/alice/.claude")
+    result, _ = prepare_session_delivery(
+        object(),
+        tool="claude",
+        integration="claude-code",
+        context=current,
+        render=lambda prepared: session_artifacts(
+            prepared, extra_args=[], enabled_workarounds=["session-skill-plugin"]
+        ),
+        workspace="/ws",
+    )
+    assert {deferred.input_id for deferred in result.application.deferred} == {rule.identity, colliding.identity}
+    assert {origin for file in result.application.files for origin in file.origins} == {hint.origin_identity}

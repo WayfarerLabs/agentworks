@@ -19,7 +19,6 @@ from agentworks.artifacts.native.common import (
     reject_flags,
     select_session_artifacts,
     skill_files,
-    validate_ancestor_names,
     validate_names,
     validate_native_argv,
 )
@@ -121,7 +120,6 @@ def session_artifacts(
         elif item.content.type is ArtifactType.AGENT:
             files.append(_persona_file(f"{plugin}/agents", item, namespace=plugin_name + ":"))
     application = ArtifactApplication(tuple(files), deferred)
-    validate_ancestor_names(context, application)
     argv = ("--plugin-dir", plugin)
     validate_native_argv(argv)
     return NativeSessionArtifacts(application, argv)

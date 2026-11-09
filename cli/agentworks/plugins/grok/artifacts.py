@@ -21,7 +21,6 @@ from agentworks.artifacts.native.common import (
     select_inputs,
     select_session_artifacts,
     skill_files,
-    validate_ancestor_names,
     validate_names,
 )
 from agentworks.artifacts.native.guidance import guidance_rules, guidance_skills
@@ -151,5 +150,4 @@ def session_artifacts(
             "not individual native commands."
         )
     application = ArtifactApplication(tuple(files), deferred, artifacts_dir=private.artifacts_dir)
-    validate_ancestor_names(context, application)
     return NativeSessionArtifacts(application)

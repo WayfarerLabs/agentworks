@@ -244,12 +244,6 @@ def persona_options(item: ArtifactInput, integration: str, allowed: Mapping[str,
     return dict(options)
 
 
-def context_text(inputs: tuple[ArtifactInput, ...], configured: str | None = None) -> str:
-    parts = [configured] if configured is not None else []
-    parts.extend(item.content.text for item in inputs if item.content.type in (ArtifactType.HINT, ArtifactType.RULE))
-    return "\n\n".join(parts)
-
-
 def reject_flags(extra_args: Sequence[str], forbidden: set[str], integration: str) -> None:
     """Reject raw CLI switches that replace or disable an artifact carrier."""
     for token in extra_args:
@@ -354,6 +348,7 @@ def prepare_session_delivery(
         plan = None
         try:
             plan = render(current)
+            validate_ancestor_names(current, plan.application)
             if plan.application.files or plan.argv:
                 if runner is None:
                     raise StateError("artifact delivery requires the actual native launch target")

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sys
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -15,7 +14,6 @@ from agentworks.plugins.codex import artifacts as codex
 from agentworks.plugins.codex.harness_integration import CodexIntegration
 from tests.artifacts._fixtures import received
 from tests.artifacts.test_native_delivery import artifact
-from tests.native_setup_fixtures import LocalFixtureTransport
 
 
 @pytest.mark.parametrize("integration_type", [ShellIntegration, ClaudeCodeIntegration, CodexIntegration])
@@ -35,21 +33,20 @@ def test_vm_plans_apply_supported_types_without_descendant_context(monkeypatch, 
     expected = {
         item.origin_identity
         for item in items
-        if integration_type is not CodexIntegration or item.content.type is ArtifactType.SKILL
+        if integration_type is not CodexIntegration or item.content.type is not ArtifactType.AGENT
     }
     assert applied == expected
     if integration_type is CodexIntegration:
         assert {entry.input_id for entry in result.deferred} == {
-            item.identity for item in items if item.content.type is not ArtifactType.SKILL
+            item.identity for item in items if item.content.type is ArtifactType.AGENT
         }
         assert {entry.destination for entry in result.deferred} == {"user"}
         assert all(file.path.startswith("/etc/codex/skills/") for file in result.files)
     else:
         assert result.deferred == ()
     if integration_type is ClaudeCodeIntegration:
-        memory = next(file for file in result.files if file.path == "/etc/claude-code/CLAUDE.md")
-        assert memory.generated_section
-        assert all(file.path.startswith("/etc/claude-code/.claude/") for file in result.files if file is not memory)
+        assert all(file.path.startswith("/etc/claude-code/.claude/") for file in result.files)
+        assert not any(file.generated_section for file in result.files)
     if integration_type is ShellIntegration:
         assert all(file.path.startswith("/opt/agentworks/artifacts/") for file in result.files)
     else:
@@ -58,26 +55,8 @@ def test_vm_plans_apply_supported_types_without_descendant_context(monkeypatch, 
         assert "workspace" not in calls[0]
 
 
-@pytest.mark.skipif(sys.platform != "linux", reason="Linux guest filesystem operations")
-@pytest.mark.parametrize("override", [None, b"", b" \n", b"Existing override instructions\n"])
-def test_codex_selects_native_instruction_file_without_changing_it(tmp_path, override):
-    target = LocalFixtureTransport(tmp_path / "target")
-    root = target.home / ".codex"
-    root.mkdir()
-    ordinary = root / "AGENTS.md"
-    ordinary.write_bytes(b"Existing ordinary instructions\n")
-    selected = root / "AGENTS.override.md"
-    if override is not None:
-        selected.write_bytes(override)
-    path = codex.guidance_path(target, str(root))
-    assert path == str(selected if override and override.strip() else ordinary)
-    assert ordinary.read_bytes() == b"Existing ordinary instructions\n"
-    if override is not None:
-        assert selected.read_bytes() == override
-
-
 @pytest.mark.parametrize("root", ["/home/alice/.codex", "/workspace"])
-def test_codex_aggregates_all_guidance_without_losing_same_named_scoped_inputs(root):
+def test_codex_preserves_individual_guidance_from_same_named_scoped_inputs(root):
     inputs = received(
         *(
             artifact(kind, owner=owner)
@@ -85,11 +64,11 @@ def test_codex_aggregates_all_guidance_without_losing_same_named_scoped_inputs(r
             for kind in (ArtifactType.HINT, ArtifactType.RULE)
         )
     )
-    plan = codex.outer_artifacts(
-        inputs, skills_root=f"{root}/skills", agents_root=f"{root}/agents", instructions_path=f"{root}/AGENTS.md"
-    )
-    assert len(plan.files) == 1
-    assert plan.files[0].generated_section
-    assert plan.files[0].origins == tuple(item.origin_identity for item in inputs.items())
-    assert plan.files[0].data.count(b"before ${agw:session_name} after") == 4
-    assert plan.deferred == ()
+    plan = codex.outer_artifacts(inputs, skills_root=f"{root}/skills", agents_root=f"{root}/agents")
+    assert len(plan.files) == 4
+    assert len({file.path for file in plan.files}) == 4
+    assert {origin for file in plan.files for origin in file.origins} == {
+        item.origin_identity for item in inputs.items()
+    }
+    assert all(len(file.origins) == 1 and not file.generated_section for file in plan.files)
+    assert not plan.deferred

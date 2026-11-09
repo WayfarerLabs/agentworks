@@ -16,7 +16,6 @@ from agentworks.capabilities.harness_integration.setup import (
     UserSetupInvocation,
     WorkspaceSetupInvocation,
 )
-from agentworks.errors import ConfigError
 from agentworks.plugins.claude.harness_integration import ClaudeCodeIntegration
 from agentworks.plugins.codex.harness_integration import CodexIntegration
 from agentworks.plugins.grok.harness_integration import GrokBuildIntegration
@@ -37,8 +36,6 @@ def test_setup_defers_all_colliding_origins_and_applies_independent_rule(
     setup_method = "setup_user" if facet == "user" else "setup_workspace"
     if hasattr(module, setup_method):
         monkeypatch.setattr(module, setup_method, native_setup)
-    if implementation is CodexIntegration:
-        monkeypatch.setattr(module, "guidance_path", lambda runner, root: root + "/AGENTS.md")
     outer = replace(artifact(artifact_type), origin=ArtifactOrigin("vm", "vm", "vm", entry="review"))
     component = "agent" if facet == "user" else "workspace"
     local = replace(artifact(artifact_type), origin=ArtifactOrigin(component, component, "local", entry="review"))
@@ -86,7 +83,6 @@ def test_session_cross_origin_names_are_rejected_or_left_unhandled(adapter, arti
     if adapter == "grok":
         result = module.session_artifacts(
             context=context(outer, local),
-            configured=None,
             extra_args=["--single", "fixture task"],
             enabled_workarounds=enabled(module.session_artifacts),
         )
@@ -98,7 +94,6 @@ def test_session_cross_origin_names_are_rejected_or_left_unhandled(adapter, arti
     with pytest.raises(NativeArtifactConflictError):
         module.session_artifacts(
             context=context(outer, local),
-            configured=None,
             extra_args=["--single", "fixture task"] if adapter == "grok" else [],
             enabled_workarounds=enabled(module.session_artifacts),
         )
@@ -115,18 +110,16 @@ def test_grok_cross_origin_rules_survive_competing_unhandled_personas(override):
     personas = tuple(artifact(ArtifactType.AGENT, owner=owner) for owner in ("outer", "local"))
     kwargs = {
         "context": context(outer, local, *personas),
-        "configured": None,
         "extra_args": ["--rules", "override"] if override else [],
-        "enabled_workarounds": ["session-rules", "session-agent-definitions"],
+        "enabled_workarounds": ["session-home-skills", "session-agent-definitions"],
     }
-    if override:
-        with pytest.raises(ConfigError):
-            session_artifacts(**kwargs)
-    else:
-        result = session_artifacts(**kwargs)
-        assert result.argv == ("--rules", "outer guidance\n\nlocal guidance")
-        assert result.application.files == ()
-        assert {item.input_id for item in result.application.deferred} == {item.identity for item in personas}
+    result = session_artifacts(**kwargs)
+    assert result.argv == () and result.application.files
+    assert {origin for file in result.application.files for origin in file.origins} == {
+        outer.origin_identity,
+        local.origin_identity,
+    }
+    assert {item.input_id for item in result.application.deferred} == {item.identity for item in personas}
 
 
 def test_deferring_a_renamed_existing_entry_exposes_its_other_native_collision(db):

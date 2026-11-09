@@ -426,8 +426,8 @@ class CodexIntegration(HarnessIntegration):
         Ships as the opt-in `codex` system plugin, and needs the `codex` CLI on the
         session's target.
 
-        Machine, user and workspace facets publish standard skills, generated guidance
-        skills and supported native personas. Session artifacts are unhandled by default.
+        The VM facet publishes machine skills and generated guidance skills. User and
+        workspace facets also publish supported native personas. Session artifacts are unhandled by default.
         `session-home-skills` publishes session-qualified rules, hints and skills in the
         shared user skill catalog: applicability through UUID/run metadata is best effort.
         `session-agent-config` supplies private delegated-persona configuration. Primary
@@ -1019,9 +1019,7 @@ class CodexIntegration(HarnessIntegration):
         """
         parts = [shlex.quote(token) for token in (*head, *self._managed_flags())]
         parts += ["-c", notify_value_word(self._session_name)]
-        if self.config.developer_instructions is not None and not any(
-            token.startswith("developer_instructions=") for token in self._artifact_plan.argv
-        ):
+        if self.config.developer_instructions is not None:
             value = _toml_basic_string(self.config.developer_instructions)
             parts += ["-c", shlex.quote(f"developer_instructions={value}")]
         parts += [shlex.quote(token) for token in self._artifact_plan.argv]
