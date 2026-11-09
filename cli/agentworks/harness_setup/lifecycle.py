@@ -35,6 +35,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
     from agentworks.db.instance_state import InstanceKind
+    from agentworks.execution.files import Files
     from agentworks.harness_setup.locking import NativeMutationGuard
     from agentworks.harness_setup.model import NativeSetupState, SetupComponent
     from agentworks.harness_setup.outcomes import SetupFailure
@@ -44,9 +45,6 @@ if TYPE_CHECKING:
     from agentworks.vms.admin import AdminConfig
     from agentworks.vms.templates import ResolvedVMTemplate
     from agentworks.workspaces.templates import ResolvedTemplate
-
-VM_SETUP_DEADLINE = 60
-"""Seconds that bound each of VM-scope setup's requests, as create and reinit bound every call they make."""
 
 
 def _needed(
@@ -165,7 +163,7 @@ def prepare_workspace_setup(
 
 def apply_vm_setup(
     db: Database,
-    config: Config,
+    files: Files,
     registry: Registry,
     *,
     inputs: tuple[SetupInputs, ...],
@@ -176,9 +174,12 @@ def apply_vm_setup(
     operation: str,
     failures: list[SetupFailure],
 ) -> None:
-    """Apply VM then admin setup as the admin."""
-    access = execution.vm_access(vm, config, Admin(), log=logger.record)
-    files = access.files(deadline=VM_SETUP_DEADLINE)
+    """Apply VM then admin setup as the admin, on Phase B's ``files`` and its access.
+
+    ``files`` carries Phase B's bound, so every setup request has the one
+    create and reinit give each of their own.
+    """
+    access = files.access
     for item in inputs:
         context = ResourceContext(
             vm_name=vm.name, platform=site_platform_name(vm.site, registry), site=vm.site, user=vm.admin_username

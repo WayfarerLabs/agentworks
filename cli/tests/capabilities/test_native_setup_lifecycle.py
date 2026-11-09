@@ -401,7 +401,7 @@ def test_applied_state_appearing_after_empty_preparation_refuses_before_core(db,
 
 @pytest.mark.parametrize("failed_components", [(), ("vm",), ("admin",), ("vm", "admin")])
 def test_vm_and_admin_setup_follow_core_before_terminal_checkpoint(
-    db, registry, vm, native, monkeypatch, failed_components
+    db, registry, vm, native, monkeypatch, failed_components, vm_access_recorder
 ):
     from agentworks.db import InitStatus
     from agentworks.debian import DebianRelease
@@ -425,6 +425,9 @@ def test_vm_and_admin_setup_follow_core_before_terminal_checkpoint(
 
     def vm_setup(self, invocation):
         assert events == ["core"]
+        # Setup runs on Phase B's own access and bound.
+        assert invocation.access is vm_access_recorder.access(vm_name=vm.name)
+        assert invocation.files.deadline == 60
         assert invocation.environment["TOKEN"] == "vm-private"
         assert "ADMIN_ONLY" not in invocation.environment
         assert "AGENTWORKS_AGENT" not in invocation.environment
@@ -466,11 +469,12 @@ def test_vm_and_admin_setup_follow_core_before_terminal_checkpoint(
             template,
             admin,
             vm.name,
-            native.target,
+            vm_access_recorder.access(vm_name=vm.name),
             (),
             "/home/admin",
             "admin",
             logger,
+            legacy_target=native.target,
             debian_release=DebianRelease.TRIXIE,
             operation=VMInitializationOperation.VM_REINIT,
             setup_inputs=inputs,

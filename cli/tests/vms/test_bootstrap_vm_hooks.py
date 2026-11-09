@@ -15,6 +15,7 @@ import pytest
 from agentworks.capabilities.base import RunContext
 from agentworks.debian import DebianRelease
 from agentworks.execution import trust
+from agentworks.execution.access import Admin
 from agentworks.vms.initializer import driver
 from tests.vms.phase_a_support import ADDRESS, VM, PhaseAHarness
 
@@ -46,12 +47,15 @@ def bootstrap(phase: PhaseAHarness, logger: Any = None) -> Any:
     )
 
 
-def test_phase_b_receives_a_vm_bound_target_at_the_recorded_address(phase: PhaseAHarness) -> None:
-    ts_target, home, release = bootstrap(phase)
+def test_phase_b_receives_the_admins_access_built_from_the_recorded_address(phase: PhaseAHarness) -> None:
+    access, legacy_target, home, release = bootstrap(phase)
 
-    assert ts_target.host == ADDRESS
-    assert ts_target.trust == trust.TrustBinding(trust.TrustMode.VM, VM)
-    assert ts_target.logger is phase.log
+    assert access is phase.admin
+    assert phase.recorder.built[-1] == (VM, Admin())
+    assert phase.recorder.rows[-1].tailscale_host == ADDRESS
+    assert phase.recorder.logs[-1] == phase.log.record
+    assert legacy_target.host == ADDRESS
+    assert legacy_target.trust == trust.TrustBinding(trust.TrustMode.VM, VM)
     assert (home, release) == ("/home/agentworks", DebianRelease.TRIXIE)
 
 

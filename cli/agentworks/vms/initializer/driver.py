@@ -1,11 +1,14 @@
-"""The two-phase init driver: Phase A (first contact and the VM contract, over
-``agentworks.execution``) and Phase B (setup, over the legacy Tailscale SSH
-transport, non-fatal-on-failure).
+"""The two-phase init driver: Phase A (first contact and the VM contract) and
+Phase B (setup, non-fatal-on-failure), both over ``agentworks.execution``.
 
 Phase A is provisioning: after the platform completes create-time bootstrap,
 ``bootstrap_vm`` runs ``phase_a.bootstrap`` (record the address, enroll the
-host key, check the contract) and syncs SSH config, then returns the Tailscale
-transport and home for Phase B. Phase B is initialization:
+host key, check the contract) and syncs SSH config, then returns the admin's
+``VMAccess`` and home for Phase B. Every Phase B request runs on that one
+access, each bounded by ``steps.STEP_DEADLINE`` unless it has a bound of its
+own. Until the Admin Initialization steps move, those steps and the final
+``authorized_keys`` write still take the legacy target the callers build
+beside the access. Phase B is initialization:
 ``run_initialization`` runs it, both after ``bootstrap_vm`` on ``vm create``
 and standalone on ``vm reinit``.
 
@@ -66,6 +69,7 @@ from .ssh_keys import (
     _preserve_ssh_host_keys,
     _reconcile_authorized_keys,
 )
+from .steps import STEP_DEADLINE
 from .workspaces_dir import _setup_workspaces_directory
 
 if TYPE_CHECKING:
@@ -77,6 +81,8 @@ if TYPE_CHECKING:
     from agentworks.db import Database, DesiredOverlayRecord
     from agentworks.db.instance_state import VersionedPayload
     from agentworks.debian import DebianRelease
+    from agentworks.execution.access import VMAccess
+    from agentworks.execution.files import Files
     from agentworks.git_credentials import CredentialRequest
     from agentworks.harness_setup.inputs import SetupInputs
     from agentworks.harness_setup.locking import NativeMutationGuard
@@ -104,16 +110,17 @@ def bootstrap_vm(
     admin_username: str,
     tailnet_address: str,
     expected_release: DebianRelease,
-) -> tuple[Transport, str, DebianRelease]:
-    """Run Phase A (``phase_a.bootstrap``), then hand Phase B its legacy target.
+) -> tuple[VMAccess, Transport, str, DebianRelease]:
+    """Run Phase A (``phase_a.bootstrap``), then hand Phase B the admin's access.
 
     Phase A records the platform's address, makes the first contact in Enroll
     mode and runs the VM contract, release first, all over
     ``agentworks.execution``; see :mod:`.phase_a` for its fail-closed span.
-    What stays here is what stays legacy until initialization moves: the
-    non-fatal SSH-config sync, and Phase B's VM-bound ``SSHTransport``.
+    The non-fatal SSH-config sync follows.
 
-    Returns ``(ts_target, home, release)``: the target and home for
+    Returns ``(access, legacy_target, home, release)``: the admin's access,
+    built from the row Phase A recorded the address on, the legacy target the
+    Admin Initialization steps still take beside it, the home for
     ``run_initialization``, and the release Phase A attested. The caller owns
     the availability hold spanning both phases, the ``Provisioning`` output
     section and ``logger``'s lifetime.
@@ -136,15 +143,18 @@ def bootstrap_vm(
 
     sync_ssh_config_or_warn(config, db)
 
-    ts_target = SSHTransport(
+    vm = db.get_vm(vm_name)
+    assert vm is not None, f"VM '{vm_name}' missing from DB after Phase A"
+    access = execution.vm_access(vm, config, Admin(), log=logger.record)
+    legacy_target = SSHTransport(
         host=address,
         trust=trust.TrustBinding(trust.TrustMode.VM, vm_name),
         user=admin_username,
         identity_file=config.operator.ssh_private_key,
-        default_timeout=60,
+        default_timeout=STEP_DEADLINE,
         logger=logger,
     )
-    return ts_target, f"/home/{admin_username}", release
+    return access, legacy_target, f"/home/{admin_username}", release
 
 
 def run_initialization(
@@ -154,12 +164,13 @@ def run_initialization(
     vm_template: ResolvedVMTemplate,
     admin: AdminConfig,
     vm_name: str,
-    ts_target: Transport,
+    access: VMAccess,
     credential_requests: tuple[CredentialRequest, ...],
     home: str,
     admin_username: str,
     logger: SSHLogger,
     *,
+    legacy_target: Transport,
     debian_release: DebianRelease,
     operation: VMInitializationOperation,
     setup_failures: list[SetupFailure],
@@ -177,6 +188,11 @@ def run_initialization(
     Native setup failures join the caller's collector and leave initialization
     partial after terminal key reconciliation and checkpointing. The caller
     reports them after its remaining command bookkeeping.
+
+    ``access`` is the admin's, and every step's requests run on it, bounded
+    by ``STEP_DEADLINE`` through one ``Files``. ``legacy_target`` is the
+    admin's legacy transport, which the Admin Initialization steps and the
+    final ``authorized_keys`` write take until they move onto ``access``.
     """
     from agentworks.harness_setup.locking import native_mutation_guard
 
@@ -186,6 +202,7 @@ def run_initialization(
         require_prepared_setup(db, "vm", vm_name, ("vm", "admin"), setup_inputs)
         db.insert_vm_event(vm_name, "init_started")
 
+        files = access.files(deadline=STEP_DEADLINE)
         try:
             _phase_b_setup(
                 db,
@@ -194,11 +211,12 @@ def run_initialization(
                 vm_template,
                 admin,
                 vm_name,
-                ts_target,
+                files,
                 credential_requests,
                 home,
                 admin_username,
                 logger,
+                legacy_target=legacy_target,
                 debian_release=debian_release,
                 operation=operation,
             )
@@ -209,7 +227,7 @@ def run_initialization(
                 assert vm is not None
                 apply_vm_setup(
                     db,
-                    config,
+                    files,
                     registry,
                     inputs=setup_inputs,
                     vm=vm,
@@ -220,7 +238,7 @@ def run_initialization(
                     failures=setup_failures,
                 )
             # Terminal guest mutation follows every integration's setup.
-            authorized_keys = _reconcile_authorized_keys(ts_target, config, home, logger)
+            authorized_keys = _reconcile_authorized_keys(legacy_target, config, home, logger)
         except Exception as e:
             with db.transaction():
                 db.update_vm_init_status(vm_name, InitStatus.FAILED)
@@ -295,16 +313,17 @@ def _phase_b_setup(
     vm_template: ResolvedVMTemplate,
     admin: AdminConfig,
     vm_name: str,
-    ts_target: Transport,
+    files: Files,
     credential_requests: tuple[CredentialRequest, ...],
     home: str,
     admin_username: str,
     logger: SSHLogger,
     *,
+    legacy_target: Transport,
     debian_release: DebianRelease,
     operation: VMInitializationOperation,
 ) -> None:
-    """Phase B: Setup (over Tailscale SSH). Non-fatal steps warn and continue."""
+    """Phase B: setup on the admin's ``files.access``. Non-fatal steps warn and continue."""
     with output.section("VM Initialization"):
         from agentworks.resources.access import kind_dict
 
@@ -333,7 +352,7 @@ def _phase_b_setup(
         # Runs first so VMs predating the create-time bootstrap step are
         # repaired on reinit even if a later step warns. Idempotent overwrite
         # with identical content.
-        _preserve_ssh_host_keys(ts_target, logger)
+        _preserve_ssh_host_keys(legacy_target, logger)
 
         # Non-fatal: repair the Apple-vz SVE trap (arm64.nosve grub drop-in) on
         # VMs provisioned before the create-time bootstrap mask existed. Runs
@@ -341,7 +360,7 @@ def _phase_b_setup(
         # least gets the fix installed this pass; it needs a restart plus one
         # more reinit to converge. A silent no-op on every non-Apple host and on
         # already-masked VMs.
-        _apply_sve_mask(ts_target, logger)
+        _apply_sve_mask(legacy_target, logger)
 
         # Non-fatal: VM hardening (sysctl baseline + /proc hidepid>=1).
         # Runs before the rest of init so subsequent steps execute under the
@@ -350,7 +369,7 @@ def _phase_b_setup(
         # reinit.
         from agentworks.vms.hardening import apply_vm_hardening
 
-        apply_vm_hardening(ts_target, logger)
+        apply_vm_hardening(legacy_target, logger)
 
         # Check VM DNS works before subsequent steps that need external
         # resolution (apt-get update, source fetches, etc.) fail cryptically.
@@ -364,7 +383,7 @@ def _phase_b_setup(
             check_vm_dns,
         )
 
-        check_vm_dns(ts_target, logger)
+        check_vm_dns(legacy_target, logger)
 
         # Non-fatal: tailscaled cold-boot DNS race fix (GitHub issue #117).
         # Drops in a systemd override that orders tailscaled after the DNS
@@ -372,16 +391,16 @@ def _phase_b_setup(
         # falling back to direct mode. Applied early in Phase B so existing
         # VMs pick up the fix on the first reinit. Does not restart
         # tailscaled (would disconnect us); takes effect on next cold boot.
-        apply_tailscaled_dns_fix(ts_target, logger)
+        apply_tailscaled_dns_fix(legacy_target, logger)
 
         # Non-fatal: VM-wide SetEnv plumbing.
         # Runs before apt install so subsequent SSH commands within init can
         # rely on the SetEnv path. These targets don't touch zsh-shipped files,
         # so dpkg conffile handling doesn't apply.
-        _write_sshd_accept_env(ts_target, logger)
-        _write_sudoers_env_keep(ts_target, logger)
+        _write_sshd_accept_env(legacy_target, logger)
+        _write_sudoers_env_keep(legacy_target, logger)
         # Pairs with the --preserve-env in _split_shell_pane's agent-pane branch.
-        _write_sudoers_console_setenv(ts_target, logger, admin_username)
+        _write_sudoers_console_setenv(legacy_target, logger, admin_username)
         vm_row = db.get_vm(vm_name)
         # Init runs against a VM that exists in the DB (bootstrap_vm fetches the
         # row up front). A None here is an internal invariant violation, not a
@@ -409,11 +428,11 @@ def _phase_b_setup(
         # consoles), never build-time install machinery.
 
         # Required system packages must succeed before dependent setup runs.
-        _install_system_packages(ts_target, logger)
+        _install_system_packages(legacy_target, logger)
 
         # Non-fatal: apt sources required by selected apt_packages
         _configure_apt_sources(
-            ts_target,
+            legacy_target,
             vm_template,
             apt_packages,
             apt_sources,
@@ -423,7 +442,7 @@ def _phase_b_setup(
         )
 
         # Non-fatal: apt packages (direct list + apt-package entries)
-        _install_apt_packages(ts_target, vm_template, apt_packages, logger)
+        _install_apt_packages(legacy_target, vm_template, apt_packages, logger)
 
         # Identity profile fragments. Runs AFTER apt install because apt uses
         # `--force-confnew`, which would replace the agentworks block in
@@ -432,7 +451,7 @@ def _phase_b_setup(
         # on top of whatever the package shipped. The mirror is idempotent on
         # reinit (strip-and-rewrite via begin/end markers).
         _write_agentworks_identity_profile(
-            ts_target,
+            legacy_target,
             vm_stable_identity_env(identity_ctx),
             logger,
         )
@@ -443,7 +462,7 @@ def _phase_b_setup(
         # `--force-confnew` would let a bash upgrade silently replace the
         # seed with Debian's stock skel (saving ours as .dpkg-old). Future
         # `useradd -m` would then inherit Debian's skel instead.
-        _write_skel_seeds(ts_target, logger)
+        _write_skel_seeds(legacy_target, logger)
 
         # Non-fatal: snap packages
         if vm_template.snap:
@@ -451,7 +470,7 @@ def _phase_b_setup(
             output.info(f"Installing {output.count(len(vm_template.snap), 'snap package')}...")
             for pkg in vm_template.snap:
                 try:
-                    ts_target.run(f"snap install {shlex.quote(pkg)}", sudo=True, timeout=120)
+                    legacy_target.run(f"snap install {shlex.quote(pkg)}", sudo=True, timeout=120)
                 except SSHError as e:
                     msg = f"snap install '{pkg}' failed: {e}"
                     logger.warning(msg)
@@ -467,7 +486,7 @@ def _phase_b_setup(
         # they do not depend on the login-shell usermod, and they install
         # system-wide tools rather than touching the admin's rc.
         system_path = _run_install_commands(
-            ts_target,
+            legacy_target,
             vm_template.system_install_commands,
             system_install_commands,
             admin_shell,
@@ -491,13 +510,13 @@ def _phase_b_setup(
             output.info("Setting up agent tmux socket infrastructure...")
 
             ensure_agent_socket_root(
-                ts_target,
+                legacy_target,
                 admin_username,
                 warn_if_missing=operation is not VMInitializationOperation.VM_CREATE,
             )
             for agent in db.list_agents(vm_name=vm_name):
-                ensure_agent_socket_dir(ts_target, agent.linux_user)
-                removed = cleanup_stale_sockets(ts_target, agent.linux_user)
+                ensure_agent_socket_dir(legacy_target, agent.linux_user)
+                removed = cleanup_stale_sockets(legacy_target, agent.linux_user)
                 if removed:
                     output.detail(f"Cleaned up {output.count(removed, 'stale socket')} for {agent.linux_user}")
         except SSHError as e:
@@ -512,7 +531,7 @@ def _phase_b_setup(
         logger.step("Shell configuration")
         output.info(f"Setting shell to {admin_shell}...")
         try:
-            ts_target.run(
+            legacy_target.run(
                 f"usermod -s $(which {shlex.quote(admin_shell)}) {shlex.quote(admin_username)}",
                 sudo=True,
             )
@@ -525,24 +544,24 @@ def _phase_b_setup(
         # hardening in agents/initializer.py). Runs on both initial provision
         # and reinit (both reach _phase_b_setup), so a pre-existing
         # world-readable admin home is repaired on the next reinit.
-        _harden_admin_home(ts_target, home=home, admin_username=admin_username, logger=logger)
+        _harden_admin_home(legacy_target, home=home, admin_username=admin_username, logger=logger)
 
         # Non-fatal: the shared workspaces parent directory and its canonical
         # ACL (recursive over all workspaces). The ACL apply and the
         # parent-traversal re-grant are order-dependent, so they live in one
         # helper that documents and enforces the order (see #254).
-        _setup_workspaces_directory(ts_target, config, logger)
+        _setup_workspaces_directory(legacy_target, config, logger)
 
         # Non-fatal: mise config (written before dotfiles so dotfiles can override)
         mise_path: list[str] = _mise_shims_path(home)
         if admin.mise_packages:
-            _write_mise_config(ts_target, admin.mise_packages, admin.mise_install_before, home, logger)
+            _write_mise_config(legacy_target, admin.mise_packages, admin.mise_install_before, home, logger)
 
         # Non-fatal: git safe.directory wildcard (disables ownership checks for the
         # multi-user workspace model where agents access repos owned by admin)
         if admin.git_force_safe_directory:
             try:
-                ensure_safe_directory_wildcard(ts_target)
+                ensure_safe_directory_wildcard(legacy_target)
                 output.info("Git safe.directory wildcard configured")
             except SSHError as e:
                 msg = f"git safe.directory setup failed: {e}"
@@ -551,8 +570,8 @@ def _phase_b_setup(
 
         # Non-fatal: git credentials (before dotfiles and mise lockfile for private repos)
         configure_user_git_credentials(
-            ts_target,
-            execution.vm_access(vm_row, config, Admin(), log=logger.record),
+            legacy_target,
+            files.access,
             credential_requests,
             config,
             logger,
@@ -572,7 +591,7 @@ def _phase_b_setup(
 
                 ref = parse_source_ref(admin.dotfiles_source)
                 output.info(f"Syncing dotfiles from {admin.dotfiles_source}...")
-                fetch_dir(ref, ts_target, dest, logger=logger)
+                fetch_dir(ref, legacy_target, dest, logger=logger)
                 synced = True
             except Exception as e:
                 msg = (
@@ -584,7 +603,7 @@ def _phase_b_setup(
             if synced:
                 try:
                     output.info(f"Running dotfiles install: {admin.dotfiles_install_cmd}")
-                    ts_target.run(
+                    legacy_target.run(
                         f"cd {dest} && {admin.dotfiles_install_cmd}",
                         timeout=120,
                     )
@@ -595,13 +614,13 @@ def _phase_b_setup(
 
         # Non-fatal: mise lockfile (after git creds and dotfiles; overrides dotfiles lockfile)
         if admin.mise_lockfile:
-            _fetch_mise_lockfile(ts_target, admin.mise_lockfile, home, logger)
+            _fetch_mise_lockfile(legacy_target, admin.mise_lockfile, home, logger)
 
         # Non-fatal: mise install (after config + dotfiles + lockfile are all settled)
         prune = admin.mise_prune_on_reinit
         if admin.mise_packages or admin.mise_lockfile:
             _run_mise_install(
-                ts_target,
+                legacy_target,
                 admin_shell,
                 home,
                 admin.mise_allow_unlocked,
@@ -610,10 +629,10 @@ def _phase_b_setup(
             )
         else:
             try:
-                check = ts_target.run(f"test -f {home}/.config/mise/config.toml", check=False)
+                check = legacy_target.run(f"test -f {home}/.config/mise/config.toml", check=False)
                 if check.ok:
                     _run_mise_install(
-                        ts_target,
+                        legacy_target,
                         admin_shell,
                         home,
                         admin.mise_allow_unlocked,
@@ -625,7 +644,7 @@ def _phase_b_setup(
 
         # Non-fatal: user install commands for admin user (may depend on mise tools)
         user_path = _run_install_commands(
-            ts_target,
+            legacy_target,
             admin.user_install_commands,
             user_install_commands,
             admin_shell,
@@ -636,17 +655,17 @@ def _phase_b_setup(
 
         # Non-fatal: shell profile (PATH exports sourced at login)
         all_paths = system_path + mise_path + user_path
-        _write_agentworks_profile(ts_target, all_paths, logger)
+        _write_agentworks_profile(legacy_target, all_paths, logger)
 
         # Non-fatal: shell rc (interactive shell hooks like mise activate)
         rc_snippets = [MISE_ACTIVATE_LINES] if admin.mise_activate else ["# mise activation disabled"]
-        _write_agentworks_rc(ts_target, rc_snippets, logger)
+        _write_agentworks_rc(legacy_target, rc_snippets, logger)
 
         # Defensive final step: re-ensure source lines in case any earlier
         # step (dotfiles install in particular) overwrote a shell rc file
         # in place. Idempotent grep-or-append.
         _ensure_agentworks_files_sourced(
-            ts_target,
+            legacy_target,
             home=home,
             shell=admin_shell,
             logger=logger,

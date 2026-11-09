@@ -617,7 +617,7 @@ def create_vm(
                 # so a failure to open it maps like any other init failure, as
                 # it did when the hold was entered inside the old initialize_vm.
                 init_stack.enter_context(platform_obj.vm_active(init_row, config=config))
-                ts_target, home, observed_release = _mgr.bootstrap_vm(
+                access, legacy_target, home, observed_release = _mgr.bootstrap_vm(
                     db,
                     config,
                     vm_name,
@@ -665,11 +665,12 @@ def create_vm(
                 vm_tmpl,
                 admin,
                 vm_name,
-                ts_target,
+                access,
                 credential_ops,
                 home,
                 resolved_admin_username,
                 logger,
+                legacy_target=legacy_target,
                 debian_release=observed_release,
                 operation=_mgr.VMInitializationOperation.VM_CREATE,
                 setup_failures=setup_failures,

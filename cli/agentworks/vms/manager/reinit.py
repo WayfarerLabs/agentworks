@@ -56,6 +56,7 @@ def reinit_vm(
     import agentworks.vms.manager as _mgr
     from agentworks.bootstrap import load_request_registry
     from agentworks.transports import transport
+    from agentworks.vms.initializer.steps import STEP_DEADLINE
 
     # build_registry runs first so framework miss-policies surface
     # before any template / DB / VM business logic.
@@ -266,7 +267,8 @@ def reinit_vm(
             "vm-reinit",
             redactions=tuple(dict.fromkeys((*git_redactions, *(resolver.values.values() if setup_inputs else ())))),
         )
-        ts_target = transport(vm, config, default_timeout=60, logger=logger)
+        # The legacy target the Admin Initialization steps still take beside the access.
+        legacy_target = transport(vm, config, default_timeout=STEP_DEADLINE, logger=logger)
 
         home = f"/home/{vm.admin_username}"
 
@@ -292,11 +294,12 @@ def reinit_vm(
                     reinit_vm_tmpl,
                     admin,
                     name,
-                    ts_target,
+                    access,
                     credential_ops,
                     home,
                     vm.admin_username,
                     logger,
+                    legacy_target=legacy_target,
                     debian_release=verified_release,
                     operation=_mgr.VMInitializationOperation.VM_REINIT,
                     setup_failures=setup_failures,

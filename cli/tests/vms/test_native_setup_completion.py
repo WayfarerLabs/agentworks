@@ -84,10 +84,10 @@ def test_vm_reports_native_failures_only_after_command_completion(
 
     monkeypatch.setattr("agentworks.ssh.SSHLogger", Logger)
 
-    def bootstrap(*args: object, **kwargs: object) -> tuple[MagicMock, str, DebianRelease]:
+    def bootstrap(*args: object, **kwargs: object) -> tuple[MagicMock, MagicMock, str, DebianRelease]:
         db.update_vm_provisioning_status("box", ProvisioningStatus.COMPLETE)
         db.update_vm_tailscale("box", "100.64.0.7")
-        return target, "/home/agentworks", DebianRelease.TRIXIE
+        return MagicMock(), target, "/home/agentworks", DebianRelease.TRIXIE
 
     monkeypatch.setattr(vm_manager, "bootstrap_vm", bootstrap)
     expected = [

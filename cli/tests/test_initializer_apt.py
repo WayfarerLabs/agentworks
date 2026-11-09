@@ -23,6 +23,7 @@ from agentworks.vms.initializer import (
     _run_install_commands,
 )
 from agentworks.vms.initializer.driver import VMInitializationOperation, _phase_b_setup
+from tests.vm_access_support import Admin, RecordingVMAccess
 
 from ._initializer_support import _make_entries, _make_target, _make_vm_template
 
@@ -144,6 +145,7 @@ def test_configure_apt_sources_resolves_all_mappings_before_guest_mutation() -> 
 
 def test_phase_b_resolves_all_release_maps_before_any_guest_call(monkeypatch: pytest.MonkeyPatch) -> None:
     target = MagicMock()
+    access = RecordingVMAccess([], Admin())
     vm_template = _make_vm_template(apt_packages=["test-pkg"])
     entries = _make_entries()
     entries.apt_sources["test-source"] = AptSourceEntry(
@@ -173,16 +175,18 @@ def test_phase_b_resolves_all_release_maps_before_any_guest_call(monkeypatch: py
             vm_template,
             MagicMock(),
             "mapped-vm",
-            target,
+            access.files(),
             (),
             "/home/operator",
             "operator",
             MagicMock(),
+            legacy_target=target,
             debian_release=DebianRelease.BOOKWORM,
             operation=VMInitializationOperation.VM_REINIT,
         )
 
     assert caught.value.entity_kind == "apt-source"
+    assert access.requests() == []
     target.run.assert_not_called()
     target.write_file.assert_not_called()
 

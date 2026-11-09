@@ -93,13 +93,13 @@ def _no_tailscale_check(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _completed_phase_a(
     db_: Database, config_: object, vm_name: str, *args: object, **kwargs: object
-) -> tuple[object, str, DebianRelease]:
+) -> tuple[object, object, str, DebianRelease]:
     """Stands in for a Phase A that passed: provisioning complete and the requested release attested."""
     from agentworks.db import ProvisioningStatus
 
     db_.update_vm_provisioning_status(vm_name, ProvisioningStatus.COMPLETE)
     release = cast("DebianRelease", kwargs["expected_release"])
-    return SimpleNamespace(), "/home/agentworks", release
+    return SimpleNamespace(), SimpleNamespace(), "/home/agentworks", release
 
 
 # -- vm create: the derived graph --------------------------------------------
@@ -286,7 +286,7 @@ def test_create_admin_spec_credential_joins_graph_and_logger_redactions(
 
     monkeypatch.setattr(LimaPlatform, "create", _create)
 
-    def _phase_a(*args: object, **kwargs: object) -> tuple[object, str, DebianRelease]:
+    def _phase_a(*args: object, **kwargs: object) -> tuple[object, object, str, DebianRelease]:
         events.append("phase-a")
         assert args[5] is loggers[0]
         return _completed_phase_a(*args, **kwargs)
@@ -854,7 +854,7 @@ def _stub_create_with_trust_probes(
 
     def _bootstrap(
         db_: Database, config_: object, vm_name: str, *a: object, **k: object
-    ) -> tuple[object, str, DebianRelease]:
+    ) -> tuple[object, object, str, DebianRelease]:
         # Nothing after the platform's create reaches the VM at its public address.
         seen["file_at_bootstrap"] = seen["binding"].provisioning_file.is_file()  # type: ignore[attr-defined]
         if bootstrap_fails:
