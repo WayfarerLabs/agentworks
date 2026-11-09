@@ -38,7 +38,7 @@ prerequisite for accepting this multi-session correction.
 - [x] Keep generated workspace output out of commits through exact locally owned exclusions where
       native discovery supports them; verify and report incompatible native discovery rather than
       hiding tracked-file changes or ignoring whole native configuration directories.
-- [ ] Update the amended FRD, HLA, native LLD, support matrix and permanent teaching together.
+- [x] Update the amended FRD, HLA, native LLD, support matrix and permanent teaching together.
       Verify both concurrent-session applicability metadata and safe restart, failed replacement,
       removal, deletion and name reuse. Run private project/Muntz/correctness reviews and required
       gates.
@@ -51,6 +51,15 @@ prerequisite for accepting this multi-session correction.
       by this effort lead: new workspaces single-session, existing workspaces multi-session, one
       registered session in single mode until deletion. It is not a current SDD closeout
       prerequisite.
+
+The initial private quality loop is complete. Source and tests at worker `eb86e703` passed 11,345
+non-integration tests with 11 skips, full mypy over 935 files, Ruff lint/format and the focused
+native regressions. The combined branch has identical product/test bytes. Project, Muntz and generic
+correctness re-reviews resolved the initial naming, observed-home, inactive-path and nested-Git
+findings. Repository lint, rulesync drift, locked-SDD checks, typer isolation, 160 website Python
+tests, 103 Node tests and deterministic builds passed. A fresh installed wheel rendered both guide
+topics for both audiences. These checks support the ready handoff; independent integration
+acceptance and both locks remain pending.
 
 ## Acceptance reconciliation, 2026-11-08
 
