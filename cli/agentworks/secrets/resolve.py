@@ -312,6 +312,25 @@ def active_sources(config: Config, registry: Registry) -> tuple[ActiveSource, ..
     return tuple(active)
 
 
+def _operation_prompt_source() -> ActiveSource:
+    """The builtin prompt turn for an operation's explicitly selected names.
+
+    It is independent of configured source activation and per-secret opt-outs;
+    neither changes an explicit request to type this operation's value.
+    """
+    from agentworks.capabilities.secret_backend.prompt import PromptBackend, PromptSourceConfig
+    from agentworks.resources.graph import Readiness
+    from agentworks.schema import CapabilityBlock
+    from agentworks.secrets.sources import SecretSourceDecl
+
+    return ActiveSource(
+        source=SecretSourceDecl(name="prompt", backend=CapabilityBlock(name="prompt")),
+        backend_class=PromptBackend,
+        config=PromptSourceConfig(name="prompt"),
+        readiness=Readiness.ready(),
+    )
+
+
 class _BackendProtocolError(Exception):
     """A backend boundary returned a malformed shape."""
 
@@ -354,6 +373,9 @@ def _require_interaction_broker(
 def _lookup_projection(
     secret: SecretDecl,
     source: ActiveSource,
+    *,
+    prompt_names: frozenset[str] = frozenset(),
+    prompt_source: ActiveSource | None = None,
 ) -> tuple[SecretLookupRequest | None, LookupDescription]:
     """Project one secret onto one source as a request and description."""
     from agentworks.capabilities.config import validate_capability_mapping
@@ -363,7 +385,16 @@ def _lookup_projection(
         safe_identity(source.name)
     except ValueError:
         raise _BackendProtocolError from None
-    mapping_present, mapping = source.mapping_for(secret)
+    # Identity distinguishes this operation's forced turn from a configured
+    # source with the same name. Only explicitly selected names can enter it.
+    if prompt_source is not None and secret.name in prompt_names:
+        if source is not prompt_source:
+            return None, LookupDescription(LookupDisposition.NOT_APPLICABLE, None)
+        mapping_present, mapping = False, None
+    elif source is prompt_source:
+        return None, LookupDescription(LookupDisposition.NOT_APPLICABLE, None)
+    else:
+        mapping_present, mapping = source.mapping_for(secret)
     if mapping_present and mapping is False:
         return None, LookupDescription(LookupDisposition.NOT_APPLICABLE, None)
     validated: BaseModel | None = None
@@ -622,10 +653,15 @@ def _resolve_batch(
     tty_access: TtyInteractionAccess,
     interaction_broker: InteractionBroker | None,
     complete: bool,
+    prompt_names: frozenset[str] = frozenset(),
 ) -> ResolutionBatch:
     """Resolve one deduplicated batch in one bounded source-first pass."""
     if type(tty_access) is not TtyInteractionAccess:
         raise StateError("tty_access must be an exact TtyInteractionAccess")
+    configured_sources_empty = not sources
+    prompt_source = _operation_prompt_source() if prompt_names else None
+    if prompt_source is not None:
+        sources = (*sources, prompt_source)
     deduped = list(dict.fromkeys(secret.name for secret in secrets))
     declarations: dict[str, SecretDecl] = {}
     for secret in secrets:
@@ -645,7 +681,12 @@ def _resolve_batch(
         key = (source_index, secret.name)
         if key not in projection_cache:
             try:
-                projection_cache[key] = _lookup_projection(secret, sources[source_index])
+                projection_cache[key] = _lookup_projection(
+                    secret,
+                    sources[source_index],
+                    prompt_names=prompt_names,
+                    prompt_source=prompt_source,
+                )
             except _BackendProtocolError:
                 projection_cache[key] = None
         return projection_cache[key]
@@ -681,7 +722,9 @@ def _resolve_batch(
             if reason is None:
                 return None
             prospective.source_blocks.append((source.name, description.identifier, source.backend_class.name, reason))
-        return _collapse_actual(secret.name, prospective, sources_empty=not sources)
+        return _collapse_actual(
+            secret.name, prospective, sources_empty=configured_sources_empty and secret.name not in prompt_names
+        )
 
     for source_index, source in enumerate(sources):
         unresolved = [declarations[name] for name in deduped if name not in outcomes]
@@ -774,7 +817,9 @@ def _resolve_batch(
 
     for name in deduped:
         if name not in outcomes:
-            outcomes[name] = _collapse_actual(name, evidence[name], sources_empty=not sources)
+            outcomes[name] = _collapse_actual(
+                name, evidence[name], sources_empty=configured_sources_empty and name not in prompt_names
+            )
     return ResolutionBatch(tuple(outcomes[name] for name in deduped), values)
 
 
@@ -784,6 +829,7 @@ def resolve_batch(
     *,
     tty_access: TtyInteractionAccess,
     interaction_broker: InteractionBroker | None,
+    prompt_names: frozenset[str] = frozenset(),
 ) -> ResolutionBatch:
     """Resolve one complete batch in one bounded source-first pass."""
     return _resolve_batch(
@@ -792,6 +838,7 @@ def resolve_batch(
         tty_access=tty_access,
         interaction_broker=interaction_broker,
         complete=True,
+        prompt_names=prompt_names,
     )
 
 

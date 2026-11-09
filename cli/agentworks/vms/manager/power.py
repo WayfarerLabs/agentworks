@@ -8,14 +8,13 @@ from typing import TYPE_CHECKING
 from agentworks import output
 from agentworks.capabilities.base import RunContext
 from agentworks.db import VMStatus
-from agentworks.errors import StateError, UserAbort
-from agentworks.naming import NAME_RE
+from agentworks.errors import NotFoundError, StateError, UserAbort, ValidationError
+from agentworks.naming import MAX_SECRET_NAME_LENGTH, NAME_RE, validate_name
 from agentworks.secrets.policy import require_exact_tty_interaction_policy
 
 from ._helpers import (
     _guard_failed_vm,
     _lookup_or_synthesize_secret,
-    _mask_env_var_backend_for,
     _require_vm,
     _vm_scope,
 )
@@ -268,7 +267,8 @@ def rekey_vm(
     name: str,
     *,
     wait_for_share: bool = False,
-    ignore_env: bool = False,
+    secret: str | None = None,
+    prompt: bool = False,
     interaction: TtyInteractionPolicy,
 ) -> None:
     """Assign a new Tailscale auth key to a VM (logout + rejoin).
@@ -278,22 +278,14 @@ def rekey_vm(
     (out-of-band) since Tailscale connectivity drops during
     the operation.
 
-    Orchestrated: the walk roots the VM-TEMPLATE node beside the live
-    VM node, because the new auth key IS this command's planned op
-    (the contrast with reinit, whose graph deliberately excludes the
-    template: there the key belongs only to the gate's conditional
-    repair path). The sweep predicts the template's declared key and
-    the key joins the ONE boundary resolve, mirroring HEAD's interleaved
-    preflight-then-single-resolve exactly; this migration is what
-    retired the ``preflight_vm_template`` delegate. The running check
-    stays past the boundary (a backend status read; on proxmox it
-    needs the token), and the activation gate opens AFTER it, exactly
-    where HEAD held ``keep_active``: a not-running VM errors before
-    any gate, so rekey never auto-starts one outside the same race
-    HEAD had.
+    ``secret`` selects a declared replacement key for this operation only.
+    ``prompt`` forces terminal entry of the template's key instead. Both
+    paths retain the ordinary preflight and single secret-resolution boundary;
+    the running check and held-active span follow it.
     """
     import ipaddress
     import time
+    from dataclasses import replace
 
     from agentworks.bootstrap import load_request_registry
     from agentworks.orchestration.activation import activation_gate
@@ -307,53 +299,55 @@ def rekey_vm(
     from agentworks.vms.nodes import live_vm_node, vm_template_node
     from agentworks.vms.templates import resolve_live_template
 
+    require_exact_tty_interaction_policy(interaction)
+    if secret is not None and prompt:
+        raise ValidationError("--secret and --prompt are mutually exclusive")
+    if secret is not None:
+        validate_name(secret, max_length=MAX_SECRET_NAME_LENGTH)
+
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)
     _warn_legacy_release(vm)
 
-    # The composition root: construct (registers the site's config
-    # secrets), preflight both participating resources (the sweep
-    # predicts the new auth key can resolve over the vm-template's
-    # declaration; the platform checks its world), then the operation's
-    # one resolve pass: the new auth key
-    # and any site secret (proxmox's API token) in a single prompt
-    # session. The template node roots FIRST so the sweep keeps HEAD's
-    # precedence (template readiness before the platform preflight).
-    # ``ignore_env`` is honored by temporarily masking the env-var
-    # backend for the auth-key secret (the env-var source reads
-    # ``os.environ`` during preview and resolution, so removing the var
-    # skips it cleanly across BOTH preflight and the
-    # resolve, and the prompt backend takes over).
     registry = load_request_registry(config, live_database=db)
-    resolver = Resolver(config, registry, interaction=interaction)
-    vm_node = live_vm_node(db, config, registry, vm)
     rekey_vm_tmpl = resolve_live_template(db, registry, vm.name, vm.template)
+    if secret is not None:
+        try:
+            registry.lookup("secret", secret)
+        except KeyError:
+            raise NotFoundError(
+                f"secret {secret!r} is not in the resource registry",
+                entity_kind="secret",
+                entity_name=secret,
+                hint="check `agw secret list` for declared and auto-declared names",
+            ) from None
+        rekey_vm_tmpl = replace(rekey_vm_tmpl, tailscale_auth_key=secret)
+    auth_key_name = rekey_vm_tmpl.tailscale_auth_key
+    prompt_names = frozenset((auth_key_name,)) if prompt else frozenset()
+    resolver = Resolver(config, registry, interaction=interaction, prompt_names=prompt_names)
+    vm_node = live_vm_node(db, config, registry, vm, repair_auth_key_name=auth_key_name)
     tmpl_node = vm_template_node(rekey_vm_tmpl)
     nodes = walk(tmpl_node, vm_node)
     for secret_name in secret_union(nodes):
         resolver.register_name(secret_name)
-    # Cache hit by design: the auth key is already in the union (the
-    # template node's secret_refs); this call only fetches the DECL,
-    # which the --ignore-env env-var mask below needs.
-    ts_decl = resolver.register_name(rekey_vm_tmpl.tailscale_auth_key)
     scope = _vm_scope(db, name)
-    with _mask_env_var_backend_for(ts_decl, masked=ignore_env):
-        preflight_all(
-            nodes,
-            RunContext(config=config, operation_scope=scope),
-            registry=registry,
-            interaction=interaction,
-        )
-        resolver.resolve()
+    preflight_all(
+        nodes,
+        RunContext(config=config, operation_scope=scope),
+        registry=registry,
+        interaction=interaction,
+        prompt_names=prompt_names,
+    )
+    resolver.resolve()
     from agentworks.secrets.line_safety import (
         LineOrientedSecretUse,
         require_line_safe_secret,
     )
 
     ts_auth_key = require_line_safe_secret(
-        resolver.get(rekey_vm_tmpl.tailscale_auth_key),
+        resolver.get(auth_key_name),
         use=LineOrientedSecretUse.TAILSCALE,
-        secret_name=rekey_vm_tmpl.tailscale_auth_key,
+        secret_name=auth_key_name,
     )
 
     # The running check is an op (a backend status read), so it sits

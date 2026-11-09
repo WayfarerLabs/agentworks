@@ -91,6 +91,7 @@ def predict_resolution(
     sources: Sequence[ActiveSource],
     *,
     tty_access: TtyInteractionAccess,
+    prompt_names: frozenset[str] = frozenset(),
 ) -> dict[str, ResolutionPreview]:
     """Preview declared references once at the fixed preflight impact."""
     from agentworks.capabilities.secret_backend import OperatorImpact, TtyInteractionAccess
@@ -105,6 +106,7 @@ def predict_resolution(
         impact=OperatorImpact.NONE,
         tty_access=tty_access,
         interaction_broker=None,
+        prompt_names=prompt_names,
     )
 
 
@@ -161,6 +163,7 @@ def require_predicted_refs(
     tty_access: TtyInteractionAccess,
     preview_memo: dict[str, ResolutionPreview] | None = None,
     sources: Sequence[ActiveSource] | None = None,
+    prompt_names: frozenset[str] = frozenset(),
 ) -> None:
     """Value-free, no-impact screen over one node's declared config secrets.
 
@@ -199,6 +202,7 @@ def require_predicted_refs(
             secret_declarations(missing_names, registry),
             active_sources(config, registry) if sources is None else sources,
             tty_access=tty_access,
+            prompt_names=prompt_names,
         )
         memo.update(predictions)
     for ref in refs:
