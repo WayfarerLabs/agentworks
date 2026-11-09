@@ -23,7 +23,7 @@ no test hits the network.
 
 from __future__ import annotations
 
-import errno
+import signal
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
@@ -31,11 +31,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agentworks import output
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import ProvisionRequest, ssh_exposure
 from agentworks.debian import DebianRelease
-from agentworks.errors import ConfigError, ConnectivityError
+from agentworks.errors import ConfigError, ConnectivityError, ProvisioningError
 from agentworks.plugins.azure import network as azure_network
 from agentworks.plugins.azure.network import (
     ALLOW_PRIORITY_BAND_END,
@@ -132,11 +131,6 @@ def _assert_allow_shape(rule: Any, prefixes: list[str], *, name: str, priority: 
     assert rule.source_address_prefixes == prefixes
     assert rule.source_address_prefix is None
     assert rule.description.startswith(ALLOW_RULE_DESCRIPTION_MARKER)
-
-
-def _dead_terminal(*_args: object, **_kwargs: object) -> None:
-    """``output`` after a hangup: the terminal is gone and a write to it fails."""
-    raise OSError(errno.EIO, "Input/output error")
 
 
 def test_public_ip_lookup_reads_nested_sdk_response() -> None:
@@ -308,8 +302,10 @@ class TestCloseProvisioningAccessHooks:
         assert network.security_rules.deletes() == [("rg1", "vm1-nsg", BOOTSTRAP_ALLOW_RULE_NAME)]
         assert network.security_rules.creates() == []
 
-    def test_the_close_tolerates_a_missing_allow(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """A 404 on the delete (hook re-run, already-closed VM) is fine."""
+    def test_the_close_tolerates_a_missing_allow_silently(
+        self, monkeypatch: pytest.MonkeyPatch, captured_output: Any
+    ) -> None:
+        """A 404 on the delete is fine: every root-channel route closes the provisioning access again."""
         from azure.core.exceptions import ResourceNotFoundError
 
         network = _install_fakes(monkeypatch).network
@@ -317,6 +313,23 @@ class TestCloseProvisioningAccessHooks:
         vm: VMRow = _fake_vm()  # type: ignore[assignment]
 
         _platform().close_provisioning_access(vm, RunContext())  # no raise
+
+        assert captured_output.info == []
+        assert captured_output.warnings == []
+
+    def test_a_close_that_cannot_build_its_client_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The caller warns with what it raises, so the rule left open is named there, not lost."""
+        _install_fakes(monkeypatch)
+        platform = _platform()
+
+        def no_client(*_args: object, **_kwargs: object) -> None:
+            raise ConfigError("the site's client secret is unset")
+
+        monkeypatch.setattr(platform, "_network_client", no_client)
+        vm: VMRow = _fake_vm()  # type: ignore[assignment]
+
+        with pytest.raises(ProvisioningError):
+            platform.close_provisioning_access(vm, RunContext())
 
 
 class TestTransientRoute:
@@ -391,18 +404,27 @@ class TestTransientRoute:
             transient[0],
         ]
 
-    def test_a_dead_terminal_cannot_keep_the_allow_open(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """A route closed by a hangup deletes its rule before printing anything."""
+    def test_an_interrupt_during_the_routes_delete_waits_for_it(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Ctrl-C the moment the script ends: the rule's delete still reaches Azure, then the interrupt raises."""
         network = _install_fakes(monkeypatch).network
+        rules = network.security_rules
+        delete = rules.begin_delete
+
+        armed = False
+
+        def interrupted_delete(rg: str, nsg: str, rule_name: str) -> Any:
+            if armed:
+                signal.raise_signal(signal.SIGINT)
+            return delete(rg, nsg, rule_name)
+
+        monkeypatch.setattr(rules, "begin_delete", interrupted_delete)
         vm: VMRow = _fake_vm()  # type: ignore[assignment]
 
-        with pytest.raises(OSError), _platform()._transient_route(vm, RunContext()):
-            monkeypatch.setattr(output, "info", _dead_terminal)
-            monkeypatch.setattr(output, "warn", _dead_terminal)
-            raise KeyboardInterrupt
+        with pytest.raises(KeyboardInterrupt), _platform()._transient_route(vm, RunContext()):
+            armed = True
 
-        (transient,) = network.security_rules.transient_names()
-        assert ("rg1", "vm1-nsg", transient) in network.security_rules.deletes()
+        (transient,) = rules.transient_names()
+        assert ("rg1", "vm1-nsg", transient) in rules.deletes()
 
     def test_convergence_tolerates_absent_legacy_rule(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A 404 on the legacy SSH delete (an already-converged or

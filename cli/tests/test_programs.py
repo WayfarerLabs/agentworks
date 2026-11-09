@@ -5,7 +5,9 @@ from __future__ import annotations
 import contextlib
 import os
 import stat
+import subprocess
 import sys
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -15,7 +17,6 @@ from agentworks.programs import find_program, resolve_program
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
 
 pytestmark = pytest.mark.windows
 
@@ -51,6 +52,13 @@ def test_the_first_absolute_path_element_holding_the_program_names_it(tmp_path: 
     assert found == genuine
 
 
+def test_a_name_with_a_directory_part_is_already_a_path(tmp_path: Path) -> None:
+    """``EDITOR=/opt/bin/vim`` names its program outright, as a shell would run it."""
+    path = str(tmp_path / "bin" / "vim")
+
+    assert resolve_program(path) == path
+
+
 # -- Every site that starts one -------------------------------------------------------------------
 
 
@@ -84,38 +92,173 @@ def _wsl_powershell() -> None:
     _powershell("$PROFILE")
 
 
-@pytest.mark.skipif(WINDOWS, reason="the decoy is a shell script, which only POSIX runs by name")
-@pytest.mark.parametrize(
-    ("programs", "site"),
-    [
-        (("tailscale",), _preflight),
-        (("tailscale",), _reachability),
-        (("tailscale",), _doctor),
-        (("pwsh", "powershell"), _profile_query),
-        (("powershell",), _wsl_powershell),
-    ],
-    ids=["preflight", "reachability", "doctor", "completion-profile", "wsl2-powershell"],
-)
-def test_no_site_runs_a_decoy_from_the_current_directory(
+def _onepassword_read() -> None:
+    from agentworks.plugins.onepassword.backend import _bounded_read
+
+    _bounded_read(["read", "--no-newline", "op://Work/item/password"], timeout=5)
+
+
+def _git_capture() -> None:
+    from agentworks.package_sources import PackageCapture
+
+    with PackageCapture() as capture:
+        capture._run(capture.root, "init", "--bare")
+
+
+def _taskkill(monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+
+    from agentworks.package_sources import _kill_process_tree
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    _kill_process_tree(SimpleNamespace(pid=4242, kill=lambda: None))  # type: ignore[arg-type]
+
+
+def _vscode() -> None:
+    from agentworks.workspaces.manager.create import _open_in_vscode
+
+    _open_in_vscode("workspace")
+
+
+def _legacy_ssh() -> None:
+    from agentworks.execution.trust import HOST_TRUST
+    from agentworks.transports import SSHTransport
+
+    SSHTransport(trust=HOST_TRUST, host="vm1", user="agentworks").run("true", check=False)
+
+
+def _legacy_scp() -> None:
+    from agentworks.execution.trust import HOST_TRUST
+    from agentworks.transports import SSHTransport
+
+    SSHTransport(trust=HOST_TRUST, host="vm1", user="agentworks").copy_to(__file__, "/tmp/copy")
+
+
+def _local_limactl() -> None:
+    from agentworks.capabilities.vm_platform.lima_host import LimaHost
+
+    LimaHost(None).run("limactl list", check=False)
+
+
+SITES: list[tuple[tuple[str, ...], Callable[..., None]]] = [
+    (("tailscale",), _preflight),
+    (("tailscale",), _reachability),
+    (("tailscale",), _doctor),
+    (("pwsh", "powershell"), _profile_query),
+    (("powershell",), _wsl_powershell),
+    (("op",), _onepassword_read),
+    (("git",), _git_capture),
+    (("taskkill",), _taskkill),
+    (("code",), _vscode),
+    (("ssh",), _legacy_ssh),
+    (("scp",), _legacy_scp),
+    (("limactl",), _local_limactl),
+]
+SITE_IDS = [
+    "preflight",
+    "reachability",
+    "doctor",
+    "completion-profile",
+    "wsl2-powershell",
+    "onepassword",
+    "git",
+    "taskkill",
+    "vscode",
+    "legacy-ssh",
+    "legacy-scp",
+    "local-limactl",
+]
+
+
+def _plant(directory: Path, names: tuple[str, ...]) -> None:
+    """Each program under both its POSIX name and its Windows one, so whichever the lookup asks for is there."""
+    directory.mkdir()
+    for name in names:
+        for filename in (name, f"{name}.exe"):
+            path = directory / filename
+            path.write_text("")
+            path.chmod(stat.S_IRWXU)
+
+
+@pytest.mark.parametrize(("programs", "site"), SITES, ids=SITE_IDS)
+def test_no_site_starts_a_decoy_from_the_current_directory(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     captured_output: object,
     programs: tuple[str, ...],
-    site: Callable[[], None],
+    site: Callable[..., None],
 ) -> None:
-    """Each decoy would leave a marker; PATH's empty element is what a bare name's lookup reads as the current one."""
-    marker = tmp_path / "decoy-ran"
-    cwd = tmp_path / "cwd"
-    cwd.mkdir()
-    for name in programs:
-        decoy = cwd / name
-        decoy.write_text(f"#!/bin/sh\n: > '{marker}'\n")  # a builtin: PATH holds no touch
-        decoy.chmod(stat.S_IRWXU)
+    """A decoy waits in the current directory, which the empty and ``.`` elements of ``PATH`` also name.
+
+    Each start is recorded instead of run, so the test reads the same on
+    every platform: the program it names must be the genuine one, by an
+    absolute path, since a bare name is what the system would look up in the
+    current directory first.
+    """
+    cwd, genuine = tmp_path / "cwd", tmp_path / "bin"
+    _plant(cwd, programs)
+    _plant(genuine, programs)
     monkeypatch.chdir(cwd)
-    monkeypatch.setenv("PATH", os.pathsep + str(tmp_path / "no-such-bin"))
+    monkeypatch.setenv("PATH", os.pathsep.join(["", ".", str(genuine)]))
+    started: list[str] = []
 
-    # A missing program is the expected outcome; only whether the decoy ran matters.
+    def record(args: list[str], *_args: object, **_kwargs: object) -> None:
+        started.append(str(args[0]))
+        raise FileNotFoundError(args[0])
+
+    monkeypatch.setattr(subprocess, "Popen", record)
+
+    # Whether the site copes with a program that cannot start is not the question here.
     with contextlib.suppress(AgentworksError, OSError):
-        site()
+        if site is _taskkill:
+            site(monkeypatch)
+        else:
+            site()
 
-    assert not marker.exists()
+    assert started
+    assert all(Path(program).parent == genuine for program in started), started
+
+
+def _onepassword_ready() -> bool:
+    from agentworks.plugins.onepassword.backend import OnePasswordBackend
+
+    return OnePasswordBackend.backend_readiness().is_ready
+
+
+def _powershell_available() -> bool:
+    from agentworks.doctor import _shell_available
+
+    return _shell_available("powershell")
+
+
+def _local_lima_ready() -> bool:
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+
+    return LimaPlatform.not_ready({"placement": {"mode": "local"}}).is_ready
+
+
+def _remote_lima_ready() -> bool:
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+
+    return LimaPlatform.not_ready({"placement": {"mode": "ssh", "host": "box"}}).is_ready
+
+
+@pytest.mark.parametrize(
+    ("names", "installed"),
+    [
+        (("op",), _onepassword_ready),
+        (("pwsh", "powershell"), _powershell_available),
+        (("limactl",), _local_lima_ready),
+        (("ssh",), _remote_lima_ready),
+    ],
+    ids=["onepassword-readiness", "doctor-shell", "local-lima-readiness", "remote-lima-readiness"],
+)
+def test_a_decoy_in_the_current_directory_does_not_count_as_installed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, names: tuple[str, ...], installed: Callable[[], bool]
+) -> None:
+    """A check that found the decoy would vouch for a program the start then refuses, or worse."""
+    _plant(tmp_path / "cwd", names)
+    monkeypatch.chdir(tmp_path / "cwd")
+    monkeypatch.setenv("PATH", os.pathsep.join(["", "."]))
+
+    assert not installed()

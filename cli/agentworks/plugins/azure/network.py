@@ -378,9 +378,9 @@ def remove_ssh_allow(
 
     ``rule_name`` is the fixed ``allow-ssh-bootstrap`` on the hook paths
     and the poke's nonce name on the ``_transient_route`` exit and the
-    poke's own attempt cleanup. A 404 is fine (the rule was already
-    gone: a hook re-run, a VM that never had it, or a create that never
-    landed server-side). Any other failure warns instead of raising:
+    poke's own attempt cleanup. A 404 is fine and silent (the rule was
+    already gone: a hook re-run, a VM that never had it, or a create that
+    never landed server-side). Any other failure warns instead of raising:
     every call site must keep unwinding, and the warning names the rule
     and states the actual residual exposure: the rule's scoped source
     prefixes, not the world (pass ``prefixes`` when known so the warning
@@ -391,17 +391,13 @@ def remove_ssh_allow(
     the platform instance just to sharpen a warning string is not worth
     the coupling; the rule NAME, by contrast, is always known (fixed for
     bootstrap, returned by the poke), so it is always named.
-
-    It deletes before it prints: on a route closed by a hangup the
-    terminal is gone and a write to it can fail, so the rule must be
-    gone first.
     """
     from azure.core.exceptions import ResourceNotFoundError
 
     try:
         network.security_rules.begin_delete(rg, f"{name}-nsg", rule_name).result()
     except ResourceNotFoundError:
-        pass
+        return
     except Exception as exc:
         err = wrap_azure_error(exc)
         scope = f"source(s) {', '.join(prefixes)}" if prefixes else "the rule's scoped source addresses"

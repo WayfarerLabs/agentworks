@@ -19,6 +19,7 @@ from agentworks.output import (
     _render_header,
     non_interactive,
     presentation_suppressed,
+    tolerating_dead_sink,
 )
 from agentworks.terminal import MOUSE_TRACKING_DISABLE, ensure_cooked_input
 
@@ -32,6 +33,12 @@ _STATUS_COLORS: dict[StatusStyle, str] = {
     StatusStyle.WARN: "yellow",
     StatusStyle.BAD: "red",
 }
+
+
+def _echo(message: str, *, err: bool = False) -> None:
+    """``typer.echo`` for an output line, carrying on past a dead stream (see :func:`tolerating_dead_sink`)."""
+    with tolerating_dead_sink(sys.stderr if err else sys.stdout):
+        typer.echo(message, err=err)
 
 
 class _TyperProgress:
@@ -50,12 +57,12 @@ class _TyperProgress:
             parts.append(f" {pct:.0f}% ({current}/{self._total})")
         if message:
             parts.append(f" {message}")
-        typer.echo("".join(parts))
+        _echo("".join(parts))
 
     def done(self, message: str | None = None) -> None:
         elapsed = time.monotonic() - self._start
         suffix = f" {message}" if message else ""
-        typer.echo(f"{_pad(self._level + 1)}{self._label} done ({elapsed:.0f}s){suffix}")
+        _echo(f"{_pad(self._level + 1)}{self._label} done ({elapsed:.0f}s){suffix}")
 
 
 class TyperHandler:
@@ -79,36 +86,36 @@ class TyperHandler:
             prefix = "Notice:"
             if self._color_enabled(sys.stderr):
                 prefix = click.style(prefix, fg="cyan")
-            typer.echo(f"{_pad(level)}{prefix} {message}", err=True)
+            _echo(f"{_pad(level)}{prefix} {message}", err=True)
         elif role is Role.WARNING:
             prefix = "Warning:"
             if self._color_enabled(sys.stderr):
                 prefix = click.style(prefix, fg="yellow")
-            typer.echo(f"{_pad(level)}{prefix} {message}", err=True)
+            _echo(f"{_pad(level)}{prefix} {message}", err=True)
         elif role is Role.ERROR:
             prefix = "Error:"
             if self._color_enabled(sys.stderr):
                 prefix = click.style(prefix, fg="red")
-            typer.echo(f"{_pad(level)}{prefix} {message}", err=True)
+            _echo(f"{_pad(level)}{prefix} {message}", err=True)
         elif role is Role.HEADER:
             if level in (0, 1):
-                typer.echo("")
+                _echo("")
             header = _render_header(message, level)
             if self._color_enabled(sys.stdout):
                 header = click.style(header, bold=True)
-            typer.echo(f"{_pad(level)}{header}")
+            _echo(f"{_pad(level)}{header}")
         elif role is Role.DETAIL:
             text = click.style(message, dim=True) if self._color_enabled(sys.stdout) else message
-            typer.echo(f"{_pad(level + 1)}{text}")
+            _echo(f"{_pad(level + 1)}{text}")
         elif role is Role.RESULT:
             text = click.style(message, fg="green", dim=True) if self._color_enabled(sys.stdout) else message
-            typer.echo(f"{_pad(0)}{text}")
+            _echo(f"{_pad(0)}{text}")
         else:
             # BODY renders as a plain, default-colored body line. Reserved
             # roles fall through here for now: wiring STATUS (the deferred
             # fast-follow) must add its own explicit branch above, not
             # lean on this BODY fall-through.
-            typer.echo(f"{_pad(level)}{message}")
+            _echo(f"{_pad(level)}{message}")
 
     def style_status(self, text: str, style: StatusStyle) -> str:
         # Gated on stdout, matching every other body-stream role above
@@ -247,5 +254,5 @@ class TyperHandler:
         raise UserAbort("interrupted") from None
 
     def progress(self, label: str, level: int, total: int | None = None) -> Progress:
-        typer.echo(f"{_pad(level + 1)}{label}...")
+        _echo(f"{_pad(level + 1)}{label}...")
         return _TyperProgress(label, level, total)

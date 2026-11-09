@@ -11,6 +11,7 @@ from agentworks.agents.grants import MAX_WORKSPACE_NAME_LENGTH
 from agentworks.errors import AlreadyExistsError, ExternalError, NotFoundError, StateError
 from agentworks.naming import validate_name
 from agentworks.path_rendering import format_host_path
+from agentworks.programs import resolve_program
 from agentworks.vms.manager import gated_vm_boundary
 from agentworks.workspaces.backends.vm import default_workspace_path
 from agentworks.workspaces.manager._common import _guard_vm_status, _resolve_vm, _workspace_scope
@@ -113,7 +114,7 @@ def copy_workspace(
             output.info(f"Packing workspace '{source_name}' from VM '{src_vm.name}'...")
 
             # Stream tar from VM to local temp file
-            ssh_args = ["ssh", *src_exec.host_key_options(), "-o", "BatchMode=yes"]
+            ssh_args = [resolve_program("ssh"), *src_exec.host_key_options(), "-o", "BatchMode=yes"]
             if src_exec.identity_file is not None:
                 ssh_args.extend(["-i", str(src_exec.identity_file)])
             ssh_args.append(f"{src_exec.user}@{src_exec.host}")

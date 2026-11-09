@@ -268,7 +268,6 @@ def test_the_native_shell_runs_under_the_terminal_guard_and_255_is_noted_after_i
     db.close()
 
 
-@pytest.mark.usefixtures("standard_streams")
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
 @pytest.mark.parametrize("signal_name", ["SIGTERM", "SIGHUP"])
 def test_a_terminated_native_shell_unwinds_so_what_it_holds_is_released(

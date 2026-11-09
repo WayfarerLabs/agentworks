@@ -18,7 +18,7 @@ from agentworks.harness_setup.outcomes import SetupFailure, raise_setup_failures
 from agentworks.output import Role
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
-from tests.conftest import CapturedOutput, pin_wsl2_unsupported, seed_vm_trust
+from tests.conftest import CapturedOutput, fake_installed_programs, pin_wsl2_unsupported, seed_vm_trust
 from tests.ssh_fixtures import write_test_ssh_keypair
 from tests.vm_access_support import AccessRecorder
 
@@ -47,7 +47,7 @@ def test_vm_reports_native_failures_only_after_command_completion(
     )
     config = load_config(settings, warn_issues=False, warn_deprecations=False)
     monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", "fixture-ts-key")
-    monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+    fake_installed_programs(monkeypatch, lambda name: f"/usr/bin/{name}")
     pin_wsl2_unsupported(monkeypatch)
     monkeypatch.setattr(vm_manager, "verify_tailscale_available", lambda: None)
     monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: True)

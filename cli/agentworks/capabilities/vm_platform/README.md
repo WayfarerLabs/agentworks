@@ -235,11 +235,13 @@ method semantics or ask a platform to interpret Debian's current release.
 **The clouds' route.** `public_ssh.PublicAddressPlatform`, the clouds' shared base, opens its own
 route around every `run_as_root`, `read_host_keys` and `native_shell` call and closes it before the
 call returns, so no firewall allow outlives one call; `SIGTERM`, `SIGHUP` and, on Windows,
-`SIGBREAK` (Ctrl-Break) unwind like Ctrl-C while the route may be open, so they close it too. Each
-cloud supplies it privately, as an abstract member of that base: `_transient_route(vm, ctx)`, a
-context manager that opens this call's own SSH allow scoped to the operator's egress prefixes
-(widened by `ctx.config.operator.ssh_allow_cidrs`) and removes exactly it in a `finally`. When the
-VM never answers, `PublicSSH.wait_until_answering` warns `public_ssh.PROBE_FAILURE_HINT`, the
+`SIGBREAK` (Ctrl-Break) unwind like Ctrl-C while the route may be open, so they close it too. Once
+the route has closed, the base also calls `close_provisioning_access` (below). Each cloud supplies
+it privately, as an abstract member of that base: `_transient_route(vm, ctx)`, a context manager
+that opens this call's own SSH allow scoped to the operator's egress prefixes (widened by
+`ctx.config.operator.ssh_allow_cidrs`) and removes exactly it in a `finally`, under
+`interrupts_deferred`, so an interrupt that lands during the removal waits for it. When the VM never
+answers, `PublicSSH.wait_until_answering` warns `public_ssh.PROBE_FAILURE_HINT`, the
 `ssh_allow_cidrs` advice, unless the address refused the last probe's connection: the allow let it
 through, and the `ChannelUnreachable` it raises names a restart for an SSH server that is not
 running. Azure also heals a missing public IP and converges the NSG onto the baseline-deny model on
@@ -248,11 +250,11 @@ needs no public-IP heal (a running instance receives an address automatically), 
 forces a divergence: an EC2 ingress rule's identity is its `(protocol, port, cidr)` tuple, not a
 name, so two concurrent routes from one operator egress share ONE rule rather than owning
 independent ones. The poke is therefore idempotent (tolerate `InvalidPermission.Duplicate`) and the
-per-op remove tolerant (tolerate `InvalidPermission.NotFound`), failing CLOSED (the deny baseline),
-never open; see `plugins/aws/network.py`. GCE uses a distinct UUID-suffixed firewall rule and
-provider ID for each route, so concurrent routes close independently. The route's calls read the
-credential from `ctx`, so a credentials-configured site authenticates as itself with no ambient
-fallback.
+per-op remove tolerant (tolerate `InvalidPermission.NotFound`, or a success that lists the rule
+under `UnknownIpPermissions`), failing CLOSED (the deny baseline), never open; see
+`plugins/aws/network.py`. GCE uses a distinct UUID-suffixed firewall rule and provider ID for each
+route, so concurrent routes close independently. The route's calls read the credential from `ctx`,
+so a credentials-configured site authenticates as itself with no ambient fallback.
 
 **Lifecycle hooks** have sensible defaults. All are entered by callers that gate first, so on entry
 the VM is running or was just started:
@@ -261,22 +263,29 @@ the VM is running or was just started:
   keepalive that holds the distro against Windows' idle-shutdown for the span of a command, with
   Win32 Job-Object orphan-proofing for a hard-killed `agw`. No `ctx`: every hold that exists is
   local and makes no backend call. A cloud hold that did would take `ctx` as the ops do.
-- `close_provisioning_access(vm, ctx) -> None` (default no-op). Phase A calls it exactly once, from
-  a `finally` around its span, so it runs whether the VM contract passed, Phase A failed (the row is
-  marked FAILED) or the operator interrupted it (the row stays incomplete). A create that fails
-  before it returns rolls back its own ingress inside the platform's rollback window and never
-  reaches this hook. Azure deletes the ephemeral bootstrap SSH allow rule here, leaving the VM with
-  zero inbound exposure behind its permanent deny-all-inbound baseline (the public IP itself stays
-  attached for the VM's whole lifetime); EC2 revokes exactly the bootstrap allow's tuples (recorded
-  in platform_metadata at create) to the same end, so a concurrent native route's distinct allow
-  survives; GCE removes its provider-ID-owned stable allow and retains its priority-1 all-ingress
-  deny. The asymmetry with the per-call route is intentional: the bootstrap ingress opens inside
-  `create()` (cloud-init needs inbound SSH from the operator), and neither that nor this closing
-  point is context-manager-shaped. The hook must not assume the VM is reachable or complete, and
-  Phase A treats it as best effort: a failure warns, and an error or interrupt already propagating
-  keeps going. The ordinary-command gate refuses a VM Phase A did not complete,
-  `vm shell --platform` included, so debugging such a VM goes through the platform's serial console
-  (not firewall-gated); `vm delete`'s logout opens its own per-operation allow.
+- `close_provisioning_access(vm, ctx) -> None` (default no-op). Phase A calls it once, from a
+  `finally` around its span, so it runs whether the VM contract passed, Phase A failed (the row is
+  marked FAILED) or the operator interrupted it (the row stays incomplete). The clouds' base calls
+  it again each time a route closes, so an allow a failed close left is removed by the next
+  `vm recover`, `vm rekey`, delete's logout or `vm shell --platform`; a close with nothing left to
+  remove must therefore be a silent no-op. Both callers go through
+  `close_provisioning_access_or_warn`, which holds Ctrl-C and the terminations until the close
+  returns and then raises the interrupt, so one that lands mid-close cannot leave the allow open. A
+  create that fails before it returns rolls back its own ingress inside the platform's rollback
+  window and never reaches this hook. Azure deletes the ephemeral bootstrap SSH allow rule here,
+  leaving the VM with zero inbound exposure behind its permanent deny-all-inbound baseline (the
+  public IP itself stays attached for the VM's whole lifetime); EC2 revokes exactly the bootstrap
+  allow's tuples (recorded in platform_metadata at create) to the same end, so a concurrent native
+  route's distinct allow survives; GCE removes its provider-ID-owned stable allow and retains its
+  priority-1 all-ingress deny. The asymmetry with the per-call route is intentional: the bootstrap
+  ingress opens inside `create()` (cloud-init needs inbound SSH from the operator), and neither that
+  nor this closing point is context-manager-shaped. The hook must not assume the VM is reachable or
+  complete, and callers treat it as best effort: a failure warns with what the hook raised, so an
+  error should name the rule it left, and the warning adds the command that finishes the close; an
+  error or interrupt already propagating keeps going. The ordinary-command gate refuses a VM Phase A
+  did not complete, `vm shell --platform` included, so debugging such a VM goes through the
+  platform's serial console (not firewall-gated); `vm delete`'s logout opens its own per-operation
+  allow.
 
 The closing hook and the route take `ctx` because opening or closing the firewall route (an Azure
 NSG rule, an EC2 security-group rule) is a backend call; Phase A (`phase_a.bootstrap`) passes the

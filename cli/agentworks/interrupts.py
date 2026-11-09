@@ -6,30 +6,28 @@ other state a command holds open, would outlive it.
 :func:`termination_as_interrupt` raises ``KeyboardInterrupt`` for them
 instead, as Ctrl-C does, for the span of a command that waits on something
 the operator ends (an interactive shell, a port forward) or holds a cloud
-route open, and restores the previous handlers afterwards. Once one has
-arrived, further ones no longer interrupt until the block exits, so a second
-signal cannot cut short the cleanup the first one started. A signal the process
-already ignores stays ignored, so a command started under ``nohup`` keeps
-running after its terminal closes.
+route open, and restores the previous handlers afterwards. Ctrl-C takes the
+same path, so whichever signal arrives first starts the cleanup, and from then
+until the block exits ``SIGTERM``, ``SIGHUP`` and ``SIGBREAK`` are ignored: a
+closed terminal or a second termination cannot cut short the cleanup the
+first signal started. A second Ctrl-C still interrupts, since that is how the
+operator abandons a cleanup that hangs. A signal the process already ignores
+stays ignored, so a command started under ``nohup`` keeps running after its
+terminal closes.
 
-A hangup means the terminal is gone, and every write to it fails, so the
-first thing the cleanup printed would raise and end it. The same goes for a
-pipe into a program in the closed terminal's session (``| tee create.log``),
-which the hangup ends too. Before it raises the interrupt, the hangup's
-handler points whichever of standard output and standard error is not a
-regular file at the null device, so the cleanup runs to the end, silently
-there. Output going to a file is left where it goes. A hangup that arrives
-after another signal started the cleanup still does this, without
-interrupting it.
+A hangup needs nothing more: the cleanup's output to the terminal it took
+away, or to a pipe into a program in that terminal's session, goes nowhere
+(see :func:`agentworks.output.tolerating_dead_sink`) rather than failing.
+
+:func:`interrupts_deferred` holds every one of these signals for a short step
+that must not stop halfway, such as removing a firewall allow, and delivers
+the first of them once the step is done.
 """
 
 from __future__ import annotations
 
 import contextlib
-import os
 import signal
-import stat
-import sys
 import threading
 from typing import TYPE_CHECKING
 
@@ -37,84 +35,30 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
 # SIGHUP exists only on POSIX, and SIGBREAK (Ctrl-Break) only on Windows.
-_HANGUP = getattr(signal, "SIGHUP", None)
 _TERMINATIONS = tuple(
     number
-    for number in (getattr(signal, "SIGTERM", None), _HANGUP, getattr(signal, "SIGBREAK", None))
+    for number in (
+        getattr(signal, "SIGTERM", None),
+        getattr(signal, "SIGHUP", None),
+        getattr(signal, "SIGBREAK", None),
+    )
     if number is not None
 )
+_INTERRUPTS = (signal.SIGINT, *_TERMINATIONS)
 
 
-def _interrupt(signal_number: int, _frame: object) -> None:
+def _interrupt(_signal_number: int, _frame: object) -> None:
     for number in _TERMINATIONS:
         if signal.getsignal(number) is _interrupt:
-            signal.signal(number, _redirect_without_interrupting if number == _HANGUP else signal.SIG_IGN)
-    if signal_number == _HANGUP:
-        _write_to_the_null_device()
+            signal.signal(number, signal.SIG_IGN)
     raise KeyboardInterrupt
-
-
-def _redirect_without_interrupting(_signal_number: int, _frame: object) -> None:
-    """A hangup during the unwind another signal started: the terminal is gone all the same."""
-    _write_to_the_null_device()
-
-
-def _write_to_the_null_device() -> None:
-    """Point descriptors 1 and 2 that are not files, and a Python stream on another such descriptor, at the null device.
-
-    The descriptors cover what child processes inherit and the streams that
-    sit on them. A descriptor on a regular file keeps its target, and a
-    closed one stays closed. A stream on some other descriptor (an embedding
-    host's) is replaced on the same test, since what it writes to may have
-    gone too. Everything is decided before anything moves, so the decision
-    is about where output went, not the null device. A closed 1 or 2 is
-    where ``open`` may put the null device, and closing it afterwards
-    leaves that descriptor closed again. It is best effort: an error, such
-    as no null device to open, leaves the rest as it is, since it must not
-    replace the interrupt or reach code the signal arrived in.
-    """
-    with contextlib.suppress(OSError):
-        outputs = [descriptor for descriptor in (1, 2) if _open_and_not_a_file(descriptor)]
-        streams = [name for name in ("stdout", "stderr") if _on_another_output(getattr(sys, name))]
-        if outputs:
-            null = os.open(os.devnull, os.O_WRONLY)
-            try:
-                for descriptor in outputs:
-                    os.dup2(null, descriptor)
-            finally:
-                os.close(null)
-        for name in streams:
-            setattr(sys, name, open(os.devnull, "w", encoding="utf-8"))  # noqa: SIM115 - lives as long as the process
-
-
-def _on_another_output(stream: object) -> bool:
-    try:
-        descriptor = getattr(stream, "fileno")()  # noqa: B009 - a stream may lack it
-    except (AttributeError, OSError, ValueError):
-        return False
-    return descriptor not in (1, 2) and _open_and_not_a_file(descriptor)
-
-
-def _open_and_not_a_file(descriptor: int) -> bool:
-    """Whether ``descriptor`` is open on something a hangup can take away: anything but a regular file.
-
-    A terminal and a pipe or socket into the terminal's session both fail
-    every write once it has gone. Neither can be told by asking:
-    ``os.isatty`` answers no once a terminal has hung up, and a pipe's
-    reader may die after the check. Redirecting one that would have kept
-    working (the null device, a pipe into a logger outside the session)
-    only silences the cleanup.
-    """
-    try:
-        return not stat.S_ISREG(os.fstat(descriptor).st_mode)
-    except OSError:
-        return False
 
 
 @contextlib.contextmanager
 def termination_as_interrupt() -> Iterator[None]:
-    """Raise ``KeyboardInterrupt`` on ``SIGTERM``, ``SIGHUP`` and ``SIGBREAK`` where they exist, unless ignored.
+    """Raise ``KeyboardInterrupt`` on Ctrl-C, ``SIGTERM``, ``SIGHUP`` and ``SIGBREAK`` where they exist, unless ignored.
 
+    After the first, only Ctrl-C interrupts again until the block exits.
     Inside an enclosing block, or off the main thread, it changes nothing: the
     outermost block owns the handlers and their restoration.
     """
@@ -124,11 +68,42 @@ def termination_as_interrupt() -> Iterator[None]:
         return
     previous = {
         number: signal.signal(number, _interrupt)
-        for number in _TERMINATIONS
-        if signal.getsignal(number) not in (signal.SIG_IGN, _interrupt, _redirect_without_interrupting)
+        for number in _INTERRUPTS
+        if signal.getsignal(number) not in (signal.SIG_IGN, _interrupt)
     }
     try:
         yield
     finally:
         for number, handler in previous.items():
             signal.signal(number, handler)
+
+
+@contextlib.contextmanager
+def interrupts_deferred() -> Iterator[None]:
+    """Hold Ctrl-C and the terminations until the block ends, then deliver the first that arrived.
+
+    The held signal reaches whatever handler was in place before the block,
+    so it does there exactly what it would have done when it arrived: inside
+    :func:`termination_as_interrupt` it raises ``KeyboardInterrupt``, and
+    outside one a ``SIGTERM`` ends the process. It is delivered even while an
+    exception leaves the block, which it then replaces. Off the main thread
+    it changes nothing.
+    """
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+    arrived: list[int] = []
+
+    def hold(signal_number: int, _frame: object) -> None:
+        arrived.append(signal_number)
+
+    previous = {
+        number: signal.signal(number, hold) for number in _INTERRUPTS if signal.getsignal(number) is not signal.SIG_IGN
+    }
+    try:
+        yield
+    finally:
+        for number, handler in previous.items():
+            signal.signal(number, handler)
+        if arrived:
+            signal.raise_signal(arrived[0])

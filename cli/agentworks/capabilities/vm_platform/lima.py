@@ -248,13 +248,13 @@ class LimaPlatform(VMPlatform):
         else:
             local = isinstance(LimaConfig.model_fields["placement"].default, LimaLocalPlacement)
             remote = False
-        import shutil
+        from agentworks.programs import is_installed
 
         if not local:
-            if remote and not shutil.which("ssh"):
+            if remote and not is_installed("ssh"):
                 return Readiness.blocked("ssh not installed")
             return Readiness.ready()
-        if not shutil.which("limactl"):
+        if not is_installed("limactl"):
             return Readiness.blocked("limactl not installed")
         return Readiness.ready()
 
@@ -327,9 +327,9 @@ class LimaPlatform(VMPlatform):
             self._ensure_limactl()
 
     def _ensure_limactl(self) -> None:
-        import shutil
+        from agentworks.programs import is_installed
 
-        if not shutil.which("limactl"):
+        if not is_installed("limactl"):
             from agentworks.errors import ConnectivityError
 
             # Mirrors the 'tailscale' / 'tailscale status' precedent in

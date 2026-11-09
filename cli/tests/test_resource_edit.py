@@ -26,6 +26,12 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 
+@pytest.fixture(autouse=True)
+def _editor_by_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``EDITOR=test-editor`` names no installed program; how a name becomes a path is ``test_programs``'s concern."""
+    monkeypatch.setattr("agentworks.programs.resolve_program", lambda name: name)
+
+
 def _write_base(cfg_path: Path) -> None:
     tmp = cfg_path.parent
     (tmp / "id.pub").write_text("ssh-ed25519 AAAA...")

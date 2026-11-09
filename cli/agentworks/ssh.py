@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING
 
 from agentworks.errors import ConnectivityError
 from agentworks.path_rendering import format_host_path
+from agentworks.programs import resolve_program
 from agentworks.subprocess_io import decode_stream, stdin_bytes
 
 if TYPE_CHECKING:
@@ -367,7 +368,7 @@ def _ssh_base_args(
     ``input_text`` payload is written, so callers set ``close_stdin`` only for
     the no-stdin-payload case.
     """
-    args = ["ssh", *target.host_key_options, "-o", "BatchMode=yes"]
+    args = [resolve_program("ssh"), *target.host_key_options, "-o", "BatchMode=yes"]
     if tty:
         args.insert(1, "-tt")
     else:
@@ -510,7 +511,7 @@ def run(
 
 def _scp_base_args(target: SSHTarget) -> list[str]:
     """Build the base scp argument list (flags and options, no paths)."""
-    args = ["scp", "-q", *target.host_key_options, "-o", "BatchMode=yes"]
+    args = [resolve_program("scp"), "-q", *target.host_key_options, "-o", "BatchMode=yes"]
     if target.port is not None:
         args.extend(["-P", str(target.port)])
     if target.identity_file is not None:

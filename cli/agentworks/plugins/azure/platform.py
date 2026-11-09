@@ -16,7 +16,8 @@ from agentworks.capabilities.vm_platform.debian_release import (
 from agentworks.capabilities.vm_platform.public_ssh import PublicAddressPlatform, PublicSSH
 from agentworks.capabilities.vm_platform.tailscale_join import complete_cloud_bootstrap
 from agentworks.db import VMStatus
-from agentworks.errors import NotFoundError, StateError
+from agentworks.errors import NotFoundError, ProvisioningError, StateError
+from agentworks.interrupts import interrupts_deferred
 from agentworks.plugins.azure.auth import (
     _build_ambient_credential,
     _build_service_principal_credential,
@@ -802,9 +803,18 @@ class AzureVMPlatform(PublicAddressPlatform):
         as the configured principal, with no ambient fallback. A kept VM
         Phase A did not complete is debugged through the Azure serial
         console, which is not NSG-gated; ``vm delete``'s logout pokes a fresh
-        transient allow via :meth:`_transient_route`.
+        transient allow via :meth:`_transient_route`. Every root-channel
+        route calls it again once it closes, so a rule an earlier close
+        left is removed then; a rule already gone is a silent no-op. A
+        failure before the delete raises naming the rule, and a refused
+        delete warns naming it.
         """
-        self._remove_ssh_allow(vm, ctx, BOOTSTRAP_ALLOW_RULE_NAME)
+        try:
+            self._remove_ssh_allow(vm, ctx, BOOTSTRAP_ALLOW_RULE_NAME)
+        except Exception as exc:
+            raise ProvisioningError(
+                f"the '{BOOTSTRAP_ALLOW_RULE_NAME}' rule on the NSG of VM '{vm.name}' stays open: {exc}"
+            ) from exc
 
     @contextlib.contextmanager
     def _transient_route(self, vm: VMRow, ctx: RunContext) -> Iterator[None]:
@@ -837,7 +847,8 @@ class AzureVMPlatform(PublicAddressPlatform):
             yield
         finally:
             if rule_name is not None:
-                self._remove_ssh_allow(vm, ctx, rule_name, prefixes)
+                with interrupts_deferred():
+                    self._remove_ssh_allow(vm, ctx, rule_name, prefixes)
 
     def status(self, vm: VMRow, ctx: RunContext) -> VMStatus:
         if not vm.platform_metadata.get("resource_id"):

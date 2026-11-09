@@ -460,6 +460,7 @@ def test_native_failure_preserves_workspace_and_continues_sibling_and_grants(db,
     monkeypatch.setattr(
         "agentworks.workspaces.backends.vm.delete_vm_workspace", lambda *a, **k: pytest.fail("workspace unwound")
     )
+    monkeypatch.setattr("agentworks.workspaces.manager.create.resolve_program", lambda name: name)
     monkeypatch.setattr("agentworks.workspaces.manager.create.subprocess.run", lambda *a, **k: events.append("open"))
     with pytest.raises(StateError):
         workspace_manager.create_workspace(

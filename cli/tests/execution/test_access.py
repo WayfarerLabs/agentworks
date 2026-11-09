@@ -676,7 +676,7 @@ class _Buffer(io.BytesIO):
 def test_with_nothing_in_flight_the_closing_flush_tries_both_streams_then_raises(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    failure = OSError(5, "Input/output error")
+    failure = OSError(28, "No space left on device")
     stdout, stderr = _Buffer(failure), _Buffer()
     monkeypatch.setattr(sys, "stdout", SimpleNamespace(flush=lambda: None, buffer=stdout))
     monkeypatch.setattr(sys, "stderr", SimpleNamespace(flush=lambda: None, buffer=stderr))

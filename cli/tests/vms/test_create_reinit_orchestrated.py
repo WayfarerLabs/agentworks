@@ -31,7 +31,7 @@ from agentworks.vms import manager as vm_manager
 from agentworks.vms.admin import AdminConfig
 from agentworks.vms.contract import ACCOUNTS_VARIABLE
 from agentworks.vms.templates import ResolvedVMTemplate
-from tests.conftest import ManifestDoc, pin_wsl2_unsupported, seed_vm_trust, write_manifests
+from tests.conftest import ManifestDoc, fake_installed_programs, pin_wsl2_unsupported, seed_vm_trust, write_manifests
 from tests.orchestrated_fixtures import proxmox_site
 from tests.ssh_fixtures import write_test_ssh_keypair
 from tests.vm_access_support import AccessRecorder, Admin
@@ -62,7 +62,7 @@ def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", "tskey-test")
     monkeypatch.setenv("AW_SECRET_GIT_TOKEN_GH", "ghtok")
     monkeypatch.setenv("AW_SECRET_PROXMOX_TOKEN", "pve-token")
-    monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+    fake_installed_programs(monkeypatch, lambda name: f"/usr/bin/{name}")
     pin_wsl2_unsupported(monkeypatch)
 
     def _make(extra: str = "", *, manifests: Sequence[ManifestDoc | str] = ()):

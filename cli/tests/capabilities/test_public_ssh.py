@@ -411,6 +411,7 @@ class _Cloud:
                 self.events.append("route-close")
 
         monkeypatch.setattr(cls, "_transient_route", route)
+        monkeypatch.setattr(cls, "close_provisioning_access", lambda platform, vm, ctx: self._ran("access-close"))
         monkeypatch.setattr(cls, "_public_address", lambda platform, vm, ctx: address)
         original = PublicSSH.__init__
 
@@ -457,7 +458,7 @@ def test_a_cloud_runs_one_script_inside_its_own_route_under_vm_trust(
 
     cloud.platform.run_as_root(_vm(), _ctx(), b"true\n", 5)
 
-    assert cloud.events == ["route-open", "probe", "script", "route-close"]
+    assert cloud.events == ["route-open", "probe", "script", "route-close", "access-close"]
     assert [binding.mode for binding in cloud.bindings] == [TrustMode.VM]
 
 
@@ -471,7 +472,7 @@ def test_a_cloud_reads_host_keys_under_an_unverified_file_that_is_gone_afterward
 
     assert cloud.platform.read_host_keys(_vm(), _ctx()) == keys
 
-    assert cloud.events == ["route-open", "probe", "read", "route-close"]
+    assert cloud.events == ["route-open", "probe", "read", "route-close", "access-close"]
     (binding,) = cloud.bindings
     assert binding.mode is TrustMode.UNVERIFIED
     assert binding.provisioning_file is not None
@@ -503,7 +504,7 @@ def test_a_clouds_native_shell_runs_inside_its_own_route_after_the_probe(
 
     assert cloud.platform.native_shell(_vm(), _ctx()) == 3
 
-    assert cloud.events == ["route-open", "probe", "shell", "route-close"]
+    assert cloud.events == ["route-open", "probe", "shell", "route-close", "access-close"]
     assert [binding.mode for binding in cloud.bindings] == [TrustMode.VM]
 
 
@@ -523,10 +524,9 @@ def test_an_interrupted_native_shell_still_closes_its_route(
     with pytest.raises(KeyboardInterrupt):
         cloud.platform.native_shell(_vm(), _ctx())
 
-    assert cloud.events == ["route-open", "probe", "shell", "route-close"]
+    assert cloud.events == ["route-open", "probe", "shell", "route-close", "access-close"]
 
 
-@pytest.mark.usefixtures("standard_streams")
 @pytest.mark.skipif(sys.platform == "win32", reason="os.kill delivery is POSIX")
 @pytest.mark.parametrize("factory", CLOUDS, ids=["aws", "azure", "gcp"])
 @pytest.mark.parametrize("signal_name", ["SIGTERM", "SIGHUP"])
@@ -547,7 +547,7 @@ def test_a_termination_during_a_root_script_still_closes_its_route(
     with pytest.raises(KeyboardInterrupt):
         cloud.platform.run_as_root(_vm(), _ctx(), b"true\n", 5)
 
-    assert cloud.events == ["route-open", "probe", "script", "route-close"]
+    assert cloud.events == ["route-open", "probe", "script", "route-close", "access-close"]
 
 
 @pytest.mark.parametrize("factory", CLOUDS, ids=["aws", "azure", "gcp"])
@@ -574,4 +574,4 @@ def test_a_cloud_vm_with_no_public_address_is_a_state_error(
         cloud.platform.run_as_root(_vm(), _ctx(), b"true\n", 5)
 
     assert caught.value.hint
-    assert cloud.events == ["route-open", "route-close"]
+    assert cloud.events == ["route-open", "route-close", "access-close"]

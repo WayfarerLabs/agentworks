@@ -130,10 +130,12 @@ has started.
   8.1, so install the Win32-OpenSSH MSI from <https://github.com/PowerShell/Win32-OpenSSH/releases>.
 - **No program from the current directory.** Windows looks a bare program name up in the current
   directory before `PATH`, and on POSIX an empty or relative `PATH` entry means the current
-  directory. Agentworks now starts `tailscale` and PowerShell by their path in an absolute `PATH`
-  directory, like `ssh` on macOS and Linux. The commands that still use the older SSH path (VM and
-  agent initialization, sessions, workspaces and backups) start `ssh` and `scp` by name until a
-  later release moves them, so on Windows run `agw` from a directory whose contents you trust.
+  directory. Agentworks now starts every workstation program by its path in an absolute `PATH`
+  directory: `tailscale`, PowerShell, the 1Password CLI `op`, `git`, `taskkill`, local Lima's
+  `limactl`, VS Code's `code`, your `EDITOR`, and the `ssh` and `scp` of the commands that still use
+  the older SSH path (VM and agent initialization, sessions, workspaces and backups). A program
+  found only in the current directory counts as not installed, so `agw doctor` and the 1Password
+  backend's readiness no longer vouch for one. An `EDITOR` given as a path is run as given.
 - **`python3` on the VM.** Every request starts a small Python program on the VM. A VM without
   `python3`, or with one that lacks its standard library, is reported as unable to run Agentworks
   requests. New VMs get it at provisioning. `vm reinit` and `vm confirm-release` now connect the
@@ -283,11 +285,18 @@ before they resolve the auth key.
   Agentworks opens to a cloud VM (AWS, Azure, GCP) is removed when the command is ended on macOS and
   Linux by `SIGTERM` or `SIGHUP` (a closed terminal), or on Windows by Ctrl-Break, as it is on
   Ctrl-C: `vm create` rolls back, bootstrap allow included, and a root script (`vm recover`,
-  `vm rekey`, the logout at `vm delete`) or a `vm shell --platform` session removes its own allow. A
-  second signal during that cleanup is ignored, so it cannot cut the removal short. Closing the
-  console window on Windows may start that cleanup, but Windows ends the process within seconds, so
-  it cannot be relied on to finish: end the command with Ctrl-C or Ctrl-Break instead, and delete a
-  rule a closed window left behind from the VM's firewall in the provider's console.
+  `vm rekey`, the logout at `vm delete`) or a `vm shell --platform` session removes its own allow.
+  Once a signal has started that cleanup, Ctrl-C included, a `SIGTERM`, `SIGHUP` or Ctrl-Break is
+  ignored, so a closed terminal cannot cut the removal short; a second Ctrl-C still abandons the
+  cleanup, as its message says. Closing the console window on Windows may start that cleanup, but
+  Windows ends the process within seconds, so it cannot be relied on to finish: end the command with
+  Ctrl-C or Ctrl-Break instead, and delete a rule a closed window left behind from the VM's firewall
+  in the provider's console.
+- **Output nobody reads no longer fails a command.** When the reader of `agw`'s output has gone (a
+  pipe into `head` that has exited, `2>&1 | tee create.log` in a closed window, or the closed
+  terminal itself), the rest of that output is dropped and the command carries on to the end, a
+  create's rollback included, with the exit status it would have had. Output redirected to a file
+  that cannot be written, such as on a full disk, still fails the command.
 
 ## Third-party VM platforms
 
@@ -346,12 +355,14 @@ state the full contract, and the
   any other failure's error quotes the exit status and cloud-init's own detail and errors
   (`cloud-init status --wait --long`), since the rollback then removes the VM.
 - **`close_provisioning_access(vm, ctx)` replaces `post_tailscale_ready` and `secure_failed_vm`.**
-  Phase A calls it exactly once with the create's own context, however Phase A ends: after the VM
-  contract passes, when Phase A fails, and when it is interrupted. A platform that opens
-  provisioning access in `create`, such as a bootstrap firewall allow, closes it there. Rename an
-  override of either old hook; a platform that overrode both with the same body keeps one.
-  Registration refuses a platform that still defines either old name, naming
-  `close_provisioning_access`, since nothing calls them any more.
+  Phase A calls it once with the create's own context, however Phase A ends: after the VM contract
+  passes, when Phase A fails, and when it is interrupted. A platform that opens provisioning access
+  in `create`, such as a bootstrap firewall allow, closes it there. A platform built on
+  `public_ssh.PublicAddressPlatform` has it called again after each root-channel route, so it must
+  do nothing, silently, when the access is already closed. Rename an override of either old hook; a
+  platform that overrode both with the same body keeps one. Registration refuses a platform that
+  still defines either old name, naming `close_provisioning_access`, since nothing calls them any
+  more.
 - **`generate_bootstrap_script()` no longer takes `tailscale_auth_key`.** The script it generates
   holds no secret and stops once Tailscale is installed, so a provider may retain it.
   `run_bootstrap()` runs it through a root channel, and `parse_bootstrap_steps()` replaces
