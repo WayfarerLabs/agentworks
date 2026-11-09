@@ -1,7 +1,7 @@
 # Implementation Plan: Transport Take 2
 
-- Status: Slices 1 and 2 implemented in PR A (#863) and slices 3 and 4 in PR B (#866), with the live
-  evidence cells listed below still open; slices 5 to 8 not started
+- Status: Slices 1 and 2 implemented in PR A (#863), slices 3 and 4 in PR B (#866) and slice 5 in PR
+  C, with the live evidence cells listed below still open; slices 6 to 8 not started
 - Date: 2026-10-31
 - Requirements: [frd.md](./frd.md)
 - Architecture: [hla.md](./hla.md)
@@ -442,12 +442,12 @@ no platform's private access imports a legacy module.
   - the symlink policy;
   - mode and ownership;
   - cleanup.
-- [ ] Implement `PythonProgram`, `Script.interactive`, finite stdin for `run` with `Bytes(data)`,
+- [x] Implement `PythonProgram`, `Script.interactive`, finite stdin for `run` with `Bytes(data)`,
       the `log_streams` option, the `CaptureOutput` and `DiscardOutput` sinks, `files.py` and the
       file program, and `RunContext.admin_access()` and `agent_access()`.
-- [ ] Make the operation log keep both streams of a request with `log_streams=False` out entirely
+- [x] Make the operation log keep both streams of a request with `log_streams=False` out entirely
       (HLA D13), with its first callers, the file program's reads and the native CLI.
-- [ ] Migrate:
+- [x] Migrate:
   - artifact publication and session artifacts;
   - native probing;
   - the harness-native settings merge and CLI transcript reads;
@@ -458,10 +458,14 @@ no platform's private access imports a legacy module.
   - the harness setup dispatch, readiness and lifecycle, with `SetupInvocation.access`;
   - the tmux stale-socket cleanup's path check and the workspace backend's generated-config removal,
     the last other `native_files` importers.
-- [ ] Delete `admin_target()`, `agent_target()`, `SetupInvocation.runner`, `SetupRunner` and
+- [x] Delete `admin_target()`, `agent_target()`, `SetupInvocation.runner`, `SetupRunner` and
       `native_files.py` with their last readers, after re-proving their incident rows, and bump the
-      harness-integration contract to 8, git-credential to 4 and secret-backend to 3.
-- [ ] Tests:
+      harness-integration contract to 8, git-credential to 4 and secret-backend to 3. Re-proved by
+      tests: I35, I36 and I47 through `setup_user`; I37 to I41 by the file program, `Files` and
+      publication tests; I42 and I43 by the L-lane native discovery tests and the settings log test;
+      I50 by vector F8; I51 by `test_setup_request_environment.py`; I54 to I56 by the native CLI
+      failure and marketplace tests. I57 moves with tmux in slice 7.
+- [x] Tests:
   - `write_if` and `remove_if` detect a concurrent writer;
   - a truncated stdin publishes nothing;
   - JSON null survives a settings merge;
@@ -471,10 +475,11 @@ no platform's private access imports a legacy module.
   - `preserve_metadata=True` keeps the existing file's owner, group, mode and ACLs;
   - a request's stdin is absent from logs and exceptions, and `log_streams=False` keeps its streams
     out (a conformance vector).
-- [ ] Amend ADR 0019.
-- [ ] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
-      issues and fix history), and add incident inventory rows before deleting anything.
-- [ ] Collateral: update `capabilities/README.md` and plugin author documentation for the new
+- [x] Amend ADR 0019.
+- [x] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
+      issues and fix history), and add incident inventory rows before deleting anything. Rows I35 to
+      I57 are in the HLA inventory.
+- [x] Collateral: update `capabilities/README.md` and plugin author documentation for the new
       accessors.
 - [ ] Live evidence: harness setup and a session start with artifacts, on Remote Lima from macOS and
       on one cloud from Windows.
