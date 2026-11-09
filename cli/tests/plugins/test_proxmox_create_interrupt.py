@@ -578,6 +578,25 @@ class TestDeleteOp:
         with pytest.raises(ProxmoxAPIError, match="locked"):
             platform.delete(self._vm_row(), RunContext())
 
+    def test_a_locked_running_vm_s_delete_failure_says_why_its_stop_failed(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A destroy refused because the guest still runs said nothing of the lock that kept the stop from it."""
+        platform, fake = _platform_with_fake(monkeypatch)
+        fake.holder = "vm1"
+        fake.running = True
+        fake.stop_error = ProxmoxAPIError(f"VM {NEWID} is locked (backup)")
+        refused = ProxmoxAPIError(f"VM {NEWID} is running - destroy failed")
+        refused.code = 500
+        fake.delete_error = refused
+
+        with pytest.raises(ProxmoxAPIError) as caught:
+            platform.delete(self._vm_row(), RunContext())
+
+        assert "locked (backup)" in str(caught.value)
+        assert caught.value.code == 500
+        assert caught.value.__cause__ is refused
+
     @pytest.mark.parametrize("code", [401, 403, 500])
     def test_a_failed_delete_of_a_guest_still_there_raises(self, monkeypatch: pytest.MonkeyPatch, code: int) -> None:
         """Material 10 of #866's round two: only /cluster/nextid can show a failed delete's VMID free."""

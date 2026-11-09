@@ -49,23 +49,38 @@ def remove_guest(api: ProxmoxAPI, node: str, vmid: int, *, running: bool) -> Non
     the delete to decide, since the delete op is retried against partial
     prior failures. A failed delete counts as done only when nothing holds
     the VMID any more; otherwise, or when that cannot be asked, the delete's
-    error propagates. Shared by the delete op and the create rollback
-    wrappers, so the stop-then-delete ordering lives in exactly one place.
+    error propagates, carrying the stop's failure too when there was one: a
+    locked running guest's delete says only that the guest is running.
+    Shared by the delete op and the create rollback wrappers, so the
+    stop-then-delete ordering lives in exactly one place.
     """
+    stop_failure: ProxmoxAPIError | None = None
     if running:
-        with contextlib.suppress(ProxmoxAPIError):
+        try:
             upid = api.stop_vm(node, vmid)
             api.wait_for_task(node, upid)
+        except ProxmoxAPIError as error:
+            stop_failure = error
     try:
         upid = api.delete_vm(node, vmid)
         api.wait_for_task(node, upid)
     except ProxmoxAPIError as error:
+        failure = error if stop_failure is None else _after_failed_stop(error, stop_failure)
         try:
             held = api.vmid_in_use(vmid)
         except ProxmoxAPIError:
-            raise error from None
-        if held:
+            raise failure from None
+        if held and failure is error:
             raise
+        if held:
+            raise failure from error
+
+
+def _after_failed_stop(error: ProxmoxAPIError, stop_failure: ProxmoxAPIError) -> ProxmoxAPIError:
+    """The delete's ``error``, also saying why stopping the guest first had failed."""
+    combined = ProxmoxAPIError(f"{error} (stopping the VM first had failed: {stop_failure})", hint=error.hint)
+    combined.code, combined.body = error.code, error.body
+    return combined
 
 
 def _settle_and_teardown(
