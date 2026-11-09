@@ -101,8 +101,8 @@ def run_setup(
 ) -> NativeSetupState:
     """Run desired integration activations, then retire removed activations in prior order.
 
-    ``log_warning`` writes to the operation log (``SSHLogger.warning`` today),
-    which records each failed integration's reason.
+    ``log_warning`` writes to the operation log, which records each failed
+    integration's reason.
 
     A fresh owner's caller buffers and commits this result with its owner row.
     It must already have refused native residue and own failed-create rollback.

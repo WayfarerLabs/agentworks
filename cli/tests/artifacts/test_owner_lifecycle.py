@@ -33,6 +33,7 @@ from agentworks.workspaces.realize import realize_workspace
 from agentworks.workspaces.templates import ResolvedTemplate
 from tests.conftest import _StubRegistry
 from tests.native_setup_fixtures import LocalFixtureTransport
+from tests.vm_access_support import RecordingVMAccess
 
 # Every access a command builds is the recording fake: these tests run no ssh.
 pytestmark = [
@@ -83,6 +84,7 @@ def test_common_capture_without_activation_and_vm_admin_separation(owner):
     )
     assert [item.component for item in prepared] == ["vm", "admin"]
     assert not read_captures(owner.db, "vm", "vm")
+    invocations = []
     for inputs in prepared:
         invocation = (
             VMSetupInvocation(
@@ -95,6 +97,7 @@ def test_common_capture_without_activation_and_vm_admin_separation(owner):
             if inputs.component == "vm"
             else user_call(owner)
         )
+        invocations.append(invocation)
         run_setup(owner.db, owner.registry, inputs, invocation, failures=[], operation="vm-init")
     captured = read_captures(owner.db, "vm", "vm")
     assert set(captured) == {"vm", "admin"}
@@ -103,7 +106,7 @@ def test_common_capture_without_activation_and_vm_admin_separation(owner):
     assert vm_item.content.digest == admin_item.content.digest
     assert vm_item.identity != admin_item.identity
     assert not read_native_setup(owner.db, "vm", "vm").records
-    assert owner.target.commands == []
+    assert all(cast(RecordingVMAccess, invocation.access).requests() == [] for invocation in invocations)
 
 
 def test_vm_admin_capture_shares_revision_and_refreshes_next_operation(owner, monkeypatch, tmp_path):

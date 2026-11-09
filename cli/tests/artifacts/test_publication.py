@@ -413,9 +413,10 @@ def test_package_root_is_validated_before_any_publication(target, invalid):
         "wrong-type": 42,
     }[invalid]
     malformed = replace(artifact(path), native_identity="skill:review", package_root=root)
+    access = target.access()
     with pytest.raises(StateError):
-        publish_artifacts(target.files(), (malformed,), (), lambda files: None, roots=(str(target.home),))
-    assert not path.exists() and target.commands == []
+        publish_artifacts(access.files(), (malformed,), (), lambda files: None, roots=(str(target.home),))
+    assert not path.exists() and access.requests() == []
 
 
 def test_persisted_package_root_cannot_escape_current_publication_scope(target):
@@ -427,9 +428,10 @@ def test_persisted_package_root_cannot_escape_current_publication_scope(target):
     record = OwnedArtifactFile(
         path=str(path), sha256=hashlib.sha256(b"owned").hexdigest(), origins=("a" * 64,), package_root=str(target.root)
     )
+    access = target.access()
     with pytest.raises(StateError):
-        publish_artifacts(target.files(), (), (record,), lambda files: None, roots=(str(target.home),))
-    assert path.read_bytes() == b"owned" and target.commands == []
+        publish_artifacts(access.files(), (), (record,), lambda files: None, roots=(str(target.home),))
+    assert path.read_bytes() == b"owned" and access.requests() == []
 
 
 def test_rootless_skill_entrypoints_retire_deepest_first_after_supporting_members(target):

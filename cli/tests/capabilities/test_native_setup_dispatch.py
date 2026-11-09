@@ -601,3 +601,35 @@ def test_retirement_keeps_callback_diagnostics_until_owning_retry_converges(setu
     run_setup(db, Mock(), inputs, invocation, failures=[], operation="agent-reinit")
     assert retirement_calls == 2
     assert [record.integration for record in read_native_setup(db, "agent", "agent").records] == ["second"]
+
+
+def test_a_failed_integration_reaches_the_operation_log_through_a_lifecycle_entry_point(
+    setup_case, monkeypatch, tmp_path
+):
+    from agentworks.harness_setup.lifecycle import apply_agent_setup
+    from agentworks.ssh import SSHLogger
+    from tests.vm_access_support import install_access_recorder
+
+    db, inputs, _, _, failures = setup_case
+    failures.add("first")
+    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path / "logs")
+    install_access_recorder(monkeypatch)
+    monkeypatch.setattr("agentworks.harness_setup.lifecycle.site_platform_name", lambda *args: "fixture")
+    logger = SSHLogger("agent", "agent-reinit")
+    observed: list[SetupFailure] = []
+    apply_agent_setup(
+        db,
+        Mock(),
+        Mock(),
+        inputs=inputs,
+        vm=db.get_vm("vm"),
+        username="user",
+        values={},
+        logger=logger,
+        held=None,
+        operation="agent-reinit",
+        failures=observed,
+    )
+    logger.close()
+    (failure,) = observed
+    assert failure.reason in logger.path.read_text()

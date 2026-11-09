@@ -82,14 +82,12 @@ class LocalFixtureTransport(Transport):
         }
         self.logger = None
         self.default_timeout = 30
-        self.commands: list[str] = []
         self.logged_output: list[str] = []
 
     def describe(self) -> str:
         return "isolated local native fixture"
 
     def run(self, command: str, **kwargs) -> SSHResult:
-        self.commands.append(command)
         result = subprocess.run(
             ["bash", "-c", command],
             cwd=self.home,
