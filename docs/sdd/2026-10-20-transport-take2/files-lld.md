@@ -417,9 +417,10 @@ and no caller branches on it; its test (`cli/tests/test_native_path_failures.py:
 ### Native settings publication
 
 Native settings, the one caller that rewrites a file it has read, has no read-modify-write
-operation. `native.py` reads the file to plan (`_MappingPlan.build` and its inventory checks) and
-reads it again just before each publish, computes the settings on the workstation from that content,
-and calls `write_if` with `expected` the SHA-256 of what it read (`None` for absent):
+operation. `native.py` reads the file to plan (`_MappingPlan.build` and its inventory checks), and
+again before the publish when native commands ran in between; it computes the settings on the
+workstation from the last read and calls `write_if` with `expected` the SHA-256 of it (`None` for
+absent):
 
 - **A change is a refusal.** No Agentworks path races that publish, so a `FileConflict` means
   another writer changed the file during setup. It propagates with nothing written and nothing
