@@ -107,6 +107,10 @@ launcher's, so a `PythonProgram` runs under it too.
 - F7 (S and V): an elevated `write_if` creates a root-owned file that an elevated `read` returns
   (with `sudo -n` on S), and an agent's elevated `write_if` is refused before anything is sent.
 
+Every test but an integration test sends the file program with its lock in the worker's temporary
+directory (the suite conftest's `file_lock_path`), so the L and S lanes and
+`run_file_program_locally` never take the host's own `/run/lock`.
+
 `test_file_program.py` runs the guest file program's `main` in its own interpreter, under each
 interpreter the L lane uses, on a temporary tree with its lock in a sticky directory of its own:
 conflicts, truncated input, links at the destination, a parent and the lock path, the lock's mode,

@@ -89,6 +89,41 @@ def _isolate_ssh_logs(tmp_path_factory: pytest.TempPathFactory) -> Generator[Non
         ssh.LOG_DIR = prior
 
 
+@pytest.fixture(scope="session")
+def file_lock_path(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """The guest file program's VM-wide lock for programs this worker runs on this machine."""
+    directory = tmp_path_factory.getbasetemp() / "file-lock"
+    directory.mkdir(exist_ok=True)
+    return directory / "agentworks-files.lock"
+
+
+@pytest.fixture(scope="session")
+def _file_program_with_private_lock(file_lock_path: Path) -> str:
+    from agentworks.execution import file_program, files
+
+    source = files.program_source()
+    declaration = f'LOCK_PATH = "{file_program.LOCK_PATH}"'
+    if source.count(declaration) != 1:
+        raise RuntimeError(f"the file program no longer declares {declaration}; update this fixture")
+    return source.replace(declaration, f'LOCK_PATH = "{file_lock_path}"')
+
+
+@pytest.fixture(autouse=True)
+def _private_file_lock(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Send the file program with its lock at :func:`file_lock_path` in every non-integration test.
+
+    The L and S lanes and ``run_file_program_locally`` run the program on this
+    machine, where the VM's lock path is the host's own ``/run/lock``.
+    Integration tests reach a VM and keep its real lock.
+    """
+    if request.node.get_closest_marker("integration") is not None:
+        return
+    from agentworks.execution import files
+
+    source = request.getfixturevalue("_file_program_with_private_lock")
+    monkeypatch.setattr(files, "program_source", lambda: source)
+
+
 # ---------------------------------------------------------------------------
 # Resource manifest authoring
 #

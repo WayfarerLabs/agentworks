@@ -35,6 +35,7 @@ from agentworks.execution.files import (
 from agentworks.execution.requests import Bytes, PythonProgram
 from agentworks.execution.results import Completed, Result, Unknown, UnknownReason
 from tests.vm_access_support import Admin, Agent, RecordingVMAccess, account_shell, local_vm_access
+from tests.vm_access_support import local_files as recorded_local_files
 
 DIGEST = hashlib.sha256(b"current").hexdigest()
 
@@ -276,6 +277,17 @@ def test_operations_round_trip_on_a_real_filesystem(local_files: Files, tmp_path
     assert not package.exists()
     local_files.ensure_directory(str(tmp_path / "made" / "here"), mode=0o750)
     assert local_files.stat(str(tmp_path / "made" / "here")) == Directory()
+
+
+def test_programs_run_on_this_machine_take_the_private_lock(
+    local_files: Files, file_lock_path: Path, tmp_path: Path
+) -> None:
+    for name, files in (("lane", local_files), ("recorded", recorded_local_files())):
+        file_lock_path.unlink(missing_ok=True)
+
+        files.write_if(str(tmp_path / name), b"content", expected=None, mode=0o600, parent_mode=0o700)
+
+        assert file_lock_path.is_file()
 
 
 def test_a_link_is_refused_as_unsuitable(local_files: Files, tmp_path: Path) -> None:

@@ -420,13 +420,16 @@ __all__ = [
     "RecordingVMAccess",
     "account_shell",
     "answer_command_checks",
+    "answer_destination_identity",
     "check_result",
     "command_check_access",
     "is_command_check",
     "presence_check",
+    "local_files",
     "local_remote_argv",
     "local_vm_access",
     "rewrite_launcher",
+    "run_file_program_locally",
     "run_requests_locally",
 ]
 
@@ -436,7 +439,9 @@ def run_file_program_locally(call: Call) -> Result | None:
 
     The program's source and arguments are the request's, run by this
     interpreter with no startup (``-I -S``), its input on stdin. Elevation
-    is not applied: a caller test's paths are the test's own.
+    is not applied: a caller test's paths are the test's own. The suite's
+    conftest sends the program with a private lock (``file_lock_path``), so
+    no test takes the host's.
     """
     import subprocess
     import sys
