@@ -101,6 +101,8 @@ feature. They are recorded verbatim.
 > actual command. Rather just that it renders and that required_commands are present. The command
 > itself just need to be executed to see if it works.
 
+Transport scope:
+
 > For #1, please just file an issue. We're completely reworking the ssh and transport stack. I think
 > this is already addressed but I'll have the dev look at your issue to make sure. We should not do
 > anything special here.

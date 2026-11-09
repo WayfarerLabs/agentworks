@@ -77,10 +77,10 @@ agent or workspace, before workload/env secret resolution. The existing VM activ
 its own credentials before remote preflight.
 
 The readiness path checks declared `required_commands` on an available target; a new target's probe
-defers until that target exists. These checks cover template renderability and declared-command
-availability. Command behavior is determined by execution. Launch renders the selected field again
-from its declaration before launch or destructive replacement. Native transports retain their
-documented env-delivery limitations.
+defers until that target exists. These checks cover whether the template renders and whether
+declared commands are available. Command behavior is determined by execution. Launch renders the
+selected field again from its declaration before launch or destructive replacement. Native
+transports retain their documented env-delivery limitations.
 
 `agw env show --session NAME` previews winning plaintext values and their scopes from managed state
 without connecting to the VM. `--vm`, `--workspace`, and `--agent` select other contexts. Secrets

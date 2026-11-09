@@ -56,7 +56,7 @@ secret resolution, even when a pending target defers the required-command probe.
 same selection/rendering helper on the declaration, without caching its rendered value. The existing
 VM activation gate can resolve its own credentials before remote preflight.
 
-Declared `required_commands` use the existing target availability probe. Template renderability and
+Declared `required_commands` use the existing target availability probe. Template rendering and
 declared-command availability are the checks; command success is established by execution. Native
 structured arguments render during launch selection before destructive replacement. Env context is
 validated before workload boundary prompts when its facts are known; no separate generic preflight
