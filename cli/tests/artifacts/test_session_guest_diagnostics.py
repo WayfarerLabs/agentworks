@@ -4,7 +4,7 @@ import shlex
 import subprocess
 import sys
 import traceback
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
@@ -14,9 +14,6 @@ from agentworks.artifacts.native.probe import probe_native
 from agentworks.errors import ExternalError
 from agentworks.execution.results import Completed, Result
 from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
-from agentworks.harness_setup.runner import SetupRunner
-from agentworks.ssh import SSHError
-from agentworks.transports import Transport
 from tests.artifacts.test_native_probe import probe
 from tests.vm_access_support import Admin, RecordingVMAccess, account_shell, local_vm_access
 
@@ -72,23 +69,6 @@ def test_advisory_ancestor_warning_redacts_normalized_runtime_values(representat
     message = warn.call_args.args[0]
     assert secret[: len(secret) // 2] not in message and "\x1b" not in message and "\x07" not in message
     assert len(message.encode()) < 2300
-
-
-@pytest.mark.windows
-@pytest.mark.parametrize("representation", ["raw", "shell", "repr"])
-def test_setup_runner_preserves_error_identity_and_sanitizes_environment(representation):
-    secret, payload = hostile_text(representation)
-    target = Mock(spec=Transport)
-    target.logger = None
-    target.default_timeout = 30
-    failure = SSHError(payload, hint=payload)
-    target.run.side_effect = failure
-    with pytest.raises(SSHError) as caught:
-        SetupRunner(target, {"TOKEN": secret}, redactions=(secret,)).run("fixture")
-    assert caught.value is failure
-    assert_safe(str(failure), secret)
-    assert failure.hint is not None
-    assert_safe(failure.hint, secret)
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="runs agw-launch and the native probe locally")

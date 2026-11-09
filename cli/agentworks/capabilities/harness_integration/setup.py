@@ -15,7 +15,6 @@ if TYPE_CHECKING:
     from agentworks.execution.access import VMAccess
     from agentworks.execution.files import Files
     from agentworks.harness_setup.model import NativeClaim, SetupFacet, SetupRecord
-    from agentworks.transports import Transport
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -41,7 +40,6 @@ class SetupInvocation:
     vm: VMRow
     access: VMAccess
     files: Files
-    runner: Transport
     prior: SetupRecord | None
     checkpoint: Callable[[tuple[NativeClaim, ...]], None]
     report_incomplete: Callable[[str], None] = field(default=output.warn, repr=False)

@@ -265,12 +265,13 @@ reference and the 0.20 upgrade guide.
 
 ## Independence
 
-Nothing in this package imports `agentworks.transports`, `agentworks.ssh`, `agentworks.remote_exec`,
-`agentworks.harness_setup.runner` or `agentworks.native_files`. Three guards hold that. A
-fresh-interpreter test (`tests/execution/test_independence.py`) imports every submodule with them
-blocked, and with them the modules outside the package that are built on it alone: `vms.contract`,
-`vms.recovery`, and `public_ssh`, which loads the `vm_platform` package. A conftest blocks them for
-every test in `tests/execution/`. A static check rejects any import of them, in a function body or
-under `TYPE_CHECKING` too, in the files already migrated onto this package
-(`tests/test_execution_import_boundary.py`); a slice that migrates a file adds it to that list. The
-tests are described in [`tests/execution/README.md`](../../tests/execution/README.md).
+Nothing in this package imports `agentworks.transports`, `agentworks.ssh` or
+`agentworks.remote_exec`. Three guards hold that. A fresh-interpreter test
+(`tests/execution/test_independence.py`) imports every submodule with them blocked, and with them
+the modules outside the package that are built on it alone: `vms.contract`, `vms.recovery`,
+`public_ssh`, which loads the `vm_platform` package, and every module of `agentworks.plugins`, which
+loads the plugin index. A conftest blocks them for every test in `tests/execution/`. A static check
+rejects any import of them, in a function body or under `TYPE_CHECKING` too, in the files already
+migrated onto this package (`tests/test_execution_import_boundary.py`); a slice that migrates a file
+adds it to that list. The tests are described in
+[`tests/execution/README.md`](../../tests/execution/README.md).

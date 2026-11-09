@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import sys
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
 from unittest.mock import Mock
 from uuid import uuid4
 
@@ -14,12 +12,8 @@ import pytest
 from agentworks.artifacts.native.probe import probe_native
 from agentworks.errors import ExternalError
 from agentworks.execution.results import Completed, Result
-from agentworks.harness_setup.runner import SetupRunner
-from agentworks.native_files import NativeFiles
-from agentworks.ssh import SSHError, SSHLogger, SSHResult
+from agentworks.ssh import SSHLogger
 from agentworks.transports import Transport
-from tests.native_setup_fixtures import LocalFixtureTransport
-from tests.test_native_harness_setup import transport as transport
 from tests.vm_access_support import Admin, RecordingVMAccess
 
 
@@ -111,25 +105,6 @@ def test_actual_session_delivery_caller_redacts_probe_failures(delivery, monkeyp
     assert secret not in diagnostic and path in diagnostic
 
 
-def test_logger_only_secret_is_removed_before_terminal_normalization(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    marker = uuid4().hex.upper()
-    secret = "x" + marker + "\nsecond-part"
-    path = "/home/agt-tester/.grok/agents/operator.md"
-    failure = SSHError("\x1b[" + secret + " " + path, hint=secret)
-    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path / "logs")
-    runner = Mock(spec=Transport)
-    runner.logger = SSHLogger("resolved-values", "probe", redactions=(secret,))
-    runner.default_timeout = 30
-    runner.run.side_effect = failure
-    with pytest.raises(SSHError) as caught:
-        SetupRunner(runner, {"USER": "tester", "LETTER": "e"}).run("fixture")
-    assert caught.value is failure
-    assert marker not in str(failure) and marker not in (failure.hint or "")
-    assert path in str(failure)
-
-
 def test_logger_only_secret_is_removed_from_setup_probe_diagnostics(
     db, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -179,29 +154,3 @@ def test_logger_only_secret_is_removed_from_setup_probe_diagnostics(
         setup.user_init(replace(invocation, access=access, artifacts=received(artifact(ArtifactType.SKILL))))
     assert marker not in str(caught.value) and marker not in (caught.value.hint or "")
     assert path in str(caught.value)
-
-
-@pytest.mark.skipif(sys.platform != "linux", reason="executes Linux guest native-file helpers")
-def test_native_staging_ignores_a_startup_banner_and_cleans_its_directory(
-    transport: LocalFixtureTransport, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    original = transport.run
-
-    def with_banner(command: str, **kwargs: Any) -> SSHResult:
-        result = original(command, **kwargs)
-        return SSHResult(result.returncode, "fixture welcome" + result.stdout, result.stderr)
-
-    monkeypatch.setattr(transport, "run", with_banner)
-    with NativeFiles(transport) as files:
-        destination = str(transport.home / "settings.json")
-        assert not files.directory(str(transport.home / "config"))
-        assert files.directory(str(transport.home / "config"), create=True)
-        assert files.read(destination) is None
-        assert files.fingerprint(destination) is None
-        files.publish(destination, b"{}", expected=None)
-        assert files.read(destination) == b"{}"
-        observed = files.fingerprint(destination)
-        assert observed is not None
-        files.remove(destination, expected=observed[0])
-        assert files.read(destination) is None
-    assert not list((transport.root / "tmp").iterdir())

@@ -105,7 +105,6 @@ def routed_setup(db, tmp_path, monkeypatch):
         vm=fixture.vm,
         access=(recorded := admin.access()),
         files=recorded.files(),
-        runner=admin,
         prior=None,
         checkpoint=lambda claims: None,
     )
@@ -114,7 +113,6 @@ def routed_setup(db, tmp_path, monkeypatch):
             vm=fixture.vm,
             access=(recorded := admin.access()),
             files=recorded.files(),
-            runner=admin,
             prior=None,
             checkpoint=lambda claims: None,
             username="admin",
@@ -124,7 +122,6 @@ def routed_setup(db, tmp_path, monkeypatch):
             vm=fixture.vm,
             access=(recorded := agent.access()),
             files=recorded.files(),
-            runner=agent,
             prior=None,
             checkpoint=lambda claims: None,
             username="worker",
@@ -218,7 +215,6 @@ def test_untrusted_large_failure_is_bounded_terminal_safe_and_redacted_before_tr
     if with_logger:
         monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path / "logs")
         logger = SSHLogger("round4", "setup", redactions=(token,))
-    invocation.runner.logger = logger
     invocation = replace(invocation, secrets={"credential": token})
     # A secret crossing the storage limit must be redacted before slicing.
     payload = (
@@ -238,7 +234,15 @@ def test_untrusted_large_failure_is_bounded_terminal_safe_and_redacted_before_tr
 
     monkeypatch.setattr(harness_integration_for("first"), "user_init", initialize)
     failures: list[SetupFailure] = []
-    state = run_setup(db, Mock(), inputs, invocation, failures=failures, operation="agent-reinit")
+    state = run_setup(
+        db,
+        Mock(),
+        inputs,
+        invocation,
+        failures=failures,
+        operation="agent-reinit",
+        log_warning=None if logger is None else logger.warning,
+    )
     failure = failures[0]
     assert failure.hint is not None
     values = [failure.reason, failure.hint, *state.records[0].incomplete_reasons]
@@ -288,7 +292,6 @@ def test_unavailable_capture_cannot_erase_placements_or_unresolved_deferrals(rou
         vm=fixture.vm,
         access=case.calls["admin"].access,
         files=case.calls["admin"].files,
-        runner=case.calls["admin"].runner,
         prior=None,
         checkpoint=lambda claims: None,
     )

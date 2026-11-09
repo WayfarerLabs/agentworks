@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from typing import cast
-from unittest.mock import Mock
 
 from agentworks.capabilities.harness_integration.setup import VMSetupInvocation
 from agentworks.db import VMRow
@@ -16,7 +15,6 @@ def invocation(environment: dict[str, str]) -> VMSetupInvocation:
         vm=cast("VMRow", object()),
         access=access,
         files=access.files(),
-        runner=Mock(),
         prior=None,
         checkpoint=lambda claims: None,
         environment=environment,

@@ -62,7 +62,6 @@ def large_skill_setup(tmp_path, db, monkeypatch):
         vm=db.insert_vm("vm", "lima", "vm"),
         access=(local := fixture_access(monkeypatch, target)),
         files=local.files(),
-        runner=target,
         prior=None,
         checkpoint=lambda claims: None,
         username="worker",

@@ -119,7 +119,6 @@ def test_receiver_acknowledges_known_inputs_without_certifying_incoming_routes(
         vm=fixture.vm,
         access=(recorded := runner.access()),
         files=recorded.files(),
-        runner=runner,
         prior=None,
         checkpoint=lambda claims: None,
         username="worker",

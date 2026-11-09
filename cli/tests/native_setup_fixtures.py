@@ -195,7 +195,6 @@ def invocation(
         vm=cast(VMRow, object()),
         access=access,
         files=access.files(),
-        runner=transport,
         prior=prior,
         checkpoint=claims.append,
         username="fixture",

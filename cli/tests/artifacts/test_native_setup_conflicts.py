@@ -22,7 +22,6 @@ from agentworks.plugins.codex.harness_integration import CodexIntegration
 from agentworks.plugins.grok.harness_integration import GrokBuildIntegration
 from tests.artifacts._fixtures import received
 from tests.artifacts.test_native_delivery import artifact, context, enabled
-from tests.conftest import _FakeTarget
 from tests.vm_access_support import Admin, RecordingVMAccess
 
 
@@ -49,7 +48,6 @@ def test_setup_defers_all_colliding_origins_and_applies_independent_rule(
         "vm": db.insert_vm("vm", "site", "host"),
         "access": (recorded := RecordingVMAccess([], Admin())),
         "files": recorded.files(),
-        "runner": _FakeTarget(),
         "prior": None,
         "checkpoint": lambda claims: None,
         "report_incomplete": incomplete,
@@ -145,7 +143,6 @@ def test_deferring_a_renamed_existing_entry_exposes_its_other_native_collision(d
         vm=db.insert_vm("vm", "site", "host"),
         access=(recorded := RecordingVMAccess([], Admin())),
         files=recorded.files(),
-        runner=_FakeTarget(),
         prior=None,
         checkpoint=lambda claims: None,
         report_incomplete=incomplete,

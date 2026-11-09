@@ -1,6 +1,7 @@
 """Mutation prefixes, retirement order, and destination ownership at dispatch."""
 
 from dataclasses import replace
+from typing import cast
 from unittest.mock import Mock
 
 import pytest
@@ -42,7 +43,6 @@ def facet_case(db, monkeypatch, component):
         vm=vm,
         access=(recorded := RecordingVMAccess([], Admin())),
         files=recorded.files(),
-        runner=Mock(logger=None),
         prior=None,
         checkpoint=Mock(),
     )
@@ -81,7 +81,7 @@ def test_unimplemented_activation_fails_without_successful_record(db, facet_case
     assert caught.value.entity_kind == inputs.kind and caught.value.entity_name == inputs.name
     assert failures == []
     assert read_native_setup(db, inputs.kind, inputs.name).records == ()
-    assert invocation.runner.method_calls == []
+    assert cast(RecordingVMAccess, invocation.access).requests() == []
 
 
 @pytest.mark.parametrize("component", ["vm", "admin", "agent", "workspace"])
@@ -92,7 +92,7 @@ def test_inactive_integrations_remain_absent(db, facet_case, monkeypatch):
     )
     state = run_setup(db, Mock(), inputs, invocation, failures=[], operation="fixture-setup")
     assert state.records == read_native_setup(db, inputs.kind, inputs.name).records == ()
-    assert invocation.runner.method_calls == []
+    assert cast(RecordingVMAccess, invocation.access).requests() == []
 
 
 @pytest.mark.parametrize("component", ["admin", "agent", "workspace"])
@@ -105,7 +105,7 @@ def test_implemented_default_setup_completes_without_native_changes(db, facet_ca
         (record,) = state.records
         assert record.complete and record.claims == ()
         assert record == read_native_setup(db, inputs.kind, inputs.name).records[0]
-    assert invocation.runner.method_calls == []
+    assert cast(RecordingVMAccess, invocation.access).requests() == []
 
 
 @pytest.mark.parametrize("component", ["vm", "admin", "agent", "workspace"])
@@ -117,7 +117,7 @@ def test_retirement_removes_legacy_claim_free_unsupported_record(db, facet_case)
     write_native_setup(db, inputs.kind, inputs.name, NativeSetupState(records=(previous,)), operation="fixture-setup")
     state = run_setup(db, Mock(), inputs, invocation, failures=[], operation="fixture-setup")
     assert state.records == read_native_setup(db, inputs.kind, inputs.name).records == ()
-    assert invocation.runner.method_calls == []
+    assert cast(RecordingVMAccess, invocation.access).requests() == []
 
 
 @pytest.fixture
@@ -157,7 +157,6 @@ def setup_case(tmp_path, monkeypatch):
         vm=vm,
         access=(recorded := RecordingVMAccess([], Admin())),
         files=recorded.files(),
-        runner=Mock(logger=None),
         prior=None,
         checkpoint=lambda claims: None,
         username="user",
@@ -300,7 +299,7 @@ def test_inactive_capture_notice_requires_local_artifacts(db, facet_case, monkey
     state = run_setup(db, Mock(), inputs, invocation, failures=[], operation="fixture-setup", buffered=True)
     assert warning.call_count == (1 if capture == "nonempty" else 0)
     assert state.records == ()
-    assert invocation.runner.method_calls == []
+    assert cast(RecordingVMAccess, invocation.access).requests() == []
 
 
 @pytest.mark.parametrize("component", ["vm"])

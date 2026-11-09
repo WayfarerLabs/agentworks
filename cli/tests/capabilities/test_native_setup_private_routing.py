@@ -48,7 +48,6 @@ def fallback_placements(db, tmp_path, monkeypatch):
         vm=fixture.vm,
         access=(recorded := target.access()),
         files=recorded.files(),
-        runner=target,
         prior=None,
         checkpoint=lambda claims: None,
         username="worker",
@@ -58,7 +57,6 @@ def fallback_placements(db, tmp_path, monkeypatch):
         vm=fixture.vm,
         access=(recorded := target.access()),
         files=recorded.files(),
-        runner=target,
         prior=None,
         checkpoint=lambda claims: None,
     )

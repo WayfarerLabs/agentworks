@@ -41,8 +41,8 @@ MIGRATED_FILES = (
     "capabilities/vm_platform/ssh_exposure.py",
     "capabilities/vm_platform/tailscale_join.py",
     "capabilities/vm_platform/wsl2.py",
-    # The plugins cannot pass the package guard yet: importing one
-    # loads the plugin index, which loads the harness plugins.
+    # The package guard imports every plugin too, likewise running no
+    # function body; this check reads the plugins migrated so far whole.
     "plugins/aws/platform.py",
     "plugins/azure/platform.py",
     "plugins/gcp/platform.py",
@@ -74,6 +74,9 @@ MIGRATED_FILES = (
     "harness_setup/dispatch.py",
     "harness_setup/readiness.py",
     "plugins/codex/artifacts.py",
+    "plugins/_harness_native/native.py",
+    "plugins/_harness_native/native_cli.py",
+    "capabilities/harness_integration/setup.py",
 )
 
 
@@ -112,8 +115,8 @@ def legacy_imports(source: str, *, module: str, is_package: bool = False, filena
         ("from agentworks.transports.base import Transport", ["agentworks.transports.base.Transport"]),
         ("from ... import ssh", ["agentworks.ssh"]),
         ("from ...ssh import SSHError", ["agentworks.ssh.SSHError"]),
-        ("from agentworks.harness_setup import runner", ["agentworks.harness_setup.runner"]),
-        ("def f():\n    from agentworks.native_files import x", ["agentworks.native_files.x"]),
+        ("from agentworks.transports import base", ["agentworks.transports.base"]),
+        ("def f():\n    from agentworks.remote_exec import x", ["agentworks.remote_exec.x"]),
         ("if TYPE_CHECKING:\n    import agentworks.remote_exec", ["agentworks.remote_exec"]),
     ],
 )

@@ -6,8 +6,6 @@ LEGACY_MODULES = (
     "agentworks.transports",
     "agentworks.ssh",
     "agentworks.remote_exec",
-    "agentworks.harness_setup.runner",
-    "agentworks.native_files",
 )
 
 

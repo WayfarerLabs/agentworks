@@ -530,7 +530,6 @@ def test_user_native_home_boundary_precedes_other_setup(db, monkeypatch, impleme
         vm=db.insert_vm("vm", "lima", "vm"),
         access=(recorded := RecordingVMAccess([], Admin())),
         files=recorded.files(),
-        runner=SimpleNamespace(),
         prior=None,
         checkpoint=lambda claims: None,
         username="alice",
@@ -559,7 +558,6 @@ def test_codex_external_home_does_not_block_home_owned_skills(db, monkeypatch):
             vm=db.insert_vm("vm", "lima", "vm"),
             access=(recorded := RecordingVMAccess([], Admin())),
             files=recorded.files(),
-            runner=SimpleNamespace(),
             prior=None,
             checkpoint=lambda claims: None,
             username="alice",
@@ -960,7 +958,6 @@ def test_setup_native_name_conflict_defers_only_affected_artifact(implementation
         VMSetupInvocation,
         WorkspaceSetupInvocation,
     )
-    from tests.conftest import _FakeTarget
 
     module = import_module(implementation.__module__)
     module_root = "/home/alice/.native"
@@ -982,7 +979,6 @@ def test_setup_native_name_conflict_defers_only_affected_artifact(implementation
         "vm": db.insert_vm("vm", "site", "host"),
         "access": (recorded := RecordingVMAccess([], Admin())),
         "files": recorded.files(),
-        "runner": _FakeTarget(),
         "prior": None,
         "checkpoint": lambda claims: None,
         "report_incomplete": incomplete.append,
@@ -1033,7 +1029,6 @@ def test_setup_name_conflict_deferral_uses_safe_owned_retirement(tmp_path, db, m
         vm=db.insert_vm("vm", "site", "host"),
         access=(recorded := target.access()),
         files=recorded.files(),
-        runner=target,
         prior=None,
         checkpoint=lambda claims: None,
         report_incomplete=incomplete.append,

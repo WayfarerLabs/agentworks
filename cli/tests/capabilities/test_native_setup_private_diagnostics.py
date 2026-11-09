@@ -48,7 +48,6 @@ def test_dispatch_redacts_canonicalized_invocation_and_logger_patterns_before_bo
     if with_logger:
         monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path / "logs")
         logger = SSHLogger("private-diagnostics", "setup", redactions=(log_token,))
-    invocation.runner.logger = logger
     # Core hands the invocation every secret the operation log registered.
     invocation = replace(invocation, secrets={"credential": token}, redactions=logger.redactions if logger else ())
     # The logger-only value precedes a long invocation value crossing the storage
@@ -69,7 +68,15 @@ def test_dispatch_redacts_canonicalized_invocation_and_logger_patterns_before_bo
 
     monkeypatch.setattr(harness_integration_for("first"), "user_init", initialize)
     failures: list[SetupFailure] = []
-    state = run_setup(db, Mock(), inputs, invocation, failures=failures, operation="agent-reinit")
+    state = run_setup(
+        db,
+        Mock(),
+        inputs,
+        invocation,
+        failures=failures,
+        operation="agent-reinit",
+        log_warning=None if logger is None else logger.warning,
+    )
     assert events == [("first", False), ("second", False)]
     assert not state.records[0].complete and state.records[1].complete
     (failure,) = failures

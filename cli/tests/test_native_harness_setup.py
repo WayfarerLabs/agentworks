@@ -6,7 +6,6 @@ import hashlib
 import json
 import os
 import shutil
-import subprocess
 import sys
 import tempfile
 from collections.abc import Iterator
@@ -19,11 +18,10 @@ import pytest
 from agentworks.capabilities.harness_integration.settings import SettingsMapping, parse_settings, serialize_settings
 from agentworks.capabilities.harness_integration.setup import WorkspaceSetupInvocation
 from agentworks.db import VMRow
-from agentworks.errors import ConfigError, ExternalError, StateError
-from agentworks.execution.errors import FileConflict
+from agentworks.errors import ConfigError, ExternalError
+from agentworks.execution.errors import FileConflict, PathRefusal, PathRefused
 from agentworks.execution.files import UPDATE_ATTEMPTS, Files
 from agentworks.harness_setup.model import NativeClaim
-from agentworks.native_files import _DENIED_PATH, _FILE_PROGRAM, _UNSUITABLE_PATH, NativeFiles
 from agentworks.plugins._harness_native.native import setup_user, setup_workspace
 from agentworks.plugins._harness_native.native_cli import NativeCLI, NativeTool
 from agentworks.plugins._harness_native.native_config import NativeUserConfig, NativeWorkspaceConfig
@@ -50,24 +48,8 @@ def transport(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Local
     shutil.rmtree(root)
 
 
-def test_guarded_snapshot_and_atomic_publish(transport: LocalFixtureTransport) -> None:
-    destination = transport.home / ".claude/settings.json"
-    content = b'{"private-fixture-value": true}'
-    with NativeFiles(transport) as files:
-        assert files.read(str(destination)) is None
-        files.publish(str(destination), content, expected=None)
-        assert files.read(str(destination)) == content
-        assert destination.stat().st_mode & 0o777 == 0o600
-        assert destination.parent.stat().st_mode & 0o777 == 0o700
-        with pytest.raises(StateError):
-            files.publish(str(destination), b"{}", expected=None)
-        assert destination.read_bytes() == content
-    assert not list((transport.root / "tmp").iterdir())
-    assert "private-fixture-value" not in "".join(transport.commands + transport.logged_output)
-
-
 @pytest.mark.parametrize("link_parent", [False, True])
-def test_links_cannot_redirect_native_files(transport: LocalFixtureTransport, link_parent: bool) -> None:
+def test_settings_are_never_read_or_written_through_a_link(transport: LocalFixtureTransport, link_parent: bool) -> None:
     outside = transport.root / "outside"
     outside.mkdir()
     protected = outside / "settings.json"
@@ -78,78 +60,38 @@ def test_links_cannot_redirect_native_files(transport: LocalFixtureTransport, li
     else:
         directory.mkdir()
         (directory / "settings.json").symlink_to(protected)
-    with NativeFiles(transport) as files:
-        with pytest.raises(StateError):
-            files.read(str(directory / "settings.json"))
-        with pytest.raises(StateError):
-            files.publish(
-                str(directory / "settings.json"), b'{"changed": true}', expected=hashlib.sha256(b"{}").hexdigest()
-            )
+    source = transport.root / "mapping.json"
+    source.write_bytes(b'{"changed": true}')
+
+    with pytest.raises(PathRefused) as refused:
+        setup_user(
+            "claude",
+            NativeUserConfig(settings=SettingsMapping(source=str(source), strategy="merge-overwrite")),
+            invocation(transport, []),
+        )
+
+    assert refused.value.reason is PathRefusal.UNSUITABLE
+    assert refused.value.path == str(directory / "settings.json")
+    assert sorted(os.listdir(outside)) == ["settings.json"]
     assert protected.read_bytes() == b"{}"
 
 
-def _run_guest(op: str, destination: Path, staging: Path) -> subprocess.CompletedProcess[str]:
-    """Drive the embedded guest program directly, the way the probe tests do."""
-    return subprocess.run(
-        [sys.executable, "-c", _FILE_PROGRAM, op, str(destination), str(staging), "-", "", "0"],
-        capture_output=True,
-        text=True,
-    )
-
-
-@pytest.mark.parametrize("op", ["read", "fingerprint", "write", "delete"])
-def test_guest_program_classifies_a_linked_destination(tmp_path: Path, op: str) -> None:
-    """A leaf symlink must reach the classification branch instead of escaping.
-
-    O_NOFOLLOW raises ELOOP before the regular-file check, which is how this
-    failure previously left the program as an uncaught OSError: the operator got
-    a traceback in the log and an error naming neither the path nor the cause.
-    """
-    root = tmp_path / "home" / ".claude"
+def test_a_search_only_ancestor_allows_settings_publication(transport: LocalFixtureTransport) -> None:
+    ancestor = transport.home / "search-only"
+    root = ancestor / ".claude"
     root.mkdir(parents=True)
-    protected = tmp_path / "outside.json"
-    protected.write_bytes(b"{}")
-    (root / "settings.json").symlink_to(protected)
-    staging = tmp_path / "staging"
-    staging.write_bytes(b'{"replacement": true}')
-
-    result = _run_guest(op, root / "settings.json", staging)
-
-    assert result.returncode == _UNSUITABLE_PATH
-    assert "Traceback" not in result.stderr
-    assert protected.read_bytes() == b"{}"
-
-
-def test_guest_program_separates_a_denial_from_an_unsuitable_path(tmp_path: Path) -> None:
-    """A denied parent is a different operator problem than a link."""
-    if os.geteuid() == 0:
-        pytest.skip("root bypasses directory permissions")
-    root = tmp_path / "home" / ".claude"
-    root.mkdir(parents=True)
-    (root / "settings.json").write_bytes(b"{}")
-    root.chmod(0o000)
+    source = transport.root / "mapping.json"
+    source.write_bytes(b'{"mapped": true}')
+    ancestor.chmod(0o111)
     try:
-        result = _run_guest("read", root / "settings.json", tmp_path / "staging")
+        setup_user(
+            "claude",
+            NativeUserConfig(settings=SettingsMapping(source=str(source), strategy="merge-overwrite")),
+            invocation(transport, [], env={"CLAUDE_CONFIG_DIR": str(root)}),
+        )
     finally:
-        root.chmod(0o700)
-
-    assert result.returncode == _DENIED_PATH
-    assert "Traceback" not in result.stderr
-
-
-def test_guest_program_still_reports_a_regular_file(tmp_path: Path) -> None:
-    """Classification must not swallow the ordinary case it sits in front of."""
-    root = tmp_path / "home" / ".claude"
-    root.mkdir(parents=True)
-    (root / "settings.json").write_bytes(b"{}")
-
-    result = _run_guest("fingerprint", root / "settings.json", tmp_path / "staging")
-
-    assert result.returncode == 0
-    assert (
-        json.loads(result.stdout.strip().removeprefix("AGW_NATIVE_FILE="))["sha256"]
-        == hashlib.sha256(b"{}").hexdigest()
-    )
+        ancestor.chmod(0o700)
+    assert json.loads((root / "settings.json").read_bytes()) == {"mapped": True}
 
 
 @pytest.mark.parametrize("tool", ["codex", "claude"])
@@ -228,7 +170,6 @@ def test_workspace_mapping_uses_group_and_fixed_project_role(transport: LocalFix
             vm=cast(VMRow, object()),
             access=(recorded := transport.access()),
             files=recorded.files(),
-            runner=transport,
             prior=None,
             checkpoint=claims.append,
             workspace_name="fixture",
@@ -645,33 +586,6 @@ def test_codex_missing_marketplace_keeps_unobservable_plugin_cleanup_pending(tra
     assert (transport.home / ".codex/config.toml").read_bytes() == before
 
 
-def test_search_only_ancestor_allows_native_read_and_publication(transport: LocalFixtureTransport) -> None:
-    ancestor = transport.home / "search-only"
-    ancestor.mkdir()
-    destination = ancestor / ".claude/settings.json"
-    destination.parent.mkdir()
-    ancestor.chmod(0o111)
-    try:
-        with NativeFiles(transport) as files:
-            assert files.read(str(destination)) is None
-            files.publish(str(destination), b"{}", expected=None)
-            assert files.read(str(destination)) == b"{}"
-    finally:
-        ancestor.chmod(0o700)
-
-
-def test_missing_guest_python_refuses_before_staging(transport: LocalFixtureTransport, monkeypatch) -> None:
-    from types import SimpleNamespace
-    from unittest.mock import Mock
-
-    probe = Mock(return_value=SimpleNamespace(ok=True, stdout="AGW_PYTHON3=missing\n"))
-    monkeypatch.setattr(transport, "run", probe)
-    with pytest.raises(StateError), NativeFiles(transport):
-        pytest.fail("missing prerequisite must stop before staging")
-    assert probe.call_count == 1
-    assert not list((transport.root / "tmp").iterdir())
-
-
 @pytest.mark.parametrize("tool", ["codex", "claude"])
 @pytest.mark.parametrize("inside_plugin", [False, True])
 @pytest.mark.parametrize("strategy", ["merge-preserve", "merge-overwrite"])
@@ -914,43 +828,3 @@ def test_marketplace_only_repeat_does_not_read_available_catalog(transport, monk
 
     monkeypatch.setattr(NativeCLI, "available", unexpected_catalog)
     setup_user("codex", config, invocation(transport, claims, prior=record(claims[-1], "codex")))
-
-
-@pytest.mark.parametrize("operation", ["directory", "read", "fingerprint"])
-@pytest.mark.parametrize(
-    "payload",
-    [
-        '{"exists":true}',  # Unframed observations are not protocol replies.
-        'AGW_NATIVE_FILE={"exists":true}\nAGW_NATIVE_FILE={"exists":false}',
-        'AGW_NATIVE_FILE={"exists":true,"exists":false}',
-        'AGW_NATIVE_FILE={"exists":1}',
-        "AGW_NATIVE_FILE=[]",
-        'AGW_NATIVE_FILE={"exists":false,"extra":true}',
-        'AGW_NATIVE_FILE={"exists":true,"sha256":"' + "z" * 64 + '","mode":384}',
-        'AGW_NATIVE_FILE={"exists":true,"sha256":"' + "a" * 64 + '","mode":true}',
-        'AGW_NATIVE_FILE={"exists":true,"sha256":"' + "a" * 64 + '","mode":4096}',
-    ],
-)
-def test_native_observations_fail_closed_on_ambiguous_or_malformed_frames(
-    transport: LocalFixtureTransport, monkeypatch: pytest.MonkeyPatch, operation: str, payload: str
-) -> None:
-    destination = transport.home / "settings.json"
-    destination.write_bytes(b"operator content")
-    original = transport.run
-
-    def corrupt_observation(command: str, **kwargs):
-        result = original(command, **kwargs)
-        if "AGW_NATIVE_FILE=" in result.stdout:
-            return replace(result, stdout=payload)
-        return result
-
-    monkeypatch.setattr(transport, "run", corrupt_observation)
-    with NativeFiles(transport) as files, pytest.raises(ExternalError):
-        if operation == "directory":
-            files.directory(str(transport.home))
-        elif operation == "read":
-            files.read(str(destination))
-        else:
-            files.fingerprint(str(destination))
-    assert destination.read_bytes() == b"operator content"
-    assert not list((transport.root / "tmp").iterdir())

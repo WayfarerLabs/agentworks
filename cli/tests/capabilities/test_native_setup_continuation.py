@@ -178,7 +178,6 @@ def test_failure_message_and_hint_redact_all_operation_secrets(setup_case, monke
     if with_logger:
         monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path / "logs")
         logger = SSHLogger("fixture", "setup", redactions=(extra,))
-    invocation.runner.logger = logger
     # Core hands the invocation every secret the operation log registered.
     invocation = replace(
         invocation, secrets={"token": token, "overlap": token[:8]}, redactions=logger.redactions if logger else ()
@@ -194,7 +193,15 @@ def test_failure_message_and_hint_redact_all_operation_secrets(setup_case, monke
 
     monkeypatch.setattr(harness_integration_for("first"), "user_init", initialize)
     failures: list[SetupFailure] = []
-    state = run_setup(db, Mock(), inputs, invocation, failures=failures, operation="agent-reinit")
+    state = run_setup(
+        db,
+        Mock(),
+        inputs,
+        invocation,
+        failures=failures,
+        operation="agent-reinit",
+        log_warning=None if logger is None else logger.warning,
+    )
     with pytest.raises(StateError) as caught:
         raise_setup_failures(failures)
     surfaces = [state.model_dump_json(), str(failures), str(caught.value)]
@@ -236,9 +243,10 @@ def test_warning_log_failure_is_fatal_before_sibling(setup_case, monkeypatch):
     db, inputs, invocation, events, injected = setup_case
     injected.add("first")
     failure = StateError(str(uuid4()))
-    invocation.runner.logger = Mock(sanitize=lambda text, **kwargs: text, warning=Mock(side_effect=failure))
     with pytest.raises(StateError) as caught:
-        run_setup(db, Mock(), inputs, invocation, failures=[], operation="agent-reinit")
+        run_setup(
+            db, Mock(), inputs, invocation, failures=[], operation="agent-reinit", log_warning=Mock(side_effect=failure)
+        )
     assert caught.value is failure and events == [("first", False)]
 
 

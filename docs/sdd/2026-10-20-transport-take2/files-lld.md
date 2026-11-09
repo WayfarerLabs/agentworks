@@ -613,15 +613,18 @@ to I43, I47, I50 and I51) are re-proved (R10). With them:
 - the static check's form cases that use them (`cli/tests/test_execution_import_boundary.py:98-99`)
   switch to `agentworks.remote_exec` and `agentworks.transports.base`;
 - `cli/agentworks/execution/README.md:197-198` lists the four remaining modules;
-- `cli/tests/test_native_file_boundaries.py`, `test_native_path_failures.py` and
-  `tests/artifacts/test_generated_sections.py:226-247` move to `file_program.py`, patching
-  `files.program_source` where they patched `_FILE_PROGRAM`;
+- `cli/tests/test_native_file_boundaries.py` keeps only its publication-level root boundary test, as
+  `cli/tests/artifacts/test_root_publication_boundaries.py`; its `NativeFiles` and `require_python3`
+  cases go, with `test_native_path_failures.py`, since `test_file_program.py`, `test_files.py` and
+  the native setup tests cover the same paths through the new program
+  (`tests/artifacts/test_generated_sections.py:226-247` moved in batch B);
 - HLA migration item 8 and plan slice 8 no longer list them.
 
-**The package guard.** The plugins stay on the static check because importing one loads the plugin
-index (`cli/tests/test_execution_import_boundary.py:44-45`). Batch C checks whether the index then
-imports no legacy module; if so, the plugins move to the fresh-interpreter guard (D14), and if not,
-the module that still does is recorded there.
+**The package guard.** The plugins were on the static check alone because importing one loads the
+plugin index (`cli/tests/test_execution_import_boundary.py:44-45`). Once `native_files` and the
+runner are gone, no module under `agentworks/plugins/` imports a legacy module anywhere, so the
+fresh-interpreter guard (D14) imports every plugin module too, and the plugin files keep their place
+on the static check, which also reads function bodies.
 
 ## Tests
 
@@ -675,8 +678,8 @@ writes nothing; a `format_record` of a request with `Bytes(marker)` and of a res
 hold `marker`, under `log_streams=False`, does not contain the marker's bytes; `stream` refuses
 `Bytes` with `ValidationError`; `RunContext` construction is passive; `guest_path`'s refusals;
 `files` on an agent access refuses `elevated=True` before dispatch;
-`SetupInvocation.request_environment` keeps core's `AGENTWORKS_*` values and drops a plugin's
-(`cli/tests/capabilities/test_native_setup_runner.py`, moved).
+`SetupInvocation.request_environment` keeps core's `AGENTWORKS_*` values and drops a plugin's (moved
+from `cli/tests/capabilities/test_native_setup_runner.py` to `test_setup_request_environment.py`).
 
 **Caller tests stay green.** The native setup, publication and probe tests already run the real
 guest program against local files on Linux (`cli/tests/native_setup_fixtures.py:20-80`,

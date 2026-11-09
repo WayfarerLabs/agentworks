@@ -689,7 +689,6 @@ def test_user_setup_preflight_allows_retry_after_interrupted_skill_retirement(
         vm=db.insert_vm("vm", "lima", "vm"),
         access=(local := fixture_access(monkeypatch, target)),
         files=local.files(),
-        runner=target,
         prior=None,
         checkpoint=lambda claims: None,
         username="worker",
@@ -925,24 +924,6 @@ def test_production_probe_streams_large_valid_package_through_login_shell(tmp_pa
         assert isinstance(request.stdin, Bytes)
         assert files[-1].path.encode() in request.stdin.data
         assert all(files[-1].path not in argument for argument in request.args)
-
-
-def test_missing_python_refuses_before_staging(tmp_path):
-    from agentworks.errors import StateError
-    from agentworks.native_files import NativeFiles
-    from tests.native_setup_fixtures import LocalFixtureTransport
-
-    target = LocalFixtureTransport(tmp_path)
-    binary = tmp_path / "bin"
-    binary.mkdir()
-    (binary / "bash").symlink_to("/bin/bash")
-    target.environment["PATH"] = str(binary)
-    before = set(tmp_path.rglob("*"))
-    with pytest.raises(StateError) as caught, NativeFiles(target):
-        pytest.fail("missing prerequisite allowed staging")
-    assert caught.value.hint
-    assert len(target.commands) == 1
-    assert set(tmp_path.rglob("*")) == before
 
 
 @pytest.mark.parametrize("returncode,stdout", [(127, ""), (1, "AGW_ARTIFACT_PROBE={}\n"), (0, "not-json")])

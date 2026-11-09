@@ -34,6 +34,8 @@ from agentworks.harness_setup.outcomes import (
 from agentworks.harness_setup.state import read_native_setup, replace_setup_record, write_native_setup
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from agentworks.artifacts.application import OwnedArtifactFile
     from agentworks.db import Database, VMRow
     from agentworks.execution.access import VMAccess
@@ -95,8 +97,12 @@ def run_setup(
     failures: list[SetupFailure],
     buffered: bool = False,
     held: NativeMutationGuard | None = None,
+    log_warning: Callable[[str], None] | None = None,
 ) -> NativeSetupState:
     """Run desired integration activations, then retire removed activations in prior order.
+
+    ``log_warning`` writes to the operation log (``SSHLogger.warning`` today),
+    which records each failed integration's reason.
 
     A fresh owner's caller buffers and commits this result with its owner row.
     It must already have refused native residue and own failed-create rollback.
@@ -335,8 +341,8 @@ def run_setup(
                 state = replace_setup_record(state, current)
                 persist(state)
                 failures.append(SetupFailure(inputs.kind, inputs.name, facet, name, reason, hint))
-                if invocation.runner.logger is not None:
-                    invocation.runner.logger.warning(
+                if log_warning is not None:
+                    log_warning(
                         f"Setup failed for {inputs.kind}/{inputs.name} facet={facet} integration={name}: {reason}"
                     )
                 continue

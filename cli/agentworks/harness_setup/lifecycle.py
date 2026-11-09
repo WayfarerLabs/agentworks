@@ -22,7 +22,6 @@ from agentworks.errors import StateError
 from agentworks.execution.access import Admin, Agent
 from agentworks.harness_setup.dispatch import run_setup
 from agentworks.harness_setup.inputs import SetupInputs
-from agentworks.harness_setup.runner import SetupRunner
 from agentworks.harness_setup.state import read_native_setup
 from agentworks.package_sources import PackageCapture
 from agentworks.secrets.orchestration import SecretTarget
@@ -42,7 +41,6 @@ if TYPE_CHECKING:
     from agentworks.resources.registry import Registry
     from agentworks.schema import CapabilityConfig
     from agentworks.ssh import SSHLogger
-    from agentworks.transports import Transport
     from agentworks.vms.admin import AdminConfig
     from agentworks.vms.templates import ResolvedVMTemplate
     from agentworks.workspaces.templates import ResolvedTemplate
@@ -172,14 +170,13 @@ def apply_vm_setup(
     *,
     inputs: tuple[SetupInputs, ...],
     vm: VMRow,
-    target: Transport,
     values: Mapping[str, str],
     logger: SSHLogger,
     held: NativeMutationGuard,
     operation: str,
     failures: list[SetupFailure],
 ) -> None:
-    """Apply VM then admin setup on the already-established admin transport."""
+    """Apply VM then admin setup as the admin."""
     access = execution.vm_access(vm, config, Admin(), log=logger.record)
     files = access.files(deadline=VM_SETUP_DEADLINE)
     for item in inputs:
@@ -187,13 +184,11 @@ def apply_vm_setup(
             vm_name=vm.name, platform=site_platform_name(vm.site, registry), site=vm.site, user=vm.admin_username
         )
         environment = item.environment(values, context)
-        runner = SetupRunner(target, environment, redactions=values.values())
         if item.component == "vm":
             invocation: SetupInvocation = VMSetupInvocation(
                 vm=vm,
                 access=access,
                 files=files,
-                runner=runner,
                 environment=environment,
                 secrets=values,
                 redactions=logger.redactions,
@@ -205,7 +200,6 @@ def apply_vm_setup(
                 vm=vm,
                 access=access,
                 files=files,
-                runner=runner,
                 environment=environment,
                 secrets=values,
                 redactions=logger.redactions,
@@ -214,7 +208,16 @@ def apply_vm_setup(
                 username=vm.admin_username,
                 home=f"/home/{vm.admin_username}",
             )
-        run_setup(db, registry, item, invocation, operation=operation, failures=failures, held=held)
+        run_setup(
+            db,
+            registry,
+            item,
+            invocation,
+            operation=operation,
+            failures=failures,
+            held=held,
+            log_warning=logger.warning,
+        )
 
 
 def apply_agent_setup(
@@ -233,8 +236,6 @@ def apply_agent_setup(
     buffered: bool = False,
 ) -> NativeSetupState:
     """Execute as the actual agent, after core establishes its SSH access."""
-    from agentworks.transports import transport_for_user
-
     context = ResourceContext(
         vm_name=vm.name,
         platform=site_platform_name(vm.site, registry),
@@ -243,15 +244,11 @@ def apply_agent_setup(
         agent_name=inputs.name,
     )
     environment = inputs.environment(values, context)
-    runner = SetupRunner(
-        transport_for_user(vm, config, user=username, logger=logger), environment, redactions=values.values()
-    )
     access = execution.vm_access(vm, config, Agent(inputs.name, username), log=logger.record)
     invocation = UserSetupInvocation(
         vm=vm,
         access=access,
         files=access.files(),
-        runner=runner,
         environment=environment,
         secrets=values,
         redactions=logger.redactions,
@@ -261,7 +258,15 @@ def apply_agent_setup(
         home=f"/home/{username}",
     )
     return run_setup(
-        db, registry, inputs, invocation, operation=operation, failures=failures, buffered=buffered, held=held
+        db,
+        registry,
+        inputs,
+        invocation,
+        operation=operation,
+        failures=failures,
+        buffered=buffered,
+        held=held,
+        log_warning=logger.warning,
     )
 
 
@@ -282,8 +287,6 @@ def apply_workspace_setup(
     buffered: bool = True,
 ) -> NativeSetupState:
     """Execute project setup as admin before publishing the new workspace row."""
-    from agentworks.transports import transport
-
     context = ResourceContext(
         vm_name=vm.name,
         platform=site_platform_name(vm.site, registry),
@@ -293,13 +296,11 @@ def apply_workspace_setup(
         workspace_dir=root,
     )
     environment = inputs.environment(values, context)
-    runner = SetupRunner(transport(vm, config, logger=logger), environment, redactions=values.values())
     access = execution.vm_access(vm, config, Admin(), log=logger.record)
     invocation = WorkspaceSetupInvocation(
         vm=vm,
         access=access,
         files=access.files(),
-        runner=runner,
         environment=environment,
         secrets=values,
         redactions=logger.redactions,
@@ -310,5 +311,13 @@ def apply_workspace_setup(
         linux_group=linux_group,
     )
     return run_setup(
-        db, registry, inputs, invocation, operation=operation, failures=failures, buffered=buffered, held=held
+        db,
+        registry,
+        inputs,
+        invocation,
+        operation=operation,
+        failures=failures,
+        buffered=buffered,
+        held=held,
+        log_warning=logger.warning,
     )

@@ -32,7 +32,6 @@ def test_vm_plans_apply_supported_types_without_descendant_context(monkeypatch, 
         SimpleNamespace(
             artifacts=received(*items),
             access=object(),
-            runner=object(),
             environment={},
             request_environment=lambda local=None: {},
             secrets={},

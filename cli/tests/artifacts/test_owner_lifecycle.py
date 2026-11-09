@@ -66,7 +66,6 @@ def user_call(owner: SimpleNamespace) -> UserSetupInvocation:
         vm=owner.vm,
         access=(recorded := owner.target.access()),
         files=recorded.files(),
-        runner=owner.target,
         prior=None,
         checkpoint=lambda claims: None,
         username="worker",
@@ -90,7 +89,6 @@ def test_common_capture_without_activation_and_vm_admin_separation(owner):
                 vm=owner.vm,
                 access=(recorded := owner.target.access()),
                 files=recorded.files(),
-                runner=owner.target,
                 prior=None,
                 checkpoint=lambda claims: None,
             )
@@ -381,7 +379,6 @@ def test_user_setup_publishes_vm_inputs_without_vm_activation(db, tmp_path):
         vm=fixture.vm,
         access=(recorded := target.access()),
         files=recorded.files(),
-        runner=target,
         prior=None,
         checkpoint=lambda claims: None,
         username="worker",

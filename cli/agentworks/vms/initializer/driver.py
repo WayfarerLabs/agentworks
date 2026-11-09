@@ -213,7 +213,6 @@ def run_initialization(
                     registry,
                     inputs=setup_inputs,
                     vm=vm,
-                    target=ts_target,
                     values=setup_values or {},
                     logger=logger,
                     held=guard,
