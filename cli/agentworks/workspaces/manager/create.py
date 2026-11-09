@@ -13,6 +13,7 @@ from agentworks.errors import AlreadyExistsError, NotFoundError
 from agentworks.list_sorting import nullable_sort_value, sort_rows
 from agentworks.name_filters import validate_name_filters
 from agentworks.naming import validate_name
+from agentworks.programs import resolve_program
 from agentworks.workspaces.manager._common import _guard_vm_status, _resolve_vm, _workspace_scope
 
 if TYPE_CHECKING:
@@ -307,7 +308,20 @@ def create_workspace(
         pending_workspace.mark_realized()
 
         if open_vscode:
-            subprocess.run(["code", str(vscode_path)], check=False)
+            _open_in_vscode(str(vscode_path))
+
+
+def _open_in_vscode(path: str) -> None:
+    """Open ``path`` in VS Code through its ``code`` command, warning when it is not installed.
+
+    The workspace exists by now, so a missing editor is no reason to fail.
+    """
+    try:
+        program = resolve_program("code")
+    except FileNotFoundError:
+        output.warn("VS Code's 'code' command was not found on PATH, so the workspace was not opened in it")
+        return
+    subprocess.run([program, path], check=False)
 
 
 def workspace_description(db: Database, config: Config, name: str) -> WorkspaceDescription:

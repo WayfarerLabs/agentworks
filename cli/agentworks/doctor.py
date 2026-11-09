@@ -6,7 +6,6 @@ Returns structured results. The presentation layer decides rendering.
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -1100,8 +1099,16 @@ def _shell_available(shell_name: str) -> bool:
     enumeration ever changes to include a static PowerShell path, this
     branch becomes load-bearing.
     """
+    from agentworks.programs import resolve_program
+
     candidates = {"powershell": ("pwsh", "powershell")}.get(shell_name, (shell_name,))
-    return any(shutil.which(c) for c in candidates)
+    for candidate in candidates:
+        try:
+            resolve_program(candidate)
+        except FileNotFoundError:
+            continue
+        return True
+    return False
 
 
 def _get_completion_paths() -> list[tuple[str, list[Path]]]:

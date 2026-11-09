@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, NoReturn
 from agentworks import output
 from agentworks.errors import BackupError, NotFoundError, StateError
 from agentworks.path_rendering import format_host_path
+from agentworks.programs import resolve_program
 from agentworks.vms.applied_state import canonicalize_vm_applied_slice
 from agentworks.vms.manager import _guard_incomplete_vm, gated_vm_boundary
 
@@ -464,7 +465,7 @@ def _transfer_with_progress(
     """
     from agentworks.ssh import SSHError
 
-    args = ["scp", "-q", *target.host_key_options(), "-o", "BatchMode=yes"]
+    args = [resolve_program("scp"), "-q", *target.host_key_options(), "-o", "BatchMode=yes"]
     if target.port is not None:
         args.extend(["-P", str(target.port)])
     if target.identity_file is not None:
