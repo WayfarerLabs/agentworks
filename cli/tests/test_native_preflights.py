@@ -12,11 +12,9 @@ import pytest
 from agentworks.capabilities.harness_integration.settings import SettingsMapping, parse_settings, serialize_settings
 from agentworks.errors import ConfigError, ExternalError
 from agentworks.harness_setup.model import NativeClaim
-from agentworks.native_files import NativeFiles
 from agentworks.plugins._harness_native.native import setup_user
-from agentworks.plugins._harness_native.native_cli import NativeCLI
 from agentworks.plugins._harness_native.native_config import NativeUserConfig
-from tests.native_setup_fixtures import LocalFixtureTransport, invocation, market_fixture, record
+from tests.native_setup_fixtures import LocalFixtureTransport, invocation, market_fixture, native_cli, record
 from tests.test_native_convergence import copied_market, git_market
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="local execution of Linux guest setup helpers")
@@ -48,8 +46,7 @@ def test_incomplete_or_differing_git_source_survives_mapping(transport, tool, de
     root.mkdir()
     destination = root / ("config.toml" if tool == "codex" else "settings.json")
     format = "toml" if tool == "codex" else "json"
-    with NativeFiles(transport) as files:
-        cli = NativeCLI(tool, files, home=str(transport.home), config_root=str(root))
+    with native_cli(transport, tool, root) as cli:
         args = ["plugin", "marketplace", "add", source]
         if option == "ref":
             if tool == "codex":
@@ -108,8 +105,7 @@ def test_incomplete_or_differing_git_source_survives_mapping(transport, tool, de
             json.loads((root / "plugins/known_marketplaces.json").read_bytes())["fixture-market"]["source"]
             == registered_source
         )
-    with NativeFiles(transport) as files:
-        cli = NativeCLI(tool, files, home=str(transport.home), config_root=str(root))
+    with native_cli(transport, tool, root) as cli:
         observed = cli.markets()
         assert next(item for item in observed if item.name == "fixture-market") == before[0]
         expected_plugin_identifiers = {"one@fixture-market"} | ({"two@independent"} if tool == "codex" else set())
@@ -164,8 +160,7 @@ def test_claude_missing_user_declaration_blocks_removal_before_dependent_uninsta
         assert document["enabledPlugins"]["one@fixture-market"] is True
     else:
         assert "one@fixture-market" not in document.get("enabledPlugins", {})
-    with NativeFiles(transport) as files:
-        cli = NativeCLI("claude", files, home=str(transport.home), config_root=str(destination.parent))
+    with native_cli(transport, "claude", destination.parent) as cli:
         assert {item.name for item in cli.markets()} == {"fixture-market"}
         assert {item.identifier for item in cli.plugins(cli.markets())} == (
             {"one@fixture-market"} if dependent else set()
@@ -186,10 +181,8 @@ def test_ambiguous_plugin_preserves_claims_and_mapping_while_unique_selection_co
     )
     previous = claims[-1]
     root = transport.home / (".codex" if tool == "codex" else ".claude")
-    with NativeFiles(transport) as files:
-        NativeCLI(tool, files, home=str(transport.home), config_root=str(root)).add_market(
-            str(copied_market(market, tool, name="operator-market"))
-        )
+    with native_cli(transport, tool, root) as cli:
+        cli.add_market(str(copied_market(market, tool, name="operator-market")))
     format = "toml" if tool == "codex" else "json"
     mapping = transport.root / "mapping"
     mapping.write_bytes(serialize_settings({"mapped": True}, format=format))
@@ -206,8 +199,7 @@ def test_ambiguous_plugin_preserves_claims_and_mapping_while_unique_selection_co
     )
     assert incomplete
     assert set(previous) <= set(claims[-1])
-    with NativeFiles(transport) as files:
-        cli = NativeCLI(tool, files, home=str(transport.home), config_root=str(root))
+    with native_cli(transport, tool, root) as cli:
         observed = cli.markets()
         assert {item.name for item in observed} == {"fixture-market", "operator-market"}
         assert {item.identifier for item in cli.plugins(observed)} == {"one@fixture-market", "two@operator-market"}
@@ -268,8 +260,7 @@ def test_ambiguous_selection_retains_both_previously_owned_marketplaces(transpor
     assert len(incomplete) == 1
     assert claims[-1] == previous
     root = transport.home / (".codex" if tool == "codex" else ".claude")
-    with NativeFiles(transport) as files:
-        cli = NativeCLI(tool, files, home=str(transport.home), config_root=str(root))
+    with native_cli(transport, tool, root) as cli:
         assert {item.name for item in cli.markets()} == {"fixture-market", "second-market"}
         assert cli.plugins(cli.markets()) == ()
 
@@ -324,8 +315,7 @@ def test_claude_invalid_named_declaration_holds_unsafe_native_writes_but_not_oth
     assert final_document["extraKnownMarketplaces"]["fixture-market"] == declaration
     if mapped:
         assert final_document["mapped"] is True
-    with NativeFiles(transport) as files:
-        cli = NativeCLI("claude", files, home=str(transport.home), config_root=str(root))
+    with native_cli(transport, "claude", root) as cli:
         markets = {item.name: item for item in cli.markets()}
         assert markets["fixture-market"].source is None
         assert markets["fixture-market"].unavailable_reason is not None
@@ -346,8 +336,7 @@ def test_invalid_broad_marketplace_inventory_still_refuses(transport, monkeypatc
     root = transport.home / ".claude"
     root.mkdir()
     (root / "settings.json").write_text(json.dumps({"extraKnownMarketplaces": declarations}))
-    with NativeFiles(transport) as files:
-        cli = NativeCLI("claude", files, home=str(transport.home), config_root=str(root))
+    with native_cli(transport, "claude", root) as cli:
         monkeypatch.setattr(cli, "command", lambda *a, **k: payload)
         with pytest.raises(ExternalError):
             cli.markets()
@@ -373,8 +362,7 @@ def test_invalid_broad_marketplace_inventory_still_refuses(transport, monkeypatc
 def test_native_operation_failure_identifies_request_without_provider_output_or_url_credentials(
     transport, args, selector
 ):
-    with NativeFiles(transport) as files:
-        cli = NativeCLI("claude", files, home=str(transport.home), config_root=str(transport.home / ".claude"))
+    with native_cli(transport, "claude", transport.home / ".claude") as cli:
         cli._resolved = ("/bin/false", "/usr/bin:/bin")
         with pytest.raises(ExternalError) as caught:
             cli.command(args)

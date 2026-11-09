@@ -11,62 +11,57 @@ import json
 import posixpath
 import re
 import shlex
-import subprocess
-from dataclasses import dataclass
+from contextlib import AbstractContextManager
+from dataclasses import dataclass, replace
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Literal
 from urllib.parse import urlsplit, urlunsplit
 
+from agentworks import output
 from agentworks.capabilities.harness_integration.settings import parse_settings
-from agentworks.errors import ConfigError, ConnectivityError, ExternalError
+from agentworks.errors import ConfigError, ExternalError, StateError
+from agentworks.execution.files import guest_path
+from agentworks.execution.requests import Bytes, CaptureOutput, Command, DiscardOutput, PythonProgram, Script, Shell
 from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+    from types import TracebackType
 
     from agentworks.capabilities.harness_integration.settings import SettingsObject
-    from agentworks.native_files import NativeFiles
+    from agentworks.capabilities.harness_integration.setup import UserSetupInvocation
+    from agentworks.execution.requests import OutputSink
+    from agentworks.execution.results import Result
 
 type NativeTool = Literal["codex", "claude"]
 
 
-# The login shell writes only PATH, never its full environment. Both profile
-# noise and subprocess failures stay private; prepared values arrive on stdin.
+_RESOLVED_PREFIX = "AGW_NATIVE_EXECUTABLE="
+
+# Run after the user's login startup, so PATH is the login PATH; an explicit
+# PATH from the setup environment arrives on stdin with the tool and wins.
 _LOGIN_RESOLVE_PROGRAM = r"""
-import json, os, shlex, shutil, subprocess, sys
+import json, os, shutil, sys
 request = json.load(sys.stdin)
-output_path = sys.argv[1]
-profile_path = output_path + '.profile'
-os.chdir(request['home'])
-shell = os.environ.get('SHELL')
-if not shell:
-    sys.exit(1)
-capture = (
-    "import json, os, sys; "
-    "fd=os.open(sys.argv[1], os.O_WRONLY|os.O_CREAT|os.O_EXCL, 0o600); "
-    "json.dump(os.environ.get('PATH', ''), os.fdopen(fd, 'w'))"
-)
-subprocess.run(
-    [shell, '-lc', shlex.join([sys.executable, '-c', capture, profile_path])],
-    env={**os.environ, 'HOME': request['home']},
-    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True,
-)
-with open(profile_path) as profile:
-    login_path = json.load(profile)
-path = login_path if request['path'] is None else request['path']
+path = os.environ.get('PATH', '') if request['path'] is None else request['path']
 executable = shutil.which(request['tool'], path=path)
 if executable is None:
     sys.exit(1)
-fd = os.open(output_path, os.O_WRONLY|os.O_CREAT|os.O_EXCL, 0o600)
-with os.fdopen(fd, 'w') as output:
-    json.dump({'executable': os.path.abspath(executable), 'path': path}, output)
+observed = {'executable': os.path.abspath(executable), 'path': path}
+sys.stdout.write('\nAGW_NATIVE_EXECUTABLE=' + json.dumps(observed) + '\n')
 """
 
-_BOUND_STDERR = """import sys
-with open(sys.argv[1], 'rb') as source:
-    data = source.read(8192)
-with open(sys.argv[2], 'xb') as destination:
-    destination.write(data)
-"""
+_CAPTURE = CaptureOutput()
+_DISCARD = DiscardOutput()
+_STDERR_FILE = "native-stderr"
+"""A failed command's stderr, in the scratch directory that is its working directory."""
+
+_DIAGNOSTIC_BYTES = 8192
+"""How much of a failed native command's stderr is read back, to find a named marketplace in it."""
+
+_STRUCTURED_OUTPUT_LIMIT = 16 * 1024 * 1024
+"""The largest JSON reply a native inventory command may give."""
+
 _MARKETPLACE_ERROR = re.compile(r"\bmarketplaces\.([A-Za-z0-9][A-Za-z0-9_.-]{0,127})(?=[`'\s:]|$)")
 _CODEX_MARKETPLACE_LOAD_ERROR = re.compile(
     r"^- `([A-Za-z0-9][A-Za-z0-9_.-]{0,127})` at <invalid source>:", re.MULTILINE
@@ -197,48 +192,96 @@ def unreadable_marketplace_settings(tool: NativeTool, document: SettingsObject) 
     return tuple(unsafe)
 
 
-class NativeCLI:
-    """Run one harness as the invoking user, optionally with an isolated home."""
+class NativeCLI(AbstractContextManager["NativeCLI"]):
+    """Run one harness as the setup's user, optionally with an isolated home.
+
+    Entering creates a private scratch directory on the guest, each command's
+    working directory and the parent of isolated discovery homes; leaving
+    removes it. Every request takes the setup's request environment, and
+    neither a command line nor its output reaches the operation log.
+    """
 
     def __init__(
         self,
         tool: NativeTool,
-        files: NativeFiles,
+        invocation: UserSetupInvocation,
         *,
-        home: str,
         config_root: str,
         isolated: bool = False,
-        environment: Mapping[str, str] | None = None,
         diagnostic_root: str | None = None,
     ):
         self.tool = tool
-        self.files = files
-        self.home = home
+        self.invocation = invocation
+        self.home = invocation.home
         self.config_root = config_root
         self.diagnostic_root = diagnostic_root or config_root
         self.isolated = isolated
-        self.environment = dict(environment or {})
+        self.scratch: str | None = None
+        self._discoveries = 0
         self._resolved: tuple[str, str] | None = None
+
+    def __enter__(self) -> NativeCLI:
+        result = self._run(Command(("mktemp", "-d", "-t", "agentworks-native-XXXXXXXXXX")))
+        path = result.stdout.decode("utf-8", "replace").strip()
+        if result.require_completed(self._vm) != 0 or not PurePosixPath(path).name.startswith("agentworks-native-"):
+            raise ExternalError("could not create native setup scratch directory")
+        self.scratch = guest_path(path)
+        return self
+
+    def __exit__(
+        self, exc_type: type[BaseException] | None, exc: BaseException | None, traceback: TracebackType | None
+    ) -> None:
+        if self.scratch is None:
+            return
+        scratch, self.scratch = self.scratch, None
+        try:
+            if self._run(Command(("rm", "-rf", "--", scratch)), stdout=_DISCARD).require_completed(self._vm) != 0:
+                raise ExternalError("could not remove native setup scratch directory")
+        except Exception:
+            if exc is None:
+                raise
+            output.warn("Native setup scratch cleanup failed; the original setup error is retained.")
+
+    @property
+    def _vm(self) -> str:
+        return self.invocation.access.vm_name
+
+    def _run(self, request: Command | Script, *, stdout: OutputSink = _CAPTURE) -> Result:
+        """One request with the setup's request environment, bounded as setup's file operations are."""
+        request = replace(request, env=self.invocation.request_environment(), deadline=self.invocation.files.deadline)
+        return self.invocation.access.run(request, stdout=stdout, stderr=_DISCARD)
+
+    def _scratch(self) -> str:
+        if self.scratch is None:
+            raise StateError("the native CLI's scratch directory is not open")
+        return self.scratch
 
     def _resolve_command(self) -> tuple[str, str]:
         """Capture the actual user's executable and login PATH once per setup."""
         if self._resolved is not None:
             return self._resolved
-        remote, local = self.files.slot()
-        command = shlex.join(["python3", "-c", _LOGIN_RESOLVE_PROGRAM, remote])
-        request = {"home": self.home, "tool": self.tool, "path": self.environment.get("PATH")}
-        result = self.files.runner.run(
-            command,
-            input_text=json.dumps(request),
-            env={**self.environment, "HOME": self.home},
-            check=False,
-            timeout=30,
+        request = {"tool": self.tool, "path": self.invocation.environment.get("PATH")}
+        result = self.invocation.access.run(
+            PythonProgram(
+                _LOGIN_RESOLVE_PROGRAM,
+                login=True,
+                env=self.invocation.request_environment(),
+                stdin=Bytes(json.dumps(request).encode()),
+                deadline=30,
+                log_streams=False,
+            ),
+            stderr=_DISCARD,
         )
-        if not result.ok:
+        if result.require_completed(self._vm) != 0:
             raise ExternalError(f"could not resolve {self.tool} from the actual user's login environment")
-        self.files.runner.copy_from(remote, local)
         try:
-            observed = json.loads(local.read_bytes())
+            # Login startup may print first, even without a trailing newline.
+            (line,) = (
+                line.removeprefix(_RESOLVED_PREFIX)
+                for line in result.stdout.decode("utf-8").splitlines()
+                if line.startswith(_RESOLVED_PREFIX)
+            )
+            observed = json.loads(line)
             executable = _text(observed["executable"])
             path = _text(observed["path"])
             if not executable.startswith("/") or "\x00" in executable or "\x00" in path:
@@ -250,10 +293,8 @@ class NativeCLI:
 
     def command(self, args: list[str], *, structured: bool = False) -> object:
         executable, path = self._resolve_command()
-        remote, local = self.files.slot()
         override = "CODEX_HOME" if self.tool == "codex" else "CLAUDE_CONFIG_DIR"
-        env = {
-            **self.environment,
+        local = {
             "PATH": path,
             override: self.config_root,
             "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
@@ -262,7 +303,7 @@ class NativeCLI:
             "DISABLE_ERROR_REPORTING": "1",
         }
         if self.isolated:
-            env.update(
+            local.update(
                 {
                     "HOME": self.config_root,
                     "CODEX_HOME": self.config_root + "/.codex",
@@ -272,27 +313,32 @@ class NativeCLI:
                     "XDG_DATA_HOME": self.config_root + "/.local/share",
                 }
             )
-        # Sensitive stdin keeps source URLs and all provider output out of the
-        # transport logger. On failure only a bounded private stderr prefix is
-        # inspected for a named marketplace, never rendered as provider prose.
-        stderr = remote + ".stderr"
-        diagnostic_path = remote + ".diagnostic"
+        # The command line, which can hold a source URL, is script text, and
+        # neither stream is logged. On failure only a bounded stderr prefix
+        # returns, inspected for a named marketplace and never shown as
+        # provider prose.
         script = (
-            f"cd {shlex.quote(self.files.remote)} || exit 1\n"
-            f"{shlex.join([executable, *args])} > {shlex.quote(remote)} 2> {shlex.quote(stderr)}\n"
+            f"{shlex.join([executable, *args])} 2>{_STDERR_FILE}\n"
             "native_status=$?\n"
             'if [ "$native_status" -ne 0 ]; then\n'
-            f"{shlex.join(['python3', '-c', _BOUND_STDERR, stderr, diagnostic_path])}\n"
+            f"  head -c {_DIAGNOSTIC_BYTES} -- {_STDERR_FILE} >&2\n"
             "fi\n"
             'exit "$native_status"'
         )
-        result = self.files.runner.run("bash", input_text=script, env=env, check=False, timeout=180)
-        if not result.ok:
-            try:
-                self.files.runner.copy_from(diagnostic_path, local)
-                diagnostic = local.read_bytes().decode("utf-8", errors="replace")
-            except (ConnectivityError, ExternalError, OSError, subprocess.SubprocessError):
-                diagnostic = ""
+        result = self.invocation.access.run(
+            Script(
+                script,
+                Shell.BASH,
+                cwd=self._scratch(),
+                env=self.invocation.request_environment(local),
+                deadline=180,
+                log_streams=False,
+            ),
+            stdout=CaptureOutput(_STRUCTURED_OUTPUT_LIMIT) if structured else _DISCARD,
+            stderr=CaptureOutput(),
+        )
+        if result.require_completed(self._vm) != 0:
+            diagnostic = result.stderr.decode("utf-8", errors="replace")
             match = _MARKETPLACE_ERROR.search(diagnostic)
             entry = "" if match is None else f" at native setting {'marketplaces.' + match[1]!r}"
             if match is None and self.tool == "codex":
@@ -309,10 +355,9 @@ class NativeCLI:
             )
         if not structured:
             return None
-        self.files.runner.copy_from(remote, local)
         try:
-            return json.loads(local.read_bytes())
-        except Exception:
+            return json.loads(result.stdout)
+        except ValueError:
             raise ExternalError(f"invalid {self.tool} native plugin response") from None
 
     def markets(self) -> tuple[NativeMarket, ...]:
@@ -323,7 +368,7 @@ class NativeCLI:
             else self.config_root
         )
         settings_path = active_root + ("/config.toml" if self.tool == "codex" else "/settings.json")
-        settings = self.files.read(settings_path)
+        settings = self.invocation.files.read(settings_path)
         document = (
             {}
             if settings is None
@@ -417,9 +462,9 @@ class NativeCLI:
         if source.startswith("~/"):
             source = self.home + source[1:]
         elif not source.startswith("/"):
+            # Script text, not an argv, keeps a source URL's credentials out of the log.
             candidate = posixpath.normpath(self.home + "/" + source)
-            exists = self.files.runner.run("bash", input_text="test -e " + shlex.quote(candidate), check=False)
-            if exists.ok:
+            if self._run(Script("test -e " + shlex.quote(candidate), Shell.SH)).require_completed(self._vm) == 0:
                 source = candidate
         self.command(["plugin", "marketplace", "add", source, *([] if self.tool == "codex" else ["--scope", "user"])])
 
@@ -452,23 +497,19 @@ class NativeCLI:
         Native source grammar remains the harness's. Git sources may be fetched
         twice: once here to validate the plan and once for actual registration.
         """
-        root, _ = self.files.slot()
-        result = self.files.runner.run(
-            shlex.join(["mkdir", "-p", "-m", "700", root + "/.codex", root + "/.claude"]),
-            check=False,
-            discard_output=True,
-        )
-        if not result.ok:
+        self._discoveries += 1
+        root = f"{self._scratch()}/discovery-{self._discoveries}"
+        homes = Command(("mkdir", "-p", "-m", "700", "--", root + "/.codex", root + "/.claude"))
+        if self._run(homes, stdout=_DISCARD).require_completed(self._vm) != 0:
             raise ExternalError("could not create isolated native marketplace discovery directory")
         staged = NativeCLI(
             self.tool,
-            self.files,
-            home=self.home,
+            self.invocation,
             config_root=root,
             isolated=True,
-            environment=self.environment,
             diagnostic_root=self.diagnostic_root,
         )
+        staged.scratch = self.scratch
         staged._resolved = self._resolve_command()
         staged.add_market(self.home + source[1:] if source.startswith("~/") else source)
         markets = staged.markets()

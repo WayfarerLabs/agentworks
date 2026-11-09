@@ -12,11 +12,10 @@ import pytest
 from agentworks.capabilities.harness_integration.settings import SettingsMapping, SettingsValue
 from agentworks.errors import ExternalError
 from agentworks.harness_setup.model import NativeClaim
-from agentworks.native_files import NativeFiles
 from agentworks.plugins._harness_native.native import setup_user
 from agentworks.plugins._harness_native.native_cli import NativeCLI, NativeMarket, NativeTool
 from agentworks.plugins._harness_native.native_config import NativeUserConfig
-from tests.native_setup_fixtures import LocalFixtureTransport, invocation, market_fixture, record
+from tests.native_setup_fixtures import LocalFixtureTransport, invocation, market_fixture, native_cli, record
 from tests.test_native_harness_setup import transport as transport
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="executes Linux guest native setup helpers")
@@ -66,8 +65,7 @@ def test_native_unreadable_marketplace_names_entry_and_preserves_its_source(
 ) -> None:
     market = market_fixture(transport, tool)
     root = transport.home / (".claude" if tool == "claude" else ".codex")
-    with NativeFiles(transport) as files:
-        cli = NativeCLI(tool, files, home=str(transport.home), config_root=str(root))
+    with native_cli(transport, tool, root) as cli:
         if tool == "claude":
             cli.add_market(str(market))
             path = root / "plugins/known_marketplaces.json"

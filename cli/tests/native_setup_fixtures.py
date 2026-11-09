@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import shlex
 import shutil
 import subprocess
+import sys
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
@@ -15,10 +17,11 @@ from agentworks.capabilities.harness_integration.setup import UserSetupInvocatio
 from agentworks.db import VMRow
 from agentworks.execution.access import VMAccess
 from agentworks.execution.files import Files
-from agentworks.execution.requests import Command
+from agentworks.execution.oplog import format_record
+from agentworks.execution.requests import Bytes, Command, PythonProgram, Script, Shell
 from agentworks.execution.results import Completed, Result
 from agentworks.harness_setup.model import NativeClaim, SetupRecord
-from agentworks.plugins._harness_native.native_cli import NativeTool
+from agentworks.plugins._harness_native.native_cli import NativeCLI, NativeTool
 from agentworks.ssh import SSHResult
 from agentworks.transports import Transport
 from tests.vm_access_support import (
@@ -31,6 +34,11 @@ from tests.vm_access_support import (
     local_vm_access,
     run_file_program_locally,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from agentworks.execution.requests import RunRequest
 
 
 class LocalFixtureTransport(Transport):
@@ -113,20 +121,44 @@ class LocalFixtureTransport(Transport):
         """Answer an access's request as this fixture's account would, or ``None`` for the default outcome.
 
         File operations run their real program here (``run_file_program_locally``),
-        a ``Command`` runs here in the fixture's home and environment, the
-        session home probe reads this fixture's home, and every required
-        command is present.
+        the session home probe reads this fixture's home, and every required
+        command is present. Any other ``Command``, a bash or sh ``Script`` and
+        a ``PythonProgram`` run here, in the request's working directory or the
+        fixture's home, with the fixture's environment and the request's over
+        it; a login program runs after the fixture's login shell reads its
+        ``.profile``. Each answered request's operation log record joins
+        ``logged_output``.
         """
-        if is_command_check(call.request):
-            return check_result(call.request, 0)
-        if call.request == HOME_PROBE:
+        request = call.request
+        if is_command_check(request):
+            return check_result(request, 0)
+        if request == HOME_PROBE:
             return Result(Completed(0), str(self.home).encode())
-        if isinstance(call.request, Command):
-            completed = subprocess.run(
-                list(call.request.argv), cwd=self.home, env=self.environment, capture_output=True, check=False
+        result = run_file_program_locally(call)
+        if result is None and isinstance(request, Command):
+            result = self._spawn(list(request.argv), request)
+        elif result is None and isinstance(request, Script) and request.shell in (Shell.BASH, Shell.SH):
+            result = self._spawn([request.shell.value, "-c", request.source], request)
+        elif result is None and isinstance(request, PythonProgram):
+            program = shlex.join([sys.executable, "-I", "-S", "-c", request.source, *request.args])
+            result = self._spawn(
+                [self.environment["SHELL"], "-lc", program] if request.login else shlex.split(program), request
             )
-            return Result(Completed(completed.returncode), completed.stdout, completed.stderr)
-        return run_file_program_locally(call)
+        if result is not None:
+            self.logged_output.append(format_record(request, result, label="fixture"))
+        return result
+
+    def _spawn(self, argv: list[str], request: Command | Script | PythonProgram) -> Result:
+        completed = subprocess.run(
+            argv,
+            cwd=request.cwd or self.home,
+            env={**self.environment, **request.env},
+            input=request.stdin.data if isinstance(request.stdin, Bytes) else b"",
+            capture_output=True,
+            timeout=request.deadline or 120,
+            check=False,
+        )
+        return Result(Completed(completed.returncode), completed.stdout, completed.stderr)
 
     def access(self) -> RecordingVMAccess:
         """A recording access to this fixture's account, answered by :meth:`answer`."""
@@ -139,9 +171,14 @@ class LocalFixtureTransport(Transport):
         return self.access().files()
 
 
-def fixture_access(monkeypatch: pytest.MonkeyPatch, transport: LocalFixtureTransport) -> VMAccess:
+def fixture_access(
+    monkeypatch: pytest.MonkeyPatch,
+    transport: LocalFixtureTransport,
+    *,
+    log: Callable[[RunRequest, Result], None] | None = None,
+) -> VMAccess:
     """A real ``VMAccess`` to the fixture's account: its home, and a login shell that reads only its ``.profile``."""
-    return local_vm_access(monkeypatch, home=transport.home, shell=account_shell(transport.root))
+    return local_vm_access(monkeypatch, home=transport.home, shell=account_shell(transport.root), log=log)
 
 
 def invocation(
@@ -150,11 +187,14 @@ def invocation(
     *,
     prior=None,
     env=None,
+    access: VMAccess | None = None,
 ):
+    """User setup of the fixture's account, through ``access`` (the fixture's recording access by default)."""
+    access = access or transport.access()
     return UserSetupInvocation(
         vm=cast(VMRow, object()),
-        access=(recorded := transport.access()),
-        files=recorded.files(),
+        access=access,
+        files=access.files(),
         runner=transport,
         prior=prior,
         checkpoint=claims.append,
@@ -162,6 +202,13 @@ def invocation(
         home=str(transport.home),
         environment=env or {},
     )
+
+
+def native_cli(
+    transport: LocalFixtureTransport, tool: NativeTool, config_root: Path | str, *, env=None, access=None
+) -> NativeCLI:
+    """A native CLI for the fixture's account, to use as a context manager."""
+    return NativeCLI(tool, invocation(transport, [], env=env, access=access), config_root=str(config_root))
 
 
 def record(claims: tuple[NativeClaim, ...], tool: NativeTool) -> SetupRecord:

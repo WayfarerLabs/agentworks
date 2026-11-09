@@ -317,11 +317,15 @@ Artifact discovery for Claude Code, Codex and Grok Build runs the VM's `/usr/bin
 account's login and interactive startup files. It no longer runs the first `python3` on the login
 `PATH`, so an interpreter a version manager puts first is not used for it.
 
-Artifact files and generated instruction sections are published, checked and retired by one small
-Python program per operation, with the content sent on its input instead of staged in a temporary
-directory on the VM. Every such write on a VM, by any account, takes one lock,
+Artifact files, generated instruction sections and mapped native settings are published, checked and
+retired by one small Python program per operation, with the content sent on its input instead of
+staged in a temporary directory on the VM. Every such write on a VM, by any account, takes one lock,
 `/run/lock/agentworks-files.lock`; one that cannot take it within 30 seconds fails, saying that
 another Agentworks operation is writing files on the VM, and changes nothing.
+
+A settings file that changes between setup's read and its write is no longer a failure on the first
+try: setup reads it again and recomputes the mapped settings from the new content, up to three
+writes, and fails only when every one meets a further change.
 
 ## Third-party harness integrations, Git credential providers and secret backends
 

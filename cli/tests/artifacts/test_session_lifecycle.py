@@ -633,8 +633,9 @@ def test_real_native_probe_failure_preserves_existing_runtime_before_teardown(
     monkeypatch.setattr(native, "probe_native", observed)
     lifecycle.events.clear()
 
-    # The recording access answers the real probe with no reply, which discovery
-    # rejects as an invalid response rather than a fabricated exception or inventory.
+    # The real probe runs in the fixture's account, whose login startup fails,
+    # so discovery fails with the probe's own status rather than a fabricated exception.
+    (lifecycle.target.home / ".profile").write_text("exit 1\n")
     with pytest.raises(ExternalError):
         lifecycle.restart()
     assert observed.called

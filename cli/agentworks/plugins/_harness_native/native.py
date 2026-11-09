@@ -7,7 +7,6 @@ and reported without preventing independent entries from converging.
 
 from __future__ import annotations
 
-import hashlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -22,9 +21,10 @@ from agentworks.capabilities.harness_integration.settings import (
     serialize_settings,
 )
 from agentworks.errors import ConfigError, StateError
+from agentworks.execution.errors import PathRefusal, PathRefused
+from agentworks.execution.files import Absent, Directory, guest_path
 from agentworks.harness_setup.model import NativeClaim
 from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
-from agentworks.native_files import NativeFiles, native_path
 from agentworks.plugins._harness_native.native_cli import (
     NativeCLI,
     NativeMarket,
@@ -36,6 +36,7 @@ from agentworks.plugins._harness_native.native_cli import (
 
 if TYPE_CHECKING:
     from agentworks.capabilities.harness_integration.setup import UserSetupInvocation, WorkspaceSetupInvocation
+    from agentworks.execution.files import Files
     from agentworks.plugins._harness_native.native_config import NativeUserConfig, NativeWorkspaceConfig
 
 
@@ -45,10 +46,6 @@ def _format(tool: NativeTool) -> SettingsFormat:
 
 def _filename(tool: NativeTool) -> str:
     return "settings.json" if tool == "claude" else "config.toml"
-
-
-def _hash(content: bytes | None) -> str | None:
-    return None if content is None else hashlib.sha256(content).hexdigest()
 
 
 def _native_key(tool: NativeTool, role: str, name: str) -> tuple[str, str]:
@@ -122,43 +119,59 @@ class _MappingPlan:
 
     def publish(
         self,
-        files: NativeFiles,
+        files: Files,
         destination: str,
         *,
         current: bytes | None,
-        group: str = "",
+        group: str | None = None,
         overlays: tuple[tuple[tuple[str, str], SettingsValue], ...] = (),
         removed: tuple[tuple[str, str], ...] = (),
         protected: tuple[tuple[str, str], ...] = (),
     ) -> None:
+        """Write the planned settings over ``current``, what was last read, recomputing them if the file changes.
+
+        User files are 0600 under 0700 parents; workspace files, with
+        ``group``, 0660 under setgid 2770 parents.
+        """
         if self.skipped:
             return
-        # Keep the initial skip decision even when plugin commands create the file.
-        result = self.prepared.apply(
-            None if self.prepared.strategy == "skip-existing" else current, destination_path=destination
+
+        def render(existing: bytes | None) -> bytes:
+            # Keep the initial skip decision even when plugin commands create the file.
+            result = self.prepared.apply(
+                None if self.prepared.strategy == "skip-existing" else existing, destination_path=destination
+            )
+            document = parse_settings(result.content, format=self.prepared.format)
+            for key, name in removed:
+                _table(document, key).pop(name, None)
+            native = (
+                {}
+                if existing is None or not (overlays or protected)
+                else parse_settings(
+                    existing, format=self.prepared.format, location=f"guest destination {destination!r}"
+                )
+            )
+            for (key, name), value in overlays:
+                if key not in document:
+                    document[key] = {}
+                table = _table(document, key)
+                baseline = _table(native, key).get(name)
+                table[name] = _overlay_fields(_overlay_fields(baseline, table.get(name, baseline)), value)
+            # A skipped native association is not permission to undo an explicit
+            # settings mapping. Preserve only values the selected policy leaves alone.
+            contributions = self.prepared.contributions(existing, destination_path=destination)
+            retained = tuple((key, name) for key, name in protected if name not in _table(contributions, key))
+            _preserve_entries(document, native, retained)
+            return serialize_settings(document, format=self.prepared.format)
+
+        files.update(
+            destination,
+            render,
+            observed=current,
+            mode=0o600 if group is None else 0o660,
+            parent_mode=0o700 if group is None else 0o2770,
+            group=group,
         )
-        document = parse_settings(result.content, format=self.prepared.format)
-        for key, name in removed:
-            _table(document, key).pop(name, None)
-        native = (
-            {}
-            if current is None or not (overlays or protected)
-            else parse_settings(current, format=self.prepared.format, location=f"guest destination {destination!r}")
-        )
-        for (key, name), value in overlays:
-            if key not in document:
-                document[key] = {}
-            table = _table(document, key)
-            baseline = _table(native, key).get(name)
-            table[name] = _overlay_fields(_overlay_fields(baseline, table.get(name, baseline)), value)
-        # A skipped native association is not permission to undo an explicit
-        # settings mapping. Preserve only values the selected policy leaves alone.
-        contributions = self.prepared.contributions(current, destination_path=destination)
-        retained = tuple((key, name) for key, name in protected if name not in _table(contributions, key))
-        _preserve_entries(document, native, retained)
-        content = serialize_settings(document, format=self.prepared.format)
-        if content != current:
-            files.publish(destination, content, expected=_hash(current), group=group)
 
 
 def setup_workspace(
@@ -175,14 +188,24 @@ def setup_workspace(
             invocation.checkpoint(())
         return
     prepared = prepare_settings(mapping, format=_format(tool))
-    root = native_path(invocation.root) + ("/.claude" if tool == "claude" else "/.codex")
+    root = guest_path(invocation.root) + ("/.claude" if tool == "claude" else "/.codex")
     destination = root + "/" + _filename(tool)
-    with NativeFiles(invocation.runner) as files:
-        initial = files.read(destination)
-        plan = _MappingPlan.build(prepared, initial, destination)
-        plan.publish(files, destination, current=initial, group=invocation.linux_group)
-        if claims:
-            invocation.checkpoint(())
+    files = invocation.files
+    initial = files.read(destination)
+    plan = _MappingPlan.build(prepared, initial, destination)
+    plan.publish(files, destination, current=initial, group=invocation.linux_group or None)
+    if claims:
+        invocation.checkpoint(())
+
+
+def _is_directory(files: Files, path: str) -> bool:
+    """Whether the native home ``path`` exists; anything but a directory there is refused."""
+    state = files.stat(path)
+    if isinstance(state, Directory):
+        return True
+    if isinstance(state, Absent):
+        return False
+    raise PathRefused(files.access.vm_name, "stat", path, PathRefusal.UNSUITABLE)
 
 
 def _owned(claim: NativeClaim | None, source: str | None) -> bool:
@@ -248,7 +271,7 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
     if any(claim.role not in ("settings", "plugin", "marketplace") for claim in claims):
         raise StateError("user native setup contains unsupported ownership claims")
     override = "CLAUDE_CONFIG_DIR" if tool == "claude" else "CODEX_HOME"
-    root = native_path(
+    root = guest_path(
         invocation.environment.get(override) or (invocation.home + ("/.claude" if tool == "claude" else "/.codex"))
     )
     if mapping is None and any(claim.role == "settings" for claim in claims):
@@ -258,7 +281,7 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
         invocation.checkpoint(tuple(native_claims))
     claims = native_claims.copy()
     if config is None and native_claims:
-        roots = {native_path(claim.destination) for claim in native_claims}
+        roots = {guest_path(claim.destination) for claim in native_claims}
         if len(roots) != 1:
             raise StateError("native retirement requires one recorded config home; ownership evidence was retained")
         root = roots.pop()
@@ -270,12 +293,12 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
     if not native_claims and not sources and not requested:
         if prepared is None or mapping is None:
             return
-        with NativeFiles(invocation.runner) as files:
-            initial = files.read(destination)
-            settings_plan = _MappingPlan.build(prepared, initial, destination)
-            settings_plan.publish(files, destination, current=initial)
+        initial = invocation.files.read(destination)
+        settings_plan = _MappingPlan.build(prepared, initial, destination)
+        settings_plan.publish(invocation.files, destination, current=initial)
         return
-    with NativeFiles(invocation.runner) as files:
+    files = invocation.files
+    with NativeCLI(tool, invocation, config_root=root) as cli:
         initial = files.read(destination)
         plan = None if mapping is None or prepared is None else _MappingPlan.build(prepared, initial, destination)
         # Native inventory must be trustworthy before mutation. A settings-only
@@ -286,8 +309,7 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
             if initial is None
             else parse_settings(initial, format=_format(tool), location=f"guest destination {destination!r}")
         )
-        cli = NativeCLI(tool, files, home=invocation.home, config_root=root, environment=invocation.environment)
-        root_exists = files.directory(root)
+        root_exists = _is_directory(files, root)
         markets = cli.markets() if root_exists else ()
         installed = cli.plugins(markets) if root_exists else ()
         prior = {(claim.role, claim.identifier): claim for claim in native_claims}
@@ -481,7 +503,7 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
                     )
 
         if sources or requested:
-            files.directory(root, create=True)
+            files.ensure_directory(root, mode=0o700)
         # Retirement is entry-local: preserve unsafe associations and their claims,
         # while unrelated removals and desired entries continue.
         for claim in obsolete:
