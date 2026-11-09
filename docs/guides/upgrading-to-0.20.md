@@ -129,7 +129,7 @@ path and needs none of what follows. Everything else keeps its current path for 
   quoted `*` now reaches the guest as `*`, as on macOS and Linux, where the shell decides. Expand a
   pattern yourself (PowerShell's `Get-ChildItem`, for example) where you relied on `agw` doing it,
   and write `$HOME\...` (PowerShell) or `%USERPROFILE%\...` (cmd) instead of `~` in a path such as
-  `database restore`'s.
+  `database restore`'s or `vm import-host-keys --known-hosts`'s.
 - **Exit statuses.** `vm exec` and `agent exec` still run the command line under the account shell,
   so a command that cannot start exits 127 or 126 with the shell's message, as before. A missing
   workspace directory exits 125 with one line from `agw`. A command that exits 255 is no longer
