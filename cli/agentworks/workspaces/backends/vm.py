@@ -9,8 +9,10 @@ from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
+import agentworks.execution as execution
 from agentworks import output
 from agentworks.errors import AlreadyExistsError
+from agentworks.execution.access import Admin
 from agentworks.ssh import SSHError
 from agentworks.transports import transport
 from agentworks.workspaces.acls import apply_workspace_acls
@@ -205,11 +207,10 @@ def create_vm_workspace(
         # Cleanup steps are independent: an unreachable private attempt must not
         # prevent reclaiming an empty final reservation and its group.
         if not clone_published and generated_config is not None:
-            from agentworks.native_files import NativeFiles
-
             try:
-                with NativeFiles(target) as files:
-                    files.remove(generated_config[0], expected=generated_config[1])
+                # The admin's own access, unelevated like the transport above.
+                access = execution.vm_access(vm, config, Admin(), log=None if logger is None else logger.record)
+                access.files().remove_if(generated_config[0], expected=generated_config[1])
             except BaseException:
                 output.warn(
                     f"Generated workspace config {generated_config[0]!r} could not be safely removed. "

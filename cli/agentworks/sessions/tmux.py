@@ -366,9 +366,9 @@ def cleanup_stale_admin_sockets(target: Transport, admin_username: str) -> int:
 
 def _cleanup_stale_sockets_under(target: Transport, dir_path: str) -> int:
     """Remove only observed direct sockets whose native server is confirmed absent."""
-    from agentworks.native_files import native_path
+    from agentworks.execution.files import guest_path
 
-    dir_path = native_path(dir_path)
+    dir_path = guest_path(dir_path)
     q_dir = shlex.quote(dir_path)
     begin, end = "\nAGW_STALE_SOCKETS_BEGIN\0", "AGW_STALE_SOCKETS_END\0"
     result = target.run(
@@ -389,7 +389,7 @@ def _cleanup_stale_sockets_under(target: Transport, dir_path: str) -> int:
         return 0
     try:
         if any(
-            native_path(path) != path or path.rpartition("/")[0] != dir_path or not path.endswith(".sock")
+            guest_path(path) != path or path.rpartition("/")[0] != dir_path or not path.endswith(".sock")
             for path in paths
         ):
             return 0

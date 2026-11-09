@@ -19,6 +19,7 @@ from agentworks.ssh import SSHError, SSHResult
 from agentworks.workspaces.backends.vm import create_vm_workspace
 from agentworks.workspaces.templates import ResolvedTemplate
 from agentworks.workspaces.tmuxinator import console_session_name
+from tests.vm_access_support import local_files
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -133,6 +134,7 @@ class LocalCommands:
 def backend(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     target = LocalCommands(tmp_path)
     monkeypatch.setattr("agentworks.workspaces.backends.vm.transport", lambda *args, **kwargs: target)
+    monkeypatch.setattr("agentworks.execution.vm_access", lambda *args, **kwargs: local_files().access)
     monkeypatch.setattr("agentworks.workspaces.backends.vm.apply_workspace_acls", lambda *args: None)
     vm = SimpleNamespace(name="fixture", tailscale_host="fixture", admin_username="fixture")
     config = SimpleNamespace(paths=SimpleNamespace(vm_workspaces=str(tmp_path / "workspaces")))
