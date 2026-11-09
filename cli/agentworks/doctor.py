@@ -525,10 +525,10 @@ def _check_python() -> HealthGroup:
 def _check_required_tools() -> HealthGroup:
     """PATH presence rows, then the OpenSSH resolver's verdict.
 
-    The ``ssh`` and ``scp`` rows stay until the last legacy path that runs a
-    bare ``ssh`` or ``scp`` goes. The resolver row is what the migrated
-    commands will use: the absolute client path and version, or the refusal
-    with its install guidance.
+    The ``ssh`` and ``scp`` rows stay while legacy paths still start them
+    through ``programs.resolve_program``. The resolver row is what the
+    migrated commands use: the absolute client path and version, or the
+    refusal with its install guidance.
     """
     from agentworks.execution import resolve_ssh
     from agentworks.execution.errors import ClientUnsupported
