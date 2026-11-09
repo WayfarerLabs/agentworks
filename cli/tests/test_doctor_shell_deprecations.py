@@ -1,4 +1,4 @@
-"""Read-only health checks for temporary Shell command placeholders."""
+"""Read-only health checks for temporary session context placeholders."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import pytest
 from agentworks import output
 from agentworks.db import LATEST_VERSION, Database, SessionMode, VersionedPayload
 from agentworks.doctor import HealthGroup, Status, _check_config
-from agentworks.doctor_state import append_shell_template_deprecation_checks
+from agentworks.doctor_state import append_session_template_deprecation_checks
 from agentworks.env import EnvEntry
 from agentworks.origin import Origin
 from agentworks.schema import CapabilityBlock
@@ -61,13 +61,67 @@ def test_doctor_reports_only_winning_shell_command_fields() -> None:
     registry = _registry(parent, child, modern, unrelated, env_only)
     group = HealthGroup("Configuration")
 
-    append_shell_template_deprecation_checks(group, registry)
+    append_session_template_deprecation_checks(group, registry)
 
     assert {(check.name, check.status) for check in group.checks} == {
         ("session-template/parent.command", Status.WARN),
         ("session-template/parent.resume_command", Status.WARN),
         ("session-template/child.resume_command", Status.WARN),
+        ("session-template/env-only.env.LITERAL", Status.WARN),
     }
+
+
+def test_session_env_health_uses_inherited_winners_for_non_shell_integrations() -> None:
+    from agentworks.env.identity import SESSION_IDENTITY_KEYS, WORKSPACE_IDENTITY_KEYS
+
+    entries = {
+        "INHERITED": EnvEntry.model_validate("{{session_name}}"),
+        "REPLACED": EnvEntry.model_validate("{{workspace_name}}"),
+        "SECRET": EnvEntry.model_validate({"secret": "{{session_name}}"}),
+        **{key: EnvEntry.model_validate("{{session_name}}") for key in SESSION_IDENTITY_KEYS | WORKSPACE_IDENTITY_KEYS},
+    }
+    parent = SessionTemplate(
+        name="parent",
+        harness_integration=CapabilityBlock.of("claude-code", append_system_prompt="{{session_name}}"),
+        env=entries,
+    )
+    child = SessionTemplate(
+        name="child",
+        inherits=["parent"],
+        env={"REPLACED": EnvEntry.model_validate("${agw:workspace_name}")},
+    )
+    output.set_suppress_deprecations(True)
+    group = HealthGroup("Configuration")
+
+    append_session_template_deprecation_checks(group, _registry(parent, child))
+
+    assert {(check.name, check.status) for check in group.checks} == {
+        ("session-template/parent.env.INHERITED", Status.WARN),
+        ("session-template/parent.env.REPLACED", Status.WARN),
+        ("session-template/child.env.INHERITED", Status.WARN),
+    }
+
+
+def test_lower_scope_env_aliases_are_not_reported_as_session_compatibility() -> None:
+    from agentworks.agents.template import AgentTemplate
+    from agentworks.vms.admin import AdminConfig
+    from agentworks.vms.template import VMTemplate
+    from agentworks.workspaces.template import WorkspaceTemplate
+
+    entries = {"LOWER": EnvEntry.model_validate("{{session_name}}")}
+    registry = _registry(_shell("default", command="${agw:session_name}"))
+    for kind, declaration in (
+        ("vm-template", VMTemplate(name="lower", env=entries)),
+        ("workspace-template", WorkspaceTemplate(name="lower", env=entries)),
+        ("agent-template", AgentTemplate(name="lower", env=entries)),
+        ("admin-template", AdminConfig(env=entries)),
+    ):
+        registry.add(kind, declaration.name, declaration, Origin.built_in(source="test"))
+    group = HealthGroup("Configuration")
+
+    append_session_template_deprecation_checks(group, registry)
+
+    assert group.checks == []
 
 
 def test_doctor_reads_stored_session_overlays_without_mutating_them(
@@ -88,7 +142,12 @@ def test_doctor_reads_stored_session_overlays_without_mutating_them(
                     "name": "shell",
                     "command": "private-command {{session_name}}",
                     "resume_command": "{{workspace_name}}",
-                }
+                },
+                "env": {
+                    "CACHE": "private-env {{workspace_name}}",
+                    "SECRET": {"secret": "{{session_name}}"},
+                    "AGENTWORKS_SESSION": "{{session_name}}",
+                },
             },
         )
         database.instance_state.put_desired_overlay("session", "old", overlay)
@@ -111,9 +170,10 @@ def test_doctor_reads_stored_session_overlays_without_mutating_them(
         monkeypatch.setattr(Database, "__init__", observe_open)
         group = HealthGroup("Configuration")
 
-        append_shell_template_deprecation_checks(group, registry)
+        append_session_template_deprecation_checks(group, registry)
 
         assert [(check.name, check.status) for check in group.checks] == [
+            ("session/old.env.CACHE", Status.WARN),
             ("session/old.command", Status.WARN),
             ("session/old.resume_command", Status.WARN),
         ]
@@ -122,13 +182,14 @@ def test_doctor_reads_stored_session_overlays_without_mutating_them(
         assert database.list_sessions() == original_rows
         assert database.instance_state.get_desired_overlay("session", "old") == original_overlay
         assert "private-command" not in json.dumps([check.__dict__ for check in group.checks], default=str)
+        assert "private-env" not in json.dumps([check.__dict__ for check in group.checks], default=str)
 
 
 def test_doctor_deprecation_health_is_not_suppressed() -> None:
     output.set_suppress_deprecations(True)
     group = HealthGroup("Configuration")
 
-    append_shell_template_deprecation_checks(group, _registry(_shell("old", command="{{session_name}}")))
+    append_session_template_deprecation_checks(group, _registry(_shell("old", command="{{session_name}}")))
 
     assert [(check.name, check.status) for check in group.checks] == [("session-template/old.command", Status.WARN)]
 
@@ -165,7 +226,7 @@ def test_missing_database_is_not_created() -> None:
     assert not DB_PATH.exists()
     group = HealthGroup("Configuration")
 
-    append_shell_template_deprecation_checks(group, _registry(_shell("old", command="{{session_name}}")))
+    append_session_template_deprecation_checks(group, _registry(_shell("old", command="{{session_name}}")))
 
     assert not DB_PATH.exists()
     assert [(check.name, check.status) for check in group.checks] == [("session-template/old.command", Status.WARN)]
@@ -180,7 +241,7 @@ def test_stale_database_preserves_declared_checks_and_reports_live_coverage() ->
     original_bytes = DB_PATH.read_bytes()
     group = HealthGroup("Configuration")
 
-    append_shell_template_deprecation_checks(group, _registry(_shell("old", command="{{session_name}}")))
+    append_session_template_deprecation_checks(group, _registry(_shell("old", command="{{session_name}}")))
 
     assert [(check.name, check.status) for check in group.checks] == [
         ("session-template/old.command", Status.WARN),
@@ -195,7 +256,7 @@ def test_malformed_database_preserves_declared_checks_and_reports_live_failure()
     DB_PATH.write_bytes(b"malformed fixture database")
     group = HealthGroup("Configuration")
 
-    append_shell_template_deprecation_checks(group, _registry(_shell("old", command="{{session_name}}")))
+    append_session_template_deprecation_checks(group, _registry(_shell("old", command="{{session_name}}")))
 
     assert [(check.name, check.status) for check in group.checks] == [
         ("session-template/old.command", Status.WARN),
@@ -219,7 +280,7 @@ def test_unreadable_overlay_preserves_other_session_health_checks() -> None:
         )
         group = HealthGroup("Configuration")
 
-        append_shell_template_deprecation_checks(group, registry)
+        append_session_template_deprecation_checks(group, registry)
 
         assert {(check.name, check.status) for check in group.checks} == {
             ("session/broken", Status.FAIL),
@@ -246,7 +307,7 @@ def test_supported_overlay_with_invalid_shell_field_preserves_healthy_rows(field
         )
         group = HealthGroup("Configuration")
 
-        append_shell_template_deprecation_checks(group, registry)
+        append_session_template_deprecation_checks(group, registry)
 
         assert {(check.name, check.status) for check in group.checks} == {
             ("session/broken", Status.FAIL),

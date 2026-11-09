@@ -39,8 +39,8 @@ def _current_database() -> Iterator[tuple[bool, int, int, Database | None]]:
             database.close()
 
 
-def append_shell_template_deprecation_checks(group: HealthGroup, registry: Registry) -> None:
-    """Inspect effective Shell declarations without rendering or resolving secrets.
+def append_session_template_deprecation_checks(group: HealthGroup, registry: Registry) -> None:
+    """Inspect session declarations without rendering or resolving secrets.
 
     Declared templates are always available from this registry. Persisted session
     overlays are inspected only through the ordinary current, read-only database;
@@ -55,9 +55,9 @@ def append_shell_template_deprecation_checks(group: HealthGroup, registry: Regis
         try:
             resolved = resolve_template(registry, name)
         except AgentworksError:
-            group.fail(owner, "Shell compatibility could not be checked for this declaration")
+            group.fail(owner, "Session compatibility could not be checked for this declaration")
             continue
-        _append_shell_template_fields(group, owner, resolved)
+        _append_session_template_fields(group, owner, resolved)
 
     try:
         with _current_database() as (exists, current, latest, database):
@@ -76,9 +76,9 @@ def append_shell_template_deprecation_checks(group: HealthGroup, registry: Regis
                     try:
                         resolved = resolve_live_template(database, registry, session.name, session.template)
                     except AgentworksError:
-                        group.fail(owner, "Shell compatibility could not be checked for this declaration")
+                        group.fail(owner, "Session compatibility could not be checked for this declaration")
                         continue
-                    _append_shell_template_fields(group, owner, resolved)
+                    _append_session_template_fields(group, owner, resolved)
     except (AgentworksError, DatabaseDriverError, OSError, ValueError):
         group.fail(
             "Session template compatibility coverage",
@@ -86,8 +86,8 @@ def append_shell_template_deprecation_checks(group: HealthGroup, registry: Regis
         )
 
 
-def _append_shell_template_fields(group: HealthGroup, owner: str, template: ResolvedSessionTemplate) -> None:
-    """Validate the effective capability blob read from persisted declarations.
+def _append_session_template_fields(group: HealthGroup, owner: str, template: ResolvedSessionTemplate) -> None:
+    """Inspect session plaintext and validate persisted Shell capability fields.
 
     A stored session overlay can be decoded without capability-field validation
     when doctor falls back to a declared-only registry. Inspect only a validated
@@ -95,12 +95,16 @@ def _append_shell_template_fields(group: HealthGroup, owner: str, template: Reso
     """
     from pydantic import ValidationError as PydanticValidationError
 
-    from agentworks.capabilities.harness_integration.shell import (
-        LEGACY_SHELL_PLACEHOLDER_REMOVAL,
-        ShellConfig,
-        uses_legacy_shell_placeholders,
-    )
+    from agentworks.capabilities.harness_integration.shell import ShellConfig
+    from agentworks.env.identity import SESSION_IDENTITY_KEYS, WORKSPACE_IDENTITY_KEYS
+    from agentworks.env.merge import effective_env
 
+    session_env = effective_env(
+        vm={}, session=template.env, identity_keys=SESSION_IDENTITY_KEYS | WORKSPACE_IDENTITY_KEYS
+    )
+    for key, entry in session_env.items():
+        if entry.value is not None:
+            _append_legacy_placeholder_check(group, f"{owner}.env.{key}", entry.value)
     if template.harness_integration != "shell":
         return
     try:
@@ -109,15 +113,20 @@ def _append_shell_template_fields(group: HealthGroup, owner: str, template: Reso
         group.fail(owner, "Shell compatibility could not be checked for this declaration")
         return
     for field, command in (("command", config.command), ("resume_command", config.resume_command)):
-        if uses_legacy_shell_placeholders(command):
-            group.warn(
-                f"{owner}.{field}",
-                "Deprecated Shell context placeholders",
-                hint=(
-                    "Use ${agw:session_name} and ${agw:workspace_name} "
-                    f"before release {LEGACY_SHELL_PLACEHOLDER_REMOVAL}."
-                ),
-            )
+        _append_legacy_placeholder_check(group, f"{owner}.{field}", command)
+
+
+def _append_legacy_placeholder_check(group: HealthGroup, field: str, value: str) -> None:
+    from agentworks.interpolation_compat import LEGACY_PLACEHOLDER_REMOVAL, uses_legacy_placeholders
+
+    if uses_legacy_placeholders(value):
+        group.warn(
+            field,
+            "Deprecated session context placeholders",
+            hint=(
+                f"Use ${{agw:session_name}} and ${{agw:workspace_name}} before release {LEGACY_PLACEHOLDER_REMOVAL}."
+            ),
+        )
 
 
 def check_system() -> HealthGroup:

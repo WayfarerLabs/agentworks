@@ -814,9 +814,9 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
     if registry is None:
         return g, config, None
 
-    from agentworks.doctor_state import append_shell_template_deprecation_checks
+    from agentworks.doctor_state import append_session_template_deprecation_checks
 
-    append_shell_template_deprecation_checks(g, registry)
+    append_session_template_deprecation_checks(g, registry)
 
     # Dotfiles
     from agentworks.resources.access import admin_template
