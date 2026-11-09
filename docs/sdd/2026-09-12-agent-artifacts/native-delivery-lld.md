@@ -135,10 +135,10 @@ imported skills.
 Generated guidance skills have two ordinary owned package members: a fixed navigation `SKILL.md` and
 sibling `guidance.md` containing the literal rule or owner hints aggregate. Keep freeform guidance
 and source descriptions out of the native preprocessing entrypoint. Include a deterministic content
-digest in its body so changed guidance changes the rendered entrypoint too. Session applicability
-stays in the wrapper; canonical types, captures and origin identities do not change. Do not escape
-selected syntax, run a shell loader or grant tools. Authored skills retain their native body
-processing and complete supporting files.
+digest in its body so changed guidance changes the rendered entrypoint too. Retain the adapter's
+applicability conditions or invocation-local namespace; canonical types, captures and origin
+identities do not change. Do not escape selected syntax, run a shell loader or grant tools. Authored
+skills retain their native body processing and complete supporting files.
 
 Retire old recorded instruction sections by removing only Agentworks content and paired markers,
 preserving surrounding bytes, ownership, permissions and extended attributes. Malformed markers warn
@@ -365,6 +365,12 @@ root spelling with a lexical configured path. Only the metadata destination inde
 by current Git authorizes I/O. After a Git-directory move, matching owned pairs there can converge
 without following old persisted destinations. Invalid associations warn and release; modified pairs
 retain their evidence. Existing native file path guards still apply.
+
+Rebound Git associations contain only that role's source, current destination and literal
+identifier; legacy settings-only metadata cannot prevent deduplication before a validated
+checkpoint. Marker and pattern recognition requires whole-line boundaries. Modified marker lines,
+including prefixed annotations, retain their bytes and cleanup evidence rather than splicing
+unrelated lines. Metadata-only tracked-file queries disable Git's filesystem monitor locally.
 
 Before destructive workspace directory/group/record removal, reconcile known artifact exclusion
 claims with no desired files and checkpoint the remaining ordinary native setup state. Failure or

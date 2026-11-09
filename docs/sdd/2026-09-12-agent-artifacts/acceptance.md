@@ -52,6 +52,21 @@ cell does not create an additional acceptance requirement. The report preserves 
 observers, later reconciliation and independent cleanup rather than relabeling failures as passes.
 Both locks remain absent while the material correction and its actual acceptance are pending.
 
+### Installed-package dependency limit
+
+A fresh unconstrained wheel installation at `4dbadd9d` selected newly released Typer 0.29.0. Build
+and installation passed, but CLI command-tree construction failed before the guide ran because four
+existing options pass the removed `click_type` parameter. The same sites exist on main `438c4546`;
+the runtime lock selects Typer 0.27.3. The failure is recorded separately in
+[issue 880](https://github.com/WayfarerLabs/agentworks/issues/880), with the original receipt
+retained. It is not a passing latest-dependency guide check or an artifact-carrier regression.
+
+A separate fresh environment installed that same wheel with the repository's exported runtime lock
+constraints. Both artifact/integration guide topics rendered for human and agent audiences with
+exit 0. Installed README/guide bytes matched the source. The wheel had 479 members and no scratch,
+environment or cache members. This proves packaged guide availability under the tested locked
+runtime; it does not clear the unconstrained-install defect or certify the next source head.
+
 ## Retained reconciliation, 2026-11-08
 
 Date: 2026-11-08. Earlier executable acceptance used `eddf7501a5bacde0222471e09d5ea5060a6d2972`,

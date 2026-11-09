@@ -33,6 +33,31 @@ and Rule-to-Skill preprocessing. Its interactive API history/resume cell did not
 prompt because of native onboarding; it is unvalidated, not an established authentication defect.
 R10 does not require model calls. Workspace modes remain a separate owned additional PR.
 
+### Private correction and gate record
+
+The project, Muntz and generic correctness lanes reviewed `4dbadd9d` independently. The first two
+corroborated the Git rebinding convergence failure: carrying irrelevant legacy fields prevented
+deduplication, and checkpoint validation refused the result before writing. Prior valid database
+evidence remained intact; saved corruption was not established. The generic lane additionally proved
+that substring-based pair removal could join an annotated marker to the next operator exclusion,
+changing actual Git ignore behavior. Metadata-only `ls-files` also ran a configured filesystem
+monitor; the optional local suppression preserved its results.
+
+Worker `772f2aab` corrects all three through canonical four-field associations, whole-line marker
+recognition/span removal and a local filesystem-monitor override. Fifty combined real-Git, workspace
+deletion, setup-probe and source-package tests passed. Regressions were observed failing before
+correction. Ruff and full mypy over 941 files passed; the final full suite and private delta
+re-reviews remain pending. The actual native renderer evidence retains source `818ccee9`; later
+changes to that renderer only add a list type annotation.
+
+The first frozen full suite at `17456c60` returned 1: 11,471 passed, 11 skipped and one
+source-distribution packaging failure in 1,029.82 seconds. An old owned wheel environment beneath
+`cli/.dev-proof.local.work` entered the source archive with an absolute interpreter symlink. The
+original result is retained. Moving those owned receipts/environments outside the package root fixed
+the fixture condition; no product packaging or dependency change was made. Own-tree test temporary
+directories now have the process's group and scoped Git discovery, preserving the actual
+file-ownership guard and avoiding discovery of the enclosing developer repository.
+
 ## Delivery reassessment, 2026-11-08
 
 The approved design is promoted into the FRD, HLA and native LLD. The private exploratory response

@@ -334,10 +334,10 @@ are not rewritten.
 
 Generated guidance skills contain a fixed `SKILL.md` entrypoint that directs the reader to sibling
 `guidance.md`. That supporting file holds the literal rule body or owner hints aggregate. The
-entrypoint includes its content revision, so changing the guidance also changes the entrypoint. Rule
-and hint text therefore stays out of native skill-body command and variable preprocessing. Authored
-skills retain their native semantics; using a skill can run native preprocessing permitted by the
-harness. Reading a supporting file still requires tool access and agent cooperation.
+entrypoint includes a digest of that file, so changing the guidance also changes the entrypoint.
+Rule and hint text therefore stays out of native skill-body command and variable preprocessing.
+Authored skills retain their native semantics; using a skill can run native preprocessing permitted
+by the harness. Reading a supporting file still requires tool access and agent cooperation.
 
 Codex guidance uses generated skills under its ordinary skill roots; it does not edit AGENTS.md or
 AGENTS.override.md. Claude user/project guidance uses separate native rule files. Grok workspace
@@ -606,6 +606,10 @@ changed files are preserved with recorded skips and evidence for retry; independ
 apply. A conflicting member skips its whole skill package, including when a modified obsolete member
 must be retained while the package is still requested. Generated instruction sections instead follow
 their explicit replaceable-section contract.
+
+`git_excludes.py` owns exact Git exclusion associations through ordinary native setup claims.
+`harness_setup/cleanup.py` retires known workspace associations before destructive owner cleanup,
+checkpointing partial progress in that same state.
 
 `session.py` prepares the launch context, stages a new private run before old-runtime teardown, then
 retires obsolete owned files after teardown. No artifact bookkeeping changes VM deletion.
