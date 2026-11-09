@@ -16,7 +16,6 @@ import subprocess
 from typing import TYPE_CHECKING
 
 from agentworks.execution import trust as host_trust
-from agentworks.programs import resolve_program
 from agentworks.ssh import (
     SSH_DEFAULT_RETRIES,
     SSH_INTERACTIVE_ALIVE_COUNT_MAX,
@@ -26,6 +25,7 @@ from agentworks.ssh import (
     SSHResult,
     SSHTarget,
     _set_env_args,
+    openssh_program,
 )
 from agentworks.ssh import (
     run as ssh_run,
@@ -103,7 +103,7 @@ def _scp_base_args(
     identity_file: Path | None,
     proxy_jump: str | None,
 ) -> list[str]:
-    args = [resolve_program("scp"), "-q", *host_key_options, "-o", "BatchMode=yes"]
+    args = [openssh_program("scp"), "-q", *host_key_options, "-o", "BatchMode=yes"]
     if port is not None:
         args.extend(["-P", str(port)])
     if identity_file is not None:
@@ -203,7 +203,7 @@ class SSHTransport(Transport):
         ``input_data`` payload leave ``close_stdin`` false so stdin stays open
         for the write.
         """
-        args = [resolve_program("ssh"), *self.host_key_options(), "-o", "BatchMode=yes"]
+        args = [openssh_program("ssh"), *self.host_key_options(), "-o", "BatchMode=yes"]
         if tty:
             args.insert(1, "-tt")
         else:
@@ -375,7 +375,7 @@ class SSHTransport(Transport):
         """Interactive SSH with ``-t`` (allocates a TTY) and no
         ``BatchMode``. Empty ``command`` opens a login shell.
         """
-        args = [resolve_program("ssh"), "-t", *self.host_key_options(), *keepalive_args()]
+        args = [openssh_program("ssh"), "-t", *self.host_key_options(), *keepalive_args()]
         if self.port is not None:
             args.extend(["-p", str(self.port)])
         if self.identity_file is not None:
@@ -461,7 +461,7 @@ class SSHTransport(Transport):
         ``vm exec`` and ``agent exec`` so the operator sees output
         stream in real time. Returns the remote exit code.
         """
-        args = [resolve_program("ssh"), "-T", *self.host_key_options(), "-o", "BatchMode=yes", *keepalive_args()]
+        args = [openssh_program("ssh"), "-T", *self.host_key_options(), "-o", "BatchMode=yes", *keepalive_args()]
         if self.port is not None:
             args.extend(["-p", str(self.port)])
         if self.identity_file is not None:

@@ -90,6 +90,21 @@ class SSHError(ConnectivityError):
     """
 
 
+def openssh_program(name: str) -> str:
+    """The absolute path of the OpenSSH program ``name`` (``ssh``, ``scp``) on ``PATH``, for a legacy argv.
+
+    A missing program raises :class:`SSHError`, the failure every caller of
+    this module and of ``SSHTransport`` already handles.
+    """
+    try:
+        return resolve_program(name)
+    except FileNotFoundError as error:
+        raise SSHError(
+            f"'{name}' could not be started: {error}",
+            hint="Install the OpenSSH client on this machine, or check that it is on PATH.",
+        ) from error
+
+
 LOG_DIR = Path.home() / ".config" / "agentworks" / "logs"
 
 
@@ -368,7 +383,7 @@ def _ssh_base_args(
     ``input_text`` payload is written, so callers set ``close_stdin`` only for
     the no-stdin-payload case.
     """
-    args = [resolve_program("ssh"), *target.host_key_options, "-o", "BatchMode=yes"]
+    args = [openssh_program("ssh"), *target.host_key_options, "-o", "BatchMode=yes"]
     if tty:
         args.insert(1, "-tt")
     else:
@@ -511,7 +526,7 @@ def run(
 
 def _scp_base_args(target: SSHTarget) -> list[str]:
     """Build the base scp argument list (flags and options, no paths)."""
-    args = [resolve_program("scp"), "-q", *target.host_key_options, "-o", "BatchMode=yes"]
+    args = [openssh_program("scp"), "-q", *target.host_key_options, "-o", "BatchMode=yes"]
     if target.port is not None:
         args.extend(["-P", str(target.port)])
     if target.identity_file is not None:

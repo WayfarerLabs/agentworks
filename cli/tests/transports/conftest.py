@@ -21,7 +21,6 @@ import pytest
 @pytest.fixture(autouse=True)
 def _programs_by_name(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("agentworks.ssh.resolve_program", lambda name: name)
-    monkeypatch.setattr("agentworks.transports.ssh.resolve_program", lambda name: name)
 
 
 def ok_completed(stdout: str = "", stderr: str = "") -> MagicMock:
