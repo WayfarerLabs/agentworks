@@ -87,7 +87,7 @@ class _Host:
             return _Completed(0, self.outputs[command], "")
         if "mktemp -d" in command:
             return _Completed(0, f"{_REMOTE_TEMPLATE_DIR}\n", "")
-        if command.startswith("nohup "):
+        if "nohup " in command:
             self.launched = True
         if command.startswith("test -f") and command.endswith(".status"):
             return _Completed(0 if self.launched and self.detached_status is not None else 1, "", "")
@@ -140,7 +140,7 @@ def test_remote_stdin_write_failure_removes_partial_template_and_preserves_error
 
     assert caught.value is write_failure
     assert host.commands[-1].startswith(f"rm -rf -- {_REMOTE_TEMPLATE_DIR}")
-    assert not any(command.startswith("nohup") for command in host.commands)
+    assert not any("nohup " in command for command in host.commands)
 
 
 def test_remote_template_rejects_untrusted_allocation_path(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -231,8 +231,9 @@ def test_the_detached_create_runs_once_and_its_output_reaches_the_creates_log(ho
 
     _create_remote(progress=progress)
 
-    launches = [command for command in host.commands if command.startswith("nohup ")]
-    assert launches == [f"nohup /bin/bash {_BASE}.sh </dev/null >/dev/null 2>&1 &"]
+    launches = [command for command in host.commands if "nohup " in command]
+    assert len(launches) == 1
+    assert f"{_BASE}.sh" in launches[0]
     wrapper = [content for command, content in host.calls if command.endswith(f"cat > {_BASE}.sh")]
     assert len(wrapper) == 1
     assert "limactl create --name myvm --tty=false" in (wrapper[0] or "")
@@ -388,8 +389,9 @@ def test_delete_op_issues_the_shared_teardown_command(host: _Host, captured_outp
 def test_a_remote_delete_removes_what_an_abandoned_create_left_on_the_host(
     host: _Host, captured_output: CapturedOutput
 ) -> None:
-    """A retained rollback or a second Ctrl-C leaves the detached create's files; the delete that follows removes
-    them, after the instance, and only kills a PID that is still that create's wrapper."""
+    """A retained rollback or a second Ctrl-C can leave the detached create running, with its files; the delete
+    that follows stops it and removes them before deleting the instance, and only kills a PID that is still that
+    create's wrapper."""
     vm = SimpleNamespace(name="myvm", platform_metadata={"instance_name": "myvm"})
 
     LimaPlatform("lima", _REMOTE).delete(vm, RunContext())  # type: ignore[arg-type]
@@ -398,7 +400,7 @@ def test_a_remote_delete_removes_what_an_abandoned_create_left_on_the_host(
     delete = _index(commands, lambda c: c == "limactl delete --force myvm")
     kill = _index(commands, lambda c: f"pid=$(cat {_BASE}.pid)" in c and f"grep -qF -- {_BASE}.sh" in c)
     artifacts = _index(commands, lambda c: c == f"rm -f {_BASE}.out {_BASE}.sh {_BASE}.pid {_BASE}.status")
-    assert delete < kill < artifacts
+    assert kill < artifacts < delete
 
 
 @pytest.mark.parametrize(
@@ -416,4 +418,4 @@ def test_a_delete_that_fails_raises_so_core_keeps_the_row(
     with pytest.raises(LimaCommandFailed):
         LimaPlatform("lima", placement).delete(vm, RunContext())  # type: ignore[arg-type]
 
-    assert host.commands == ["limactl delete --force myvm"]
+    assert host.commands[-1] == "limactl delete --force myvm"  # nothing after the failed delete

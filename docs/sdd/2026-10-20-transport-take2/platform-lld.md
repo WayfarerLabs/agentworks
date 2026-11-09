@@ -418,11 +418,13 @@ the two legacy transports, and imports nothing legacy:
   within the timeout, warning once that the host is not answering, and each read is asked up to six
   times. A launch the host does not answer, or a status it never answers for, raises
   `LimaCommandFailed` saying the host stopped answering and the outcome is unknown, never an exit
-  status nothing read, and the create's rollback handles it as any other failure. The kill the
-  rollback, the poll's timeout and `kill_detached` share reaches the PID file's process only while
-  it is still that run's wrapper, since the file can be days old by the time a later delete reads
-  it: a Remote Lima `delete` removes, best effort and once the instance is gone, the detached files
-  a retained or abandoned rollback left on the host.
+  status nothing read, and the create's rollback handles it as any other failure. The wrapper starts
+  as its own process group's leader, and the kill the rollback, the poll's timeout and
+  `kill_detached` share signals that group, so the `limactl` the wrapper started dies with it; it
+  does so only while the PID file's process is still that run's wrapper, since the file can be days
+  old by the time a later delete reads it. A Remote Lima `delete` stops, best effort and before
+  deleting the instance, the detached create and removes the files a retained or abandoned rollback
+  left on the host.
 
 The remote create keeps its private staging directory (`lima.py:671-691`). Piping the template to
 `limactl create -` would need `create` to be quick, and it is not: `createAction` calls

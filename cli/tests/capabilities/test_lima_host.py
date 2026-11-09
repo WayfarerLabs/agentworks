@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+import contextlib
+import os
 import shutil
+import signal
 import subprocess
+import time
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -14,7 +19,7 @@ from agentworks.execution.client import SSHClient
 from agentworks.execution.root_script import RawRun
 
 if TYPE_CHECKING:
-    from pathlib import Path
+    from collections.abc import Callable
 
     from tests.conftest import CapturedOutput
 
@@ -130,7 +135,7 @@ def test_a_detached_command_clears_a_stale_result_and_runs_fresh(
     def execute(host: LimaHost, command: str, *, input: str | None, timeout: float | None) -> _Completed:
         nonlocal launched
         commands.append(command)
-        launched = launched or command.startswith("nohup ")
+        launched = launched or "nohup " in command
         if command.startswith("test -f") and command.endswith(".status"):
             return _Completed(0, "", "")  # stale before the launch, this run's after it
         if command.startswith("cat") and ".status" in command:
@@ -143,7 +148,7 @@ def test_a_detached_command_clears_a_stale_result_and_runs_fresh(
     result = LimaHost("me@gpu-box").run_detached("limactl start vm1", base_path="/var/tmp/agw-x", timeout=600)
 
     assert result.exit_code == 0
-    assert sum(command.startswith("nohup ") for command in commands) == 1
+    assert sum("nohup " in command for command in commands) == 1
     assert len(captured_output.warnings) == 1
 
 
@@ -164,7 +169,7 @@ def test_a_placement_host_that_drops_for_a_while_does_not_end_the_detached_comma
 
     def execute(host: LimaHost, command: str, *, input: str | None, timeout: float | None) -> _Completed:
         nonlocal launched
-        launched = launched or command.startswith("nohup ")
+        launched = launched or "nohup " in command
         for prefix, queue in answers.items():
             if launched and command.startswith(prefix):
                 return queue.pop(0) if len(queue) > 1 else queue[0]
@@ -206,7 +211,7 @@ def test_a_placement_host_that_stops_answering_is_an_unknown_outcome_not_an_exit
     def execute(host: LimaHost, command: str, *, input: str | None, timeout: float | None) -> _Completed:
         nonlocal down
         commands.append(command)
-        down = down or (command.startswith("nohup ") if down_from == "launch" else command.startswith("wc -c"))
+        down = down or ("nohup " in command if down_from == "launch" else command.startswith("wc -c"))
         if down:
             return _Completed(255, "", "ssh: connect to host gpu-box port 22: Operation timed out")
         return _Completed(1 if command.startswith("test -f") else 0, "", "")
@@ -229,19 +234,60 @@ def test_a_kill_reaches_only_the_wrapper_its_pid_file_names(tmp_path: Path) -> N
 
     files = _DetachedFiles(str(tmp_path / "agw-x"))
     bystander = subprocess.Popen(["sleep", "30"])
-    wrapper: subprocess.Popen[bytes] | None = None
     try:
         (tmp_path / "agw-x.pid").write_text(f"{bystander.pid}\n")
         subprocess.run(["bash", "-c", _kill_wrapper(files)], check=False)
         assert bystander.poll() is None  # not the wrapper: left alone
-
-        (tmp_path / "agw-x.sh").write_text("sleep 30\n")
-        wrapper = subprocess.Popen(["/bin/bash", files.wrapper])
-        (tmp_path / "agw-x.pid").write_text(f"{wrapper.pid}\n")
-        subprocess.run(["bash", "-c", _kill_wrapper(files)], check=False)
-        assert wrapper.wait(timeout=10) != 0  # the wrapper: killed
     finally:
-        for process in (bystander, wrapper):
-            if process is not None and process.poll() is None:
-                process.kill()
-                process.wait()
+        bystander.kill()
+        bystander.wait()
+
+
+def test_a_kill_stops_the_command_the_wrapper_started(tmp_path: Path) -> None:
+    """Killing only the bash wrapper left the limactl it started running on the placement host."""
+    if shutil.which("ps") is None or not Path("/bin/bash").exists():
+        pytest.skip("needs ps and /bin/bash")
+    from agentworks.capabilities.vm_platform.lima_host import (
+        _WRAPPER_TEMPLATE,
+        _DetachedFiles,
+        _kill_wrapper,
+        _launch_wrapper,
+    )
+
+    files = _DetachedFiles(str(tmp_path / "agw-x"))
+    child_pid_file = tmp_path / "child.pid"
+    # The command records its own child's PID, standing in for the limactl the wrapper runs.
+    command = f"sleep 300 & echo $! > {child_pid_file}; wait"
+    (tmp_path / "agw-x.sh").write_text(_WRAPPER_TEMPLATE.format(command=command, **files.template_fields()))
+    subprocess.run(["bash", "-c", _launch_wrapper(files)], check=True)
+    pids = [_wait_for_pid(Path(files.pid)), _wait_for_pid(child_pid_file)]
+    try:
+        assert all(_alive(pid) for pid in pids)
+
+        subprocess.run(["bash", "-c", _kill_wrapper(files)], check=False)
+
+        assert _eventually(lambda: not any(_alive(pid) for pid in pids))
+    finally:
+        for pid in pids:
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(pid, signal.SIGKILL)
+
+
+def _wait_for_pid(path: Path) -> int:
+    assert _eventually(lambda: path.exists() and path.read_text().strip().isdigit())
+    return int(path.read_text())
+
+
+def _alive(pid: int) -> bool:
+    """Whether ``pid`` is a running process: a zombie awaiting its reaper counts as gone."""
+    state = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
+    return bool(state) and not state.startswith("Z")
+
+
+def _eventually(condition: Callable[[], bool]) -> bool:
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        if condition():
+            return True
+        time.sleep(0.05)
+    return False

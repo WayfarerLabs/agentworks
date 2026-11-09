@@ -35,7 +35,9 @@ _DETACHED_READ_RETRY_SECONDS = 5
 _SSH_CONNECTION_FAILED = 255
 
 # Writes the PID, runs the command, then writes its status. The brace group
-# makes the redirection capture all of a compound command's output.
+# makes the redirection capture all of a compound command's output. The
+# wrapper is started as its own process group's leader (_launch_wrapper), so
+# its PID is also the group a kill signals, reaching the command it started.
 _WRAPPER_TEMPLATE = """\
 #!/bin/bash
 echo $$ > {pid_file}
@@ -131,7 +133,7 @@ class LimaHost:
             output.warn(f"clearing stale result files from a previous interrupted run ({base_path}.*)")
         self.upload(files.wrapper, _WRAPPER_TEMPLATE.format(command=command, **files.template_fields()))
         self._returncode(f"rm -f {files.output} {files.pid} {files.status}")
-        if self._returncode(f"nohup /bin/bash {files.wrapper} </dev/null >/dev/null 2>&1 &") == _SSH_CONNECTION_FAILED:
+        if self._returncode(_launch_wrapper(files)) == _SSH_CONNECTION_FAILED:
             raise LimaCommandFailed(f"the placement host '{self.host}' did not answer when starting: {command}")
         time.sleep(0.5)
         self._poll_until_done(files, timeout=timeout)
@@ -273,11 +275,24 @@ class LimaHost:
         return _Completed(process.returncode, decode_stream(stdout), decode_stream(stderr))
 
 
+def _launch_wrapper(files: _DetachedFiles) -> str:
+    """The command that starts ``files.wrapper`` under ``nohup``, in the background, as a process group leader.
+
+    ``set -m`` turns on bash's job control, which gives each background job
+    its own process group even with no terminal; ``nohup`` execs the
+    wrapper, so the wrapper's PID is that group's ID. An explicit
+    ``/bin/bash`` keeps this independent of the host user's login shell.
+    """
+    return shlex.join(["/bin/bash", "-c", f"set -m; nohup /bin/bash {files.wrapper} </dev/null >/dev/null 2>&1 &"])
+
+
 def _kill_wrapper(files: _DetachedFiles) -> str:
-    """The command that kills the PID in ``files.pid`` only while that process is still ``files.wrapper``."""
+    """The command that kills the process group the PID in ``files.pid`` leads, only while that PID is still
+    ``files.wrapper``: the wrapper and the command it started, which signalling the wrapper alone leaves running.
+    """
     return (
         f'test -f {files.pid} && pid=$(cat {files.pid}) && ps -p "$pid" -o args= | grep -qF -- {files.wrapper} '
-        '&& kill "$pid" 2>/dev/null'
+        '&& kill -- -"$pid" 2>/dev/null'
     )
 
 
