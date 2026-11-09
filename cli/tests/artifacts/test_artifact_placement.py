@@ -65,8 +65,8 @@ def test_codex_preserves_individual_guidance_from_same_named_scoped_inputs(root)
         )
     )
     plan = codex.outer_artifacts(inputs, skills_root=f"{root}/skills", agents_root=f"{root}/agents")
-    assert len(plan.files) == 4
-    assert len({file.path for file in plan.files}) == 4
+    assert len([file for file in plan.files if file.path.endswith("/SKILL.md")]) == 4
+    assert len({file.path for file in plan.files}) == len(plan.files)
     assert {origin for file in plan.files for origin in file.origins} == {
         item.origin_identity for item in inputs.items()
     }

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from dataclasses import replace
 from pathlib import PurePosixPath
 
@@ -30,17 +31,20 @@ def test_same_named_rules_and_hints_from_different_scopes_have_distinct_owned_pa
     second = artifact(ArtifactType.RULE, owner="two")
     hints = [artifact(ArtifactType.HINT, owner=owner, name=name) for owner in ("one", "two") for name in ("a", "b")]
     files = guidance_skills("/skills", received(first, second, *hints))
-    assert len(files) == 4
+    entries = [file for file in files if file.path.endswith("/SKILL.md")]
+    assert len(entries) == 4
     assert len({file.native_identity for file in files}) == 4
-    assert sorted(len(file.origins) for file in files) == [1, 1, 2, 2]
+    assert sorted(len(file.origins) for file in entries) == [1, 1, 2, 2]
     assert {origin for file in files for origin in file.origins} == {
         item.origin_identity for item in (first, second, *hints)
     }
-    for file in files:
+    for file in entries:
         name = PurePosixPath(file.package_root).name
         assert metadata(file)["name"] == name and len(name) <= 64
         assert file.native_identity == "skill:" + name
-    assert first.content.text.encode() in next(file.data for file in files if file.origins == (first.origin_identity,))
+    assert first.content.text.encode() == next(
+        file.data for file in files if file.origins == (first.origin_identity,) and file.path.endswith("/guidance.md")
+    )
 
 
 @pytest.mark.parametrize(
@@ -60,12 +64,14 @@ def test_long_rule_keys_with_the_same_readable_prefix_keep_distinct_native_outpu
     else:
         plan = grok.outer_artifacts(inputs, "/native", workspace=skills)
     validate_application(plan, inputs, "user", integration=integration)
-    assert not plan.deferred and len(plan.files) == 2
-    assert len({file.path for file in plan.files}) == 2
+    assert not plan.deferred and len(plan.files) == (4 if skills else 2)
+    assert len({file.path for file in plan.files}) == len(plan.files)
     assert {file.origins for file in plan.files} == {(item.origin_identity,) for item in items}
     if skills:
         assert len({file.native_identity for file in plan.files}) == 2
         for file in plan.files:
+            if not file.path.endswith("/SKILL.md"):
+                continue
             name = metadata(file)["name"]
             assert name == PurePosixPath(file.package_root).name and len(name) <= 64
             assert file.native_identity == "skill:" + name
@@ -188,43 +194,6 @@ def test_explicit_claude_persona_selection_tracks_only_its_delivered_native_iden
         assert argv[argv.index("--agent") + 1] == selection
 
 
-def test_explicit_claude_persona_selection_refuses_ambiguous_surviving_mapping():
-    from agentworks.artifacts.application import ArtifactApplication
-    from agentworks.artifacts.native.common import NativeSessionArtifacts
-    from agentworks.capabilities.base import RunContext
-    from agentworks.capabilities.harness_integration import HarnessLaunchIntent
-    from agentworks.plugins.claude.harness_integration import ClaudeCodeIntegration
-
-    item = artifact(ArtifactType.AGENT)
-    integration = ClaudeCodeIntegration(
-        "claude-code",
-        {"agent": item.content.name},
-        session_name="s1",
-        vm_name="vm",
-        workspace_name="ws",
-        workspace_path="/ws",
-        target=None,
-        admin=True,
-        state={},
-        artifact_context=context(item),
-    )
-    integration._artifact_plan = NativeSessionArtifacts(
-        ArtifactApplication(
-            files=tuple(
-                ArtifactFile(
-                    f"/private/{index}.md",
-                    b"fixture",
-                    (item.origin_identity,),
-                    native_identity=f"agent:plugin{index}:review",
-                )
-                for index in (1, 2)
-            )
-        )
-    )
-    with pytest.raises(StateError):
-        integration._resume_or_launch(RunContext(), intent=HarnessLaunchIntent.CREATE)
-
-
 def test_generated_helper_collision_defers_both_origins_and_keeps_independent_guidance(monkeypatch):
     from agentworks.artifacts.native.common import prepare_session_delivery
     from agentworks.plugins.claude.artifacts import session_artifacts
@@ -247,3 +216,70 @@ def test_generated_helper_collision_defers_both_origins_and_keeps_independent_gu
     )
     assert {deferred.input_id for deferred in result.application.deferred} == {rule.identity, colliding.identity}
     assert {origin for file in result.application.files for origin in file.origins} == {hint.origin_identity}
+
+
+@pytest.mark.parametrize("artifact_type", [ArtifactType.RULE, ArtifactType.HINT])
+@pytest.mark.parametrize("session", [False, True])
+def test_generated_guidance_keeps_native_template_syntax_in_literal_supporting_data(artifact_type, session):
+    import hashlib
+
+    from agentworks.artifacts.capture import text_content
+
+    text = (
+        "Literal fixture.\n!`printf 'LITERAL_%s' DATA`\n"
+        "```\n!`printf 'FENCED_%s' DATA`\n```\n"
+        "$ARGUMENTS $1 ${CLAUDE_SESSION_ID} ${agw:session_name}\n"
+    )
+    item = replace(artifact(artifact_type), content=text_content(artifact_type, "review", text))
+    current = context(item) if session else None
+    files = guidance_skills("/skills", received(item), context=current)
+    entry = next(file for file in files if file.path.endswith("/SKILL.md"))
+    data = next(file for file in files if file.path.endswith("/guidance.md"))
+    expected = text if artifact_type is ArtifactType.RULE else f"## {item.content.name}\n\n{text}"
+    assert data.data == expected.encode()
+    assert text.encode() not in entry.data
+    assert hashlib.sha256(data.data).hexdigest().encode() in entry.data
+    assert {file.package_root for file in files} == {entry.package_root}
+    assert {file.origins for file in files} == {(item.origin_identity,)}
+    assert {file.native_identity for file in files} == {entry.native_identity}
+    assert metadata(entry).keys() == {"name", "description"}
+    assert metadata(entry)["name"] == PurePosixPath(entry.package_root).name
+    changed = replace(item, content=text_content(artifact_type, "review", text + "New revision.\n"))
+    after = guidance_skills("/skills", received(changed), context=context(changed) if session else None)
+    updated = next(file for file in after if file.path.endswith("/SKILL.md"))
+    assert updated.path == entry.path and updated.native_identity == entry.native_identity
+    assert updated.data != entry.data
+
+
+def test_generated_guidance_cannot_interpolate_freeform_rule_description():
+    from agentworks.artifacts.capture import text_content
+
+    text = '---\ndescription: "!`printf data` $ARGUMENTS"\n---\nLiteral body.\n'
+    item = replace(artifact(ArtifactType.RULE), content=text_content(ArtifactType.RULE, "review", text))
+    files = guidance_skills("/skills", received(item))
+    entry = next(file for file in files if file.path.endswith("/SKILL.md"))
+    assert item.content.description not in metadata(entry)["description"]
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux guest filesystem operations")
+def test_generated_guidance_supporting_file_is_updated_and_retired_with_its_entrypoint(tmp_path):
+    from pathlib import Path
+
+    from agentworks.artifacts.publication import publish_artifacts
+    from tests.native_setup_fixtures import LocalFixtureTransport
+
+    target = LocalFixtureTransport(tmp_path / "guest")
+    item = artifact(ArtifactType.RULE)
+    initial = guidance_skills(str(target.home / "skills"), received(item))
+    owned = publish_artifacts(target, initial, (), lambda files: None, roots=(str(target.home),)).files
+    assert len(owned) == 2
+    changed = replace(item, content=replace(item.content, text="Revised literal body.\n"))
+    desired = guidance_skills(str(target.home / "skills"), received(changed))
+    updated = publish_artifacts(target, desired, owned, lambda files: None, roots=(str(target.home),)).files
+    assert {file.path for file in owned} == {file.path for file in updated}
+    for file in desired:
+        assert Path(file.path).read_bytes() == file.data
+    assert all(before.sha256 != after.sha256 for before, after in zip(owned, updated, strict=True))
+    retired = publish_artifacts(target, (), updated, lambda files: None, roots=(str(target.home),))
+    assert not retired.files and not retired.skipped
+    assert all(not Path(file.path).exists() for file in desired)

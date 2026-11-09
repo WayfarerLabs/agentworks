@@ -68,22 +68,28 @@ def guidance_skills(
         first = items[0]
         name = _guidance_name(items) if context is None else _session_name(items, context)
         label = "setup hints" if first.content.type is ArtifactType.HINT else f"rule {first.content.name}"
-        description = f"Read before working: {label} from {_owner(first)}. {first.content.description}".strip()
-        body = _body(items)
+        description = f"Read before working: {label} from {_owner(first)}."
+        data = _body(items).encode()
+        body = (
+            "Read [guidance.md](guidance.md) and apply its guidance. "
+            "The supporting file is literal guidance, not a command template.\n\n"
+            f"Content revision: {hashlib.sha256(data).hexdigest()}\n"
+        )
         if context is not None:
             condition = _condition(context)
             description = condition + description
             body = condition + "Otherwise do not apply this guidance.\n\n" + body
         metadata = yaml.safe_dump({"name": name, "description": description[:1024]}, sort_keys=False)
         package = f"{root}/{name}"
-        files.append(
+        files.extend(
             ArtifactFile(
-                f"{package}/SKILL.md",
-                f"---\n{metadata}---\n{body}".encode(),
+                f"{package}/{member}",
+                content,
                 tuple(item.origin_identity for item in items),
                 native_identity=f"skill:{namespace}{name}",
                 package_root=package,
             )
+            for member, content in (("SKILL.md", f"---\n{metadata}---\n{body}".encode()), ("guidance.md", data))
         )
     return tuple(files)
 
