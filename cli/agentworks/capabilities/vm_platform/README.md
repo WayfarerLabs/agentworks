@@ -240,8 +240,9 @@ the route has closed, the base also calls `close_provisioning_access` (below). E
 it privately, as an abstract member of that base: `_transient_route(vm, ctx)`, a context manager
 that opens this call's own SSH allow scoped to the operator's egress prefixes (widened by
 `ctx.config.operator.ssh_allow_cidrs`) and removes exactly it in a `finally`, under
-`interrupts_deferred`, so an interrupt that lands during the removal waits for it. When the VM never
-answers, `PublicSSH.wait_until_answering` warns `public_ssh.PROBE_FAILURE_HINT`, the
+`interrupts_deferred`, so an interrupt that lands during the removal waits for it; Azure and GCP
+bound that wait, warning that the rule may remain when the provider has not answered in time. When
+the VM never answers, `PublicSSH.wait_until_answering` warns `public_ssh.PROBE_FAILURE_HINT`, the
 `ssh_allow_cidrs` advice, unless the address refused the last probe's connection: the allow let it
 through, and the `ChannelUnreachable` it raises names a restart for an SSH server that is not
 running. Azure also heals a missing public IP and converges the NSG onto the baseline-deny model on

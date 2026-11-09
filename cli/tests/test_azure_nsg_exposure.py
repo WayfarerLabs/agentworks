@@ -317,6 +317,29 @@ class TestCloseProvisioningAccessHooks:
         assert captured_output.info == []
         assert captured_output.warnings == []
 
+    def test_a_close_whose_removal_does_not_finish_in_time_warns_instead_of_waiting(
+        self, monkeypatch: pytest.MonkeyPatch, captured_output: Any
+    ) -> None:
+        """The removal runs with interrupts deferred, so an unbounded wait on a hung operation made Ctrl-C useless."""
+        network = _install_fakes(monkeypatch).network
+        waits: list[float | None] = []
+
+        class _HungPoller(_Poller):
+            def result(self, timeout: float | None = None) -> object:
+                waits.append(timeout)
+                return super().result(timeout)
+
+        monkeypatch.setattr(network.security_rules, "begin_delete", lambda *_args: _HungPoller(None, finishes=False))
+        vm: VMRow = _fake_vm()  # type: ignore[assignment]
+
+        _platform().close_provisioning_access(vm, RunContext())  # no raise
+
+        assert len(waits) == 1
+        assert waits[0] is not None
+        assert captured_output.info == []  # not reported closed
+        (warning,) = captured_output.warnings
+        assert BOOTSTRAP_ALLOW_RULE_NAME in warning
+
     def test_a_close_that_cannot_build_its_client_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The caller warns with what it raises, so the rule left open is named there, not lost."""
         _install_fakes(monkeypatch)
@@ -466,7 +489,7 @@ class TestTransientRoute:
         real_create = rules.begin_create_or_update
 
         class _ExplodingPoller(_Poller):
-            def result(self) -> object:
+            def result(self, timeout: float | None = None) -> object:
                 raise RuntimeError("client-side poll failure")
 
         def _create(rg: str, nsg: str, rule_name: str, rule: object) -> _Poller:
@@ -498,7 +521,7 @@ class TestTransientRoute:
         real_create = rules.begin_create_or_update
 
         class _InterruptedPoller(_Poller):
-            def result(self) -> object:
+            def result(self, timeout: float | None = None) -> object:
                 raise KeyboardInterrupt
 
         def _create(rg: str, nsg: str, rule_name: str, rule: object) -> _Poller:
@@ -530,7 +553,7 @@ class TestTransientRoute:
         real_create = rules.begin_create_or_update
 
         class _ExplodingPoller(_Poller):
-            def result(self) -> object:
+            def result(self, timeout: float | None = None) -> object:
                 raise RuntimeError("client-side poll failure")
 
         def _create(rg: str, nsg: str, rule_name: str, rule: object) -> _Poller:

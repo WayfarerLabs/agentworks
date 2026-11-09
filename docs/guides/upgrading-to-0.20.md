@@ -288,10 +288,12 @@ before they resolve the auth key.
   `vm rekey`, the logout at `vm delete`) or a `vm shell --platform` session removes its own allow.
   Once a signal has started that cleanup, Ctrl-C included, a `SIGTERM`, `SIGHUP` or Ctrl-Break is
   ignored, so a closed terminal cannot cut the removal short; a second Ctrl-C still abandons the
-  cleanup, as its message says. Closing the console window on Windows may start that cleanup, but
-  Windows ends the process within seconds, so it cannot be relied on to finish: end the command with
-  Ctrl-C or Ctrl-Break instead, and delete a rule a closed window left behind from the VM's firewall
-  in the provider's console.
+  cleanup, as its message says, though one that lands while a firewall rule's removal is in flight
+  waits for that removal to finish first (Azure and GCP bound that wait, then warn that the rule may
+  remain). Closing the console window on Windows may start that cleanup, but Windows ends the
+  process within seconds, so it cannot be relied on to finish: end the command with Ctrl-C or
+  Ctrl-Break instead, and delete a rule a closed window left behind from the VM's firewall in the
+  provider's console.
 - **Output nobody reads no longer fails a command.** When the reader of `agw`'s output has gone (a
   pipe into `head` that has exited, `2>&1 | tee create.log` in a closed window, or the closed
   terminal itself), the rest of that output is dropped and the command carries on to the end, a

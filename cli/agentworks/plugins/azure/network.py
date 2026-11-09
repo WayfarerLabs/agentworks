@@ -115,6 +115,11 @@ ALLOW_RULE_DESCRIPTION_MARKER = "agentworks transient SSH allow"
 # the next free slot.
 _POKE_ALLOCATION_ATTEMPTS = 5
 
+# How long a rule removal waits for Azure. It runs with interrupts deferred,
+# so this bound is also how long a Ctrl-C can wait; GCP bounds its firewall
+# operations the same way.
+_RULE_REMOVAL_TIMEOUT_SECONDS = 300.0
+
 # The old scheme's standing world-open SSH allow, deleted on
 # convergence (see converge_nsg).
 LEGACY_SSH_RULE_NAME = "SSH"
@@ -391,20 +396,32 @@ def remove_ssh_allow(
     the platform instance just to sharpen a warning string is not worth
     the coupling; the rule NAME, by contrast, is always known (fixed for
     bootstrap, returned by the poke), so it is always named.
+
+    The removal waits at most ``_RULE_REMOVAL_TIMEOUT_SECONDS`` for Azure,
+    since its callers defer interrupts around it; an operation still running
+    then is an outcome nobody saw, so it warns that the rule may remain.
     """
     from azure.core.exceptions import ResourceNotFoundError
 
+    scope = f"source(s) {', '.join(prefixes)}" if prefixes else "the rule's scoped source addresses"
     try:
-        network.security_rules.begin_delete(rg, f"{name}-nsg", rule_name).result()
+        poller = network.security_rules.begin_delete(rg, f"{name}-nsg", rule_name)
+        poller.result(timeout=_RULE_REMOVAL_TIMEOUT_SECONDS)
     except ResourceNotFoundError:
         return
     except Exception as exc:
         err = wrap_azure_error(exc)
-        scope = f"source(s) {', '.join(prefixes)}" if prefixes else "the rule's scoped source addresses"
         output.warn(
             f"could not remove the '{rule_name}' rule on NSG "
             f"'{name}-nsg': {err.summary}. The VM's SSH port stays open to "
             f"{scope}; delete the rule manually to restore zero inbound exposure."
+        )
+        return
+    if not poller.done():
+        output.warn(
+            f"Azure did not confirm the removal of the '{rule_name}' rule on NSG '{name}-nsg' within "
+            f"{_RULE_REMOVAL_TIMEOUT_SECONDS:.0f}s, so the VM's SSH port may remain open to {scope}; check "
+            "the rule and delete it manually if it is still there."
         )
         return
     output.info(f"Closed SSH route (removed allow rule '{rule_name}')")
