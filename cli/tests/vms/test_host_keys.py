@@ -69,12 +69,10 @@ def _line(patterns: str, key: HostKey, *, marker: str = "") -> str:
 @pytest.fixture
 def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A home whose ``~/.ssh`` exists, so the default source is findable."""
-    from tests.conftest import windows_home_env
+    from tests.conftest import isolate_home
 
-    home = tmp_path / "home"
-    (home / ".ssh").mkdir(parents=True)
-    for key, value in windows_home_env(home).items():
-        monkeypatch.setenv(key, value)
+    home = isolate_home(monkeypatch, tmp_path / "home")
+    (home / ".ssh").mkdir()
     return home
 
 

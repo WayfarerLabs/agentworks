@@ -67,6 +67,8 @@ class FakeProxmoxAPI:
         self.delete_error: BaseException | None = None
         self.stop_task_error: BaseException | None = None
         self.status_errors: list[BaseException | None] = []
+        # The timeout each identity read (status and VMID-in-use) was given, in call order.
+        self.identity_timeouts: list[float | None] = []
         self.wait_errors: dict[str, list[BaseException]] = {}
         # The VM behind QGA, the root channel: bootstrap, join and address read.
         self.guest = FakeGuest()
@@ -89,6 +91,7 @@ class FakeProxmoxAPI:
         return NEWID
 
     def vmid_in_use(self, vmid: int, *, timeout: float | None = None) -> bool:
+        self.identity_timeouts.append(timeout)
         if self.in_use_error is not None:
             raise self.in_use_error
         self.calls.append(("vmid_in_use", vmid))
@@ -138,6 +141,7 @@ class FakeProxmoxAPI:
         return "UPID:pve1:delete"
 
     def vm_status(self, node: str, vmid: int, *, timeout: float | None = None) -> dict[str, Any]:
+        self.identity_timeouts.append(timeout)
         if self.status_errors:
             err = self.status_errors.pop(0)
             if err is not None:

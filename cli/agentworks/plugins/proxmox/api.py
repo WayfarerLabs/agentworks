@@ -20,6 +20,17 @@ from agentworks.errors import ProvisioningError
 ERROR_BODY_LIMIT_BYTES = 4096
 """How much of an error response's body is read: enough for Proxmox's JSON errors, and it bounds every message."""
 
+REQUEST_TIMEOUT_SECONDS = 30.0
+"""The socket timeout of a request whose caller passes none, so an API that stops answering fails the call.
+
+It bounds the connection and each wait for the answer, as ssh's
+``ConnectTimeout`` (``ssh_process.CONNECT_TIMEOUT_SECONDS``) bounds a host
+connection. The calls that wait on long work (clone, start, stop, delete)
+return a task UPID at once and ``wait_for_task`` polls it, so no single
+request needs longer. Callers with a budget of their own pass it instead:
+the status read's 10 s and the guest agent's remaining deadline.
+"""
+
 
 def _error_body(error: urllib.error.HTTPError) -> str:
     """An error response's body as text, or what of it could be read: callers branch on the HTTP code."""
@@ -165,13 +176,15 @@ class ProxmoxAPI:
         data: dict[str, Any] | None = None,
         *,
         json_body: bool = False,
-        timeout: float | None = None,
+        timeout: float = REQUEST_TIMEOUT_SECONDS,
     ) -> Any:
         """Send an API request and return the parsed JSON ``data`` field.
 
         Args:
             json_body: If True, send data as JSON (required for guest agent
                        endpoints). Otherwise use form-urlencoded.
+            timeout: The socket timeout in seconds, for the connection and
+                     for each read of the answer.
         """
         url = f"{self._base}{path}"
 
@@ -190,12 +203,7 @@ class ProxmoxAPI:
             req.add_header("Content-Type", content_type)
 
         try:
-            response = (
-                urllib.request.urlopen(req, context=self._ssl_ctx)
-                if timeout is None
-                else urllib.request.urlopen(req, context=self._ssl_ctx, timeout=timeout)
-            )
-            with response as resp:
+            with urllib.request.urlopen(req, context=self._ssl_ctx, timeout=timeout) as resp:
                 resp_body = resp.read().decode()
         except urllib.error.HTTPError as e:
             error_body = _error_body(e)
@@ -223,7 +231,7 @@ class ProxmoxAPI:
         result = self._request("GET", "/cluster/nextid")
         return int(result)
 
-    def vmid_in_use(self, vmid: int, *, timeout: float | None = None) -> bool:
+    def vmid_in_use(self, vmid: int, *, timeout: float = REQUEST_TIMEOUT_SECONDS) -> bool:
         """Whether any guest in the cluster holds ``vmid``, asked of ``/cluster/nextid``.
 
         Any valid token may ask, whatever its ACLs, so it also sees guests the
@@ -302,7 +310,7 @@ class ProxmoxAPI:
         result = self._request("DELETE", f"/nodes/{node}/qemu/{vmid}")
         return str(result)
 
-    def vm_status(self, node: str, vmid: int, *, timeout: float | None = None) -> dict[str, Any]:
+    def vm_status(self, node: str, vmid: int, *, timeout: float = REQUEST_TIMEOUT_SECONDS) -> dict[str, Any]:
         """Get current VM status."""
         path = f"/nodes/{node}/qemu/{vmid}/status/current"
         result = self._request("GET", path, timeout=timeout)
@@ -342,7 +350,7 @@ class ProxmoxAPI:
 
     # -- Guest agent -----------------------------------------------------------
 
-    def guest_agent_ping(self, node: str, vmid: int, *, timeout: float | None = None) -> None:
+    def guest_agent_ping(self, node: str, vmid: int, *, timeout: float = REQUEST_TIMEOUT_SECONDS) -> None:
         """Ask the VM's guest agent to answer; raises ``ProxmoxAPIError`` while it does not."""
         self._request("POST", f"/nodes/{node}/qemu/{vmid}/agent/ping", timeout=timeout)
 
@@ -353,7 +361,7 @@ class ProxmoxAPI:
         *,
         command: list[str],
         input_data: str | None = None,
-        timeout: float | None = None,
+        timeout: float = REQUEST_TIMEOUT_SECONDS,
     ) -> int:
         """Dispatch one QGA command and return its provider PID."""
         payload: dict[str, Any] = {"command": command}
@@ -376,7 +384,7 @@ class ProxmoxAPI:
         vmid: int,
         *,
         pid: int,
-        timeout: float | None = None,
+        timeout: float = REQUEST_TIMEOUT_SECONDS,
     ) -> dict[str, Any]:
         """Read one QGA command's current status."""
         result = self._request(

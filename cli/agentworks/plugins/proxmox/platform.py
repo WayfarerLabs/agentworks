@@ -29,7 +29,7 @@ from agentworks.debian import DebianRelease
 from agentworks.errors import ConnectivityError, ProvisioningError, StateError
 from agentworks.execution import root_script
 from agentworks.plugins.proxmox import guest_agent
-from agentworks.plugins.proxmox.api import ProxmoxAPI, ProxmoxAPIError
+from agentworks.plugins.proxmox.api import REQUEST_TIMEOUT_SECONDS, ProxmoxAPI, ProxmoxAPIError
 from agentworks.plugins.proxmox.identity import Gone, find_guest
 from agentworks.plugins.proxmox.teardown import (
     remove_guest,
@@ -462,7 +462,9 @@ class ProxmoxPlatform(VMPlatform):
             return False
         return any(entry.get("name") == backend_name for entry in existing)
 
-    def _find_guest(self, vm: VMRow, ctx: RunContext, *, timeout: float | None = None) -> dict[str, Any] | Gone:
+    def _find_guest(
+        self, vm: VMRow, ctx: RunContext, *, timeout: float = REQUEST_TIMEOUT_SECONDS
+    ) -> dict[str, Any] | Gone:
         """What holds the row's VMID: our guest's ``status/current`` answer, or :class:`Gone`."""
         return find_guest(
             self._api(ctx),
@@ -473,7 +475,7 @@ class ProxmoxPlatform(VMPlatform):
             timeout=timeout,
         )
 
-    def _guest(self, vm: VMRow, ctx: RunContext, *, timeout: float | None = None) -> dict[str, Any]:
+    def _guest(self, vm: VMRow, ctx: RunContext, *, timeout: float = REQUEST_TIMEOUT_SECONDS) -> dict[str, Any]:
         """Our guest's ``status/current`` answer; a guest that is gone refuses, naming ``agw vm delete``."""
         found = self._find_guest(vm, ctx, timeout=timeout)
         if isinstance(found, Gone):

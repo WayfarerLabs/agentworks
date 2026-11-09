@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from agentworks.errors import StateError
-from agentworks.plugins.proxmox.api import ProxmoxAPIError
+from agentworks.plugins.proxmox.api import REQUEST_TIMEOUT_SECONDS, ProxmoxAPIError
 
 if TYPE_CHECKING:
     from collections.abc import Collection
@@ -62,7 +62,7 @@ def find_guest(
     *,
     vm_name: str,
     names: Collection[str],
-    timeout: float | None = None,
+    timeout: float = REQUEST_TIMEOUT_SECONDS,
 ) -> dict[str, Any] | Gone:
     """Our guest's ``status/current`` answer, or :class:`Gone` when the guest is provably gone.
 

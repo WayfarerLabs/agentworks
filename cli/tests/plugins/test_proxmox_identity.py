@@ -7,6 +7,8 @@ lives with the other delete tests in ``test_proxmox_create_interrupt.py``.
 
 from __future__ import annotations
 
+import contextlib
+import math
 from functools import partial
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
@@ -87,6 +89,21 @@ def test_a_guest_the_token_cannot_audit_is_refused(fake: FakeProxmoxAPI, operati
 
     assert caught.value.hint
     assert not set(_ADDRESSING) & set(fake.ops())
+
+
+@pytest.mark.parametrize("operation", [*OPERATIONS, "delete"])
+def test_every_identity_read_has_a_finite_timeout(fake: FakeProxmoxAPI, operation: str) -> None:
+    """An API that stops answering fails the confirmation; it cannot hang the operation behind it."""
+    # Nothing holds the VMID, so the status read is refused and the VMID-in-use read follows it.
+    platform = _platform()
+    with contextlib.suppress(StateError):
+        if operation == "delete":
+            platform.delete(ROW, RunContext())
+        else:
+            OPERATIONS[operation](platform)
+
+    assert len(fake.identity_timeouts) == 2
+    assert all(timeout is not None and 0 < timeout < math.inf for timeout in fake.identity_timeouts)
 
 
 def test_our_guest_is_operated_on(fake: FakeProxmoxAPI) -> None:

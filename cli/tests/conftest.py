@@ -613,6 +613,18 @@ def windows_home_env(home: Path) -> dict[str, str]:
     return {"HOME": str(home), "USERPROFILE": str(home), "HOMEDRIVE": drive, "HOMEPATH": tail}
 
 
+def isolate_home(monkeypatch: pytest.MonkeyPatch, home: Path) -> Path:
+    """Create ``home`` and point ``Path.home()`` / ``expanduser`` at it for the rest of the test.
+
+    For a test that runs a command which writes under the operator's home
+    (the managed ``~/.ssh/config`` sync, say), so the write lands in the
+    test's tmp directory instead of the real home."""
+    home.mkdir(parents=True, exist_ok=True)
+    for name, value in windows_home_env(home).items():
+        monkeypatch.setenv(name, value)
+    return home
+
+
 def normalize_lf(data: bytes) -> bytes:
     """Normalize the platform newline to LF for a human-output byte compare.
 
