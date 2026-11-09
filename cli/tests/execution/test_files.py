@@ -31,6 +31,8 @@ from tests.vm_access_support import local_files as recorded_local_files
 
 DIGEST = hashlib.sha256(b"current").hexdigest()
 
+linux_only = pytest.mark.skipif(sys.platform != "linux", reason="the file program walks paths with Linux's O_PATH")
+
 
 def recording(*outcomes: Result | BaseException) -> tuple[Files, RecordingVMAccess]:
     access = RecordingVMAccess([], Admin())
@@ -156,6 +158,7 @@ def test_an_update_to_what_was_read_sends_nothing_and_reports_no_write() -> None
     assert access.requests() == []
 
 
+@linux_only
 def test_an_update_publishes_against_the_digest_of_what_was_read(tmp_path: Path) -> None:
     files = recorded_local_files()
     present, absent = tmp_path / "present", tmp_path / "absent" / "file"
@@ -167,6 +170,7 @@ def test_an_update_publishes_against_the_digest_of_what_was_read(tmp_path: Path)
     assert (present.read_bytes(), absent.read_bytes()) == (b"new", b"made")
 
 
+@linux_only
 def test_an_update_over_a_file_changed_since_the_read_conflicts_and_keeps_the_other_writers_bytes(
     tmp_path: Path,
 ) -> None:
