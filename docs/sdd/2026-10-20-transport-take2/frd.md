@@ -367,6 +367,18 @@ warning only), the operator chose the first:]
 > to lean towards ripping the bandaid now if it's at all related, though. It all has to work
 > together at the end of the day, right?
 
+### 2026-11-09
+
+[Asked what initialization should do when a shell rc file (or mise config) is a symbolic link, as in
+stow-style dotfiles, and its target does not already hold Agentworks' source line, with three
+options (write through a link only for an unelevated write by the file's own user to a regular file
+inside that user's home; refuse to write through any link and warn with the exact line to add,
+staying silent when the target already holds it, at the cost of the fragments' identity and `PATH`
+entries missing from login shells and a partial reinit until the operator adds the line; or keep
+following links wherever they point), the operator chose:]
+
+> Refuse and warn
+
 ### Rulings carried forward
 
 These predecessor rulings still hold, quoted from the transport-improv FRD.
