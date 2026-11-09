@@ -693,10 +693,13 @@ Three rules make a per-user file legitimate under the session-scoped effects rul
 
 - **Rewrite it identically on every launch.** If two sessions of the same user would write the same
   bytes, neither can change what the other's file does, and an Agentworks upgrade cannot leave a
-  stale copy of the same file behind. Write it atomically (stage, `chmod`, `mv`) so the tool never
-  sees a partial one. The corollary of the versioning rule below: an OBSOLETE version (a `-v1` after
-  the integration moved to `-v2`) is deliberately left alone, since a running session may still hold
-  its path, and nothing prunes it today.
+  stale copy of the same file behind. Write it atomically so the tool never sees a partial one: from
+  a stage that holds an access, with `Files.write_if` (`access.files()`), which writes a sibling
+  file with the mode and renames it into place; from inside the launch command, as `codex`'s
+  recorder is, by staging, `chmod`ing and `mv`ing it in the same way. The corollary of the
+  versioning rule below: an OBSOLETE version (a `-v1` after the integration moved to `-v2`) is
+  deliberately left alone, since a running session may still hold its path, and nothing prunes it
+  today.
 - **Version anything the tool holds a path to.** `codex`'s recorder is `record-thread-v1.sh`: a
   future recorder taking different arguments becomes `-v2`, so an upgrade mid-session cannot reshape
   the contract of a script a running tool is about to invoke.

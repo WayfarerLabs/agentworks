@@ -46,7 +46,7 @@ lock. `FromFile`, `ToFile` and the `observation` option stay slice 7.
 | `artifacts/publication.py`                                        | Gains `ROOT_FILE_DIRECTORIES` and the root path rule from `native_files.py:193`, `:229-238`                                                                                           |
 | `native_files.py`, `harness_setup/runner.py`                      | Deleted, after their incident rows are re-proved (R10)                                                                                                                                |
 | `cli/tests/execution/test_file_program.py`, `test_files.py` (new) | The program against a real local filesystem, and the API over the L lane                                                                                                              |
-| `cli/tests/vm_access_support.py`                                  | `RecordingVMAccess` handles `files`; a local access over the L lane for caller tests                                                                                                  |
+| `cli/tests/vm_access_support.py`                                  | `RecordingVMAccess` handles `files`; `local_files` runs the real program on this machine for caller tests                                                                             |
 
 `file_program.py` is a separate payload from agw-launch, as D6 requires: `files.program_source()`
 reads it from the installed package as `envelope.launcher_source()` reads `agw_launch.py`, and only
@@ -231,9 +231,12 @@ a parent directory, not a link, or change the destination, between the walk and 
 create the lock file with a mode others cannot open, put something other than a file there, or hold
 the lock to stall them (D6); a hard link it owns into a destination directory is followed by `read`
 (Debian's `fs.protected_hardlinks` limits it to files it can already write); and an elevated
-operation walks directories an agent may be able to write. The elevated allowlist
-(`ROOT_FILE_DIRECTORIES`) is caller policy in `artifacts/publication.py`, not enforcement in the
-transport (FRD scope: no core file-mutation allowlist).
+operation walks directories an agent may be able to write. So the program checks no ownership of the
+existing directories above an elevated write, and `preserve_metadata` copies a pre-placed file's
+set-id bits along with its mode: each matters only to an account that can write those directories.
+An agent account can also take the lock and hold it, stalling every other identity's writes. The
+elevated allowlist (`ROOT_FILE_DIRECTORIES`) is caller policy in `artifacts/publication.py`, not
+enforcement in the transport (FRD scope: no core file-mutation allowlist).
 
 ### The lock
 
@@ -450,6 +453,11 @@ raise FileConflict(...)
   the operator's own; native settings and Codex's override file keep the default.
 - **Writes** are bounded by memory on both ends (D3).
 - **`stat`** transfers no content, which is why publication uses it.
+- **Digests are logged.** `write_if`'s `expected` and `sha256` and `remove_if`'s `expected` are
+  arguments, which the operation log records. Batch B's callers write artifacts, whose digests
+  disclose nothing; batch C must not route a secret-bearing document (a settings file holding a
+  credential, say) through these operations without revisiting this, since a digest of a short or
+  guessable secret confirms it.
 
 ## Capability delivery: `admin_access()` and `agent_access()`
 
