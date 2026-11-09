@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import signal
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -660,30 +659,6 @@ def test_transient_route_open_failure_never_yields_or_mutates_stable_deny(
     assert set(cache.firewalls.resources) == {result.platform_metadata["deny_rule"]}
     first, second = cache.firewalls.insert_requests[-2:]
     assert first.request_id == second.request_id
-
-
-def test_an_interrupt_during_the_routes_delete_waits_for_it(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Ctrl-C the moment the script ends: the rule's delete still reaches Compute Engine, then the interrupt raises."""
-    platform, cache = gce_platform(monkeypatch, gce_guest())
-    result = platform.create(gce_request(), gce_ctx())
-    vm = _vm(result.platform_metadata)
-    platform.close_provisioning_access(vm, gce_ctx())
-    firewalls = cache.firewalls
-    delete = firewalls.delete
-
-    armed = False
-
-    def interrupted_delete(**kwargs: Any) -> Any:
-        if armed:
-            signal.raise_signal(signal.SIGINT)
-        return delete(**kwargs)
-
-    monkeypatch.setattr(firewalls, "delete", interrupted_delete)
-
-    with pytest.raises(KeyboardInterrupt), platform._transient_route(vm, gce_ctx()):
-        armed = True
-
-    assert set(firewalls.resources) == {result.platform_metadata["deny_rule"]}
 
 
 def test_transient_route_close_failure_warns_and_retains_only_its_exact_rule(

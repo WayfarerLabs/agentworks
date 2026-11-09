@@ -7,7 +7,6 @@ interrupt), status mapping, and strict idempotent delete.
 from __future__ import annotations
 
 import gzip
-import signal
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
@@ -770,27 +769,6 @@ class TestTransientRoute:
         with pytest.raises(RuntimeError), platform._transient_route(_vm(), RunContext(config=_config())):
             raise RuntimeError("boom")
         assert _ec2(platform).ingress["sg-123"] == {}
-
-    def test_an_interrupt_during_the_routes_revoke_waits_for_it(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Ctrl-C the moment the script ends: the revoke still reaches EC2, then the interrupt raises."""
-        install_fakes(monkeypatch)
-        platform = _platform()
-        ec2 = _ec2(platform)
-        revoke = ec2.revoke_security_group_ingress
-
-        armed = False
-
-        def interrupted_revoke(**kwargs: Any) -> Any:
-            if armed:
-                signal.raise_signal(signal.SIGINT)
-            return revoke(**kwargs)
-
-        monkeypatch.setattr(ec2, "revoke_security_group_ingress", interrupted_revoke)
-
-        with pytest.raises(KeyboardInterrupt), platform._transient_route(_vm(), RunContext(config=_config())):
-            armed = True
-
-        assert ec2.ingress["sg-123"] == {}
 
     def test_partial_poke_failure_is_still_swept(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A poke that fails on the second prefix still has the first prefix

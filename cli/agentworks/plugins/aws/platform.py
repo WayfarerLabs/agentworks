@@ -46,7 +46,6 @@ from agentworks.errors import (
     StateError,
     TokenRejectedError,
 )
-from agentworks.interrupts import interrupts_deferred
 from agentworks.plugins.aws.auth import _build_access_key_session, _build_ambient_session
 from agentworks.plugins.aws.config import (
     AwsAmbientAuth,
@@ -751,8 +750,7 @@ class EC2Platform(PublicAddressPlatform):
         try:
             yield
         finally:
-            with interrupts_deferred():
-                remove_ssh_allow(ec2, security_group_id, prefixes)
+            remove_ssh_allow(ec2, security_group_id, prefixes)
 
     # -- Helpers ---------------------------------------------------------------
 

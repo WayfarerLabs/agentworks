@@ -17,7 +17,6 @@ from agentworks.capabilities.vm_platform.public_ssh import PublicAddressPlatform
 from agentworks.capabilities.vm_platform.tailscale_join import complete_cloud_bootstrap
 from agentworks.db import VMStatus
 from agentworks.errors import NotFoundError, ProvisioningError, StateError
-from agentworks.interrupts import interrupts_deferred
 from agentworks.plugins.azure.auth import (
     _build_ambient_credential,
     _build_service_principal_credential,
@@ -848,8 +847,7 @@ class AzureVMPlatform(PublicAddressPlatform):
             yield
         finally:
             if rule_name is not None:
-                with interrupts_deferred():
-                    self._remove_ssh_allow(vm, ctx, rule_name, prefixes)
+                self._remove_ssh_allow(vm, ctx, rule_name, prefixes)
 
     def status(self, vm: VMRow, ctx: RunContext) -> VMStatus:
         if not vm.platform_metadata.get("resource_id"):
