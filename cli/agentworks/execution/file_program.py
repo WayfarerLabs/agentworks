@@ -107,11 +107,12 @@ class _Walk:
                 if create_mode is None:
                     self.complete = False
                     return
-                child = self._make(component, create_mode, gid)
+                child = self.open_or_make(component, create_mode, gid)
             self.opened.append((self.parent, component))
             self.parent = child
 
-    def _make(self, component: str, mode: int, gid: int) -> int:
+    def open_or_make(self, component: str, mode: int, gid: int) -> int:
+        """The directory ``component`` of ``parent``, made with ``mode`` (and group ``gid``) when absent."""
         try:
             os.mkdir(component, 0o700, dir_fd=self.parent)
         except FileExistsError:
@@ -353,6 +354,15 @@ def _remove_if(params: Params) -> int:
         walk.close()
 
 
+def _ensure_directory(params: Params) -> int:
+    walk = _Walk(params["path"], create_mode=params["mode"])
+    try:
+        os.close(walk.open_or_make(walk.name, params["mode"], -1))
+        return 0
+    finally:
+        walk.close()
+
+
 def _prune_empty_parents(params: Params) -> int:
     root_depth = len(params["root"].split("/")[1:])
     walk = _Walk(params["path"])
@@ -397,6 +407,7 @@ _READERS = {"read": _read, "stat": _stat}
 _MUTATORS = {
     "write_if": _write_if,
     "remove_if": _remove_if,
+    "ensure_directory": _ensure_directory,
     "prune_empty_parents": _prune_empty_parents,
 }
 

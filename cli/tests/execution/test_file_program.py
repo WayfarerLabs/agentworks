@@ -234,6 +234,32 @@ def test_content_that_did_not_arrive_as_sent_publishes_nothing(guest: Guest, dam
     assert os.listdir(guest.tree) == []
 
 
+# -- Directories -----------------------------------------------------------------------------
+
+
+def test_ensure_directory_creates_it_and_its_parents_with_the_mode_and_leaves_an_existing_one(guest: Guest) -> None:
+    existing = guest.tree / "existing"
+    existing.mkdir()
+    existing.chmod(0o755)
+
+    made = guest.run("ensure_directory", {"path": str(guest.tree / "a" / "b"), "mode": 0o710}, umask=0o077)
+    kept = guest.run("ensure_directory", {"path": str(existing), "mode": 0o700})
+
+    assert (made.returncode, kept.returncode) == (0, 0), (made.stderr, kept.stderr)
+    assert stat.S_IMODE((guest.tree / "a").stat().st_mode) == 0o710
+    assert stat.S_IMODE((guest.tree / "a" / "b").stat().st_mode) == 0o710
+    assert stat.S_IMODE(existing.stat().st_mode) == 0o755
+
+
+def test_ensure_directory_refuses_a_file_at_the_path(guest: Guest) -> None:
+    (guest.tree / "file").write_bytes(b"content")
+
+    result = guest.run("ensure_directory", {"path": str(guest.tree / "file"), "mode": 0o700})
+
+    assert result.returncode == file_program.EXIT_UNSUITABLE
+    assert (guest.tree / "file").read_bytes() == b"content"
+
+
 # -- Links, types and permissions ----------------------------------------------------------
 
 
@@ -254,6 +280,7 @@ def _all_operations(path: Path) -> list[tuple[str, dict, bytes]]:
         ("stat", {"path": str(path)}, b""),
         ("write_if", write, data),
         ("remove_if", {"path": str(path), "expected": digest(b"target")}, b""),
+        ("ensure_directory", {"path": str(path), "mode": 0o700}, b""),
         ("prune_empty_parents", {"path": str(path / "member"), "root": str(path)}, b""),
     ]
 

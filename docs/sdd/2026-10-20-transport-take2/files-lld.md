@@ -370,11 +370,11 @@ def stat(path: str, *, elevated: bool = False) -> PathState
 def write_if(path: str, data: bytes, *, expected: str | None, mode: int, parent_mode: int,
              group: str | None = None, preserve_metadata: bool = False,
              elevated: bool = False) -> None
-def update(path: str, transform: Callable[[bytes | None], bytes | None], *, mode: int,
-           parent_mode: int, group: str | None = None, preserve_metadata: bool = False,
-           limit: int = 1_048_576, elevated: bool = False) -> bool
+def update(path: str, transform: Callable[[bytes | None], bytes | None], *,
+           observed: bytes | None, mode: int, parent_mode: int,
+           group: str | None = None) -> bool
 def remove_if(path: str, *, expected: str, elevated: bool = False) -> None
-def ensure_directory(path: str, *, mode: int, elevated: bool = False) -> None
+def ensure_directory(path: str, *, mode: int) -> None
 def prune_empty_parents(path: str, *, root: str, elevated: bool = False) -> Pruned
 ```
 
@@ -417,11 +417,16 @@ and no caller branches on it; its test (`cli/tests/test_native_path_failures.py:
 
 ### `update`
 
-D6's read, transform on the workstation, conditional write, retry on conflict:
+D6's read, transform on the workstation, conditional write, retry on conflict. Its one caller,
+native settings, has already read the file to plan (`native.py`'s `_MappingPlan.build` and its
+inventory checks), so the caller passes what it read as `observed` and the first attempt reads
+nothing:
 
 ```python
-for _ in range(UPDATE_ATTEMPTS):  # 3
-    before = self.read(path, limit=limit, elevated=elevated)
+before = observed
+for attempt in range(UPDATE_ATTEMPTS):  # 3
+    if attempt:
+        before = self.read(path)
     after = transform(before)
     if after is None or after == before:
         return False
@@ -430,8 +435,11 @@ for _ in range(UPDATE_ATTEMPTS):  # 3
         return True
     except FileConflict:
         continue
-raise FileConflict(...)
+raise FileConflict(vm, "update", path)
 ```
+
+It takes no `limit`, `preserve_metadata` or `elevated`, and `ensure_directory` no `elevated`, since
+native settings, their only caller, needs none.
 
 - **`transform`** may run more than once, always on the current content. It returns the new bytes,
   or `None` to leave the file alone. An exception from it (a malformed existing document) propagates
