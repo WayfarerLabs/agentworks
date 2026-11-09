@@ -2,6 +2,11 @@
 
 ## Delivery reassessment, 2026-11-08
 
+The approved design is promoted into the FRD, HLA and native LLD. The private exploratory response
+is retained with the research evidence rather than published as a competing architecture document.
+Workspace modes are explicitly transferred to an additional PR owned by this effort lead, not a
+prerequisite for accepting this multi-session correction.
+
 - [x] Reconsider all four artifact types using the operator's distinction between delivery and
       voluntary cooperation. Map current native placement, lifecycle, private loaders,
       shared-document mutation and Git-ignore behavior; preserve the verified resume counterexamples
