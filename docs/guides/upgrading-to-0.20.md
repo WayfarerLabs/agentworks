@@ -303,6 +303,13 @@ before they resolve the auth key.
   process within seconds, so it cannot be relied on to finish: end the command with Ctrl-C or
   Ctrl-Break instead, and delete a rule a closed window left behind from the VM's firewall in the
   provider's console.
+- **A Lima VM's create-time bootstrap runs once.** Lima runs its provisioning on every boot, and a
+  Lima VM created before 0.20 runs Agentworks' bootstrap again at each start: it resets the admin's
+  `.bashrc` and `.zshrc` to the seed, which drops your edits and the lines `vm reinit` adds, puts
+  back the key it was created with if you replaced it, and upgrades packages. A Lima VM created by
+  0.20 runs it at create only. Recreate an older Lima VM to stop the reruns; until then,
+  `agw vm reinit NAME` after a start restores the lines it adds and removes a replaced key again,
+  but not your own edits.
 - **Output nobody reads no longer fails a command.** When the reader of `agw`'s output has gone (a
   pipe into `head` that has exited, `2>&1 | tee create.log` in a closed window, or the closed
   terminal itself), the rest of that output is dropped and the command carries on to the end, a

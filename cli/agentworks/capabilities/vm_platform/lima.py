@@ -29,6 +29,7 @@ from agentworks.capabilities.vm_platform.bootstrap_script import (
     REBOOT_SENTINEL_PATH,
     generate_bootstrap_script,
     parse_bootstrap_steps,
+    run_once_script,
 )
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
 from agentworks.capabilities.vm_platform.debian_release import (
@@ -68,12 +69,18 @@ _REMOTE_TEMPLATE_PREFIX = "agentworks-lima-template."
 _REMOTE_TEMPLATE_RANDOM_LENGTH = 10
 _STATUS_TIMEOUT_SECONDS = 10
 
+# Where the bootstrap's run-once gate keeps its marker and its copy of the
+# script: Lima runs every system provisioner on every boot, and the bootstrap
+# is create-time only.
+LIMA_BOOTSTRAP_MARKER = "/var/lib/agentworks/lima-bootstrap.complete"
+LIMA_BOOTSTRAP_PATH = "/var/lib/agentworks/lima-bootstrap.sh"
+
 # Lima template for Debian cloud VMs (values substituted at create time).
 # The provision block runs the non-secret bootstrap script (user, packages,
 # swap, SSH key, and Tailscale installation) as a system-level provisioner
-# during limactl start. Lima retains this block in its instance YAML, so the
-# Tailscale auth key is never in it: create joins afterwards through the VM's
-# root channel.
+# during limactl start, inside run_once_script so later boots skip it. Lima
+# retains this block in its instance YAML, so the Tailscale auth key is never
+# in it: create joins afterwards through the VM's root channel.
 _LIMA_IMAGE_BLOCKS: dict[DebianRelease, str] = {
     DebianRelease.TRIXIE: """\
   - location: https://cloud.debian.org/images/cloud/trixie/latest/debian-13-generic-amd64.qcow2
@@ -387,12 +394,16 @@ class LimaPlatform(VMPlatform):
         # render them through `limactl list --json`. The bootstrap holds no
         # secret; the Tailscale key reaches the guest only in the join below,
         # through the root channel.
-        provision_script = generate_bootstrap_script(
-            admin_username=request.admin_username,
-            ssh_public_key=request.ssh_public_key,
-            provisioning_packages=PROVISIONING_PACKAGES,
-            hostname=request.hostname,
-            swap=swap,
+        provision_script = run_once_script(
+            generate_bootstrap_script(
+                admin_username=request.admin_username,
+                ssh_public_key=request.ssh_public_key,
+                provisioning_packages=PROVISIONING_PACKAGES,
+                hostname=request.hostname,
+                swap=swap,
+            ),
+            marker=LIMA_BOOTSTRAP_MARKER,
+            script_path=LIMA_BOOTSTRAP_PATH,
         )
 
         # Indent the provision script for YAML embedding (6 spaces)

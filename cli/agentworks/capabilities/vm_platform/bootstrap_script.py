@@ -6,6 +6,12 @@ through :func:`run_bootstrap` over its root channel. The script uses
 structured markers in stdout so the platform can drive logging and console
 output.
 
+The script runs once per VM. A backend that runs its payload again on every
+boot (Lima's provisioners, GCE's ``startup-script``) carries it inside
+:func:`run_once_script`, so a later boot never rewrites what the operator or
+initialization changed since (the admin's shell rc files, a replaced key in
+``authorized_keys``, package configuration).
+
 Markers:
   ##STEP## <name>       - step boundary
   ##SUCCESS## <msg>     - step succeeded
@@ -106,8 +112,9 @@ echo "$VM_USER ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/$VM_USER"
 HOME_DIR="/home/$VM_USER"
 
 # -- Step 1b: Default shell rc seeds for admin's home --
-# One-time copy. Init / reinit also writes the same seeds to
-# /etc/skel so future ``useradd -m`` (i.e. new agents) inherit them
+# One-time copy: the script runs once per VM (run_once_script gates the
+# backends that rerun it on boot). Init / reinit also writes the same seeds
+# to /etc/skel so future ``useradd -m`` (i.e. new agents) inherit them
 # automatically. Operators who later install their own dotfiles win:
 # agentworks never writes shell rc files into a user's home again.
 echo "##STEP## Default shell rc seeds"
@@ -141,11 +148,11 @@ cat > {ssh_preserve_path} <<'CLOUDCFG'
 echo "##SUCCESS## SSH host key preservation configured"
 
 # -- Step 3: SSH public key --
-# This bootstrap runs as a Lima provision.system provisioner, which Lima
-# re-executes on every guest boot (not just create), so the key install must
-# be idempotent: append only when the exact line is not already present.
-# grep -qxF matches the whole line as a fixed string; 2>/dev/null and the ||
-# cover the first boot, where authorized_keys does not exist yet.
+# A first run that failed part way runs again from the top on the next boot
+# under run_once_script, so the key install is idempotent: append only when
+# the exact line is not already present. grep -qxF matches the whole line as
+# a fixed string; 2>/dev/null and the || cover the first run, where
+# authorized_keys does not exist yet.
 # The install is skipped when SSH_PUBLIC_KEY is empty: a platform that installs
 # the key out of band (EC2 via the cloud-init users block, to avoid embedding
 # the key literal a second time in its size-capped user-data) passes an empty
@@ -282,6 +289,41 @@ def generate_bootstrap_script(
         bashrc_content=BASHRC,
         zshrc_content=ZSHRC,
     )
+
+
+def run_once_script(bootstrap_script: str, *, marker: str, script_path: str) -> str:
+    """Wrap ``bootstrap_script`` for a backend that runs its payload on every boot, so it runs once.
+
+    The wrapper checks ``marker`` before any mutation and exits 0 when it is
+    there. Otherwise it writes the bootstrap to ``script_path``, runs it, and
+    moves the marker into place only once the bootstrap exits 0, so a failed
+    or interrupted first run leaves no marker and runs again on the next
+    boot. ``marker`` and ``script_path`` share one directory, which the
+    wrapper creates.
+    """
+    return f"""\
+#!/bin/bash
+set -euo pipefail
+
+MARKER={marker}
+if test -f "$MARKER"; then
+    exit 0
+fi
+
+install -d -m 0755 "$(dirname "$MARKER")"
+BOOTSTRAP={script_path}
+cat > "$BOOTSTRAP" <<'AGW_RUN_ONCE_EOF'
+{bootstrap_script.rstrip()}
+AGW_RUN_ONCE_EOF
+chmod 0700 "$BOOTSTRAP"
+"$BOOTSTRAP"
+
+MARKER_TMP=$(mktemp "$MARKER.tmp.XXXXXX")
+trap 'rm -f "${{MARKER_TMP:-}}"' EXIT
+chmod 0644 "$MARKER_TMP"
+mv -f "$MARKER_TMP" "$MARKER"
+MARKER_TMP=
+"""
 
 
 @dataclass

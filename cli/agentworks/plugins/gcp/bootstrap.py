@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from agentworks.capabilities.vm_platform.bootstrap_script import run_once_script
 from agentworks.errors import ConfigError
 
 GCE_BOOTSTRAP_MARKER = "/var/lib/agentworks/gce-bootstrap-v1.complete"
+GCE_BOOTSTRAP_PATH = "/var/lib/agentworks/gce-bootstrap-v1.sh"
 GCE_READINESS_COMMAND = f"until test -f {GCE_BOOTSTRAP_MARKER}; do sleep 2; done"
 GCE_READINESS_LABEL = "GCE startup script"
 GCE_STARTUP_SCRIPT_LIMIT_BYTES = 256 * 1024
@@ -13,35 +15,12 @@ GCE_STARTUP_SCRIPT_LIMIT_BYTES = 256 * 1024
 def build_startup_script(bootstrap_script: str, *, instance_name: str) -> str:
     """Wrap the shared bootstrap in a success-only durable run-once gate.
 
-    Compute Engine executes ``startup-script`` metadata on every boot. The
-    marker check therefore precedes every mutation, and the marker is moved
-    into place only after the complete shared bootstrap exits successfully.
-    A failed or interrupted first run leaves no success marker and may retry on
-    a later boot.
+    Compute Engine executes ``startup-script`` metadata on every boot, so the
+    bootstrap runs inside :func:`run_once_script`, whose marker is also what
+    :data:`GCE_READINESS_COMMAND` waits for. The result is refused when its
+    UTF-8 size exceeds the metadata limit.
     """
-    script = f"""\
-#!/bin/bash
-set -euo pipefail
-
-MARKER={GCE_BOOTSTRAP_MARKER}
-if test -f "$MARKER"; then
-    exit 0
-fi
-
-install -d -m 0755 "$(dirname "$MARKER")"
-BOOTSTRAP=/var/lib/agentworks/gce-bootstrap-v1.sh
-cat > "$BOOTSTRAP" <<'AGW_GCE_BOOTSTRAP_EOF'
-{bootstrap_script.rstrip()}
-AGW_GCE_BOOTSTRAP_EOF
-chmod 0700 "$BOOTSTRAP"
-"$BOOTSTRAP"
-
-MARKER_TMP=$(mktemp "$MARKER.tmp.XXXXXX")
-trap 'rm -f "${{MARKER_TMP:-}}"' EXIT
-chmod 0644 "$MARKER_TMP"
-mv -f "$MARKER_TMP" "$MARKER"
-MARKER_TMP=
-"""
+    script = run_once_script(bootstrap_script, marker=GCE_BOOTSTRAP_MARKER, script_path=GCE_BOOTSTRAP_PATH)
     encoded_size = len(script.encode("utf-8"))
     if encoded_size > GCE_STARTUP_SCRIPT_LIMIT_BYTES:
         raise ConfigError(

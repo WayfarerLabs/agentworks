@@ -389,6 +389,18 @@ caller judges the outcome by its own status. `generate_bootstrap_script` loses i
 `tailscale_auth_key` parameter and step 7 (`bootstrap_script.py:236-247`), so no generated script
 can hold the key: I10 holds by construction, and the staging files go.
 
+**The bootstrap runs once per VM.** Lima runs its system provisioners on every boot, so each
+`vm start` ran the bootstrap again: it reset the admin's `.bashrc` and `.zshrc` to the seed
+(dropping init's source lines and the operator's edits, against `skel.py`'s one-time policy),
+appended the create-time key that `vm recover` or `vm reinit` had replaced, and ran
+`apt-get dist-upgrade` with `--force-confnew`. GCE already wrapped the same payload in a durable
+success marker because its `startup-script` runs on every boot too. That wrapper moves into
+`bootstrap_script.run_once_script(script, *, marker, script_path)`, and Lima's provision step uses
+it with its own marker, `/var/lib/agentworks/lima-bootstrap.complete`; the payload itself is
+unchanged, and the platforms that run it once already (WSL2, Proxmox, cloud-init's per-instance
+`runcmd` on AWS and Azure) do not wrap it. A Lima VM created before this keeps its old provision
+step; the 0.20 upgrade guide says so.
+
 **The bootstrap's output against the 1 MiB capture.** Its package steps run `apt-get -qq`
 (`bootstrap_script.py:114-117`) and every other step prints one marker line. No create log exists
 under this account's `~/.config/agentworks/logs` (`ssh.py:89`), and other accounts' logs on this

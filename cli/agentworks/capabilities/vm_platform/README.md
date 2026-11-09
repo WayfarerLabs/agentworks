@@ -590,18 +590,20 @@ and the operator-facing command banners that the rest of the codebase calls "pha
   (admin user, packages, SSH key, swap, hostname, the Apple-vz SVE grub mask, Tailscale). Lima
   instance YAML, Azure `custom_data`, EC2 `UserData`, and GCE `Instance.metadata` retain
   credential-free forms of that payload; WSL2 and Proxmox run the same key-free script through
-  `run_as_root`. GCE's startup wrapper checks a durable success marker before any mutation and is
-  rejected when its exact UTF-8 value exceeds 256 KiB. After the payload installs Tailscale,
-  `create()` joins through its own `run_as_root` with `tailscale_join.join_tailscale` (the clouds
-  through `complete_cloud_bootstrap`, which first waits for the provider's bootstrap), the only
-  script that carries the key. The key travels inside that script on the channel's stdin and reaches
-  Tailscale through `--auth-key=file:/dev/stdin`, so it is in no argv on the workstation or the
-  guest and absent from provider-retained configuration. `create()` then reads the address with
-  `settle_tailnet_address`, which retries a failed read and, when the reads are exhausted, logs the
-  node out over the same channel and raises: core never enrolled its host key, so nothing could log
-  it out later. `create()` returns only after bootstrap succeeds, Tailscale joins and the address is
-  read, or it raises after rolling back partial backend resources. **This stage runs once, at
-  create.**
+  `run_as_root`. Lima runs its provisioners and GCE its `startup-script` on every boot, so both
+  carry the payload inside `run_once_script`, which checks a durable success marker before any
+  mutation and sets it only after the payload succeeds: a later boot changes nothing in the guest.
+  GCE's wrapper is rejected when its exact UTF-8 value exceeds 256 KiB. After the payload installs
+  Tailscale, `create()` joins through its own `run_as_root` with `tailscale_join.join_tailscale`
+  (the clouds through `complete_cloud_bootstrap`, which first waits for the provider's bootstrap),
+  the only script that carries the key. The key travels inside that script on the channel's stdin
+  and reaches Tailscale through `--auth-key=file:/dev/stdin`, so it is in no argv on the workstation
+  or the guest and absent from provider-retained configuration. `create()` then reads the address
+  with `settle_tailnet_address`, which retries a failed read and, when the reads are exhausted, logs
+  the node out over the same channel and raises: core never enrolled its host key, so nothing could
+  log it out later. `create()` returns only after bootstrap succeeds, Tailscale joins and the
+  address is read, or it raises after rolling back partial backend resources. **This stage runs
+  once, at create.**
 - **Phase A** (`agentworks.vms.initializer.phase_a`) receives the returned `tailnet_address`. It
   validates and records the address, makes the first contact over SSH there in Enroll mode (the only
   connections that may record the VM's host key), and runs the VM contract's base checks, release
