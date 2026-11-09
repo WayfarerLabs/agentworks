@@ -226,6 +226,42 @@ def test_warn_from_thread_pool_worker_is_captured(
     assert "from worker" in captured_output.warnings
 
 
+def test_keyed_deprecations_warn_once_per_request(captured_output: CapturedOutput) -> None:
+    from agentworks.bootstrap import begin_request_warning_scope
+
+    output.deprecation("first source", key="compatibility-a")
+    output.deprecation("second source", key="compatibility-a")
+    output.deprecation("another feature", key="compatibility-b")
+    assert len(captured_output.warnings) == 2
+    begin_request_warning_scope()
+    output.deprecation("next invocation", key="compatibility-a")
+    assert len(captured_output.warnings) == 3
+
+
+def test_unkeyed_deprecations_retain_each_call(captured_output: CapturedOutput) -> None:
+    output.deprecation("first source")
+    output.deprecation("second source")
+    assert len(captured_output.warnings) == 2
+
+
+def test_suppression_does_not_consume_a_deprecation_key(captured_output: CapturedOutput) -> None:
+    output.set_suppress_deprecations(True)
+    output.deprecation("suppressed source", key="compatibility")
+    assert captured_output.warnings == []
+    output.set_suppress_deprecations(False)
+    output.deprecation("visible source", key="compatibility")
+    assert len(captured_output.warnings) == 1
+
+
+def test_deprecation_keys_are_isolated_between_contexts(captured_output: CapturedOutput) -> None:
+    from contextvars import Context
+
+    output.deprecation("parent source", key="compatibility")
+    Context().run(output.deprecation, "independent source", key="compatibility")
+    output.deprecation("repeated parent source", key="compatibility")
+    assert len(captured_output.warnings) == 2
+
+
 # -- Default handler rendering (byte-identity + level ownership) --------------
 
 

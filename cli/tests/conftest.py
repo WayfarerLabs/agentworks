@@ -242,11 +242,13 @@ def _reset_cli_request_flags() -> Generator[None, None, None]:
 
     output.set_non_interactive(False)
     output.set_suppress_deprecations(False)
+    output.reset_deprecation_warning_scope()
     try:
         yield
     finally:
         output.set_non_interactive(False)
         output.set_suppress_deprecations(False)
+        output.reset_deprecation_warning_scope()
 
 
 @pytest.fixture(autouse=True)

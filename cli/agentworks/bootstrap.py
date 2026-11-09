@@ -52,7 +52,10 @@ def begin_request_warning_scope() -> None:
     independent; library callers that do not establish a scope still get one
     warning for their current context.
     """
+    from agentworks import output
+
     _warned_request_configs.set(frozenset())
+    output.reset_deprecation_warning_scope()
 
 
 def build_registry(
