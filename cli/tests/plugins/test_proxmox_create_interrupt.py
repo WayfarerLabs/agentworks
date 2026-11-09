@@ -32,6 +32,7 @@ import pytest
 
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import ProvisionRequest, RetainedProvisioningError
+from agentworks.capabilities.vm_platform.tailscale_join import DEFAULT_READINESS_COMMAND
 from agentworks.debian import DebianRelease
 from agentworks.errors import ProvisioningError, StateError
 from agentworks.plugins.proxmox.api import ProxmoxAPIError
@@ -183,7 +184,7 @@ class TestFailClosedBootstrap:
 
         assert ("stop_vm", "pve1", NEWID) in fake.calls
         assert ("delete_vm", "pve1", NEWID) in fake.calls
-        assert fake.guest.payloads == ["cloud-init status --wait"]
+        assert fake.guest.payloads == [DEFAULT_READINESS_COMMAND]
         _assert_exception_graph_is_value_free(caught.value)
 
     @pytest.mark.parametrize(

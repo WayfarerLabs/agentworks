@@ -73,6 +73,18 @@ READINESS_REASON_LINES = 12
 """How many of a failed readiness wait's last output lines its error quotes: ``--long``'s detail and errors."""
 
 
+def readiness_failure(incomplete: str, result: RootScriptResult) -> str:
+    """A failed readiness wait's message: ``incomplete``, the wait's status and its last output lines.
+
+    The output's last :data:`READINESS_REASON_LINES` lines are quoted because
+    a create's rollback removes the VM, and with it the evidence of why.
+    """
+    outcome = "its outcome is unknown" if result.status is None else f"exit {result.status}"
+    printed = (result.stdout + b"\n" + result.stderr).decode("utf-8", errors="replace")
+    reason = ssh_process.tail_lines(printed, READINESS_REASON_LINES)
+    return f"{incomplete} ({outcome})" + (f":\n{reason}" if reason else "")
+
+
 def join_tailscale(run_as_root: Callable[[bytes, float], RawRun], auth_key: str, *, node: str) -> None:
     """Join the VM to the tailnet as ``node`` with ``auth_key``, exactly once.
 
@@ -248,9 +260,6 @@ def complete_cloud_bootstrap(
     if result.status == CLOUD_INIT_RECOVERABLE_STATUS and readiness_command == DEFAULT_READINESS_COMMAND:
         output.warn(f"{readiness_label} completed with recoverable errors; continuing")
     elif result.status != 0:
-        outcome = "its outcome is unknown" if result.status is None else f"exit {result.status}"
-        printed = (result.stdout + b"\n" + result.stderr).decode("utf-8", errors="replace")
-        reason = ssh_process.tail_lines(printed, READINESS_REASON_LINES)
-        raise ProvisioningError(f"{incomplete} ({outcome})" + (f":\n{reason}" if reason else ""))
+        raise ProvisioningError(readiness_failure(incomplete, result))
     join_tailscale(target.run_as_root, auth_key, node=node)
     return settle_tailnet_address(target.run_as_root, node=node, rerun_hint=CREATE_RERUN_HINT)

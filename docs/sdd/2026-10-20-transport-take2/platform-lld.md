@@ -495,14 +495,16 @@ mid-script answers `Agent error: PID <pid> does not exist`), since that request 
 PID. A dispatch failure adds none, since its request carries the script. A `_TruncatedQGAOutput`
 report raises `ConnectivityError` saying the script exited with its output cut short. No failure
 chains the API error, whose request quotes the script. `create` waits for cloud-init through it
-(`cloud-init status --wait`, 420 s, which covers the agent ping's 120 and cloud-init's 300, status 2
-a warning; a channel failure is asked again within that budget, since cloud-init can restart the
-guest agent and the command changes nothing), with no separate wait for a guest IP, then runs the
-bootstrap through it with `run_bootstrap` and today's 600-second deadline (`platform.py:600`), then
-joins and settles; `guest_agent_exec_wait` and `guest_agent_network` leave the API client.
-`out-data` and `err-data` are encoded with `errors="replace"`, since the API's JSON can carry a lone
-surrogate, and `_request` types `http.client.HTTPException` as `ProxmoxAPIError` like any transport
-failure. `_run_bootstrap_via_agent` (`platform.py:566-636`), `native_transport` (`:488-502`) and
+(`cloud-init status --wait --long`, the cloud bootstrap's readiness command, 420 s, which covers the
+agent ping's 120 and cloud-init's 300, status 2 a warning, and any other failure quoting
+cloud-init's last lines as the cloud bootstrap does; a channel failure is asked again within that
+budget, since cloud-init can restart the guest agent and the command changes nothing), with no
+separate wait for a guest IP, then runs the bootstrap through it with `run_bootstrap` and today's
+600-second deadline (`platform.py:600`), then joins and settles; `guest_agent_exec_wait` and
+`guest_agent_network` leave the API client. `out-data` and `err-data` are encoded with
+`errors="replace"`, since the API's JSON can carry a lone surrogate, and `_request` types
+`http.client.HTTPException` as `ProxmoxAPIError` like any transport failure.
+`_run_bootstrap_via_agent` (`platform.py:566-636`), `native_transport` (`:488-502`) and
 `transport.py` go. No `native_shell` override. `recovery_needs_guest_sshd = False`.
 
 **Which guest holds the VMID.** Proxmox reissues a freed VMID to the next create, and a node listing

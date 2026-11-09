@@ -19,7 +19,9 @@ from agentworks.capabilities.vm_platform.debian_release import (
 from agentworks.capabilities.vm_platform.tailscale_join import (
     CLOUD_INIT_RECOVERABLE_STATUS,
     CREATE_RERUN_HINT,
+    DEFAULT_READINESS_COMMAND,
     join_tailscale,
+    readiness_failure,
     settle_tailnet_address,
 )
 from agentworks.db import VMStatus
@@ -552,7 +554,9 @@ def _clone_names(vm: VMRow) -> tuple[str, ...]:
 def _wait_for_cloud_init(run_as_root: Callable[[bytes, float], RawRun], vmid: int) -> None:
     """Wait for cloud-init to finish inside the VM; :data:`CLOUD_INIT_RECOVERABLE_STATUS` warns.
 
-    A channel failure is asked again until :data:`CLOUD_INIT_DEADLINE_SECONDS`
+    The wait is the cloud bootstrap's own command, so a failure quotes
+    cloud-init's status and detail the same way (``readiness_failure``). A
+    channel failure is asked again until :data:`CLOUD_INIT_DEADLINE_SECONDS`
     runs out: cloud-init can restart the guest agent mid-run (Proxmox's
     ``ciupgrade``), and ``cloud-init status --wait`` changes nothing, so
     running it again is safe.
@@ -561,7 +565,7 @@ def _wait_for_cloud_init(run_as_root: Callable[[bytes, float], RawRun], vmid: in
     while True:
         try:
             result = root_script.run(
-                run_as_root, "cloud-init status --wait", deadline=max(expires - time.monotonic(), 0.1)
+                run_as_root, DEFAULT_READINESS_COMMAND, deadline=max(expires - time.monotonic(), 0.1)
             )
             break
         except ConnectivityError:
@@ -572,5 +576,4 @@ def _wait_for_cloud_init(run_as_root: Callable[[bytes, float], RawRun], vmid: in
     if result.status == CLOUD_INIT_RECOVERABLE_STATUS:
         output.warn(f"cloud-init completed with recoverable errors on Proxmox VMID {vmid}; continuing")
     elif result.status != 0:
-        outcome = "an unknown outcome" if result.status is None else f"exit {result.status}"
-        raise ProvisioningError(f"cloud-init did not complete on Proxmox VMID {vmid} ({outcome})")
+        raise ProvisioningError(readiness_failure(f"cloud-init did not complete on Proxmox VMID {vmid}", result))
