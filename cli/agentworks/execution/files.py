@@ -151,8 +151,9 @@ class Files:
         """Replace ``path`` with ``data`` only while it still has digest ``expected`` (``None``: still absent).
 
         The file is written beside the destination with ``mode`` (and ``group``,
-        set first), then renamed over it. Missing parents are created with
-        ``parent_mode``. ``preserve_metadata`` gives the new file the existing
+        set first), then renamed over it. With ``expected=None`` missing parents
+        are created with ``parent_mode``; otherwise a missing parent is a
+        conflict. ``preserve_metadata`` gives the new file the existing
         one's owner, group, mode and extended attributes instead. A changed
         destination is ``FileConflict``, and nothing is written.
         """

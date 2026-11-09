@@ -212,11 +212,12 @@ no empty, `.` or `..` component, as `native_path` checks today. It raises `State
   parent component relative to the last, with the same flags (`native_files.py:32`, `:82-99`). A
   symlink component fails with `ELOOP` or `ENOTDIR` (status 4). `O_PATH` needs only search
   permission, so a search-only ancestor works (I36).
-- **A missing parent.** `read`, `stat` and `remove_if` report the target absent. `write_if` and
-  `ensure_directory` create it: `mkdir` relative to the parent descriptor with mode 0700, an
-  `O_RDONLY | O_DIRECTORY | O_NOFOLLOW` open of what was made, `fchown(-1, gid)` when `write_if`
-  names a group, then `fchmod(parent_mode)`, or `ensure_directory`'s `mode`, so the umask plays no
-  part (`native_files.py:91-97`).
+- **A missing parent.** `read`, `stat` and `remove_if` report the target absent, and a `write_if`
+  that expects a digest reports a conflict (status 2) having created nothing, since the caller
+  observed a file there. A `write_if` expecting absence and `ensure_directory` create it: `mkdir`
+  relative to the parent descriptor with mode 0700, an `O_RDONLY | O_DIRECTORY | O_NOFOLLOW` open of
+  what was made, `fchown(-1, gid)` when `write_if` names a group, then `fchmod(parent_mode)`, or
+  `ensure_directory`'s `mode`, so the umask plays no part (`native_files.py:91-97`).
 - **The destination.** `stat` uses `os.stat(name, dir_fd=parent, follow_symlinks=False)`: a symlink
   or any type but a directory or a regular file is status 4, a directory is reported as one, and
   only a regular file is opened. `read`, `stat`'s hash and every compare open a regular file with

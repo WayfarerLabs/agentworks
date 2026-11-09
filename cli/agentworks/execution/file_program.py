@@ -234,7 +234,12 @@ def _write_if(params: Params) -> int:
     import grp
 
     gid = -1 if params["group"] is None else grp.getgrnam(params["group"]).gr_gid
-    walk = _Walk(params["path"], create_mode=params["parent_mode"], gid=gid)
+    # Only a write to an absent destination creates parents: a missing one contradicts ``expected``.
+    create_mode = params["parent_mode"] if params["expected"] is None else None
+    walk = _Walk(params["path"], create_mode=create_mode, gid=gid)
+    if not walk.complete:
+        walk.close()
+        return EXIT_CONFLICT
     parent = walk.parent
     temporary = _TEMPORARY_PREFIX + secrets.token_hex(12)
     try:

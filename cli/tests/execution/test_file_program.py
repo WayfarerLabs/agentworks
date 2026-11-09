@@ -171,6 +171,13 @@ def test_a_destination_changed_after_it_was_read_is_a_conflict_and_keeps_the_new
     assert temporaries(guest.tree) == []
 
 
+def test_a_write_expecting_a_file_under_missing_parents_is_a_conflict_creating_nothing(guest: Guest) -> None:
+    result = guest.write_if(guest.tree / "a" / "b" / "c" / "file", b"content", expected=digest(b"observed"))
+
+    assert result.returncode == file_program.EXIT_CONFLICT
+    assert os.listdir(guest.tree) == []
+
+
 def test_two_concurrent_writes_with_one_expectation_have_exactly_one_winner(guest: Guest) -> None:
     destination = guest.tree / "file"
     destination.write_bytes(b"start")
@@ -401,9 +408,7 @@ def test_an_elevated_write_without_preserve_creates_a_root_owned_file(guest: Gue
         "attribute copy",
     ],
 )
-def test_a_failed_write_leaves_no_temporary_file_but_keeps_created_parents_and_others(
-    guest: Guest, failure: str
-) -> None:
+def test_a_failed_write_leaves_no_temporary_file_but_keeps_its_parent_and_others(guest: Guest, failure: str) -> None:
     parent = guest.tree / "created"
     destination = parent / "file"
     unrelated = guest.tree / ".agentworks-tmp-unrelated"
@@ -412,6 +417,7 @@ def test_a_failed_write_leaves_no_temporary_file_but_keeps_created_parents_and_o
     expected: str | None = None
     preserve = False
     if failure == "conflict":
+        parent.mkdir()
         expected = digest(b"something else")
     elif failure == "rename":
         patch = "import os\ndef rename(*a, **k): raise PermissionError(13, 'denied')\nos.rename = rename"
