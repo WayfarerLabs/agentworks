@@ -31,7 +31,8 @@ if p.returncode:
 prefix, exclude = p.stdout.splitlines()
 tracked = set()
 for start in range(0, len(r['paths']), 64):
-    p = subprocess.run(['git', '--literal-pathspecs', '-C', r['workspace'], 'ls-files', '-z', '--',
+    p = subprocess.run(['git', '-c', 'core.fsmonitor=false', '--literal-pathspecs',
+                        '-C', r['workspace'], 'ls-files', '-z', '--',
                         *r['paths'][start:start + 64]], capture_output=True)
     if p.returncode:
         raise SystemExit(p.returncode)
@@ -116,7 +117,9 @@ def reconcile_workspace_excludes(
         if not valid:
             output.warn("Stored artifact exclusion no longer matches this workspace; its association was released.")
             continue
-        current_claim = claim.model_copy(update={"destination": destination})
+        current_claim = NativeClaim(
+            role=GIT_EXCLUDE_ROLE, identifier=claim.identifier, destination=destination, source=workspace
+        )
         if claim.destination != destination:
             output.warn("Git metadata moved; artifact exclusion ownership now uses Git's current destination.")
         if current_claim not in remaining:
@@ -141,19 +144,27 @@ def reconcile_workspace_excludes(
         for claim in (*prior, *(claim for claim in desired if claim not in prior)):
             pair = _pair(claim, integration)
             existing = current or b""
-            if existing.count(pair) > 1:
-                raise StateError("workspace artifact exclusion ownership markers are duplicated")
-            if pair not in existing and pair.split(b"\n", 1)[0] in existing:
+            marker = pair.split(b"\n", 1)[0]
+            positions = tuple(match.start() for match in re.finditer(re.escape(marker), existing))
+            if any(
+                (start != 0 and existing[start - 1 : start] != b"\n") or not existing.startswith(pair, start)
+                for start in positions
+            ):
                 report_incomplete("An owned artifact exclusion was modified; its bytes and ownership were retained.")
                 continue
+            if len(positions) > 1:
+                raise StateError("workspace artifact exclusion ownership markers are duplicated")
             if claim in desired:
                 replacement = (
                     existing
-                    if pair in existing
+                    if positions
                     else existing + (b"" if not existing or existing.endswith(b"\n") else b"\n") + pair
                 )
+            elif positions:
+                start = positions[0]
+                replacement = existing[:start] + existing[start + len(pair) :]
             else:
-                replacement = existing.replace(pair, b"", 1)
+                replacement = existing
             if replacement != existing:
                 native.publish(
                     destination,

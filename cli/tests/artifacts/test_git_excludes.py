@@ -269,3 +269,101 @@ def test_exclusion_refuses_paths_outside_the_owning_workspace(repository):
     record = file(target.home / "outside/SKILL.md")
     with pytest.raises(StateError):
         apply(target, workspace, (record,))
+
+
+def test_rebound_git_claims_roundtrip_every_persisted_checkpoint(db, repository):
+    from agentworks.harness_setup.model import NativeSetupState, SetupRecord
+    from agentworks.harness_setup.state import read_native_setup, write_native_setup
+
+    target, workspace = repository
+    record = file(workspace / ".agents/skills/policy/SKILL.md")
+    claims, _, _ = apply(target, workspace, (record,))
+    older = claims[0].model_copy(
+        update={"destination": str(target.home / "old/exclude"), "sha256": "a" * 64, "strategy": "merge"}
+    )
+    db.insert_vm("vm", "site", "host")
+    db.insert_workspace("project", str(workspace), "vm", "")
+    original = SetupRecord(
+        component="workspace",
+        integration="codex",
+        destination_id="a" * 64,
+        declaration={},
+        claims=(older, *claims),
+    )
+    write_native_setup(db, "workspace", "project", NativeSetupState(records=(original,)), operation="workspace-create")
+    exclude = Path(claims[0].destination)
+    before = exclude.read_bytes(), exclude.stat().st_mtime_ns
+    checkpoints: list[NativeSetupState] = []
+
+    def checkpoint(value):
+        current = original.model_copy(update={"claims": value})
+        write_native_setup(
+            db, "workspace", "project", NativeSetupState(records=(current,)), operation="workspace-create"
+        )
+        checkpoints.append(read_native_setup(db, "workspace", "project"))
+
+    reconcile_workspace_excludes(
+        target,
+        str(workspace),
+        "codex",
+        (record,),
+        original.claims,
+        checkpoint,
+        group="",
+        report_incomplete=lambda reason: pytest.fail(reason),
+    )
+    assert checkpoints and all(state.records[0].claims == claims for state in checkpoints)
+    assert read_native_setup(db, "workspace", "project").records[0].claims == claims
+    assert (exclude.read_bytes(), exclude.stat().st_mtime_ns) == before
+
+
+def test_git_metadata_tracking_does_not_execute_configured_fsmonitor(repository, captured_output):
+    import shlex
+
+    target, workspace = repository
+    tracked = file(workspace / ".agents/skills/policy/tracked [x]*?.txt")
+    relative = ".agents/skills/policy/tracked [x]*?.txt"
+    git("--literal-pathspecs", "-C", workspace, "add", "--", relative)
+    marker = target.home / "monitor-ran"
+    monitor = target.home / "fsmonitor.sh"
+    monitor.write_text(
+        "#!/bin/sh\n" + f"printf 'called\\n' >> {shlex.quote(str(marker))}\n" + "printf 'fixture-token\\0'\n"
+    )
+    monitor.chmod(0o700)
+    git("-C", workspace, "config", "core.fsmonitor", monitor)
+    git("-C", workspace, "config", "core.fsmonitorHookVersion", "2")
+    assert git("--literal-pathspecs", "-C", workspace, "ls-files", "--", relative).stdout.strip() == relative
+    assert marker.exists()
+    marker.unlink()
+    claims, _, incomplete = apply(target, workspace, (tracked,))
+    assert not claims and not incomplete and captured_output.warnings
+    assert not marker.exists()
+
+
+@pytest.mark.parametrize("placement", ["prefixed", "prefixed-first", "prefixed-last"])
+@pytest.mark.parametrize("reapply", [False, True])
+def test_modified_marker_line_preserves_exclusions_and_evidence_until_repaired(repository, placement, reapply):
+    from agentworks.artifacts.git_excludes import _pair
+
+    target, workspace = repository
+    record = file(workspace / ".agents/skills/policy/SKILL.md")
+    claims, _, _ = apply(target, workspace, (record,))
+    exclude = Path(claims[0].destination)
+    pair = _pair(claims[0], "codex")
+    prefixed = b"# operator note " + pair
+    variants = {"prefixed": prefixed, "prefixed-first": prefixed + pair, "prefixed-last": pair + prefixed}
+    independent = workspace / "private.env"
+    independent.write_bytes(b"fixture only")
+    modified = b"# operator\n" + variants[placement] + b"private.env\n"
+    exclude.write_bytes(modified)
+    before = exclude.stat().st_mtime_ns
+    assert git("-C", workspace, "check-ignore", "--no-index", "--", independent).returncode == 0
+    remaining, checkpoints, incomplete = apply(target, workspace, (record,) if reapply else (), claims)
+    assert remaining == claims and not checkpoints and incomplete
+    assert exclude.read_bytes() == modified and exclude.stat().st_mtime_ns == before
+    assert git("-C", workspace, "check-ignore", "--no-index", "--", independent).returncode == 0
+    exclude.write_bytes(b"# operator\n" + pair + b"private.env\n")
+    retired, _, incomplete = apply(target, workspace, (), claims)
+    assert not retired and not incomplete
+    assert exclude.read_bytes() == b"# operator\nprivate.env\n"
+    assert git("-C", workspace, "check-ignore", "--no-index", "--", independent).returncode == 0
