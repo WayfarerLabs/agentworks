@@ -58,7 +58,7 @@ validation result; the lock takes effect at merge.
       bounded charter from the accepted change. Do not infer permission to probe live user
       environments.
 - [x] Hand off one exact reviewed and validated state with its documentation and migration notes.
-- [ ] Once implementation and documentation are complete, record truthful completion and add the
+- [x] Once implementation and documentation are complete, record truthful completion and add the
       lockfile. The permanent reference must stand alone if this entire SDD directory is deleted.
 
 ## Final review iterations
@@ -254,3 +254,20 @@ The final ready-triggered campaign must confirm the diagnostic correction and re
 workstation and harness coverage explicitly. No additional inference budget is requested. No merge
 or acceptance waiver is authorized. Implementation closeout, private review, and local gates do not
 replace that final-head report.
+
+### Implementation closeout
+
+The full feature, SDD, and permanent reference are complete in this PR. Runtime correction head
+`802006b9c448c49dd051ebb9213464633e628734` includes the field-attribution fix; its release metadata
+is commit `bc6d7bc3e`. The generic correctness lane passed 157 focused tests and found no material
+delta issue. Project and complexity each passed 62 Shell tests and returned clean scoped verdicts.
+Restoring the old field label caused two failures, one at preflight and one at launch. The
+independent project review confirmed that implementation closeout may include `locked.md` before
+merge if acceptance gaps remain explicit and final-head validation is still required. Closeout does
+not authorize merge or certify the pending campaign.
+
+The permanent architecture reference, CLI reference, capability documentation, schema descriptions,
+guide signposts, and sample config carry the operational contract without depending on this SDD. The
+implementation lock takes effect only when merged. Unmerged feedback can still amend these
+artifacts. Required local gates and private closeout reviews are recorded at the final handoff;
+remaining failed, blocked, and untested live cells above retain their stated dispositions.
