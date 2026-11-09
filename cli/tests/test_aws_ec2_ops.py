@@ -813,6 +813,38 @@ class TestTransientRoute:
         # The detected prefix that WAS authorized got revoked on the way out.
         assert _ec2(platform).ingress["sg-123"] == {}
 
+    def test_a_second_interrupt_during_a_failed_pokes_revoke_waits_for_it(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The route's exit never runs for a poke that failed, so the poke's own revoke must hold a Ctrl-C."""
+        install_fakes(monkeypatch)
+        platform = _platform()
+        ec2 = _ec2(platform)
+        real_authorize = ec2.authorize_security_group_ingress
+        revoke = ec2.revoke_security_group_ingress
+
+        authorized: list[object] = []
+
+        def _authorize(**kw: Any) -> Any:
+            # The first prefix is authorized, then Ctrl-C lands on the second.
+            if authorized:
+                raise KeyboardInterrupt
+            authorized.append(kw)
+            return real_authorize(**kw)
+
+        def interrupted_revoke(**kwargs: Any) -> Any:
+            if not kwargs.get("DryRun"):
+                signal.raise_signal(signal.SIGINT)
+            return revoke(**kwargs)
+
+        monkeypatch.setattr(ec2, "authorize_security_group_ingress", _authorize)
+        monkeypatch.setattr(ec2, "revoke_security_group_ingress", interrupted_revoke)
+        route = platform._transient_route(_vm(), RunContext(config=_config(["198.51.100.0/24"])))
+        with pytest.raises(KeyboardInterrupt), route:
+            pytest.fail("the body must not run when the poke fails")
+        assert authorized
+        assert ec2.ingress["sg-123"] == {}
+
     def test_requires_a_security_group_id(self, monkeypatch: pytest.MonkeyPatch) -> None:
         install_fakes(monkeypatch)
         vm = SimpleNamespace(name="dev", admin_username="agw", platform_metadata={"instance_id": "i-123"})
