@@ -291,10 +291,11 @@ def _kill_wrapper(files: _DetachedFiles) -> str:
     ``files.wrapper``: the wrapper and the command it started, which signalling the wrapper alone leaves running.
 
     Where no such group exists (a host bash that did not give the job its own group), it falls back to
-    the wrapper alone.
+    the wrapper alone. ``-ww`` keeps ``ps`` from cutting the command line to ``COLUMNS``, which would
+    hide the wrapper's path and skip the kill.
     """
     return (
-        f'test -f {files.pid} && pid=$(cat {files.pid}) && ps -p "$pid" -o args= | grep -qF -- {files.wrapper} '
+        f'test -f {files.pid} && pid=$(cat {files.pid}) && ps -ww -p "$pid" -o args= | grep -qF -- {files.wrapper} '
         '&& { kill -- -"$pid" 2>/dev/null || kill "$pid" 2>/dev/null; }'
     )
 
