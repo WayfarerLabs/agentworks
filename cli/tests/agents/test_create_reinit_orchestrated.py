@@ -30,6 +30,7 @@ from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
 from tests.conftest import ManifestDoc, seed_vm_trust, stub_vm_ssh_identity
 from tests.orchestrated_fixtures import PLUGINS_ENABLED, proxmox_site, write_operator_config
+from tests.vm_access_support import answer_destination_identity, install_access_recorder
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -1293,7 +1294,7 @@ def test_active_user_setup_joins_eager_env_and_runs_after_core(
         db.insert_agent("dev", "box", "agt-dev", template="default")
     target = MagicMock(spec=Transport)
     target.logger = None
-    target.run.return_value.stdout = "\nAGW_NATIVE_ID=native-identity\n"
+    install_access_recorder(monkeypatch).answer = answer_destination_identity
     monkeypatch.setattr("agentworks.transports.transport_for_user", lambda *a, **k: target)
     calls = []
 
@@ -1351,7 +1352,7 @@ def test_legacy_overlay_conversion_waits_for_successful_native_reinit(
     _reachable(monkeypatch, True)
     target = MagicMock(spec=Transport)
     target.logger = None
-    target.run.return_value.stdout = "\nAGW_NATIVE_ID=native-identity\n"
+    install_access_recorder(monkeypatch).answer = answer_destination_identity
     monkeypatch.setattr("agentworks.transports.transport_for_user", lambda *a, **k: target)
 
     def setup(self, invocation):
@@ -1415,7 +1416,7 @@ def test_native_failure_preserves_agent_and_continues_sibling_grants_and_ssh(
         db.insert_agent_grant("dev", "project", "explicit")
     target = MagicMock(spec=Transport)
     target.logger = None
-    target.run.return_value.stdout = "\nAGW_NATIVE_ID=native-identity\n"
+    install_access_recorder(monkeypatch).answer = answer_destination_identity
     monkeypatch.setattr("agentworks.transports.transport_for_user", lambda *a, **k: target)
     events = []
 

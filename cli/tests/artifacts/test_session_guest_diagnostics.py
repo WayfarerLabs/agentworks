@@ -13,10 +13,9 @@ from agentworks.artifacts.native.common import ancestor_diagnostics
 from agentworks.artifacts.native.probe import probe_native
 from agentworks.errors import ExternalError
 from agentworks.execution.results import Completed, Result
-from agentworks.harness_setup.dispatch import destination_id
 from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
 from agentworks.harness_setup.runner import SetupRunner
-from agentworks.ssh import SSHError, SSHResult
+from agentworks.ssh import SSHError
 from agentworks.transports import Transport
 from tests.artifacts.test_native_probe import probe
 from tests.vm_access_support import Admin, RecordingVMAccess, account_shell, local_vm_access
@@ -104,23 +103,6 @@ def test_native_discovery_accepts_a_login_banner_without_a_newline(tmp_path, mon
     access = local_vm_access(monkeypatch, home=home, shell=account_shell(tmp_path))
     environment = {"PATH": f"{binary.parent}:/usr/bin:/bin"}
     assert probe_native(access, tool="grok", environment=environment, home=str(home)) == str(home / ".grok")
-
-
-@pytest.mark.parametrize("banner", ["", "Welcome\n", "Welcome"])
-def test_destination_identity_ignores_noninteractive_startup_output(db, banner):
-    vm = db.insert_vm("identity", "site", "vm")
-    runner = Mock(spec=Transport)
-    runner.logger = None
-    runner.run.side_effect = [
-        SSHResult(0, banner + "\nAGW_NATIVE_ID=machine-token\n", ""),
-        SSHResult(0, banner + "\nAGW_NATIVE_ID=1:2:1000\n", ""),
-    ]
-    observed = destination_id(vm, runner, location="/home/identity", username="identity")
-    runner.run.side_effect = [
-        SSHResult(0, "\nAGW_NATIVE_ID=machine-token\n", ""),
-        SSHResult(0, "\nAGW_NATIVE_ID=1:2:1000\n", ""),
-    ]
-    assert observed == destination_id(vm, runner, location="/home/identity", username="identity")
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="executes the Linux guest inventory helper locally")

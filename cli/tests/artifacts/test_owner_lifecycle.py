@@ -33,7 +33,6 @@ from agentworks.workspaces.realize import realize_workspace
 from agentworks.workspaces.templates import ResolvedTemplate
 from tests.conftest import _StubRegistry
 from tests.native_setup_fixtures import LocalFixtureTransport
-from tests.vm_access_support import Admin, RecordingVMAccess
 
 # Every access a command builds is the recording fake: these tests run no ssh.
 pytestmark = [
@@ -65,7 +64,8 @@ def owner(db, tmp_path):
 def user_call(owner: SimpleNamespace) -> UserSetupInvocation:
     return UserSetupInvocation(
         vm=owner.vm,
-        access=RecordingVMAccess([], Admin()),
+        access=(recorded := owner.target.access()),
+        files=recorded.files(),
         runner=owner.target,
         prior=None,
         checkpoint=lambda claims: None,
@@ -88,7 +88,8 @@ def test_common_capture_without_activation_and_vm_admin_separation(owner):
         invocation = (
             VMSetupInvocation(
                 vm=owner.vm,
-                access=RecordingVMAccess([], Admin()),
+                access=(recorded := owner.target.access()),
+                files=recorded.files(),
                 runner=owner.target,
                 prior=None,
                 checkpoint=lambda claims: None,
@@ -342,7 +343,7 @@ def test_owned_effect_removal_retains_pending_cleanup_without_blocking_descendan
 
 
 def test_repeated_owner_setup_does_not_rewrite_unchanged_native_files(owner, monkeypatch):
-    from agentworks.native_files import NativeFiles
+    from agentworks.execution.files import Files
 
     owner.db.insert_agent("agent", "vm", "worker")
     template = ResolvedAgentTemplate(
@@ -356,7 +357,7 @@ def test_repeated_owner_setup_does_not_rewrite_unchanged_native_files(owner, mon
     def unexpected_write(*args, **kwargs):
         raise AssertionError("unchanged native files must not be republished")
 
-    monkeypatch.setattr(NativeFiles, "publish", unexpected_write)
+    monkeypatch.setattr(Files, "write_if", unexpected_write)
     second = prepare_agent_setup(owner.db, owner.registry, vm=owner.vm, name="agent", template=template)
     assert second is not None
     run_setup(owner.db, owner.registry, second, user_call(owner), failures=[], operation="agent-reinit")
@@ -378,7 +379,8 @@ def test_user_setup_publishes_vm_inputs_without_vm_activation(db, tmp_path):
     target = LocalFixtureTransport(tmp_path / "native")
     invocation = UserSetupInvocation(
         vm=fixture.vm,
-        access=RecordingVMAccess([], Admin()),
+        access=(recorded := target.access()),
+        files=recorded.files(),
         runner=target,
         prior=None,
         checkpoint=lambda claims: None,

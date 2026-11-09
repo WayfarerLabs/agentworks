@@ -25,7 +25,6 @@ from agentworks.ssh import SSHLogger
 from tests.artifacts.test_routing import graph
 from tests.capabilities.test_native_setup_dispatch import setup_case as setup_case
 from tests.native_setup_fixtures import LocalFixtureTransport
-from tests.vm_access_support import Admin, RecordingVMAccess
 
 
 @pytest.mark.parametrize("failure_type", [ConfigError, StateError, ExternalError, ConnectivityError])
@@ -103,12 +102,18 @@ def routed_setup(db, tmp_path, monkeypatch):
     admin = LocalFixtureTransport(tmp_path / "admin")
     agent = LocalFixtureTransport(tmp_path / "agent")
     vm_call = VMSetupInvocation(
-        vm=fixture.vm, access=RecordingVMAccess([], Admin()), runner=admin, prior=None, checkpoint=lambda claims: None
+        vm=fixture.vm,
+        access=(recorded := admin.access()),
+        files=recorded.files(),
+        runner=admin,
+        prior=None,
+        checkpoint=lambda claims: None,
     )
     calls = {
         "admin": UserSetupInvocation(
             vm=fixture.vm,
-            access=RecordingVMAccess([], Admin()),
+            access=(recorded := admin.access()),
+            files=recorded.files(),
             runner=admin,
             prior=None,
             checkpoint=lambda claims: None,
@@ -117,7 +122,8 @@ def routed_setup(db, tmp_path, monkeypatch):
         ),
         "agent": UserSetupInvocation(
             vm=fixture.vm,
-            access=RecordingVMAccess([], Admin()),
+            access=(recorded := agent.access()),
+            files=recorded.files(),
             runner=agent,
             prior=None,
             checkpoint=lambda claims: None,
@@ -281,6 +287,7 @@ def test_unavailable_capture_cannot_erase_placements_or_unresolved_deferrals(rou
     vm_call = VMSetupInvocation(
         vm=fixture.vm,
         access=case.calls["admin"].access,
+        files=case.calls["admin"].files,
         runner=case.calls["admin"].runner,
         prior=None,
         checkpoint=lambda claims: None,

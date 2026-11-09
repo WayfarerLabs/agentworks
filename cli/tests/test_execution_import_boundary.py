@@ -68,6 +68,12 @@ MIGRATED_FILES = (
     "plugins/claude/harness_integration.py",
     "plugins/codex/harness_integration.py",
     "plugins/grok/harness_integration.py",
+    "artifacts/publication.py",
+    "artifacts/session.py",
+    "artifacts/native/common.py",
+    "harness_setup/dispatch.py",
+    "harness_setup/readiness.py",
+    "plugins/codex/artifacts.py",
 )
 
 

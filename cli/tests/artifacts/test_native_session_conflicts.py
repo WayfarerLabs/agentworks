@@ -151,6 +151,7 @@ def test_setup_operator_collision_is_reconsidered_at_session_without_blocking_ot
         UserSetupInvocation(
             vm=db.insert_vm("vm", "site", "host"),
             access=access,
+            files=access.files(),
             runner=Mock(),
             prior=None,
             checkpoint=lambda claims: None,

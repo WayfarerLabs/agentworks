@@ -8,6 +8,9 @@ identity (and one for enrollment) and one ordered call list, so a test can
 assert both what each identity was asked and in what order. Manager tests built
 on it run on every CI host.
 
+``local_files`` runs file operations' real program on this machine behind a
+recording access, for tests of what a caller publishes.
+
 ``local_vm_access`` is the conformance suite's L lane for a caller's own
 tests: the real ``VMAccess``, pump and launcher, with the account shell run
 locally instead of over ssh, so a probe's or a program's real request runs
@@ -37,6 +40,7 @@ if TYPE_CHECKING:
 
     import pytest
 
+    from agentworks.execution.files import Files
     from agentworks.execution.requests import Forward, LoginShell, OutputSink, RunRequest
 
 
@@ -425,3 +429,54 @@ __all__ = [
     "rewrite_launcher",
     "run_requests_locally",
 ]
+
+
+def run_file_program_locally(call: Call) -> Result | None:
+    """Run a file operation's real program on this machine, as the test's own user; ``None`` for any other request.
+
+    The program's source and arguments are the request's, run by this
+    interpreter with no startup (``-I -S``), its input on stdin. Elevation
+    is not applied: a caller test's paths are the test's own.
+    """
+    import subprocess
+    import sys
+
+    from agentworks.execution.files import program_source
+    from agentworks.execution.requests import Bytes, PythonProgram
+
+    request = call.request
+    if not isinstance(request, PythonProgram) or request.source != program_source():
+        return None
+    completed = subprocess.run(
+        [sys.executable, "-I", "-S", "-c", request.source, *request.args],
+        input=request.stdin.data if isinstance(request.stdin, Bytes) else b"",
+        capture_output=True,
+        timeout=60,
+        check=False,
+    )
+    return Result(Completed(completed.returncode), completed.stdout, completed.stderr)
+
+
+def local_files(vm_name: str = "box") -> Files:
+    """``Files`` over a recording access whose file operations run on this machine (:func:`run_file_program_locally`).
+
+    Unlike :func:`local_vm_access`, any number may exist in one test and no
+    launcher runs, which suits a caller's tests of what it publishes.
+    """
+    access = RecordingVMAccess([], Admin(), vm_name=vm_name)
+    access.answer = run_file_program_locally
+    return access.files()
+
+
+def answer_destination_identity(call: Call) -> Result | None:
+    """Answer setup's destination identity probes with one fixed identity; ``None`` for any other request.
+
+    They are ``harness_setup.dispatch.destination_id``'s two ``Command``s:
+    ``cat /etc/machine-id`` and ``stat`` of the destination.
+    """
+    from agentworks.execution.requests import Command
+
+    request = call.request
+    if isinstance(request, Command) and request.argv[:2] in (("cat", "/etc/machine-id"), ("stat", "-Lc")):
+        return Result(Completed(0), b"native-identity\n")
+    return None

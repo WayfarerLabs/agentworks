@@ -74,7 +74,7 @@ def test_cloned_artifacts_adopt_and_first_repair_keeps_published_file_acls(tmp_p
     before = {item.path: Path(item.path).stat() for item in desired}
     checkpoints: list[tuple[OwnedArtifactFile, ...]] = []
     group = fixture_group()
-    adopted = publish_artifacts(target, desired, (), checkpoints.append, roots=(str(workspace),), group=group)
+    adopted = publish_artifacts(target.files(), desired, (), checkpoints.append, roots=(str(workspace),), group=group)
     assert not adopted.skipped and len(adopted.files) == len(content)
     for item in desired:
         observed = Path(item.path).stat()
@@ -85,7 +85,7 @@ def test_cloned_artifacts_adopt_and_first_repair_keeps_published_file_acls(tmp_p
     assert target.run(shlex.quote(str(workspace / ".codex/skills/review/run.sh"))).ok
     new_file = workspace / ".codex/rules/new.md"
     updated = publish_artifacts(
-        target,
+        target.files(),
         (*desired, ArtifactFile(str(new_file), b"new fixture rule", ("d" * 64,))),
         adopted.files,
         checkpoints.append,
@@ -132,7 +132,7 @@ def test_differing_executable_intent_is_retained_after_workspace_acl_application
     apply_workspace_acls(target, str(target.home))
     before = path.stat()
     result = publish_artifacts(
-        target,
+        target.files(),
         (ArtifactFile(str(path), b"fixture", ("a" * 64,), executable=executable),),
         (),
         lambda files: None,

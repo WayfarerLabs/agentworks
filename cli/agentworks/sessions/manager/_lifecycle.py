@@ -836,7 +836,7 @@ def _launch_existing_session(
                 vm=vm,
                 workspace=ws,
                 agent_name=session.agent_name,
-                runner=session_target,
+                access=preflight_session_access,
             )
 
         with output.section("Resolving Secrets"):
@@ -967,7 +967,7 @@ def _launch_existing_session(
                 vm=vm,
                 workspace=ws,
                 agent_name=session.agent_name,
-                runner=session_target,
+                access=session_access,
                 environment=session_env,
                 redactions=redactions,
                 session_uuid=session.session_uuid,
@@ -1007,7 +1007,7 @@ def _launch_existing_session(
             if artifact_application.artifacts_dir is not None:
                 session_env["AGENTWORKS_ARTIFACTS_DIR"] = artifact_application.artifacts_dir
             stage_session_artifacts(
-                db, name, template.harness_integration, session_target, prepared_artifacts, artifact_application
+                db, name, template.harness_integration, session_access, prepared_artifacts, artifact_application
             )
             command = _mgr._substitute_template_vars(
                 harness_start.command,
@@ -1027,7 +1027,7 @@ def _launch_existing_session(
                         legacy_running_authorized=(not replace_running or running_restart_authorized),
                     )
 
-                commit_session_artifacts(db, name, template.harness_integration, session_target, prepared_artifacts)
+                commit_session_artifacts(db, name, template.harness_integration, session_access, prepared_artifacts)
                 deploy_restricted_config(run_command, history_limit=config.session.history_limit)
 
                 if harness_start.note is not None:

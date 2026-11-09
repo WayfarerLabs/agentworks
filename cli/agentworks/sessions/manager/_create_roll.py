@@ -241,7 +241,7 @@ def _start_session_slice(
             vm=vm,
             workspace=ws,
             agent_name=resolved_agent_name,
-            runner=agent_target or target,
+            access=agent_access or admin_access,
         )
 
     # Retain the dedicated address for either mode, including failed launches.
@@ -289,7 +289,7 @@ def _start_session_slice(
                 vm=vm,
                 workspace=ws,
                 agent_name=resolved_agent_name,
-                runner=agent_target or target,
+                access=agent_access or admin_access,
                 environment=session_env,
                 redactions=tuple(secret_values.values()),
                 linux_user=linux_user,
@@ -379,9 +379,16 @@ def _start_session_slice(
                 persist_creation_overlay(db, "session", name, graph.session_overlay)
 
             stage_session_artifacts(
-                db, name, template.harness_integration, agent_target or target, prepared_artifacts, artifact_application
+                db,
+                name,
+                template.harness_integration,
+                agent_access or admin_access,
+                prepared_artifacts,
+                artifact_application,
             )
-            commit_session_artifacts(db, name, template.harness_integration, agent_target or target, prepared_artifacts)
+            commit_session_artifacts(
+                db, name, template.harness_integration, agent_access or admin_access, prepared_artifacts
+            )
             deploy_restricted_config(run_command, history_limit=config.session.history_limit)
             # Pick the SSH transport for tmux operations:
             # - admin sessions: admin's run_command (unchanged)
@@ -486,7 +493,7 @@ def _start_session_slice(
                 current_session = db.get_session(name)
                 if current_session is not None:
                     try:
-                        cleanup_session_artifacts(db, current_session, agent_target or target)
+                        cleanup_session_artifacts(db, current_session, agent_access or admin_access)
                     except Exception:
                         output.warn(
                             "Session artifact cleanup is incomplete; its row and ownership evidence were retained."

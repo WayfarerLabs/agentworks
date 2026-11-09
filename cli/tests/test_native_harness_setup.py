@@ -31,7 +31,6 @@ from tests.native_setup_fixtures import (
     market_fixture,
     record,
 )
-from tests.vm_access_support import Admin, RecordingVMAccess
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="local execution of Linux guest setup helpers")
 
@@ -224,7 +223,8 @@ def test_workspace_mapping_uses_group_and_fixed_project_role(transport: LocalFix
         NativeWorkspaceConfig(settings=SettingsMapping(source=str(source), strategy="replace")),
         WorkspaceSetupInvocation(
             vm=cast(VMRow, object()),
-            access=RecordingVMAccess([], Admin()),
+            access=(recorded := transport.access()),
+            files=recorded.files(),
             runner=transport,
             prior=None,
             checkpoint=claims.append,

@@ -400,7 +400,8 @@ def test_codex_inventory_bounds_combined_toml_bytes(tmp_path):
 
 
 def test_removed_skill_support_directories_do_not_block_remaining_native_skill(tmp_path):
-    from agentworks.native_files import NativeFiles
+    import hashlib
+
     from tests.native_setup_fixtures import LocalFixtureTransport
 
     transport = LocalFixtureTransport(tmp_path)
@@ -413,12 +414,10 @@ def test_removed_skill_support_directories_do_not_block_remaining_native_skill(t
     remaining = root / "review/SKILL.md"
     remaining.parent.mkdir()
     remaining.write_text("---\nname: review\n---\nbody\n")
-    # NativeFiles owns whole files, so successful cleanup preserves support directories.
-    native = NativeFiles(transport)
+    # Removal owns whole files, so successful cleanup preserves support directories.
+    files = transport.files()
     for path in (removed / "SKILL.md", removed / "scripts/nested/check.sh"):
-        import hashlib
-
-        native.remove(str(path), expected=hashlib.sha256(path.read_bytes()).hexdigest())
+        files.remove_if(str(path), expected=hashlib.sha256(path.read_bytes()).hexdigest())
     assert (removed / "scripts/nested").is_dir()
     assert probe(tmp_path, tool="claude", entries={str(remaining): "skill:review"})["problems"] == []
 
@@ -496,7 +495,7 @@ def test_large_skill_retirement_does_not_leave_an_inventory_lockout(tmp_path):
         )
     assert probe(tmp_path, tool="claude", entries={str(keep): "skill:review"})["problems"] == []
     retained = publish_artifacts(
-        target,
+        target.files(),
         (
             ArtifactFile(
                 str(keep), contents[keep], ("a" * 64,), native_identity="skill:review", package_root=str(keep.parent)
@@ -662,8 +661,8 @@ def test_user_setup_preflight_allows_retry_after_interrupted_skill_retirement(
     from agentworks.artifacts.publication import publish_artifacts
     from agentworks.capabilities.harness_integration.setup import UserSetupInvocation
     from agentworks.errors import StateError
+    from agentworks.execution.files import Files
     from agentworks.harness_setup.model import SetupRecord
-    from agentworks.native_files import NativeFiles
     from agentworks.plugins.claude.harness_integration import ClaudeCodeIntegration
     from tests.artifacts._fixtures import received
     from tests.native_setup_fixtures import LocalFixtureTransport, fixture_access
@@ -688,7 +687,8 @@ def test_user_setup_preflight_allows_retry_after_interrupted_skill_retirement(
     integration = ClaudeCodeIntegration.for_setup(owner_kind="agent", owner_name="worker", facet="user", config={})
     invocation = UserSetupInvocation(
         vm=db.insert_vm("vm", "lima", "vm"),
-        access=fixture_access(monkeypatch, target),
+        access=(local := fixture_access(monkeypatch, target)),
+        files=local.files(),
         runner=target,
         prior=None,
         checkpoint=lambda claims: None,
@@ -698,7 +698,7 @@ def test_user_setup_preflight_allows_retry_after_interrupted_skill_retirement(
         artifacts=received(removed, kept),
     )
     first = integration.user_init(invocation)
-    current = publish_artifacts(target, first.files, (), lambda files: None, roots=(str(target.home),)).files
+    current = publish_artifacts(target.files(), first.files, (), lambda files: None, roots=(str(target.home),)).files
     if rootless:
         current = tuple(record.model_copy(update={"package_root": None}) for record in current)
     entrypoint = target.home / ".claude/skills/review/SKILL.md"
@@ -719,25 +719,25 @@ def test_user_setup_preflight_allows_retry_after_interrupted_skill_retirement(
         ),
     )
     next_plan = integration.user_init(invocation)
-    remove = NativeFiles.remove
+    remove = Files.remove_if
 
-    def interrupted(self, destination, *, expected):
+    def interrupted(self, destination, *, expected, elevated=False):
         if destination.endswith("/review/scripts/check.sh"):
             raise StateError("fixture interrupted supporting-file retirement")
-        remove(self, destination, expected=expected)
+        remove(self, destination, expected=expected, elevated=elevated)
 
-    monkeypatch.setattr(NativeFiles, "remove", interrupted)
+    monkeypatch.setattr(Files, "remove_if", interrupted)
     with pytest.raises(StateError):
-        publish_artifacts(target, next_plan.files, current, checkpoints.append, roots=(str(target.home),))
+        publish_artifacts(target.files(), next_plan.files, current, checkpoints.append, roots=(str(target.home),))
     entrypoint = target.home / ".claude/skills/review/SKILL.md"
     assert entrypoint.exists() and any(file.path == str(entrypoint) for file in checkpoints[-1])
-    monkeypatch.setattr(NativeFiles, "remove", remove)
+    monkeypatch.setattr(Files, "remove_if", remove)
     assert invocation.prior is not None
     invocation = replace(invocation, prior=invocation.prior.model_copy(update={"artifact_files": checkpoints[-1]}))
     # This actual user_init invokes native preflight before retrying publication.
     retried = integration.user_init(invocation)
     finished = publish_artifacts(
-        target, retried.files, checkpoints[-1], checkpoints.append, roots=(str(target.home),)
+        target.files(), retried.files, checkpoints[-1], checkpoints.append, roots=(str(target.home),)
     ).files
     assert not entrypoint.exists()
     assert entrypoint.parent.exists() == (rootless or unowned_leftovers)
@@ -749,7 +749,9 @@ def test_user_setup_preflight_allows_retry_after_interrupted_skill_retirement(
     invocation = replace(invocation, prior=invocation.prior.model_copy(update={"artifact_files": finished}))
     subsequent = integration.user_init(invocation)
     assert (
-        publish_artifacts(target, subsequent.files, finished, checkpoints.append, roots=(str(target.home),)).files
+        publish_artifacts(
+            target.files(), subsequent.files, finished, checkpoints.append, roots=(str(target.home),)
+        ).files
         == finished
     )
 

@@ -20,7 +20,6 @@ from agentworks.origin import Origin
 from agentworks.schema import CapabilityConfig
 from tests.artifacts.test_routing import Graph, graph
 from tests.native_setup_fixtures import LocalFixtureTransport
-from tests.vm_access_support import Admin, RecordingVMAccess
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="local Linux guest filesystem execution")
 
@@ -38,7 +37,8 @@ def _invoke(
         fixture.workspace = workspace
         return WorkspaceSetupInvocation(
             vm=fixture.vm,
-            access=RecordingVMAccess([], Admin()),
+            access=(recorded := target.access()),
+            files=recorded.files(),
             runner=target,
             prior=None,
             checkpoint=lambda _: None,
@@ -48,7 +48,8 @@ def _invoke(
         )
     return UserSetupInvocation(
         vm=fixture.vm,
-        access=RecordingVMAccess([], Admin()),
+        access=(recorded := target.access()),
+        files=recorded.files(),
         runner=target,
         prior=None,
         checkpoint=lambda _: None,

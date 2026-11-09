@@ -56,9 +56,9 @@ def test_confirmed_empty_deferrals_do_not_hold_receiver_content(db, tmp_path, re
         ArtifactFile(str(path), b"old rule", (item.origin_identity,)),
         ArtifactFile(str(retired), b"old skill", (item.origin_identity,)),
     )
-    previous = publish_artifacts(transport, files, (), lambda _: None, roots=(str(transport.home),)).files
+    previous = publish_artifacts(transport.files(), files, (), lambda _: None, roots=(str(transport.home),)).files
     updated = publish_artifacts(
-        transport,
+        transport.files(),
         (replace(files[0], data=b"new rule"),),
         previous,
         lambda _: None,

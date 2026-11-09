@@ -570,7 +570,7 @@ class CodexIntegration(HarnessIntegration):
                     skills_root=f"{invocation.home}/.agents/skills",
                     agents_root=f"{root}/agents",
                     instructions_path=(
-                        guidance_path(invocation.runner, root)
+                        guidance_path(invocation.files, root)
                         if any(item.content.type in (ArtifactType.HINT, ArtifactType.RULE) for item in inputs.items())
                         else f"{root}/AGENTS.md"
                     ),
@@ -610,7 +610,7 @@ class CodexIntegration(HarnessIntegration):
                     skills_root=f"{invocation.root}/.agents/skills",
                     agents_root=f"{invocation.root}/.codex/agents",
                     instructions_path=(
-                        guidance_path(invocation.runner, invocation.root)
+                        guidance_path(invocation.files, invocation.root)
                         if any(item.content.type in (ArtifactType.HINT, ArtifactType.RULE) for item in inputs.items())
                         else f"{invocation.root}/AGENTS.md"
                     ),

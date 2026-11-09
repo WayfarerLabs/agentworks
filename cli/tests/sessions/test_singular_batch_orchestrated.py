@@ -246,6 +246,8 @@ def test_list_status_reports_identity_refusal_as_unknown_without_transport(
 class _FakeTarget:
     """Transport double for the probe / kill / regenerate helpers."""
 
+    logger = None
+
     def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
         return framed_runtime_result(cmd, SimpleNamespace(ok=True, returncode=0, stdout="", stderr=""))
 

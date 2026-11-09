@@ -317,6 +317,12 @@ Artifact discovery for Claude Code, Codex and Grok Build runs the VM's `/usr/bin
 account's login and interactive startup files. It no longer runs the first `python3` on the login
 `PATH`, so an interpreter a version manager puts first is not used for it.
 
+Artifact files and generated instruction sections are published, checked and retired by one small
+Python program per operation, with the content sent on its input instead of staged in a temporary
+directory on the VM. Every such write on a VM, by any account, takes one lock,
+`/run/lock/agentworks-files.lock`; one that cannot take it within 30 seconds fails, saying that
+another Agentworks operation is writing files on the VM, and changes nothing.
+
 ## Third-party harness integrations, Git credential providers and secret backends
 
 Every capability's stages receive a `RunContext`, whose execution accessors changed: a stage that
@@ -337,9 +343,10 @@ for it can register. Beyond the version and the accessors:
 
 - **Harness integrations.** `_probe_target(access)` receives the launch target's `VMAccess` and
   passes it to `require_commands(commands, access, ...)`. A setup facet's invocation carries
-  `access` beside `runner`. `probe_native` takes a `VMAccess` first. `check_required_commands` and
-  `run_user_shell_command` take a `VMAccess` and an optional `deadline` in seconds, and
-  `run_user_shell_command` returns the command's exit status.
+  `access`, and `files`, that access's file operations under setup's per-request bound, beside
+  `runner`; `SetupReadiness` no longer carries a runner. `probe_native` takes a `VMAccess` first.
+  `check_required_commands` and `run_user_shell_command` take a `VMAccess` and an optional
+  `deadline` in seconds, and `run_user_shell_command` returns the command's exit status.
 - **Git credential providers.** A provider's runup check reads the access the same way.
 - **Secret backends.** Nothing else changes.
 

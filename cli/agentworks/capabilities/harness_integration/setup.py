@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 
     from agentworks.db import VMRow
     from agentworks.execution.access import VMAccess
+    from agentworks.execution.files import Files
     from agentworks.harness_setup.model import NativeClaim, SetupFacet, SetupRecord
     from agentworks.transports import Transport
 
@@ -22,7 +23,9 @@ class SetupInvocation:
     """Core supplies execution and acknowledges confirmed ownership changes.
 
     ``access`` runs requests as the identity being set up (the admin for VM,
-    admin and workspace setup, the agent for its own). Checkpoint the complete
+    admin and workspace setup, the agent for its own), and ``files`` is that
+    access's file operations under setup's per-request bound; use it for
+    every file operation. Checkpoint the complete
     remaining claim set after each ownership change. Returning from the
     callback means persistence succeeded; an exception stops further writes.
     Initial creation may buffer until the owning row is inserted. Report an
@@ -32,6 +35,7 @@ class SetupInvocation:
 
     vm: VMRow
     access: VMAccess
+    files: Files
     runner: Transport
     prior: SetupRecord | None
     checkpoint: Callable[[tuple[NativeClaim, ...]], None]
@@ -95,7 +99,6 @@ class SetupReadiness:
     """Load only requested ancestor facts, cached for this readiness invocation."""
 
     lookup: Callable[[SetupFacet], SetupEvidence] = field(repr=False)
-    runner: Transport
     _cache: dict[SetupFacet, SetupEvidence] = field(default_factory=dict, init=False, repr=False)
 
     def _get(self, facet: SetupFacet) -> SetupEvidence:

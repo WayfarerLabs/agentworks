@@ -10,14 +10,27 @@ from typing import cast
 
 import pytest
 
+from agentworks.artifacts.session import HOME_PROBE
 from agentworks.capabilities.harness_integration.setup import UserSetupInvocation
 from agentworks.db import VMRow
 from agentworks.execution.access import VMAccess
+from agentworks.execution.files import Files
+from agentworks.execution.requests import Command
+from agentworks.execution.results import Completed, Result
 from agentworks.harness_setup.model import NativeClaim, SetupRecord
 from agentworks.plugins._harness_native.native_cli import NativeTool
 from agentworks.ssh import SSHResult
 from agentworks.transports import Transport
-from tests.vm_access_support import Admin, RecordingVMAccess, account_shell, local_vm_access
+from tests.vm_access_support import (
+    Admin,
+    Call,
+    RecordingVMAccess,
+    account_shell,
+    check_result,
+    is_command_check,
+    local_vm_access,
+    run_file_program_locally,
+)
 
 
 class LocalFixtureTransport(Transport):
@@ -96,6 +109,35 @@ class LocalFixtureTransport(Transport):
     def call_streaming(self, command: str, **kwargs) -> int:
         raise AssertionError("streaming operations are outside fixture scope")
 
+    def answer(self, call: Call) -> Result | None:
+        """Answer an access's request as this fixture's account would, or ``None`` for the default outcome.
+
+        File operations run their real program here (``run_file_program_locally``),
+        a ``Command`` runs here in the fixture's home and environment, the
+        session home probe reads this fixture's home, and every required
+        command is present.
+        """
+        if is_command_check(call.request):
+            return check_result(call.request, 0)
+        if call.request == HOME_PROBE:
+            return Result(Completed(0), str(self.home).encode())
+        if isinstance(call.request, Command):
+            completed = subprocess.run(
+                list(call.request.argv), cwd=self.home, env=self.environment, capture_output=True, check=False
+            )
+            return Result(Completed(completed.returncode), completed.stdout, completed.stderr)
+        return run_file_program_locally(call)
+
+    def access(self) -> RecordingVMAccess:
+        """A recording access to this fixture's account, answered by :meth:`answer`."""
+        access = RecordingVMAccess([], Admin())
+        access.answer = self.answer
+        return access
+
+    def files(self) -> Files:
+        """File operations on this fixture's files, through :meth:`access`."""
+        return self.access().files()
+
 
 def fixture_access(monkeypatch: pytest.MonkeyPatch, transport: LocalFixtureTransport) -> VMAccess:
     """A real ``VMAccess`` to the fixture's account: its home, and a login shell that reads only its ``.profile``."""
@@ -111,7 +153,8 @@ def invocation(
 ):
     return UserSetupInvocation(
         vm=cast(VMRow, object()),
-        access=RecordingVMAccess([], Admin()),
+        access=(recorded := transport.access()),
+        files=recorded.files(),
         runner=transport,
         prior=prior,
         checkpoint=claims.append,

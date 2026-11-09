@@ -39,7 +39,7 @@ def test_setup_defers_all_colliding_origins_and_applies_independent_rule(
     if hasattr(module, setup_method):
         monkeypatch.setattr(module, setup_method, native_setup)
     if implementation is CodexIntegration:
-        monkeypatch.setattr(module, "guidance_path", lambda runner, root: root + "/AGENTS.md")
+        monkeypatch.setattr(module, "guidance_path", lambda files, root: root + "/AGENTS.md")
     outer = replace(artifact(artifact_type), origin=ArtifactOrigin("vm", "vm", "vm", entry="review"))
     component = "agent" if facet == "user" else "workspace"
     local = replace(artifact(artifact_type), origin=ArtifactOrigin(component, component, "local", entry="review"))
@@ -47,7 +47,8 @@ def test_setup_defers_all_colliding_origins_and_applies_independent_rule(
     incomplete = Mock()
     common = {
         "vm": db.insert_vm("vm", "site", "host"),
-        "access": RecordingVMAccess([], Admin()),
+        "access": (recorded := RecordingVMAccess([], Admin())),
+        "files": recorded.files(),
         "runner": _FakeTarget(),
         "prior": None,
         "checkpoint": lambda claims: None,
@@ -142,7 +143,8 @@ def test_deferring_a_renamed_existing_entry_exposes_its_other_native_collision(d
     incomplete = Mock()
     invocation = UserSetupInvocation(
         vm=db.insert_vm("vm", "site", "host"),
-        access=RecordingVMAccess([], Admin()),
+        access=(recorded := RecordingVMAccess([], Admin())),
+        files=recorded.files(),
         runner=_FakeTarget(),
         prior=None,
         checkpoint=lambda claims: None,

@@ -47,6 +47,9 @@ if TYPE_CHECKING:
     from agentworks.vms.templates import ResolvedVMTemplate
     from agentworks.workspaces.templates import ResolvedTemplate
 
+VM_SETUP_DEADLINE = 60
+"""Seconds that bound each of VM-scope setup's requests, as create and reinit bound every call they make."""
+
 
 def _needed(
     db: Database,
@@ -178,6 +181,7 @@ def apply_vm_setup(
 ) -> None:
     """Apply VM then admin setup on the already-established admin transport."""
     access = execution.vm_access(vm, config, Admin(), log=logger.record)
+    files = access.files(deadline=VM_SETUP_DEADLINE)
     for item in inputs:
         context = ResourceContext(
             vm_name=vm.name, platform=site_platform_name(vm.site, registry), site=vm.site, user=vm.admin_username
@@ -188,6 +192,7 @@ def apply_vm_setup(
             invocation: SetupInvocation = VMSetupInvocation(
                 vm=vm,
                 access=access,
+                files=files,
                 runner=runner,
                 environment=environment,
                 secrets=values,
@@ -198,6 +203,7 @@ def apply_vm_setup(
             invocation = UserSetupInvocation(
                 vm=vm,
                 access=access,
+                files=files,
                 runner=runner,
                 environment=environment,
                 secrets=values,
@@ -238,9 +244,11 @@ def apply_agent_setup(
     runner = SetupRunner(
         transport_for_user(vm, config, user=username, logger=logger), environment, redactions=values.values()
     )
+    access = execution.vm_access(vm, config, Agent(inputs.name, username), log=logger.record)
     invocation = UserSetupInvocation(
         vm=vm,
-        access=execution.vm_access(vm, config, Agent(inputs.name, username), log=logger.record),
+        access=access,
+        files=access.files(),
         runner=runner,
         environment=environment,
         secrets=values,
@@ -283,9 +291,11 @@ def apply_workspace_setup(
     )
     environment = inputs.environment(values, context)
     runner = SetupRunner(transport(vm, config, logger=logger), environment, redactions=values.values())
+    access = execution.vm_access(vm, config, Admin(), log=logger.record)
     invocation = WorkspaceSetupInvocation(
         vm=vm,
-        access=execution.vm_access(vm, config, Admin(), log=logger.record),
+        access=access,
+        files=access.files(),
         runner=runner,
         environment=environment,
         secrets=values,

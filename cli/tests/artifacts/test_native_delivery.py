@@ -528,7 +528,8 @@ def test_user_native_home_boundary_precedes_other_setup(db, monkeypatch, impleme
     integration = implementation.for_setup(owner_kind="agent", owner_name="alice", facet="user", config={})
     invocation = UserSetupInvocation(
         vm=db.insert_vm("vm", "lima", "vm"),
-        access=RecordingVMAccess([], Admin()),
+        access=(recorded := RecordingVMAccess([], Admin())),
+        files=recorded.files(),
         runner=SimpleNamespace(),
         prior=None,
         checkpoint=lambda claims: None,
@@ -556,7 +557,8 @@ def test_codex_external_home_does_not_block_home_owned_skills(db, monkeypatch):
     result = integration.user_init(
         UserSetupInvocation(
             vm=db.insert_vm("vm", "lima", "vm"),
-            access=RecordingVMAccess([], Admin()),
+            access=(recorded := RecordingVMAccess([], Admin())),
+            files=recorded.files(),
             runner=SimpleNamespace(),
             prior=None,
             checkpoint=lambda claims: None,
@@ -972,13 +974,14 @@ def test_setup_native_name_conflict_defers_only_affected_artifact(implementation
 
     monkeypatch.setattr(module, "probe_native", check)
     if implementation is CodexIntegration:
-        monkeypatch.setattr(module, "guidance_path", lambda runner, root: root + "/AGENTS.md")
+        monkeypatch.setattr(module, "guidance_path", lambda files, root: root + "/AGENTS.md")
     bad = artifact(ArtifactType.SKILL)
     good = artifact(ArtifactType.RULE)
     incomplete: list[str] = []
     common = {
         "vm": db.insert_vm("vm", "site", "host"),
-        "access": RecordingVMAccess([], Admin()),
+        "access": (recorded := RecordingVMAccess([], Admin())),
+        "files": recorded.files(),
         "runner": _FakeTarget(),
         "prior": None,
         "checkpoint": lambda claims: None,
@@ -1018,7 +1021,7 @@ def test_setup_name_conflict_deferral_uses_safe_owned_retirement(tmp_path, db, m
     bad, good = artifact(ArtifactType.SKILL), artifact(ArtifactType.RULE)
     inputs = received(bad, good)
     plan = claude.outer_artifacts(inputs, str(target.home / ".claude"))
-    current = publish_artifacts(target, plan.files, (), lambda files: None, roots=(str(target.home),)).files
+    current = publish_artifacts(target.files(), plan.files, (), lambda files: None, roots=(str(target.home),)).files
     entrypoint = target.home / ".claude/skills/review/SKILL.md"
     if modified:
         entrypoint.write_text("operator changed entrypoint")
@@ -1028,7 +1031,8 @@ def test_setup_name_conflict_deferral_uses_safe_owned_retirement(tmp_path, db, m
     incomplete: list[str] = []
     invocation = UserSetupInvocation(
         vm=db.insert_vm("vm", "site", "host"),
-        access=RecordingVMAccess([], Admin()),
+        access=(recorded := target.access()),
+        files=recorded.files(),
         runner=target,
         prior=None,
         checkpoint=lambda claims: None,
@@ -1043,7 +1047,7 @@ def test_setup_name_conflict_deferral_uses_safe_owned_retirement(tmp_path, db, m
             raise NativeArtifactConflictError("fixture competing skill", ("skill:review",), hint="fixture repair")
 
     filtered = defer_setup_conflicts(plan, invocation, check)
-    result = publish_artifacts(target, filtered.files, current, lambda files: None, roots=(str(target.home),))
+    result = publish_artifacts(target.files(), filtered.files, current, lambda files: None, roots=(str(target.home),))
     assert incomplete and filtered.deferred[0].input_id == bad.identity
     assert competing.read_text() == "operator content"
     assert entrypoint.exists() is modified

@@ -32,7 +32,6 @@ from agentworks.schema import CapabilityConfig
 from agentworks.vms.templates import ResolvedVMTemplate
 from tests.artifacts.test_routing import graph
 from tests.native_setup_fixtures import LocalFixtureTransport
-from tests.vm_access_support import Admin, RecordingVMAccess
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="isolated Linux user filesystem execution")
 
@@ -47,7 +46,8 @@ def fallback_placements(db, tmp_path, monkeypatch):
     target = LocalFixtureTransport(tmp_path / "guest")
     user = UserSetupInvocation(
         vm=fixture.vm,
-        access=RecordingVMAccess([], Admin()),
+        access=(recorded := target.access()),
+        files=recorded.files(),
         runner=target,
         prior=None,
         checkpoint=lambda claims: None,
@@ -55,7 +55,12 @@ def fallback_placements(db, tmp_path, monkeypatch):
         home=str(target.home),
     )
     machine = VMSetupInvocation(
-        vm=fixture.vm, access=RecordingVMAccess([], Admin()), runner=target, prior=None, checkpoint=lambda claims: None
+        vm=fixture.vm,
+        access=(recorded := target.access()),
+        files=recorded.files(),
+        runner=target,
+        prior=None,
+        checkpoint=lambda claims: None,
     )
     control = {"template": ResolvedVMTemplate("vm", artifacts=fixture.owners["vm"].artifacts), "fail": True}
     monkeypatch.setattr("agentworks.vms.templates.resolve_live_template", lambda *a, **k: control["template"])

@@ -178,7 +178,7 @@ def delete_workspace(
                 if vm is not None and target is not None:
                     from agentworks.artifacts.session import cleanup_session_artifacts
                     from agentworks.harness_setup.state import read_native_setup
-                    from agentworks.sessions.manager import _build_session_target
+                    from agentworks.sessions.manager import _session_access
 
                     for session in db.list_sessions(workspace_name=name):
                         try:
@@ -187,10 +187,9 @@ def delete_workspace(
                                 for record in read_native_setup(db, "session", session.name).records
                             ):
                                 continue
-                            session_target = _build_session_target(
-                                session, vm=vm, config=config, db=db, admin_target=target
+                            cleanup_session_artifacts(
+                                db, session, _session_access(session, vm=vm, config=config, db=db, logger=ssh_logger)
                             )
-                            cleanup_session_artifacts(db, session, session_target)
                         except Exception:
                             output.warn(
                                 f"Private artifact cleanup for session '{session.name}' could not finish. "

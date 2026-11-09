@@ -32,7 +32,7 @@ def apply(
     desired: tuple[ArtifactFile, ...],
     previous: tuple[OwnedArtifactFile, ...] = (),
 ) -> ArtifactPublication:
-    return publish_artifacts(target, desired, previous, lambda files: None, roots=(str(target.home),))
+    return publish_artifacts(target.files(), desired, previous, lambda files: None, roots=(str(target.home),))
 
 
 @pytest.mark.parametrize("initial", [None, b"", b"operator content without newline", b"operator content\r\n"])
@@ -107,55 +107,42 @@ def test_malformed_retirement_retains_cleanup_evidence(target):
 
 
 def test_section_race_does_not_overwrite_concurrent_operator_edit(target, monkeypatch):
-    from agentworks.native_files import NativeFiles
+    from agentworks.execution.files import Files
 
     path = target.home / "AGENTS.md"
     path.write_bytes(b"initial operator text")
-    publish = NativeFiles.publish
+    write_if = Files.write_if
 
-    def concurrent_edit(self, destination, content, **kwargs):
+    def concurrent_edit(self, destination, data, **kwargs):
         path.write_bytes(b"concurrent edit")
-        return publish(self, destination, content, **kwargs)
+        return write_if(self, destination, data, **kwargs)
 
-    monkeypatch.setattr(NativeFiles, "publish", concurrent_edit)
+    monkeypatch.setattr(Files, "write_if", concurrent_edit)
     with pytest.raises(StateError):
         apply(target, (section(path),))
     assert path.read_bytes() == b"concurrent edit"
 
 
-def test_root_publication_elevates_only_guarded_operations_and_sets_public_modes(target, monkeypatch):
-    import agentworks.native_files as native
-
-    # Record elevation at the transport boundary, while executing inside this
-    # unprivileged fixture. No test changes the host's machine-wide directories.
-    run = target.run
-    elevated = []
-
-    def run_guarded(command, **kwargs):
-        if command.startswith("sudo -n -- "):
-            elevated.append(command)
-            command = command.removeprefix("sudo -n -- ")
-        return run(command, **kwargs)
-
-    target.run = run_guarded
+def test_root_publication_elevates_every_file_operation_and_sets_public_modes(target, monkeypatch):
+    # Elevation is recorded at the access while the fixture runs each operation as
+    # this test's own user. No test changes the host's machine-wide directories.
     boundary = target.root / "machine/artifacts"
-    monkeypatch.setattr(native, "ROOT_FILE_DIRECTORIES", (str(boundary),))
+    monkeypatch.setattr("agentworks.artifacts.publication.ROOT_FILE_DIRECTORIES", (str(boundary),))
+    access = target.access()
     directory = boundary / "skill"
     desired = (
         replace(section(directory / "AGENTS.md"), generated_section=True),
         ArtifactFile(str(directory / "run"), b"executable", ("b" * 64,), executable=True),
     )
-    result = publish_artifacts(target, desired, (), lambda files: None, roots=(str(boundary),), root=True)
-    assert len(result.files) == 2 and elevated
+    result = publish_artifacts(access.files(), desired, (), lambda files: None, roots=(str(boundary),), root=True)
+    assert len(result.files) == 2
+    assert access.requests() and all(request.elevated for request in access.requests())
     assert (directory / "AGENTS.md").stat().st_mode & 0o777 == 0o644
     assert (directory / "run").stat().st_mode & 0o777 == 0o755
     assert directory.stat().st_mode & 0o777 == 0o755
     assert directory.parent.stat().st_mode & 0o777 == 0o755
-    assert all("python3 -c" in command for command in elevated)
-    assert not list((target.root / "tmp").iterdir())
-    # Reapplication reads a protected destination into transport-owned staging.
     assert (
-        publish_artifacts(target, desired, result.files, lambda files: None, roots=(str(boundary),), root=True)
+        publish_artifacts(access.files(), desired, result.files, lambda files: None, roots=(str(boundary),), root=True)
         == result
     )
     assert (directory / "AGENTS.md").stat().st_uid == os.getuid()
@@ -224,27 +211,32 @@ def test_generated_section_preserves_posix_acl(target):
 
 
 def test_attribute_copy_failure_leaves_original_unchanged(target, monkeypatch):
-    import agentworks.native_files as native
+    from agentworks.execution import files
 
     path = target.home / "AGENTS.md"
     before = b"operator instructions\n"
     path.write_bytes(before)
     os.setxattr(path, "user.artifact-test", b"operator metadata")
     metadata = path.stat()
+    source = files.program_source()
     monkeypatch.setattr(
-        native,
-        "_FILE_PROGRAM",
-        "import os, errno\n"
-        "def deny_attribute_copy(*args):\n"
-        "    raise OSError(errno.EPERM, 'fixture attribute copy denial')\n"
-        "os.setxattr = deny_attribute_copy\n" + native._FILE_PROGRAM,
+        files,
+        "program_source",
+        lambda: source.replace(
+            "\nimport time\n",
+            "\nimport time\n"
+            "def deny_attribute_copy(*args):\n"
+            "    raise OSError(errno.EPERM, 'fixture attribute copy denial')\n"
+            "os.setxattr = deny_attribute_copy\n",
+            1,
+        ),
     )
     with pytest.raises(StateError):
         apply(target, (section(path),))
     assert path.read_bytes() == before
     assert path.stat().st_ino == metadata.st_ino
     assert os.getxattr(path, "user.artifact-test") == b"operator metadata"
-    assert not list(path.parent.glob(".agentworks-settings-*"))
+    assert not list(path.parent.glob(".agentworks-tmp-*"))
 
 
 def test_generated_section_does_not_inherit_a_new_directory_acl(target):

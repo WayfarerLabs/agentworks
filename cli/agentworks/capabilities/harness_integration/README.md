@@ -229,7 +229,8 @@ session facet. Its session implementation:
 
 It does not own the tmux session, the user, the workspace, or attach and detach. Agentworks provides
 those; the session facet only decides what runs in the pane. Setup facets use the core-supplied
-runner and checkpoint callback to configure native tooling at their owning scope.
+access (`invocation.access`), its file operations (`invocation.files`) and checkpoint callback to
+configure native tooling at their owning scope.
 
 ## Technical Overview
 
@@ -379,7 +380,6 @@ The session facet's `check_setup(SetupReadiness)` may inspect `.vm`, `.user`, or
 Evidence is loaded once per requested facet and includes the actual owner, its last setup record,
 status, and remediation. A record is current only when completion, effective declaration, and native
 destination identity agree. Checks do not reread workstation settings sources or resolve secrets.
-Integrations can use the supplied session runner for read-only native probes.
 
 Return `SetupGap` entries with `required` or `recommended` severity and an integration-specific
 reason. Core refuses required gaps before session runtime replacement and warns for recommended

@@ -208,7 +208,9 @@ def delete_session(
 
             from agentworks.artifacts.session import cleanup_session_artifacts
 
-            cleanup_session_artifacts(db, session, session_target)
+            cleanup_session_artifacts(
+                db, session, _mgr._session_access(session, vm=vm, config=config, db=db, logger=admin_target.logger)
+            )
             db.delete_session(name)
 
             # Clean up implicit grant for this session

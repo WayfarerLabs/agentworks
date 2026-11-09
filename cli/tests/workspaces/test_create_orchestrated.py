@@ -23,6 +23,7 @@ from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
 from agentworks.workspaces import manager as workspace_manager
 from tests.conftest import ManifestDoc, seed_vm_trust, stub_vm_ssh_identity
+from tests.vm_access_support import answer_destination_identity
 
 if TYPE_CHECKING:
     from agentworks.capabilities.base import OperationScope, RunContext
@@ -383,7 +384,7 @@ def test_workspace_scope_reaches_node_readiness(
 
 
 def test_workspace_setup_joins_eager_env_and_follows_directory_creation(
-    db, make_config, mutation, monkeypatch, resolve_counter
+    db, make_config, mutation, monkeypatch, resolve_counter, vm_access_recorder
 ):
     from unittest.mock import Mock
 
@@ -397,7 +398,7 @@ def test_workspace_setup_joins_eager_env_and_follows_directory_creation(
     monkeypatch.setenv("AW_SECRET_PROJECT_TOKEN", "project-private")
     target = Mock(spec=Transport)
     target.logger = None
-    target.run.return_value.stdout = "\nAGW_NATIVE_ID=native-identity\n"
+    vm_access_recorder.answer = answer_destination_identity
     monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: target)
     calls = []
 
@@ -425,7 +426,9 @@ def test_workspace_setup_joins_eager_env_and_follows_directory_creation(
     assert read_native_setup(db, "workspace", "project").records[0].complete
 
 
-def test_native_failure_preserves_workspace_and_continues_sibling_and_grants(db, make_config, mutation, monkeypatch):
+def test_native_failure_preserves_workspace_and_continues_sibling_and_grants(
+    db, make_config, mutation, monkeypatch, vm_access_recorder
+):
     from dataclasses import replace
     from unittest.mock import Mock
 
@@ -441,7 +444,7 @@ def test_native_failure_preserves_workspace_and_continues_sibling_and_grants(db,
     db.insert_agent("dev", "box", "agt-dev", template="default", grant_all=True)
     target = Mock(spec=Transport)
     target.logger = None
-    target.run.return_value.stdout = "\nAGW_NATIVE_ID=native-identity\n"
+    vm_access_recorder.answer = answer_destination_identity
     monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: target)
     events = []
 

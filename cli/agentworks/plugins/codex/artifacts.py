@@ -26,14 +26,13 @@ from agentworks.artifacts.native.common import (
     validate_native_argv,
 )
 from agentworks.errors import ConfigError
-from agentworks.native_files import NativeFiles
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from agentworks.artifacts.application import SessionArtifactContext
     from agentworks.artifacts.model import ArtifactInput, ArtifactInputs
-    from agentworks.transports import Transport
+    from agentworks.execution.files import Files
 
 
 _OPTIONS = {"model": str, "model_reasoning_effort": str}
@@ -59,12 +58,11 @@ def _persona(item: ArtifactInput, *, role_layer: bool = False) -> str:
     return rendered
 
 
-def guidance_path(runner: Transport, root: str) -> str:
+def guidance_path(files: Files, root: str) -> str:
     """Use the instruction file Codex actually selects at this directory."""
     override = f"{root}/AGENTS.override.md"
-    with NativeFiles(runner) as files:
-        content = files.read(override)
-    return override if content and content.strip() else f"{root}/AGENTS.md"
+    content = files.read(override)
+    return override if content is not None and content.data.strip() else f"{root}/AGENTS.md"
 
 
 def outer_artifacts(

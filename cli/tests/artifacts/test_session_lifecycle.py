@@ -374,7 +374,7 @@ def test_deleted_name_reuses_no_private_run_or_uuid(lifecycle):
     old = lifecycle.db.get_session("s1")
     assert old is not None
     files = lifecycle.files()
-    cleanup_session_artifacts(lifecycle.db, old, lifecycle.target)
+    cleanup_session_artifacts(lifecycle.db, old, lifecycle.target.access())
     lifecycle.db.delete_session("s1")
     assert all(not path.exists() for path in files)
     replacement = lifecycle.db.insert_session(
@@ -395,7 +395,7 @@ def test_modified_session_file_keeps_ownership_for_recovery(lifecycle):
     files = lifecycle.files()
     files[0].write_text("operator modification")
     with pytest.raises(StateError):
-        cleanup_session_artifacts(lifecycle.db, session, lifecycle.target)
+        cleanup_session_artifacts(lifecycle.db, session, lifecycle.target.access())
     assert lifecycle.db.get_session("s1") is not None
     assert files[0].exists()
     assert any(
@@ -452,13 +452,13 @@ def test_unconfirmed_new_runtime_keeps_its_run_and_artifacts(lifecycle, monkeypa
 
 
 def test_partial_publication_retains_old_run_and_retry_cleans_staged_files(lifecycle, monkeypatch):
-    from agentworks.native_files import NativeFiles
+    from agentworks.execution.files import Files
 
     lifecycle.restart()
     previous = lifecycle.db.get_session("s1")
     old_files = lifecycle.files()
     assert previous is not None
-    original = NativeFiles.publish
+    original = Files.write_if
     calls = 0
 
     def fail_second(self, *args, **kwargs):
@@ -469,7 +469,7 @@ def test_partial_publication_retains_old_run_and_retry_cleans_staged_files(lifec
         return original(self, *args, **kwargs)
 
     lifecycle.events.clear()
-    monkeypatch.setattr(NativeFiles, "publish", fail_second)
+    monkeypatch.setattr(Files, "write_if", fail_second)
     with pytest.raises(StateError):
         lifecycle.restart()
     interrupted_files = lifecycle.files()
@@ -479,7 +479,7 @@ def test_partial_publication_retains_old_run_and_retry_cleans_staged_files(lifec
     assert current is not None and current.run_id == previous.run_id
     assert "kill" not in lifecycle.events
     assert not read_native_setup(lifecycle.db, "session", "s1").records[0].complete
-    monkeypatch.setattr(NativeFiles, "publish", original)
+    monkeypatch.setattr(Files, "write_if", original)
     lifecycle.restart()
     assert len(lifecycle.files()) == 2
     assert all(not path.exists() for path in interrupted_files)

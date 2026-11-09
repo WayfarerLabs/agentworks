@@ -72,7 +72,7 @@ def test_actual_session_delivery_caller_redacts_probe_failures(delivery, monkeyp
         vm=Mock(),
         workspace=Mock(),
         agent_name="worker",
-        runner=Mock(spec=Transport),
+        access=access,
         environment={"TOKEN": secret},
         secret_target=SecretTarget(vm={}),
         linux_user="worker",

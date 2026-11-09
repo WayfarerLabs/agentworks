@@ -551,13 +551,16 @@ application. Inactive receivers preserve the same metadata through fixed passthr
 content stays incomplete through the session; it is never counted as delivered.
 
 `application.py` defines integration results, file/section ownership and recorded skips.
-`publication.py` validates plugin output and uses the shared guarded `NativeFiles` transport
-utility. Native formats and policy live in integration adapters. Existing files whose bytes match
-the declaration can be adopted, with recorded ownership and a report. Differing unowned or manually
-changed files are preserved with recorded skips and evidence for retry; independent artifacts still
-apply. A conflicting member skips its whole skill package, including when a modified obsolete member
-must be retained while the package is still requested. Generated instruction sections instead follow
-their explicit replaceable-section contract.
+`publication.py` validates plugin output and publishes it through a `Files`, an access's file
+operations (setup passes its invocation's, sessions their identity's): every destination is
+inspected before any write, and each write, removal and prune is conditional on what was observed.
+It owns the directories VM-scope publication may write as root. Native formats and policy live in
+integration adapters. Existing files whose bytes match the declaration can be adopted, with recorded
+ownership and a report. Differing unowned or manually changed files are preserved with recorded
+skips and evidence for retry; independent artifacts still apply. A conflicting member skips its
+whole skill package, including when a modified obsolete member must be retained while the package is
+still requested. Generated instruction sections instead follow their explicit replaceable-section
+contract.
 
 `session.py` prepares the launch context, stages a new private run before old-runtime teardown, then
 retires obsolete owned files after teardown. No artifact bookkeeping changes VM deletion.

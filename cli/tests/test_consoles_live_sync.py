@@ -38,6 +38,10 @@ if TYPE_CHECKING:
 CON = "aw-console-con"
 
 
+# Session delete builds the session identity's access for artifact cleanup; it is the recording fake.
+pytestmark = pytest.mark.usefixtures("vm_access_recorder")
+
+
 def _mark_stopped(db: Database, name: str, target: _FakeTarget, monkeypatch: pytest.MonkeyPatch) -> None:
     """Model a stopped dedicated runtime, including absence observations."""
     import shlex

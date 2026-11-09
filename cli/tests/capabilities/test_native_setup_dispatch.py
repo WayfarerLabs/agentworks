@@ -6,6 +6,7 @@ from unittest.mock import Mock
 import pytest
 
 from agentworks.artifacts.model import ArtifactInputs
+from agentworks.artifacts.publication import ROOT_FILE_DIRECTORIES
 from agentworks.artifacts.routing import RoutingResult
 from agentworks.capabilities.harness_integration.setup import (
     SetupInvocation,
@@ -20,7 +21,6 @@ from agentworks.harness_setup.inputs import SetupInputs
 from agentworks.harness_setup.model import NativeClaim, NativeSetupState, SetupRecord
 from agentworks.harness_setup.outcomes import SetupFailure
 from agentworks.harness_setup.state import read_native_setup, write_native_setup
-from agentworks.native_files import ROOT_FILE_DIRECTORIES
 from agentworks.plugins import Plugin, seated_plugin
 from agentworks.schema import CapabilityConfig
 from agentworks.secrets.orchestration import SecretTarget
@@ -38,7 +38,14 @@ def facet_case(db, monkeypatch, component):
         activations={},
         target=SecretTarget(vm={}),
     )
-    common = dict(vm=vm, access=RecordingVMAccess([], Admin()), runner=Mock(logger=None), prior=None, checkpoint=Mock())
+    common = dict(
+        vm=vm,
+        access=(recorded := RecordingVMAccess([], Admin())),
+        files=recorded.files(),
+        runner=Mock(logger=None),
+        prior=None,
+        checkpoint=Mock(),
+    )
     invocation: SetupInvocation
     if component == "vm":
         invocation = VMSetupInvocation(**common)
@@ -148,7 +155,8 @@ def setup_case(tmp_path, monkeypatch):
     )
     invocation = UserSetupInvocation(
         vm=vm,
-        access=RecordingVMAccess([], Admin()),
+        access=(recorded := RecordingVMAccess([], Admin())),
+        files=recorded.files(),
         runner=Mock(logger=None),
         prior=None,
         checkpoint=lambda claims: None,

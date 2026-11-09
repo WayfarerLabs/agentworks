@@ -11,11 +11,12 @@ import pytest
 
 import agentworks.native_files as native
 from agentworks.artifacts.application import ArtifactFile, OwnedArtifactFile
-from agentworks.artifacts.publication import publish_artifacts
+from agentworks.artifacts.publication import ROOT_FILE_DIRECTORIES, publish_artifacts
 from agentworks.errors import ExternalError, StateError
 from agentworks.execution.trust import HOST_TRUST
 from agentworks.transports import Transport
 from tests.native_setup_fixtures import LocalFixtureTransport
+from tests.vm_access_support import Admin, RecordingVMAccess
 
 
 @pytest.mark.parametrize(
@@ -54,7 +55,7 @@ def test_disallowed_root_operations_do_not_stage_or_dispatch(path, operation, mo
     slot.assert_not_called()
 
 
-@pytest.mark.parametrize("boundary", native.ROOT_FILE_DIRECTORIES)
+@pytest.mark.parametrize("boundary", ROOT_FILE_DIRECTORIES)
 def test_allowed_trees_accept_directories_and_descendants_but_not_boundary_files(boundary):
     runner = Mock(spec=Transport)
     runner.run.return_value.ok = True
@@ -95,21 +96,21 @@ def test_root_pruning_refuses_cleanup_outside_boundary_before_dispatch(package_r
     ],
 )
 def test_publication_rejects_desired_and_persisted_root_escape_before_staging(path, package_root, previous):
-    runner = Mock(spec=Transport)
+    access = RecordingVMAccess([], Admin())
     checkpoint = Mock()
     desired = ArtifactFile(path, b"rule", ("a" * 64,), package_root=package_root)
     prior = OwnedArtifactFile(path=path, sha256="b" * 64, origins=("a" * 64,), package_root=package_root)
     # Even a caller-supplied broader scope cannot enlarge the global boundary.
     with pytest.raises(StateError):
         publish_artifacts(
-            runner,
+            access.files(),
             () if previous else (desired,),
             (prior,) if previous else (),
             checkpoint,
             roots=("/etc",),
             root=True,
         )
-    assert runner.mock_calls == []
+    assert access.requests() == []
     checkpoint.assert_not_called()
 
 

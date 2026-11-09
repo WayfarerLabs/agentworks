@@ -69,7 +69,7 @@ def test_codex_selects_native_instruction_file_without_changing_it(tmp_path, ove
     selected = root / "AGENTS.override.md"
     if override is not None:
         selected.write_bytes(override)
-    path = codex.guidance_path(target, str(root))
+    path = codex.guidance_path(target.files(), str(root))
     assert path == str(selected if override and override.strip() else ordinary)
     assert ordinary.read_bytes() == b"Existing ordinary instructions\n"
     if override is not None:

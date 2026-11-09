@@ -20,7 +20,6 @@ from agentworks.origin import Origin
 from agentworks.vms.templates import ResolvedVMTemplate
 from tests.artifacts.test_routing import graph
 from tests.native_setup_fixtures import LocalFixtureTransport
-from tests.vm_access_support import Admin, RecordingVMAccess
 
 
 @pytest.mark.parametrize("receiver", ["admin", "agent", "workspace"])
@@ -118,7 +117,8 @@ def test_receiver_acknowledges_known_inputs_without_certifying_incoming_routes(
     runner = LocalFixtureTransport(tmp_path / "guest")
     invocation = UserSetupInvocation(
         vm=fixture.vm,
-        access=RecordingVMAccess([], Admin()),
+        access=(recorded := runner.access()),
+        files=recorded.files(),
         runner=runner,
         prior=None,
         checkpoint=lambda claims: None,
@@ -134,7 +134,9 @@ def test_receiver_acknowledges_known_inputs_without_certifying_incoming_routes(
         "agentworks.harness_setup.readiness.destination_id", lambda *args, **kwargs: record.destination_id
     )
     assert (
-        evaluate_setup(db, fixture.owners["agent"], "shell", vm=fixture.vm, runner=runner, remediation="fixture").status
+        evaluate_setup(
+            db, fixture.owners["agent"], "shell", vm=fixture.vm, access=recorded, remediation="fixture"
+        ).status
         == "current"
     )
     routed = fixture.route()

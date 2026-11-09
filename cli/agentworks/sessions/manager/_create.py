@@ -201,17 +201,20 @@ def _preflight_and_resolve(
         # predicts each node's declared secrets (the git-credential
         # tokens here) before that node's own preflight.
         # Then the boundary resolve: the walk-away point.
+        # Preflight precedes secret resolution, so its accesses log nothing.
+        admin_access = _mgr._identity_access(vm, config, None, logger=None)
+        agent_access = (
+            None
+            if plan.existing_agent is None or agent_target is None
+            else _mgr._identity_access(vm, config, plan.existing_agent, logger=None)
+        )
         preflight_all(
             graph.nodes,
             RunContext(
                 config=config,
                 operation_scope=graph.scope,
-                admin_access=_mgr._identity_access(vm, config, None, logger=None),
-                agent_access=(
-                    None
-                    if plan.existing_agent is None or agent_target is None
-                    else _mgr._identity_access(vm, config, plan.existing_agent, logger=None)
-                ),
+                admin_access=admin_access,
+                agent_access=agent_access,
             ),
             registry=graph.registry,
             interaction=interaction,
@@ -231,7 +234,7 @@ def _preflight_and_resolve(
                 vm=vm,
                 workspace=plan.existing_ws,
                 agent_name=plan.agent_name,
-                runner=agent_target or target,
+                access=agent_access or admin_access,
             )
 
     with output.section("Resolving Secrets"):

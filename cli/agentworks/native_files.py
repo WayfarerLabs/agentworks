@@ -10,6 +10,7 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, cast
 
 from agentworks import output
+from agentworks.artifacts.publication import ROOT_FILE_DIRECTORIES
 from agentworks.errors import ExternalError, StateError
 from agentworks.ssh import SSHError
 
@@ -216,9 +217,6 @@ def _observation(stdout: str) -> dict[str, object]:
         raise ValueError
     return cast("dict[str, object]", observed)
 
-
-# Shared by every integration. These are directory boundaries, never file targets.
-ROOT_FILE_DIRECTORIES = ("/etc/claude-code", "/etc/codex", "/opt/agentworks/artifacts")
 
 _UNSUITABLE_PATH = 4
 _DENIED_PATH = 5

@@ -29,6 +29,7 @@ from agentworks.vms.admin import AdminConfig
 from agentworks.vms.templates import resolve_from_dict as resolve_vm
 from agentworks.workspaces.realize import realize_workspace
 from agentworks.workspaces.templates import ResolvedTemplate
+from tests.vm_access_support import answer_destination_identity
 
 # Every access a command builds is the recording fake: these tests run no ssh.
 pytestmark = pytest.mark.usefixtures("vm_access_recorder")
@@ -103,10 +104,10 @@ def test_component_inputs_keep_only_ancestors_and_retirement(db, registry, vm, m
 
 
 @pytest.fixture
-def native(monkeypatch, tmp_path):
+def native(monkeypatch, tmp_path, vm_access_recorder):
+    vm_access_recorder.answer = answer_destination_identity
     target = Mock(spec=Transport)
     target.logger = None
-    target.run.return_value = SimpleNamespace(stdout="\nAGW_NATIVE_ID=native-identity\n", ok=True)
     monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: target)
     monkeypatch.setattr("agentworks.transports.transport_for_user", lambda *a, **k: target)
     monkeypatch.setattr("agentworks.harness_setup.lifecycle.site_platform_name", lambda *a: "fixture")
