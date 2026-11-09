@@ -222,9 +222,9 @@ no empty, `.` or `..` component, as `native_path` checks today. It raises `State
   or any type but a directory or a regular file is status 4, a directory is reported as one, and
   only a regular file is opened. `read`, `stat`'s hash and every compare open a regular file with
   `O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC` (`native_files.py:109`) and `fstat` it: a link
-  (`ELOOP`) or anything not regular is status 4. `O_NONBLOCK` keeps a FIFO from blocking the open.
-  Since `write_if` and `remove_if` compare under the lock before they rename or unlink, the compare
-  is also their type check: neither ever replaces or removes a link.
+  (`ELOOP`), a socket (`ENXIO` on the open) or anything not regular is status 4. `O_NONBLOCK` keeps
+  a FIFO from blocking the open. Since `write_if` and `remove_if` compare under the lock before they
+  rename or unlink, the compare is also their type check: neither ever replaces or removes a link.
 
 **Left to the permissions effort** (R5): a writer that does not take the lock can rename or replace
 a parent directory, not a link, or change the destination, between the walk and the rename; it can

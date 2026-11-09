@@ -129,6 +129,10 @@ def _open_regular(parent: int, name: str) -> int | None:
         descriptor = os.open(name, _OPEN_FILE, dir_fd=parent)
     except FileNotFoundError:
         return None
+    except OSError as error:
+        if error.errno == errno.ENXIO:  # a socket, or a device with nothing behind it
+            raise _Exit(EXIT_UNSUITABLE) from None
+        raise
     if not stat.S_ISREG(os.fstat(descriptor).st_mode):
         os.close(descriptor)
         raise _Exit(EXIT_UNSUITABLE)

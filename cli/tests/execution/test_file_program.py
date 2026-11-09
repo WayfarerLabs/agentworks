@@ -285,6 +285,22 @@ def test_stat_reports_a_directory_and_a_fifo_is_refused_without_blocking(guest: 
     assert (fifo_stat.returncode, fifo_read.returncode) == (file_program.EXIT_UNSUITABLE, file_program.EXIT_UNSUITABLE)
 
 
+def test_a_socket_destination_is_unsuitable_to_every_operation(guest: Guest, monkeypatch: pytest.MonkeyPatch) -> None:
+    import socket
+
+    # A relative bind keeps the socket's address under the platform's short path limit.
+    monkeypatch.chdir(guest.tree)
+    with socket.socket(socket.AF_UNIX) as listener:
+        listener.bind("socket")
+        path = guest.tree / "socket"
+
+        for operation, params, stdin in _all_operations(path):
+            if operation == "prune_empty_parents":  # it removes directories; a socket is no parent
+                continue
+            result = guest.run(operation, params, stdin=stdin)
+            assert result.returncode == file_program.EXIT_UNSUITABLE, (operation, result.stderr)
+
+
 def test_reads_of_absent_paths_and_parents(guest: Guest) -> None:
     for path in (guest.tree / "absent", guest.tree / "missing" / "absent"):
         assert guest.run("read", {"path": str(path)}).returncode == file_program.EXIT_ABSENT
