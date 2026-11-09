@@ -58,6 +58,36 @@ def _fake_backend(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
     return counts
 
 
+def _finish_hints(monkeypatch: pytest.MonkeyPatch) -> list[bool]:
+    """Record whether each how-to-finish hint was built for a VM already logged out (so with the rekey aside)."""
+    from agentworks.vms.manager import power
+
+    recorded: list[bool] = []
+    build = power._finish_delete_hint
+
+    def record(vm: VMRow, *, fix: str, logged_out: bool) -> str:
+        recorded.append(logged_out)
+        return build(vm, fix=fix, logged_out=logged_out)
+
+    monkeypatch.setattr(power, "_finish_delete_hint", record)
+    return recorded
+
+
+def _not_logged_out_warnings(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Record the VM each not-logged-out warning names."""
+    from agentworks.vms.manager import power
+
+    named: list[str] = []
+    warn = power._warn_not_logged_out
+
+    def record(vm: VMRow, reason: str) -> None:
+        named.append(vm.name)
+        warn(vm, reason)
+
+    monkeypatch.setattr(power, "_warn_not_logged_out", record)
+    return named
+
+
 def test_non_enum_policy_deletes_nothing(
     db: Database,
     make_config,  # noqa: ANN001
@@ -369,6 +399,7 @@ def test_backend_delete_failure_keeps_the_row(
     _seed(db)
     counts = _fake_backend(monkeypatch)
     error = _failing_backend_delete(monkeypatch, counts)
+    hints = _finish_hints(monkeypatch)
 
     with pytest.raises(AuthorizationError) as exc:
         vm_manager.delete_vm(db, make_config(), "dvm", yes=True, interaction=TtyInteractionPolicy.REFUSE)
@@ -376,9 +407,8 @@ def test_backend_delete_failure_keeps_the_row(
     assert exc.value is error
     assert counts["delete"] == 1
     assert db.get_vm("dvm") is not None
-    hint = exc.value.hint or ""
-    assert "agw vm delete dvm --force" in hint
-    assert "agw vm rekey" not in hint  # the node was not logged out (the fake reports it stopped)
+    assert "agw vm delete dvm --force" in (exc.value.hint or "")
+    assert hints == [False]  # the node was not logged out (the fake reports it stopped)
 
 
 def test_force_removes_the_row_past_a_backend_delete_failure(
@@ -626,15 +656,40 @@ def test_a_delete_refused_after_the_logout_keeps_the_row_and_says_how_to_finish(
         ProxmoxPlatform, "vm_active", lambda self, row, *, config=None: calls.append("hold") or contextlib.nullcontext()
     )
     monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *args, **kwargs: calls.append("logout"))
+    hints = _finish_hints(monkeypatch)
 
     with pytest.raises(AuthorizationError) as caught:
         vm_manager.delete_vm(db, make_config(), "dvm", yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
     assert caught.value is failure
     assert calls == ["hold", "logout"]
-    hint = caught.value.hint or ""
-    assert hint.index("agw vm delete dvm --force") < hint.index("agw vm rekey dvm")
+    assert hints == [True]
     assert db.get_vm("dvm") is not None
+
+
+def test_a_hold_that_fails_on_release_keeps_the_logouts_own_result(
+    db: Database, make_config, monkeypatch, captured_output: CapturedOutput
+):
+    """The node was logged out, so the delete's warning must not say otherwise, nor drop the rekey aside."""
+    _seed(db)
+    counts = _fake_backend(monkeypatch)
+    _failing_backend_delete(monkeypatch, counts)
+
+    @contextlib.contextmanager
+    def release_fails(self, row, *, config=None):
+        yield
+        raise RuntimeError("the distro would not stop")
+
+    monkeypatch.setattr(ProxmoxPlatform, "vm_active", release_fails)
+    monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *args, **kwargs: None)
+    hints = _finish_hints(monkeypatch)
+    warned = _not_logged_out_warnings(monkeypatch)
+
+    with pytest.raises(AuthorizationError):
+        vm_manager.delete_vm(db, make_config(), "dvm", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert hints == [True]
+    assert warned == []
 
 
 @pytest.mark.parametrize("failure", [ConfigError("site could not bind"), RuntimeError("unexpected boundary failure")])
@@ -696,11 +751,12 @@ def test_a_delete_refused_after_a_failed_logout_names_no_rekey(db: Database, mak
     counts = _fake_backend(monkeypatch)
     _failing_backend_delete(monkeypatch, counts)
     monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *args, **kwargs: "its logout could not be confirmed")
+    hints = _finish_hints(monkeypatch)
 
-    with pytest.raises(AuthorizationError) as caught:
+    with pytest.raises(AuthorizationError):
         vm_manager.delete_vm(db, make_config(), "dvm", yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
-    assert "agw vm rekey" not in (caught.value.hint or "")
+    assert hints == [False]
 
 
 def test_a_forced_delete_past_a_binding_failure_does_not_log_out(
@@ -712,11 +768,12 @@ def test_a_forced_delete_past_a_binding_failure_does_not_log_out(
         lambda *args, **kwargs: (_ for _ in ()).throw(ConfigError("site could not bind")),
     )
     monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *args, **kwargs: pytest.fail("logged out"))
+    warned = _not_logged_out_warnings(monkeypatch)
 
     vm_manager.delete_vm(db, make_config(), "dvm", force=True, yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
     assert db.get_vm("dvm") is None
-    assert any("dvm" in warning and "Tailscale" in warning for warning in captured_output.warnings)
+    assert warned == ["dvm"]
 
 
 def test_a_logged_out_vm_is_not_named_for_removal_from_the_tailnet(

@@ -201,9 +201,10 @@ def delete_vm(
 
     with native_mutation_guard(db.path, vm.name):
         backend_left = False
-        # Why the node was not logged out, reported once the row goes, or None
-        # once it has; only a row with a tailnet address is ever logged out.
-        not_logged_out: str | None = "the VM has no tailnet address"
+        # Why a row with a tailnet address was not logged out, reported once the
+        # row goes; None while nothing kept it from that. A row without one is
+        # never logged out.
+        not_logged_out: str | None = None
         try:
             vm_node, ops_ctx = _live_vm_boundary(db, config, vm, interaction=interaction)
         except UserAbort:
@@ -233,13 +234,19 @@ def delete_vm(
             # nothing (the helper reads its status first), and its delete
             # below refuses or finds the guest gone.
             if vm.tailscale_host:
+                logout_ran = False
                 try:
                     with vm_node.hold_active():
                         not_logged_out = _mgr._tailscale_logout(vm, platform, ops_ctx)
+                        logout_ran = True
                 except UserAbort:
                     raise
                 except Exception as e:
-                    not_logged_out = f"the VM could not be held for its logout ({e})"
+                    # A hold that fails only as it is released, after the logout
+                    # ran, leaves the logout's own result standing: the delete
+                    # below ends the VM the hold was keeping up.
+                    if not logout_ran:
+                        not_logged_out = f"the VM could not be held for its logout ({e})"
             # NOT best-effort: a platform delete that cannot remove the backend
             # VM raises (VMPlatform.delete), which keeps the row unless forced.
             try:
@@ -251,17 +258,16 @@ def delete_vm(
                     if isinstance(failure, AgentworksError):
                         failure.add_hint(
                             _finish_delete_hint(
-                                vm, fix="Fix what the provider refused", logged_out=not_logged_out is None
+                                vm,
+                                fix="Fix what the provider refused",
+                                logged_out=bool(vm.tailscale_host) and not_logged_out is None,
                             )
                         )
                     raise
                 _warn_backend_left(vm, str(failure))
                 backend_left = True
         if vm.tailscale_host and not_logged_out is not None:
-            output.warn(
-                f"Tailscale node {vm.hostname} was not logged out: {not_logged_out}; "
-                f"remove '{vm.hostname}' in the Tailscale admin console if it is listed there."
-            )
+            _warn_not_logged_out(vm, not_logged_out)
 
         # Clean up logs
         from agentworks.ssh import LOG_DIR
@@ -309,6 +315,14 @@ def _finish_delete_hint(vm: VMRow, *, fix: str, logged_out: bool) -> str:
             f"instead, run 'agw vm rekey {vm.name}'."
         )
     return hint
+
+
+def _warn_not_logged_out(vm: VMRow, reason: str) -> None:
+    """The warning for a deleted VM whose Tailscale node was not logged out, so may still be listed."""
+    output.warn(
+        f"Tailscale node {vm.hostname} was not logged out: {reason}; "
+        f"remove '{vm.hostname}' in the Tailscale admin console if it is listed there."
+    )
 
 
 def _warn_backend_left(vm: VMRow, reason: str) -> None:
