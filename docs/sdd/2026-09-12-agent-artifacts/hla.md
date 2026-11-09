@@ -395,9 +395,10 @@ Private publication lives under the actual user's home, conceptually
 `~/.agentworks-artifacts/session/<session_uuid>/<run_id>/`. A native invocation-local loader is
 preferred where supported. An explicit `session-home-skills` workaround can instead publish narrowly
 recognized session-owned packages in that user's ordinary native skill discovery directory. Names
-and descriptions carry exact managed session/run applicability, and public UUID/run environment
-variables identify the launched workload. Those catalogs are shared: other sessions under that user
-may discover the metadata and can read the files. The model decides applicability. This is an honest
+and descriptions identify the managed session. Codex per-run entries also identify their run; Grok's
+stable entry selects the current run through the workload environment. Public UUID/run variables
+identify the launched workload. Those catalogs are shared: other sessions under that user may
+discover the metadata and can read the files. The model decides applicability. This is an honest
 best-effort mechanism, not a native visibility boundary or guaranteed adherence.
 
 Both placements stay beneath the actual user's home. No session artifact is placed in today's shared
@@ -504,8 +505,11 @@ what the model has read. This is best-effort file access, not guaranteed automat
 Generated workspace files should be excluded locally through Git-resolved metadata, using exact
 confirmed paths and ordinary applied-state associations. Do not edit shared `.gitignore`, hide whole
 native directories, conceal tracked changes or untrack files. Preserve unrelated exclusion lines and
-scope ownership in linked working trees. Grok skips ignored rule files, so use a verified compatible
-skill representation or report unsupported discovery instead of claiming success.
+association ownership in linked working trees. Git's common exclude file applies to every worktree
+sharing it: an unrelated untracked file at the same relative path is also ignored. Exact marker
+ownership does not provide worktree-specific Git behavior. Grok skips ignored rule files, so use a
+verified compatible skill representation or report unsupported discovery instead of claiming
+success.
 
 Registering an agent persona makes a definition available; choosing it as the primary persona is a
 separate native launch behavior. Claude supports that selection. Codex's existing primary `agent`
@@ -579,8 +583,9 @@ Worked cases the HLA and subsequent tests share:
    Claude skills with the skill-plugin workaround enabled load from each actual user's private
    session plugin. No session artifact is installed into the shared project directory. For two
    sessions of the same user under the home workaround, both can discover catalog metadata;
-   descriptions identify the intended managed UUID/run and package ownership prevents one deleting
-   the other's files.
+   descriptions identify the intended managed session, with Codex run qualification or Grok's
+   current index selected through environment. Package ownership prevents one deleting the other's
+   files.
 5. **Change and removal.** Updating a Git ref and reinitializing its owner captures a new commit and
    applies/removes owned outputs. Only descendants whose actual prepared inputs change become stale.
    Inspection explains the mismatch; managed launch reports the owning repair operation and uses

@@ -300,11 +300,12 @@ Session-specific artifacts belong beneath the actual user's home. Prefer the pri
 `.agentworks-artifacts` session/run area and a native invocation-local loader where suitable. An
 explicitly enabled best-effort workaround may instead publish session-qualified native skills in
 that user's ordinary discovery directory. Names and descriptions identify the intended managed
-session/run; they do not enforce native catalog isolation. Other sessions under the same user may
-discover those entries, and the model decides whether they apply. State that tradeoff clearly rather
-than claiming native visibility restrictions or guaranteed obedience. Do not place session artifacts
-in shared workspace directories. A future single-session workspace mode is a separate PR and is not
-a prerequisite for current delivery.
+session; a per-run package may also identify its run. A stable session entry can instead read the
+current run directory from the workload environment. Neither representation enforces native catalog
+isolation. Other sessions under the same user may discover those entries, and the model decides
+whether they apply. State that tradeoff clearly rather than claiming native visibility restrictions
+or guaranteed obedience. Do not place session artifacts in shared workspace directories. A future
+single-session workspace mode is a separate PR and is not a prerequisite for current delivery.
 
 The shell integration publishes artifacts as files with a documented discovery contract. File
 publication must not be described as proof that a shell workload interpreted or obeyed the content.
@@ -390,10 +391,11 @@ emission by install commands, env declarations or features is separate future wo
 **R7. Keep sessions and owners isolated.** Session publication under a user's home must respect that
 user's access boundaries. Native private loaders remain preferred; explicitly enabled ordinary-home
 skills have the documented best-effort semantic applicability boundary above, not private catalogs.
-Qualify names and descriptions by managed session/run identity and do not overwrite another
-session's outputs. Define cleanup and replacement behavior for session restart, deletion and name
-reuse. A session consumes applicable ancestor results without repairing ancestor setup implicitly.
-Use the saga's
+Qualify native entry metadata by managed session identity and do not overwrite another session's
+outputs. Keep changing private content separated by run; an immutable entry can remain stable across
+runs when it selects the current run through that workload's environment. Define cleanup and
+replacement behavior for session restart, deletion and name reuse. A session consumes applicable
+ancestor results without repairing ancestor setup implicitly. Use the saga's
 [session identity contract](../2026-08-04-next-steps/scope-participation-contract.md#session-and-run-identity)
 when designing durable session ownership. It distinguishes `session_uuid` from per-incarnation
 `run_id`; neither the reusable session name nor VM `boot_id` is a substitute. Verify implementation

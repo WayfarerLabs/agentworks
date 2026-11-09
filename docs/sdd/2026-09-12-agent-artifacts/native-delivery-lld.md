@@ -347,6 +347,15 @@ leaving room for launcher wrapping below the operating system's per-argument lim
 fails during preparation with guidance to reduce it or use a suitable native file carrier. Guidance
 and skill bodies are file content and do not consume that argv budget.
 
+## Git exclusion scope
+
+Exclusion claims own exact marker/pattern associations, not the repository's other metadata or
+worktree contents. Resolve repository-relative paths from Git's root-aware output, including nested
+workspace directories. Git can share info/exclude across linked working trees; the same untracked
+relative path in another worktree is then ignored too. This native repository-level effect is
+explicitly disclosed, not presented as per-worktree isolation. Do not introduce another Git settings
+or reference-count engine to hide that limitation.
+
 ## Evidence and acceptance
 
 Focused tests cover complete skill packages, executable and binary members, native paths and
