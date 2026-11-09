@@ -28,7 +28,7 @@ from agentworks.errors import ConnectivityError, StateError
 from agentworks.execution import client, envelope, root_script, ssh_process, trust
 from agentworks.execution.errors import TrustMismatch
 from agentworks.execution.trust import TrustBinding, TrustMode
-from agentworks.interrupts import ExitDeferred, termination_as_interrupt
+from agentworks.interrupts import termination_as_interrupt
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -259,8 +259,7 @@ class PublicAddressPlatform(VMPlatform):
         prefixes (widened by ``ctx.config.operator.ssh_allow_cidrs``).
         ``ctx`` is the op-start context: opening and closing the route are
         backend calls that read their credential through it, with no ambient
-        fallback. The caller holds interrupts for the whole of the close, so
-        the close need not.
+        fallback.
         """
 
     @abstractmethod
@@ -310,15 +309,14 @@ class PublicAddressPlatform(VMPlatform):
 
         ``SIGTERM`` and ``SIGHUP`` unwind like Ctrl-C for as long as the route
         may be open, so ending any command that reaches a cloud VM this way
-        still closes its allow, and the route's close holds them until it is
-        done (:class:`ExitDeferred`). Once the route has closed, so does the
+        still closes its allow. Once the route has closed, so does the
         provisioning access, in case create's close of it failed: the
         bootstrap allow is not the route's own, so nothing else would remove
         it while the VM lives.
         """
         with termination_as_interrupt():
             try:
-                with ExitDeferred(self._transient_route(vm, ctx)):
+                with self._transient_route(vm, ctx):
                     address = self._public_address(vm, ctx)
                     if not address:
                         raise StateError(

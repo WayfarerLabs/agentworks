@@ -550,29 +550,6 @@ def test_a_termination_during_a_root_script_still_closes_its_route(
     assert cloud.events == ["route-open", "probe", "script", "route-close", "access-close"]
 
 
-def test_an_interrupt_during_the_routes_close_waits_for_it(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Ctrl-C the moment the script ends: the cloud's close still runs to its end, then the interrupt raises."""
-    cloud = _Cloud(monkeypatch, _aws, "203.0.113.7")
-    seed_vm_trust("box")
-
-    @contextlib.contextmanager
-    def route(platform: object, vm: object, ctx: object) -> Iterator[None]:
-        cloud._ran("route-open")
-        try:
-            yield
-        finally:
-            signal.raise_signal(signal.SIGINT)
-            cloud._ran("route-close")
-
-    monkeypatch.setattr(EC2Platform, "_transient_route", route)
-    monkeypatch.setattr(PublicSSH, "run_as_root", lambda access, script, deadline: RawRun(b"", b""))
-
-    with pytest.raises(KeyboardInterrupt):
-        cloud.platform.run_as_root(_vm(), _ctx(), b"true\n", 5)
-
-    assert cloud.events == ["route-open", "probe", "route-close", "access-close"]
-
-
 @pytest.mark.parametrize("factory", CLOUDS, ids=["aws", "azure", "gcp"])
 def test_a_clouds_native_shell_for_a_vm_with_no_record_opens_no_route(
     monkeypatch: pytest.MonkeyPatch, factory: Callable[[], Any]

@@ -575,19 +575,17 @@ stream, while any other failure (a full disk under `> file`) still raises. The C
 flushes both streams through the same guard before it exits, so the interpreter's own flush has
 nothing left to fail on. Prompts are not guarded, since a dead stream cannot answer one.
 
-`_public_ssh` runs the exit of each cloud's `_transient_route`, where it removes its allow, under
-`interrupts.interrupts_deferred` (through `interrupts.ExitDeferred`), which holds Ctrl-C and the
-terminations until the provider call returns and then delivers the first that arrived to the handler
-it would have reached, so an interrupt that lands mid-removal waits for it. The base holds them
-rather than each cloud, so no cloud can leave it out. Only what was actually removed is reported
-closed: AWS counts a revoke that EC2 answers with the rule listed under `UnknownIpPermissions`, like
-`InvalidPermission.NotFound`, as nothing revoked, and Azure reports a rule already gone (404) as
-nothing. Once the route has closed, `_public_ssh` calls `close_provisioning_access_or_warn`
-(contract-lld, Phase A), so a bootstrap allow that create's own close left open is removed by the
-next root-channel operation, `vm recover`, `vm rekey`, delete's logout or a platform shell; a close
-with nothing left to remove is silent. Azure's poke removes a rule whose create was interrupted, by
-the name it chose. `_transient_route` is an abstract member of the base, which each cloud supplies
-and nothing outside the cloud calls. Then:
+Each cloud's `_transient_route` removes its allow under `interrupts.interrupts_deferred`, which
+holds Ctrl-C and the terminations until the provider call returns and then delivers the first that
+arrived to the handler it would have reached, so an interrupt that lands mid-removal waits for it.
+Only what was actually removed is reported closed: AWS counts a revoke that EC2 answers with the
+rule listed under `UnknownIpPermissions`, like `InvalidPermission.NotFound`, as nothing revoked, and
+Azure reports a rule already gone (404) as nothing. Once the route has closed, `_public_ssh` calls
+`close_provisioning_access_or_warn` (contract-lld, Phase A), so a bootstrap allow that create's own
+close left open is removed by the next root-channel operation, `vm recover`, `vm rekey`, delete's
+logout or a platform shell; a close with nothing left to remove is silent. Azure's poke removes a
+rule whose create was interrupted, by the name it chose. `_transient_route` is an abstract member of
+the base, which each cloud supplies and nothing outside the cloud calls. Then:
 
 - `run_as_root`: `trust.require_record(vm.name)` first, so a VM with no record opens no firewall
   rule, then `run_as_root(script, deadline)` inside `_public_ssh` under VM trust.

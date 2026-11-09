@@ -239,24 +239,23 @@ call returns, so no firewall allow outlives one call; `SIGTERM`, `SIGHUP` and, o
 the route has closed, the base also calls `close_provisioning_access` (below). Each cloud supplies
 it privately, as an abstract member of that base: `_transient_route(vm, ctx)`, a context manager
 that opens this call's own SSH allow scoped to the operator's egress prefixes (widened by
-`ctx.config.operator.ssh_allow_cidrs`) and removes exactly it in a `finally`. The base runs that
-exit under `interrupts_deferred` (`interrupts.ExitDeferred`), so an interrupt that lands during the
-removal waits for it; Azure and GCP bound that wait, warning that the rule may remain when the
-provider has not answered in time. When the VM never answers, `PublicSSH.wait_until_answering` warns
-`public_ssh.PROBE_FAILURE_HINT`, the `ssh_allow_cidrs` advice, unless the address refused the last
-probe's connection: the allow let it through, and the `ChannelUnreachable` it raises names a restart
-for an SSH server that is not running. Azure also heals a missing public IP and converges the NSG
-onto the baseline-deny model on enter; concurrent operations on one VM each own an independent rule,
-so they never cross-remove. EC2 needs no public-IP heal (a running instance receives an address
-automatically), but its rule model forces a divergence: an EC2 ingress rule's identity is its
-`(protocol, port, cidr)` tuple, not a name, so two concurrent routes from one operator egress share
-ONE rule rather than owning independent ones. The poke is therefore idempotent (tolerate
-`InvalidPermission.Duplicate`) and the per-op remove tolerant (tolerate
-`InvalidPermission.NotFound`, or a success that lists the rule under `UnknownIpPermissions`),
-failing CLOSED (the deny baseline), never open; see `plugins/aws/network.py`. GCE uses a distinct
-UUID-suffixed firewall rule and provider ID for each route, so concurrent routes close
-independently. The route's calls read the credential from `ctx`, so a credentials-configured site
-authenticates as itself with no ambient fallback.
+`ctx.config.operator.ssh_allow_cidrs`) and removes exactly it in a `finally`, under
+`interrupts_deferred`, so an interrupt that lands during the removal waits for it; Azure and GCP
+bound that wait, warning that the rule may remain when the provider has not answered in time. When
+the VM never answers, `PublicSSH.wait_until_answering` warns `public_ssh.PROBE_FAILURE_HINT`, the
+`ssh_allow_cidrs` advice, unless the address refused the last probe's connection: the allow let it
+through, and the `ChannelUnreachable` it raises names a restart for an SSH server that is not
+running. Azure also heals a missing public IP and converges the NSG onto the baseline-deny model on
+enter; concurrent operations on one VM each own an independent rule, so they never cross-remove. EC2
+needs no public-IP heal (a running instance receives an address automatically), but its rule model
+forces a divergence: an EC2 ingress rule's identity is its `(protocol, port, cidr)` tuple, not a
+name, so two concurrent routes from one operator egress share ONE rule rather than owning
+independent ones. The poke is therefore idempotent (tolerate `InvalidPermission.Duplicate`) and the
+per-op remove tolerant (tolerate `InvalidPermission.NotFound`, or a success that lists the rule
+under `UnknownIpPermissions`), failing CLOSED (the deny baseline), never open; see
+`plugins/aws/network.py`. GCE uses a distinct UUID-suffixed firewall rule and provider ID for each
+route, so concurrent routes close independently. The route's calls read the credential from `ctx`,
+so a credentials-configured site authenticates as itself with no ambient fallback.
 
 **Lifecycle hooks** have sensible defaults. All are entered by callers that gate first, so on entry
 the VM is running or was just started:

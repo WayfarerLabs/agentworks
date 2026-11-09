@@ -21,8 +21,7 @@ away, or to a pipe into a program in that terminal's session, goes nowhere
 
 :func:`interrupts_deferred` holds every one of these signals for a short step
 that must not stop halfway, such as removing a firewall allow, and delivers
-the first of them once the step is done; :class:`ExitDeferred` does so for a
-context manager's exit.
+the first of them once the step is done.
 """
 
 from __future__ import annotations
@@ -30,11 +29,11 @@ from __future__ import annotations
 import contextlib
 import signal
 import threading
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
-    from types import FrameType, TracebackType
+    from types import FrameType
 
     # What ``signal.getsignal`` returns and ``signal.signal`` takes, less the ``None`` neither can put back.
     _Handler = Callable[[int, FrameType | None], Any] | int
@@ -51,30 +50,12 @@ _TERMINATIONS = tuple(
 )
 _INTERRUPTS = (signal.SIGINT, *_TERMINATIONS)
 
-_T = TypeVar("_T")
-
 
 def _interrupt(_signal_number: int, _frame: object) -> None:
     for number in _TERMINATIONS:
         if signal.getsignal(number) is _interrupt:
             signal.signal(number, signal.SIG_IGN)
     raise KeyboardInterrupt
-
-
-class ExitDeferred(contextlib.AbstractContextManager[_T]):
-    """``manager``, whose exit (its cleanup, a firewall allow's removal say) runs under :func:`interrupts_deferred`."""
-
-    def __init__(self, manager: contextlib.AbstractContextManager[_T]) -> None:
-        self._manager = manager
-
-    def __enter__(self) -> _T:
-        return self._manager.__enter__()
-
-    def __exit__(
-        self, kind: type[BaseException] | None, error: BaseException | None, traceback: TracebackType | None
-    ) -> bool | None:
-        with interrupts_deferred():
-            return self._manager.__exit__(kind, error, traceback)
 
 
 def _replace_handlers(handler: Callable[[int, object], None], *, keep: tuple[object, ...]) -> dict[int, _Handler]:
