@@ -20,6 +20,7 @@ from agentworks.sessions.template import SessionTemplate
 from tests.conftest import ManifestDoc, registry_with_shell, write_cfg
 
 if TYPE_CHECKING:
+    from agentworks.db.instance_state import JsonValue
     from agentworks.resources.registry import Registry
 
 
@@ -224,3 +225,66 @@ def test_unreadable_overlay_preserves_other_session_health_checks() -> None:
             ("session/broken", Status.FAIL),
             ("session/old.command", Status.WARN),
         }
+
+
+@pytest.mark.parametrize("field", ["command", "resume_command"])
+@pytest.mark.parametrize("value", [42, True, ["private-marker"], {"private-marker": "input"}])
+def test_supported_overlay_with_invalid_shell_field_preserves_healthy_rows(field: str, value: JsonValue) -> None:
+    registry = _registry(_shell("default", command="${agw:session_name}"))
+    with closing(Database()) as database:
+        database.insert_vm("box", site="lima-local", hostname="box")
+        database.insert_workspace("work", "/work", "box", "work")
+        database.insert_session("broken", "work", "default", SessionMode.ADMIN)
+        database.insert_session("healthy", "work", "default", SessionMode.ADMIN)
+        database.instance_state.put_desired_overlay(
+            "session", "broken", VersionedPayload(1, {"harness_integration": {"name": "shell", field: value}})
+        )
+        database.instance_state.put_desired_overlay(
+            "session",
+            "healthy",
+            VersionedPayload(1, {"harness_integration": {"name": "shell", "command": "{{session_name}}"}}),
+        )
+        group = HealthGroup("Configuration")
+
+        append_shell_template_deprecation_checks(group, registry)
+
+        assert {(check.name, check.status) for check in group.checks} == {
+            ("session/broken", Status.FAIL),
+            ("session/healthy.command", Status.WARN),
+        }
+        assert "private-marker" not in json.dumps([check.__dict__ for check in group.checks], default=str)
+
+
+def test_configuration_fallback_reports_malformed_supported_shell_overlay(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path = write_cfg(
+        tmp_path,
+        ManifestDoc("vm-template", "default"),
+        ManifestDoc("admin-template", "default"),
+        ManifestDoc("session-template", "default", {"harness_integration": {"name": "shell"}}),
+    )
+    monkeypatch.setattr("agentworks.config.CONFIG_PATH", config_path)
+    with closing(Database()) as database:
+        database.insert_vm("box", site="lima-local", hostname="box")
+        database.insert_workspace("work", "/work", "box", "work")
+        database.insert_session("broken", "work", "default", SessionMode.ADMIN)
+        database.insert_session("healthy", "work", "default", SessionMode.ADMIN)
+        database.instance_state.put_desired_overlay(
+            "session", "broken", VersionedPayload(1, {"harness_integration": {"name": "shell", "command": 42}})
+        )
+        database.instance_state.put_desired_overlay(
+            "session",
+            "healthy",
+            VersionedPayload(1, {"harness_integration": {"name": "shell", "command": "{{session_name}}"}}),
+        )
+
+        group, config, registry = _check_config()
+
+        assert config is not None
+        assert registry is not None
+        assert {(check.name, check.status) for check in group.checks if check.name.startswith("session/")} == {
+            ("session/broken", Status.FAIL),
+            ("session/healthy.command", Status.WARN),
+        }
+        assert any(check.name == "Live resource coverage" and check.status is Status.FAIL for check in group.checks)

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from agentworks.path_rendering import format_host_path
 
@@ -87,15 +87,28 @@ def append_shell_template_deprecation_checks(group: HealthGroup, registry: Regis
 
 
 def _append_shell_template_fields(group: HealthGroup, owner: str, template: ResolvedSessionTemplate) -> None:
+    """Validate the effective capability blob read from persisted declarations.
+
+    A stored session overlay can be decoded without capability-field validation
+    when doctor falls back to a declared-only registry. Inspect only a validated
+    Shell config, and keep malformed input out of the health report.
+    """
+    from pydantic import ValidationError as PydanticValidationError
+
     from agentworks.capabilities.harness_integration.shell import (
         LEGACY_SHELL_PLACEHOLDER_REMOVAL,
+        ShellConfig,
         uses_legacy_shell_placeholders,
     )
 
     if template.harness_integration != "shell":
         return
-    for field in ("command", "resume_command"):
-        command = cast("str", template.harness_integration_config.get(field, ""))
+    try:
+        config = ShellConfig.model_validate(template.harness_integration_config)
+    except PydanticValidationError:
+        group.fail(owner, "Shell compatibility could not be checked for this declaration")
+        return
+    for field, command in (("command", config.command), ("resume_command", config.resume_command)):
         if uses_legacy_shell_placeholders(command):
             group.warn(
                 f"{owner}.{field}",
