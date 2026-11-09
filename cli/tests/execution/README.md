@@ -117,8 +117,8 @@ conflicts, truncated input, links at the destination, a parent and the lock path
 wait and sharing, metadata preservation, cleanup after a failure or `SIGTERM`, and pruning. Its sudo
 lane (a lock root created first, owner preservation, a root-owned write) needs the runner's
 passwordless `sudo -n` and follows the elevation vectors' rule. `test_files.py` covers `Files`: the
-status-to-error mapping, `update`'s retries and refusals before dispatch over the recording access,
-and a round trip, a link refusal and the settings merge through `update` over the L lane.
+status-to-error mapping and refusals before dispatch over the recording access, and a round trip, a
+link refusal and the private lock over the L lane.
 
 `conformance/test_attach_terminal.py` and `conformance/test_forward.py` cover what happens around
 the terminal half and a forward, on the same lanes.

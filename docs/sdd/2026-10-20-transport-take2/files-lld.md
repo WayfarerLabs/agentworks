@@ -353,7 +353,7 @@ own bound (the probe, `destination_id`, the native CLI's commands) keep it. A `D
 `ExecutionIncomplete`, and setup fails, as today's timeout did. The methods:
 
 ```python
-def read(path: str, *, limit: int = 1_048_576, elevated: bool = False) -> FileContent | None
+def read(path: str, *, limit: int = 1_048_576, elevated: bool = False) -> bytes | None
 def stat(path: str, *, elevated: bool = False) -> PathState
 def write_if(path: str, data: bytes, *, expected: str | None, mode: int, parent_mode: int,
              group: str | None = None, preserve_metadata: bool = False,
@@ -366,8 +366,8 @@ def ensure_directory(path: str, *, mode: int, elevated: bool = False) -> None
 def prune_empty_parents(path: str, *, root: str, elevated: bool = False) -> Pruned
 ```
 
-- **`read`** returns `FileContent(data, digest)` (`data` `repr=False`) or `None` when the file or a
-  parent is absent, with `log_streams=False` and stdout `CaptureOutput(limit)`.
+- **`read`** returns the file's bytes, or `None` when the file or a parent is absent, with
+  `log_streams=False` and stdout `CaptureOutput(limit)`.
 - **`stat`** returns `Absent()`, `Directory()` or `RegularFile(digest, mode)`, with `mode` the
   permission bits, also with `log_streams=False`. It ports today's `fingerprint` and `directory`
   (`native_files.py:307-332`, `:425-446`).
@@ -407,13 +407,12 @@ D6's read, transform on the workstation, conditional write, retry on conflict:
 
 ```python
 for _ in range(UPDATE_ATTEMPTS):  # 3
-    current = self.read(path, limit=limit, elevated=elevated)
-    before = None if current is None else current.data
+    before = self.read(path, limit=limit, elevated=elevated)
     after = transform(before)
     if after is None or after == before:
         return False
     try:
-        self.write_if(path, after, expected=None if current is None else current.digest, ...)
+        self.write_if(path, after, expected=None if before is None else sha256(before), ...)
         return True
     except FileConflict:
         continue
@@ -435,8 +434,8 @@ raise FileConflict(...)
 
 - **SHA-256**, lowercase hex: the form `OwnedArtifactFile.sha256` records and `publication.py:184`
   computes, so recorded ownership needs no migration.
-- **Where.** `read`'s digest and `write_if`'s `sha256` are computed on the workstation; `stat`'s and
-  every compare are computed by the program, the compares under the lock.
+- **Where.** `update`'s `expected` and `write_if`'s `sha256` are computed on the workstation;
+  `stat`'s and every compare are computed by the program, the compares under the lock.
 - **The capture limit is the only read bound.** The default is the pump's 1 MiB. Publication's
   generated-section reads pass `DEFAULT_CAPTURE_LIMITS.total_bytes` (64 MiB,
   `package_sources.py:27-36`), since a section file holds artifact content up to that bound around
@@ -783,8 +782,11 @@ Three batches, each green on its own, in the order they land in PR C:
 - **B, files and publication.** `file_program.py`, `files.py`, the errors, the local filesystem and
   sudo-lane tests, F6 and F7; `dispatch.py`, `readiness.py` (with `SetupReadiness.runner` deleted),
   `artifacts/publication.py`, `artifacts/session.py` and codex's `guidance_path`
-  (`harness_integration.py:497`, `:532`), with `SetupInvocation.files` and their callers.
-- **C, native setup and deletions.** `native.py` and `native_cli.py`; `request_environment`;
+  (`harness_integration.py:497`, `:532`), with `SetupInvocation.files` and their callers. `Files`
+  ships without `update` and `ensure_directory` (and the program without its `ensure_directory`
+  operation), since nothing in B calls them.
+- **C, native setup and deletions.** `native.py` and `native_cli.py`, adding `Files.update` and
+  `ensure_directory` with their tests only where a caller needs them; `request_environment`;
   deleting `SetupInvocation.runner`, `SetupRunner`, `native_files.py` and `require_python3` with the
   guard updates above; the package guard check; the inventory rows.
 

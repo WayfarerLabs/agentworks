@@ -145,15 +145,13 @@ of the guest file program (`file_program.py`, sent as a `PythonProgram` like agw
 with no import-time effect): the operation and one JSON object of parameters are its arguments, and
 content travels as `Bytes` on stdin, never as an argument. The deadline bounds every request.
 
-| Method                                        | Does                                                                             |
-| --------------------------------------------- | -------------------------------------------------------------------------------- |
-| `read(path, limit=1 MiB)`                     | `FileContent(data, digest)`, or `None` when the file or a parent is absent       |
-| `stat(path)`                                  | `Absent()`, `Directory()` or `RegularFile(digest, mode)`, hashed on the guest    |
-| `write_if(path, data, expected=, mode=, ...)` | Replaces the file only while its digest is `expected` (`None`: still absent)     |
-| `update(path, transform, mode=, ...)`         | Reads, transforms on the workstation, writes back if changed; retries a conflict |
-| `remove_if(path, expected=)`                  | Removes the file only while its digest is `expected`                             |
-| `ensure_directory(path, mode=)`               | Creates the directory and missing parents; never changes an existing one         |
-| `prune_empty_parents(path, root=)`            | Removes empty parents up to and including `root`; returns a `Pruned`             |
+| Method                                        | Does                                                                          |
+| --------------------------------------------- | ----------------------------------------------------------------------------- |
+| `read(path, limit=1 MiB)`                     | The file's bytes, or `None` when the file or a parent is absent               |
+| `stat(path)`                                  | `Absent()`, `Directory()` or `RegularFile(digest, mode)`, hashed on the guest |
+| `write_if(path, data, expected=, mode=, ...)` | Replaces the file only while its digest is `expected` (`None`: still absent)  |
+| `remove_if(path, expected=)`                  | Removes the file only while its digest is `expected`                          |
+| `prune_empty_parents(path, root=)`            | Removes empty parents up to and including `root`; returns a `Pruned`          |
 
 Each takes `elevated`, which an agent's access refuses before dispatch. Paths must be absolute and
 normalized (`guest_path`). Nothing is read or written through a symbolic link: every component is

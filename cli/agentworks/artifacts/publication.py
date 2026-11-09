@@ -178,8 +178,7 @@ def publish_artifacts(
         entry = planned.get(path) or current[path]
         if not entry.generated_section:
             continue
-        section_file = files.read(path, limit=DEFAULT_CAPTURE_LIMITS.total_bytes, elevated=root)
-        existing = None if section_file is None else section_file.data
+        existing = files.read(path, limit=DEFAULT_CAPTURE_LIMITS.total_bytes, elevated=root)
         body = planned[path].data if path in planned else None
         try:
             replacement = replace_section(existing or b"", body)

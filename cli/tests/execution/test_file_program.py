@@ -242,7 +242,6 @@ def _all_operations(path: Path) -> list[tuple[str, dict, bytes]]:
         ("stat", {"path": str(path)}, b""),
         ("write_if", write, data),
         ("remove_if", {"path": str(path), "expected": digest(b"target")}, b""),
-        ("ensure_directory", {"path": str(path), "mode": 0o700}, b""),
         ("prune_empty_parents", {"path": str(path / "member"), "root": str(path)}, b""),
     ]
 
@@ -304,7 +303,7 @@ def test_a_search_only_ancestor_does_not_block_a_write(guest: Guest) -> None:
 
 
 def test_the_lock_file_is_created_world_readable_whatever_the_umask(guest: Guest) -> None:
-    result = guest.run("ensure_directory", {"path": str(guest.tree / "made"), "mode": 0o700}, umask=0o077)
+    result = guest.write_if(guest.tree / "made", b"content", umask=0o077)
 
     assert result.returncode == 0, result.stderr
     assert stat.S_IMODE(guest.lock.stat().st_mode) == 0o644
@@ -314,7 +313,7 @@ def test_a_link_at_the_lock_path_is_refused_and_not_followed(guest: Guest) -> No
     target = guest.root / "lock-target"
     guest.lock.symlink_to(target)
 
-    result = guest.run("ensure_directory", {"path": str(guest.tree / "made"), "mode": 0o700})
+    result = guest.write_if(guest.tree / "made", b"content")
 
     assert result.returncode == file_program.EXIT_UNSUITABLE
     assert result.stderr.strip() == file_program.LOCK_REFUSED.encode()
@@ -341,7 +340,7 @@ def test_a_held_lock_times_out_creating_nothing_while_reads_proceed(guest: Guest
 
 
 def test_a_lock_another_identity_created_is_opened_not_recreated(guest: Guest, as_root: None) -> None:
-    created = guest.run("ensure_directory", {"path": str(guest.root / "by-root"), "mode": 0o755}, sudo=True)
+    created = guest.write_if(guest.root / "by-root", b"content", sudo=True)
     assert created.returncode == 0, created.stderr
     assert guest.lock.stat().st_uid == 0
 

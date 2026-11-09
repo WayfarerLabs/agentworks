@@ -55,13 +55,14 @@ def lock_is_shared_across_identities(lane: Lane) -> None:
     try:
         for creator, taker in ((False, True), (True, False)):
             _remove_lock(lane)
-            files.ensure_directory(f"{directory}/made-{creator}", mode=0o755, elevated=creator)
+            files.write_if(
+                f"{directory}/made-{creator}", b"lock", expected=None, mode=0o644, parent_mode=0o755, elevated=creator
+            )
             assert _owner(lane, file_program.LOCK_PATH) == ("0" if creator else _owner(lane, directory))
             for writer in (taker, creator):
                 path = f"{directory}/written-{creator}-{writer}"
                 files.write_if(path, b"content", expected=None, mode=0o644, parent_mode=0o755, elevated=writer)
-                content = files.read(path, elevated=True)
-                assert content is not None and content.data == b"content"
+                assert files.read(path, elevated=True) == b"content"
     finally:
         lane.run(Command(("rm", "-rf", "--", directory), elevated=True, deadline=REQUEST_DEADLINE))
 
@@ -78,8 +79,7 @@ def elevated_write_and_read_of_a_root_owned_file(lane: Lane) -> None:
         files.write_if(path, b"root content", expected=None, mode=0o600, parent_mode=0o700, elevated=True)
 
         assert _owner(lane, path) == "0"
-        content = files.read(path, elevated=True)
-        assert content is not None and content.data == b"root content"
+        assert files.read(path, elevated=True) == b"root content"
     finally:
         lane.run(Command(("rm", "-rf", "--", f"{directory}/root"), elevated=True, deadline=REQUEST_DEADLINE))
 

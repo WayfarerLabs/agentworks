@@ -62,7 +62,7 @@ def guidance_path(files: Files, root: str) -> str:
     """Use the instruction file Codex actually selects at this directory."""
     override = f"{root}/AGENTS.override.md"
     content = files.read(override)
-    return override if content is not None and content.data.strip() else f"{root}/AGENTS.md"
+    return override if content is not None and content.strip() else f"{root}/AGENTS.md"
 
 
 def outer_artifacts(

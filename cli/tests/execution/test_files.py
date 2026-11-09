@@ -10,8 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from agentworks.capabilities.harness_integration.settings import PreparedSettings
-from agentworks.errors import ConfigError, StateError
+from agentworks.errors import StateError
 from agentworks.execution import file_program
 from agentworks.execution.errors import (
     CommandFailed,
@@ -22,16 +21,7 @@ from agentworks.execution.errors import (
     PathRefused,
     PermissionDenied,
 )
-from agentworks.execution.files import (
-    UPDATE_ATTEMPTS,
-    Absent,
-    Directory,
-    FileContent,
-    Files,
-    Pruned,
-    RegularFile,
-    guest_path,
-)
+from agentworks.execution.files import Absent, Directory, Files, Pruned, RegularFile, guest_path
 from agentworks.execution.requests import Bytes, PythonProgram
 from agentworks.execution.results import Completed, Result, Unknown, UnknownReason
 from tests.vm_access_support import Admin, Agent, RecordingVMAccess, account_shell, local_vm_access
@@ -105,7 +95,7 @@ def test_successful_statuses_and_their_results() -> None:
         Result(Completed(file_program.EXIT_ROOT_RETAINED)),
     )
 
-    assert files.read("/home/a/file") == FileContent(b"current", DIGEST)
+    assert files.read("/home/a/file") == b"current"
     assert files.read("/home/a/absent") is None
     assert files.stat("/home/a/file") == RegularFile(DIGEST, 0o644)
     assert files.stat("/home/a") == Directory()
@@ -196,62 +186,6 @@ def test_an_agent_access_refuses_an_elevated_file_operation_before_dispatch() ->
         access.files().write_if("/etc/x", b"x", expected=None, mode=0o644, parent_mode=0o755, elevated=True)
 
 
-# -- update ------------------------------------------------------------------------------------
-
-
-def test_update_retries_a_conflict_against_the_new_content_and_stops_after_its_attempts() -> None:
-    reads = [Result(Completed(0), f"version {n}".encode()) for n in range(UPDATE_ATTEMPTS)]
-    conflicts = [Result(Completed(file_program.EXIT_CONFLICT)) for _ in range(UPDATE_ATTEMPTS)]
-    outcomes = [outcome for pair in zip(reads, conflicts, strict=True) for outcome in pair]
-    files, access = recording(*outcomes)
-    seen: list[bytes | None] = []
-
-    def transform(current: bytes | None) -> bytes:
-        seen.append(current)
-        return b"merged"
-
-    with pytest.raises(FileConflict):
-        files.update("/home/a/file", transform, mode=0o600, parent_mode=0o700)
-
-    assert seen == [f"version {n}".encode() for n in range(UPDATE_ATTEMPTS)]
-    assert [operation for operation, _ in operations(access)] == ["read", "write_if"] * UPDATE_ATTEMPTS
-
-
-@pytest.mark.parametrize(
-    "failure", [Result(Completed(file_program.EXIT_LOCK_TIMEOUT)), Result(Unknown(UnknownReason.DEADLINE))]
-)
-def test_update_does_not_retry_a_lock_timeout_or_an_unknown_write(failure: Result) -> None:
-    files, access = recording(Result(Completed(0), b"current"), failure)
-
-    with pytest.raises((FileLockTimeout, ExecutionIncomplete)):
-        files.update("/home/a/file", lambda current: b"merged", mode=0o600, parent_mode=0o700)
-
-    assert [operation for operation, _ in operations(access)] == ["read", "write_if"]
-
-
-@pytest.mark.parametrize("result", [None, b"current"])
-def test_update_writes_nothing_when_the_transform_leaves_the_file_alone(result: bytes | None) -> None:
-    files, access = recording(Result(Completed(0), b"current"))
-
-    assert files.update("/home/a/file", lambda current: result, mode=0o600, parent_mode=0o700) is False
-    assert [operation for operation, _ in operations(access)] == ["read"]
-
-
-def test_update_expects_the_digest_it_read_or_absence() -> None:
-    files, access = recording(
-        Result(Completed(0), b"current"),
-        Result(Completed(0)),
-        Result(Completed(file_program.EXIT_ABSENT)),
-        Result(Completed(0)),
-    )
-
-    assert files.update("/home/a/file", lambda current: b"new", mode=0o600, parent_mode=0o700)
-    assert files.update("/home/a/new", lambda current: b"new", mode=0o600, parent_mode=0o700)
-
-    writes = [params for operation, params in operations(access) if operation == "write_if"]
-    assert [params["expected"] for params in writes] == [DIGEST, None]
-
-
 # -- Over the L lane ------------------------------------------------------------------------------
 
 
@@ -267,16 +201,15 @@ def test_operations_round_trip_on_a_real_filesystem(local_files: Files, tmp_path
     destination = package / "nested" / "file"
 
     local_files.write_if(str(destination), b"first", expected=None, mode=0o640, parent_mode=0o700)
-    content = local_files.read(str(destination))
-    assert content == FileContent(b"first", hashlib.sha256(b"first").hexdigest())
-    assert local_files.stat(str(destination)) == RegularFile(content.digest, 0o640)
+    first = hashlib.sha256(b"first").hexdigest()
+    assert local_files.read(str(destination)) == b"first"
+    assert local_files.stat(str(destination)) == RegularFile(first, 0o640)
+    assert local_files.stat(str(destination.parent)) == Directory()
     with pytest.raises(FileConflict):
         local_files.write_if(str(destination), b"second", expected=None, mode=0o640, parent_mode=0o700)
-    local_files.remove_if(str(destination), expected=content.digest)
+    local_files.remove_if(str(destination), expected=first)
     assert local_files.prune_empty_parents(str(destination), root=str(package)) is Pruned.COMPLETE
     assert not package.exists()
-    local_files.ensure_directory(str(tmp_path / "made" / "here"), mode=0o750)
-    assert local_files.stat(str(tmp_path / "made" / "here")) == Directory()
 
 
 def test_programs_run_on_this_machine_take_the_private_lock(
@@ -298,35 +231,3 @@ def test_a_link_is_refused_as_unsuitable(local_files: Files, tmp_path: Path) -> 
         local_files.read(str(tmp_path / "link"))
 
     assert refused.value.reason is PathRefusal.UNSUITABLE
-
-
-def test_json_null_survives_a_settings_update(local_files: Files, tmp_path: Path) -> None:
-    destination = tmp_path / "settings.json"
-    destination.write_text('{"kept": null, "replaced": 1}')
-    settings = PreparedSettings.from_bytes(b'{"replaced": 2}', format="json", strategy="merge-overwrite")
-
-    assert local_files.update(
-        str(destination), lambda current: settings.apply(current).content, mode=0o600, parent_mode=0o700
-    )
-
-    assert json.loads(destination.read_text()) == {"kept": None, "replaced": 2}
-
-
-@pytest.mark.parametrize(("format", "malformed"), [("json", b'{"unterminated": '), ("toml", b"key = = 1")])
-def test_a_malformed_destination_is_refused_and_left_byte_identical(
-    local_files: Files, tmp_path: Path, format: str, malformed: bytes
-) -> None:
-    destination = tmp_path / f"settings.{format}"
-    destination.write_bytes(malformed)
-    settings = PreparedSettings.from_bytes(
-        b'{"a": 1}' if format == "json" else b"a = 1",
-        format=format,
-        strategy="merge-overwrite",  # type: ignore[arg-type]
-    )
-
-    with pytest.raises(ConfigError):
-        local_files.update(
-            str(destination), lambda current: settings.apply(current).content, mode=0o600, parent_mode=0o700
-        )
-
-    assert destination.read_bytes() == malformed

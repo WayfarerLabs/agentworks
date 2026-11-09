@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from importlib import resources
 from pathlib import PurePosixPath
@@ -27,16 +27,13 @@ from agentworks.execution.errors import CommandFailed, FileConflict, FileLockTim
 from agentworks.execution.requests import CAPTURE_LIMIT_BYTES, Bytes, CaptureOutput, NoInput, PythonProgram
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Mapping
 
     from agentworks.execution.access import VMAccess
     from agentworks.execution.results import Result
 
 _NO_INPUT = NoInput()
 _CAPTURE = CaptureOutput()
-
-UPDATE_ATTEMPTS = 3
-"""How many times :meth:`Files.update` reads, transforms and writes before a conflict stands."""
 
 
 def program_source() -> str:
@@ -58,14 +55,6 @@ def guest_path(path: str) -> str:
     ):
         raise StateError(f"guest file paths must be absolute and normalized: {path!r}")
     return str(PurePosixPath(path))
-
-
-@dataclass(frozen=True)
-class FileContent:
-    """A file's bytes and their SHA-256, computed on the workstation from what arrived."""
-
-    data: bytes = field(repr=False)
-    digest: str
 
 
 @dataclass(frozen=True)
@@ -98,20 +87,15 @@ class Pruned(Enum):
     """The root is empty but stays, because its parent denies removing it."""
 
 
+@dataclass(frozen=True)
 class Files:
-    """One identity's file operations on one VM; each method is one request bounded by ``deadline``."""
+    """One identity's file operations on one VM; each method is one request bounded by ``deadline`` seconds."""
 
-    def __init__(self, access: VMAccess, *, deadline: float | None = None) -> None:
-        self.access = access
-        self._deadline = deadline
+    access: VMAccess
+    deadline: float | None = None
 
-    @property
-    def deadline(self) -> float | None:
-        """The bound, in seconds, on every request these operations make."""
-        return self._deadline
-
-    def read(self, path: str, *, limit: int = CAPTURE_LIMIT_BYTES, elevated: bool = False) -> FileContent | None:
-        """The regular file at ``path``, or ``None`` when it or a parent is absent.
+    def read(self, path: str, *, limit: int = CAPTURE_LIMIT_BYTES, elevated: bool = False) -> bytes | None:
+        """The bytes of the regular file at ``path``, or ``None`` when it or a parent is absent.
 
         A file larger than ``limit`` is ``ExecutionIncomplete`` naming the limit.
         The content stays out of the operation log.
@@ -123,7 +107,7 @@ class Files:
         if status == file_program.EXIT_ABSENT:
             return None
         self._require_done("read", path, status, result)
-        return FileContent(result.stdout, hashlib.sha256(result.stdout).hexdigest())
+        return result.stdout
 
     def stat(self, path: str, *, elevated: bool = False) -> PathState:
         """What is at ``path``; a regular file's digest is computed on the guest, so no content travels."""
@@ -186,58 +170,11 @@ class Files:
         status, result = self._run("write_if", params, elevated=elevated, stdin=Bytes(data))
         self._require_done("write_if", path, status, result)
 
-    def update(
-        self,
-        path: str,
-        transform: Callable[[bytes | None], bytes | None],
-        *,
-        mode: int,
-        parent_mode: int,
-        group: str | None = None,
-        preserve_metadata: bool = False,
-        limit: int = CAPTURE_LIMIT_BYTES,
-        elevated: bool = False,
-    ) -> bool:
-        """Read ``path``, transform its content on the workstation and write the result back if it changed.
-
-        ``transform`` gets the current bytes (``None`` when absent) and returns
-        the new bytes, or ``None`` to leave the file alone. A concurrent change
-        is retried against the new content, up to :data:`UPDATE_ATTEMPTS` times
-        in all; nothing else is retried. Returns whether it wrote.
-        """
-        for _ in range(UPDATE_ATTEMPTS):
-            current = self.read(path, limit=limit, elevated=elevated)
-            before = None if current is None else current.data
-            after = transform(before)
-            if after is None or after == before:
-                return False
-            try:
-                self.write_if(
-                    path,
-                    after,
-                    expected=None if current is None else current.digest,
-                    mode=mode,
-                    parent_mode=parent_mode,
-                    group=group,
-                    preserve_metadata=preserve_metadata,
-                    elevated=elevated,
-                )
-                return True
-            except FileConflict:
-                continue
-        raise FileConflict(self.access.vm_name, "update", guest_path(path))
-
     def remove_if(self, path: str, *, expected: str, elevated: bool = False) -> None:
         """Remove the regular file at ``path`` only while it has digest ``expected``; absent is a conflict."""
         path = guest_path(path)
         status, result = self._run("remove_if", {"path": path, "expected": expected}, elevated=elevated)
         self._require_done("remove_if", path, status, result)
-
-    def ensure_directory(self, path: str, *, mode: int, elevated: bool = False) -> None:
-        """Create ``path`` and its missing parents with ``mode``; an existing directory is left as it is."""
-        path = guest_path(path)
-        status, result = self._run("ensure_directory", {"path": path, "mode": mode}, elevated=elevated)
-        self._require_done("ensure_directory", path, status, result)
 
     def prune_empty_parents(self, path: str, *, root: str, elevated: bool = False) -> Pruned:
         """Remove the empty parents of ``path``, deepest first, up to and including ``root``.
@@ -269,7 +206,7 @@ class Files:
             args=(operation, json.dumps(params, ensure_ascii=True, separators=(",", ":"))),
             elevated=elevated,
             stdin=stdin,
-            deadline=self._deadline,
+            deadline=self.deadline,
             log_streams=log_streams,
         )
         result = self.access.run(request, stdout=stdout)

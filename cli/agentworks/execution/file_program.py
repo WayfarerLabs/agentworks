@@ -91,13 +91,13 @@ class _Walk:
     and nothing created it; ``parent`` is then the last directory that exists.
     """
 
-    def __init__(self, path: str, *, create_mode: int | None = None, gid: int = -1, include_last: bool = False) -> None:
+    def __init__(self, path: str, *, create_mode: int | None = None, gid: int = -1) -> None:
         self.opened: list[tuple[int, str]] = []
         self.complete = True
         components = path.split("/")[1:]
         self.name = components[-1]
         self.parent = os.open("/", _TRAVERSE)
-        for component in components if include_last else components[:-1]:
+        for component in components[:-1]:
             try:
                 child = os.open(component, _TRAVERSE, dir_fd=self.parent)
             except FileNotFoundError:
@@ -307,11 +307,6 @@ def _remove_if(params: Params) -> int:
         walk.close()
 
 
-def _ensure_directory(params: Params) -> int:
-    _Walk(params["path"], create_mode=params["mode"], include_last=True).close()
-    return 0
-
-
 def _prune_empty_parents(params: Params) -> int:
     root_depth = len(params["root"].split("/")[1:])
     walk = _Walk(params["path"])
@@ -355,7 +350,6 @@ _READERS = {"read": _read, "stat": _stat}
 _MUTATORS = {
     "write_if": _write_if,
     "remove_if": _remove_if,
-    "ensure_directory": _ensure_directory,
     "prune_empty_parents": _prune_empty_parents,
 }
 
