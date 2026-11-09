@@ -494,8 +494,10 @@ class TestCloneThatLostItsVMID:
         fake.auditable = False
         fake.clone_error = ProxmoxAPIError(f"unable to create VM {NEWID}: config file already exists")
 
-        with pytest.raises(RetainedProvisioningError, match="cannot audit"):
+        with pytest.raises(RetainedProvisioningError) as caught:
             platform.create(_request(tailscale=False), RunContext())
+
+        assert isinstance(caught.value.__cause__, StateError)  # the identity check's refusal
 
         assert "stop_vm" not in fake.ops()
         assert "delete_vm" not in fake.ops()

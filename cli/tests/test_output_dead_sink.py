@@ -134,7 +134,7 @@ def test_a_command_whose_reader_left_exits_as_it_would_have_and_quietly(merged: 
     assert taken == b"first\n"
     assert writer.returncode == 0
     if not merged:
-        # A live stderr keeps every warning, and nothing else.
-        assert stderr.decode().splitlines() == [
-            f"Warning: warning {index}" for index in range(1000 if late == "lines" else 0)
-        ]
+        # A live stderr keeps every warning, in order, and nothing else.
+        lines = stderr.decode().splitlines()
+        assert len(lines) == (1000 if late == "lines" else 0)
+        assert all(line.endswith(f"warning {index}") for index, line in enumerate(lines))

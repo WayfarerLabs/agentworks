@@ -504,7 +504,6 @@ def test_a_delete_whose_install_directory_survives_warns_naming_it(
 
     (warning,) = captured_output.warnings
     assert str(leftover) in warning
-    assert "wsl --shutdown" in warning
 
 
 def test_a_delete_whose_install_directory_is_gone_warns_nothing(

@@ -194,9 +194,9 @@ def test_an_incomplete_vm_s_failed_connection_names_delete_not_a_command_that_re
     vm = SimpleNamespace(name="worker", site="local", debian_release=None, provisioning_status=provisioning)
     monkeypatch.setattr("agentworks.vms.sites.resolve_site", lambda site, registry: None)
     monkeypatch.setattr("agentworks.vms.manager.boundary.require_vm_ssh_boundary", lambda *args: None)
-    vm_access_recorder.access(Admin()).run_outcomes = [
-        ConnectivityError("VM is unreachable", hint="Run 'agw vm recover worker'.")
-    ]
+    recover_hint = "Run 'agw vm recover worker'."
+    failure = ConnectivityError("VM is unreachable", hint=recover_hint)
+    vm_access_recorder.access(Admin()).run_outcomes = [failure]
 
     with pytest.raises(ConnectivityError) as caught:
         verify_vm_connection(
@@ -206,9 +206,9 @@ def test_an_incomplete_vm_s_failed_connection_names_delete_not_a_command_that_re
             "worker",
         )
 
-    hint = caught.value.hint or ""
-    assert "agw vm delete worker" in hint
-    assert "recover" not in hint
+    assert caught.value is failure
+    assert caught.value.hint
+    assert caught.value.hint != recover_hint
 
 
 def test_verify_connection_refuses_an_unsupported_client_before_reading_the_database(

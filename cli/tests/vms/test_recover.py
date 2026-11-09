@@ -181,7 +181,8 @@ def test_a_recovered_vm_s_agents_are_named_as_keeping_the_previous_key(
 
     _recover(db, make_config())
 
-    noted = [line for line in captured_output.info if "agw agent reinit" in line]
+    # The note is the one line naming the agents; with none, no line names one.
+    noted = [line for line in captured_output.info if any(agent in line for agent in ("coder", "reviewer"))]
     assert len(noted) == (1 if agents else 0)
     assert all(agent in noted[0] for agent in agents)
 
