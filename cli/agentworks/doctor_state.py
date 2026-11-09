@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from agentworks.path_rendering import format_host_path
 
@@ -18,6 +18,8 @@ if TYPE_CHECKING:
         VMRow,
     )
     from agentworks.doctor import HealthGroup, InstanceStateHealthFactType
+    from agentworks.resources.registry import Registry
+    from agentworks.sessions.templates import ResolvedSessionTemplate
     from agentworks.ssh_identity import SSHIdentity
     from agentworks.vms.applied_state import SSHAppliedState
     from agentworks.vms.sites import VMSiteDecl
@@ -35,6 +37,74 @@ def _current_database() -> Iterator[tuple[bool, int, int, Database | None]]:
     finally:
         if database is not None:
             database.close()
+
+
+def append_shell_template_deprecation_checks(group: HealthGroup, registry: Registry) -> None:
+    """Inspect effective Shell declarations without rendering or resolving secrets.
+
+    Declared templates are always available from this registry. Persisted session
+    overlays are inspected only through the ordinary current, read-only database;
+    an unavailable live view receives an explicit coverage row.
+    """
+    from agentworks.db import DatabaseDriverError
+    from agentworks.errors import AgentworksError
+    from agentworks.sessions.templates import resolve_live_template, resolve_template
+
+    for name, _template in registry.iter_kind_items("session-template"):
+        owner = f"session-template/{name}"
+        try:
+            resolved = resolve_template(registry, name)
+        except AgentworksError:
+            group.fail(owner, "Shell compatibility could not be checked for this declaration")
+            continue
+        _append_shell_template_fields(group, owner, resolved)
+
+    try:
+        with _current_database() as (exists, current, latest, database):
+            if not exists:
+                return
+            if current != latest:
+                group.info(
+                    "Session template compatibility coverage",
+                    "Live session declarations not checked; see the Database group",
+                )
+                return
+            assert database is not None
+            with database.snapshot():
+                for session in database.list_sessions():
+                    owner = f"session/{session.name}"
+                    try:
+                        resolved = resolve_live_template(database, registry, session.name, session.template)
+                    except AgentworksError:
+                        group.fail(owner, "Shell compatibility could not be checked for this declaration")
+                        continue
+                    _append_shell_template_fields(group, owner, resolved)
+    except (AgentworksError, DatabaseDriverError, OSError, ValueError):
+        group.fail(
+            "Session template compatibility coverage",
+            "Live session declarations not checked; see the Database group",
+        )
+
+
+def _append_shell_template_fields(group: HealthGroup, owner: str, template: ResolvedSessionTemplate) -> None:
+    from agentworks.capabilities.harness_integration.shell import (
+        LEGACY_SHELL_PLACEHOLDER_REMOVAL,
+        uses_legacy_shell_placeholders,
+    )
+
+    if template.harness_integration != "shell":
+        return
+    for field in ("command", "resume_command"):
+        command = cast("str", template.harness_integration_config.get(field, ""))
+        if uses_legacy_shell_placeholders(command):
+            group.warn(
+                f"{owner}.{field}",
+                "Deprecated Shell context placeholders",
+                hint=(
+                    "Use ${agw:session_name} and ${agw:workspace_name} "
+                    f"before release {LEGACY_SHELL_PLACEHOLDER_REMOVAL}."
+                ),
+            )
 
 
 def check_system() -> HealthGroup:

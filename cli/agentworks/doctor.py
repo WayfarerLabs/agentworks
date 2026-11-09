@@ -794,9 +794,9 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
             g.warn("Manifest", issue)
     if not config.config_issues and manifests is not None and not manifests.issues:
         g.ok("Config is valid")
-    # No deprecation rows here: every config.toml deprecation doctor used to
-    # render is retired now, so stale inputs reach ordinary Config or Manifest
-    # validation instead. If a nudge is added back to ``Config.deprecation_issues``,
+    # Every settings-side deprecation doctor used to render is retired now,
+    # so stale settings reach ordinary Config validation instead. If a nudge
+    # is added back to ``Config.deprecation_issues``,
     # render it here as a scannable one-liner (maintainer ruling, 2026-07-06):
     # the FACT plus one next step, with the teaching text left on the ambient
     # per-command warning.
@@ -813,6 +813,10 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
         g.checks.append(registry_check)
     if registry is None:
         return g, config, None
+
+    from agentworks.doctor_state import append_shell_template_deprecation_checks
+
+    append_shell_template_deprecation_checks(g, registry)
 
     # Dotfiles
     from agentworks.resources.access import admin_template
