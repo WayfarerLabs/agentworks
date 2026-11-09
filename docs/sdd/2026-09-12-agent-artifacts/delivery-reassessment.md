@@ -169,42 +169,47 @@ to avoid the home fallback where a private loader works. Do not add a generic sh
 merely to reduce that count: it creates shared ownership and lifecycle questions, and a second layer
 the agent must read, without establishing native persona registration.
 
-## Workspace reserved for a session
+## Single-session and multi-session workspaces
 
-A workspace durably reserved for one logical session can give that session the native project
-location. This is cleaner than shared-home applicability conditions when a private native loader is
-unavailable. Different agents may retain granted filesystem access; managed session admission
-accepts only the owning session. The constraint belongs to workspace ownership, not to a new
-artifact scope. It is not a filesystem isolation promise against users already granted access.
+The operator selected two workspace modes. A single-session workspace admits at most one registered
+logical session, including a stopped session. Its reservation lasts until that session is deleted; a
+replacement can then be created. A multi-session workspace retains the current ability to host
+multiple independent logical sessions. Keep these names explicit: filesystem grants can be shared in
+either mode, so naming the modes private/shared would confuse access with session admission.
 
-This is stronger than allowing only one running session at a time. Serial access by different
-logical sessions leaves previous project guidance, skills and personas available to the next one
-unless an explicit ownership transfer reconciles them. Binding to the durable Agentworks session
-UUID avoids that transfer during ordinary harness switching: current restart already re-resolves the
-selected template/integration, preserves integration-specific native state and keeps the logical
-session UUID. The native conversations of different harnesses remain distinct; this is not automatic
-conversation transfer.
+Use the durable session UUID for the current reservation, not a reusable name or an active-runtime
+lease. Existing start/restart can switch the effective harness through configuration while
+preserving the logical UUID and each integration's separate native conversation state. Deleting the
+old session and creating a new one is also an intentional handoff, with ordinary cleanup between
+owners. This does not translate conversation history between harnesses.
 
-Workspace and session declarations still have separate original scopes, native identities, ownership
-and cleanup, even when both use project directories. Session output can refresh on its own restart
-without introducing general workspace reinit. It must preserve recorded workspace output and
-repository content, and follow the existing replacement and failed-start rules. Git exclusions,
-native discovery, trust and collision behavior still need the same verification; reserving a
-workspace does not make Grok load ignored rule files.
+Single-session mode supplies a provisioning invariant for native project placement of session
+artifacts. Workspace and session declarations retain separate original scopes, native identities,
+applied state and cleanup, even when both use project directories. Session output can refresh with
+its own lifecycle without adding general workspace reinit. Reconcile recorded session-owned files
+when its artifacts change or the session is deleted; preserve workspace-owned and repository content
+and use existing fingerprints, package boundaries, partial-progress reporting and cleanup rules. Do
+not sweep native project directories or add a second tracking mechanism.
 
-The baseline has no workspace ownership binding or workspace-wide start admission check. Merely
-observing one session, or no other currently running session, does not establish this guarantee.
-Durable binding, atomic admission on every managed create/restart path, deletion/orphan behavior and
-any explicit transfer need a workspace lifecycle design before an integration relies on exclusivity.
-Do not infer ownership from the current session list or implement it solely in one harness adapter.
+Admission belongs to workspace lifecycle code, checked on every managed create/start/restart path,
+including batch entry points, with creation rechecked at the existing mutation boundary. A stopped
+owner still occupies the slot. Deletion releases it for a new registered session under ordinary
+lifecycle and cleanup policy. The baseline has no mode or reservation field; observing one session
+or no other running session cannot substitute for this implemented invariant. Filesystem grants
+remain independent, and granted users can still read the project files.
 
-Given the operator's stated preference for one session per workspace with explicit harness handoff,
-prefer this direction over building a shared-home session workaround as the next default candidate.
-Native invocation-local loading remains appropriate where already supported. For ordinary shared
-workspaces without such a loader, leave optional session inputs explained as unhandled unless the
-operator chooses the weaker home fallback. Do not build both alternatives while the product choice
-is unresolved. The ownership work must be explicitly scoped with its requirements and acceptance; it
-is not an incidental renderer cleanup or a completed dependency of these SDDs.
+Prefer native project placement for session inputs in this mode where the integration supports it.
+Native invocation-local loading remains appropriate for multi-session workspaces or where it better
+fits the artifact. Git exclusions, native discovery, trust, collisions and failed-start behavior
+still need verification; single-session mode does not make Grok load ignored rule files. For
+multi-session workspaces lacking an invocation-local loader, keep optional unsupported inputs
+explained as unhandled rather than building the home fallback speculatively.
+
+The workspace mode default remains a product decision: the lead recommends single-session for new
+workspaces and preserving existing workspaces as multi-session. That proposal is not recorded as an
+operator ruling. The mode/admission and placement work must be designed and implemented together
+before either SDD can claim it as accepted behavior; this is a real workspace extension, not an
+incidental renderer cleanup or an existing implementation guarantee.
 
 ## Workspace Git behavior
 

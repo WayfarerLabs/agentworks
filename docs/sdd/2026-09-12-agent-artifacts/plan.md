@@ -14,11 +14,14 @@
       identities, publication/cleanup restrictions and the shared-catalog tradeoff. Record a
       concrete opt-in candidate without claiming runtime support or treating semantic applicability
       as native catalog isolation.
-- [x] Evaluate a workspace reserved for one logical session against serial shared-workspace use.
-      Verify that current restart can switch harnesses while retaining logical identity; record the
-      missing workspace admission/lifecycle contract and preserve separate artifact scopes despite
-      colocated native output. Recommend the workspace direction over building a home workaround
-      before that product choice is settled.
+- [x] Evaluate workspace admission and record the operator's single-session/multi-session direction:
+      at most one registered session, including stopped sessions, until deletion permits
+      replacement. Verify existing harness switching preserves logical identity. Preserve separate
+      artifact scopes and ordinary applied state despite colocated native output; defer the
+      speculative home fallback.
+- [ ] Settle the workspace mode default and design/implement admission, lifecycle and native project
+      placement together before relying on the invariant. Preserve existing workspaces' contract and
+      verify safe cleanup/replacement through the ordinary state mechanism.
 - [ ] Review the concrete [delivery proposal](delivery-reassessment.md), obtain the operator's
       amended contract, then update the HLA, native LLD, permanent teaching and implementation
       together. The current FRD and support matrix remain unchanged until that decision.
