@@ -2,21 +2,26 @@
 
 from __future__ import annotations
 
+import contextlib
 import http.client
 import json
 import urllib.error
 from io import BytesIO
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from agentworks.plugins.proxmox.api import (
     ERROR_BODY_LIMIT_BYTES,
+    REQUEST_TIMEOUT_SECONDS,
     ProxmoxAPI,
     ProxmoxAPIError,
     _InvalidQGAExecStatus,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 @pytest.fixture()
@@ -113,6 +118,30 @@ class TestResponseParsing:
         result = api.vm_status("pve", 100)
         assert result["status"] == "running"
         assert result["vmid"] == 100
+
+    @pytest.mark.parametrize(
+        "call",
+        [
+            lambda api: api.next_id(),
+            lambda api: api.list_vms("pve"),
+            lambda api: api.configure_vm("pve", 100, memory=2048),
+            lambda api: api.vm_status("pve", 100),
+            lambda api: api.vmid_in_use(100),
+            lambda api: api.guest_agent_ping("pve", 100),
+        ],
+        ids=["next_id", "list_vms", "configure_vm", "vm_status", "vmid_in_use", "guest_agent_ping"],
+    )
+    @patch("urllib.request.urlopen")
+    def test_a_request_whose_caller_sets_no_timeout_is_still_bounded(
+        self, mock_urlopen: MagicMock, api: ProxmoxAPI, call: Callable[[ProxmoxAPI], object]
+    ) -> None:
+        """An API that accepts the connection and never answers must fail the call, not hang it."""
+        mock_urlopen.return_value = _mock_response(100)
+
+        with contextlib.suppress(ProxmoxAPIError):  # 100 is not every call's well-formed answer
+            call(api)
+
+        assert mock_urlopen.call_args.kwargs["timeout"] == REQUEST_TIMEOUT_SECONDS
 
     @patch("urllib.request.urlopen")
     def test_vm_status_forwards_status_only_timeout(self, mock_urlopen: MagicMock, api: ProxmoxAPI) -> None:
