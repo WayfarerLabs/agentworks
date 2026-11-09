@@ -213,16 +213,19 @@ class NativeCLI(AbstractContextManager["NativeCLI"]):
         config_root: str,
         isolated: bool = False,
         diagnostic_root: str | None = None,
+        scratch: str | None = None,
+        resolved: tuple[str, str] | None = None,
     ):
+        """``scratch`` and ``resolved`` share an open CLI's scratch directory and executable with one not entered."""
         self.tool = tool
         self.invocation = invocation
         self.home = invocation.home
         self.config_root = config_root
         self.diagnostic_root = diagnostic_root or config_root
         self.isolated = isolated
-        self.scratch: str | None = None
+        self.scratch = scratch
         self._discoveries = 0
-        self._resolved: tuple[str, str] | None = None
+        self._resolved = resolved
 
     def __enter__(self) -> NativeCLI:
         result = self._run(Command(("mktemp", "-d", "-t", "agentworks-native-XXXXXXXXXX")))
@@ -361,7 +364,7 @@ class NativeCLI(AbstractContextManager["NativeCLI"]):
             return None
         try:
             return json.loads(result.stdout)
-        except ValueError:
+        except (ValueError, RecursionError):
             raise ExternalError(f"invalid {self.tool} native plugin response") from None
 
     def markets(self) -> tuple[NativeMarket, ...]:
@@ -512,9 +515,9 @@ class NativeCLI(AbstractContextManager["NativeCLI"]):
             config_root=root,
             isolated=True,
             diagnostic_root=self.diagnostic_root,
+            scratch=self._scratch(),
+            resolved=self._resolve_command(),
         )
-        staged.scratch = self.scratch
-        staged._resolved = self._resolve_command()
         staged.add_market(self.home + source[1:] if source.startswith("~/") else source)
         markets = staged.markets()
         if len(markets) != 1 or markets[0].source is None:

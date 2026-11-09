@@ -70,8 +70,9 @@ preserve work outside the workspace first; see the
 ## Marketplaces and plugins
 
 User configuration has `marketplaces` and `plugins` lists, both empty by default. Marketplace
-strings use the installed harness's native source grammar. Local marketplace paths refer to the
-guest filesystem; relative paths resolve against the actual user's home. Plugin names resolve
+strings use the installed harness's native source grammar, except that one beginning with `-`, which
+the native CLI would read as an option, is a configuration error. Local marketplace paths refer to
+the guest filesystem; relative paths resolve against the actual user's home. Plugin names resolve
 against the native catalog; qualify ambiguous names as `plugin@marketplace`. An ambiguous
 unqualified selection is retained and reported without retiring its prior associations. A name
 absent from the catalog is a configuration error.

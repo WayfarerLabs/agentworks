@@ -37,8 +37,9 @@ def test_a_failed_command_names_its_operation_and_where_to_inspect_it(transport:
     assert "provider prose" not in message
 
 
-def test_a_structured_reply_that_is_not_json_is_an_external_error(transport: LocalFixtureTransport) -> None:
+@pytest.mark.parametrize("reply", ["not json", "[" * 100_000], ids=["text", "too-deep"])
+def test_a_structured_reply_that_is_not_json_is_an_external_error(transport: LocalFixtureTransport, reply: str) -> None:
     with native_cli(transport, "codex", transport.home / ".codex") as cli:
-        cli._resolved = (str(native(transport, "echo 'not json'\n")), "/usr/bin:/bin")
+        cli._resolved = (str(native(transport, f"printf '%s' '{reply}'\n")), "/usr/bin:/bin")
         with pytest.raises(ExternalError):
             cli.command(["plugin", "list", "--json"], structured=True)

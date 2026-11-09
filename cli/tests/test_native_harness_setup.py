@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import cast
 
 import pytest
+from pydantic import ValidationError
 
 from agentworks.capabilities.harness_integration.settings import SettingsMapping, parse_settings, serialize_settings
 from agentworks.capabilities.harness_integration.setup import WorkspaceSetupInvocation
@@ -840,3 +841,9 @@ def test_marketplace_only_repeat_does_not_read_available_catalog(transport, monk
 
     monkeypatch.setattr(NativeCLI, "available", unexpected_catalog)
     setup_user("codex", config, invocation(transport, claims, prior=record(claims[-1], "codex")))
+
+
+@pytest.mark.parametrize("source", ["-x", "--help"])
+def test_a_marketplace_source_that_reads_as_an_option_is_refused(source: str) -> None:
+    with pytest.raises(ValidationError):
+        NativeUserConfig.model_validate({"marketplaces": [source]})

@@ -205,7 +205,7 @@ def setup_workspace(
     files = invocation.files
     initial = files.read(destination)
     plan = _MappingPlan.build(prepared, initial, destination)
-    plan.publish(files, destination, current=initial, group=invocation.linux_group or None)
+    plan.publish(files, destination, current=initial, group=invocation.linux_group)
     if claims:
         invocation.checkpoint(())
 
