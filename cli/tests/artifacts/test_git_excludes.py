@@ -142,9 +142,10 @@ def test_forged_persisted_metadata_destination_cannot_authorize_a_write(reposito
     unrelated = target.home / "operator"
     unrelated.write_bytes(b"operator content")
     bad = claims[0].model_copy(update={"destination": str(unrelated)})
-    with pytest.raises(StateError):
-        apply(target, workspace, (), (bad,))
+    current, _, incomplete = apply(target, workspace, (), (bad,))
+    assert not current and not incomplete
     assert unrelated.read_bytes() == b"operator content"
+    assert all(str(unrelated) not in command for command in target.commands)
 
 
 def test_linked_worktree_resolves_common_metadata_and_preserves_other_owner(repository):
@@ -178,3 +179,93 @@ def test_linked_worktree_resolves_common_metadata_and_preserves_other_owner(repo
     assert unrelated.read_bytes() == b"unrelated operator skill"
     assert second_claims[0].identifier.encode() in Path(second_claims[0].destination).read_bytes()
     git("-C", workspace, "worktree", "remove", "--force", linked)
+
+
+@pytest.mark.parametrize("nested", [False, True])
+def test_workspace_alias_uses_git_relative_names_for_tracking_and_exact_patterns(repository, nested, captured_output):
+    target, root = repository
+    workspace = root / "nested" if nested else root
+    workspace.mkdir(exist_ok=True)
+    alias = target.home / "alias"
+    alias.symlink_to(workspace, target_is_directory=True)
+    tracked = file(alias / ".agents/skills/policy/tracked [x]*?.txt")
+    untracked = file(alias / ".agents/skills/policy/new [x]*?.txt")
+    git("--literal-pathspecs", "-C", alias, "add", "--", ".agents/skills/policy/tracked [x]*?.txt")
+    claims, _, incomplete = apply(target, alias, (tracked, untracked))
+    assert not incomplete and len(claims) == 1
+    assert claims[0].source == str(alias)
+    assert captured_output.warnings
+    assert (
+        git(
+            "-C", root, "check-ignore", "--no-index", "--", workspace / ".agents/skills/policy/new [x]*?.txt"
+        ).returncode
+        == 0
+    )
+    remaining, _, incomplete = apply(target, alias, (), claims)
+    assert not remaining and not incomplete
+    assert git(
+        "--literal-pathspecs",
+        "-C",
+        alias,
+        "ls-files",
+        "--error-unmatch",
+        "--",
+        ".agents/skills/policy/tracked [x]*?.txt",
+    ).stdout
+
+
+@pytest.mark.parametrize("reapply", [False, True])
+def test_git_directory_move_rebinds_only_current_metadata_and_converges(repository, reapply):
+    target, workspace = repository
+    record = file(workspace / ".agents/skills/policy/SKILL.md")
+    prefix = b"# operator\n*.local\n"
+    exclude = workspace / ".git/info/exclude"
+    exclude.write_bytes(prefix)
+    claims, _, _ = apply(target, workspace, (record,))
+    before = exclude.read_bytes()
+    moved = target.home / "git-metadata"
+    git("-C", workspace, "init", "-q", "--separate-git-dir", moved)
+    destination = moved / "info/exclude"
+    destination.chmod(0o640)
+    metadata = destination.stat()
+    first = len(target.commands)
+    remaining, _, incomplete = apply(target, workspace, (record,) if reapply else (), claims)
+    assert not incomplete
+    assert all(claim.destination == str(destination) for claim in remaining)
+    assert all(claims[0].destination not in command for command in target.commands[first:])
+    assert destination.read_bytes() == (before if reapply else prefix)
+    after = destination.stat()
+    assert (after.st_uid, after.st_gid, after.st_mode) == (metadata.st_uid, metadata.st_gid, metadata.st_mode)
+    if reapply:
+        assert after.st_mtime_ns == metadata.st_mtime_ns
+        assert apply(target, workspace, (record,), remaining) == (remaining, [], [])
+        retired, _, _ = apply(target, workspace, (), remaining)
+        assert not retired and destination.read_bytes() == prefix
+    else:
+        assert not remaining
+
+
+@pytest.mark.parametrize("change", ["source", "glob", "escape", "outside"])
+def test_invalid_persisted_association_is_released_without_writing_its_destination(repository, change):
+    target, workspace = repository
+    record = file(workspace / ".agents/skills/policy/SKILL.md")
+    claims, _, _ = apply(target, workspace, (record,))
+    exclude = Path(claims[0].destination)
+    before = exclude.read_bytes()
+    updates = {
+        "source": {"source": str(workspace) + "-other"},
+        "glob": {"identifier": "/*"},
+        "escape": {"identifier": "/\\x"},
+        "outside": {"identifier": "/../outside"},
+    }
+    bad = claims[0].model_copy(update=updates[change])
+    remaining, _, incomplete = apply(target, workspace, (), (bad,))
+    assert not remaining and not incomplete
+    assert exclude.read_bytes() == before
+
+
+def test_exclusion_refuses_paths_outside_the_owning_workspace(repository):
+    target, workspace = repository
+    record = file(target.home / "outside/SKILL.md")
+    with pytest.raises(StateError):
+        apply(target, workspace, (record,))
