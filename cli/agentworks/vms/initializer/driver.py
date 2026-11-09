@@ -6,9 +6,9 @@ Phase A is provisioning: after the platform completes create-time bootstrap,
 host key, check the contract) and syncs SSH config, then returns the admin's
 ``VMAccess`` and home for Phase B. Every Phase B request runs on that one
 access, each bounded by ``steps.STEP_DEADLINE`` unless it has a bound of its
-own. Until the Admin Initialization steps move, those steps and the final
-``authorized_keys`` write still take the legacy target the callers build
-beside the access. Phase B is initialization:
+own, except that the Admin Initialization steps still on the legacy
+transport, and the final ``authorized_keys`` write, take the legacy target
+``bootstrap_vm`` and reinit build beside the access. Phase B is initialization:
 ``run_initialization`` runs it, both after ``bootstrap_vm`` on ``vm create``
 and standalone on ``vm reinit``.
 
