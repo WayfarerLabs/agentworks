@@ -1175,10 +1175,13 @@ spec:
 
 `agw resource explain harness-integration/shell` documents its config field by field. Command
 strings support context substitution such as `${agw:session_name}`, `${agw:workspace_name}`, and
-`${agw:user_home_dir}`. Only `${agw:...}` belongs to Agentworks; text outside that namespace remains
-literal to its renderer and does not produce placeholder errors. The namespace keeps shell variables
-and Go templates available to their own consumers. The executables an integration requires are
-checked on the session's launch target before state mutation, so a missing tool fails with an
+`${agw:user_home_dir}`. The namespaced syntax keeps shell variables and Go templates available to
+their own consumers. For existing Shell configurations, `{{session_name}}` and `{{workspace_name}}`
+remain accepted in `command` and `resume_command` through CLI 0.21.x, with removal planned for
+0.22.0. Replace them with `${agw:session_name}` and `${agw:workspace_name}`. Launches emit a
+suppressible deprecation notice; `agw doctor` also identifies affected effective templates and
+stored session overrides. Other brace text remains literal. The executables an integration requires
+are checked on the session's launch target before state mutation, so a missing tool fails with an
 actionable error.
 
 See [runtime context and interpolation](../docs/arch/runtime-context.md) for the complete
