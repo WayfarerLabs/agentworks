@@ -646,6 +646,22 @@ class TestCloseProvisioningHooks:
         assert captured_output.info == []
         assert captured_output.warnings == []
 
+    def test_a_revoke_that_lists_the_rule_as_unknown_reports_nothing_closed(
+        self, monkeypatch: pytest.MonkeyPatch, captured_output: Any
+    ) -> None:
+        """EC2 can answer a revoke of a missing rule with success and ``UnknownIpPermissions``: nothing closed."""
+        install_fakes(monkeypatch, Controls(missing_revoke_succeeds=True))
+        platform = _platform()
+        platform.create(_request(), RunContext(config=_config()))
+        platform.close_provisioning_access(_vm(), RunContext())
+        assert _ec2(platform).ingress["sg-123"] == {}
+        captured_output.info.clear()
+
+        platform.close_provisioning_access(_vm(), RunContext())
+
+        assert captured_output.info == []
+        assert captured_output.warnings == []
+
     def test_a_close_that_cannot_reach_ec2_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The caller warns with what it raises, so the tuples left open are named there, not lost."""
         install_fakes(monkeypatch)

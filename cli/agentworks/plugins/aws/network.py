@@ -271,7 +271,9 @@ def remove_ssh_allow(ec2: Any, security_group_id: str, prefixes: Sequence[str]) 
     untouched).
 
     Best-effort per prefix: a tuple already gone (a concurrent route's exit
-    revoked a shared prefix, or the group is gone) is tolerated silently; any
+    revoked a shared prefix, or the group is gone), whether EC2 answers
+    ``InvalidPermission.NotFound`` or lists it under ``UnknownIpPermissions``,
+    is tolerated silently; any
     other failure warns naming the prefix and the residual exposure rather
     than raising, because every call site must keep unwinding. Only what was
     actually revoked is reported as closed."""
@@ -279,7 +281,7 @@ def remove_ssh_allow(ec2: Any, security_group_id: str, prefixes: Sequence[str]) 
     revoked: list[str] = []
     for prefix in prefixes:
         try:
-            ec2.revoke_security_group_ingress(
+            response = ec2.revoke_security_group_ingress(
                 GroupId=security_group_id,
                 IpPermissions=[_ssh_permission(prefix)],
             )
@@ -293,7 +295,10 @@ def remove_ssh_allow(ec2: Any, security_group_id: str, prefixes: Sequence[str]) 
                 f"'{security_group_id}': {err}. The VM's SSH port stays open to "
                 f"{prefix}; revoke it manually to restore zero inbound exposure."
             )
-        else:
+            continue
+        # EC2 may answer a revoke of a rule that does not exist with success,
+        # listing the rule under UnknownIpPermissions: nothing was revoked.
+        if not (isinstance(response, dict) and response.get("UnknownIpPermissions")):
             revoked.append(prefix)
     for warning in warnings:
         output.warn(warning)

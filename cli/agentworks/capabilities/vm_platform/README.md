@@ -247,10 +247,11 @@ automatically), but its rule model forces a divergence: an EC2 ingress rule's id
 `(protocol, port, cidr)` tuple, not a name, so two concurrent routes from one operator egress share
 ONE rule rather than owning independent ones. The poke is therefore idempotent (tolerate
 `InvalidPermission.Duplicate`) and the per-op remove tolerant (tolerate
-`InvalidPermission.NotFound`), failing CLOSED (the deny baseline), never open; see
-`plugins/aws/network.py`. GCE uses a distinct UUID-suffixed firewall rule and provider ID for each
-route, so concurrent routes close independently. The route's calls read the credential from `ctx`,
-so a credentials-configured site authenticates as itself with no ambient fallback.
+`InvalidPermission.NotFound`, or a success that lists the rule under `UnknownIpPermissions`),
+failing CLOSED (the deny baseline), never open; see `plugins/aws/network.py`. GCE uses a distinct
+UUID-suffixed firewall rule and provider ID for each route, so concurrent routes close
+independently. The route's calls read the credential from `ctx`, so a credentials-configured site
+authenticates as itself with no ambient fallback.
 
 **Lifecycle hooks** have sensible defaults. All are entered by callers that gate first, so on entry
 the VM is running or was just started:
