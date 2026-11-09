@@ -50,7 +50,7 @@ def _world(monkeypatch: pytest.MonkeyPatch, vm_access_recorder: AccessRecorder) 
     synced: list[str] = []
     monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", KEY)
     monkeypatch.setattr(vm_manager, "verify_tailscale_available", lambda: None)
-    monkeypatch.setattr("agentworks.ssh_config.sync_ssh_config", lambda config, db: synced.append("sync"))
+    monkeypatch.setattr("agentworks.ssh_config.sync_ssh_config", lambda config, db, **kwargs: synced.append("sync"))
     monkeypatch.setattr("agentworks.capabilities.vm_platform.tailscale_join.time.sleep", lambda seconds: None)
     return synced
 

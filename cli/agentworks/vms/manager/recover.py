@@ -52,7 +52,7 @@ def recover_vm(db: Database, config: Config, name: str, *, interaction: TtyInter
     boundary, since the repair joins the tailnet when the node needs a login.
     """
     import agentworks.vms.manager as _mgr
-    from agentworks.ssh_config import sync_ssh_config
+    from agentworks.ssh_config import sync_ssh_config_or_warn
     from agentworks.vms.applied_state import prepare_configured_ssh_identity
     from agentworks.vms.initializer.ssh_keys import authorized_keys_content
 
@@ -120,7 +120,8 @@ def recover_vm(db: Database, config: Config, name: str, *, interaction: TtyInter
             if address != vm.tailscale_host:
                 db.update_vm_tailscale(name, address)
             # Whatever the address did: the repair installed the configured key, which may be a new one.
-            sync_ssh_config(config, db)
+            # The VM is repaired by now, so a failed local write warns rather than failing the recover.
+            sync_ssh_config_or_warn(config, db)
 
             log.step("Wait for SSH")
             wording = reachability.Wording.RECONNECT if joined else reachability.Wording.VERIFY
