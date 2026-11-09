@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit
 
+from agentworks.programs import resolve_program
 from agentworks.sources import SourceRef, SourceRefError, parse_source_ref
 
 
@@ -332,7 +333,7 @@ class PackageCapture:
         self.check()
         maximum = self.limits.member_bytes if output_limit is None else output_limit
         command = [
-            "git",
+            resolve_program("git"),
             "-c",
             "core.hooksPath=/dev/null",
             "-c",
@@ -395,19 +396,7 @@ class PackageCapture:
                 return data
             finally:
                 if process.poll() is None:
-                    if sys.platform != "win32":
-                        os.killpg(process.pid, signal.SIGKILL)
-                    else:
-                        try:
-                            subprocess.run(
-                                ["taskkill", "/F", "/T", "/PID", str(process.pid)],
-                                stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL,
-                                timeout=5,
-                                check=False,
-                            )
-                        except (OSError, subprocess.TimeoutExpired):
-                            process.kill()
+                    _kill_process_tree(process)
                 process.wait()
 
     def _git(self, reference: SourceRef) -> CapturedPackage:
@@ -459,6 +448,23 @@ class PackageCapture:
             data = self._run(repository, "cat-file", "blob", object_name)
             result.append(PackageMember(path, data, mode == b"100755"))
         return CapturedPackage(tuple(result), reference.path, reference.subpath, reference.ref, commit)
+
+
+def _kill_process_tree(process: subprocess.Popen[bytes]) -> None:
+    """End ``process`` and what it started: its session on POSIX, its tree through ``taskkill`` on Windows."""
+    if sys.platform != "win32":
+        os.killpg(process.pid, signal.SIGKILL)
+        return
+    try:
+        subprocess.run(
+            [resolve_program("taskkill"), "/F", "/T", "/PID", str(process.pid)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        process.kill()
 
 
 def _stamp(info: os.stat_result) -> tuple[int, int, int, int, int, int]:

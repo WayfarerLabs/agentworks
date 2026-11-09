@@ -23,7 +23,7 @@ from agentworks.secrets.inspect import (
     build_secret_table,
     render_secret_table,
 )
-from tests.conftest import ManifestDoc, write_manifests
+from tests.conftest import ManifestDoc, fake_installed_programs, write_manifests
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -570,7 +570,7 @@ def test_grid_cell_not_ready_wins_over_identifier(tmp_path: Path, monkeypatch) -
     """R9.7: a not-ready backend (onepassword, no ``op`` on PATH) with a mapped
     ``op://`` ref shows ``not ready: <reason>``, not the ref: it cannot run
     here, so not-ready wins over the identifier."""
-    monkeypatch.setattr("shutil.which", lambda name: None)
+    fake_installed_programs(monkeypatch, lambda name: None)
     table = _build_table(_readiness_grid_config(tmp_path))
     row = next(r for r in table.rows if r.name == "mapped-op")
     op = next(c for c in row.cells if c.source == "onepassword")
@@ -583,7 +583,7 @@ def test_grid_cell_wont_attempt_wins_over_not_ready(tmp_path: Path, monkeypatch)
     """R9.7 precedence: a backend that would NOT attempt this secret (onepassword
     is mapping-required and has no mapping) shows ``won't attempt`` even when its
     host tool is absent: readiness is moot for a secret it never attempts."""
-    monkeypatch.setattr("shutil.which", lambda name: None)
+    fake_installed_programs(monkeypatch, lambda name: None)
     table = _build_table(_readiness_grid_config(tmp_path))
     row = next(r for r in table.rows if r.name == "unmapped-op")
     op = next(c for c in row.cells if c.source == "onepassword")
@@ -596,7 +596,7 @@ def test_render_grid_uses_readiness_vocabulary(tmp_path: Path, monkeypatch, capt
     """R9.7 at the rendered level: cells are the identifier / ``candidate`` /
     ``not ready: <reason>`` / ``won't attempt`` states, never the retired
     ``enabled`` / ``disabled`` literals."""
-    monkeypatch.setattr("shutil.which", lambda name: None)
+    fake_installed_programs(monkeypatch, lambda name: None)
     table = _build_table(_readiness_grid_config(tmp_path))
     render_secret_table(table)
     out = "\n".join(captured_output.info)

@@ -125,11 +125,22 @@ has started.
   (ignoring empty and relative `PATH` entries) and checks its version once per run. A missing or
   older client is refused before anything else happens, with the paths it tried. `agw doctor` shows
   which client Agentworks resolved.
-- **The native Windows build on Windows.** Agentworks never searches `PATH` there, because `PATH`
-  commonly finds the `ssh` bundled with Git for Windows, whose argument handling breaks these
-  commands. It looks for Win32-OpenSSH in `System32\OpenSSH` and then `Program Files\OpenSSH`
+- **The native Windows build on Windows.** These commands never search `PATH` for `ssh` there,
+  because `PATH` commonly finds the `ssh` bundled with Git for Windows, whose argument handling
+  breaks them. It looks for Win32-OpenSSH in `System32\OpenSSH` and then `Program Files\OpenSSH`
   (including the 32-bit file system redirects) and judges each. Windows 10's inbox client is OpenSSH
   8.1, so install the Win32-OpenSSH MSI from <https://github.com/PowerShell/Win32-OpenSSH/releases>.
+- **No program from the current directory.** Windows looks a bare program name up in the current
+  directory before `PATH`, and on POSIX an empty or relative `PATH` entry means the current
+  directory. Agentworks now starts every workstation program by its path in an absolute `PATH`
+  directory: `tailscale`, PowerShell, the 1Password CLI `op`, `git`, `taskkill`, local Lima's
+  `limactl`, VS Code's `code`, your `EDITOR`, and the `ssh` and `scp` of the commands that still use
+  the older SSH path (VM and agent initialization, sessions, workspaces and backups). A program
+  found only in the current directory counts as not installed, so `agw doctor` and the 1Password
+  backend's readiness no longer vouch for one. An `EDITOR` given as a path is run as given. On
+  Windows, `workspace create --open-vscode` does not start VS Code: its `code` command is a batch
+  file, which only `cmd.exe` can run, and `cmd.exe` parses the workspace path by its own rules. The
+  warning names the workspace file to open in VS Code yourself.
 - **`python3` on the VM.** Every request starts a small Python program on the VM. A VM without
   `python3`, or with one that lacks its standard library, is reported as unable to run Agentworks
   requests. New VMs get it at provisioning. `vm reinit` and `vm confirm-release` now connect the
@@ -185,10 +196,10 @@ has started.
   131,071 bytes is refused before anything runs, because Linux cannot execute it.
 - **`vm shell` and `agent shell` without `--workspace` no longer print the message of the day or the
   last-login line.** sshd prints them only when it runs the login shell itself.
-- **`vm port-forward` exits 0 when you stop it** with Ctrl-C, and on macOS and Linux also with
-  `SIGTERM` or `SIGHUP` (a closed terminal); started under `nohup`, it keeps running after its
-  terminal closes. It exits non-zero when a forward cannot be set up (a busy local port, for
-  example) instead of running with nothing forwarded.
+- **`vm port-forward` exits 0 when you stop it** with Ctrl-C, on macOS and Linux also with `SIGTERM`
+  or `SIGHUP` (a closed terminal), and on Windows also with Ctrl-Break; started under `nohup`, it
+  keeps running after its terminal closes. It exits non-zero when a forward cannot be set up (a busy
+  local port, for example) instead of running with nothing forwarded.
 
 ## Create, reinit and the VM contract
 
@@ -202,9 +213,12 @@ has started.
   killed before then is kept with its provisioning incomplete. `vm start`, `vm stop`, `vm rekey`,
   `vm recover`, `vm reinit`, `vm exec`, `vm shell` (with `--platform` too), `vm port-forward`,
   `vm backup` and `vm confirm-release` refuse either, while `vm describe`, `vm list` and
-  `vm verify-connection` still run; delete it with `agw vm delete NAME`. When the check that failed
-  is a missing `python3` or a missing host-key record, the error gives only that delete-and-recreate
-  guidance, since `vm recover` refuses a VM whose provisioning never completed.
+  `vm verify-connection` still run; delete it with `agw vm delete NAME`. A create killed before its
+  platform finished leaves a row that records nothing addressing the backend: `vm delete` refuses
+  it, and `vm delete --force NAME` removes the row and its host-key record and warns with what may
+  remain on its vm-site, for you to remove there. When the check that failed is a missing `python3`
+  or a missing host-key record, the error gives only that delete-and-recreate guidance, since
+  `vm recover` refuses a VM whose provisioning never completed.
 - **Cloud create** (AWS, Azure, GCP) waits up to 10 minutes for the new VM to answer over SSH at its
   public address, instead of 30 tries 10 seconds apart. It fails at once, instead of trying again,
   when the admin cannot run `sudo` without a password or the VM's host key changes during the
@@ -235,11 +249,11 @@ before they resolve the auth key.
   on an ephemeral auth key whose node expired while it was offline, and one whose node was removed
   in the Tailscale admin console. No start resolves the auth key any more.
 - **`agw vm recover NAME`** is new. It starts a stopped VM first; then, through the platform's own
-  channel, it records missing host keys once you confirm their fingerprints, then restores your SSH
-  public key, restarts a broken SSH server on WSL2 and Proxmox, installs `python3`, starts
-  `tailscaled` if it is not running, and rejoins Tailscale only when the node needs a login. Then it
-  waits once for the VM to answer. See the [command reference](../../cli/command-reference.md) for
-  what it refuses.
+  channel, it records missing host keys once you confirm their fingerprints, then rewrites the
+  admin's `authorized_keys` with your configured keys as `vm reinit` does (removing a key you
+  replaced), restarts a broken SSH server, installs `python3`, starts `tailscaled` if it is not
+  running, and rejoins Tailscale only when the node needs a login. Then it waits once for the VM to
+  answer. See the [command reference](../../cli/command-reference.md) for what it refuses.
 - **`vm rekey`** runs its steps as one script through the platform's own channel and keeps an
   operation log. When the VM does not answer over SSH at its new address after the rekey, the
   command fails with a hint to run `agw vm recover NAME`, instead of warning and exiting 0.
@@ -257,17 +271,39 @@ before they resolve the auth key.
   so `~/.ssh/config` does not apply and an encrypted key must be loaded in the SSH agent, and it
   refuses a VM with no recorded host key. A platform without a native shell (Proxmox) is refused
   before anything is resolved.
-- **`vm delete`** reports whether the logout worked. It does not log out a cloud VM whose host key
-  was never recorded, and names the node to remove in the Tailscale admin console instead. It reads
-  the VM's power state once it holds the VM, so a WSL2 distro that the hold boots is still logged
-  out; a VM that is still stopped or deallocated is not, and the warning names its node for removal
-  in the admin console the same way.
-- **A cloud VM's temporary SSH allow closes on `SIGTERM` and `SIGHUP`.** On macOS and Linux, every
-  allow Agentworks opens to a cloud VM (AWS, Azure, GCP) is removed when the command is ended by
-  `SIGTERM` or `SIGHUP` (a closed terminal), as it is on Ctrl-C: `vm create` rolls back, bootstrap
-  allow included, and a root script (`vm recover`, `vm rekey`, the logout at `vm delete`) or a
-  `vm shell --platform` session removes its own allow. A second signal during that cleanup is
-  ignored, so it cannot cut the removal short.
+- **`vm delete` keeps a VM whose backend it could not delete, unless forced.** An unset token
+  secret, a removed vm-site or a disabled plugin used to warn and remove the row while the VM kept
+  running. Now delete keeps the row and its host-key record whenever the backend VM was not deleted,
+  a site that cannot be bound included, naming the backend identifiers the row holds; fix the cause
+  and run it again, or remove the backend yourself and pass `--force`. `vm delete --force` now has
+  one meaning: it also deletes the VM's children, and removes the row and the host-key record even
+  when the backend delete could not complete, warning with those identifiers.
+- **`vm delete`** logs the node out of Tailscale over the platform's own channel before the backend
+  delete, and no longer stops each session first. It reports whether the logout worked, and goes on
+  with the delete either way. It does not log out a cloud VM whose host key was never recorded, and
+  names the node to remove in the Tailscale admin console instead. It reads the VM's power state
+  once it holds the VM, so a WSL2 distro that the hold boots is still logged out; a VM that is still
+  stopped or deallocated is not, and the warning names its node the same way. A backend delete that
+  fails after the logout says how to finish the delete, and that `agw vm rekey NAME` puts the VM
+  back on Tailscale instead.
+- **A cloud VM's temporary SSH allow closes on `SIGTERM`, `SIGHUP` and Ctrl-Break.** Every allow
+  Agentworks opens to a cloud VM (AWS, Azure, GCP) is removed when the command is ended on macOS and
+  Linux by `SIGTERM` or `SIGHUP` (a closed terminal), or on Windows by Ctrl-Break, as it is on
+  Ctrl-C: `vm create` rolls back, bootstrap allow included, and a root script (`vm recover`,
+  `vm rekey`, the logout at `vm delete`) or a `vm shell --platform` session removes its own allow.
+  Once a signal has started that cleanup, Ctrl-C included, a `SIGTERM`, `SIGHUP` or Ctrl-Break is
+  ignored, so a closed terminal cannot cut the removal short; a second Ctrl-C still abandons the
+  cleanup, as its message says, though one that lands while a firewall rule's removal is in flight
+  waits for that removal to finish first (Azure and GCP bound that wait, then warn that the rule may
+  remain). Closing the console window on Windows may start that cleanup, but Windows ends the
+  process within seconds, so it cannot be relied on to finish: end the command with Ctrl-C or
+  Ctrl-Break instead, and delete a rule a closed window left behind from the VM's firewall in the
+  provider's console.
+- **Output nobody reads no longer fails a command.** When the reader of `agw`'s output has gone (a
+  pipe into `head` that has exited, `2>&1 | tee create.log` in a closed window, or the closed
+  terminal itself), the rest of that output is dropped and the command carries on to the end, a
+  create's rollback included, with the exit status it would have had. Output redirected to a file
+  that cannot be written, such as on a full disk, still fails the command.
 
 ## Native harness setup
 
@@ -361,10 +397,19 @@ state the full contract, and the
   `request.provisioning_trust`. It waits with
   `PublicSSH.wait_until_answering(seconds=..., retry_refused_key=True)`, where a refused key raises
   `public_ssh.KeyRefused` and is retried until the bound, since a cloud's guest agent may install
-  the key after sshd starts; then it waits for cloud-init, joins and settles the address.
-- **Phase A always calls `post_tailscale_ready`** once the VM contract passes, with the create's own
-  context, and `secure_failed_vm` when Phase A fails or is interrupted. A platform that opens
-  provisioning access in `create`, such as a bootstrap firewall allow, closes it in both.
+  the key after sshd starts; then it waits for cloud-init, joins and settles the address. A
+  cloud-init that finished with recoverable errors (exit status 2) warns and lets create carry on;
+  any other failure's error quotes the exit status and cloud-init's own detail and errors
+  (`cloud-init status --wait --long`), since the rollback then removes the VM.
+- **`close_provisioning_access(vm, ctx)` replaces `post_tailscale_ready` and `secure_failed_vm`.**
+  Phase A calls it once with the create's own context, however Phase A ends: after the VM contract
+  passes, when Phase A fails, and when it is interrupted. A platform that opens provisioning access
+  in `create`, such as a bootstrap firewall allow, closes it there. A platform built on
+  `public_ssh.PublicAddressPlatform` has it called again after each root-channel route, so it must
+  do nothing, silently, when the access is already closed. Rename an override of either old hook; a
+  platform that overrode both with the same body keeps one. Registration refuses a platform that
+  still defines either old name, naming `close_provisioning_access`, since nothing calls them any
+  more.
 - **`generate_bootstrap_script()` no longer takes `tailscale_auth_key`.** The script it generates
   holds no secret and stops once Tailscale is installed, so a provider may retain it.
   `run_bootstrap()` runs it through a root channel, and `parse_bootstrap_steps()` replaces

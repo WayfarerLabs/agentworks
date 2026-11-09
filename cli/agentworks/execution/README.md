@@ -122,7 +122,8 @@ Completion comes from the markers, never from ssh's exit status:
 - `Unknown(reason)`: it may have run (`CONNECTION`, `HOST_KEY`, `TRUNCATED`, `DEADLINE`,
   `OUTPUT_LIMIT`). `AUTH_FAILED` is the exception the evidence allows: ssh's 255 with no start
   marker and `Permission denied (publickey` in its own log means the VM refused the configured key,
-  so nothing ran.
+  so nothing ran. `CONNECTION` stays "may have run": the start marker is written just before the
+  payload starts, so a connection lost then can drop it. Both errors' hints name `agw vm recover`.
 
 `Result.require_completed` and `run(check=True)` turn the rest into typed errors (`errors.py`):
 `VMNotReady`, `TrustMismatch`, `RequestRefused`, `ExecutionIncomplete`, `CommandFailed`. No error,

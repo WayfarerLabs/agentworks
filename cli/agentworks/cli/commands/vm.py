@@ -279,7 +279,16 @@ def vm_stop(
 @vm_app.command("delete")
 def vm_delete(
     name: Annotated[str, typer.Argument(help="VM name")],
-    force: Annotated[bool, typer.Option("--force", help="Force delete even with workspaces")] = False,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            help=(
+                "Also delete dependent workspaces, agents and sessions, and remove the VM's row even when "
+                "its backend could not be deleted"
+            ),
+        ),
+    ] = False,
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
 ) -> None:
     """Delete a VM and clean up all resources."""
@@ -340,9 +349,10 @@ def vm_recover(
     Starts the VM first if it is stopped. Then, through the platform's own
     channel, without the VM's Tailscale: records a missing host key once you
     confirm its fingerprints, restores your SSH key, restarts a broken SSH
-    server where the platform's channel does not use it, installs python3,
+    server, installs python3,
     starts tailscaled if it is not running, and rejoins Tailscale only when
-    the node needs a login. Then it waits for the VM to answer over SSH.
+    the node needs a login. Then it waits for the VM to answer over SSH, and
+    records your configured SSH identity as the VM's.
     """
     interaction = ordinary_tty_interaction_policy()
     from agentworks.config import load_config

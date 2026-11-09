@@ -9,7 +9,9 @@ runs the delete op's teardown sequence (the shared
 ``_teardown_distro``: ``wsl --unregister`` + install-dir removal) on
 plain failure AND on interrupt, re-raising the original; a SECOND
 interrupt during the cleanup abandons it loudly, naming the removal
-command. The azure precedent is test_azure_create_interrupt.py (#338).
+command. A cleanup that fails, is abandoned, or leaves the distro
+registered hands it to core as ``RetainedProvisioningError``, so the row
+survives for ``vm delete`` to retry. The azure precedent is test_azure_create_interrupt.py (#338).
 
 The rootfs-download atomicity suite at the bottom covers the cache the
 rollback deliberately keeps: a failed download must never leave a
@@ -24,6 +26,7 @@ touches the network.
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
@@ -33,7 +36,7 @@ from urllib.parse import urlparse
 import pytest
 
 from agentworks.capabilities.base import RunContext
-from agentworks.capabilities.vm_platform import ProvisionRequest, wsl2
+from agentworks.capabilities.vm_platform import ProvisionRequest, RetainedProvisioningError, wsl2
 from agentworks.capabilities.vm_platform.tailscale_join import JOIN_FRAGMENT
 from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 from agentworks.debian import DebianRelease
@@ -92,13 +95,20 @@ def _wire(
     monkeypatch: pytest.MonkeyPatch,
     *,
     errors: dict[str, BaseException] | None = None,
+    listed: str = "",
+    listing_stderr: str = "",
+    statuses: dict[str, int] | None = None,
 ) -> _Calls:
     """Mock the backend seams; return the recorded calls.
 
     ``errors`` maps a substring (of the joined wsl args or the
     PowerShell script) to the exception the seam raises when it sees it
     (the call is still recorded first, so tests can pin exactly-once
-    attempts).
+    attempts). ``listed`` is what ``wsl --list`` prints on stdout and
+    ``listing_stderr`` what it prints on stderr, and ``statuses`` maps
+    the first wsl argument (``--unregister``, ``--list``) to its
+    exit status, 0 when absent. ``_wsl`` itself runs for real over the
+    faked process.
     """
     calls = _Calls()
 
@@ -107,18 +117,21 @@ def _wire(
             if needle in text:
                 raise exc
 
-    def _fake_wsl(args: list[str], *, check: bool = True, timeout: int = 300) -> str:
+    def _fake_run_wsl(args: list[str], *, timeout: int = 300) -> subprocess.CompletedProcess[str]:
         joined = " ".join(args)
         calls.events.append(("wsl", joined))
         _raise_if_matched(joined)
-        return ""
+        status = (statuses or {}).get(args[0], 0)
+        if args[:1] == ["--list"]:
+            return subprocess.CompletedProcess(args, status, listed, listing_stderr)
+        return subprocess.CompletedProcess(args, status, "", "")
 
     def _fake_powershell(script: str, *, check: bool = True, timeout: int = 120) -> str:
         calls.events.append(("ps", script))
         _raise_if_matched(script)
         return ""
 
-    monkeypatch.setattr(wsl2, "_wsl", _fake_wsl)
+    monkeypatch.setattr(wsl2, "_run_wsl", _fake_run_wsl)
     monkeypatch.setattr(wsl2, "_powershell", _fake_powershell)
     monkeypatch.setattr(wsl2, "_download_debian_rootfs", lambda tarball, *, tag: None)
     monkeypatch.setattr(WSL2Platform, "_distro_exists", staticmethod(lambda name: False))
@@ -182,7 +195,6 @@ def test_failure_mid_provision_cleans_up_and_reraises(
 
     _assert_teardown_ran(calls)
     assert not any("Interrupted" in w for w in captured_output.warnings)
-    assert not any("Cleanup abandoned" in w for w in captured_output.warnings)
 
 
 def test_interrupt_during_primary_bootstrap_cleans_up_and_reraises_the_original(
@@ -199,47 +211,63 @@ def test_interrupt_during_primary_bootstrap_cleans_up_and_reraises_the_original(
 
     assert exc.value is interrupt
     _assert_teardown_ran(calls)
-    assert any("Ctrl-C again to abandon" in w for w in captured_output.warnings)
 
 
-def test_second_interrupt_abandons_cleanup_loudly(
+def test_second_interrupt_abandons_cleanup_and_retains_the_row(
     monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
 ) -> None:
     """A second Ctrl-C during the cleanup abandons it instead of
     wedging: the unregister is attempted exactly once, the install-dir
     removal is never reached, the warning names the exact removal
-    command, and the ORIGINAL interrupt still propagates."""
+    command, and the distro is handed to core so the row survives."""
     interrupt = KeyboardInterrupt("first")
     calls = _wire(monkeypatch, errors={"--unregister": KeyboardInterrupt("second")})
     monkeypatch.setattr(wsl2, "run_bootstrap", MagicMock(side_effect=interrupt))
 
-    with pytest.raises(KeyboardInterrupt) as exc:
+    with pytest.raises(RetainedProvisioningError) as exc:
         WSL2Platform("wsl2", {}).create(_request(), RunContext())
 
-    assert exc.value is interrupt
+    assert exc.value.platform_metadata == {"distro_name": "vm1"}
     assert len(calls.wsl("--unregister")) == 1
     assert calls.ps("Remove-Item") == []
-    (abandoned,) = [w for w in captured_output.warnings if "Cleanup abandoned" in w]
-    assert "'wsl --unregister vm1'" in abandoned
+    assert any("'wsl --unregister vm1'" in w for w in captured_output.warnings)
 
 
-def test_cleanup_failure_warns_and_does_not_mask_the_original(
+def test_cleanup_failure_warns_and_retains_the_row_with_the_original_failure(
     monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
 ) -> None:
-    """The rollback is best-effort: a broken teardown warns with the
-    manual removal command and the ORIGINAL failure still propagates."""
+    """A broken teardown warns with the manual removal command and hands
+    the distro to core, so the row survives for ``vm delete``; the
+    original failure stays in the error."""
     calls = _wire(
         monkeypatch,
         errors={"apt-get": RuntimeError("original failure"), "--unregister": RuntimeError("cleanup broke")},
     )
 
-    with pytest.raises(RuntimeError, match="original failure"):
+    with pytest.raises(RetainedProvisioningError, match="original failure") as caught:
         WSL2Platform("wsl2", {}).create(_request(), RunContext())
 
+    assert caught.value.platform_metadata == {"distro_name": "vm1"}
     assert len(calls.wsl("--unregister")) == 1
     warned = "\n".join(captured_output.warnings)
     assert "could not clean up the partial WSL2 distro 'vm1'" in warned
     assert "'wsl --unregister vm1'" in warned
+
+
+@pytest.mark.parametrize("path", ["failure", "interrupt"])
+def test_a_distro_still_registered_after_the_teardown_is_retained(
+    monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput, path: str
+) -> None:
+    """The listing still names the distro, so it is not gone whatever the unregister said."""
+    _wire(monkeypatch, listed="Debian\nvm1\n")
+    failure: BaseException = RuntimeError("original failure") if path == "failure" else KeyboardInterrupt("first")
+    monkeypatch.setattr(wsl2, "run_bootstrap", MagicMock(side_effect=failure))
+
+    with pytest.raises(RetainedProvisioningError) as caught:
+        WSL2Platform("wsl2", {}).create(_request(), RunContext())
+
+    assert caught.value.platform_metadata == {"distro_name": "vm1"}
+    assert any("'wsl --unregister vm1'" in w for w in captured_output.warnings)
 
 
 def test_pre_mutation_failure_makes_no_cleanup_calls(
@@ -396,8 +424,106 @@ def test_delete_op_issues_the_shared_teardown_sequence(
     WSL2Platform("wsl2", {}).delete(vm, RunContext())  # type: ignore[arg-type]
 
     kinds_and_calls = calls.events
-    assert len(kinds_and_calls) == 2
+    assert len(kinds_and_calls) == 3
     assert kinds_and_calls[0] == ("wsl", "--unregister vm1")
     assert kinds_and_calls[1][0] == "ps"
     assert "Remove-Item" in kinds_and_calls[1][1]
     assert str(wsl2._wsl_base_path() / "vm1") in kinds_and_calls[1][1]
+    assert kinds_and_calls[2] == ("wsl", "--list --quiet")
+
+
+def test_a_delete_that_leaves_the_distro_registered_raises_so_core_keeps_the_row(
+    monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+) -> None:
+    _wire(monkeypatch, listed="vm1\n")
+    vm = SimpleNamespace(name="vm1", platform_metadata={"distro_name": "vm1"})
+
+    with pytest.raises(StateError):
+        WSL2Platform("wsl2", {}).delete(vm, RunContext())  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ("unregister", "listing", "listed", "gone"),
+    [
+        (0, 0, "Debian\n", True),
+        (1, 0, "Debian\n", True),  # never registered: the unregister fails, the listing does not name it
+        (0, 1, "", True),  # the last distro went: the listing fails, but the unregister succeeded
+        (1, 0, "", True),  # no distro at all on WSL 2.7.14.0: the listing exits 0 with no output
+        (1, 1, "", False),  # neither succeeded, so nothing shows it gone
+        (1, 1, "The operation was aborted.\n", False),
+        (0, 0, "vm1\n", False),
+    ],
+    ids=["clean", "never-registered", "last-distro", "empty-listing", "both-failed", "listing-failed", "listed"],
+)
+def test_the_delete_counts_the_distro_gone_only_on_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+    unregister: int,
+    listing: int,
+    listed: str,
+    gone: bool,
+) -> None:
+    """A listing that fails says nothing: the distro is gone only when a step that succeeded shows it."""
+    _wire(monkeypatch, listed=listed, statuses={"--unregister": unregister, "--list": listing})
+    vm = SimpleNamespace(name="vm1", platform_metadata={"distro_name": "vm1"})
+
+    if gone:
+        WSL2Platform("wsl2", {}).delete(vm, RunContext())  # type: ignore[arg-type]
+    else:
+        with pytest.raises(StateError):
+            WSL2Platform("wsl2", {}).delete(vm, RunContext())  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("stream", ["stdout", "stderr"])
+def test_the_delete_reads_an_empty_wsl_from_either_stream(
+    monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput, stream: str
+) -> None:
+    """With no distro installed both steps fail, and the listing's error code is the evidence, on either stream."""
+    no_distributions = "Error code: Wsl/WSL_E_DEFAULT_DISTRO_NOT_FOUND\n"
+    _wire(
+        monkeypatch,
+        listed=no_distributions if stream == "stdout" else "",
+        listing_stderr=no_distributions if stream == "stderr" else "",
+        statuses={"--unregister": 1, "--list": 1},
+    )
+    vm = SimpleNamespace(name="vm1", platform_metadata={"distro_name": "vm1"})
+
+    WSL2Platform("wsl2", {}).delete(vm, RunContext())  # type: ignore[arg-type]
+
+
+def test_a_delete_whose_install_directory_survives_warns_naming_it(
+    monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+) -> None:
+    """Something outside WSL holds the disk image: the distro is gone, so the row goes, but the leftover is named."""
+    _wire(monkeypatch)
+    leftover = wsl2._wsl_base_path() / "vm1"
+    leftover.mkdir(parents=True)
+    vm = SimpleNamespace(name="vm1", platform_metadata={"distro_name": "vm1"})
+
+    WSL2Platform("wsl2", {}).delete(vm, RunContext())  # type: ignore[arg-type]
+
+    (warning,) = captured_output.warnings
+    assert str(leftover) in warning
+
+
+def test_a_delete_whose_install_directory_is_gone_warns_nothing(
+    monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+) -> None:
+    _wire(monkeypatch)
+    vm = SimpleNamespace(name="vm1", platform_metadata={"distro_name": "vm1"})
+
+    WSL2Platform("wsl2", {}).delete(vm, RunContext())  # type: ignore[arg-type]
+
+    assert captured_output.warnings == []
+
+
+def test_a_rollback_whose_listing_fails_retains_the_row(
+    monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+) -> None:
+    _wire(monkeypatch, statuses={"--unregister": 1, "--list": 1})
+    monkeypatch.setattr(wsl2, "run_bootstrap", MagicMock(side_effect=RuntimeError("original failure")))
+
+    with pytest.raises(RetainedProvisioningError) as caught:
+        WSL2Platform("wsl2", {}).create(_request(), RunContext())
+
+    assert caught.value.platform_metadata == {"distro_name": "vm1"}

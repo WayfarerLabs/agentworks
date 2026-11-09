@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.errors import ConnectivityError, UserAbort
+from agentworks.programs import resolve_program
 
 from ._helpers import _require_vm
 
@@ -45,7 +46,7 @@ def _is_tailscale_reachable(tailscale_host: str) -> bool:
 
     try:
         result = subprocess.run(
-            ["tailscale", "ping", "--timeout=5s", "-c=1", tailscale_host],
+            [resolve_program("tailscale"), "ping", "--timeout=5s", "-c=1", tailscale_host],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -105,50 +106,48 @@ def _await_tailnet(db: Database, config: Config, vm: VMRow, *, already_running: 
     raise VMNotAnswering(vm.name, address)
 
 
-def _tailscale_logout(vm: VMRow, platform: VMPlatform, ctx: RunContext) -> None:
-    """Log the VM's node out of the tailnet over its root channel, best effort, and say what happened.
+def _tailscale_logout(vm: VMRow, platform: VMPlatform, ctx: RunContext) -> str | None:
+    """Log the VM's node out of the tailnet over its root channel, best effort.
 
-    Each outcome is reported and none is checked over SSH, since the VM is
-    going away. A VM the platform reports stopped or deallocated is not
-    asked: no channel reaches it, and a cloud's would wait two minutes to
-    find that out (a WSL2 distro the caller's hold has booted reports
-    running). A cloud VM whose host key was never recorded refuses inside
-    ``run_as_root``, before any route opens: an impostor could report a
-    logout that never happened. Either way the node is named for removal
-    instead.
+    Returns ``None`` once the node has logged out, or why it was not, for
+    ``vm delete`` to report once its delete's outcome is known. Nothing is
+    checked over SSH, since the VM is going away. A VM the platform reports
+    stopped or deallocated is not asked: no channel reaches it, and a cloud's
+    would wait two minutes to find that out (a WSL2 distro the caller's hold
+    has booted reports running). A status the platform refuses with a
+    ``StateError`` means it cannot confirm the guest is this VM's, so nothing
+    is sent to it: a promise to every platform, whichever ones refuse today
+    (Proxmox does, for a VMID another guest now holds). A cloud VM whose
+    host key was never recorded refuses inside ``run_as_root``, before any
+    route opens: an impostor could report a logout that never happened.
     """
     from agentworks.capabilities.vm_platform.tailscale_join import log_out
     from agentworks.db import VMStatus
+    from agentworks.errors import StateError
     from agentworks.execution.errors import TrustMissing
 
-    node = vm.hostname
-    removal = f"remove '{node}' in the Tailscale admin console if it is listed there"
     try:
         status = platform.status(vm, ctx)
     except UserAbort:
         raise
+    except StateError as refusal:
+        return str(refusal)
     except Exception:
         status = VMStatus.UNKNOWN
     if status in (VMStatus.STOPPED, VMStatus.DEALLOCATED):
-        output.warn(f"Tailscale node {node} was not logged out: VM '{vm.name}' is {status.value}; {removal}")
-        return
+        return f"VM '{vm.name}' is {status.value}"
     output.info("Logging out of Tailscale...")
     try:
         result = log_out(partial(platform.run_as_root, vm, ctx))
     except UserAbort:
         raise
     except TrustMissing:
-        output.warn(
-            f"Tailscale node {node} was not logged out: the host key of VM '{vm.name}' was never "
-            f"recorded, so its logout could not be trusted; {removal}"
-        )
-        return
+        return f"the host key of VM '{vm.name}' was never recorded, so its logout could not be trusted"
     except Exception as error:
-        output.warn(f"the Tailscale logout of node {node} could not be confirmed ({error}); {removal}")
-        return
+        return f"its logout could not be confirmed ({error})"
     if result.status == 0:
-        output.info(f"Tailscale node {node} logged out")
-    elif result.status is None:
-        output.warn(f"the Tailscale logout of node {node} could not be confirmed; {removal}")
-    else:
-        output.warn(f"'tailscale logout' exited with status {result.status} on node {node}; {removal}")
+        output.info(f"Tailscale node {vm.hostname} logged out")
+        return None
+    if result.status is None:
+        return "its logout could not be confirmed"
+    return f"'tailscale logout' exited with status {result.status}"

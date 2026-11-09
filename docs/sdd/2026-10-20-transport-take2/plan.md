@@ -77,8 +77,9 @@ answer.
       the guest fingerprints matching after a stop and start on Remote Lima from Linux and Windows,
       local Lima from macOS, WSL2, AWS, Azure and GCP (heads `9327e02b` and `7b169591`;
       [comment 6571182125](https://github.com/WayfarerLabs/agentworks/pull/863#issuecomment-6571182125)).
-- [ ] Re-prove I9 on Proxmox. Carried forward to before closeout by the operator's 2026-11-04
-      ruling.
+- [x] Re-prove I9 on Proxmox: keys and trust held through stops, `qm reboot` and `qm reset` on PVE
+      8.4 and 9.2, and regenerated when `99-preserve-ssh-keys.cfg` was removed, at `5bbe5d09a`
+      ([comment 6654000489](https://github.com/WayfarerLabs/agentworks/pull/863#issuecomment-6654000489)).
 - [x] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
       issues and fix history), and add incident inventory rows before deleting anything.
 - [x] Collateral: update the command reference and completions, add an operator guide section on the
@@ -90,9 +91,15 @@ answer.
       byte-identical. Cells covered: Remote Lima from Linux and Windows, local Lima from macOS (all
       but import), WSL2 from Windows, and AWS, Azure and GCP from Linux. An encrypted key served by
       the agent was used from Linux against Remote Lima.
+- [x] Live evidence for the carried cells, at `5bbe5d09a`
+      ([comment 6654000489](https://github.com/WayfarerLabs/agentworks/pull/863#issuecomment-6654000489)):
+      Remote Lima from macOS, Proxmox (PVE 8 and 9), AWS from Windows (create, exec, stop and start,
+      delete), a real address change after rekey on Proxmox, import on local Lima from macOS, and an
+      encrypted key served by the agent from Linux against Proxmox and from macOS against local
+      Lima.
 - [ ] Live evidence still open, carried forward to before closeout by the operator's 2026-11-04
-      ruling: Remote Lima from macOS, Proxmox, a cloud from Windows, an address change after rekey,
-      import on local Lima from macOS, and an encrypted key served by the agent on every other cell.
+      ruling: an encrypted key served by the agent on the remaining cells. Windows cannot be covered
+      this way, because its agent refuses from a key-authenticated session.
 
 Definition of done: every core connection to a VM verifies against the store, the only acceptance of
 a new key is create's enrollment, and nothing in Agentworks writes the operator's `known_hosts` for
@@ -177,16 +184,19 @@ a VM connection.
   - payload stdout that does not end in a newline, and a `refused` trailer;
   - the deadline;
   - binary stdin and stdout on Windows.
-- [ ] Run the conformance vectors on a live Debian 12 target. Carried forward to before closeout by
-      the operator's 2026-11-04 ruling: agw creates Debian 12 only on Proxmox.
+
+Debian 12 targets are out of scope by the operator's 2026-11-05 ruling: agw creates only the current
+release on every platform (ADR 0025), so no live run can reach one.
+
 - [x] Unit-test the stream filters under every split and interleaving of the two streams, which
       covers stdout's last bytes arriving after the trailer.
 - [x] Re-prove incident rows I1, I2, I5, I6, I7, I12, I13, I14, I19 and I21 live, I3 on Debian 13
       guests, and I11 with a pipe and with no stdin
       ([comment 6571182125](https://github.com/WayfarerLabs/agentworks/pull/863#issuecomment-6571182125),
       which gives each row's head and workstation).
-- [ ] Re-prove I4 live, I3 on a Debian 12 guest, and I11 with a socket on stdin. Carried forward to
-      before closeout by the operator's 2026-11-04 ruling.
+- [x] Re-prove I4 live and I11 with a socket on stdin, on Proxmox PVE 9 from Linux, at `5bbe5d09a`
+      ([comment 6654000489](https://github.com/WayfarerLabs/agentworks/pull/863#issuecomment-6654000489)).
+      I3 on a Debian 12 guest is out of scope by the operator's 2026-11-05 ruling.
 - [x] Amend ADRs 0013 and 0014.
 - [x] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
       issues and fix history), and add incident inventory rows before deleting anything.
@@ -197,9 +207,13 @@ a VM connection.
       and the reports it links): Remote Lima from Linux and Windows, local Lima from macOS and WSL2
       from Windows, all on Debian 13 guests. AWS, Azure and GCP from Linux ran the exec surface
       only, not the V lane.
+- [x] Live evidence for the carried cells, at `5bbe5d09a`
+      ([comment 6654000489](https://github.com/WayfarerLabs/agentworks/pull/863#issuecomment-6654000489)):
+      Remote Lima from macOS, the V lane against AWS, Azure and GCP from Linux (18 of 18 each), and
+      the OpenSSH 8.5 floor through a version shim, which the operator's 2026-11-05 ruling accepts
+      in place of a real 8.5 client.
 - [ ] Live evidence still open, carried forward to before closeout by the operator's 2026-11-04
-      ruling: Remote Lima from macOS, local Lima from Linux (the Linux bed has no `/dev/kvm`), a
-      Debian 12 guest, an OpenSSH 8.5 client, and the V lane against a live cloud.
+      ruling: local Lima from Linux (the Linux bed has no `/dev/kvm`).
 
 Definition of done: the migrated commands reach VMs only through `agentworks.execution`, their files
 pass the static check, and the package's tests pass with the legacy modules blocked.
@@ -255,7 +269,11 @@ pass the static check, and the package's tests pass with the legacy modules bloc
       check, its first consumer: `elevated` on `BoundedRequestOptions`, `stage0_command(elevated=)`,
       and `PermissionDenied` for an agent-bound access, derived from the access's identity. An
       elevated attach is excluded by the types.
-- [ ] Prove an elevated request on a fresh, never-initialized Debian 12 and 13 VM.
+- [x] Prove an elevated request on a fresh, never-initialized Debian 13 VM: the contract's sudo
+      check runs elevated in every create's Phase A, which passed on all six platforms at
+      `d49f6f946`
+      ([comment 6656660451](https://github.com/WayfarerLabs/agentworks/pull/866#issuecomment-6656660451)).
+      Debian 12 is out of scope by the operator's 2026-11-05 ruling.
 - [x] Add `vms/contract.py`: the `(id, severity, probe)` table, the script protocol and its parser,
       `observe_release`, `check_base` and `enforce`. Run the base checks first at reinit, moving
       slice 2's reinit pam_env warning into them, and add `vms/contract.py` to the package guard
@@ -374,9 +392,44 @@ Line numbers in this slice are at `60d347220`, the platform LLD's baseline.
     restarts the guest agent, and the guest agent's ping on each supported PVE major;
   - rekey, delete's logout and `vm recover` on every platform from at least one workstation each;
   - `vm start` after the node is removed, and after an ephemeral key's node expired;
-  - recovery of a broken sshd on WSL2 and on Proxmox;
+  - recovery of a broken sshd on WSL2, Proxmox and Lima, and W6's restart of `ssh.service` over
+    sshd's own channel on Lima, Remote Lima and a cloud;
+  - W7 on WSL2 with the `setsid` root channel;
+  - `vm recover` after the operator's key changes, then `vm exec`;
+  - `vm rekey` with a dead public sshd on a cloud: one wait, no node-removal advice;
+  - a closed terminal during a cloud `vm create`, and Ctrl-Break during a cloud command on Windows;
+  - the current-directory decoys for `tailscale` and PowerShell on Windows;
+  - I18: a failed backend delete keeps the row and the store record on Proxmox PVE 8 and 9 (a locked
+    VM, the API down) and on Remote Lima with its host unreachable;
+  - a failed create rollback keeping the row on Proxmox, Lima and WSL2, and `vm delete --force`
+    clearing the row a killed create left;
+  - a closed terminal during `vm create` on Remote Lima and Proxmox as well as the clouds;
+  - `vm recover` of a python3 that was removed but not purged;
+  - cloud-init's recoverable status 2 on AWS and Azure;
+  - that WSL2's delete and rollback read an empty `wsl --list` as the distro gone on a release that
+    prints `WSL_E_DEFAULT_DISTRO_NOT_FOUND`, if one is at hand: WSL 2.7.14.0 exits 0 with no output
+    instead (measured), which reads as an empty listing;
   - recovery of a lost store record on one cloud and on Remote Lima;
   - the V cells of vectors W1 and W3 to W9.
+- [ ] Live evidence for round 3's output and signal fixes:
+  - a create, and its rollback, whose output pipe loses its reader, on each platform, on Linux and
+    on Windows (where a closed pipe reports `EINVAL`): the rollback finishes and the exit status is
+    the command's own;
+  - on the clouds, an interrupt as Phase A writes `COMPLETE`, closing the bootstrap allow before it
+    propagates, and a termination during a Ctrl-C rollback, which does not cut it short;
+  - on WSL2, Ctrl-C during the base package install; also measure the untested candidate of starting
+    `wsl.exe` without a console (`CREATE_NO_WINDOW`).
+- [ ] Live evidence for round 3's Proxmox identity checks, with the setup script's pool token: a
+      gone VM deleted, a reissued VMID left untouched by delete and refused by the other commands, a
+      create that lost the `next_id` race rolled back without touching the winner, and a VMID held
+      by a guest the token cannot audit refused.
+- [ ] Live evidence for `vm delete` under the operator's [2026-11-08 ruling](./frd.md#2026-11-08): a
+      VM whose site cannot be bound refused, then removed with `--force` and the backend's
+      identifiers warned; the logout before the provider delete; and a delete that fails after it,
+      whose hint leads with finishing the delete and names `vm rekey` only as the way back onto
+      Tailscale.
+- [ ] Live evidence on Windows: current-directory decoys for `op`, `git`, `code`, `taskkill` and the
+      legacy `ssh` and `scp` are never started.
 
 Definition of done: core reaches a native channel only through `run_as_root` or `native_shell`, and
 no platform's private access imports a legacy module.
@@ -479,6 +532,10 @@ Definition of done: create and reinit run entirely on the new transport.
 - [ ] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
       issues and fix history), and add incident inventory rows before deleting anything.
 - [ ] Collateral: guides for sessions, consoles and backup where behavior changes.
+- [ ] Settle with the operator the commented post-bind resolve in
+      `sessions/multi_console/restore.py` (it either runs or goes), and whether the workspace, agent
+      and session refusals of a VM with no recorded SSH identity
+      (`applied_state.require_vm_ssh_identity`) should hint at `agw vm reinit`.
 - [ ] Live evidence:
   - session and console create, attach, detach and restore on Remote Lima from all three
     workstations and on WSL2;

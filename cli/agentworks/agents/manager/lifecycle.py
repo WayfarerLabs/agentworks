@@ -20,6 +20,7 @@ from agentworks.errors import (
     StateError,
     UserAbort,
 )
+from agentworks.harness_setup.outcomes import SetupFailure, raise_setup_failures
 from agentworks.naming import validate_name
 from agentworks.secrets.policy import require_exact_tty_interaction_policy
 from agentworks.vms.manager import gated_vm_boundary
@@ -236,6 +237,7 @@ def create_agent(
         credential_ops = credential_requests(tmpl_node.credentials, scoped_ctx)
         git_redactions = credential_redactions(tmpl_node.credentials, resolver.values)
 
+        setup_failures: list[SetupFailure] = []
         with output.section("Agent Initialization"):
             from agentworks.agents.realize import realize_agent
 
@@ -253,6 +255,7 @@ def create_agent(
                 template=agent_tmpl,
                 credential_requests=credential_ops,
                 credential_redactions=git_redactions,
+                setup_failures=setup_failures,
                 setup_inputs=setup_inputs,
                 setup_values=resolver.values,
                 grant_all_workspaces=grant_all_workspaces,
@@ -264,6 +267,8 @@ def create_agent(
             # did), and the body already cleaned up its own partial state
             # before re-raising.
             pending_agent.mark_realized()
+
+        raise_setup_failures(setup_failures)
 
 
 def delete_agent(
@@ -564,6 +569,7 @@ def reinit_agent(
 
         from agentworks.instance_specs import replace_agent_overlay, report_overlay_outcome
 
+        previous_template = agent.template
         with db.transaction():
             if update_template is not None:
                 db.update_agent_template(name, update_template)
@@ -573,6 +579,11 @@ def reinit_agent(
                 name,
                 parsed_overlay,
                 supplied=supplied_overlay,
+            )
+        if agent.template != previous_template:
+            output.info(
+                f"Agent '{name}' template binding saved as {agent.template!r} (previously {previous_template!r}). "
+                "The binding remains if setup fails; use --update-template to choose a different template."
             )
 
         try:
@@ -681,6 +692,8 @@ def reinit_agent(
             from agentworks.harness_setup.lifecycle import require_prepared_setup
 
             require_prepared_setup(db, "agent", name, ("agent",), () if setup_inputs is None else (setup_inputs,))
+            setup_failures: list[SetupFailure] = []
+            native_setup = None
             with output.section("Agent Initialization"):
                 from agentworks.agents.initializer import create_agent_on_vm
                 from agentworks.ssh import SSHLogger
@@ -716,11 +729,12 @@ def reinit_agent(
                         if setup_inputs is not None:
                             from agentworks.harness_setup.lifecycle import apply_agent_setup
 
-                            apply_agent_setup(
+                            native_setup = apply_agent_setup(
                                 db,
                                 config,
                                 registry,
                                 inputs=setup_inputs,
+                                failures=setup_failures,
                                 vm=vm,
                                 username=agent.linux_user,
                                 values=resolver.values,
@@ -802,7 +816,7 @@ def reinit_agent(
                         # cannot report whether membership actually changed), hence
                         # "Reconciled", not "Repaired". Stay silent when there was
                         # nothing to reconcile.
-                        if candidate_overlay is not None:
+                        if candidate_overlay is not None and not setup_failures:
                             from agentworks.legacy_claude import checkpoint_conversion
 
                             with db.transaction():
@@ -840,4 +854,7 @@ def reinit_agent(
             # The section is closed: the terminal outcome line renders at
             # column 0 via result(), matching the reference create/restart
             # flows.
-            output.result(f"Agent '{name}' reinitialized")
+            raise_setup_failures(setup_failures)
+            from agentworks.harness_setup.outcomes import setup_completion_suffix
+
+            output.result(f"Agent '{name}' reinitialized{setup_completion_suffix(native_setup)}")

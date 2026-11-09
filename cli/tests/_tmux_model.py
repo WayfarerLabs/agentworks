@@ -66,6 +66,7 @@ from __future__ import annotations
 import shlex
 from dataclasses import dataclass, field
 
+from tests._runtime_probes import framed_runtime_result, runtime_probe_parts
 from tests.conftest import _FakeResult
 
 # Mirror of ``multi_console_layout.SHELL_INDEX_OPTION``. Duplicated here so
@@ -375,6 +376,9 @@ class TmuxModel:
         recognize returns a default-OK result, matching the stateless fake's
         fall-through so mixed command streams (sudo probes, select-pane,
         resize) stay quiet."""
+        frame = runtime_probe_parts(command)
+        if frame is not None:
+            return framed_runtime_result(command, self.dispatch(frame[1]))
         stripped = command.strip()
         if not stripped.startswith("tmux"):
             return _FakeResult()

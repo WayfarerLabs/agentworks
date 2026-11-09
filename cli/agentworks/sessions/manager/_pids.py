@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from functools import partial
 from typing import TYPE_CHECKING
 
 import agentworks.sessions.manager as _mgr
@@ -86,20 +87,24 @@ def _build_session_target(
     return agent_target
 
 
-def _identity_access(vm: VMRow, config: Config, agent: AgentRow | None, *, logger: SSHLogger) -> VMAccess:
+def _identity_access(vm: VMRow, config: Config, agent: AgentRow | None, *, logger: SSHLogger | None) -> VMAccess:
     """The admin's ``VMAccess``, or ``agent``'s, logging to the operation's own ``logger``.
 
-    Building it connects to nothing, so it adds no probe to what the
-    operation's transports already do.
+    ``logger`` is ``None`` only where the operation has no log yet: session
+    create's preflight runs before secret resolution, and its log is opened
+    once the redactions are known. Building the access connects to nothing,
+    so it adds no probe to what the operation's transports already do.
     """
     import agentworks.execution as execution
     from agentworks.execution.access import Admin, Agent
 
     identity = Admin() if agent is None else Agent(agent.name, agent.linux_user)
-    return execution.vm_access(vm, config, identity, log=logger.record)
+    return execution.vm_access(vm, config, identity, log=None if logger is None else logger.record)
 
 
-def _session_access(session: SessionRow, *, vm: VMRow, config: Config, db: Database, logger: SSHLogger) -> VMAccess:
+def _session_access(
+    session: SessionRow, *, vm: VMRow, config: Config, db: Database, logger: SSHLogger | None
+) -> VMAccess:
     """The ``VMAccess`` of the session's owning identity: the admin for an admin-mode session, else its agent."""
     if session.mode == SessionMode.ADMIN.value:
         return _identity_access(vm, config, None, logger=logger)
@@ -125,7 +130,14 @@ def _repair_session_pid(
     Raises StateError if the session is alive but PID/boot_id can't be recovered,
     or ConnectivityError if the VM is unreachable.
     """
-    from agentworks.sessions.tmux import ProbeStatus, capture_tmux_server_fingerprint, probe_tmux_session
+    from agentworks.sessions.tmux import (
+        ProbeStatus,
+        _matches_launch_attempt,
+        admin_socket_path,
+        capture_tmux_server_fingerprint,
+        probe_tmux_session,
+        require_socket_path,
+    )
 
     sock = session.socket_path
     if sock is None:
@@ -147,7 +159,35 @@ def _repair_session_pid(
                 entity_kind="session",
                 entity_name=session.name,
             )
-        if not _prove_stored_runtime_absent(session, target=target):
+        # Older failed admin launches retained no address. Only known absence
+        # permits assigning the dedicated address; a live legacy row keeps its
+        # existing migration path.
+        if session.mode == SessionMode.ADMIN.value and session.pid in {None, PID_STOPPED}:
+            workspace = db.get_workspace(session.workspace_name)
+            vm = db.get_vm(workspace.vm_name) if workspace is not None else None
+            assert vm is not None
+            sock = admin_socket_path(vm.admin_username, session.name)
+            require_socket_path(sock, run_command=target.run)
+            dedicated = capture_tmux_server_fingerprint(target=target, socket_path=sock)
+            if dedicated.status is not ProbeStatus.ABSENT:
+                raise StateError(
+                    f"session '{session.name}' dedicated runtime absence could not be proved",
+                    entity_kind="session",
+                    entity_name=session.name,
+                )
+            if session.pid != PID_STOPPED and session.boot_id is None:
+                boot_id = _mgr._get_boot_id(target)
+                if boot_id is not None:
+                    db.update_session_runtime(
+                        session.name, socket_path=None, pid=None, boot_id=boot_id, tmux_server_start_ticks=None
+                    )
+                raise StateError(
+                    f"session '{session.name}' has no recorded launch identity",
+                    entity_kind="session",
+                    entity_name=session.name,
+                    hint="Stop and start its VM, then retry to prove the old workload is gone.",
+                )
+        if session.pid != PID_STOPPED and not _prove_stored_runtime_absent(session, target=target):
             raise StateError(
                 f"session '{session.name}' may still own a legacy runtime",
                 entity_kind="session",
@@ -155,6 +195,7 @@ def _repair_session_pid(
             )
     else:
         sudo = session.mode == SessionMode.AGENT.value
+        require_socket_path(sock, run_command=partial(target.run, sudo=sudo))
         probe = capture_tmux_server_fingerprint(target=target, socket_path=sock, sudo=sudo)
         if probe.status is ProbeStatus.PRESENT:
             fingerprint = probe.fingerprint
@@ -163,9 +204,25 @@ def _repair_session_pid(
             stored_boot_id = _validated_stored_boot_id(session) if session.boot_id is not None else None
             stored_ticks = _validated_stored_start_ticks(session)
             if (
-                (session.pid is None or session.pid == fingerprint.pid)
+                session.pid != PID_STOPPED
+                and (session.pid is None or session.pid == fingerprint.pid)
                 and (stored_boot_id is None or stored_boot_id == observed_boot_id)
                 and (stored_ticks is None or stored_ticks == fingerprint.start_ticks)
+                and (
+                    (session.pid is not None and stored_boot_id is not None and stored_ticks is not None)
+                    or (
+                        stored_boot_id == observed_boot_id
+                        and _matches_launch_attempt(
+                            target=target,
+                            socket_path=sock,
+                            session_name=session.name,
+                            session_uuid=session.session_uuid,
+                            run_id=session.run_id,
+                            fingerprint=fingerprint,
+                            sudo=sudo,
+                        )
+                    )
+                )
             ):
                 db.update_session_runtime(
                     session.name,
@@ -181,7 +238,15 @@ def _repair_session_pid(
                 f"session '{session.name}' has a live tmux server whose identity does not match its row",
                 entity_kind="session",
                 entity_name=session.name,
-                hint="Investigate the tmux server manually.",
+                hint=(
+                    "Its stored runtime identity is incomplete. Stop the native workload manually, or stop and start "
+                    "its VM, then retry."
+                    if session.pid is not None
+                    and session.pid > 0
+                    and stored_boot_id is not None
+                    and stored_ticks is None
+                    else "Investigate the tmux server manually."
+                ),
             )
         if probe.status is ProbeStatus.UNKNOWN:
             raise StateError(
@@ -189,6 +254,22 @@ def _repair_session_pid(
                 entity_kind="session",
                 entity_name=session.name,
                 hint="Investigate the tmux server manually.",
+            )
+        if session.boot_id is None:
+            boot_id = _mgr._get_boot_id(target)
+            if boot_id is not None:
+                db.update_session_runtime(
+                    session.name,
+                    socket_path=sock,
+                    pid=None,
+                    boot_id=boot_id,
+                    tmux_server_start_ticks=None,
+                )
+            raise StateError(
+                f"session '{session.name}' has no recorded launch identity",
+                entity_kind="session",
+                entity_name=session.name,
+                hint="Stop and start its VM, then retry this operation to prove the old workload is gone.",
             )
         if not _prove_stored_runtime_absent(session, target=target, sudo=sudo):
             raise StateError(
@@ -263,7 +344,7 @@ def _prove_stored_runtime_absent(
     """Prove the stored process incarnation absent without signaling its PID."""
     from agentworks.sessions.tmux import ProbeStatus, probe_process_start_ticks
 
-    if session.pid is None or session.pid <= 0 or session.boot_id is None:
+    if session.boot_id is None:
         raise StateError(
             f"session '{session.name}' lacks the stored identity required to prove runtime absence",
             entity_kind="session",
@@ -280,6 +361,14 @@ def _prove_stored_runtime_absent(
         )
     if current_boot != stored_boot_id:
         return True
+
+    if session.pid is None or session.pid <= 0:
+        raise StateError(
+            f"session '{session.name}' has an uncertain launch from the current VM boot",
+            entity_kind="session",
+            entity_name=session.name,
+            hint="Stop and start its VM, then retry this operation to prove the old workload is gone.",
+        )
 
     pid_presence = _mgr._pid_presence(session.pid, target=target, sudo=sudo)
     if pid_presence is ProbeStatus.ABSENT:
@@ -319,7 +408,9 @@ def _ensure_pid(session: SessionRow, *, target: Transport, db: Database) -> Sess
     PID_STOPPED or have valid PID + boot_id. Raises StateError if the
     session cannot be resolved.
     """
-    if not _needs_repair(session):
+    if not _needs_repair(session) and session.socket_path is not None:
+        return session
+    if session.socket_path is None and session.pid is not None and session.pid > 0:
         return session
     _repair_session_pid(session, target=target, db=db)  # raises on failure
     result = db.get_session(session.name)

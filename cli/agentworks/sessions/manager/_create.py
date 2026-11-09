@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 import agentworks.sessions.manager as _mgr
 from agentworks import output
 from agentworks.errors import StateError
+from agentworks.harness_setup.outcomes import SetupFailure, raise_setup_failures
 
 from ._create_build import _build_session_graph
 from ._create_plan import _resolve_session_plan
@@ -130,11 +131,13 @@ def _reload_vm(db: Database, target_vm_name: str) -> VMRow:
     return refreshed_vm
 
 
-def _build_live_transport(vm: VMRow, config: Config) -> tuple[Transport, RunCommand, SSHLogger]:
+def _build_live_transport(
+    vm: VMRow, config: Config, *, redactions: tuple[str, ...] = ()
+) -> tuple[Transport, RunCommand, SSHLogger]:
     """Build the admin SSH transport for the live VM, its run command and the operation log they share."""
     from agentworks.ssh import SSHLogger
 
-    logger = SSHLogger(vm.name, "session-create")
+    logger = SSHLogger(vm.name, "session-create", redactions=redactions)
     target = _mgr.transport(vm, config, logger=logger)
     run_command: RunCommand = target.run
     return target, run_command, logger
@@ -148,7 +151,6 @@ def _preflight_and_resolve(
     graph: SessionGraph,
     vm: VMRow,
     target: Transport,
-    logger: SSHLogger,
     interaction: TtyInteractionPolicy,
 ) -> tuple[dict[str, str], Transport | None]:
     """Run the Preflight sweep and the Resolving-Secrets boundary resolve.
@@ -204,11 +206,11 @@ def _preflight_and_resolve(
             RunContext(
                 config=config,
                 operation_scope=graph.scope,
-                admin_access=_mgr._identity_access(vm, config, None, logger=logger),
+                admin_access=_mgr._identity_access(vm, config, None, logger=None),
                 agent_access=(
                     None
                     if plan.existing_agent is None or agent_target is None
-                    else _mgr._identity_access(vm, config, plan.existing_agent, logger=logger)
+                    else _mgr._identity_access(vm, config, plan.existing_agent, logger=None)
                 ),
             ),
             registry=graph.registry,
@@ -231,18 +233,6 @@ def _preflight_and_resolve(
                 agent_name=plan.agent_name,
                 runner=agent_target or target,
             )
-
-        from agentworks.artifacts.routing import require_session_ancestors
-
-        require_session_ancestors(
-            db,
-            graph.registry,
-            vm,
-            plan.existing_ws,
-            plan.agent_name,
-            graph.template.harness_integration,
-            pending_user=plan.new_agent,
-        )
 
     with output.section("Resolving Secrets"):
         graph.resolver.resolve()
@@ -277,11 +267,11 @@ def create_session(
 
     Accepts the same flag combinations the ``agw session create`` CLI
     surfaces, validates them, prompts the operator for anything left
-    unspecified (where interactive), and atomically provisions whichever
-    ephemeral resources (workspace, agent) the operator requested
-    alongside the session itself. On any failure after a mutation
-    begins, every ephemeral resource created during the call is rolled
-    back.
+    unspecified (where interactive), and provisions the requested workspace,
+    agent and session. Core failures unwind newly created resources. Collected
+    facet failures retain completed owners and their partial setup; explicit
+    required setup blocks only its session consumer. A session can be running
+    when the final collected-failure report makes the command fail.
 
     Args:
         name: Session name.
@@ -424,7 +414,9 @@ def create_session(
     require_vm_ssh_boundary(db, config, graph.vm_node.row)
     with activation_gate(graph.vm_node, gate_secret_resolver(config, registry, graph.resolver)):
         vm = _reload_vm(db, plan.target_vm_name)
-        target, run_command, logger = _build_live_transport(vm, config)
+        # Preflight precedes secret resolution and carries no workload values.
+        # Build the logged mutation target only once its redactions are known.
+        target = _mgr.transport(vm, config)
 
         secret_values, agent_target = _preflight_and_resolve(
             db,
@@ -433,16 +425,18 @@ def create_session(
             graph=graph,
             vm=vm,
             target=target,
-            logger=logger,
             interaction=interaction,
         )
+        target, run_command, logger = _build_live_transport(vm, config, redactions=tuple(secret_values.values()))
 
         # ===== Dependency-ordered roll-forward (S11) ========================
         #
         # Realize the ephemerals then the session's own slice, unwinding
-        # the realized ephemerals on any failure. The two-level rollback
+        # the realized ephemerals on core failures. Required setup retains
+        # completed owners for repair. The two-level rollback
         # (session-slice teardown, then ephemeral unwind) and the emit
         # order live in _roll_forward.
+        setup_failures: list[SetupFailure] = []
         _roll_forward(
             db,
             config,
@@ -455,4 +449,6 @@ def create_session(
             run_command=run_command,
             agent_target=agent_target,
             secret_values=secret_values,
+            setup_failures=setup_failures,
         )
+        raise_setup_failures(setup_failures)

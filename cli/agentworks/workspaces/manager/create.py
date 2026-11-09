@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
@@ -10,12 +11,17 @@ from agentworks import output
 from agentworks.agents.grants import MAX_WORKSPACE_NAME_LENGTH
 from agentworks.db.projections import project_session_mode
 from agentworks.errors import AlreadyExistsError, NotFoundError
+from agentworks.harness_setup.outcomes import SetupFailure, raise_setup_failures
 from agentworks.list_sorting import nullable_sort_value, sort_rows
 from agentworks.name_filters import validate_name_filters
 from agentworks.naming import validate_name
+from agentworks.path_rendering import format_host_path
+from agentworks.programs import resolve_program
 from agentworks.workspaces.manager._common import _guard_vm_status, _resolve_vm, _workspace_scope
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from agentworks.config import Config
     from agentworks.db import Database, InstanceStateInspection, WorkspaceRow
     from agentworks.instance_description import InstanceStateDescription
@@ -288,6 +294,7 @@ def create_workspace(
 
         from agentworks.workspaces.realize import realize_workspace
 
+        setup_failures: list[SetupFailure] = []
         vscode_path = realize_workspace(
             db,
             config,
@@ -295,6 +302,7 @@ def create_workspace(
             name=ws_name,
             vm=vm,
             template=template,
+            setup_failures=setup_failures,
             setup_inputs=setup_inputs,
             setup_values=resolver.values,
             overlay=overlay,
@@ -307,7 +315,30 @@ def create_workspace(
         pending_workspace.mark_realized()
 
         if open_vscode:
-            subprocess.run(["code", str(vscode_path)], check=False)
+            _open_in_vscode(vscode_path)
+
+        raise_setup_failures(setup_failures)
+
+
+def _open_in_vscode(path: Path) -> None:
+    """Open the workspace file ``path`` in VS Code through its ``code`` command, warning when it cannot.
+
+    The workspace exists by now, so an editor that cannot start is no reason
+    to fail. On Windows ``code`` is a batch file, which only ``cmd.exe`` can
+    start, and ``cmd.exe`` parses its arguments by its own rules, so ``agw``
+    does not start it there and says to open the file instead.
+    """
+    if sys.platform == "win32":
+        output.warn(
+            f"agw does not start VS Code on Windows; open {format_host_path(path)} in VS Code to use the workspace"
+        )
+        return
+    try:
+        program = resolve_program("code")
+    except FileNotFoundError:
+        output.warn("VS Code's 'code' command was not found on PATH, so the workspace was not opened in it")
+        return
+    subprocess.run([program, str(path)], check=False)
 
 
 def workspace_description(db: Database, config: Config, name: str) -> WorkspaceDescription:

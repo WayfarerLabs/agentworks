@@ -123,6 +123,7 @@ def _capture_tmux(monkeypatch: pytest.MonkeyPatch, events: list[str], captured: 
         return ("/tmp/s1.sock", 4243)
 
     monkeypatch.setattr(tmux_mod, "create_session", capture)
+    monkeypatch.setattr(tmux_mod, "finalize_session_start", lambda *a, **k: None)
     monkeypatch.setattr(
         tmux_mod,
         "capture_tmux_server_fingerprint",

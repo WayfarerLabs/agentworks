@@ -156,9 +156,13 @@ the site's placement host for an ssh-placed site); WSL2 the distro plus its inst
 second Ctrl-C abandons that cleanup, printing what to remove manually: the resource group and name
 prefix, the node and VMID, or the exact removal command (`limactl delete --force <name>`, run on the
 placement host for an ssh-placed site, or `wsl --unregister <name>` plus deleting the install
-directory it names). Where rollback isn't possible (`vm reinit`, `agent reinit`, the init phase of
-`vm create`) it prints a recovery hint: the next command to run (`vm reinit`, `vm delete --force`,
-...). Every cancellation exits with the conventional SIGINT exit code (130).
+directory it names). On AWS, Proxmox, Lima and WSL2, a cleanup that is abandoned this way, or that
+fails or cannot show the backend removed, after a failure or a Ctrl-C alike, keeps the VM in a
+failed state with the identifiers of what may remain, so `agw vm delete <name>` can finish the
+removal; that `vm create` exits with status 1, not 130. Where rollback isn't possible (`vm reinit`,
+`agent reinit`, the init phase of `vm create`) it prints a recovery hint: the next command to run
+(`vm reinit`, `vm delete --force`, ...). Every other cancellation exits with the conventional SIGINT
+exit code (130).
 
 ## Commands
 
@@ -577,12 +581,13 @@ refined by `--admin-spec`. `vm reinit` takes only the VM name and re-runs initia
 current config and both stored final layers. See
 [Instance specs](command-reference.md#instance-specs) for the exact create and agent-reinit surface.
 
-Agentworks records the configured SSH identity only after a VM create or reinit proves the admin
-`authorized_keys` result. It does not synthesize evidence for VMs created before this tracking was
-introduced. Such a VM needs one successful `agw vm reinit NAME` before ordinary canonical SSH
-commands will use it. If the configured key no longer works, `agw vm recover NAME` restores the
-configured public key through the platform's own channel; then reinitialize. On a cloud that channel
-is SSH with the same key, so use the provider's console or recreate the VM when the VM refuses it.
+Agentworks records the configured SSH identity only after a VM create, reinit or recover proves the
+VM accepts it. It does not synthesize evidence for VMs created before this tracking was introduced.
+Such a VM needs one successful `agw vm reinit NAME` before ordinary canonical SSH commands will use
+it. If the configured key no longer works, or you changed it, `agw vm recover NAME` restores the
+configured public key through the platform's own channel and records it once the VM answers over SSH
+with it. On a cloud that channel is SSH with the same key, so use the provider's console or recreate
+the VM when the VM refuses it.
 
 Agentworks verifies each VM's SSH host key against its own per-VM store, never trusting a first
 connection. A VM created before the store existed needs a one-time `agw vm import-host-keys --all`;

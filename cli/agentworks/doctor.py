@@ -6,7 +6,6 @@ Returns structured results. The presentation layer decides rendering.
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -526,20 +525,23 @@ def _check_python() -> HealthGroup:
 def _check_required_tools() -> HealthGroup:
     """PATH presence rows, then the OpenSSH resolver's verdict.
 
-    The ``ssh`` and ``scp`` rows stay until the last legacy path that runs a
-    bare ``ssh`` or ``scp`` goes. The resolver row is what the migrated
-    commands will use: the absolute client path and version, or the refusal
-    with its install guidance.
+    The ``ssh`` and ``scp`` rows stay while legacy paths still start them
+    through ``programs.resolve_program``. The resolver row is what the
+    migrated commands use: the absolute client path and version, or the
+    refusal with its install guidance.
     """
     from agentworks.execution import resolve_ssh
     from agentworks.execution.errors import ClientUnsupported
+    from agentworks.programs import resolve_program
 
     g = HealthGroup("Required tools")
     for tool in ("ssh", "scp", "tailscale"):
-        if shutil.which(tool):
-            g.ok(tool)
-        else:
+        try:
+            resolve_program(tool)
+        except FileNotFoundError:
             g.fail(tool, "not found")
+        else:
+            g.ok(tool)
     try:
         client = resolve_ssh()
     except ClientUnsupported as e:
@@ -706,8 +708,12 @@ def _check_tailscale() -> HealthGroup:
     is an ordinary secret and reports in the Secrets group like any
     other (`agw secret describe tailscale-auth-key` for detail).
     """
+    from agentworks.programs import resolve_program
+
     g = HealthGroup("Tailscale")
-    if not shutil.which("tailscale"):
+    try:
+        tailscale = resolve_program("tailscale")
+    except FileNotFoundError:
         # Required tools already fails the missing binary; nothing to
         # add here without it.
         g.info("Connectivity", "skipped (tailscale not installed)")
@@ -715,7 +721,7 @@ def _check_tailscale() -> HealthGroup:
 
     try:
         result = subprocess.run(
-            ["tailscale", "status"],
+            [tailscale, "status"],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -1093,8 +1099,10 @@ def _shell_available(shell_name: str) -> bool:
     enumeration ever changes to include a static PowerShell path, this
     branch becomes load-bearing.
     """
+    from agentworks.programs import is_installed
+
     candidates = {"powershell": ("pwsh", "powershell")}.get(shell_name, (shell_name,))
-    return any(shutil.which(c) for c in candidates)
+    return any(is_installed(candidate) for candidate in candidates)
 
 
 def _get_completion_paths() -> list[tuple[str, list[Path]]]:

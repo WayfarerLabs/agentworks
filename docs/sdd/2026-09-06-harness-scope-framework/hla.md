@@ -576,8 +576,12 @@ native conditions as well as this record, with severity chosen by the consuming 
 Reconciliation compares desired setup with prior applied ownership and the live destination. Native
 plugin and marketplace changes remove obsolete owned resources wherever safe removal is supported,
 leave matching resources alone, and report drift or unowned conflicts. Settings mappings follow
-their explicit overwrite/merge policy and retain their document on removal. Do not infer ownership
-from current config, a matching filename, or matching bytes. Persist the non-secret identifiers and
+their explicit overwrite/merge policy and retain their document on removal. A declaration alone,
+matching filename or matching bytes does not establish native association ownership. Compare the
+tool's full reported marketplace source and stable plugin association; a mutable installed version
+is not ownership identity. Matching pre-existing associations may be adopted, recorded and reported,
+which makes them eligible for safe later cleanup. Historical cache-origin verification and
+installation-intent tracking are outside this boundary. Persist the non-secret identifiers and
 removal facts needed after a plugin entry or whole activation disappears.
 
 Removed activations still reconcile: core invokes the same facet method with absent desired config
@@ -595,36 +599,51 @@ Serialize observation, native mutation, and applied-state persistence for the sa
 across command executions. A competing mutation refuses with retry guidance. The LLD chooses a lock
 that spans that lifetime and specifies cascade ordering; a SQLite write transaction held across
 network calls is not the design. Remote writes and SQLite are not a distributed transaction: a crash
-can leave unrecorded native residue. Treat it as unowned until the integration can prove its claim;
-do not adopt it just because bytes match. Unknown versions retain their evidence, malformed known
-records yield safe errors, and partial replacement preserves unrelated keys and integrations.
+can leave unrecorded native residue. Retry adopts an entry whose observed native identity and source
+match the declaration, records its confirmed claim, and reports adoption. Differing unowned entries
+are preserved and reported individually while independent setup continues. Setup invocations can
+report incomplete entry application without aborting their other work; core retains an incomplete
+setup record until a later retry converges. Confirmed native registrations, installs, removals and
+replacements report progress. A valid setup facet's domain or transport error stops that facet,
+records its sanitized current-attempt failure and confirmed progress, and joins an operation-local
+failure list. Other independent facets and owning initialization continue. The command reports the
+ordered failures and exits unsuccessfully only after preserving completed core work, owner records,
+grants and SSH configuration. This does not turn failures into successful setup. Shared persistence
+failures, cancellation and unexpected internal exceptions abort immediately. Invalid activation and
+binding preflight still fail before native setup. Unknown versions retain their evidence, malformed
+known records yield safe errors, and partial replacement preserves unrelated keys and integrations.
 
-For a new workspace, buffer applied facts until creation commits and unwind partial native setup
-through the existing failed-create path. Existing database backup/restore and VM backup exports must
-carry the new typed lifecycle evidence through their appropriate codecs. VM export currently selects
-only VM applied slices (`db/database.py:1238-1239`), so extending its owner-scoped evidence requires
-explicit coverage. Exported-payload codec round trips and database restore are separate from a VM
-restore/import workflow, which this effort does not add. Copy, rehome, restore, and same-name
-recreation must not turn old applied-state records into proof of setup at a new destination.
-Destination fingerprints inform read-only readiness; they do not prohibit reinit or workspace
-rehome. Owning setup invokes the integration against the current destination, where its native
-identity checks govern plugin reconciliation, and records the new completed setup on success.
+For a new workspace, buffer applied facts until creation commits. A collected facet error retains
+the workspace and its partial records; a core creation error uses the existing failed-create path.
+Existing database backup/restore and VM backup exports must carry the new typed lifecycle evidence
+through their appropriate codecs. VM export currently selects only VM applied slices
+(`db/database.py:1238-1239`), so extending its owner-scoped evidence requires explicit coverage.
+Exported-payload codec round trips and database restore are separate from a VM restore/import
+workflow, which this effort does not add. Copy, rehome, restore, and same-name recreation must not
+turn old applied-state records into proof of setup at a new destination. Destination fingerprints
+inform read-only readiness; they do not prohibit reinit or workspace rehome. Owning setup invokes
+the integration against the current destination, where its native identity checks govern plugin
+reconciliation, and records the new completed setup on success.
 
 ## Workspace retry and session readiness
 
 Workspace setup participates in `realize_workspace`, shared by standalone create and
 `session create --new-workspace`. Prepare env and run integrations after the directory and
 repository exist but before publishing successful creation. Commit the workspace row, desired
-overlay, and initial applied facts together only after setup succeeds.
+overlay, and initial applied facts together after core creation succeeds, even when individual
+facets have recorded failures. Continue independent creation steps before the final error summary.
 
-On a handled failure before that commit, unwind the newly created workspace directory, group, and
-local stub using the existing partial-create path. A retry is another `workspace create` with the
-same inputs after successful cleanup. A cleanup failure or process crash reports residue and refuses
-to adopt a pre-existing path on retry; the operator inspects and removes or relocates it before a
-fresh create. This deliberately avoids adding a workspace reinit command or a durable partial-create
-state machine. Once creation commits, later session failure follows the existing orchestrator's
-completed-resource retention or teardown policy. No integration may write outside the new workspace
-as part of workspace setup and expect that rollback to cover it.
+On a core creation failure before that commit, unwind the newly created workspace directory, group,
+and local stub using the existing partial-create path. A retry is another `workspace create` with
+the same inputs after successful cleanup. A cleanup failure or process crash reports residue and
+refuses to adopt a pre-existing path on retry; the operator inspects and removes or relocates it
+before a fresh create. This deliberately avoids adding a workspace reinit command or a durable
+partial-create state machine. Once creation commits, later session failure follows the existing
+orchestrator's completed-resource retention or teardown policy. A required setup prerequisite blocks
+session creation without unwinding successfully created ancestor owners; their partial setup remains
+inspectable. Other session runtime failures retain their existing compensation behavior. No
+integration may write outside the new workspace as part of workspace setup and expect that rollback
+to cover it.
 
 **Required and recommended facets are prerequisites of the consuming invocation.** The session
 integration declares them through its readiness check, using its selected config and the actual

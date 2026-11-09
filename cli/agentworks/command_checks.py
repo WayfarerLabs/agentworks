@@ -17,6 +17,7 @@ STATUS_PREFIX = "agentworks-command-status:"
 """What starts the line a probe reports its command's status on, followed by the request's nonce."""
 
 _MISSING_STATUS = 20
+_STARTUP_HINT = "Check the target user's login and interactive shell startup, then retry the operation."
 
 
 def user_shell_probe(command: str, *, nonce: str, deadline: float | None = None) -> Script:
@@ -78,7 +79,7 @@ def check_required_commands(
         if status == _MISSING_STATUS:
             missing.append(command)
         elif status != 0:
-            raise ExternalError("could not check required commands in the target user's shell")
+            raise ExternalError("could not check required commands in the target user's shell", hint=_STARTUP_HINT)
     return tuple(missing)
 
 
@@ -88,5 +89,5 @@ def _reported_status(access: VMAccess, probe: Script, nonce: str) -> int:
     status_line = re.compile(re.escape(f"{STATUS_PREFIX}{nonce}:").encode() + rb"(\d{1,3})")
     statuses = [match for line in result.stdout.splitlines() if (match := status_line.fullmatch(line))]
     if len(statuses) != 1 or int(statuses[0][1]) > 255:
-        raise ExternalError("could not read a command's status in the target user's shell")
+        raise ExternalError("could not read a command's status in the target user's shell", hint=_STARTUP_HINT)
     return int(statuses[0][1])

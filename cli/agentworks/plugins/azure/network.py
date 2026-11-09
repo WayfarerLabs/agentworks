@@ -115,6 +115,11 @@ ALLOW_RULE_DESCRIPTION_MARKER = "agentworks transient SSH allow"
 # the next free slot.
 _POKE_ALLOCATION_ATTEMPTS = 5
 
+# How long a rule removal waits for Azure. It runs with interrupts deferred,
+# so this bound is also how long a Ctrl-C can wait; GCP bounds its firewall
+# operations the same way.
+_RULE_REMOVAL_TIMEOUT_SECONDS = 300.0
+
 # The old scheme's standing world-open SSH allow, deleted on
 # convergence (see converge_nsg).
 LEGACY_SSH_RULE_NAME = "SSH"
@@ -378,9 +383,9 @@ def remove_ssh_allow(
 
     ``rule_name`` is the fixed ``allow-ssh-bootstrap`` on the hook paths
     and the poke's nonce name on the ``_transient_route`` exit and the
-    poke's own attempt cleanup. A 404 is fine (the rule was already
-    gone: a hook re-run, a VM that never had it, or a create that never
-    landed server-side). Any other failure warns instead of raising:
+    poke's own attempt cleanup. A 404 is fine and silent (the rule was
+    already gone: a hook re-run, a VM that never had it, or a create that
+    never landed server-side). Any other failure warns instead of raising:
     every call site must keep unwinding, and the warning names the rule
     and states the actual residual exposure: the rule's scoped source
     prefixes, not the world (pass ``prefixes`` when known so the warning
@@ -392,23 +397,31 @@ def remove_ssh_allow(
     the coupling; the rule NAME, by contrast, is always known (fixed for
     bootstrap, returned by the poke), so it is always named.
 
-    It deletes before it prints: on a route closed by a hangup the
-    terminal is gone and a write to it can fail, so the rule must be
-    gone first.
+    The removal waits at most ``_RULE_REMOVAL_TIMEOUT_SECONDS`` for Azure,
+    since its callers defer interrupts around it; an operation still running
+    then is an outcome nobody saw, so it warns that the rule may remain.
     """
     from azure.core.exceptions import ResourceNotFoundError
 
+    scope = f"source(s) {', '.join(prefixes)}" if prefixes else "the rule's scoped source addresses"
     try:
-        network.security_rules.begin_delete(rg, f"{name}-nsg", rule_name).result()
+        poller = network.security_rules.begin_delete(rg, f"{name}-nsg", rule_name)
+        poller.result(timeout=_RULE_REMOVAL_TIMEOUT_SECONDS)
     except ResourceNotFoundError:
-        pass
+        return
     except Exception as exc:
         err = wrap_azure_error(exc)
-        scope = f"source(s) {', '.join(prefixes)}" if prefixes else "the rule's scoped source addresses"
         output.warn(
             f"could not remove the '{rule_name}' rule on NSG "
             f"'{name}-nsg': {err.summary}. The VM's SSH port stays open to "
             f"{scope}; delete the rule manually to restore zero inbound exposure."
+        )
+        return
+    if not poller.done():
+        output.warn(
+            f"Azure did not confirm the removal of the '{rule_name}' rule on NSG '{name}-nsg' within "
+            f"{_RULE_REMOVAL_TIMEOUT_SECONDS:.0f}s, so the VM's SSH port may remain open to {scope}; check "
+            "the rule and delete it manually if it is still there."
         )
         return
     output.info(f"Closed SSH route (removed allow rule '{rule_name}')")
@@ -737,11 +750,10 @@ def rollback_create_on_interrupt(
     The second interrupt is absorbed so the caller re-raises the
     ORIGINAL one; either way a KeyboardInterrupt propagates to
     ``create_vm``, whose unwind then deletes the DB row it no longer
-    needs. A VM delete failure inside the teardown warns here (the
-    proxmox rollbacks' ``_warn_if_vm_remains`` precedent, using the
-    captured failure instead of a probe): this path is already
-    unwinding on the operator's interrupt, so raising like the delete
-    op does would replace it, but a silent orphan is never acceptable.
+    needs. A VM delete failure inside the teardown warns here, using the
+    captured failure: this path is already unwinding on the operator's
+    interrupt, so raising like the delete op does would replace it, but a
+    silent orphan is never acceptable.
     """
     output.warn(
         f"Interrupted: cleaning up partial Azure resources for '{name}', please wait (Ctrl-C again to abandon them)..."

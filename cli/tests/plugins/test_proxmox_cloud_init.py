@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from agentworks.capabilities.vm_platform.tailscale_join import DEFAULT_READINESS_COMMAND
 from agentworks.errors import ConnectivityError, ProvisioningError
 from agentworks.plugins.proxmox.platform import CLOUD_INIT_DEADLINE_SECONDS, _wait_for_cloud_init
 from tests._root_channel_fakes import Answer, FakeGuest
@@ -23,7 +24,7 @@ def test_cloud_init_success_returns_without_warning(captured_output: CapturedOut
 
     _wait_for_cloud_init(guest.run_as_root, 101)
 
-    assert guest.payloads == ["cloud-init status --wait"]
+    assert guest.payloads == [DEFAULT_READINESS_COMMAND]
     assert captured_output.warnings == []
 
 
@@ -45,6 +46,16 @@ def test_cloud_init_that_does_not_complete_raises_after_one_run(status: int | No
     assert len(guest.scripts) == 1
 
 
+def test_a_failed_cloud_init_s_reason_reaches_the_error() -> None:
+    """The create's rollback destroys the VM, so what cloud-init said is kept in the error before it goes."""
+    guest = _guest(Answer(status=1, stdout=b"status: error\nerrors:\n\t- (scripts_user) failed\n"))
+
+    with pytest.raises(ProvisioningError) as caught:
+        _wait_for_cloud_init(guest.run_as_root, 101)
+
+    assert "(scripts_user) failed" in str(caught.value)
+
+
 def test_a_channel_failure_is_asked_again_until_cloud_init_answers(
     monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
 ) -> None:
@@ -55,7 +66,7 @@ def test_a_channel_failure_is_asked_again_until_cloud_init_answers(
 
     _wait_for_cloud_init(guest.run_as_root, 101)
 
-    assert guest.payloads == ["cloud-init status --wait"] * 2
+    assert guest.payloads == [DEFAULT_READINESS_COMMAND] * 2
     assert captured_output.warnings == []
 
 

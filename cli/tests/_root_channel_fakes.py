@@ -30,10 +30,11 @@ ADDRESS = "100.64.0.9"
 
 @dataclass(frozen=True)
 class Answer:
-    """How the guest answers one payload: a status (``None`` for no markers at all), stdout, or a raise."""
+    """How the guest answers one payload: a status (``None`` for no markers at all), its streams, or a raise."""
 
     status: int | None = 0
     stdout: bytes = b""
+    stderr: bytes = b""
     raises: BaseException | None = None
 
 
@@ -95,7 +96,7 @@ class FakeGuest:
         prefix = b"\x1e" + nonce_of(script).encode() + b" "
         return RawRun(
             prefix + b"start\n" + answer.stdout + prefix + b"end\n",
-            prefix + b"start\n" + prefix + b"exit %d\n" % answer.status,
+            prefix + b"start\n" + answer.stderr + prefix + b"exit %d\n" % answer.status,
         )
 
     def run_process(self, argv: Sequence[str], script: bytes, deadline: float) -> RawRun:

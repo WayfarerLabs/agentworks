@@ -19,7 +19,12 @@ from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal
 from pydantic import Field, field_validator
 
 from agentworks import output
-from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
+from agentworks.capabilities.vm_platform.base import (
+    ProvisionRequest,
+    ProvisionResult,
+    RetainedProvisioningError,
+    VMPlatform,
+)
 from agentworks.capabilities.vm_platform.bootstrap_script import (
     REBOOT_SENTINEL_PATH,
     generate_bootstrap_script,
@@ -243,13 +248,13 @@ class LimaPlatform(VMPlatform):
         else:
             local = isinstance(LimaConfig.model_fields["placement"].default, LimaLocalPlacement)
             remote = False
-        import shutil
+        from agentworks.programs import is_installed
 
         if not local:
-            if remote and not shutil.which("ssh"):
+            if remote and not is_installed("ssh"):
                 return Readiness.blocked("ssh not installed")
             return Readiness.ready()
-        if not shutil.which("limactl"):
+        if not is_installed("limactl"):
             return Readiness.blocked("limactl not installed")
         return Readiness.ready()
 
@@ -322,9 +327,9 @@ class LimaPlatform(VMPlatform):
             self._ensure_limactl()
 
     def _ensure_limactl(self) -> None:
-        import shutil
+        from agentworks.programs import is_installed
 
-        if not shutil.which("limactl"):
+        if not is_installed("limactl"):
             from agentworks.errors import ConnectivityError
 
             # Mirrors the 'tailscale' / 'tailscale status' precedent in
@@ -407,47 +412,56 @@ class LimaPlatform(VMPlatform):
         # here would be orphaned with nothing to target it (#340; the
         # azure precedent is #338). Everything before this try mutates
         # nothing, so no arm ever fires a cleanup call for an instance
-        # that was never made.
+        # that was never made. The arms nest like Proxmox's and WSL2's:
+        # the outer interrupt arm wraps the inner failure arm, so a Ctrl-C
+        # during the failure arm's cleanup restarts it under the full
+        # two-Ctrl-C protocol, which retains the row if it is abandoned.
         try:
-            if self.is_remote:
-                self._create_remote(instance_name, rendered, progress=request.progress)
-            else:
-                self._create_local(instance_name, rendered)
-
-            output.detail(f"Lima VM '{instance_name}' created.")
-
-            # Some bootstrap steps (currently the Apple-vz SVE mask, see
-            # bootstrap_script) only take effect after a reboot, and rebooting
-            # mid-provision is unreliable (lima-vm/lima#4867). Such steps drop a
-            # restart sentinel; restart the instance from the host when we see it.
-            # The probe stays generic: the host cannot cheaply tell which guest
-            # shape it is, so a bare failure is phrased for what it does know.
             try:
-                restart_pending = self._restart_sentinel_present(instance_name)
-            except LimaCommandFailed as e:
-                output.warn(f"could not check whether '{instance_name}' needs a restart to finish provisioning: {e}")
-                output.warn(
-                    f"if the VM misbehaves, 'limactl restart {instance_name}' reapplies any deferred bootstrap step."
-                )
-                restart_pending = False
-            if restart_pending:
-                output.detail(f"A bootstrap step needs a reboot; restarting '{instance_name}'...")
-                self._host.run(f"limactl restart {instance_name}")
+                if self.is_remote:
+                    self._create_remote(instance_name, rendered, progress=request.progress)
+                else:
+                    self._create_local(instance_name, rendered)
 
-            # The join follows any restart, so nothing but the address read
-            # sits between the join and the settle that logs a failed one out.
-            run_as_root = functools.partial(self._host.run_as_root, instance_name)
-            _wait_for_tailscaled(run_as_root, instance_name)
-            output.detail("Joining Tailscale...")
-            join_tailscale(run_as_root, request.tailscale_auth_key, node=request.hostname)
-            output.detail("Retrieving Tailscale IP...")
-            tailnet_address = settle_tailnet_address(run_as_root, node=request.hostname, rerun_hint=CREATE_RERUN_HINT)
+                output.detail(f"Lima VM '{instance_name}' created.")
+
+                # Some bootstrap steps (currently the Apple-vz SVE mask, see
+                # bootstrap_script) only take effect after a reboot, and rebooting
+                # mid-provision is unreliable (lima-vm/lima#4867). Such steps drop a
+                # restart sentinel; restart the instance from the host when we see it.
+                # The probe stays generic: the host cannot cheaply tell which guest
+                # shape it is, so a bare failure is phrased for what it does know.
+                try:
+                    restart_pending = self._restart_sentinel_present(instance_name)
+                except LimaCommandFailed as e:
+                    output.warn(
+                        f"could not check whether '{instance_name}' needs a restart to finish provisioning: {e}"
+                    )
+                    output.warn(
+                        f"if the VM misbehaves, 'limactl restart {instance_name}' "
+                        "reapplies any deferred bootstrap step."
+                    )
+                    restart_pending = False
+                if restart_pending:
+                    output.detail(f"A bootstrap step needs a reboot; restarting '{instance_name}'...")
+                    self._host.run(f"limactl restart {instance_name}")
+
+                # The join follows any restart, so nothing but the address read
+                # sits between the join and the settle that logs a failed one out.
+                run_as_root = functools.partial(self._host.run_as_root, instance_name)
+                _wait_for_tailscaled(run_as_root, instance_name)
+                output.detail("Joining Tailscale...")
+                join_tailscale(run_as_root, request.tailscale_auth_key, node=request.hostname)
+                output.detail("Retrieving Tailscale IP...")
+                tailnet_address = settle_tailnet_address(
+                    run_as_root, node=request.hostname, rerun_hint=CREATE_RERUN_HINT
+                )
+            except Exception as failure:
+                output.detail(f"Cleaning up the partial Lima instance '{instance_name}'...")
+                self._cleanup_partial_create(instance_name, vm_name=request.vm_name, failure=failure)
+                raise
         except KeyboardInterrupt:
-            self._rollback_create_on_interrupt(instance_name)
-            raise
-        except Exception:
-            output.detail(f"Cleaning up the partial Lima instance '{instance_name}'...")
-            self._cleanup_partial_create(instance_name)
+            self._rollback_create_on_interrupt(instance_name, vm_name=request.vm_name)
             raise
 
         return ProvisionResult(
@@ -589,15 +603,20 @@ class LimaPlatform(VMPlatform):
         quoted_dir = shlex.quote(remote_template_dir)
         self._host.run(f"rm -rf -- {quoted_dir} && test ! -e {quoted_dir}")
 
-    def _cleanup_partial_create(self, instance_name: str) -> None:
-        """Best-effort teardown of the instance a failed ``create`` made
-        (only ever an instance this create named: the pre-flight
-        collision check guarantees the name was free when we started).
+    def _cleanup_partial_create(self, instance_name: str, *, vm_name: str, failure: Exception | None) -> None:
+        """Tear down the instance a failed or interrupted ``create`` made
+        (only ever an instance this create named: the pre-flight collision
+        check guarantees the name was free when we started).
 
-        Never raises a cleanup failure over the original error; it
-        warns with the manual removal command instead. An operator's
-        second Ctrl-C (``KeyboardInterrupt``) deliberately escapes so
-        :meth:`_rollback_create_on_interrupt` can abandon the cleanup.
+        An instance that may remain is warned with the manual removal
+        command and handed to core as :class:`RetainedProvisioningError`,
+        whose message carries the original ``failure`` (``None`` for an
+        interrupt), so the row survives for ``vm delete`` to retry. A
+        ``KeyboardInterrupt`` during it is not contained: called from the
+        failure arm, it escapes to ``create``'s outer interrupt arm, which
+        restarts the cleanup under :meth:`_rollback_create_on_interrupt`;
+        called from there, it is the second Ctrl-C that abandons the
+        cleanup.
         """
         if self.is_remote:
             # A failed or interrupted detached create may still be alive on the
@@ -611,28 +630,46 @@ class LimaPlatform(VMPlatform):
         except Exception as e:
             output.warn(f"could not clean up the partial Lima instance '{instance_name}': {e}")
             output.warn(self._manual_removal_hint(instance_name))
+            cause = "create was interrupted" if failure is None else f"create failed ({failure})"
+            raise self._retained(vm_name, instance_name, f"{cause}, and removing the instance failed: {e}") from e
 
-    def _rollback_create_on_interrupt(self, instance_name: str) -> None:
+    def _rollback_create_on_interrupt(self, instance_name: str, *, vm_name: str) -> None:
         """Roll back the partially created instance after an operator
         interrupt inside :meth:`create` (the azure precedent:
         ``rollback_create_on_interrupt``, #338).
 
         A SECOND interrupt during the cleanup abandons it cleanly
-        instead of wedging, warning with the exact removal command; it
-        is absorbed so the caller re-raises the ORIGINAL interrupt,
-        which then reaches ``create_vm``, whose unwind deletes the DB
-        row it no longer needs."""
+        instead of wedging, warning with the exact removal command, and
+        raises :class:`RetainedProvisioningError` in place of the
+        interrupt, as a failed cleanup does, so the row survives for
+        ``vm delete``. A cleanup that completes returns, and the caller
+        re-raises the ORIGINAL interrupt, which then reaches
+        ``create_vm``, whose unwind deletes the DB row it no longer
+        needs."""
         output.warn(
             f"Interrupted: cleaning up the partial Lima instance '{instance_name}', "
-            "please wait (Ctrl-C again to abandon it)..."
+            "please wait (Ctrl-C again retains it for explicit deletion)..."
         )
         try:
-            self._cleanup_partial_create(instance_name)
-        except KeyboardInterrupt:
+            self._cleanup_partial_create(instance_name, vm_name=vm_name, failure=None)
+        except KeyboardInterrupt as second:
             output.warn(
                 f"Cleanup abandoned: the Lima instance '{instance_name}' may remain; "
                 + self._manual_removal_hint(instance_name)
             )
+            raise self._retained(
+                vm_name, instance_name, "create was interrupted, and so was removing the instance"
+            ) from second
+
+    def _retained(self, vm_name: str, instance_name: str, detail: str) -> RetainedProvisioningError:
+        """The retained-row handoff: the row keeps the instance name, so ``vm delete`` can retry its removal."""
+        return RetainedProvisioningError(
+            f"the Lima instance '{instance_name}' may remain: {detail}",
+            platform_metadata={"instance_name": instance_name},
+            entity_name=vm_name,
+            hint=f"Once the cause is fixed, run 'agw vm delete {vm_name}', or "
+            + self._manual_removal_hint(instance_name),
+        )
 
     def _manual_removal_hint(self, instance_name: str) -> str:
         where = f" on '{self._remote_host}'" if self.is_remote else ""
@@ -660,7 +697,19 @@ class LimaPlatform(VMPlatform):
             output.detail(f"Lima VM '{vm.name}' is already running")
             return
         output.info(f"Starting Lima VM '{vm.name}'...")
-        self._host.run(f"limactl start {self._instance_name(vm)}")
+        try:
+            self._host.run(f"limactl start {self._instance_name(vm)}")
+        except LimaCommandFailed as error:
+            # limactl start waits up to ten minutes for the guest's sshd, so a broken one ends here.
+            raise ConnectivityError(
+                f"Lima VM '{vm.name}' did not finish starting: {error}",
+                entity_kind="vm",
+                entity_name=vm.name,
+                hint=(
+                    f"Lima waits for the VM's SSH server. Run 'agw vm recover {vm.name}', which repairs it "
+                    "while Lima can still reach the VM; if Lima cannot, delete and recreate the VM."
+                ),
+            ) from error
         output.info(f"Lima VM '{vm.name}' started")
 
     def stop(self, vm: VMRow, ctx: RunContext) -> None:
@@ -676,14 +725,23 @@ class LimaPlatform(VMPlatform):
     def _delete_instance(self, instance_name: str) -> None:
         """The one place the teardown command lives: shared by the
         delete op and the create rollback. ``--force`` stops a running
-        instance first; ``check=False`` makes it a no-op for an
-        instance that is already gone or only partially exists
-        (created but never started)."""
-        self._host.run(f"limactl delete --force {instance_name}", check=False)
+        instance first, and ``limactl`` exits 0 for an instance that is
+        already gone, so any other failure, an unreachable placement host
+        included, raises :class:`LimaCommandFailed`: core drops a VM's row
+        only when its delete returns."""
+        self._host.run(f"limactl delete --force {instance_name}")
 
     def delete(self, vm: VMRow, ctx: RunContext) -> None:
         output.info(f"Deleting Lima VM '{vm.name}'...")
-        self._delete_instance(self._instance_name(vm))
+        instance_name = self._instance_name(vm)
+        if self.is_remote:
+            # A create whose rollback failed or was abandoned may have left its detached create running,
+            # and its files, on the placement host. Stop it before deleting the instance it would keep
+            # mutating, as the create rollback does. Best-effort: the instance's removal is what the
+            # row's removal needs.
+            with contextlib.suppress(Exception):
+                self._host.kill_detached(self._remote_base_path(instance_name))
+        self._delete_instance(instance_name)
         output.info(f"Lima VM '{vm.name}' deleted")
 
     def display_backend_name(self, vm: VMRow) -> str:

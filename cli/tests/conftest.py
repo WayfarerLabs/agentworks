@@ -6,7 +6,7 @@ import contextlib
 import os
 import sqlite3
 import tempfile
-from collections.abc import Generator, Iterator
+from collections.abc import Callable, Generator, Iterator
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -462,25 +462,30 @@ class _FakeTarget:
     existing test is unaffected.
     """
 
+    logger = None
+
     def __init__(
         self,
         responses: dict[str, _FakeResult] | None = None,
         *,
         model: _SupportsDispatch | None = None,
     ) -> None:
+        self.logger = None
         self.commands: list[str] = []
         # Substring -> response. First matching substring wins; default = ok.
         self.responses = responses or {}
         self.model = model
 
     def run(self, command: str, **kwargs: object) -> _FakeResult:
+        from tests._runtime_probes import framed_runtime_result
+
         self.commands.append(command)
         for needle, response in self.responses.items():
             if needle in command:
-                return response
+                return framed_runtime_result(command, response)
         if self.model is not None:
             return self.model.dispatch(command)
-        return _FakeResult()
+        return framed_runtime_result(command, _FakeResult())
 
 
 class _StubPlatform:
@@ -509,10 +514,7 @@ class _StubPlatform:
 
         return VMStatus.RUNNING
 
-    def post_tailscale_ready(self, vm: object, ctx: object) -> None:
-        return None
-
-    def secure_failed_vm(self, vm: object, ctx: object) -> None:
+    def close_provisioning_access(self, vm: object, ctx: object) -> None:
         return None
 
 
@@ -1007,6 +1009,17 @@ def _isolated_host_key_store(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) ->
     store = tmp_path / "host-key-store"
     monkeypatch.setattr("agentworks.execution.trust.STORE_DIR", store)
     return store
+
+
+def fake_installed_programs(monkeypatch: pytest.MonkeyPatch, which: Callable[[str], str | None]) -> None:
+    """Decide which workstation programs count as installed: ``which`` answers as ``shutil.which`` would.
+
+    Both lookups get it: ``programs.is_installed``, which the presence checks
+    ask, and ``shutil.which``, which WSL2 still asks about ``wsl.exe``'s fixed
+    path.
+    """
+    monkeypatch.setattr("shutil.which", which)
+    monkeypatch.setattr("agentworks.programs.is_installed", lambda name: which(name) is not None)
 
 
 def provisioning_trust_for_tests(vm_name: str) -> TrustBinding:

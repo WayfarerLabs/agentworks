@@ -329,8 +329,9 @@ class PendingVMNode:
     identity is complete while it is still pending; the orchestrator
     flips it through ``RealizationLog.mark_realized`` once its row
     exists, and ``teardown`` is today's rollback body (delete the row)
-    relocated onto the node. The row is the only artifact this node
-    unwinds: a provisioning failure means nothing usable was created
+    relocated onto the node. The row, and the host-key store file
+    create resets for the name right after it, are the only artifacts
+    this node unwinds: a provisioning failure means nothing usable was created
     remotely (or the remote was unreachable), today's stance, and
     initialization failures are deliberately NOT unwound (the VM
     exists and is debuggable; reinit retries).
@@ -393,6 +394,10 @@ class PendingVMNode:
                 entity_kind="vm",
                 entity_name=self._name,
             ) from exc
+        # The store file goes with the row, as at delete. Create reset it
+        # for this name (``trust.begin_enrollment``), so it holds nothing
+        # that predates this create, and a store error names the file.
+        trust.remove(self._name)
 
 
 # -- Factories: the translation rule applied to real declared resources ----

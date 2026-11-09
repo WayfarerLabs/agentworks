@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
+from agentworks import output
 from agentworks.artifacts.model import ArtifactInputs
 
 if TYPE_CHECKING:
@@ -24,7 +25,9 @@ class SetupInvocation:
     admin and workspace setup, the agent for its own). Checkpoint the complete
     remaining claim set after each ownership change. Returning from the
     callback means persistence succeeded; an exception stops further writes.
-    Initial creation may buffer until the owning row is inserted.
+    Initial creation may buffer until the owning row is inserted. Report an
+    entry that cannot converge without failing unrelated setup entries; core
+    retains incomplete evidence and reports the owning repair operation.
     """
 
     vm: VMRow
@@ -32,6 +35,7 @@ class SetupInvocation:
     runner: Transport
     prior: SetupRecord | None
     checkpoint: Callable[[tuple[NativeClaim, ...]], None]
+    report_incomplete: Callable[[str], None] = field(default=output.warn, repr=False)
     artifacts: ArtifactInputs = field(default_factory=ArtifactInputs)
     environment: Mapping[str, str] = field(default_factory=dict, repr=False)
     secrets: Mapping[str, str] = field(default_factory=dict, repr=False)

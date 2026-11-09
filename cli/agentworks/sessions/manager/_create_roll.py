@@ -1,21 +1,8 @@
-"""``_roll_forward``: the dependency-ordered mutation phase of ``create_session``.
+"""Dependency-ordered session creation and recovery-aware rollback.
 
-Section S11, running inside the activation gate after the boundary
-resolve. Split into three functions that preserve the original two-level
-rollback exactly:
-
-- :func:`_realize_ephemerals` realizes the pending workspace / agent in
-  dependency order, recording each in the :class:`RealizationLog`.
-- :func:`_start_session_slice` is the session's own realizing slice: the
-  grant, the DB row, the tmux launch, and the completion bookkeeping.
-  Its inner ``except`` runs the session node's partial-state teardown
-  (rollback level 1).
-- :func:`_roll_forward` frames both in the outer try whose ``except``
-  unwinds the realized ephemerals (rollback level 2). A COMPLETED
-  session (tmux up, node flipped) is deliberately never rolled back.
-
-The bodies are the original ``create_session`` roll-forward moved
-verbatim: no emit, DB call, SSH call, or teardown was reordered.
+Before dispatching tmux, failure unwinds the newly realized owners. A dispatched
+launch retains its row and dependencies unless runtime absence is proved.
+Persist the stable fingerprint before finalizing startup and releasing protection.
 """
 
 from __future__ import annotations
@@ -26,13 +13,18 @@ import agentworks.sessions.manager as _mgr
 from agentworks import output
 from agentworks.capabilities.harness_integration import HarnessLaunchIntent, require_implemented_start
 from agentworks.db import SessionMode
-from agentworks.errors import ExternalError, NotFoundError, ValidationError
+from agentworks.errors import AgentworksError, ExternalError, NotFoundError, ValidationError
+from agentworks.harness_setup.outcomes import describe_setup_failures
+from agentworks.harness_setup.readiness import RequiredSetupMissingError
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from agentworks.capabilities.base import RunContext
     from agentworks.config import Config
     from agentworks.db import AgentRow, Database, VMRow
     from agentworks.execution.access import VMAccess
+    from agentworks.harness_setup.outcomes import SetupFailure
     from agentworks.orchestration.unwind import RealizationLog
     from agentworks.resources.registry import Registry
     from agentworks.sessions.tmux import RunCommand
@@ -52,6 +44,7 @@ def _realize_ephemerals(
     vm: VMRow,
     secret_values: dict[str, str],
     log: RealizationLog,
+    setup_failures: list[SetupFailure],
 ) -> None:
     """Realize the pending workspace / agent in dependency order, recording
     each completed realization in ``log`` for the reverse-order unwind."""
@@ -88,6 +81,7 @@ def _realize_ephemerals(
                     name=plan.workspace_name,
                     vm=vm,
                     template=graph.workspace_tmpl,
+                    setup_failures=setup_failures,
                     setup_inputs=graph.pending_workspace.setup_inputs,
                     setup_values=secret_values,
                     overlay=graph.workspace_overlay,
@@ -122,6 +116,7 @@ def _realize_ephemerals(
                     template=graph.agent_tmpl,
                     credential_requests=credential_ops,
                     credential_redactions=git_redactions,
+                    setup_failures=setup_failures,
                     setup_inputs=graph.pending_agent.setup_inputs,
                     setup_values=secret_values,
                     overlay=graph.agent_overlay,
@@ -148,6 +143,8 @@ def _start_session_slice(
     run_command: RunCommand,
     agent_target: Transport | None,
     secret_values: dict[str, str],
+    setup_incomplete: bool,
+    on_session_retained: Callable[[], None],
 ) -> None:
     """The session's own realizing slice: the grant, the DB row, the tmux
     launch, and the completion bookkeeping.
@@ -247,14 +244,12 @@ def _start_session_slice(
             runner=agent_target or target,
         )
 
-    # Compute socket path up front (deterministic from linux_user +
-    # session name). Needed for the DB insert since the CHECK
-    # constraint requires agent sessions to have a socket_path.
-    expected_socket: str | None = None
-    if mode == SessionMode.AGENT:
-        from agentworks.sessions.tmux import agent_socket_path
+    # Retain the dedicated address for either mode, including failed launches.
+    from agentworks.sessions.tmux import admin_socket_path, agent_socket_path
 
-        expected_socket = agent_socket_path(linux_user, name)
+    expected_socket = (
+        agent_socket_path(linux_user, name) if mode == SessionMode.AGENT else admin_socket_path(linux_user, name)
+    )
 
     mode_label = f"agent: {resolved_agent_name}" if resolved_agent_name else "admin"
     from agentworks.harness_setup.locking import native_mutation_guard
@@ -265,6 +260,7 @@ def _start_session_slice(
         )
 
         retain_unknown_runtime = False
+        fingerprint_recorded = False
         try:
             from agentworks.artifacts.session import (
                 commit_session_artifacts,
@@ -295,6 +291,7 @@ def _start_session_slice(
                 agent_name=resolved_agent_name,
                 runner=agent_target or target,
                 environment=session_env,
+                redactions=tuple(secret_values.values()),
                 linux_user=linux_user,
                 secret_target=_mgr._session_secret_target(
                     registry,
@@ -399,6 +396,25 @@ def _start_session_slice(
                 session_run_command = agent_target.run
             else:
                 session_run_command = run_command
+            from agentworks.sessions.tmux import finalize_session_start
+
+            fingerprint_target = agent_target if mode == SessionMode.AGENT else target
+            assert fingerprint_target is not None
+            launch_boot = _mgr._get_boot_id(fingerprint_target)
+            if launch_boot is None:
+                raise ExternalError(
+                    f"could not read the VM boot identity before launching session '{name}'",
+                    entity_kind="session",
+                    entity_name=name,
+                )
+
+            def before_spawn() -> None:
+                nonlocal retain_unknown_runtime
+                db.update_session_runtime(
+                    name, socket_path=expected_socket, pid=None, boot_id=launch_boot, tmux_server_start_ticks=None
+                )
+                retain_unknown_runtime = True
+
             sock, pid = create_tmux_session(
                 name,
                 ws.workspace_path,
@@ -409,31 +425,13 @@ def _start_session_slice(
                 admin_username=vm.admin_username,
                 is_admin=(mode == SessionMode.ADMIN),
                 env=session_env,
+                before_spawn=before_spawn,
+                session_uuid=prepared_artifacts.context.session_uuid,
+                run_id=prepared_artifacts.context.run_id,
             )
-            from agentworks.sessions.tmux import (
-                ProbeStatus,
-                capture_tmux_server_fingerprint,
-                kill_server_and_probe,
-            )
+            db.record_session_started(name)
+            from agentworks.sessions.tmux import ProbeStatus, capture_tmux_server_fingerprint
 
-            try:
-                db.record_session_started(name)
-            except (KeyboardInterrupt, Exception):
-                cleanup = kill_server_and_probe(run_command=session_run_command, socket_path=sock)
-                if cleanup is not ProbeStatus.ABSENT:
-                    db.update_session_runtime(
-                        name,
-                        socket_path=sock,
-                        pid=None,
-                        boot_id=None,
-                        tmux_server_start_ticks=None,
-                    )
-                    retain_unknown_runtime = True
-                    output.warn(f"session '{name}' may still have a runtime at socket {sock}")
-                raise
-
-            fingerprint_target = agent_target if mode == SessionMode.AGENT else target
-            assert fingerprint_target is not None
             fingerprint_probe = capture_tmux_server_fingerprint(target=fingerprint_target, socket_path=sock)
             fingerprint = fingerprint_probe.fingerprint
             if (
@@ -441,24 +439,12 @@ def _start_session_slice(
                 or fingerprint is None
                 or (pid is not None and fingerprint.pid != pid)
             ):
-                cleanup = kill_server_and_probe(run_command=session_run_command, socket_path=sock)
-                if cleanup is not ProbeStatus.ABSENT:
-                    db.update_session_runtime(
-                        name,
-                        socket_path=sock,
-                        pid=None,
-                        boot_id=None,
-                        tmux_server_start_ticks=None,
-                    )
-                    retain_unknown_runtime = True
                 raise ExternalError(
                     f"could not capture a stable tmux server fingerprint for session '{name}'",
                     entity_kind="session",
                     entity_name=name,
                     hint=(
                         f"The session row and socket {sock} were retained because runtime absence could not be proved."
-                        if retain_unknown_runtime
-                        else None
                     ),
                 )
             db.update_session_runtime(
@@ -468,7 +454,27 @@ def _start_session_slice(
                 boot_id=fingerprint.boot_id,
                 tmux_server_start_ticks=fingerprint.start_ticks,
             )
-        except (KeyboardInterrupt, Exception):
+            fingerprint_recorded = True
+            finalize_session_start(
+                name,
+                run_command=session_run_command,
+                socket_path=sock,
+                is_admin=mode == SessionMode.ADMIN,
+                redactions=tuple(secret_values.values()),
+            )
+            retain_unknown_runtime = False
+        except (KeyboardInterrupt, Exception) as error:
+            # An acknowledged runtime may still be live. Only its stored
+            # process fingerprint can authorize discarding the recovery row.
+            if fingerprint_recorded and not isinstance(error, KeyboardInterrupt):
+                current = db.get_session(name)
+                if current is not None:
+                    try:
+                        retain_unknown_runtime = not _mgr._prove_stored_runtime_absent(
+                            current, target=agent_target or target
+                        )
+                    except AgentworksError:
+                        retain_unknown_runtime = True
             # Session-internal cleanup only (DB row, grant, group
             # membership: the node's partial-state teardown). The
             # realized ephemerals are unwound by the outer handlers,
@@ -488,6 +494,9 @@ def _start_session_slice(
                         retain_unknown_runtime = True
                 if not retain_unknown_runtime:
                     session_node.teardown()
+            if retain_unknown_runtime:
+                on_session_retained()
+                output.warn(f"Session '{name}' and its dependencies were retained for runtime recovery.")
             raise
 
         # The session's realizing slice is complete: flip the node.
@@ -496,6 +505,7 @@ def _start_session_slice(
         # failures past this point unwind only the ephemerals, and
         # the session survives them. That pins the completed-session
         # window as non-rollbackable.
+        on_session_retained()
         session_node.mark_realized()
 
     # The section is closed: the terminal result line and the
@@ -504,7 +514,15 @@ def _start_session_slice(
     # outer try so a failure here still triggers the ephemeral
     # rollback (a completed session itself is never rolled back).
     mode_label = f"agent: {resolved_agent_name}" if resolved_agent_name else "admin"
-    output.result(f"Session '{name}' started ({mode_label}, template: {template.name})")
+    started = f"Session '{name}' started ({mode_label}, template: {template.name})"
+    from agentworks.harness_setup.outcomes import setup_completion_suffix
+    from agentworks.harness_setup.state import read_native_setup
+
+    suffix = setup_completion_suffix(read_native_setup(db, "session", name))
+    if setup_incomplete or suffix:
+        output.info(f"{started}{suffix or '; harness setup incomplete'}")
+    else:
+        output.result(started)
 
     # Update the workspace's tmuxinator config.
     _mgr._regenerate_tmuxinator(db, config, vm, ws)
@@ -523,18 +541,26 @@ def _roll_forward(
     run_command: RunCommand,
     agent_target: Transport | None,
     secret_values: dict[str, str],
+    setup_failures: list[SetupFailure],
 ) -> None:
     """Realize the ephemerals then the session slice, unwinding the
-    realized ephemerals on any failure (rollback level 2)."""
+    realized ephemerals on core failure (rollback level 2). Required setup
+    blocks only its session consumer and retains completed owners for repair."""
     from agentworks.orchestration.unwind import RealizationLog
 
     # Realize the pending nodes in dependency order, recording each
-    # completed realization; on any later failure the log unwinds them in
+    # completed realization; on later core failure the log unwinds them in
     # reverse (agent before workspace, today's proven rollback order). The
     # session's own partial state is cleaned by its node's teardown in the
     # slice, and a COMPLETED session (tmux up) is deliberately never
     # rolled back.
     log = RealizationLog()
+    retain_dependencies = False
+
+    def retain_session() -> None:
+        nonlocal retain_dependencies
+        retain_dependencies = True
+
     try:
         _realize_ephemerals(
             db,
@@ -545,6 +571,7 @@ def _roll_forward(
             vm=vm,
             secret_values=secret_values,
             log=log,
+            setup_failures=setup_failures,
         )
         _start_session_slice(
             db,
@@ -558,10 +585,34 @@ def _roll_forward(
             run_command=run_command,
             agent_target=agent_target,
             secret_values=secret_values,
+            setup_incomplete=bool(setup_failures),
+            on_session_retained=retain_session,
         )
+    except RequiredSetupMissingError as error:
+        # The owners completed their core work. Keep them and their native
+        # progress so the operator can repair the session's required setup.
+        _render_retained_overlay_outcomes(db, plan, graph)
+        retained = []
+        if graph.pending_workspace is not None:
+            retained.append(
+                f"Workspace '{plan.workspace_name}' was retained; "
+                f"replace --new-workspace with --workspace {plan.workspace_name} and remove any "
+                "--workspace-name, --workspace-template and --workspace-spec options."
+            )
+        if graph.pending_agent is not None:
+            retained.append(
+                f"Agent '{plan.agent_name}' was retained; replace --new-agent with --agent {plan.agent_name} "
+                "and remove any --agent-name, --agent-template and --agent-spec options."
+            )
+        summary = describe_setup_failures(setup_failures)
+        error.hint = "\n".join(part for part in (error.hint, *retained, summary) if part)
+        raise
     except KeyboardInterrupt:
-        output.warn(f"Cancelling session create '{plan.name}'... rolling back.")
-        log.unwind()
+        if retain_dependencies:
+            output.warn(f"Cancelling session create '{plan.name}'; its managed session and dependencies were retained.")
+        else:
+            output.warn(f"Cancelling session create '{plan.name}'... rolling back.")
+            log.unwind()
         _render_retained_overlay_outcomes(db, plan, graph)
         raise
     except Exception as e:
@@ -571,8 +622,19 @@ def _roll_forward(
         # exception handler still prints the canonical 'Error: ...' line
         # with the typed hint at the very end; this warn just bridges
         # the silence between "thing X created" and the rollback output.
-        output.warn(f"Session create '{plan.name}' failed; rolling back. Reason: {e}")
-        log.unwind()
+        from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic, sanitize_setup_error
+
+        if isinstance(e, AgentworksError):
+            sanitize_setup_error(e, redactions=secret_values.values())
+        diagnostic = sanitize_setup_diagnostic(str(e), redactions=secret_values.values())
+        if retain_dependencies:
+            output.warn(
+                f"Session create '{plan.name}' failed; its managed session and dependencies were retained. "
+                f"Reason: {diagnostic}"
+            )
+        else:
+            output.warn(f"Session create '{plan.name}' failed; rolling back. Reason: {diagnostic}")
+            log.unwind()
         _render_retained_overlay_outcomes(db, plan, graph)
         raise
     else:

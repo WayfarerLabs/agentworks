@@ -5,9 +5,11 @@ from __future__ import annotations
 import hashlib
 import json
 import shlex
+import sys
 import tomllib
 from collections.abc import Callable
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 from typing import get_args
 
@@ -24,7 +26,7 @@ from agentworks.artifacts.model import (
     ArtifactType,
 )
 from agentworks.artifacts.native.common import NativeSessionArtifacts, native_home, validate_ancestor_names
-from agentworks.artifacts.native.probe import probe_native
+from agentworks.artifacts.native.probe import NativeArtifactConflictError, probe_native
 from agentworks.artifacts.native.shell import shell_artifacts
 from agentworks.artifacts.publication import validate_application
 from agentworks.artifacts.session import validate_session_application
@@ -219,23 +221,32 @@ def test_claude_session_plugin_uses_native_namespace_and_private_directory():
 @pytest.mark.parametrize("render", [codex.session_artifacts, grok.session_artifacts])
 def test_private_skills_stay_unhandled_when_native_cli_cannot_discover_them(render):
     item = artifact(ArtifactType.SKILL)
-    result = render(enabled_workarounds=enabled(render), context=context(item), configured=None, extra_args=[])
+    result = render(
+        enabled_workarounds=enabled(render),
+        context=context(item),
+        configured=None,
+        extra_args=["--single", "task"] if render is grok.session_artifacts else [],
+    )
     assert result.application.files == ()
     assert result.application.deferred[0].input_id == item.identity
     assert result.application.deferred[0].destination == "session"
     assert result.argv == ()
 
 
-@pytest.mark.parametrize("render", [claude.session_artifacts, codex.session_artifacts, grok.session_artifacts])
+@pytest.mark.parametrize("render", [claude.session_artifacts, codex.session_artifacts])
 def test_native_persona_options_do_not_enable_hooks_or_unknown_native_fields(render):
     name = {
         claude.session_artifacts: "claude-code",
         codex.session_artifacts: "codex",
-        grok.session_artifacts: "grok-build",
     }[render]
     item = artifact(ArtifactType.AGENT, options={name: {"hooks": {}}})
     with pytest.raises(ConfigError):
-        render(enabled_workarounds=enabled(render), context=context(item), configured=None, extra_args=[])
+        render(
+            enabled_workarounds=enabled(render),
+            context=context(item),
+            configured=None,
+            extra_args=[],
+        )
 
 
 @pytest.mark.parametrize(
@@ -260,7 +271,7 @@ def test_native_name_collision_does_not_silently_shadow_another_scope():
     item = artifact(ArtifactType.AGENT)
     other = replace(item, origin=ArtifactOrigin("agent", "agent", "alice", bundle="another", entry="review"))
     earlier = claude.outer_artifacts(received(other), "/home/alice/.claude")
-    with pytest.raises(ConfigError):
+    with pytest.raises(NativeArtifactConflictError):
         claude.session_artifacts(
             enabled_workarounds=enabled(claude.session_artifacts),
             context=context(item, ancestors=tuple(owned(file) for file in earlier.files)),
@@ -336,8 +347,7 @@ def test_native_launch_carries_literal_artifact_guidance_on_new_and_resumed_thre
     from agentworks.capabilities.base import RunContext
     from agentworks.capabilities.harness_integration import HarnessLaunchIntent
 
-    module = __import__(implementation.__module__, fromlist=["probe_native"])
-    monkeypatch.setattr(module, "probe_native", lambda *args, **kwargs: "/home/alice/.native")
+    monkeypatch.setattr("agentworks.artifacts.native.probe.probe_native", lambda *args, **kwargs: "/home/alice/.native")
     item = artifact(ArtifactType.RULE)
     integration = implementation(
         "native",
@@ -468,7 +478,12 @@ def test_large_native_argument_artifacts_fail_before_publication(render, type):
     item = artifact(type)
     item = replace(item, content=replace(item.content, text="x" * (128 * 1024)))
     with pytest.raises(ConfigError):
-        render(enabled_workarounds=enabled(render), context=context(item), configured=None, extra_args=[])
+        render(
+            enabled_workarounds=enabled(render),
+            context=context(item),
+            configured=None,
+            extra_args=["--single", "task"] if render is grok.session_artifacts else [],
+        )
 
 
 def test_large_claude_context_uses_private_file_without_an_argument_size_penalty():
@@ -613,7 +628,8 @@ def test_session_delivery_defaults_to_unhandled_before_native_validation(render)
 def test_config_workaround_names_match_native_delivery(integration, workarounds):
     annotation = integration.config_model.model_fields["enabled_workarounds"].annotation
     names = get_args(get_args(annotation)[0])
-    assert set(names) == set(workarounds.values())
+    compatibility_names = {"session-agent-definitions"} if integration is GrokBuildIntegration else set()
+    assert set(names) == set(workarounds.values()) | compatibility_names
 
 
 @pytest.mark.parametrize("type", list(ArtifactType))
@@ -657,7 +673,6 @@ def test_shell_delivers_session_artifacts_without_workarounds(type):
         (codex.session_artifacts, "session-developer-instructions", {ArtifactType.HINT, ArtifactType.RULE}, "-c"),
         (codex.session_artifacts, "session-agent-config", {ArtifactType.AGENT}, "-c"),
         (grok.session_artifacts, "session-rules", {ArtifactType.HINT, ArtifactType.RULE}, "--rules"),
-        (grok.session_artifacts, "session-agent-definitions", {ArtifactType.AGENT}, "--agents"),
     ],
 )
 def test_workaround_selects_only_its_types_including_deferred_ancestors(render, workaround, selected, flag):
@@ -671,7 +686,12 @@ def test_workaround_selects_only_its_types_including_deferred_ancestors(render, 
     items = tuple(sorted(items, key=lambda item: item.origin.component == "session"))
     received_context = context(*items)
     assert received_context.inputs.deferred
-    result = render(received_context, configured=None, extra_args=[], enabled_workarounds=[workaround])
+    result = render(
+        received_context,
+        configured=None,
+        extra_args=[],
+        enabled_workarounds=[workaround],
+    )
     assert flag in result.argv
     assert {item.input_id for item in result.application.deferred} == {
         item.identity for item in items if item.content.type not in selected
@@ -687,14 +707,22 @@ def test_workaround_selects_only_its_types_including_deferred_ancestors(render, 
     ],
 )
 def test_unselected_guidance_does_not_restrict_native_guidance_flags(render, workaround, args):
+    if render is grok.session_artifacts:
+        args = [*args, "--single", "task"]
+    rule, agent = artifact(ArtifactType.RULE), artifact(ArtifactType.AGENT)
     result = render(
-        context(artifact(ArtifactType.RULE), artifact(ArtifactType.AGENT)),
+        context(rule, agent),
         configured=None,
         extra_args=args,
         enabled_workarounds=[workaround],
     )
-    assert result.argv
-    assert len(result.application.deferred) == 1
+    if render is grok.session_artifacts:
+        assert result.argv == () and result.application.files == ()
+        assert {item.input_id for item in result.application.deferred} == {rule.identity, agent.identity}
+        assert {item.destination for item in result.application.deferred} == {"session"}
+    else:
+        assert result.argv
+        assert {item.input_id for item in result.application.deferred} == {rule.identity}
 
 
 @pytest.mark.parametrize("implementation", [ClaudeCodeIntegration, CodexIntegration, GrokBuildIntegration])
@@ -702,8 +730,10 @@ def test_skipped_inputs_do_not_probe_or_require_launch_target(monkeypatch, imple
     from agentworks.capabilities.base import RunContext
     from agentworks.capabilities.harness_integration import HarnessLaunchIntent
 
-    module = __import__(implementation.__module__, fromlist=["probe_native"])
-    monkeypatch.setattr(module, "probe_native", lambda *args, **kwargs: pytest.fail("unexpected artifact probe"))
+    monkeypatch.setattr(
+        "agentworks.artifacts.native.probe.probe_native",
+        lambda *args, **kwargs: pytest.fail("unexpected artifact probe"),
+    )
     integration = implementation(
         "native",
         {},
@@ -807,7 +837,7 @@ def test_claude_observes_version_only_for_delivered_session_prompt(monkeypatch, 
 
     snapshot = Mock(return_value=("--system-prompt-snapshot", "off"))
     monkeypatch.setattr(module, "session_prompt_snapshot", snapshot)
-    monkeypatch.setattr(module, "probe_native", lambda *args, **kwargs: "/home/alice/.claude")
+    monkeypatch.setattr("agentworks.artifacts.native.probe.probe_native", lambda *args, **kwargs: "/home/alice/.claude")
     ancestor = claude.outer_artifacts(received(artifact(ArtifactType.RULE)), "/home/alice/.claude")
     integration = ClaudeCodeIntegration(
         "claude-code",
@@ -827,3 +857,215 @@ def test_claude_observes_version_only_for_delivered_session_prompt(monkeypatch, 
     integration.start(RunContext(admin_access=RecordingVMAccess([], Admin())), intent=HarnessLaunchIntent.CREATE)
     assert snapshot.called is (workaround == "session-prompt")
     assert ("--system-prompt-snapshot" in integration._artifact_plan.argv) is (workaround == "session-prompt")
+
+
+@pytest.mark.parametrize(
+    "render,args",
+    [
+        (claude.session_artifacts, ["--bare"]),
+        (codex.session_artifacts, ["--profile"]),
+        (grok.session_artifacts, ["--no-subagents"]),
+        (claude.session_artifacts, ["--", "prompt"]),
+        (codex.session_artifacts, ["--", "prompt"]),
+        (grok.session_artifacts, ["--", "prompt"]),
+    ],
+)
+def test_ancestor_only_override_is_reported_without_blocking(render, args, monkeypatch):
+    warnings: list[str] = []
+    monkeypatch.setattr(output, "warn", warnings.append)
+    existing = claude.outer_artifacts(received(artifact(ArtifactType.AGENT)), "/home/alice/.claude")
+    result = render(
+        context=context(ancestors=tuple(owned(file) for file in existing.files)),
+        configured=None,
+        extra_args=args,
+    )
+    assert warnings
+    assert not result.application.files and not result.argv
+
+
+@pytest.mark.parametrize(
+    "integration_class,module,workaround",
+    [
+        (ClaudeCodeIntegration, "claude", "session-prompt"),
+        (CodexIntegration, "codex", "session-developer-instructions"),
+        (GrokBuildIntegration, "grok", "session-rules"),
+    ],
+)
+@pytest.mark.parametrize("own_delivery", [False, True])
+def test_failed_native_probe_is_advisory_only_without_new_carriers(
+    integration_class, module, workaround, own_delivery, monkeypatch
+):
+    from agentworks.capabilities.harness_integration import HarnessLaunchIntent
+    from agentworks.errors import ExternalError
+
+    warnings: list[str] = []
+    monkeypatch.setattr(output, "warn", warnings.append)
+
+    def fail_probe(*args, **kwargs):
+        raise ExternalError("fixture native discovery unavailable")
+
+    monkeypatch.setattr("agentworks.artifacts.native.probe.probe_native", fail_probe)
+    ancestor = claude.outer_artifacts(received(artifact(ArtifactType.RULE)), "/home/alice/.claude")
+    prepared = context(
+        *([artifact(ArtifactType.RULE)] if own_delivery else []),
+        ancestors=tuple(owned(file) for file in ancestor.files),
+    )
+    integration = integration_class(
+        integration_class.name,
+        {"enabled_workarounds": [workaround] if own_delivery else []},
+        session_name="s1",
+        vm_name="vm",
+        workspace_name="ws",
+        workspace_path="/ws",
+        target=None,
+        admin=True,
+        state={},
+        artifact_context=prepared,
+    )
+    monkeypatch.setattr(integration, "_resume_or_launch", lambda *args, **kwargs: "fixture-launch")
+    if own_delivery:
+        with pytest.raises(ExternalError):
+            integration.start(
+                RunContext(admin_access=RecordingVMAccess([], Admin())), intent=HarnessLaunchIntent.RESUME_OR_NEW
+            )
+    else:
+        result = integration.start(
+            RunContext(admin_access=RecordingVMAccess([], Admin())), intent=HarnessLaunchIntent.RESUME_OR_NEW
+        )
+        assert result.command == "fixture-launch" and warnings
+
+
+@pytest.mark.parametrize(
+    "implementation,facet",
+    [
+        (ClaudeCodeIntegration, "vm"),
+        (ClaudeCodeIntegration, "user"),
+        (ClaudeCodeIntegration, "workspace"),
+        (CodexIntegration, "vm"),
+        (CodexIntegration, "user"),
+        (CodexIntegration, "workspace"),
+        (GrokBuildIntegration, "user"),
+        (GrokBuildIntegration, "workspace"),
+    ],
+)
+def test_setup_native_name_conflict_defers_only_affected_artifact(implementation, facet, db, monkeypatch):
+    from importlib import import_module
+
+    from agentworks.artifacts.native.probe import NativeArtifactConflictError
+    from agentworks.capabilities.harness_integration.setup import (
+        SetupInvocation,
+        UserSetupInvocation,
+        VMSetupInvocation,
+        WorkspaceSetupInvocation,
+    )
+    from tests.conftest import _FakeTarget
+
+    module = import_module(implementation.__module__)
+    module_root = "/home/alice/.native"
+    calls = []
+
+    def check(*args, files=(), **kwargs):
+        calls.append(tuple(files))
+        if any(file.native_identity == "skill:review" for file in files):
+            raise NativeArtifactConflictError("fixture competing skill", ("skill:review",), hint="fixture repair")
+        return module_root
+
+    monkeypatch.setattr(module, "probe_native", check)
+    if implementation is CodexIntegration:
+        monkeypatch.setattr(module, "guidance_path", lambda runner, root: root + "/AGENTS.md")
+    bad = artifact(ArtifactType.SKILL)
+    good = artifact(ArtifactType.RULE)
+    incomplete: list[str] = []
+    common = {
+        "vm": db.insert_vm("vm", "site", "host"),
+        "access": RecordingVMAccess([], Admin()),
+        "runner": _FakeTarget(),
+        "prior": None,
+        "checkpoint": lambda claims: None,
+        "report_incomplete": incomplete.append,
+        "artifacts": received(bad, good),
+    }
+    invocation: SetupInvocation
+    if facet == "vm":
+        invocation = VMSetupInvocation(**common)
+    elif facet == "user":
+        invocation = UserSetupInvocation(**common, username="alice", home="/home/alice")
+    else:
+        invocation = WorkspaceSetupInvocation(**common, workspace_name="ws", root="/workspace", linux_group="ws")
+    integration = implementation.for_setup(owner_kind="vm", owner_name="vm", facet=facet, config={})
+    result = getattr(integration, {"vm": "vm_init", "user": "user_init", "workspace": "workspace_init"}[facet])(
+        invocation
+    )
+    assert incomplete and calls
+    assert not any(bad.origin_identity in file.origins for file in result.files)
+    route = next(item for item in result.deferred if item.input_id == bad.identity)
+    assert route.destination == ("user" if facet == "vm" else "session")
+    assert any(good.origin_identity in file.origins for file in result.files) or any(
+        item.input_id == good.identity for item in result.deferred
+    )
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="executes Linux guest filesystem helpers locally")
+@pytest.mark.parametrize("modified", [False, True])
+def test_setup_name_conflict_deferral_uses_safe_owned_retirement(tmp_path, db, modified):
+    from agentworks.artifacts.native.common import defer_setup_conflicts
+    from agentworks.artifacts.native.probe import NativeArtifactConflictError
+    from agentworks.artifacts.publication import publish_artifacts
+    from agentworks.capabilities.harness_integration.setup import UserSetupInvocation
+    from tests.native_setup_fixtures import LocalFixtureTransport
+
+    target = LocalFixtureTransport(tmp_path)
+    bad, good = artifact(ArtifactType.SKILL), artifact(ArtifactType.RULE)
+    inputs = received(bad, good)
+    plan = claude.outer_artifacts(inputs, str(target.home / ".claude"))
+    current = publish_artifacts(target, plan.files, (), lambda files: None, roots=(str(target.home),)).files
+    entrypoint = target.home / ".claude/skills/review/SKILL.md"
+    if modified:
+        entrypoint.write_text("operator changed entrypoint")
+    competing = target.home / ".claude/skills/competing/SKILL.md"
+    competing.parent.mkdir(parents=True)
+    competing.write_text("operator content")
+    incomplete: list[str] = []
+    invocation = UserSetupInvocation(
+        vm=db.insert_vm("vm", "site", "host"),
+        access=RecordingVMAccess([], Admin()),
+        runner=target,
+        prior=None,
+        checkpoint=lambda claims: None,
+        report_incomplete=incomplete.append,
+        artifacts=inputs,
+        username="alice",
+        home=str(target.home),
+    )
+
+    def check(files):
+        if any(file.native_identity == "skill:review" for file in files):
+            raise NativeArtifactConflictError("fixture competing skill", ("skill:review",), hint="fixture repair")
+
+    filtered = defer_setup_conflicts(plan, invocation, check)
+    result = publish_artifacts(target, filtered.files, current, lambda files: None, roots=(str(target.home),))
+    assert incomplete and filtered.deferred[0].input_id == bad.identity
+    assert competing.read_text() == "operator content"
+    assert entrypoint.exists() is modified
+    assert any(file.path == str(entrypoint) for file in result.files) is modified
+    assert all(Path(file.path).exists() for file in result.files)
+    assert any(good.origin_identity in file.origins for file in result.files)
+
+
+@pytest.mark.parametrize("render", [claude.session_artifacts, codex.session_artifacts])
+@pytest.mark.parametrize("matching_owner", ["user", "workspace"])
+def test_new_carrier_cannot_choose_one_of_competing_ancestor_origins(render, matching_owner):
+    first = artifact(ArtifactType.AGENT, owner="user")
+    second = artifact(ArtifactType.AGENT, owner="workspace")
+    earlier = (
+        *claude.outer_artifacts(received(first), "/home/alice/.claude").files,
+        *claude.outer_artifacts(received(second), "/workspace/.claude").files,
+    )
+    selected = first if matching_owner == "user" else second
+    with pytest.raises(NativeArtifactConflictError):
+        render(
+            context=context(selected, ancestors=tuple(owned(file) for file in earlier)),
+            configured=None,
+            extra_args=[],
+            enabled_workarounds=enabled(render),
+        )

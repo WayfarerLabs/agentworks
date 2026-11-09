@@ -1,19 +1,8 @@
-"""``delete_vm`` cleanup discipline: never gates, never lets a
-best-effort step (the build-and-boundary composition, the hold, the
-logout) skip the backend delete, keeps the SIGINT contract at a
-site-secret prompt, and never deletes the row past a FAILED backend
-delete (the one non-best-effort step: a raise from ``platform.delete``
-keeps the row so the surviving backend VM stays reachable, #329).
+"""VM deletion keeps the existing binding-failure local retirement path.
 
-Real config, registry, resolver, and backend loop (env-var backend);
-the platform's backend ops and the Tailscale logout are the fakes,
-mirroring ``test_lifecycle_orchestrated.py`` (delete shares the
-lifecycle commands' composition root, ``_live_vm_boundary``). One
-end-to-end azure pin at the bottom drops one level lower: the REAL
-``AzureVMPlatform.delete`` (with its #329 verification gate) runs
-through this same manager path, with only the Azure SDK faked
-(``tests._azure_platform_support``), composing the two halves the
-suites above and ``test_azure_delete_verify.py`` pin separately.
+The real registry/resolver boundary runs against fake provider operations.
+Selected corrupt-name tests prebind before injecting their invalid inventory so
+local artifact cleanup remains exercised independently of boundary validation.
 """
 
 from __future__ import annotations
@@ -25,7 +14,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.db import VMStatus
-from agentworks.errors import AuthorizationError, StateError, UserAbort
+from agentworks.errors import AuthorizationError, ConfigError, StateError, UserAbort
 from agentworks.execution import trust
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
@@ -35,6 +24,7 @@ from tests.conftest import ManifestDoc, requires_symlinks, seed_vm_trust
 from tests.orchestrated_fixtures import write_operator_config
 
 if TYPE_CHECKING:
+    from agentworks.config import Config
     from agentworks.db import Database, VMRow
     from tests.conftest import CapturedOutput
 
@@ -55,9 +45,7 @@ def _fake_backend(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
     choreography above them runs for real."""
     counts = {"status": 0, "delete": 0}
 
-    # The counter is the never-probes oracle (asserted zero where it
-    # matters); a raise here would be swallowed by delete's best-effort
-    # spans and could never signal anything.
+    # Core deletion must not request power observations or activate the guest.
     def _status(self: ProxmoxPlatform, row: VMRow, ctx: object) -> VMStatus:
         counts["status"] += 1
         return VMStatus.STOPPED
@@ -70,21 +58,43 @@ def _fake_backend(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
     return counts
 
 
+def _finish_hints(monkeypatch: pytest.MonkeyPatch) -> list[bool]:
+    """Record whether each how-to-finish hint was built for a VM already logged out (so with the rekey aside)."""
+    from agentworks.vms.manager import power
+
+    recorded: list[bool] = []
+    build = power._finish_delete_hint
+
+    def record(vm: VMRow, *, fix: str, logged_out: bool) -> str:
+        recorded.append(logged_out)
+        return build(vm, fix=fix, logged_out=logged_out)
+
+    monkeypatch.setattr(power, "_finish_delete_hint", record)
+    return recorded
+
+
+def _not_logged_out_warnings(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Record the VM each not-logged-out warning names."""
+    from agentworks.vms.manager import power
+
+    named: list[str] = []
+    warn = power._warn_not_logged_out
+
+    def record(vm: VMRow, reason: str) -> None:
+        named.append(vm.name)
+        warn(vm, reason)
+
+    monkeypatch.setattr(power, "_warn_not_logged_out", record)
+    return named
+
+
 def test_non_enum_policy_deletes_nothing(
     db: Database,
     make_config,  # noqa: ANN001
     resolve_counter: list[list[str]],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A caller-supplied ``"refuse"`` aborts the delete having changed nothing.
-
-    ``interaction`` reaches the resolver inside the best-effort span, which
-    downgrades every ``AgentworksError`` to a warning and carries on: without the
-    check at the top of ``delete_vm`` the rejection is swallowed, the row goes
-    (cascading workspaces, agents and sessions), the operator's SSH config is
-    rewritten, and the backend delete is skipped because no node was built,
-    leaving the backend VM running with nothing left to target it (#329).
-    """
+    """Invalid caller policy is refused before resolution or provider mutation."""
     _seed(db)
     counts = _fake_backend(monkeypatch)
     synced: list[object] = []
@@ -127,95 +137,58 @@ def test_delete_never_gates(
     assert db.get_vm("dvm") is None
 
 
-def test_reachable_vm_delete_routes_sessions_through_shared_teardown(
-    db: Database,
-    make_config,  # noqa: ANN001
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from types import SimpleNamespace
-
+def test_whole_vm_delete_logs_out_then_deletes_without_tearing_down_sessions(
+    db: Database, make_config, monkeypatch, tmp_path
+):
     from agentworks.db import SessionMode
     from agentworks.sessions import manager as session_manager
 
+    config = make_config(f'\n[paths]\nvscode_workspaces = "{(tmp_path / "vscode").as_posix()}"\n')
     _seed(db)
+    db.insert_agent("agent", "dvm", "agt-agent")
     db.insert_workspace("ws1", "/srv/ws1", "dvm", "ws-ws1")
-    db.insert_session(
-        "s1",
-        "ws1",
-        "default",
-        SessionMode.ADMIN,
-        socket_path="/run/agentworks/admin-tmux-sockets/agentworks/s1.sock",
-    )
-    _fake_backend(monkeypatch)
-    monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *args, **kwargs: None)
-    monkeypatch.setattr(session_manager, "ensure_pids_batch", lambda sessions, **kwargs: sessions)
-    monkeypatch.setattr(
-        "agentworks.transports.transport",
-        lambda *args, **kwargs: SimpleNamespace(run=lambda *args, **kwargs: None),
-    )
-    torn_down: list[str] = []
-    monkeypatch.setattr(
-        session_manager,
-        "_teardown_session",
-        lambda session, **kwargs: torn_down.append(session.name),
-    )
+    db.insert_session("s1", "ws1", "default", SessionMode.ADMIN)
+    counts = _fake_backend(monkeypatch)
+    guest_calls = []
+    events: list[str] = []
 
-    vm_manager.delete_vm(
-        db,
-        make_config(),
-        "dvm",
-        force=True,
-        interaction=TtyInteractionPolicy.REFUSE,
-    )
+    def unexpected(*args, **kwargs):
+        guest_calls.append(args)
+        raise AssertionError("VM deletion must not tear down workloads over SSH")
 
-    assert torn_down == ["s1"]
+    def logout(*args, **kwargs):
+        events.append("logout")
+
+    real_delete = ProxmoxPlatform.delete
+
+    def delete(self, row, ctx):
+        events.append("delete")
+        real_delete(self, row, ctx)
+
+    monkeypatch.setattr(vm_manager, "_tailscale_logout", logout)
+    monkeypatch.setattr(ProxmoxPlatform, "delete", delete)
+    monkeypatch.setattr(session_manager, "ensure_pids_batch", unexpected)
+    monkeypatch.setattr(session_manager, "_teardown_session", unexpected)
+    monkeypatch.setattr("agentworks.transports.transport", unexpected)
+
+    vm_manager.delete_vm(db, config, "dvm", force=True, yes=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert guest_calls == []
+    assert events == ["logout", "delete"]
+    assert counts["delete"] == 1
     assert db.get_vm("dvm") is None
+    assert db.get_agent("agent") is None
+    assert db.get_workspace("ws1") is None
+    assert db.get_session("s1") is None
 
 
-def test_vm_delete_does_not_render_session_teardown_exception_text(
-    db: Database,
-    make_config,  # noqa: ANN001
-    monkeypatch: pytest.MonkeyPatch,
-    captured_output: CapturedOutput,
-) -> None:
-    from types import SimpleNamespace
+def _bind_before_corrupt_inventory(db: Database, config: Config, monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentworks.vms.manager.boundary import _live_vm_boundary
 
-    from agentworks.db import SessionMode
-    from agentworks.sessions import manager as session_manager
-
-    sentinel = "REMOTE-TEARDOWN-SENTINEL"
-    _seed(db)
-    db.insert_workspace("ws1", "/srv/ws1", "dvm", "ws-ws1")
-    db.insert_session(
-        "s1",
-        "ws1",
-        "default",
-        SessionMode.ADMIN,
-        socket_path="/run/agentworks/admin-tmux-sockets/agentworks/s1.sock",
-    )
-    _fake_backend(monkeypatch)
-    monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *args, **kwargs: None)
-    monkeypatch.setattr(session_manager, "ensure_pids_batch", lambda sessions, **kwargs: sessions)
-    monkeypatch.setattr(
-        "agentworks.transports.transport",
-        lambda *args, **kwargs: SimpleNamespace(run=lambda *args, **kwargs: None),
-    )
-    monkeypatch.setattr(
-        session_manager,
-        "_teardown_session",
-        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError(sentinel)),
-    )
-
-    vm_manager.delete_vm(
-        db,
-        make_config(),
-        "dvm",
-        force=True,
-        interaction=TtyInteractionPolicy.REFUSE,
-    )
-
-    assert sentinel not in "\n".join(captured_output.warnings)
-    assert db.get_vm("dvm") is None
+    vm = db.get_vm("dvm")
+    assert vm is not None
+    bound = _live_vm_boundary(db, config, vm, interaction=TtyInteractionPolicy.REFUSE)
+    monkeypatch.setattr("agentworks.vms.manager.power._live_vm_boundary", lambda *args, **kwargs: bound)
 
 
 def test_delete_removes_only_its_workspace_artifacts(
@@ -241,7 +214,6 @@ def test_delete_removes_only_its_workspace_artifacts(
     other_artifact.write_text("other")
     config = make_config(f'\n[paths]\nvscode_workspaces = "{vscode_dir.as_posix()}"\n')
     _fake_backend(monkeypatch)
-    monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
 
     vm_manager.delete_vm(db, config, "dvm", force=True, interaction=TtyInteractionPolicy.REFUSE)
 
@@ -262,14 +234,14 @@ def test_delete_skips_workspace_artifacts_outside_the_managed_directory(
     _seed(db)
     # A direct DB insert models legacy or corrupt persisted state that bypassed
     # the workspace manager's write-time name validation.
-    db.insert_workspace("../sentinel", "/srv/corrupt", "dvm", "ws-corrupt")
     vscode_dir = tmp_path / "vscode"
     vscode_dir.mkdir()
     sentinel = tmp_path / "sentinel.code-workspace"
     sentinel.write_text("outside")
     config = make_config(f'\n[paths]\nvscode_workspaces = "{vscode_dir.as_posix()}"\n')
     _fake_backend(monkeypatch)
-    monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
+    _bind_before_corrupt_inventory(db, config, monkeypatch)
+    db.insert_workspace("../sentinel", "/srv/corrupt", "dvm", "ws-corrupt")
 
     vm_manager.delete_vm(db, config, "dvm", force=True, interaction=TtyInteractionPolicy.REFUSE)
 
@@ -296,7 +268,6 @@ def test_delete_unlinks_an_in_directory_symlink_without_touching_its_referent(
     artifact.symlink_to(referent)
     config = make_config(f'\n[paths]\nvscode_workspaces = "{vscode_dir.as_posix()}"\n')
     _fake_backend(monkeypatch)
-    monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
 
     vm_manager.delete_vm(db, config, "dvm", force=True, interaction=TtyInteractionPolicy.REFUSE)
 
@@ -314,7 +285,6 @@ def test_delete_skips_a_trailing_separator_through_a_directory_symlink(
     captured_output: CapturedOutput,
 ) -> None:
     _seed(db)
-    db.insert_workspace("link/", "/srv/corrupt", "dvm", "ws-corrupt")
     vscode_dir = tmp_path / "vscode"
     vscode_dir.mkdir()
     outside_dir = tmp_path / "outside"
@@ -325,7 +295,8 @@ def test_delete_skips_a_trailing_separator_through_a_directory_symlink(
     directory_link.symlink_to(outside_dir, target_is_directory=True)
     config = make_config(f'\n[paths]\nvscode_workspaces = "{vscode_dir.as_posix()}"\n')
     _fake_backend(monkeypatch)
-    monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
+    _bind_before_corrupt_inventory(db, config, monkeypatch)
+    db.insert_workspace("link/", "/srv/corrupt", "dvm", "ws-corrupt")
 
     vm_manager.delete_vm(db, config, "dvm", force=True, interaction=TtyInteractionPolicy.REFUSE)
 
@@ -356,14 +327,14 @@ def test_delete_skips_a_name_alias_targeting_another_vm_artifact(
     vscode_dir = tmp_path / "vscode"
     vscode_dir.mkdir()
     stored_name = stored_name_template.format(vscode_dir=vscode_dir)
-    db.insert_workspace(stored_name, "/srv/corrupt", "dvm", "ws-corrupt")
     db.insert_vm("other", site="proxmox", hostname="other")
     db.insert_workspace("untouched", "/srv/untouched", "other", "ws-untouched")
     other_artifact = vscode_dir / "untouched.code-workspace"
     other_artifact.write_text("other")
     config = make_config(f'\n[paths]\nvscode_workspaces = "{vscode_dir.as_posix()}"\n')
     _fake_backend(monkeypatch)
-    monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
+    _bind_before_corrupt_inventory(db, config, monkeypatch)
+    db.insert_workspace(stored_name, "/srv/corrupt", "dvm", "ws-corrupt")
     # This is inert for lowercase cases and models a case-insensitive host for
     # the uppercase case deterministically on Linux CI.
     real_unlink = Path.unlink
@@ -381,97 +352,23 @@ def test_delete_skips_a_name_alias_targeting_another_vm_artifact(
     assert captured_output.warnings
 
 
-def test_hold_failure_does_not_skip_delete(
-    db: Database,
-    make_config,  # noqa: ANN001
-    monkeypatch: pytest.MonkeyPatch,
-    captured_output: CapturedOutput,
-) -> None:
-    """A broken hold (e.g. a manually unregistered WSL2 distro) is
-    exactly what delete cleans up: warn and keep going."""
-    _seed(db)
-    counts = _fake_backend(monkeypatch)
-
-    def _broken_hold(
-        self: ProxmoxPlatform, row: VMRow, *, config: object | None = None
-    ) -> contextlib.AbstractContextManager[None]:
-        raise RuntimeError("keepalive exited immediately")
-
-    monkeypatch.setattr(ProxmoxPlatform, "vm_active", _broken_hold)
-
-    vm_manager.delete_vm(db, make_config(), "dvm", yes=True, interaction=TtyInteractionPolicy.REFUSE)
-
-    assert counts["delete"] == 1
-    assert db.get_vm("dvm") is None
-    assert any("logout skipped" in w for w in captured_output.warnings)
-
-
-def test_logout_failure_does_not_skip_delete(
-    db: Database,
-    make_config,  # noqa: ANN001
-    monkeypatch: pytest.MonkeyPatch,
-    captured_output: CapturedOutput,
-) -> None:
-    _seed(db)
-    counts = _fake_backend(monkeypatch)
-
-    def _boom(*a: object, **k: object) -> None:
-        raise RuntimeError("transport exploded")
-
-    monkeypatch.setattr(vm_manager, "_tailscale_logout", _boom)
-
-    vm_manager.delete_vm(db, make_config(), "dvm", yes=True, interaction=TtyInteractionPolicy.REFUSE)
-
-    assert counts["delete"] == 1
-    assert db.get_vm("dvm") is None
-
-
-def test_session_teardown_failure_still_logs_out_and_deletes(
-    db: Database,
-    make_config,  # noqa: ANN001
-    monkeypatch: pytest.MonkeyPatch,
-    captured_output: CapturedOutput,
-) -> None:
-    """The teardown's legacy transport can fail (it raises TrustMissing on a VM
-    with no record); the logout has its own span and still runs."""
-    from agentworks.vms.manager import power
-
-    _seed(db)
-    counts = _fake_backend(monkeypatch)
-    logouts: list[str] = []
-
-    def _broken_teardown(*a: object, **k: object) -> None:
-        raise RuntimeError("teardown transport exploded")
-
-    monkeypatch.setattr(power, "_teardown_vm_sessions", _broken_teardown)
-    monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda vm, *a, **k: logouts.append(vm.name))
-
-    vm_manager.delete_vm(db, make_config(), "dvm", yes=True, interaction=TtyInteractionPolicy.REFUSE)
-
-    assert logouts == ["dvm"]
-    assert counts["delete"] == 1
-    assert db.get_vm("dvm") is None
-
-
-def test_stranded_site_warns_with_hint_and_still_deletes_row(
-    db: Database,
-    make_config,  # noqa: ANN001
-    resolve_counter: list[list[str]],
-    monkeypatch: pytest.MonkeyPatch,
-    captured_output: CapturedOutput,
-) -> None:
-    """A stranded site degrades: the build fails inside the best-effort
-    boundary, backend cleanup is skipped with the manifest hint
-    rendered, no secret ever resolves, and the DB row still goes."""
+def test_stranded_site_warns_and_removes_local_row_and_children(
+    db: Database, make_config, resolve_counter, captured_output: CapturedOutput, tmp_path: Path
+):
+    config = make_config(f'\n[paths]\nvscode_workspaces = "{(tmp_path / "vscode").as_posix()}"\n')
     _seed(db, site="gone")
+    db.insert_workspace("kept", "/srv/kept", "dvm", "ws-kept")
+    config.paths.vscode_workspaces.mkdir()
+    artifact = config.paths.vscode_workspaces / "kept.code-workspace"
+    artifact.write_text("fixture generated workspace")
 
-    vm_manager.delete_vm(db, make_config(), "dvm", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+    vm_manager.delete_vm(db, config, "dvm", force=True, yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
     assert db.get_vm("dvm") is None
+    assert db.get_workspace("kept") is None
+    assert not artifact.exists()
     assert resolve_counter == []
-    joined = "\n".join(captured_output.warnings)
-    assert "skipping backend cleanup" in joined
-    assert "kind: vm-site" in joined
+    assert captured_output.warnings
 
 
 def _failing_backend_delete(monkeypatch: pytest.MonkeyPatch, counts: dict[str, int]) -> AuthorizationError:
@@ -490,55 +387,52 @@ def _failing_backend_delete(monkeypatch: pytest.MonkeyPatch, counts: dict[str, i
 
 def test_backend_delete_failure_keeps_the_row(
     db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """#329: without --force the backend delete is the one step delete_vm
+    must NOT treat as best-effort. A platform delete that raises (it could
+    not remove the backend VM) aborts the command and keeps the row, so the
+    operator can fix the cause and retry; dropping it would orphan the
+    surviving VM with nothing left to target it."""
+    _seed(db)
+    counts = _fake_backend(monkeypatch)
+    error = _failing_backend_delete(monkeypatch, counts)
+    hints = _finish_hints(monkeypatch)
+
+    with pytest.raises(AuthorizationError) as exc:
+        vm_manager.delete_vm(db, make_config(), "dvm", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert exc.value is error
+    assert counts["delete"] == 1
+    assert db.get_vm("dvm") is not None
+    assert "agw vm delete dvm --force" in (exc.value.hint or "")
+    assert hints == [False]  # the node was not logged out (the fake reports it stopped)
+
+
+def test_force_removes_the_row_past_a_backend_delete_failure(
+    db: Database,
     tmp_path: Path,
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
     captured_output: CapturedOutput,
 ) -> None:
-    """#329: the backend delete is the one step delete_vm must NOT
-    treat as best-effort. A platform delete that raises (it could not
-    remove the backend VM) aborts the command and keeps the row, so
-    the operator can fix the cause and retry; warning past it would
-    orphan the surviving VM with nothing left to target it."""
+    """Whoever forces a delete wants the VM gone: the children and the row go, and the backend is named."""
     _seed(db)
+    db.update_vm_platform_metadata("dvm", {"vmid": "100", "node": "pve1"})
+    seed_vm_trust("dvm")
     db.insert_workspace("kept", "/srv/kept", "dvm", "ws-kept")
-    vscode_dir = tmp_path / "vscode"
-    vscode_dir.mkdir()
-    artifact = vscode_dir / "kept.code-workspace"
-    artifact.write_text("keep")
-    config = make_config(f'\n[paths]\nvscode_workspaces = "{vscode_dir.as_posix()}"\n')
     counts = _fake_backend(monkeypatch)
-    monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
-    error = _failing_backend_delete(monkeypatch, counts)
-
-    with pytest.raises(AuthorizationError) as exc:
-        vm_manager.delete_vm(db, config, "dvm", force=True, interaction=TtyInteractionPolicy.REFUSE)
-
-    assert exc.value is error
-    assert counts["delete"] == 1
-    assert db.get_vm("dvm") is not None
-    assert db.get_workspace("kept") is not None
-    assert artifact.read_text() == "keep"
-
-
-def test_force_does_not_suppress_backend_delete_failure(
-    db: Database,
-    make_config,  # noqa: ANN001
-    monkeypatch: pytest.MonkeyPatch,
-    captured_output: CapturedOutput,
-) -> None:
-    """--force skips the child-count guard and the confirm prompt,
-    never a failed backend delete: the #329 repro used --force and the
-    failure must still surface with the row kept."""
-    _seed(db)
-    counts = _fake_backend(monkeypatch)
-    monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
     _failing_backend_delete(monkeypatch, counts)
 
-    with pytest.raises(AuthorizationError):
-        vm_manager.delete_vm(db, make_config(), "dvm", force=True, interaction=TtyInteractionPolicy.REFUSE)
+    vm_manager.delete_vm(db, make_config(), "dvm", force=True, yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
-    assert db.get_vm("dvm") is not None
+    assert counts["delete"] == 1
+    assert db.get_vm("dvm") is None
+    assert db.get_workspace("kept") is None
+    assert not trust.has_record("dvm")
+    assert any("'100'" in warning for warning in captured_output.warnings)
 
 
 def test_user_abort_at_boundary_prompt_aborts_the_delete(
@@ -564,20 +458,16 @@ def test_user_abort_at_boundary_prompt_aborts_the_delete(
     assert db.get_vm("dvm") is not None
 
 
-def test_user_abort_inside_an_op_span_aborts_the_delete(
+def test_user_abort_during_backend_delete_retains_the_row(
     db: Database,
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
     captured_output: CapturedOutput,
 ) -> None:
-    """The op-span catch-alls are best-effort ("warn and continue") but
-    must NOT downgrade a UserAbort: a swallowed abort would fall through
-    and delete the DB row the operator just declined. Pinned for both
-    best-effort spans (the logout hold and the backend delete)."""
+    """A backend abort retains the row rather than turning into local cleanup."""
     _seed(db)
     config = make_config()
     counts = _fake_backend(monkeypatch)
-    monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
 
     def _aborting_delete(self: ProxmoxPlatform, row: VMRow, ctx: object) -> None:
         counts["delete"] += 1
@@ -589,19 +479,6 @@ def test_user_abort_inside_an_op_span_aborts_the_delete(
         vm_manager.delete_vm(db, config, "dvm", yes=True, interaction=TtyInteractionPolicy.REFUSE)
     assert counts["delete"] == 1
     assert db.get_vm("dvm") is not None
-
-    # Same contract at the hold+logout span.
-    counts2 = _fake_backend(monkeypatch)
-
-    def _abort_logout(*a: object, **k: object) -> None:
-        raise UserAbort("cancelled during logout")
-
-    monkeypatch.setattr(vm_manager, "_tailscale_logout", _abort_logout)
-
-    with pytest.raises(UserAbort):
-        vm_manager.delete_vm(db, config, "dvm", yes=True, interaction=TtyInteractionPolicy.REFUSE)
-    assert db.get_vm("dvm") is not None
-    assert counts2["delete"] == 0  # aborted before the backend delete
 
 
 def test_azure_rbac_delete_failure_keeps_the_row_end_to_end(
@@ -638,8 +515,7 @@ def test_azure_rbac_delete_failure_keeps_the_row_end_to_end(
             )
         ],
     )
-    # No tailscale host: the best-effort logout span never opens, so
-    # nothing here needs the transport stubs.
+    # Provider deletion needs no guest execution target.
     db.insert_vm("vm1", site="azure", hostname="vm1")
     db.update_vm_platform_metadata("vm1", {"resource_id": _RESOURCE_ID})
     fakes = _install_fakes(monkeypatch)  # the probe serves the VM back: it survived
@@ -652,6 +528,264 @@ def test_azure_rbac_delete_failure_keeps_the_row_end_to_end(
     assert exc.value.hint is not None
     assert "Contributor" in exc.value.hint
     assert db.get_vm("vm1") is not None
+
+
+# -- A row a killed create left, with no platform metadata ---------------------
+# The platform refuses it like any delete it cannot complete, and --force removes the row.
+
+
+def _proxmox_status_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fake only the status read: the REAL ``ProxmoxPlatform.delete`` refuses a row with no VMID before any API call."""
+    monkeypatch.setattr(ProxmoxPlatform, "status", lambda self, row, ctx: VMStatus.STOPPED)
+
+
+def test_a_row_with_no_platform_metadata_is_refused_without_force(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """A create killed before its platform returned leaves a pending row with no metadata; delete names --force."""
+    _seed(db)
+    seed_vm_trust("dvm")
+    _proxmox_status_only(monkeypatch)
+
+    with pytest.raises(StateError) as caught:
+        vm_manager.delete_vm(db, make_config(), "dvm", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert "--force" in (caught.value.hint or "")
+    assert db.get_vm("dvm") is not None
+    assert trust.has_record("dvm")
+
+
+def test_force_removes_a_row_with_no_platform_metadata_and_warns_its_backend_may_remain(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    _seed(db)
+    seed_vm_trust("dvm")
+    _proxmox_status_only(monkeypatch)
+
+    vm_manager.delete_vm(db, make_config(), "dvm", force=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert db.get_vm("dvm") is None
+    assert not trust.has_record("dvm")
+    warned = "\n".join(captured_output.warnings)
+    assert "'dvm'" in warned
+    assert "vm-site 'proxmox'" in warned
+
+
+def test_force_removes_an_azure_row_with_no_resource_id_without_claiming_its_resources(
+    db: Database,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """Azure used to drop such a row as deleted; now it refuses, and --force removes the row touching nothing."""
+    config = write_operator_config(
+        tmp_path,
+        '[plugins]\nsystem = ["azure"]\n',
+        manifests=[
+            ManifestDoc(
+                "vm-site",
+                "azure",
+                {
+                    "platform": {
+                        "name": "azure-vm",
+                        "subscription_id": "sub-A",
+                        "resource_group": "rg1",
+                        "region": "eastus",
+                        "auth": {"mode": "ambient"},
+                    }
+                },
+            )
+        ],
+    )
+    db.insert_vm("vm1", site="azure", hostname="vm1")
+    fakes = _install_fakes(monkeypatch)
+
+    with pytest.raises(StateError):
+        vm_manager.delete_vm(db, config, "vm1", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+    assert db.get_vm("vm1") is not None
+
+    vm_manager.delete_vm(db, config, "vm1", force=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert db.get_vm("vm1") is None
+    assert fakes.events == []
+    assert captured_output.warnings
+
+
+def test_force_still_requires_confirmation(
+    db: Database, make_config, resolve_counter, monkeypatch, captured_output: CapturedOutput
+):
+    _seed(db)
+    db.insert_agent("only-agent", "dvm", "agt-only-agent")
+    counts = _fake_backend(monkeypatch)
+    captured_output.confirm_response = False
+
+    with pytest.raises(UserAbort):
+        vm_manager.delete_vm(db, make_config(), "dvm", force=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert db.get_vm("dvm") is not None
+    assert db.get_agent("only-agent") is not None
+    assert counts["delete"] == 0
+    assert resolve_counter == []
+
+
+def test_agent_without_workspace_still_requires_cascade_opt_in(db: Database, make_config, monkeypatch):
+    _seed(db)
+    db.insert_agent("only-agent", "dvm", "agt-only-agent")
+    counts = _fake_backend(monkeypatch)
+
+    with pytest.raises(StateError):
+        vm_manager.delete_vm(db, make_config(), "dvm", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert db.get_vm("dvm") is not None
+    assert db.get_agent("only-agent") is not None
+    assert counts["delete"] == 0
+
+
+def test_a_delete_refused_after_the_logout_keeps_the_row_and_says_how_to_finish(db: Database, make_config, monkeypatch):
+    _seed(db)
+    counts = _fake_backend(monkeypatch)
+    failure = _failing_backend_delete(monkeypatch, counts)
+    calls = []
+    monkeypatch.setattr(
+        ProxmoxPlatform, "vm_active", lambda self, row, *, config=None: calls.append("hold") or contextlib.nullcontext()
+    )
+    monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *args, **kwargs: calls.append("logout"))
+    hints = _finish_hints(monkeypatch)
+
+    with pytest.raises(AuthorizationError) as caught:
+        vm_manager.delete_vm(db, make_config(), "dvm", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert caught.value is failure
+    assert calls == ["hold", "logout"]
+    assert hints == [True]
+    assert db.get_vm("dvm") is not None
+
+
+def test_a_hold_that_fails_on_release_keeps_the_logouts_own_result(
+    db: Database, make_config, monkeypatch, captured_output: CapturedOutput
+):
+    """The node was logged out, so the delete's warning must not say otherwise, nor drop the rekey aside."""
+    _seed(db)
+    counts = _fake_backend(monkeypatch)
+    _failing_backend_delete(monkeypatch, counts)
+
+    @contextlib.contextmanager
+    def release_fails(self, row, *, config=None):
+        yield
+        raise RuntimeError("the distro would not stop")
+
+    monkeypatch.setattr(ProxmoxPlatform, "vm_active", release_fails)
+    monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *args, **kwargs: None)
+    hints = _finish_hints(monkeypatch)
+    warned = _not_logged_out_warnings(monkeypatch)
+
+    with pytest.raises(AuthorizationError):
+        vm_manager.delete_vm(db, make_config(), "dvm", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert hints == [True]
+    assert warned == []
+
+
+@pytest.mark.parametrize("failure", [ConfigError("site could not bind"), RuntimeError("unexpected boundary failure")])
+def test_binding_failure_refuses_without_force_naming_the_backend(
+    db: Database, make_config, monkeypatch, failure, captured_output: CapturedOutput
+):
+    """Material 7 of #866's round two: an unset token is no proof the VM is gone, so the row stays."""
+    _seed(db)
+    db.update_vm_platform_metadata("dvm", {"vmid": "100", "node": "pve1"})
+    seed_vm_trust("dvm")
+    counts = _fake_backend(monkeypatch)
+
+    def refuse(*args, **kwargs):
+        raise failure
+
+    monkeypatch.setattr("agentworks.vms.manager.power._live_vm_boundary", refuse)
+    with pytest.raises(StateError) as caught:
+        vm_manager.delete_vm(db, make_config(), "dvm", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert caught.value.__cause__ is failure
+    assert "'100'" in (caught.value.hint or "")
+    assert "--force" in (caught.value.hint or "")
+    assert db.get_vm("dvm") is not None
+    assert trust.has_record("dvm")
+    assert counts["delete"] == 0
+
+
+@pytest.mark.parametrize("failure", [ConfigError("site could not bind"), RuntimeError("unexpected boundary failure")])
+def test_binding_failure_with_force_retires_local_resources_and_says_the_backend_stays(
+    db: Database, make_config, monkeypatch, failure, tmp_path, captured_output: CapturedOutput
+):
+    config = make_config(f'\n[paths]\nvscode_workspaces = "{(tmp_path / "vscode").as_posix()}"\n')
+    _seed(db)
+    db.insert_workspace("kept", "/srv/kept", "dvm", "ws-kept")
+    config.paths.vscode_workspaces.mkdir()
+    artifact = config.paths.vscode_workspaces / "kept.code-workspace"
+    artifact.write_text("fixture generated workspace")
+    counts = _fake_backend(monkeypatch)
+    synced = []
+    monkeypatch.setattr("agentworks.ssh_config.sync_ssh_config", lambda *args, **kwargs: synced.append(args))
+
+    def refuse(*args, **kwargs):
+        raise failure
+
+    monkeypatch.setattr("agentworks.vms.manager.power._live_vm_boundary", refuse)
+    db.update_vm_platform_metadata("dvm", {"vmid": "100", "node": "pve1"})
+    vm_manager.delete_vm(db, config, "dvm", force=True, yes=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert db.get_vm("dvm") is None
+    assert db.get_workspace("kept") is None
+    assert not artifact.exists()
+    assert counts["delete"] == 0
+    assert len(synced) == 1
+    assert any("'100'" in warning for warning in captured_output.warnings)
+
+
+def test_a_delete_refused_after_a_failed_logout_names_no_rekey(db: Database, make_config, monkeypatch):
+    _seed(db)
+    counts = _fake_backend(monkeypatch)
+    _failing_backend_delete(monkeypatch, counts)
+    monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *args, **kwargs: "its logout could not be confirmed")
+    hints = _finish_hints(monkeypatch)
+
+    with pytest.raises(AuthorizationError):
+        vm_manager.delete_vm(db, make_config(), "dvm", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert hints == [False]
+
+
+def test_a_forced_delete_past_a_binding_failure_does_not_log_out(
+    db: Database, make_config, monkeypatch, captured_output: CapturedOutput
+):
+    _seed(db)
+    monkeypatch.setattr(
+        "agentworks.vms.manager.power._live_vm_boundary",
+        lambda *args, **kwargs: (_ for _ in ()).throw(ConfigError("site could not bind")),
+    )
+    monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *args, **kwargs: pytest.fail("logged out"))
+    warned = _not_logged_out_warnings(monkeypatch)
+
+    vm_manager.delete_vm(db, make_config(), "dvm", force=True, yes=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert db.get_vm("dvm") is None
+    assert warned == ["dvm"]
+
+
+def test_a_logged_out_vm_is_not_named_for_removal_from_the_tailnet(
+    db: Database, make_config, monkeypatch, captured_output: CapturedOutput
+):
+    _seed(db)
+    _fake_backend(monkeypatch)
+    monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *args, **kwargs: None)
+
+    vm_manager.delete_vm(db, make_config(), "dvm", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert captured_output.warnings == []
 
 
 # -- The host-key record goes whenever the row goes ---------------------------
@@ -667,7 +801,6 @@ def test_delete_removes_the_host_key_record_after_the_backend_delete(
     seed_vm_trust("dvm")
     seed_vm_trust("other")
     counts = _fake_backend(monkeypatch)
-    monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
 
     vm_manager.delete_vm(db, make_config(), "dvm", yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
@@ -685,7 +818,7 @@ def test_delete_removes_the_host_key_record_when_backend_cleanup_was_skipped(
     _seed(db, site="gone")
     seed_vm_trust("dvm")
 
-    vm_manager.delete_vm(db, make_config(), "dvm", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+    vm_manager.delete_vm(db, make_config(), "dvm", force=True, yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
     assert db.get_vm("dvm") is None
     assert not trust.has_record("dvm")
@@ -700,7 +833,6 @@ def test_backend_delete_failure_keeps_the_host_key_record(
     _seed(db)
     seed_vm_trust("dvm")
     counts = _fake_backend(monkeypatch)
-    monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
     _failing_backend_delete(monkeypatch, counts)
 
     with pytest.raises(AuthorizationError):
@@ -719,7 +851,6 @@ def test_delete_removes_the_host_key_record_even_when_the_ssh_config_rebuild_fai
     _seed(db)
     seed_vm_trust("dvm")
     _fake_backend(monkeypatch)
-    monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
 
     def _boom(*_a: object, **_k: object) -> None:
         raise RuntimeError("read-only home")

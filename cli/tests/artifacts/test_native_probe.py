@@ -81,13 +81,13 @@ def probe(
         **(environment or {}),
     }
     # Guest machine paths are isolated alongside HOME and the workspace.
-    program = _PROBE.replace("/etc/claude-code", str(tmp_path / "etc/claude-code")).replace(
-        "/etc/codex", str(tmp_path / "etc/codex")
-    )
+    program = _PROBE
+    for guest_path in ("/etc/claude-code/.claude", "/etc/claude-code/managed-settings.json", "/etc/codex"):
+        program = program.replace(repr(guest_path), repr(str(tmp_path / guest_path.removeprefix("/"))))
     result = subprocess.run(
         [sys.executable, "-c", program], input=json.dumps(request), env=env, capture_output=True, text=True, check=True
     )
-    observed = json.loads(result.stdout.removeprefix("AGW_ARTIFACT_PROBE="))
+    observed = json.loads(result.stdout.strip().removeprefix("AGW_ARTIFACT_PROBE="))
     assert isinstance(observed, dict)
     observed["problems"].extend(
         problem.code for problem in _inventory_problems(observed["inventory"], identities, entries or {})
@@ -255,13 +255,12 @@ def test_ambiguous_native_inventory_refuses_instead_of_skipping_candidates(tmp_p
 
 
 @pytest.mark.parametrize("kind", [ArtifactType.SKILL, ArtifactType.AGENT])
-def test_launch_checks_unmanaged_workspace_collision_with_only_handled_ancestor(tmp_path, monkeypatch, kind):
+def test_existing_ancestor_collision_is_diagnosed_without_blocking_launch(tmp_path, monkeypatch, kind):
 
     from agentworks.artifacts.application import SessionArtifactContext
     from agentworks.artifacts.model import ArtifactInputs
     from agentworks.capabilities.base import RunContext
     from agentworks.capabilities.harness_integration import HarnessLaunchIntent
-    from agentworks.errors import StateError
     from agentworks.plugins.claude.artifacts import outer_artifacts
     from agentworks.plugins.claude.harness_integration import ClaudeCodeIntegration
     from tests.artifacts._fixtures import received
@@ -313,11 +312,9 @@ def test_launch_checks_unmanaged_workspace_collision_with_only_handled_ancestor(
         state={},
         artifact_context=prepared,
     )
-    monkeypatch.setattr(
-        integration, "_resume_or_launch", lambda *args, **kwargs: pytest.fail("launch reached after collision")
-    )
-    with pytest.raises(StateError):
-        integration.start(RunContext(admin_access=access), intent=HarnessLaunchIntent.CREATE)
+    monkeypatch.setattr(integration, "_resume_or_launch", lambda *args, **kwargs: "fixture-launch")
+    result = integration.start(RunContext(admin_access=access), intent=HarnessLaunchIntent.CREATE)
+    assert result.command == "fixture-launch"
     assert len(observed_requests) == 1
     assert not prepared.inputs
     assert set(observed_requests[0]["entries"]) == {file.path for file in application.files if file.native_identity}
@@ -370,6 +367,22 @@ def test_inventory_collision_retains_native_identity_and_competing_path():
     )
     assert len(problems) == 1
     assert (problems[0].identity, problems[0].path) == ("agent:review", path)
+
+
+def test_inventory_returns_all_conflicting_native_names():
+    paths = ("/workspace/.claude/agents/first.md", "/workspace/.claude/agents/second.md")
+    names = ("review", "helper")
+    problems = _inventory_problems(
+        [
+            {"kind": "agent", "path": path, "frontmatter": f"name: {name}"}
+            for path, name in zip(paths, names, strict=True)
+        ],
+        tuple(f"agent:{name}" for name in names),
+        {},
+    )
+    assert [(problem.identity, problem.path) for problem in problems] == list(
+        zip((f"agent:{name}" for name in names), paths, strict=True)
+    )
 
 
 def test_codex_inventory_bounds_combined_toml_bytes(tmp_path):
@@ -963,7 +976,7 @@ def test_native_probe_errors_redact_runtime_environment(returncode, padding):
     access = RecordingVMAccess([], Admin())
     access.run_outcomes = [Result(Completed(returncode), b"invalid", stderr.encode())]
     with pytest.raises(ExternalError) as caught:
-        probe_native(access, tool="claude", environment=environment)
+        probe_native(access, tool="claude", environment=environment, redactions=environment.values())
     exposed = str(caught.value) + (caught.value.hint or "") + "".join(traceback.format_exception(caught.value))
     assert short not in exposed
     assert long.strip() not in exposed

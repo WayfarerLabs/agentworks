@@ -91,10 +91,12 @@ submodule it asserts that none of the legacy modules is in `sys.modules`.
 ## Client resolution
 
 `client.resolve_ssh() -> SSHClient` is cached for the process and returns the absolute path and the
-parsed `(major, minor)`. Every spawn takes the `SSHClient`, so no caller can launch a bare name.
+parsed `(major, minor)`. Every spawn in the package takes the `SSHClient`, so none of it launches a
+bare name; the legacy transports find `ssh` and `scp` along `PATH` through
+`programs.resolve_program` (below) until slice 8 deletes them.
 
-- **POSIX.** The first `ssh` along `PATH`, skipping empty and relative elements. Only that candidate
-  is judged.
+- **POSIX.** The first `ssh` along `PATH`, skipping empty and relative elements, which is
+  `programs.find_program`. Only that candidate is judged.
 - **Windows.** `PATH` is never searched. The candidates, in order, are
   `%SystemRoot%\Sysnative\OpenSSH\ssh.exe`, `%SystemRoot%\System32\OpenSSH\ssh.exe`,
   `%ProgramW6432%\OpenSSH\ssh.exe` and `%ProgramFiles%\OpenSSH\ssh.exe`. Each is skipped when its
@@ -112,9 +114,24 @@ parsed `(major, minor)`. Every spawn takes the `SSHClient`, so no caller can lau
   read or guard, so an unsupported client refuses before anything else. The existing boundaries
   (`require_vm_ssh_boundary`, `gated_vm_boundary`) stay as they are.
 - **Doctor.** `_check_required_tools` (`doctor.py:526`) keeps its PATH presence rows for `ssh`,
-  `scp` and `tailscale`, because the legacy paths still use bare `ssh` and `scp`, and adds a row
-  with the resolver's verdict: path and version, or the refusal. Slice 7 or 8 removes the `ssh` and
-  `scp` rows with the last legacy user.
+  `scp` and `tailscale`, because the legacy paths still find `ssh` and `scp` along `PATH`, and adds
+  a row with the resolver's verdict: path and version, or the refusal. Slice 7 or 8 removes the
+  `ssh` and `scp` rows with the last legacy user.
+
+Every other workstation program `agw` starts by name goes through `programs.resolve_program(name)`,
+the same walk over absolute `PATH` elements (`name.exe` on Windows), which raises
+`FileNotFoundError` as a missing program would: `tailscale` (the workstation preflight, the
+reachability ping, doctor), PowerShell (WSL2's helper and the completion profile query), `op` (the
+1Password backend), `git` (package sources), `taskkill`, VS Code's `code`, the `EDITOR` of
+`config edit` and `resource edit`, and the legacy paths' `ssh` and `scp`. `ssh_process.spawn`
+resolves a bare first argument the same way, which covers local Lima's `limactl`. A name with a
+directory part (`EDITOR=/usr/bin/vim`) is already a path and is returned unchanged. Presence checks
+(the 1Password readiness check, Lima's `limactl` and `ssh` checks, doctor's shell check) use
+`programs.is_installed`, the same lookup, so a program counts as installed exactly when it would
+start. Windows looks a bare name up in the current directory before `PATH`, so a bare name there
+would run whatever the operator's working directory holds. Only `.exe` is appended on Windows, so VS
+Code's `code.cmd` is deliberately not found (a `PATHEXT` lookup would send its arguments through
+`cmd.exe`), and `workspace create --open-vscode` warns there instead of opening the editor.
 
 ## Requests and results
 
@@ -286,18 +303,20 @@ conformance suite run it against a local shell.
   guest's own `Completed(N)`; otherwise it is `Unknown(CONSUMER_LEFT)`, which `stream` alone reports
   as 141, the status of a writer killed by `SIGPIPE`. `stream_to_operator` flushes both streams once
   as it returns, and that flush is how a departure it did not see earlier is detected: a stream
-  whose consumer has gone is pointed at the null device, so interpreter shutdown cannot fail on the
-  bytes left in its buffer. That flush tries both streams and never replaces a failure already in
-  flight.
+  whose consumer has gone is pointed at the null device (`output.tolerating_dead_sink`), so
+  interpreter shutdown cannot fail on the bytes left in its buffer. That flush tries both streams
+  and never replaces a failure already in flight.
 - **Binary stdio.** Callers pass `sys.stdout.buffer` and `sys.stderr.buffer` (the text layer's
   `newline="\n"` at `cli/_entry.py:38` does not apply), after flushing the text layer (I2).
   `stream_to_operator(access, request)` in `access.py` is that wiring, flush, raw stdin and binary
   buffers, so the commands do not repeat it.
-- **A sink that would block.** Only `BrokenPipeError` and `ConnectionResetError` from a sink mean
-  the consumer ended early, plus `OSError(EINVAL)` on Windows, where CPython reports a pipe whose
-  reader closed that way. A sink that raises `BlockingIOError`, because the operator's own stdout is
-  a non-blocking pipe, keeps its unsent remainder and is retried, so output is never dropped while
-  the command reports success. Any other `OSError` from a sink (`ENOSPC`, `EIO`) propagates.
+- **A sink that would block.** Only `BrokenPipeError`, `ConnectionResetError` and `EIO` (a terminal
+  that hung up) from a sink mean the consumer has gone, plus `OSError(EINVAL)` on Windows, where
+  CPython reports a pipe whose reader closed that way; `output.consumer_left` is the one copy of
+  that rule, shared with the output handlers. A sink that raises `BlockingIOError`, because the
+  operator's own stdout is a non-blocking pipe, keeps its unsent remainder and is retried, so output
+  is never dropped while the command reports success. Any other `OSError` from a sink (`ENOSPC`)
+  propagates.
 
 ## The wire
 
@@ -532,29 +551,32 @@ above and waits for the client, polling `Popen.wait(timeout=0.2)` so Ctrl-C is d
   typing. The client always ends on the way out: terminate, one second, kill, and the log is
   removed.
 - **Signals.** The library installs none. `port_forward_vm` holds the forward inside the shared
-  `agentworks.interrupts.termination_as_interrupt`, which raises `KeyboardInterrupt` on `SIGTERM`,
-  and on `SIGHUP` where it exists, for the duration of the block, and restores the previous handlers
-  afterwards. A signal the process already ignores stays ignored (so a forward started under `nohup`
-  outlives its terminal); once one signal has arrived, further ones are ignored until the block
-  exits, so a second cannot cut the cleanup short; and a block inside another, or off the main
-  thread, changes nothing (`interrupts.py:32-59`). `port_forward_vm` owns the 0 on an operator stop
-  and returns the client's status for any other end. The clouds' route context opens the same block
-  around every route (`public_ssh.py:272`), so a cloud's firewall allow for a root script or a
+  `agentworks.interrupts.termination_as_interrupt`, which raises `KeyboardInterrupt` on Ctrl-C and
+  `SIGTERM`, and on `SIGHUP` and `SIGBREAK` where they exist, for the duration of the block, and
+  restores the previous handlers afterwards. A signal the process already ignores stays ignored (so
+  a forward started under `nohup` outlives its terminal); once one signal has arrived, the
+  terminations are ignored until the block exits, so a closed terminal or a second termination
+  cannot cut the cleanup short, while a second Ctrl-C still interrupts; and a block inside another,
+  or off the main thread, changes nothing (`agentworks/interrupts.py`). The unwind's own writes to a
+  terminal that hung up, or to a pipe whose reader went with it, are dropped by
+  `output.tolerating_dead_sink` rather than failing. `port_forward_vm` owns the 0 on an operator
+  stop and returns the client's status for any other end. The clouds' route context opens the same
+  block around every route (`public_ssh.py:272`), so a cloud's firewall allow for a root script or a
   native shell is removed when the command is ended by either signal. `create_vm` opens one too,
   first in the stack that spans provisioning and initialization, so either signal runs create's
   interrupt arms: a cloud's create rolls back its bootstrap allow and its partial VM.
 
 ## Errors
 
-| Error                 | Kind                 | Raised for                                                                                                                                                                                   | Hint                                                                        |
-| --------------------- | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| `ClientUnsupported`   | `ConfigError`        | No acceptable OpenSSH, or the resolved client fails to start                                                                                                                                 | The install guidance in the message                                         |
-| `VMNotReady`          | `StateError`         | `NotDelivered(PYTHON_MISSING)` (an unelevated 127) and `NotDelivered(STDLIB_MISSING)`                                                                                                        | `agw vm recover <vm>`, whose repair installs python3                        |
-| `TrustMismatch`       | `StateError`         | `Unknown(HOST_KEY)`, and the forward's token                                                                                                                                                 | Verify the new key, remove the store file, `import-host-keys --known-hosts` |
-| `RequestRefused`      | `StateError`         | `NotDelivered(REFUSED)` under `run` and `attach`; names the code                                                                                                                             | Fix the working directory or the command                                    |
-| `ExecutionIncomplete` | `ConnectivityError`  | Any other `NotDelivered` or `Unknown`; carries the `Result`, names which, and shows the client log tail. An `AUTH_FAILED` says the VM did not accept the configured key and that nothing ran | A `NotDelivered` command did not start; an `Unknown` one may have run       |
-| `PermissionDenied`    | `AuthorizationError` | An elevated request on an agent-bound access, before dispatch; names the VM and account, never the request                                                                                   | none                                                                        |
-| `CommandFailed`       | `ExternalError`      | `check=True` with a non-zero status; message has the status, never stream text                                                                                                               | none                                                                        |
+| Error                 | Kind                 | Raised for                                                                                                                                                                                   | Hint                                                                                                                                  |
+| --------------------- | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `ClientUnsupported`   | `ConfigError`        | No acceptable OpenSSH, or the resolved client fails to start                                                                                                                                 | The install guidance in the message                                                                                                   |
+| `VMNotReady`          | `StateError`         | `NotDelivered(PYTHON_MISSING)` (an unelevated 127) and `NotDelivered(STDLIB_MISSING)`                                                                                                        | `agw vm recover <vm>`, whose repair installs python3                                                                                  |
+| `TrustMismatch`       | `StateError`         | `Unknown(HOST_KEY)`, and the forward's token                                                                                                                                                 | Verify the new key, remove the store file, `import-host-keys --known-hosts`                                                           |
+| `RequestRefused`      | `StateError`         | `NotDelivered(REFUSED)` under `run` and `attach`; names the code                                                                                                                             | Fix the working directory or the command                                                                                              |
+| `ExecutionIncomplete` | `ConnectivityError`  | Any other `NotDelivered` or `Unknown`; carries the `Result`, names which, and shows the client log tail. An `AUTH_FAILED` says the VM did not accept the configured key and that nothing ran | A `NotDelivered` command did not start; an `Unknown` one may have run; `CONNECTION` and `AUTH_FAILED` also name `agw vm recover NAME` |
+| `PermissionDenied`    | `AuthorizationError` | An elevated request on an agent-bound access, before dispatch; names the VM and account, never the request                                                                                   | none                                                                                                                                  |
+| `CommandFailed`       | `ExternalError`      | `check=True` with a non-zero status; message has the status, never stream text                                                                                                               | none                                                                                                                                  |
 
 Errors may show the client log's tail. `TrustMismatch`'s hint names the manual path, since import
 never rewrites an existing record (`trust-lld.md`) and recovery re-establishes only a missing one

@@ -6,8 +6,8 @@ interrupt), status mapping, and strict idempotent delete.
 
 from __future__ import annotations
 
-import errno
 import gzip
+import signal
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
@@ -15,7 +15,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from agentworks import output
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import ProvisionRequest, RetainedProvisioningError
 from agentworks.db import VMStatus
@@ -25,6 +24,7 @@ from agentworks.errors import (
     AuthorizationError,
     ConfigError,
     ConnectivityError,
+    ProvisioningError,
     StateError,
     TokenRejectedError,
 )
@@ -132,11 +132,6 @@ def _ec2(platform: EC2Platform) -> Any:
     """The cached fake EC2 client for the platform's region, whose ``ingress``
     dict is the live per-SG ingress state the exposure tests read."""
     return platform._client("ec2", "us-east-1", RunContext())
-
-
-def _dead_terminal(*_args: object, **_kwargs: object) -> None:
-    """``output`` after a hangup: the terminal is gone and a write to it fails."""
-    raise OSError(errno.EIO, "Input/output error")
 
 
 class TestCreate:
@@ -469,9 +464,9 @@ class TestCreateRollback:
         [
             ("true", "did not answer over SSH", None),
             (
-                "cloud-init status --wait",
+                "cloud-init status --wait --long",
                 "cloud-init did not complete",
-                ["true", "cloud-init status --wait"],
+                ["true", "cloud-init status --wait --long"],
             ),
         ],
         ids=("ssh-readiness-exhaustion", "cloud-init-wait-failure"),
@@ -524,7 +519,7 @@ class TestCreateRollback:
         ("failure_command", "expected_commands"),
         [
             ("true", ["true"]),
-            ("cloud-init status --wait", ["true", "cloud-init status --wait"]),
+            ("cloud-init status --wait --long", ["true", "cloud-init status --wait --long"]),
         ],
         ids=("ssh-readiness", "cloud-init-wait"),
     )
@@ -570,7 +565,7 @@ class TestCreateRollback:
         ("failure_command", "expected_commands"),
         [
             ("true", ["true"]),
-            ("cloud-init status --wait", ["true", "cloud-init status --wait"]),
+            ("cloud-init status --wait --long", ["true", "cloud-init status --wait --long"]),
         ],
         ids=("ssh-readiness", "cloud-init-wait"),
     )
@@ -610,23 +605,15 @@ class TestCreateRollback:
 
 
 class TestCloseProvisioningHooks:
-    def test_post_tailscale_ready_revokes_the_bootstrap_tuples(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Once Tailscale is up the bootstrap hole closes: exactly the recorded
+    def test_the_close_revokes_the_bootstrap_tuples(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """When Phase A ends the bootstrap hole closes: exactly the recorded
         bootstrap prefixes are revoked, restoring the deny baseline."""
         install_fakes(monkeypatch)
         platform = _platform()
         platform.create(_request(), RunContext(config=_config()))
         assert _ec2(platform).ingress["sg-123"] == {_DETECTED_PREFIX: "sgr-1"}
 
-        platform.post_tailscale_ready(_vm(), RunContext())
-        assert _ec2(platform).ingress["sg-123"] == {}
-
-    def test_secure_failed_vm_revokes_the_bootstrap_tuples(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        install_fakes(monkeypatch)
-        platform = _platform()
-        platform.create(_request(), RunContext(config=_config()))
-
-        platform.secure_failed_vm(_vm(), RunContext())
+        platform.close_provisioning_access(_vm(), RunContext())
         assert _ec2(platform).ingress["sg-123"] == {}
 
     def test_close_leaves_a_distinct_concurrent_route_intact(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -641,15 +628,59 @@ class TestCloseProvisioningHooks:
         poke_ssh_allow(ec2, "sg-123", ["198.51.100.7/32"])
         assert set(ec2.ingress["sg-123"]) == {_DETECTED_PREFIX, "198.51.100.7/32"}
 
-        platform.post_tailscale_ready(_vm(), RunContext())
+        platform.close_provisioning_access(_vm(), RunContext())
         assert set(ec2.ingress["sg-123"]) == {"198.51.100.7/32"}
+
+    def test_a_close_with_nothing_left_to_revoke_reports_nothing_closed(
+        self, monkeypatch: pytest.MonkeyPatch, captured_output: Any
+    ) -> None:
+        """Every root-channel route closes the provisioning access again, silently once the close has worked."""
+        install_fakes(monkeypatch)
+        platform = _platform()
+        platform.create(_request(), RunContext(config=_config()))
+        platform.close_provisioning_access(_vm(), RunContext())
+        captured_output.info.clear()
+
+        platform.close_provisioning_access(_vm(), RunContext())
+
+        assert captured_output.info == []
+        assert captured_output.warnings == []
+
+    def test_a_revoke_that_lists_the_rule_as_unknown_reports_nothing_closed(
+        self, monkeypatch: pytest.MonkeyPatch, captured_output: Any
+    ) -> None:
+        """EC2 can answer a revoke of a missing rule with success and ``UnknownIpPermissions``: nothing closed."""
+        install_fakes(monkeypatch, Controls(missing_revoke_succeeds=True))
+        platform = _platform()
+        platform.create(_request(), RunContext(config=_config()))
+        platform.close_provisioning_access(_vm(), RunContext())
+        assert _ec2(platform).ingress["sg-123"] == {}
+        captured_output.info.clear()
+
+        platform.close_provisioning_access(_vm(), RunContext())
+
+        assert captured_output.info == []
+        assert captured_output.warnings == []
+
+    def test_a_close_that_cannot_reach_ec2_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The caller warns with what it raises, so the tuples left open are named there, not lost."""
+        install_fakes(monkeypatch)
+        platform = _platform()
+
+        def no_client(*_args: object, **_kwargs: object) -> None:
+            raise ConfigError("the site's access key secret is unset")
+
+        monkeypatch.setattr(platform, "_client", no_client)
+
+        with pytest.raises(ProvisioningError):
+            platform.close_provisioning_access(_vm(), RunContext())
 
     def test_hook_tolerates_missing_security_group(self, monkeypatch: pytest.MonkeyPatch, captured_output: Any) -> None:
         """A row with no recorded security group is warned and skipped, not an
-        error (the hooks are best-effort)."""
+        error (the hook is best effort)."""
         install_fakes(monkeypatch)
         vm = SimpleNamespace(name="dev", admin_username="agw", platform_metadata={"instance_id": "i-123"})
-        _platform().post_tailscale_ready(vm, RunContext())  # no raise
+        _platform().close_provisioning_access(vm, RunContext())  # no raise
         assert any("no EC2 security_group_id" in w for w in captured_output.warnings)
 
 
@@ -740,18 +771,26 @@ class TestTransientRoute:
             raise RuntimeError("boom")
         assert _ec2(platform).ingress["sg-123"] == {}
 
-    def test_a_dead_terminal_cannot_keep_the_allow_open(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """A route closed by a hangup revokes every prefix before printing anything."""
+    def test_an_interrupt_during_the_routes_revoke_waits_for_it(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Ctrl-C the moment the script ends: the revoke still reaches EC2, then the interrupt raises."""
         install_fakes(monkeypatch)
         platform = _platform()
+        ec2 = _ec2(platform)
+        revoke = ec2.revoke_security_group_ingress
 
-        route = platform._transient_route(_vm(), RunContext(config=_config(["198.51.100.0/24"])))
-        with pytest.raises(OSError), route:
-            monkeypatch.setattr(output, "info", _dead_terminal)
-            monkeypatch.setattr(output, "warn", _dead_terminal)
-            raise KeyboardInterrupt
+        armed = False
 
-        assert _ec2(platform).ingress["sg-123"] == {}
+        def interrupted_revoke(**kwargs: Any) -> Any:
+            if armed:
+                signal.raise_signal(signal.SIGINT)
+            return revoke(**kwargs)
+
+        monkeypatch.setattr(ec2, "revoke_security_group_ingress", interrupted_revoke)
+
+        with pytest.raises(KeyboardInterrupt), platform._transient_route(_vm(), RunContext(config=_config())):
+            armed = True
+
+        assert ec2.ingress["sg-123"] == {}
 
     def test_partial_poke_failure_is_still_swept(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A poke that fails on the second prefix still has the first prefix

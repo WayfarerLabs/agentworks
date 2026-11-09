@@ -389,7 +389,7 @@ def _resolve_session_env(
         session_kind="admin" if mode == SessionMode.ADMIN else "agent",
     )
 
-    return compose_env(
+    resolved = compose_env(
         values=values,
         ctx=ctx,
         vm=scopes.vm,
@@ -398,3 +398,11 @@ def _resolve_session_env(
         agent=scopes.agent,
         session=scopes.session,
     )
+    if {"_AGW_SESSION_UUID", "_AGW_RUN_ID"}.intersection(resolved):
+        raise ValidationError(
+            "session environment conflicts with private tmux launch identity",
+            entity_kind="session",
+            entity_name=session_name,
+            hint="Remove _AGW_SESSION_UUID and _AGW_RUN_ID from the session environment.",
+        )
+    return resolved

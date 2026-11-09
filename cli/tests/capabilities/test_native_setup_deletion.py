@@ -135,11 +135,13 @@ def test_parent_deletion_does_not_require_native_applied_state_cleanup(
 
 @pytest.mark.parametrize("applied_state", ["claims", "unknown", "malformed"])
 @pytest.mark.parametrize("outcome", ["success", "binding-failed", "delete-failed"])
-def test_vm_deletion_preserves_existing_backend_failure_policy(db, deletion, monkeypatch, applied_state, outcome):
+def test_forced_vm_deletion_retires_owners_whatever_the_backend_outcome(
+    db, deletion, monkeypatch, applied_state, outcome
+):
+    """``vm delete --force`` removes the VM's owners and their applied state even when the backend stays."""
     owners = [("vm", "box"), ("agent", "agent"), ("workspace", "project")]
     for kind, name in owners:
         _store_applied_state(db, kind, name, applied_state)
-    previous = {kind: db.instance_state.get_applied_slices(kind, name) for kind, name in owners}
     removed = []
 
     def remove(vm, ctx):
@@ -155,18 +157,11 @@ def test_vm_deletion_preserves_existing_backend_failure_policy(db, deletion, mon
         return SimpleNamespace(site=SimpleNamespace(platform=SimpleNamespace(delete=remove))), Mock()
 
     monkeypatch.setattr("agentworks.vms.manager.power._live_vm_boundary", boundary)
-    if outcome == "delete-failed":
-        with pytest.raises(SSHError):
-            delete_vm(db, deletion.config, "box", force=True, interaction=TtyInteractionPolicy.REFUSE)
-        assert db.get_vm("box") and db.get_agent("agent") and db.get_workspace("project")
-        for kind, name in owners:
-            assert db.instance_state.get_applied_slices(kind, name) == previous[kind]
-    else:
-        delete_vm(db, deletion.config, "box", force=True, interaction=TtyInteractionPolicy.REFUSE)
-        assert removed == (["box"] if outcome == "success" else [])
-        assert db.get_vm("box") is None and db.get_agent("agent") is None and db.get_workspace("project") is None
-        for kind, name in owners:
-            assert db.instance_state.get_applied_slices(kind, name) == ()
+    delete_vm(db, deletion.config, "box", force=True, yes=True, interaction=TtyInteractionPolicy.REFUSE)
+    assert removed == (["box"] if outcome == "success" else [])
+    assert db.get_vm("box") is None and db.get_agent("agent") is None and db.get_workspace("project") is None
+    for kind, name in owners:
+        assert db.instance_state.get_applied_slices(kind, name) == ()
     assert deletion.removed == []
 
 
@@ -178,7 +173,7 @@ def test_deletion_refuses_vm_family_contention_before_native_mutation(db, deleti
         elif kind == "workspace":
             delete_workspace(db, deletion.config, name, yes=True, interaction=TtyInteractionPolicy.REFUSE)
         else:
-            delete_vm(db, deletion.config, name, force=True, interaction=TtyInteractionPolicy.REFUSE)
+            delete_vm(db, deletion.config, name, force=True, yes=True, interaction=TtyInteractionPolicy.REFUSE)
     assert deletion.removed == [] and deletion.logs == []
 
 

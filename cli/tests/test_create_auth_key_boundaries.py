@@ -14,6 +14,7 @@ from __future__ import annotations
 import base64
 import gzip
 import shlex
+import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -121,11 +122,11 @@ def wsl2_create(monkeypatch: pytest.MonkeyPatch, guest: FakeGuest) -> Create:
     install_at_run_process(monkeypatch, guest)
     commands: list[list[str]] = []
 
-    def wsl(args: list[str], *, check: bool = True, timeout: int = 300) -> str:
+    def run_wsl(args: list[str], *, timeout: int = 300) -> subprocess.CompletedProcess[str]:
         commands.append(list(args))
-        return ""
+        return subprocess.CompletedProcess(args, 0, "", "")
 
-    monkeypatch.setattr(wsl2, "_wsl", wsl)
+    monkeypatch.setattr(wsl2, "_run_wsl", run_wsl)
     monkeypatch.setattr(wsl2, "_powershell", lambda script, **kwargs: commands.append([script]) or "")
     monkeypatch.setattr(wsl2, "_download_debian_rootfs", lambda tarball, *, tag: None)
     monkeypatch.setattr(WSL2Platform, "_distro_exists", staticmethod(lambda name: False))

@@ -87,10 +87,14 @@ and only while an operation needs it. Create opens a bootstrap allow and revokes
 reached the VM over Tailscale and checked it, or when the create fails or is interrupted. After
 that, every script Agentworks runs over the VM's public address (`vm recover`, `vm rekey`, and the
 Tailscale logout at `vm delete`) and every `vm shell --platform` session opens its own allow and
-revokes it when that script or session ends. On macOS and Linux, every one of these allows, create's
-bootstrap allow included, is also removed when the command is ended by `SIGTERM` or `SIGHUP`; an
-interrupted create rolls back as it does on Ctrl-C. Each operation revokes only the tuples it
-opened.
+revokes it when that script or session ends, and then revokes the bootstrap allow too if create
+could not (create warns naming its tuples when that happens). Every one of these allows, create's
+bootstrap allow included, is also removed when the command is ended on macOS and Linux by `SIGTERM`
+or `SIGHUP`, or on Windows by Ctrl-Break; an interrupted create rolls back as it does on Ctrl-C.
+Closing the console window on Windows may start that cleanup, but Windows ends the process within
+seconds, so it cannot be relied on to finish: end the command with Ctrl-C or Ctrl-Break instead, and
+delete a rule a closed window left behind from the VM's firewall in the provider's console. Each
+operation revokes only the tuples it opened.
 
 `agw vm delete <name>` refreshes the STS identity and refuses an account mismatch. It reads the
 recorded instance and security group, verifies their `agentworks:vm` ownership and recorded
@@ -112,4 +116,5 @@ remove the retained group. Agentworks can only target provider IDs it received.
 Rows created before account binding carry no account ID. Agentworks deletes one only when the live
 instance's ID, ownership tag, and security-group association prove that the current account owns the
 target. An already-absent legacy target is intentionally ambiguous, so Agentworks retains the row
-instead of risking a wrong-account orphan.
+instead of risking a wrong-account orphan; once you have checked the account yourself,
+`agw vm delete --force <name>` removes the row.

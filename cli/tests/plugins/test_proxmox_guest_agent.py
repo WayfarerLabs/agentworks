@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 
 from agentworks.errors import ConnectivityError, TokenRejectedError
-from agentworks.execution.root_script import RawRun
+from agentworks.execution.root_script import ChannelUnreachable, RawRun
 from agentworks.plugins.proxmox import guest_agent
 from agentworks.plugins.proxmox.api import ProxmoxAPIError
 
@@ -57,8 +57,13 @@ class FakeAPI:
 
 
 @pytest.fixture(autouse=True)
-def _no_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("agentworks.plugins.proxmox.guest_agent.time.sleep", lambda seconds: None)
+def _virtual_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Sleeping advances a clock the channel reads, so waits cost no real time."""
+    now = [0.0]
+    monkeypatch.setattr(
+        "agentworks.plugins.proxmox.guest_agent.time.sleep", lambda seconds: now.append(now.pop() + seconds)
+    )
+    monkeypatch.setattr("agentworks.plugins.proxmox.guest_agent.time.monotonic", lambda: now[-1])
 
 
 def run(api: FakeAPI, deadline: float = 60) -> RawRun:
@@ -90,20 +95,71 @@ def test_the_deadline_returns_empty_streams_without_dispatching_again(monkeypatc
     "api",
     [
         FakeAPI([], dispatch=ProxmoxAPIError(f"POST failed for {SCRIPT.decode()}")),
-        FakeAPI([ProxmoxAPIError(f"status failed for {SCRIPT.decode()}")]),
-        FakeAPI([RuntimeError(f"socket error near {SCRIPT.decode()}")]),
+        FakeAPI([RuntimeError(f"socket error near {SCRIPT.decode()}")] * 100),
     ],
-    ids=["dispatch", "status", "unexpected"],
+    ids=["dispatch", "unexpected"],
 )
 def test_a_failed_call_raises_without_the_script_anywhere(api: FakeAPI) -> None:
     with pytest.raises(ConnectivityError) as caught:
         run(api)
 
     error = caught.value
+    assert not isinstance(error, ChannelUnreachable)  # the agent answered, so a read may be tried again
     assert "tskey-auth-private" not in str(error)
     assert "tskey-auth-private" not in repr(error)
     assert error.__cause__ is None
     assert error.__context__ is None
+    assert len(api.execs) == 1
+
+
+def test_a_failed_status_poll_says_why_without_chaining() -> None:
+    """The status request carries only the PID, so the API's own reason is safe to show, and it is the useful part."""
+    reason = (
+        "Proxmox API GET /nodes/pve1/qemu/101/agent/exec-status?pid=41 failed (500): Agent error: PID 41 does not exist"
+    )
+    api = FakeAPI([ProxmoxAPIError(reason)] * 100)
+
+    with pytest.raises(ConnectivityError) as caught:
+        run(api)
+
+    assert reason in str(caught.value)
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+
+
+def test_a_failed_status_poll_shows_the_provider_s_text_as_a_terminal_can_take_it() -> None:
+    """The API's text is the provider's, not ours: controls are removed and only its last lines are kept."""
+    body = "\n".join(f"line {number}" for number in range(40)) + "\n\x1b]0;owned\x07\x1b[31mAgent error\x1b[0m"
+    api = FakeAPI([ProxmoxAPIError(body)] * 100)
+
+    with pytest.raises(ConnectivityError) as caught:
+        run(api)
+
+    message = str(caught.value)
+    assert "\x1b" not in message
+    assert "\x07" not in message
+    assert "line 39" in message
+    assert "line 0\n" not in message
+
+
+def test_a_status_poll_that_fails_once_is_asked_again() -> None:
+    """A poll carries only the PID, so one missed answer (an API blip) does not end the script's wait."""
+    api = FakeAPI([ProxmoxAPIError("Proxmox API failed: connection reset"), {"exited": True, "exitcode": 0}])
+
+    raw = run(api)
+
+    assert api.polls == 2
+    assert raw == RawRun(b"", b"")
+    assert len(api.execs) == 1
+
+
+def test_status_polls_that_keep_failing_give_up_within_the_retry_window() -> None:
+    api = FakeAPI([ProxmoxAPIError("Agent error: PID 41 does not exist")] * 1000)
+
+    with pytest.raises(ConnectivityError):
+        run(api, deadline=600)
+
+    assert api.polls <= guest_agent.STATUS_RETRY_SECONDS / guest_agent.POLL_INTERVAL_SECONDS + 1
     assert len(api.execs) == 1
 
 
@@ -129,7 +185,8 @@ def test_an_agent_that_never_answers_raises_at_the_cap_with_nothing_dispatched(
     )
     api = FakeAPI([], pings=[ProxmoxAPIError("not running")] * 1000)
 
-    with pytest.raises(ConnectivityError) as caught:
+    # Unreachable, so a caller stops instead of waiting out the cap again.
+    with pytest.raises(ChannelUnreachable) as caught:
         run(api, deadline=600)
 
     assert max(seen) <= guest_agent.AGENT_WAIT_SECONDS + 2 * guest_agent.POLL_INTERVAL_SECONDS

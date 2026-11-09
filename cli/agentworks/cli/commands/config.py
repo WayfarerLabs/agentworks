@@ -52,6 +52,7 @@ def config_edit() -> None:
     import sys
 
     from agentworks.config import CONFIG_PATH
+    from agentworks.programs import resolve_program
 
     editor = os.environ.get("EDITOR") or os.environ.get("VISUAL")
     if not editor:
@@ -63,7 +64,7 @@ def config_edit() -> None:
         typer.echo("Run 'agw config init' to create one.", err=True)
         raise typer.Exit(1)
 
-    sys.exit(subprocess.call([editor, str(CONFIG_PATH)]))
+    sys.exit(subprocess.call([resolve_program(editor), str(CONFIG_PATH)]))
 
 
 @config_app.command("sample")

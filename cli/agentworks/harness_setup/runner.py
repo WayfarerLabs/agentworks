@@ -5,10 +5,12 @@ from __future__ import annotations
 import shlex
 from typing import TYPE_CHECKING
 
+from agentworks.errors import AgentworksError
+from agentworks.harness_setup.outcomes import sanitize_setup_error
 from agentworks.transports import Transport
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable, Iterable, Mapping
     from pathlib import Path
 
     from agentworks.ssh import SSHResult
@@ -17,9 +19,10 @@ if TYPE_CHECKING:
 class SetupRunner(Transport):
     """Deliver scope env while preserving core identity against local overrides."""
 
-    def __init__(self, target: Transport, environment: Mapping[str, str]) -> None:
+    def __init__(self, target: Transport, environment: Mapping[str, str], *, redactions: Iterable[str] = ()) -> None:
         self._target = target
         self._environment = dict(environment)
+        self._redactions = tuple(redactions)
         self.logger = target.logger
         self.default_timeout = target.default_timeout
 
@@ -55,19 +58,23 @@ class SetupRunner(Transport):
         if sudo:
             preserve = f" --preserve-env={shlex.quote(','.join(environment))}" if environment else ""
             command = f"sudo -n{preserve} bash -c {shlex.quote(command)}"
-        return self._target.run(
-            command,
-            sudo=False,
-            tty=tty,
-            check=check,
-            timeout=timeout,
-            env=environment,
-            input_text=input_text,
-            input_data=input_data,
-            discard_output=discard_output,
-            retries=retries,
-            on_retry=on_retry,
-        )
+        try:
+            return self._target.run(
+                command,
+                sudo=False,
+                tty=tty,
+                check=check,
+                timeout=timeout,
+                env=environment,
+                input_text=input_text,
+                input_data=input_data,
+                discard_output=discard_output,
+                retries=retries,
+                on_retry=on_retry,
+            )
+        except AgentworksError as error:
+            sanitize_setup_error(error, redactions=self._redactions, logger=self.logger)
+            raise
 
     def _interactive(self, command: str, *, env: dict[str, str] | None = None) -> int:
         return self._target.interactive(command, env=self._env(env))

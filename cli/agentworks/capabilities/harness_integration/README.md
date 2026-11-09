@@ -77,7 +77,9 @@ before shallower ones. Unowned files do not keep an obsolete entrypoint active.
 A VM deferral chooses exactly one of user, workspace or session. User/workspace deferrals can only
 target session. Core sends an inactive VM's inputs to user, then passes an inactive user or
 workspace's applicable inputs to session. It does not rerun ancestor setup during session start.
-Missing or stale active artifact results require the owning setup operation.
+Missing, stale or incomplete ancestor artifact results are reported with their owner and repair
+operation. They do not block a receiving facet. Runtime routing reuses available captures and known
+explicit deferrals, never recaptures an ancestor, and reports unknown handling without guessing.
 
 Before `start`, core calls `prepare_artifacts` with the immutable `SessionArtifactContext` available
 on the session binding. This includes completed environment, actual home, prospective session/run
@@ -85,11 +87,19 @@ IDs, grouped remaining inputs and ancestor file ownership metadata. Return the s
 in `HarnessStart.artifacts`. Core warns about unhandled inputs after validating the full result and
 restricts session file publication to that run's private directory under the actual user's home.
 First-party session facets default to no artifact delivery. Their typed `enabled_workarounds` config
-lists specific supported delivery methods, with an empty default and replacement inheritance. Return
-an explicit deferral for each disabled or unsupported input, including its relevant workaround in
-the reason when one exists. Filter disabled inputs before applying delivery-specific validation or
-compatibility probes. Keep unsafe paths, conflicting ownership, malformed results and invalid
-configuration as errors. Do not turn an optional artifact into a blanket version requirement.
+lists specific delivery opt-ins, with an empty default and replacement inheritance. A recognized
+compatibility name need not have a verified carrier: Grok accepts `session-agent-definitions` but
+returns its private session personas unhandled in every launch mode. Return an explicit deferral for
+each disabled or unsupported input, including its relevant workaround in the reason when one exists.
+Filter disabled inputs before applying delivery-specific validation or compatibility probes. Keep
+unsafe paths, conflicting ownership, malformed results and invalid configuration as errors. Do not
+turn an optional artifact into a blanket version requirement.
+
+Native-name collisions that prevent an input from being represented become terminal session
+deferrals. Rerender the remaining inputs so rejected content and carrier arguments are both absent,
+then validate that remaining delivery. A namespace that resolves the collision may permit handling
+at the receiving facet; an earlier deferral is not a permanent refusal. Hard failures in input,
+transport or private filesystem publication remain errors of the running facet.
 
 Generated literal argv values must use `quote_literal_argv` so artifact text is not interpreted as
 Agentworks template substitutions. Native conversation IDs remain integration-owned.
@@ -113,6 +123,13 @@ shared files or silently provision a missing ancestor. Core owns accounts, direc
 and lifecycle transactions; integrations own their native placements and report confirmed claims.
 Authentication files are not supported settings roles. Put session-local secrets in the session's
 environment rather than command text.
+
+The shared native plugin reconciler holds whole-document native CLI mutations when its association
+comparator cannot verify preservation of listed settings entries. An unrecognized source form can be
+valid native configuration. Describe this as a verification limit rather than a syntax error or
+proven native data loss. Independent mappings, file publication and no-op adoption remain available;
+explicit mapped entries follow their selected settings policy. See the
+[native setup guide](../../../../docs/guides/native-harness-setup.md) for the operator workflow.
 
 ## Available Integrations
 
@@ -339,10 +356,18 @@ their respective live owners, including resources still pending during session c
 
 A VM-family mutation guard spans core provisioning, integration setup, and failed-create cleanup.
 Setup checkpoints record confirmed native claims through instance state. Fresh agent and workspace
-applied-state records remain buffered until the owner row and desired overlay commit atomically;
-failed creation cleans up the newly owned native resource. Fresh agent creation refuses an existing
-unowned Linux account or home before arming rollback. Existing agents retain the create-or-converge
-reinit path. VM/admin setup finishes before the final VM initialization and SSH-identity checkpoint.
+applied-state records remain buffered until the owner row and desired overlay commit atomically. A
+core creation failure cleans up the newly owned native resource. A valid setup facet's domain or
+transport failure instead preserves confirmed progress, records the current failure and lets
+independent facets and core bookkeeping finish. The command reports collected failures at its outer
+boundary with a failing exit status; newly created owners and their partial records remain. Shared
+persistence failures, cancellation, invalid activation preflight and unexpected internal errors
+still abort immediately. Fresh agent creation refuses an existing unowned Linux account or home
+before arming rollback. Existing agents retain the create-or-converge reinit path. VM/admin setup
+finishes before the final VM initialization and SSH-identity checkpoint, even with collected facet
+failures. See
+[reconciling setup](../../../../docs/guides/harness-facets.md#inspecting-and-reconciling-setup) for
+inspection and repair.
 
 Session create, start, and restart check the integration's declared setup prerequisites before
 session mutation. These checks inspect evidence and native placement; they do not provision an
@@ -360,12 +385,22 @@ Return `SetupGap` entries with `required` or `recommended` severity and an integ
 reason. Core refuses required gaps before session runtime replacement and warns for recommended
 gaps. The base and all shipped integrations currently return no gaps, preserving session-only use;
 there is no operator-authored universal `required_facets` field. This hook is separate from the
-capability's executable-readiness probe.
+capability's executable-readiness probe. A required gap represents a specific dependency of the
+consuming integration; it is not a blanket artifact-freshness requirement on every ancestor.
 
 Setup invocations carry prior claims and a callback for the complete remaining claim set after each
-confirmed ownership change. Core persists completion and cleanup evidence in the owning
-instance-state slice; it does not infer native ownership from filenames. Removed activations are
-invoked with absent config for retirement, and failed retirement retains evidence for retry. See
+confirmed ownership change. Report an entry skipped because of differing unowned content through
+`report_incomplete(reason)` and continue independent work. Core reports the owning resource and
+integration, and retains incomplete evidence without failing the whole initialization. Matching
+native entries can be adopted after observing their full native-reported association and source;
+adoption is recorded and reported and makes the entry eligible for safe managed cleanup. Installed
+versions are mutable observation metadata, not ownership identity. This does not verify historical
+cache origin. Core persists current-attempt `report_incomplete` reasons with completion and cleanup
+evidence in the owning instance-state slice. Reasons must be credential-free metadata identifying
+the retained entry and needed repair, without settings bodies, artifact content or resolved secrets.
+A new attempt clears prior reasons; successful setup leaves none. Core does not infer native
+ownership from filenames. Removed activations are invoked with absent config for retirement, and
+failed retirement retains evidence for retry. See
 [native harness setup](../../../../docs/guides/native-harness-setup.md) for the shipped cleanup
 rules and the [instance-state contract](../../db/README.md) for persistence and inspection.
 

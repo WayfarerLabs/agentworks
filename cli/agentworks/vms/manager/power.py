@@ -7,21 +7,19 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.db import VMStatus
-from agentworks.errors import StateError, UserAbort
+from agentworks.errors import AgentworksError, StateError, UserAbort
 from agentworks.execution import trust
 from agentworks.naming import NAME_RE
 from agentworks.secrets.policy import require_exact_tty_interaction_policy
 
-from ._helpers import _guard_incomplete_vm, _operation_log, _require_vm
+from ._helpers import _guard_incomplete_vm, _operation_log, _require_known_power_state, _require_vm
 from .boundary import _auth_key_boundary, _live_vm_boundary, _warn_legacy_release
 from .tailscale import VMNotAnswering
 
 if TYPE_CHECKING:
-    from agentworks.capabilities.base import RunContext
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
     from agentworks.secrets.policy import TtyInteractionPolicy
-    from agentworks.vms.nodes import LiveVMNode
 
 
 def start_vm(
@@ -88,12 +86,6 @@ def start_vm(
     # fails naming 'agw vm recover', which repairs what a start cannot.
     with vm_node.hold_active():
         _mgr._await_tailnet(db, config, vm, already_running=status == VMStatus.RUNNING)
-    # Only emit "is ready" on the path that actually started the VM. When
-    # status was already RUNNING we already said so above, and the wait
-    # usually answers at once, so an extra "is ready" line is just noise.
-    # On the real-work path it confirms the VM answers over SSH.
-    if status != VMStatus.RUNNING:
-        output.info(f"VM '{name}' is ready")
 
 
 def stop_vm(
@@ -147,30 +139,27 @@ def delete_vm(
     yes: bool = False,
     interaction: TtyInteractionPolicy,
 ) -> None:
-    """Delete a VM, cleaning up all associated resources.
+    """Delete the backend VM before removing its managed local resources.
 
-    Orchestrated, composition only: the child-count guard and the
-    confirm gate stay pre-boundary (zero prompts and zero resolves on
-    a refused or declined delete), then the whole build-and-boundary
-    composition (:func:`_live_vm_boundary`) is BEST-EFFORT: a broken
-    backend, a stranded site, or an unresolvable secret warns and
-    skips backend cleanup, because broken states are exactly what
-    delete exists to clean up. The backend delete op itself is the
-    one step that is NOT best-effort: a platform delete that cannot
-    remove the backend VM raises (the ``VMPlatform.delete`` contract)
-    and the row survives for a retry, because a deleted row leaves a
-    surviving backend VM orphaned with nothing to target it (#329).
-    No activation gate ever opens (an operator-stopped VM would
-    refuse; deletion never starts a stopped VM), and the Tailscale
-    logout uses a hold-only span. ``UserAbort`` is the one exception
-    the best-effort spans may not downgrade: an abort at the
-    boundary's secret prompt or inside an op span must keep the row.
-    ``interaction`` is checked HERE rather than being left to the
-    boundary's resolver: the boundary sits inside the best-effort span,
-    which would downgrade the rejection to a warning and then delete the
-    row and the operator's SSH entry while skipping the backend delete,
-    orphaning the VM the span exists to protect (#329). The span
-    tolerates a broken backend, not a malformed argument.
+    Child-count and confirmation checks run before binding or secret
+    resolution, so a refused or declined delete prompts for and resolves
+    nothing; ``interaction`` is checked before binding, whose failures are
+    handled below and must not swallow a malformed argument. Once the binding
+    holds, the node is logged out of the tailnet through the platform's root
+    channel, best effort, and the provider delete follows: whoever deletes a
+    VM wants it gone, and ``vm rekey`` rejoins one whose delete then fails.
+    Deletion never starts the guest or tears down individual workloads, which
+    the provider delete ends.
+
+    Without ``force``, a row is removed only once its backend VM is deleted,
+    because a removed row would leave a surviving backend VM with nothing to
+    target it (#329): a binding failure (a broken backend, a removed site or
+    plugin, an unresolvable secret) and a bound delete that raises (the
+    ``VMPlatform.delete`` contract) both keep the row and the host-key
+    record, with a hint naming the backend identifiers the row holds. With
+    ``force`` the children go too, and the row and record go whatever kept
+    the backend delete from completing, with a warning naming those
+    identifiers. ``UserAbort`` always propagates and keeps the row.
     """
     import agentworks.vms.manager as _mgr
 
@@ -181,7 +170,7 @@ def delete_vm(
     ws_count = db.count_workspaces_on_vm(name)
     ag_count = db.count_agents_on_vm(name)
     ts_count = db.count_sessions_on_vm(name)
-    has_children = ws_count > 0
+    has_children = ws_count > 0 or ag_count > 0 or ts_count > 0
 
     if has_children and not force:
         parts = [f"{ws_count} workspace(s)"]
@@ -196,7 +185,7 @@ def delete_vm(
             hint="Delete them first, or pass --force to also delete the children.",
         )
 
-    if not yes and not force:
+    if not yes:
         msg = f"Delete VM '{name}'?"
         if has_children:
             parts = [f"{ws_count} workspace(s)"]
@@ -211,64 +200,74 @@ def delete_vm(
     from agentworks.harness_setup.locking import native_mutation_guard
 
     with native_mutation_guard(db.path, vm.name):
-        # Platform-specific cleanup (also handles Tailscale logout)
-        vm_node: LiveVMNode | None
-        ops_ctx: RunContext | None = None
+        backend_left = False
+        # Why a row with a tailnet address was not logged out, reported once the
+        # row goes; None while nothing kept it from that. A row without one is
+        # never logged out.
+        not_logged_out: str | None = None
         try:
             vm_node, ops_ctx = _live_vm_boundary(db, config, vm, interaction=interaction)
         except UserAbort:
-            # Ctrl-C at the boundary's secret prompt must keep the SIGINT
-            # contract: abort the whole delete rather than orphaning the
-            # backend VM behind a warn. (The boundary helper runs the
-            # preflight sweep and the resolve pass, so the prompt happens
-            # inside it.)
             raise
         except Exception as e:
             # Preflight or build failure (unreachable API, missing tool,
-            # stranded site, unresolvable secret): warn and skip backend
-            # cleanup; broken backends are what delete exists to clean up.
-            vm_node = None
-            hint = getattr(e, "hint", None)
-            output.warn(f"platform binding failed, skipping backend cleanup: {e}" + (f"\n{hint}" if hint else ""))
-
-        if vm_node is not None:
-            assert ops_ctx is not None  # set beside vm_node above
+            # stranded site, unset or unresolvable secret): nothing can reach
+            # the backend, which may still run.
+            not_logged_out = f"vm-site '{vm.site}' cannot be bound"
+            if not force:
+                refusal = StateError(
+                    f"VM '{name}' was not deleted: vm-site '{vm.site}' cannot be bound: {e}",
+                    entity_kind="vm",
+                    entity_name=name,
+                    hint=getattr(e, "hint", None),
+                )
+                refusal.add_hint(_finish_delete_hint(vm, fix="Fix the site", logged_out=False))
+                raise refusal from e
+            _warn_backend_left(vm, f"vm-site '{vm.site}' cannot be bound: {e}")
+            backend_left = True
+        else:
             platform = vm_node.site.platform
-            # Session teardown and the Tailscale logout (best-effort, hold-only):
-            # both want the VM alive if it happens to be, but delete must NOT
-            # gate: an operator-stopped VM would raise. (The WSL2 hold does boot
-            # a stopped distro; the logout genuinely needs the VM up.) Each is
-            # best-effort on its own, so a teardown failure never skips the
-            # logout, and neither may skip the delete below: broken states
-            # (e.g. a manually unregistered WSL2 distro whose hold raises) are
-            # exactly what `vm delete` exists to clean up. UserAbort is the one
-            # exception the catch-alls must NOT downgrade: a swallowed abort
-            # would fall through and delete the DB row the operator just
-            # declined.
+            # The logout, best effort and inside a hold-only span: it wants the
+            # VM up if it happens to be (the WSL2 hold boots a stopped distro),
+            # but never gates, since an operator-stopped VM would refuse. A
+            # platform that cannot confirm the guest is this VM's is asked
+            # nothing (the helper reads its status first), and its delete
+            # below refuses or finds the guest gone.
             if vm.tailscale_host:
+                logout_ran = False
                 try:
                     with vm_node.hold_active():
-                        try:
-                            _teardown_vm_sessions(db, config, vm)
-                        except UserAbort:
-                            raise
-                        except Exception as e:
-                            output.warn(f"session teardown skipped: {e}")
-                        _mgr._tailscale_logout(vm, platform, ops_ctx)
+                        not_logged_out = _mgr._tailscale_logout(vm, platform, ops_ctx)
+                        logout_ran = True
                 except UserAbort:
                     raise
                 except Exception as e:
-                    output.warn(f"tailscale logout skipped: {e}")
-
-            # NOT best-effort, unlike the spans above: the platform's delete
-            # contract (VMPlatform.delete) is that a delete which cannot
-            # remove the backend VM raises a typed error, and that error
-            # aborts the command HERE, keeping the row. Warning past it and
-            # deleting the row would orphan a surviving backend VM with
-            # nothing left to target it (#329). ``--force`` does not soften
-            # this: force skips the child-count guard and the confirm
-            # prompt, never a failed backend delete.
-            platform.delete(vm, ops_ctx)
+                    # A hold that fails only as it is released, after the logout
+                    # ran, leaves the logout's own result standing: the delete
+                    # below ends the VM the hold was keeping up.
+                    if not logout_ran:
+                        not_logged_out = f"the VM could not be held for its logout ({e})"
+            # NOT best-effort: a platform delete that cannot remove the backend
+            # VM raises (VMPlatform.delete), which keeps the row unless forced.
+            try:
+                platform.delete(vm, ops_ctx)
+            except UserAbort:
+                raise
+            except Exception as failure:
+                if not force:
+                    if isinstance(failure, AgentworksError):
+                        failure.add_hint(
+                            _finish_delete_hint(
+                                vm,
+                                fix="Fix what the provider refused",
+                                logged_out=bool(vm.tailscale_host) and not_logged_out is None,
+                            )
+                        )
+                    raise
+                _warn_backend_left(vm, str(failure))
+                backend_left = True
+        if vm.tailscale_host and not_logged_out is not None:
+            _warn_not_logged_out(vm, not_logged_out)
 
         # Clean up logs
         from agentworks.ssh import LOG_DIR
@@ -296,41 +295,49 @@ def delete_vm(
         # The store file goes whenever the VM's row goes, even if the SSH config
         # rebuild raises. Reaching here means the platform delete succeeded (it
         # raises, keeping the row and the record, when it cannot remove the
-        # backend VM) or backend cleanup was skipped after a binding failure.
+        # backend VM) or --force removed a row whose backend was not deleted.
         try:
             trust.remove(name)
         finally:
             sync_ssh_config(config, db)
-        output.result(f"VM '{name}' deleted")
+        output.result(f"VM '{name}' removed; its backend was not deleted" if backend_left else f"VM '{name}' deleted")
 
 
-def _teardown_vm_sessions(db: Database, config: Config, vm: VMRow) -> None:
-    """Stop every session on the VM before it goes, each one best-effort."""
-    from agentworks.sessions.manager import _teardown_session, ensure_pids_batch
-    from agentworks.transports import transport
-
-    target = transport(vm, config)
-    sessions = ensure_pids_batch(
-        [
-            session
-            for workspace in db.list_workspaces(vm_name=vm.name)
-            for session in db.list_sessions(workspace_name=workspace.name)
-        ],
-        db=db,
-        config=config,
+def _finish_delete_hint(vm: VMRow, *, fix: str, logged_out: bool) -> str:
+    """How to finish a delete whose backend was not deleted, then, after a logout, how to undo it instead."""
+    hint = (
+        f"{fix} and run 'agw vm delete {vm.name}' again, or remove its backend yourself "
+        f"{_backend_named(vm)} and run 'agw vm delete {vm.name} --force'."
     )
-    for session in sessions:
-        try:
-            _teardown_session(
-                session,
-                target=target,
-                target_owns_session=session.agent_name is None,
-                db=db,
-                force=True,
-                legacy_running_authorized=True,
-            )
-        except Exception:
-            output.warn(f"session '{session.name}' teardown skipped during VM deletion")
+    if logged_out:
+        hint += (
+            f" The VM was logged out of Tailscale before its delete failed; to put it back on Tailscale "
+            f"instead, run 'agw vm rekey {vm.name}'."
+        )
+    return hint
+
+
+def _warn_not_logged_out(vm: VMRow, reason: str) -> None:
+    """The warning for a deleted VM whose Tailscale node was not logged out, so may still be listed."""
+    output.warn(
+        f"Tailscale node {vm.hostname} was not logged out: {reason}; "
+        f"remove '{vm.hostname}' in the Tailscale admin console if it is listed there."
+    )
+
+
+def _warn_backend_left(vm: VMRow, reason: str) -> None:
+    """The warning ``--force`` gives for a row it removes whose backend was not deleted."""
+    output.warn(
+        f"The backend of VM '{vm.name}' was not deleted ({reason}). It may still run "
+        f"{_backend_named(vm)}; remove it there."
+    )
+
+
+def _backend_named(vm: VMRow) -> str:
+    """Where to find a VM's backend by hand: its site, the hostname platforms name or tag it with, and its metadata."""
+    identifiers = [f"hostname '{vm.hostname}'"]
+    identifiers += [f"{key} '{value}'" for key, value in sorted(vm.platform_metadata.items())]
+    return f"on vm-site '{vm.site}' ({', '.join(identifiers)})"
 
 
 def rekey_vm(
@@ -362,6 +369,7 @@ def rekey_vm(
     from agentworks.capabilities.vm_platform.tailscale_join import settle_tailnet_address
     from agentworks.execution import reachability
     from agentworks.execution.access import Admin
+    from agentworks.execution.root_script import ChannelUnreachable
     from agentworks.orchestration.activation import activation_gate
     from agentworks.ssh_config import sync_ssh_config
     from agentworks.vms import recovery
@@ -385,6 +393,7 @@ def rekey_vm(
     )
     platform = vm_node.site.platform
     status = platform.status(vm, ops_ctx)
+    _require_known_power_state(status, name)
     if status != VMStatus.RUNNING:
         raise StateError(
             f"VM '{name}' is not running (status: {status.value})",
@@ -407,7 +416,13 @@ def rekey_vm(
     ):
         output.info("Logging out and joining the tailnet with the new key (about a minute)...")
         logger.step("Rekey")
-        result = recovery.rekey(platform, vm, ops_ctx, auth_key=auth_key, log=logger.record)
+        try:
+            result = recovery.rekey(platform, vm, ops_ctx, auth_key=auth_key, log=logger.record)
+        except ChannelUnreachable as error:
+            # The script never ran, so the node is as it was: once the channel's own hint gets the VM
+            # answering, the rekey itself is what is left to do.
+            error.add_hint(f"Once it answers, run 'agw vm rekey {name}' again.")
+            raise
         recovery.require_success(
             result,
             script="rekey",

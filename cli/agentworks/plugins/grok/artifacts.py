@@ -1,8 +1,7 @@
-"""Grok Build artifact placement for its interactive native discovery contract."""
+"""Grok Build native discovery and explicitly enabled session carriers."""
 
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING
 
 import yaml
@@ -11,10 +10,10 @@ from agentworks.artifacts.application import ArtifactApplication
 from agentworks.artifacts.model import ArtifactType
 from agentworks.artifacts.native.common import (
     NativeSessionArtifacts,
+    ancestor_diagnostics,
     artifact_file,
     context_text,
     has_artifacts,
-    json_text,
     persona_options,
     reject_flags,
     select_session_artifacts,
@@ -31,14 +30,13 @@ if TYPE_CHECKING:
     from agentworks.artifacts.model import ArtifactInput, ArtifactInputs
 
 
-# Only options represented by the interactive JSON and Markdown agent surfaces.
+# Only options represented by the native Markdown agent surface.
 _OPTIONS = {"model": str, "tools": list}
 
 
 _SESSION_WORKAROUNDS = {
     ArtifactType.HINT: "session-rules",
     ArtifactType.RULE: "session-rules",
-    ArtifactType.AGENT: "session-agent-definitions",
 }
 
 
@@ -104,36 +102,25 @@ def session_artifacts(
     validate_names(inputs)
     selected_types = {item.content.type for item in inputs.items()}
     ancestor_names = {file.native_identity or "" for file in context.ancestor_files}
-    has_skills = any(name.startswith("skill:") for name in ancestor_names)
-    has_agents = ArtifactType.AGENT in selected_types or any(name.startswith("agent:") for name in ancestor_names)
     forbidden = set()
     if selected_types & {ArtifactType.HINT, ArtifactType.RULE}:
         forbidden.update({"--rules", "--append-system-prompt", "--system-prompt", "--system-prompt-override"})
-    if has_agents:
-        forbidden.update({"--agents", "--no-subagents"})
-    if has_skills:
-        forbidden.update({"--plugin-dir", "--disable-skills"})
-    reject_flags(extra_args, forbidden, "grok-build")
-    files = []
+    if inputs:
+        reject_flags(extra_args, forbidden, "grok-build")
+    if context.ancestor_files:
+        ancestor_flags = set()
+        if any(name.startswith("agent:") for name in ancestor_names):
+            ancestor_flags.update({"--agents", "--no-subagents"})
+        if any(name.startswith("skill:") for name in ancestor_names):
+            ancestor_flags.update({"--plugin-dir", "--disable-skills"})
+        with ancestor_diagnostics("grok-build"):
+            reject_flags(extra_args, ancestor_flags, "grok-build")
     argv: list[str] = []
     guidance = tuple(item for item in inputs.items() if item.content.type in (ArtifactType.HINT, ArtifactType.RULE))
     if guidance:
         text = context_text(guidance, configured)
         argv += ["--rules", text]
-    agents = tuple(item for item in inputs.items() if item.content.type is ArtifactType.AGENT)
-    if agents:
-        definitions = {item.content.name: _persona(item) for item in agents}
-        for item in agents:
-            files.append(
-                artifact_file(
-                    f"{context.directory}/agents/{item.content.name}.json",
-                    json_text(definitions[item.content.name]),
-                    (item,),
-                    identity=f"agent:{item.content.name}",
-                )
-            )
-        argv += ["--agents", json.dumps(definitions, ensure_ascii=False)]
-    application = ArtifactApplication(tuple(files), deferred)
+    application = ArtifactApplication(deferred=deferred)
     validate_ancestor_names(context, application)
     validate_native_argv(tuple(argv))
     return NativeSessionArtifacts(application, tuple(argv))

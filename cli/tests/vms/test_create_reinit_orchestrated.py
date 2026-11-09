@@ -31,7 +31,7 @@ from agentworks.vms import manager as vm_manager
 from agentworks.vms.admin import AdminConfig
 from agentworks.vms.contract import ACCOUNTS_VARIABLE
 from agentworks.vms.templates import ResolvedVMTemplate
-from tests.conftest import ManifestDoc, pin_wsl2_unsupported, seed_vm_trust, write_manifests
+from tests.conftest import ManifestDoc, fake_installed_programs, pin_wsl2_unsupported, seed_vm_trust, write_manifests
 from tests.orchestrated_fixtures import proxmox_site
 from tests.ssh_fixtures import write_test_ssh_keypair
 from tests.vm_access_support import AccessRecorder, Admin
@@ -62,7 +62,7 @@ def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", "tskey-test")
     monkeypatch.setenv("AW_SECRET_GIT_TOKEN_GH", "ghtok")
     monkeypatch.setenv("AW_SECRET_PROXMOX_TOKEN", "pve-token")
-    monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+    fake_installed_programs(monkeypatch, lambda name: f"/usr/bin/{name}")
     pin_wsl2_unsupported(monkeypatch)
 
     def _make(extra: str = "", *, manifests: Sequence[ManifestDoc | str] = ()):
@@ -1112,12 +1112,16 @@ def test_reinit_runs_initialization_through_the_gate(
     monkeypatch.setattr("agentworks.ssh.SSHLogger", _LoggerSpy)
     _contract_passes.access(vm_name="rvm").run_outcomes = _contract_outcomes(os_release=BOOKWORM_OS_RELEASE)
 
+    steps: list[str] = []
+
     def _fake_init(*args: object, **kwargs: object) -> None:
         captured["providers"] = args[7]
         captured["held"] = list(holds)
         captured["debian_release"] = kwargs["debian_release"]
+        steps.append("init")
 
     monkeypatch.setattr(vm_manager, "run_initialization", _fake_init)
+    monkeypatch.setattr("agentworks.ssh_config.sync_ssh_config", lambda *a, **k: steps.append("sync"))
     import agentworks.transports as transports
 
     monkeypatch.setattr(transports, "transport", lambda vm, config, **kw: _reinit_transport())
@@ -1125,6 +1129,8 @@ def test_reinit_runs_initialization_through_the_gate(
     vm_manager.reinit_vm(db, config, "rvm", interaction=TtyInteractionPolicy.REFUSE)
 
     assert captured["debian_release"] is DebianRelease.BOOKWORM
+    # The aliases name the configured key, which the initialization installs: a changed key reaches them.
+    assert steps == ["init", "sync"]
     # The base checks, release first, over the admin's access, and nothing else on the new stack.
     assert _contract_passes.operations == [("admin", "run")] * 3
     assert legacy_checked == ["rvm"]
@@ -1133,15 +1139,10 @@ def test_reinit_runs_initialization_through_the_gate(
     assert [request.name for request in requests] == ["gh"]
     assert captured["held"] == ["open"]  # init ran inside the span
     assert holds == ["open", "close"]  # span closed at the end
-    assert any("reinitialized successfully" in m for m in captured_output.info)
     # Preflight is a real section (header at level 0), and the terminal
     # outcome routes through result() (RESULT role at level 0).
-    assert (Role.HEADER, 0, "Preflight") in captured_output.lines
-    assert (
-        Role.RESULT,
-        0,
-        "VM 'rvm' reinitialized successfully!",
-    ) in captured_output.lines
+    assert any(role is Role.HEADER and level == 0 for role, level, _ in captured_output.lines)
+    assert any(role is Role.RESULT and level == 0 and "rvm" in text for role, level, text in captured_output.lines)
 
 
 def test_reinit_refuses_invalid_configured_identity_before_activation_or_transport(

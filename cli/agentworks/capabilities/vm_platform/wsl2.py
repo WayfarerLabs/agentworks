@@ -7,6 +7,7 @@ import functools
 import json
 import os
 import platform
+import shlex
 import subprocess
 import sys
 import urllib.request
@@ -14,7 +15,12 @@ from pathlib import Path, PureWindowsPath
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from agentworks import output
-from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
+from agentworks.capabilities.vm_platform.base import (
+    ProvisionRequest,
+    ProvisionResult,
+    RetainedProvisioningError,
+    VMPlatform,
+)
 from agentworks.capabilities.vm_platform.bootstrap_script import run_bootstrap
 from agentworks.capabilities.vm_platform.debian_release import code_owned_release_value
 from agentworks.capabilities.vm_platform.tailscale_join import (
@@ -24,9 +30,11 @@ from agentworks.capabilities.vm_platform.tailscale_join import (
 )
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
-from agentworks.errors import StateError
+from agentworks.errors import ExternalError, StateError
 from agentworks.execution import root_script, ssh_process
+from agentworks.programs import resolve_program
 from agentworks.schema import AgwModel
+from agentworks.terminal import sanitize_terminal_output
 from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
@@ -58,16 +66,38 @@ def wsl_program(*, windows: bool, environ: Mapping[str, str]) -> str:
 
 # The one place the wsl.exe program is named.
 _WSL = wsl_program(windows=sys.platform == "win32", environ=os.environ)
+# The error code other WSL releases print, with a non-zero status, for a
+# listing when no distro is installed (not measured here); the one token of
+# their localized output this module reads, on either stream, as wsl.exe prints
+# its own errors on stdout. WSL 2.7.14.0 (measured) instead exits 0 with no
+# output on either stream, which reads as an ordinary empty listing.
+_NO_DISTRIBUTIONS = "WSL_E_DEFAULT_DISTRO_NOT_FOUND"
+
+# The root channel's program inside the distro: Bash in a session of its own, with no controlling terminal.
+_DETACHED_ROOT_SHELL = ("/usr/bin/setsid", "-w", "/bin/bash", "-s")
 
 
 def _run_as_root(distro_name: str, script: bytes, deadline: float) -> RawRun:
-    """The distro's root channel: ``wsl.exe --user root --exec /bin/bash -s`` with ``script`` on stdin.
+    """The distro's root channel: ``wsl.exe --user root --exec setsid -w /bin/bash -s`` with ``script`` on stdin.
 
-    ``--exec`` starts ``/bin/bash`` directly, so root's login shell and its
+    ``--exec`` starts the program directly, so root's login shell and its
     startup files are not between ``wsl.exe`` and Bash, and ``--user root``
-    needs no sudo, so no ``use_pty`` gives the script a terminal.
+    needs no sudo. ``wsl.exe`` still makes the program a session leader with
+    a pseudo-terminal as its controlling terminal, whatever its own streams
+    are, so ``setsid`` (util-linux, essential in Debian) runs Bash in a new
+    session with none: a ``dpkg`` maintainer script that reads or resets
+    ``/dev/tty`` cannot stop the script. ``-w`` keeps the channel open until
+    Bash exits; Bash inherits all three streams.
     """
-    argv = [_WSL, "--distribution", distro_name, "--user", "root", "--exec", "/bin/bash", "-s"]
+    argv = [
+        _WSL,
+        "--distribution",
+        distro_name,
+        "--user",
+        "root",
+        "--exec",
+        *_DETACHED_ROOT_SHELL,
+    ]
     return root_script.run_process(argv, script, deadline)
 
 
@@ -271,27 +301,50 @@ class _StripAuthRedirectHandler(urllib.request.HTTPRedirectHandler):
 _blob_opener = urllib.request.build_opener(_StripAuthRedirectHandler)
 
 
+class WSLCommandFailed(ExternalError):
+    """A ``wsl.exe`` command exited non-zero; the message quotes what it printed."""
+
+
 def _wsl(args: list[str], *, check: bool = True, timeout: int = 300) -> str:
     """Run a wsl.exe command and return stdout.
 
     wsl.exe emits UTF-16LE on redirected output unless WSL_UTF8=1 is
     set; decoding that as UTF-8 leaves a NUL after every ASCII char,
     which silently breaks the name-equality parsers (``status``,
-    ``_distro_exists``). Strip the NULs so both encodings parse.
+    ``_distro_exists``). Strip the NULs so both encodings parse. A failure
+    under ``check`` raises :class:`WSLCommandFailed` with wsl.exe's own text,
+    which it prints on stdout, not stderr.
     """
+    result = _run_wsl(args, timeout=timeout)
+    if check and result.returncode != 0:
+        printed = "\n".join(text for stream in (result.stderr, result.stdout) if (text := stream.strip()))
+        # No argument carries a secret: the auth key reaches the distro on the root channel's stdin.
+        command = sanitize_terminal_output(shlex.join(["wsl", *args]))
+        reason = sanitize_terminal_output(printed) or "no output"
+        raise WSLCommandFailed(
+            f"'{command}' exited with status {result.returncode}: {reason}",
+            hint=(
+                "WSL may have been shut down meanwhile ('wsl --shutdown' stops every distro). "
+                "Check it with 'wsl --status', then run the command again."
+            ),
+        )
+    return result.stdout
+
+
+def _run_wsl(args: list[str], *, timeout: int = 300) -> subprocess.CompletedProcess[str]:
+    """Run a wsl.exe command once, both streams captured with their NULs stripped (see :func:`_wsl`)."""
     result = subprocess.run(
         [_WSL, *args], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout
     )
-    if check and result.returncode != 0:
-        stderr = result.stderr.replace("\x00", "").strip()
-        raise RuntimeError(f"wsl command failed: {stderr}")
-    return result.stdout.replace("\x00", "")
+    return subprocess.CompletedProcess(
+        result.args, result.returncode, result.stdout.replace("\x00", ""), result.stderr.replace("\x00", "")
+    )
 
 
 def _powershell(script: str, *, check: bool = True, timeout: int = 120) -> str:
     """Run a PowerShell command and return stdout."""
     result = subprocess.run(
-        ["powershell", "-NoProfile", "-Command", script],
+        [resolve_program("powershell"), "-NoProfile", "-Command", script],
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -402,6 +455,14 @@ def _download_debian_rootfs(tarball_path: Path, *, tag: str) -> None:
         raise
 
 
+def _windows_status(code: int) -> str:
+    """A Windows exit status as ``wsl.exe`` means it: Windows reports a 32-bit value, unsigned, so
+    ``wsl.exe``'s -1 for a distro it cannot find arrives as 4294967295."""
+    if code > 0x7FFFFFFF:
+        return f"{code - 0x100000000} (0x{code:08X})"
+    return str(code)
+
+
 @contextlib.contextmanager
 def _keepalive(distro_name: str) -> Iterator[None]:
     """Anchor a WSL2 distro for the duration of the context.
@@ -441,11 +502,12 @@ def _keepalive(distro_name: str) -> Iterator[None]:
     skips the ``finally:`` (SIGKILL, console window closed, hard crash),
     the kernel closes the job handle and kills the orphan for us.
     """
+    # Both streams share one pipe, read only on the fast-fail path: wsl.exe prints its own errors on stdout.
     proc = subprocess.Popen(
         [_WSL, "--distribution", distro_name, "--", "sleep", "infinity"],
         stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
     )
     # Bind the subprocess to a Job Object so a hard-kill of this Python
     # process still tears down the wsl.exe orphan (the OS closes the job
@@ -467,14 +529,14 @@ def _keepalive(distro_name: str) -> Iterator[None]:
     if h_job is None and sys.platform == "win32":
         output.detail("(note: Win32 Job Object unavailable; a hard-kill of this command may leave an orphan wsl.exe.)")
 
-    def _close_stderr() -> None:
-        # Popen with stderr=PIPE leaves a read-end fd open until the Popen
+    def _close_output() -> None:
+        # Popen with stdout=PIPE leaves a read-end fd open until the Popen
         # object is GC'd. On the fast-fail path we already read and won't
         # touch it again; on the normal-exit path the subprocess has been
         # waited on so the pipe is at EOF. Either way the fd is dead weight.
-        if proc.stderr is not None:
+        if proc.stdout is not None:
             with contextlib.suppress(OSError):
-                proc.stderr.close()
+                proc.stdout.close()
 
     # Fast-fail check: if wsl.exe couldn't attach (wrong distro name, WSL
     # service hiccup, etc.), `sleep infinity` exits within milliseconds.
@@ -485,12 +547,17 @@ def _keepalive(distro_name: str) -> Iterator[None]:
     except subprocess.TimeoutExpired:
         rc = None  # still running, which is what we want
     if rc is not None:
-        stderr = proc.stderr.read().decode("utf-8", errors="replace").strip() if proc.stderr else ""
-        _close_stderr()
+        printed = proc.stdout.read().decode("utf-8", errors="replace") if proc.stdout else ""
+        _close_output()
         _close_handle(h_job)
-        raise RuntimeError(
-            f"WSL2 keepalive for distro {distro_name!r} exited immediately (rc={rc})"
-            + (f": {stderr}" if stderr else "")
+        reason = sanitize_terminal_output(printed.replace("\x00", "").strip()) or "no output"
+        raise WSLCommandFailed(
+            f"WSL2 distro '{distro_name}' could not be held running: "
+            f"'wsl --distribution {distro_name} -- sleep infinity' exited with status {_windows_status(rc)}: {reason}",
+            hint=(
+                f"Check that 'wsl --list --verbose' lists '{distro_name}'. A distro unregistered outside "
+                "Agentworks leaves a VM that only 'agw vm delete' can remove."
+            ),
         )
     output.detail(f"Preventing idle-shutdown of WSL2 distro {distro_name!r} for the duration of this command...")
     try:
@@ -513,7 +580,7 @@ def _keepalive(distro_name: str) -> Iterator[None]:
                 proc.kill()
             with contextlib.suppress(subprocess.TimeoutExpired):
                 proc.wait(timeout=5)
-        _close_stderr()
+        _close_output()
         _close_handle(h_job)
         output.detail("Idle-shutdown prevention stopped.")
 
@@ -819,15 +886,15 @@ class WSL2Platform(VMPlatform):
                 tailnet_address = settle_tailnet_address(
                     run_as_root, node=request.hostname, rerun_hint=CREATE_RERUN_HINT
                 )
-            except Exception:
-                # WSL2's error convention holds: the RuntimeErrors from
-                # _wsl / _powershell propagate unwrapped; the only new
-                # obligation is the teardown.
+            except Exception as failure:
+                # WSL2's error convention holds: the errors from _wsl and
+                # _powershell propagate unwrapped; the only new obligation
+                # is the teardown.
                 output.detail(f"Cleaning up the partial WSL2 distro '{vm_name}'...")
-                self._cleanup_partial_create(vm_name)
+                self._cleanup_partial_create(vm_name, vm_name=request.vm_name, failure=failure)
                 raise
         except KeyboardInterrupt:
-            self._rollback_create_on_interrupt(vm_name)
+            self._rollback_create_on_interrupt(vm_name, vm_name=request.vm_name)
             raise
 
         output.detail(f"WSL2 VM '{vm_name}' provisioned.")
@@ -836,44 +903,72 @@ class WSL2Platform(VMPlatform):
             tailnet_address=tailnet_address,
         )
 
-    def _cleanup_partial_create(self, distro_name: str) -> None:
-        """Best-effort teardown of the distro / install directory a
-        failed ``create`` made (only ever state this create named: the
-        pre-flight collision check guarantees the name was free when we
-        started).
+    def _cleanup_partial_create(self, distro_name: str, *, vm_name: str, failure: Exception | None) -> None:
+        """Tear down the distro / install directory a failed or interrupted
+        ``create`` made (only ever state this create named: the pre-flight
+        collision check guarantees the name was free when we started).
 
-        Never raises a cleanup failure over the original error; it
-        warns with the manual removal command instead. An operator's
-        second Ctrl-C (``KeyboardInterrupt``) deliberately escapes so
-        :meth:`_rollback_create_on_interrupt` can abandon the cleanup.
+        A teardown that fails, or that cannot show the distro gone (see
+        :meth:`_teardown_distro`), warns with the manual removal command and
+        hands the distro to core as :class:`RetainedProvisioningError`,
+        whose message carries the original ``failure`` (``None`` for an
+        interrupt), so the row survives for ``vm delete`` to retry. A
+        ``KeyboardInterrupt`` during it is not contained: called from the
+        failure arm, it escapes to ``create``'s outer interrupt arm, which
+        restarts the cleanup under :meth:`_rollback_create_on_interrupt`;
+        called from there, it is the second Ctrl-C that abandons the
+        cleanup.
         """
         try:
-            self._teardown_distro(distro_name)
+            remains = not self._teardown_distro(distro_name)
+            detail = "it could not be shown unregistered"
+            cause: Exception | None = None
         except Exception as e:
-            output.warn(f"could not clean up the partial WSL2 distro '{distro_name}': {e}")
-            output.warn(self._manual_removal_hint(distro_name))
+            remains, detail, cause = True, str(e), e
+        if not remains:
+            return
+        output.warn(f"could not clean up the partial WSL2 distro '{distro_name}': {detail}")
+        output.warn(self._manual_removal_hint(distro_name))
+        what = "create was interrupted" if failure is None else f"create failed ({failure})"
+        raise self._retained(vm_name, distro_name, f"{what}, and removing the distro failed: {detail}") from cause
 
-    def _rollback_create_on_interrupt(self, distro_name: str) -> None:
+    def _rollback_create_on_interrupt(self, distro_name: str, *, vm_name: str) -> None:
         """Roll back the partially created distro after an operator
         interrupt inside :meth:`create` (the azure precedent:
         ``rollback_create_on_interrupt``, #338).
 
         A SECOND interrupt during the cleanup abandons it cleanly
-        instead of wedging, warning with the exact removal command; it
-        is absorbed so the caller re-raises the ORIGINAL interrupt,
-        which then reaches ``create_vm``, whose unwind deletes the DB
-        row it no longer needs."""
+        instead of wedging, warning with the exact removal command, and
+        raises :class:`RetainedProvisioningError` in place of the
+        interrupt, as a failed cleanup does, so the row survives for
+        ``vm delete``. A cleanup that completes returns, and the caller
+        re-raises the ORIGINAL interrupt, which then reaches
+        ``create_vm``, whose unwind deletes the DB row it no longer
+        needs."""
         output.warn(
             f"Interrupted: cleaning up the partial WSL2 distro '{distro_name}', "
-            "please wait (Ctrl-C again to abandon it)..."
+            "please wait (Ctrl-C again retains it for explicit deletion)..."
         )
         try:
-            self._cleanup_partial_create(distro_name)
-        except KeyboardInterrupt:
+            self._cleanup_partial_create(distro_name, vm_name=vm_name, failure=None)
+        except KeyboardInterrupt as second:
             output.warn(
                 f"Cleanup abandoned: the WSL2 distro '{distro_name}' may remain; "
                 + self._manual_removal_hint(distro_name)
             )
+            raise self._retained(
+                vm_name, distro_name, "create was interrupted, and so was removing the distro"
+            ) from second
+
+    def _retained(self, vm_name: str, distro_name: str, detail: str) -> RetainedProvisioningError:
+        """The retained-row handoff: the row keeps the distro name, so ``vm delete`` can retry its removal."""
+        return RetainedProvisioningError(
+            f"the WSL2 distro '{distro_name}' may remain: {detail}",
+            platform_metadata={"distro_name": distro_name},
+            entity_name=vm_name,
+            hint=f"Once the cause is fixed, run 'agw vm delete {vm_name}', or "
+            + self._manual_removal_hint(distro_name),
+        )
 
     @staticmethod
     def _manual_removal_hint(distro_name: str) -> str:
@@ -910,24 +1005,52 @@ class WSL2Platform(VMPlatform):
         output.info(f"WSL2 distro '{vm.name}' terminated")
 
     @staticmethod
-    def _teardown_distro(distro_name: str) -> None:
-        """The one place the teardown sequence lives: shared by the
-        delete op and the create rollback. Unregister the distro (which
-        discards its virtual disk), then remove the install directory.
-        Both steps are no-ops on absent state (``check=False`` /
-        ``SilentlyContinue``), which is what the rollback's partial
-        states need: an install directory without a registered distro,
-        or a registered distro whose in-guest setup never finished."""
-        _wsl(["--unregister", distro_name], check=False)
+    def _teardown_distro(distro_name: str) -> bool:
+        """Unregister the distro and remove its install directory; return whether the distro is shown gone.
+
+        The one place the teardown sequence lives: shared by the delete op
+        and the create rollback. Unregistering discards the distro's
+        virtual disk. Neither step's status stops the sequence, since the
+        rollback's partial states (an install directory without a
+        registered distro, or a registered distro whose in-guest setup
+        never finished) make either fail harmlessly. Then ``wsl --list``
+        decides, and nothing reads a failure as absence: the distro is
+        gone only when the listing does not name it and either the
+        unregister or the listing exited 0 (an empty one included), or the
+        listing reports :data:`_NO_DISTRIBUTIONS`. A distro shown gone whose
+        install directory survived (a process outside WSL holds its disk
+        image) warns naming the directory.
+        """
+        unregistered = _run_wsl(["--unregister", distro_name]).returncode == 0
         install_path = _wsl_base_path() / distro_name
         _powershell(
             f"Remove-Item -Recurse -Force -Path {_ps_quote(install_path)} -ErrorAction SilentlyContinue",
             check=False,
         )
+        listing = _run_wsl(["--list", "--quiet"])
+        if any(line.strip() == distro_name for line in listing.stdout.splitlines()):
+            return False
+        empty = _NO_DISTRIBUTIONS in listing.stdout or _NO_DISTRIBUTIONS in listing.stderr
+        gone = unregistered or listing.returncode == 0 or empty
+        if gone and install_path.exists():
+            output.warn(
+                f"WSL2 distro '{distro_name}' is unregistered, but its directory '{install_path}' could not be "
+                "removed, so its disk image may remain there: run 'wsl --shutdown', then delete the directory."
+            )
+        return gone
 
     def delete(self, vm: VMRow, ctx: RunContext) -> None:
         output.info(f"Unregistering WSL2 distro '{vm.name}'...")
-        self._teardown_distro(self._distro_name(vm))
+        distro_name = self._distro_name(vm)
+        # Core drops the row only when this returns, so a distro the
+        # teardown cannot show gone fails the delete.
+        if not self._teardown_distro(distro_name):
+            raise StateError(
+                f"WSL2 distro '{distro_name}' could not be shown unregistered after 'wsl --unregister'",
+                entity_kind="vm",
+                entity_name=vm.name,
+                hint=f"Run 'agw vm delete {vm.name}' again, or {self._manual_removal_hint(distro_name)}",
+            )
         output.info(f"WSL2 distro '{vm.name}' deleted")
 
     def display_backend_name(self, vm: VMRow) -> str:

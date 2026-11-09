@@ -13,6 +13,7 @@ creates, and it removes them.
 
 from __future__ import annotations
 
+import os
 import time
 import uuid
 import warnings
@@ -84,6 +85,9 @@ def the_secret_reaches_the_payload_and_no_argv_or_child_env(lane: RootLane) -> N
     entries that hold it; ``grep`` reads the needle from a file, so its own
     argv cannot match.
     """
+    if lane.name != "V" and not os.path.exists("/proc/self/cmdline"):
+        # A local lane's guest is this machine; a V lane's is Debian, which always has it.
+        pytest.skip("W3 counts the processes holding the key through /proc, which this machine lacks")
     tmp = scratch_path()
     stub = f"""#!/bin/bash
 [ "$1" = up ] || exit 2
@@ -326,7 +330,8 @@ def the_repair_runs_to_status_zero(lane: RootLane) -> None:
     python3 with its standard library. Run it once on a guest prepared with python3 absent and once with only
     ``python3-minimal``; preparing them is by hand, since it removes packages. The rekey and logout scripts change
     the node, so their live cells are ``vm rekey`` and ``vm delete``; on the guest's own Bash they run here against
-    stubs. On WSL2 and Proxmox the repair's sshd half runs too, restarting ``ssh.service``."""
+    stubs. The repair's sshd half runs on every platform, restarting ``ssh.service``: over sshd's own channel
+    (Lima, Remote Lima, the clouds) the script's session must survive it."""
     from agentworks.capabilities.base import RunContext
     from agentworks.vms import recovery
 
@@ -335,12 +340,21 @@ def the_repair_runs_to_status_zero(lane: RootLane) -> None:
     admin = _admin(lane)
     stand_in_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOU3HUqrGubKZio8MVx9WOFPYHGIHl5tIyF3skwoAxv0 agw-conformance"
     vm: Any = SimpleNamespace(name="conformance", admin_username=admin)
-    # The lane's own sshd dependence, so the sshd half runs on WSL2 and Proxmox.
+    # The lane's own sshd dependence, which only recover's failure hint reads.
     platform: Any = _LanePlatform(lane, recovery_needs_guest_sshd=lane.recovery_needs_guest_sshd)
 
-    # A healthy node reads Running, so the stand-in key is never used.
-    repaired = recovery.repair(platform, vm, RunContext(), public_key=stand_in_key, auth_key=SECRET, log=None)
-    lane.run(f"sed -i '/ agw-conformance$/d' ~{admin}/.ssh/authorized_keys")
+    # The repair rewrites the account's whole file, so it gets every key already there plus the stand-in, and the
+    # original is put back after. A healthy node reads Running, so the auth key is never used.
+    keys = f"~{admin}/.ssh/authorized_keys"
+    saved = f"{keys}.agw-conformance"
+    present = lane.run(f"cat {keys}")
+    original = present.stdout.decode() if present.status == 0 else ""
+    lane.run(f"if [ -e {keys} ]; then cp -p {keys} {saved}; fi")
+    content = original + ("\n" if original and not original.endswith("\n") else "") + f"{stand_in_key}\n"
+    try:
+        repaired = recovery.repair(platform, vm, RunContext(), authorized_keys=content, auth_key=SECRET, log=None)
+    finally:
+        lane.run(f"if [ -e {saved} ]; then mv -f {saved} {keys}; else rm -f {keys}; fi")
     stdlib = lane.check("python3 -c 'import json, ssl, venv'")
 
     tmp = scratch_path()

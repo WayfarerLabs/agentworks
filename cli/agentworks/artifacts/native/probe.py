@@ -3,25 +3,35 @@
 from __future__ import annotations
 
 import json
-import shlex
 import tomllib
 from dataclasses import dataclass
 from pathlib import PurePosixPath
+from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 from agentworks.artifacts.application import ArtifactFile
 from agentworks.artifacts.frontmatter import parse_metadata
 from agentworks.artifacts.native.common import MAX_CODEX_PERSONA_BYTES
-from agentworks.errors import ExternalError, StateError
+from agentworks.errors import AgentworksError, ExternalError, StateError
 from agentworks.execution.requests import Bytes, CaptureOutput, PythonProgram
+from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic, sanitize_setup_error
 from agentworks.package_sources import CaptureLimits
 from agentworks.sources import SourceRefError
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Iterable, Mapping, Sequence
 
     from agentworks.artifacts.application import OwnedArtifactFile
     from agentworks.execution.access import VMAccess
+
+
+class NativeArtifactConflictError(StateError):
+    """Native names that setup can defer or sessions can leave unhandled."""
+
+    def __init__(self, message: str, identities: tuple[str, ...], *, hint: str) -> None:
+        super().__init__(message, hint=hint)
+        self.identities = identities
+
 
 # Executed in the same login and interactive environment as the native workload. Only
 # selected bounded artifact frontmatter and discovery facts return for local identity
@@ -36,6 +46,7 @@ variable, default = {'claude': ('CLAUDE_CONFIG_DIR', '.claude'),
                      'codex': ('CODEX_HOME', '.codex'), 'grok': ('GROK_HOME', '.grok')}[tool]
 native_home = os.environ.get(variable) or home + '/' + default
 problems = []
+problem_paths = []
 skill_names = {name[6:] for name in request['identities'] if name.startswith('skill:')}
 agent_names = {name[6:] for name in request['identities'] if name.startswith('agent:')}
 if not vm_only and request['home'] is not None and home != request['home']:
@@ -83,6 +94,7 @@ for root in roots:
         safe_roots.append(root)
     except Exception:
         problems.append('unreadable-native-inventory')
+        problem_paths.append(str(root))
 roots = safe_roots
 inventory = []
 known_entries = request['entries']
@@ -146,12 +158,15 @@ for path in paths:
         pass
     except Exception:
         problems.append('unreadable-native-policy')
+        problem_paths.append(str(path))
 try:
     candidates = []
     scanned = 0
     existing_entries = set()
     discovery_roots = []
+    inspecting = None
     for root in roots:
+        inspecting = root
         skill_root = (root.parent / '.agents' / 'skills') if tool == 'codex' else root / 'skills'
         if tool == 'codex' and root == machine_root:
             skill_root = root / 'skills'
@@ -159,10 +174,12 @@ try:
             skill_root = pathlib.Path(home) / '.agents' / 'skills'
         if any(':' not in name for name in skill_names):
             discovery_roots.append(('skill', skill_root))
+        inspecting = skill_root
         if any(':' not in name for name in skill_names) and skill_root.exists():
             if skill_root.is_symlink():
                 raise ValueError()
             for directory in skill_root.iterdir():
+                inspecting = directory
                 existing_entries.add(str(directory))
                 scanned += 1
                 if scanned > 512 or directory.is_symlink() or (tool == 'codex' and directory.name == 'SKILL.md'):
@@ -170,6 +187,7 @@ try:
                 if not directory.is_dir():
                     continue
                 marker = directory / 'SKILL.md'
+                inspecting = marker
                 if marker.is_symlink() or (marker.exists() and not marker.is_file()):
                     raise ValueError()
                 if tool == 'codex' or not marker.exists():
@@ -178,6 +196,7 @@ try:
                     pending = [directory]
                     while pending:
                         for leftover in pending.pop().iterdir():
+                            inspecting = leftover
                             existing_entries.add(str(leftover))
                             scanned += 1
                             if (scanned > 512 or leftover.is_symlink() or
@@ -197,9 +216,11 @@ try:
         if discover_agents:
             discovery_roots.append(('agent', agent_root))
         if discover_agents and agent_root.exists():
+            inspecting = agent_root
             if agent_root.is_symlink():
                 raise ValueError()
             for path in agent_root.iterdir():
+                inspecting = path
                 existing_entries.add(str(path))
                 scanned += 1
                 if scanned > 512 or path.is_symlink() or path.is_dir():
@@ -240,6 +261,7 @@ try:
     codex_total = 0
     observed_sizes = {}
     for kind, path, fallback in candidates:
+        inspecting = path
         limit = request['codex_persona_bytes'] if tool == 'codex' and kind == 'agent' else 32768
         if tool == 'codex' and kind == 'agent':
             limit = min(limit, request['inventory_bytes'] - codex_total)
@@ -275,8 +297,11 @@ try:
         raise ValueError()
     if sum(size for kind, size in future.values() if tool != 'codex' or kind != 'agent') > 1048576:
         raise ValueError()
-except Exception:
+except Exception as error:
     problems.append('unreadable-native-inventory')
+    failed_path = getattr(error, 'filename', None) or inspecting
+    if failed_path is not None:
+        problem_paths.append(str(failed_path))
 if tool == 'codex' and request['check_policy']:
     for spelling in request['paths']:
         path = pathlib.Path(spelling)
@@ -301,9 +326,9 @@ if tool == 'grok' and workspace and request['paths']:
                 problems.append('native-discovery-exclusions')
             elif ignored.returncode != 1:
                 problems.append('unreadable-native-policy')
-print('AGW_ARTIFACT_PROBE=' + json.dumps({
+print('\nAGW_ARTIFACT_PROBE=' + json.dumps({
     'home': home, 'native_home': str(machine_root) if vm_only else native_home,
-    'problems': sorted(set(problems)), 'inventory': inventory
+    'problems': sorted(set(problems)), 'inventory': inventory, 'problem_paths': list(dict.fromkeys(problem_paths))
 }))
 """
 
@@ -377,22 +402,28 @@ def probe_native(
     *,
     tool: str,
     environment: Mapping[str, str],
+    redactions: Iterable[str] = (),
     home: str | None = None,
     workspace: str = "",
     files: Sequence[ArtifactFile | OwnedArtifactFile] = (),
+    recognized_files: Sequence[OwnedArtifactFile] = (),
     session_plugin: bool = False,
     workspace_only: bool = False,
     vm_only: bool = False,
     check_policy: bool = True,
 ) -> str:
-    """Check the actual native home and relevant native policy without starting a model.
+    """Check proposed delivery while recognizing earlier placements as inventory hints.
 
+    Recognized files do not widen the proposed paths, selected identities or policy
+    checks. Their actual native name must still agree before inventory accepts them.
     The probe is a Python program run by the system ``python3`` after the
     account's login and interactive startup, so it sees the environment the
     native workload gets. The request travels on its stdin, so a large
     package needs no argument.
     """
+    secret_values = tuple(redactions)
     entries = {file.path: file.native_identity for file in files if file.native_identity}
+    recognized_entries = {file.path: file.native_identity for file in recognized_files if file.native_identity}
     identities = tuple(entries.values())
     request = {
         "tool": tool,
@@ -401,7 +432,7 @@ def probe_native(
         "home": home,
         "workspace": workspace,
         "paths": tuple(file.path for file in files),
-        "entries": entries,
+        "entries": {**recognized_entries, **entries},
         "proposed": _proposed_sizes(files, tool),
         "session_plugin": session_plugin,
         "workspace_only": workspace_only,
@@ -409,49 +440,65 @@ def probe_native(
         "identities": identities,
         "check_policy": check_policy,
     }
-    result = access.run(
-        PythonProgram(
-            _PROBE,
-            login=True,
-            interactive=True,
-            env=dict(environment),
-            stdin=Bytes(json.dumps(request).encode()),
-            deadline=30,
-        ),
-        stdout=CaptureOutput(_PROBE_OUTPUT_LIMIT),
-    )
-    status = result.require_completed(access.vm_name)
+    try:
+        result = access.run(
+            PythonProgram(
+                _PROBE,
+                login=True,
+                interactive=True,
+                env=dict(environment),
+                stdin=Bytes(json.dumps(request).encode()),
+                deadline=30,
+            ),
+            stdout=CaptureOutput(_PROBE_OUTPUT_LIMIT),
+        )
+        status = result.require_completed(access.vm_name)
+    except AgentworksError as error:
+        sanitize_setup_error(error, redactions=secret_values)
+        raise
     stdout = result.stdout.decode("utf-8", "replace")
+    stderr = result.stderr.decode("utf-8", "replace")
     # Login startup scripts can echo the supplied runtime environment on failure.
     # Redact known values and their shell-quoted forms before publishing diagnostics.
-    diagnostic = result.stderr.decode("utf-8", "replace")
-    redactions = {form for value in environment.values() if value for form in (value, shlex.quote(value))}
-    for value in sorted(redactions, key=len, reverse=True):
-        diagnostic = diagnostic.replace(value, "[REDACTED]")
-    diagnostic = diagnostic.strip()
     if status:
-        raise ExternalError(f"{tool} artifact discovery probe failed (exit {status}): {diagnostic}")
+        raise ExternalError(
+            sanitize_setup_diagnostic(
+                f"{tool} artifact discovery probe failed (exit {status}): {stderr}", redactions=secret_values
+            )
+        )
     try:
         lines = [
             line.removeprefix("AGW_ARTIFACT_PROBE=")
             for line in stdout.splitlines()
             if line.startswith("AGW_ARTIFACT_PROBE=")
         ]
-        observed = json.loads(lines[-1])
+        if len(lines) != 1:
+            raise ValueError
+        observed = json.loads(lines[0])
         root = observed["native_home"]
         problems = observed["problems"]
         if not isinstance(root, str) or not root.startswith("/") or not isinstance(problems, list):
             raise ValueError()
         if any(not isinstance(problem, str) or problem not in _PROBLEM_MESSAGES for problem in problems):
             raise ValueError()
+        problem_paths = observed.get("problem_paths", [])
+        if (
+            not isinstance(problem_paths, list)
+            or len(problem_paths) > 512
+            or any(not isinstance(path, str) or not path.startswith("/") for path in problem_paths)
+        ):
+            raise ValueError()
     except (ValueError, KeyError, IndexError, TypeError):
         raise ExternalError(
             f"{tool} artifact discovery probe returned an invalid response",
-            hint=diagnostic or None,
+            hint=sanitize_setup_diagnostic(stderr, redactions=secret_values) or None,
         ) from None
-    inventory_problems = _inventory_problems(observed.get("inventory"), identities, entries)
+    inventory_problems = _inventory_problems(
+        observed.get("inventory"), identities, entries, recognized_entries=recognized_entries
+    )
     problems.extend(problem.code for problem in inventory_problems)
-    details = []
+    details: list[str] = []
+    details.extend(f"Native path: {path!r}" for path in problem_paths)
     for problem in inventory_problems:
         if problem.identity:
             managed = [
@@ -460,12 +507,25 @@ def probe_native(
                 if file.native_identity == problem.identity or file.path == problem.path
             ]
             details.append(f"Native {problem.identity!r} at {problem.path!r}; managed artifacts: {', '.join(managed)}")
+        elif problem.path:
+            details.append(f"Native entry: {problem.path!r}")
     if problems:
-        raise StateError(
-            f"{tool} artifact delivery: "
-            + "; ".join([*(_PROBLEM_MESSAGES[problem].format(tool=tool) for problem in problems), *details]),
-            hint=f"Native configuration directory: {root!r}",
+        message = f"{tool} artifact delivery: " + "; ".join(
+            [*(_PROBLEM_MESSAGES[problem].format(tool=tool) for problem in problems), *details]
         )
+        message = sanitize_setup_diagnostic(message, redactions=secret_values)
+        paths = [*problem_paths, *(problem.path for problem in inventory_problems if problem.path)]
+        hint = sanitize_setup_diagnostic(
+            "Inspect native paths: " + ", ".join(repr(path) for path in dict.fromkeys(paths))
+            if paths
+            else f"Native configuration directory: {root!r}",
+            redactions=secret_values,
+        )
+        if all(problem in ("native-artifact-collision", "native-artifact-identity-mismatch") for problem in problems):
+            raise NativeArtifactConflictError(
+                message, tuple(dict.fromkeys(problem.identity for problem in inventory_problems)), hint=hint
+            )
+        raise StateError(message, hint=hint)
     return root
 
 
@@ -477,14 +537,20 @@ class _InventoryProblem:
 
 
 def _inventory_problems(
-    inventory: object, identities: tuple[str, ...], entries: Mapping[str, str]
+    inventory: object,
+    identities: tuple[str, ...],
+    entries: Mapping[str, str],
+    *,
+    recognized_entries: Mapping[str, str] = MappingProxyType({}),
 ) -> list[_InventoryProblem]:
     """Interpret bounded target metadata without requiring a YAML parser on the guest."""
+    current_path = ""
     try:
         if not isinstance(inventory, list) or len(inventory) > 512:
             raise ValueError
         selected = set(identities)
         total = 0
+        problems: list[_InventoryProblem] = []
         for row in inventory:
             if (
                 not isinstance(row, dict)
@@ -492,6 +558,7 @@ def _inventory_problems(
                 or not isinstance(row.get("path"), str)
             ):
                 raise ValueError
+            current_path = row["path"]
             name = row.get("name")
             if name is None:
                 header = row.get("frontmatter")
@@ -510,10 +577,12 @@ def _inventory_problems(
             expected = entries.get(row["path"])
             if expected is not None:
                 if native_identity != expected:
-                    return [_InventoryProblem("native-artifact-identity-mismatch", expected, row["path"])]
+                    problems.append(_InventoryProblem("native-artifact-identity-mismatch", expected, row["path"]))
+                continue
+            if native_identity == recognized_entries.get(row["path"]):
                 continue
             if native_identity in selected:
-                return [_InventoryProblem("native-artifact-collision", native_identity, row["path"])]
-        return []
+                problems.append(_InventoryProblem("native-artifact-collision", native_identity, row["path"]))
+        return problems
     except (ValueError, TypeError, SourceRefError, RecursionError):
-        return [_InventoryProblem("unreadable-native-inventory")]
+        return [_InventoryProblem("unreadable-native-inventory", path=current_path)]

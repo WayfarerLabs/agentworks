@@ -125,28 +125,51 @@ def test_lima_start_proceeds_when_stopped(monkeypatch: pytest.MonkeyPatch, captu
     assert ran and "limactl start" in ran[0]
 
 
-def test_proxmox_start_skips_when_already_running(monkeypatch: pytest.MonkeyPatch, captured_output: object) -> None:
-    """The empty context refuses any `ctx.secret` read, so a passing
-    guard proves the API client was never built."""
+def test_a_lima_start_that_fails_is_a_typed_error_naming_recover(
+    monkeypatch: pytest.MonkeyPatch, captured_output: object
+) -> None:
+    """``limactl start`` waits ten minutes for the guest's sshd; a broken one must not end in a raw limactl error."""
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+    from agentworks.capabilities.vm_platform.lima_host import LimaCommandFailed
+    from agentworks.errors import ConnectivityError
+
+    platform = LimaPlatform("lima", {"placement": {"mode": "local"}})
+    monkeypatch.setattr(LimaPlatform, "status", lambda self, vm, ctx: VMStatus.STOPPED)
+
+    def run(self: object, cmd: str, **kwargs: object) -> str:
+        raise LimaCommandFailed(f"limactl command failed (exit 1): {cmd}")
+
+    monkeypatch.setattr(LimaHost, "run", run)
+
+    with pytest.raises(ConnectivityError) as caught:
+        platform.start(_vm(), RunContext())  # type: ignore[arg-type]
+
+    assert caught.value.entity_name == "v1"
+    assert "agw vm recover v1" in (caught.value.hint or "")
+    assert isinstance(caught.value.__cause__, LimaCommandFailed)
+
+
+def _proxmox_row() -> object:
+    return SimpleNamespace(name="v1", hostname="v1", platform_metadata={"node": "pve1", "vmid": "100"})
+
+
+@pytest.mark.parametrize(("running", "verb"), [(True, "start"), (False, "stop")])
+def test_proxmox_power_ops_skip_when_already_in_state(
+    monkeypatch: pytest.MonkeyPatch, captured_output: object, running: bool, verb: str
+) -> None:
+    """The guard reads the guest's state from the same answer that confirms the guest is the row's."""
     from agentworks.plugins.proxmox.platform import ProxmoxPlatform
+    from tests._proxmox_fakes import PROXMOX_CONFIG, FakeProxmoxAPI
 
-    platform = ProxmoxPlatform(
-        "px",
-        {"api_url": "https://pve:8006", "node": "n", "token_id": "t", "template_vmid": 1},
-    )
-    monkeypatch.setattr(ProxmoxPlatform, "status", lambda self, vm, ctx: VMStatus.RUNNING)
-    platform.start(_vm(), RunContext())  # type: ignore[arg-type]
+    fake = FakeProxmoxAPI()
+    fake.holder = "v1"
+    fake.running = running
+    monkeypatch.setattr(ProxmoxPlatform, "_api", lambda self, ctx: fake)
+    platform = ProxmoxPlatform("px", dict(PROXMOX_CONFIG))
 
+    getattr(platform, verb)(_proxmox_row(), RunContext())
 
-def test_proxmox_stop_skips_when_already_stopped(monkeypatch: pytest.MonkeyPatch, captured_output: object) -> None:
-    from agentworks.plugins.proxmox.platform import ProxmoxPlatform
-
-    platform = ProxmoxPlatform(
-        "px",
-        {"api_url": "https://pve:8006", "node": "n", "token_id": "t", "template_vmid": 1},
-    )
-    monkeypatch.setattr(ProxmoxPlatform, "status", lambda self, vm, ctx: VMStatus.STOPPED)
-    platform.stop(_vm(), RunContext())  # type: ignore[arg-type]
+    assert fake.ops() == ["vm_status"]
 
 
 def test_proxmox_status_uses_bounded_provider_call(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -161,13 +184,12 @@ def test_proxmox_status_uses_bounded_provider_call(monkeypatch: pytest.MonkeyPat
     class _API:
         def vm_status(self, node: str, vmid: int, *, timeout: float | None = None) -> dict[str, str]:
             calls.append((node, vmid, timeout))
-            return {"status": "running"}
+            return {"status": "running", "name": "v1"}
 
     monkeypatch.setattr(platform, "_api", lambda _ctx: _API())
-    vm = SimpleNamespace(name="v1", platform_metadata={"node": "pve", "vmid": 100})
 
-    assert platform.status(vm, RunContext()) is VMStatus.RUNNING  # type: ignore[arg-type]
-    assert calls == [("pve", 100, 10)]
+    assert platform.status(_proxmox_row(), RunContext()) is VMStatus.RUNNING  # type: ignore[arg-type]
+    assert calls == [("pve1", 100, 10)]
 
 
 def test_wsl2_status_uses_bounded_provider_call(monkeypatch: pytest.MonkeyPatch) -> None:

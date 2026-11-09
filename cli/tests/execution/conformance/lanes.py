@@ -3,10 +3,12 @@
 - **L** runs ``$SHELL -c <remote command>`` locally, through the real
   ``VMAccess`` and pump, with ``ssh_process.build_argv`` replaced by a local
   shell. The account's startup files are set per vector and ``SSH_CLIENT`` is
-  exported as sshd does. It covers the shells and runs on every Linux CI host.
+  exported as sshd does. It covers the shells and runs on every Linux CI host;
+  elsewhere it skips, since agw-launch is a Linux guest program.
 - **S** runs the real client against a rootless local ``sshd`` (loopback, a
   temporary host key and ``AuthorizedKeysFile``, no PAM) and ``trust.write_records``
-  for the test host key. It skips when no ``sshd`` binary exists, and fails on CI.
+  for the test host key. It skips when no ``sshd`` binary exists, and fails on CI;
+  its vectors skip off Linux, as L does.
 - **V** runs against a live VM named by ``AGW_CONFORMANCE_VM``, as the operator's
   own configured admin. It is the integration lane, run by the tester from each
   workstation.
@@ -21,6 +23,7 @@ import os
 import shutil
 import socket
 import subprocess
+import sys
 import time
 import uuid
 from dataclasses import dataclass
@@ -202,6 +205,18 @@ class LocalFilesystem(Lane):
 
 def find_shell(name: str) -> str | None:
     return shutil.which(name)
+
+
+def require_linux_guest() -> None:
+    """Skip unless this machine can stand in for the guest: the L and S lanes run agw-launch here.
+
+    agw-launch is a Linux guest program (it stages a script with
+    ``os.memfd_create`` and reads ``/proc``), so on macOS or Windows those
+    lanes would test a launcher where it never runs. It is not a missing
+    prerequisite to install, so it skips on CI too; CI's lanes run on Linux.
+    """
+    if sys.platform != "linux":
+        pytest.skip("the L and S lanes run agw-launch, a Linux guest program, on this machine")
 
 
 def unavailable(message: str) -> NoReturn:

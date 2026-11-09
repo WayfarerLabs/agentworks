@@ -52,6 +52,7 @@ def conformance_error(descriptor: CapabilityKindDescriptor, impl: type) -> str |
         or _constructibility_error(impl)
         or _config_hook_error(impl)
         or _attributes_error(descriptor, impl)
+        or _retired_error(descriptor, impl)
         or _operations_error(descriptor, impl)
         or _focused_operation_error(descriptor, impl)
         or _version_error(descriptor, impl)
@@ -152,6 +153,16 @@ def _attributes_error(descriptor: CapabilityKindDescriptor, impl: type) -> str |
     missing = sorted(attr for attr in descriptor.required_attributes if getattr(impl, attr, _MISSING) is _MISSING)
     if missing:
         return f"it is missing the required {descriptor.kind} attributes: {', '.join(missing)}"
+    return None
+
+
+def _retired_error(descriptor: CapabilityKindDescriptor, impl: type) -> str | None:
+    for retired, replacement in descriptor.retired_members:
+        if getattr(impl, retired, _MISSING) is not _MISSING:
+            return (
+                f"it defines {retired}, which {descriptor.kind} contract version "
+                f"{descriptor.contract_version} no longer calls; implement {replacement} instead"
+            )
     return None
 
 

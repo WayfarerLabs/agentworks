@@ -28,8 +28,10 @@ from agentworks.artifacts.application import ArtifactApplication
 from agentworks.artifacts.native.common import (
     NativeSessionArtifacts,
     defer,
-    delivery_files,
+    defer_setup_conflicts,
     native_home,
+    prepare_session_delivery,
+    render_setup_artifacts,
     validate_discovery_paths,
     validate_native_command,
     validate_user_placement,
@@ -113,7 +115,11 @@ class GrokBuildConfig(AgwModel):
     enabled_workarounds: Annotated[
         list[Literal["session-rules", "session-agent-definitions"]], MergeStrategy.REPLACE
     ] = Field(default_factory=list)
-    """Explicitly enabled session artifact carriers. An authored list replaces inherited opt-ins."""
+    """Explicitly enabled session artifact carriers; replaces inherited opt-ins.
+
+    ``session-agent-definitions`` remains accepted for config compatibility,
+    but private session personas have no verified carrier and stay unhandled.
+    """
 
     extra_args: Annotated[list[str], MergeStrategy.REPLACE] = Field(default_factory=list)
     """Raw argv tokens appended verbatim after every managed flag and before
@@ -167,10 +173,10 @@ class GrokBuildIntegration(HarnessIntegration):
 
         User and workspace facets publish native rules, skills and agent personas.
         Session artifacts are optional and unhandled by default. `enabled_workarounds`
-        can opt into `session-rules` for rules/hints through `--rules`, and
-        `session-agent-definitions` for personas through `--agents`. Private session
-        skills have no supported workaround; activate the user or workspace facet
-        to publish those skills at their native scope.
+        can opt into `session-rules` for rules/hints through `--rules`. Private session
+        skills and personas have no verified carrier and remain unhandled. The accepted
+        `session-agent-definitions` spelling does not enable persona delivery. Activate
+        the user or workspace facet to publish skills and personas at their native scope.
         """,
     )
 
@@ -194,6 +200,7 @@ class GrokBuildIntegration(HarnessIntegration):
                 invocation.access,
                 tool="grok",
                 environment=invocation.environment,
+                redactions=invocation.secrets.values(),
                 home=invocation.home,
                 check_policy=False,
             )
@@ -203,19 +210,27 @@ class GrokBuildIntegration(HarnessIntegration):
         plan = (
             ArtifactApplication()
             if self.retiring
-            else outer_artifacts(
-                invocation.artifacts, root or native_home(invocation.home, invocation.environment, "GROK_HOME", ".grok")
+            else render_setup_artifacts(
+                invocation,
+                lambda inputs: outer_artifacts(
+                    inputs, root or native_home(invocation.home, invocation.environment, "GROK_HOME", ".grok")
+                ),
             )
         )
         validate_user_placement(plan, invocation.home)
 
         if plan.files:
-            probe_native(
-                invocation.access,
-                tool="grok",
-                environment=invocation.environment,
-                home=invocation.home,
-                files=plan.files,
+            plan = defer_setup_conflicts(
+                plan,
+                invocation,
+                lambda files: probe_native(
+                    invocation.access,
+                    tool="grok",
+                    environment=invocation.environment,
+                    redactions=invocation.secrets.values(),
+                    home=invocation.home,
+                    files=files,
+                ),
             )
         return plan
 
@@ -223,16 +238,21 @@ class GrokBuildIntegration(HarnessIntegration):
         plan = (
             ArtifactApplication()
             if self.retiring
-            else outer_artifacts(invocation.artifacts, f"{invocation.root}/.grok")
+            else render_setup_artifacts(invocation, lambda inputs: outer_artifacts(inputs, f"{invocation.root}/.grok"))
         )
         if plan.files:
-            probe_native(
-                invocation.access,
-                tool="grok",
-                environment=invocation.environment,
-                workspace=invocation.root,
-                files=plan.files,
-                workspace_only=True,
+            plan = defer_setup_conflicts(
+                plan,
+                invocation,
+                lambda files: probe_native(
+                    invocation.access,
+                    tool="grok",
+                    environment=invocation.environment,
+                    redactions=invocation.secrets.values(),
+                    workspace=invocation.root,
+                    files=files,
+                    workspace_only=True,
+                ),
             )
         return plan
 
@@ -248,31 +268,23 @@ class GrokBuildIntegration(HarnessIntegration):
         intent: HarnessLaunchIntent = HarnessLaunchIntent.RESUME_OR_NEW,
     ) -> HarnessStart:
         """Choose the requested fresh, strict-resume, or fallback policy."""
-        self._artifact_plan = session_artifacts(
-            self._session_binding.artifact_context,
-            configured=self.config.rules,
-            extra_args=self.config.extra_args,
-            enabled_workarounds=self.config.enabled_workarounds,
-        )
         artifact_context = self._session_binding.artifact_context
-        if artifact_context is not None and (
-            artifact_context.ancestor_files or self._artifact_plan.application.files or self._artifact_plan.argv
-        ):
-            access = ctx.admin_access() if self._admin else ctx.agent_access()
-            if access is None:
-                raise StateError("artifact delivery requires the actual native launch target")
-            files = delivery_files(artifact_context, self._artifact_plan.application)
-            native_root = probe_native(
-                access,
-                tool="grok",
-                environment=artifact_context.environment,
-                home=artifact_context.home,
-                workspace=self._workspace_path,
-                files=files,
-                session_plugin="--plugin-dir" in self._artifact_plan.argv,
-            )
+        access = ctx.admin_access() if self._admin else ctx.agent_access()
+        self._artifact_plan, native_root = prepare_session_delivery(
+            access,
+            tool="grok",
+            integration=self.name,
+            context=artifact_context,
+            render=lambda prepared: session_artifacts(
+                prepared,
+                configured=self.config.rules,
+                extra_args=self.config.extra_args,
+                enabled_workarounds=self.config.enabled_workarounds,
+            ),
+            workspace=self._workspace_path,
+        )
+        if artifact_context is not None and native_root is not None:
             validate_discovery_paths(artifact_context, (native_root, f"{self._workspace_path}/.grok"))
-
         command = self._resume_or_launch(ctx, intent=intent)
         if intent is HarnessLaunchIntent.FORCE_NEW:
             note = "Fresh Grok Build session requested. Starting a new one without resuming prior state..."

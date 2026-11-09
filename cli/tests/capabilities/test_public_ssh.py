@@ -22,7 +22,7 @@ from agentworks.errors import ConnectivityError, StateError, ValidationError
 from agentworks.execution import client, root_script, trust
 from agentworks.execution.client import SSHClient
 from agentworks.execution.errors import TrustMismatch, TrustMissing
-from agentworks.execution.root_script import RawRun
+from agentworks.execution.root_script import ChannelUnreachable, RawRun
 from agentworks.execution.trust import TrustBinding, TrustMode
 from agentworks.plugins.aws.platform import EC2Platform
 from agentworks.plugins.azure.platform import AzureVMPlatform
@@ -144,8 +144,17 @@ def test_a_refused_key_in_the_client_log_leads_with_the_agent_load_hint_when_the
     assert hint.startswith("ssh-add the key") is (load_hint is not None)  # first: it fires only when likely
 
 
+def test_a_refused_connection_in_the_client_log_raises_as_nothing_ran(monkeypatch: pytest.MonkeyPatch) -> None:
+    answering(monkeypatch, log_text="ssh: connect to host 203.0.113.7 port 22: Connection refused\n", status=None)
+
+    with pytest.raises(public_ssh._ConnectionRefused):
+        target().run_as_root(b"true\n", 5)
+
+
 @pytest.mark.parametrize(
-    "banner", ["Host key verification failed.\n", "Permission denied (publickey).\n"], ids=["host-key", "auth"]
+    "banner",
+    ["Host key verification failed.\n", "Permission denied (publickey).\n", "Connection refused\n"],
+    ids=["host-key", "auth", "refused"],
 )
 def test_failure_text_in_the_log_of_a_script_that_started_is_not_a_failure(
     monkeypatch: pytest.MonkeyPatch, banner: str
@@ -179,15 +188,20 @@ class _Clock:
         self.now += seconds
 
 
-def _answering_after(monkeypatch: pytest.MonkeyPatch, clock: _Clock, seconds: float) -> list[list[str]]:
-    """Refuse at once until ``seconds`` of the fake clock have passed, then answer."""
+_CONNECTION_REFUSED = "ssh: connect to host 203.0.113.7 port 22: Connection refused\n"
+
+
+def _answering_after(
+    monkeypatch: pytest.MonkeyPatch, clock: _Clock, seconds: float, *, log_text: str = ""
+) -> list[list[str]]:
+    """Fail each probe at once, logging ``log_text``, until ``seconds`` of the fake clock have passed, then answer."""
     argvs = answering(monkeypatch)
     answer = root_script.run_process
 
     def run_process(argv: list[str], script: bytes, deadline: float) -> RawRun:
         if clock.now < seconds:
             argvs.append(list(argv))
-            Path(argv[argv.index("-E") + 1]).write_text("")
+            Path(argv[argv.index("-E") + 1]).write_text(log_text)
             return RawRun(b"", b"")
         return answer(argv, script, deadline)
 
@@ -214,12 +228,48 @@ def test_the_wait_warns_its_hint_and_raises_at_its_time_bound(
     clock = _Clock(monkeypatch)
     _answering_after(monkeypatch, clock, float("inf"))
 
-    with pytest.raises(ConnectivityError):
+    with pytest.raises(ChannelUnreachable):
         target().wait_until_answering()
 
     assert (
         public_ssh.PROBE_WAIT_SECONDS <= clock.now < public_ssh.PROBE_WAIT_SECONDS + public_ssh.PROBE_INTERVAL_SECONDS
     )
+    assert captured_output.warnings == [public_ssh.PROBE_FAILURE_HINT]
+
+
+def test_an_address_that_refuses_the_connection_raises_without_the_firewall_warning(
+    monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+) -> None:
+    """A refusal comes from the VM itself, so the allow lets the operator's address through; sshd is what is down."""
+    clock = _Clock(monkeypatch)
+    _answering_after(monkeypatch, clock, float("inf"), log_text=_CONNECTION_REFUSED)
+
+    with pytest.raises(ChannelUnreachable) as caught:
+        target().wait_until_answering()
+
+    assert clock.now >= public_ssh.PROBE_WAIT_SECONDS  # a booting VM refuses too, so the wait still runs out
+    assert captured_output.warnings == []
+    assert caught.value.hint
+
+
+def test_the_firewall_warning_follows_the_last_probe_not_an_earlier_refusal(
+    monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+) -> None:
+    """A VM refuses while it boots; a wait whose last probe went unanswered may still be the allow's mismatch."""
+    clock = _Clock(monkeypatch)
+    argvs = answering(monkeypatch)
+
+    def run_process(argv: list[str], script: bytes, deadline: float) -> RawRun:
+        argvs.append(list(argv))
+        log_text = _CONNECTION_REFUSED if clock.now < public_ssh.PROBE_WAIT_SECONDS / 2 else ""
+        Path(argv[argv.index("-E") + 1]).write_text(log_text)
+        return RawRun(b"", b"")
+
+    monkeypatch.setattr(root_script, "run_process", run_process)
+
+    with pytest.raises(ChannelUnreachable):
+        target().wait_until_answering()
+
     assert captured_output.warnings == [public_ssh.PROBE_FAILURE_HINT]
 
 
@@ -361,6 +411,7 @@ class _Cloud:
                 self.events.append("route-close")
 
         monkeypatch.setattr(cls, "_transient_route", route)
+        monkeypatch.setattr(cls, "close_provisioning_access", lambda platform, vm, ctx: self._ran("access-close"))
         monkeypatch.setattr(cls, "_public_address", lambda platform, vm, ctx: address)
         original = PublicSSH.__init__
 
@@ -407,7 +458,7 @@ def test_a_cloud_runs_one_script_inside_its_own_route_under_vm_trust(
 
     cloud.platform.run_as_root(_vm(), _ctx(), b"true\n", 5)
 
-    assert cloud.events == ["route-open", "probe", "script", "route-close"]
+    assert cloud.events == ["route-open", "probe", "script", "route-close", "access-close"]
     assert [binding.mode for binding in cloud.bindings] == [TrustMode.VM]
 
 
@@ -421,7 +472,7 @@ def test_a_cloud_reads_host_keys_under_an_unverified_file_that_is_gone_afterward
 
     assert cloud.platform.read_host_keys(_vm(), _ctx()) == keys
 
-    assert cloud.events == ["route-open", "probe", "read", "route-close"]
+    assert cloud.events == ["route-open", "probe", "read", "route-close", "access-close"]
     (binding,) = cloud.bindings
     assert binding.mode is TrustMode.UNVERIFIED
     assert binding.provisioning_file is not None
@@ -453,7 +504,7 @@ def test_a_clouds_native_shell_runs_inside_its_own_route_after_the_probe(
 
     assert cloud.platform.native_shell(_vm(), _ctx()) == 3
 
-    assert cloud.events == ["route-open", "probe", "shell", "route-close"]
+    assert cloud.events == ["route-open", "probe", "shell", "route-close", "access-close"]
     assert [binding.mode for binding in cloud.bindings] == [TrustMode.VM]
 
 
@@ -473,7 +524,7 @@ def test_an_interrupted_native_shell_still_closes_its_route(
     with pytest.raises(KeyboardInterrupt):
         cloud.platform.native_shell(_vm(), _ctx())
 
-    assert cloud.events == ["route-open", "probe", "shell", "route-close"]
+    assert cloud.events == ["route-open", "probe", "shell", "route-close", "access-close"]
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="os.kill delivery is POSIX")
@@ -496,7 +547,7 @@ def test_a_termination_during_a_root_script_still_closes_its_route(
     with pytest.raises(KeyboardInterrupt):
         cloud.platform.run_as_root(_vm(), _ctx(), b"true\n", 5)
 
-    assert cloud.events == ["route-open", "probe", "script", "route-close"]
+    assert cloud.events == ["route-open", "probe", "script", "route-close", "access-close"]
 
 
 @pytest.mark.parametrize("factory", CLOUDS, ids=["aws", "azure", "gcp"])
@@ -523,4 +574,4 @@ def test_a_cloud_vm_with_no_public_address_is_a_state_error(
         cloud.platform.run_as_root(_vm(), _ctx(), b"true\n", 5)
 
     assert caught.value.hint
-    assert cloud.events == ["route-open", "route-close"]
+    assert cloud.events == ["route-open", "route-close", "access-close"]

@@ -133,7 +133,7 @@ spec:
     storage: data
     bridge: vmbr0
     pool: agentworks
-    verify_ssl: false
+    verify_ssl: true
 ```
 
 `agw resource explain vm-platform/proxmox` documents every field above with its type, whether it is
@@ -198,13 +198,44 @@ agw vm describe test-vm
 agw vm delete test-vm
 ```
 
+On Proxmox, `vm stop` uses the platform's hard power-off operation. It does not request a graceful
+guest shutdown. Save and flush work before stopping; request shutdown inside the guest when a
+graceful shutdown is needed.
+
+Proxmox gives a freed VM ID to the next VM created, so every command that reaches a VM by its ID
+(`vm start`, `stop`, `describe`, `recover`, `rekey` and `delete`) first checks that the guest
+holding the ID still carries the name its create gave it, the VM's hostname. A VM whose ID nothing
+holds any more, or whose ID another guest now holds, is gone: `agw vm delete` removes its row and
+host-key record without touching that other guest, warning with the ID and the guest's name, and
+every other command refuses it and names `agw vm delete`. When the API token cannot audit the guest
+holding the ID, every command refuses, since nothing shows whether that guest is the VM; check it in
+the Proxmox web UI, and run `agw vm delete --force` to remove the row once you know.
+
+Otherwise `agw vm delete` stops and deletes the VM, and succeeds once Proxmox's destroy task
+completes or a failed delete leaves the ID free. A delete that Proxmox refuses (a locked VM) or that
+gets no answer keeps the VM's row and its host-key record, so run it again once the cause is fixed,
+or delete the VM in Proxmox yourself and run `agw vm delete --force`. When a failed or interrupted
+create cannot remove its clone, it names the VM ID and node and keeps the VM in a failed state for
+`agw vm delete` to remove. A create rollback likewise touches only a guest carrying the new VM's
+name, so a create that lost its ID to another create leaves that VM alone.
+
+Delete logs the VM's node out of Tailscale through the guest agent before it deletes the VM, best
+effort, and does not tear down guest sessions first. When the logout does not run or fails, delete
+names the node to remove from the Tailscale admin console. A VM whose site cannot be bound, such as
+one whose API token secret is unset, is not deleted either: delete refuses, naming its VM ID and
+node. `--force` also deletes dependent workspaces, agents and sessions, and removes the row whenever
+the VM could not be deleted, naming its VM ID and node; it does not skip the confirmation prompt, so
+pass `--yes` for that.
+
 ### Native recovery and interactive access
 
 Agentworks uses QEMU Guest Agent as the root channel that works without Tailscale: create's
 bootstrap and Tailscale join, `agw vm recover`, `vm rekey` and the logout during deletion run their
 root scripts through it. Before each script, Agentworks waits up to about two minutes for the guest
 agent to answer, since a VM that has just started has none running yet; a VM whose agent never
-answers fails with nothing dispatched. A started VM that does not answer over Tailscale SSH fails
+answers fails with nothing dispatched. Create's wait for cloud-init asks again for about seven
+minutes in all, since cloud-init can restart the agent, so a create from a template without the
+agent fails after about seven minutes. A started VM that does not answer over Tailscale SSH fails
 `vm start` with a hint to run `agw vm recover`, which can also restart a broken SSH server here,
 since the guest agent does not depend on it.
 
@@ -233,13 +264,22 @@ After provisioning, normal operations use Tailscale SSH, as they do on Lima and 
 
 ### The guest agent does not answer
 
-A root script, including create's wait for cloud-init, fails with
+A root script fails with
 `the QEMU guest agent of Proxmox VM <vmid>@<node> did not answer, so no script was dispatched` when
-the agent does not answer within about two minutes. Check:
+the agent does not answer within about two minutes; create's wait for cloud-init asks again until
+about seven minutes have passed. Check:
 
 - The guest agent is installed in the template (the setup script handles this via `virt-customize`)
 - The guest agent is enabled in the VM config (`qm set <vmid> --agent enabled=1`)
 - The VM has finished booting: connect with `qm terminal <vmid>` to check
+
+### Create fails with `QGA status failed` during the bootstrap
+
+A template whose `qemu-guest-agent` package has an upgrade pending fails every create: the bootstrap
+upgrades the package, the agent restarts mid-script and forgets the script, and the next status poll
+fails with the agent's own reason (`Agent error: PID <pid> does not exist`). Keep the template's
+cloud-init `ciupgrade` option on, as it is by default, so the upgrade happens during cloud-init,
+whose wait survives the restart, or build the template with its packages already upgraded.
 
 ### The token secret won't resolve
 
@@ -273,5 +313,10 @@ repository, then rerun the script. The script does not alter package sources.
 
 ### Self-signed certificate errors
 
-Set `verify_ssl: false` in the site's `platform` table. This is common for homelab setups without a
-trusted CA.
+Keep certificate verification enabled and trust your Proxmox certificate authority on the
+workstation. Python's TLS trust configuration also accepts `SSL_CERT_FILE` pointing to a PEM CA
+bundle; set it in the environment running Agentworks. The certificate must still match the site's
+API hostname.
+
+`verify_ssl: false` in the site's `platform` table disables certificate verification entirely. Use
+it only when that is the trust policy you intend for this site.

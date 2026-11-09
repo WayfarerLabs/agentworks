@@ -17,13 +17,16 @@ from typing import Any
 
 from agentworks.errors import ProvisioningError
 
+ERROR_BODY_LIMIT_BYTES = 4096
+"""How much of an error response's body is read: enough for Proxmox's JSON errors, and it bounds every message."""
+
 
 def _error_body(error: urllib.error.HTTPError) -> str:
     """An error response's body as text, or what of it could be read: callers branch on the HTTP code."""
     if not error.fp:
         return ""
     try:
-        return error.read().decode("utf-8", errors="replace")
+        return error.read(ERROR_BODY_LIMIT_BYTES).decode("utf-8", errors="replace")
     except (OSError, http.client.HTTPException):
         return ""
 
@@ -34,9 +37,11 @@ class ProxmoxAPIError(ProvisioningError):
     ``code`` carries the HTTP status when the failure was an HTTP error
     (``None`` for a non-HTTP failure), so callers can distinguish an
     auth rejection (401/403) from other failures without parsing the
-    message. Used by the platform's ``runup`` token check."""
+    message, and ``body`` the start of the error response's body, for the
+    one caller that reads Proxmox's error detail (:meth:`ProxmoxAPI.vmid_in_use`)."""
 
     code: int | None = None
+    body: str = ""
 
 
 _QGA_BOOLEAN_FIELDS = ("exited", "out-truncated", "err-truncated")
@@ -121,6 +126,17 @@ def _validate_qga_exec_status(
     return normalized
 
 
+def _vmid_exists(body: str) -> bool:
+    """Whether an error body is Proxmox's ``vmid`` parameter error for a VMID that is taken."""
+    try:
+        parsed = json.loads(body)
+    except json.JSONDecodeError:
+        return False
+    errors = parsed.get("errors") if isinstance(parsed, dict) else None
+    detail = errors.get("vmid") if isinstance(errors, dict) else None
+    return isinstance(detail, str) and "already exists" in detail
+
+
 class ProxmoxAPI:
     """Minimal Proxmox VE REST client."""
 
@@ -182,8 +198,10 @@ class ProxmoxAPI:
             with response as resp:
                 resp_body = resp.read().decode()
         except urllib.error.HTTPError as e:
-            err = ProxmoxAPIError(f"Proxmox API {method} {path} failed ({e.code}): {_error_body(e)}")
+            error_body = _error_body(e)
+            err = ProxmoxAPIError(f"Proxmox API {method} {path} failed ({e.code}): {error_body}")
             err.code = e.code
+            err.body = error_body
             raise err from e
         except (OSError, UnicodeError, http.client.HTTPException) as e:
             raise ProxmoxAPIError(f"Proxmox API {method} {path} failed: {e}") from e
@@ -205,12 +223,32 @@ class ProxmoxAPI:
         result = self._request("GET", "/cluster/nextid")
         return int(result)
 
+    def vmid_in_use(self, vmid: int, *, timeout: float | None = None) -> bool:
+        """Whether any guest in the cluster holds ``vmid``, asked of ``/cluster/nextid``.
+
+        Any valid token may ask, whatever its ACLs, so it also sees guests the
+        token cannot audit. A 200 echoing the VMID means nothing holds it; a
+        400 whose ``vmid`` error says the VM already exists means something
+        does. Any other answer raises, since it shows neither.
+        """
+        try:
+            result = self._request("GET", f"/cluster/nextid?vmid={vmid}", timeout=timeout)
+        except ProxmoxAPIError as error:
+            if error.code == 400 and _vmid_exists(error.body):
+                return True
+            raise
+        if str(result) != str(vmid):
+            raise ProxmoxAPIError(f"Proxmox API GET /cluster/nextid?vmid={vmid} returned a different VMID")
+        return False
+
     # -- VM operations ---------------------------------------------------------
 
     def list_vms(self, node: str) -> list[dict[str, Any]]:
         """List the VMs on a node (GET /nodes/{node}/qemu)."""
         result = self._request("GET", f"/nodes/{node}/qemu")
-        return result if isinstance(result, list) else []
+        if not isinstance(result, list):
+            raise ProxmoxAPIError(f"Proxmox API GET /nodes/{node}/qemu returned a malformed listing")
+        return result
 
     def clone_vm(
         self,
@@ -240,13 +278,14 @@ class ProxmoxAPI:
         """Update VM configuration."""
         self._request("PUT", f"/nodes/{node}/qemu/{vmid}/config", params)
 
-    def resize_disk(self, node: str, vmid: int, disk: str, size: str) -> None:
-        """Resize a VM disk (e.g. disk='scsi0', size='+20G')."""
-        self._request(
+    def resize_disk(self, node: str, vmid: int, disk: str, size: str) -> str | None:
+        """Resize a VM disk (e.g. disk='scsi0', size='+20G'). Returns the task UPID, or ``None`` with no task."""
+        result = self._request(
             "PUT",
             f"/nodes/{node}/qemu/{vmid}/resize",
             {"disk": disk, "size": size},
         )
+        return None if result is None else str(result)
 
     def start_vm(self, node: str, vmid: int) -> str:
         """Start a VM. Returns the task UPID."""
@@ -265,8 +304,11 @@ class ProxmoxAPI:
 
     def vm_status(self, node: str, vmid: int, *, timeout: float | None = None) -> dict[str, Any]:
         """Get current VM status."""
-        result = self._request("GET", f"/nodes/{node}/qemu/{vmid}/status/current", timeout=timeout)
-        return result  # type: ignore[no-any-return]
+        path = f"/nodes/{node}/qemu/{vmid}/status/current"
+        result = self._request("GET", path, timeout=timeout)
+        if not isinstance(result, dict):
+            raise ProxmoxAPIError(f"Proxmox API GET {path} returned a malformed status")
+        return result
 
     # -- Tasks -----------------------------------------------------------------
 

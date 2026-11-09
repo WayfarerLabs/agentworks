@@ -5,11 +5,11 @@ Each of the two scripts has one function that runs it once with
 without its Tailscale or, on a platform whose channel is not sshd, its SSH
 server:
 
-- :func:`repair`, ``agw vm recover``'s one script: restore the admin's
-  authorized key, restart a broken sshd where the channel does not depend on
-  it, install python3, start ``tailscaled`` if it is not running and wait
-  for its state to settle, and join Tailscale only when the node needs a
-  login.
+- :func:`repair`, ``agw vm recover``'s one script: rewrite the admin's
+  ``authorized_keys`` as reinit does, restart a broken sshd, install python3 when agw-launch's
+  interpreter does not run, start ``tailscaled`` if it is not running and
+  wait for its state to settle, and join Tailscale only when the node needs
+  a login.
 - :func:`rekey`, ``vm rekey``'s logout and rejoin with a new auth key.
 
 ``vm delete``'s logout is ``tailscale_join.log_out``, the one logout.
@@ -35,7 +35,7 @@ from typing import TYPE_CHECKING
 
 from agentworks.capabilities.vm_platform.tailscale_join import JOIN_FRAGMENT
 from agentworks.errors import ConnectivityError, StateError
-from agentworks.execution import root_script
+from agentworks.execution import root_script, ssh_process
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -73,41 +73,50 @@ set -eu
 # lives there too.
 PATH="$PATH:/usr/sbin:/sbin"
 admin={admin}
-key={key}
-repair_sshd={repair_sshd}
 
 entry=$(getent passwd "$admin") || {{ echo "the admin account '$admin' does not exist" >&2; exit 1; }}
 home=$(printf '%s\\n' "$entry" | cut -d: -f6)
 keys="$home/.ssh/authorized_keys"
 mkdir -p "$home/.ssh"
-if ! grep -qxF "$key" "$keys" 2>/dev/null; then
-    # A last line without its newline would otherwise run into the key.
-    if [ -s "$keys" ] && [ -n "$(tail -c 1 "$keys")" ]; then printf '\\n' >> "$keys"; fi
-    printf '%s\\n' "$key" >> "$keys"
-fi
+# The whole managed file, as reinit writes it, so a key it no longer lists
+# (one the configured key replaced) stops working now, not at the next reinit.
+# The admin owns this directory, so root writes only a file mktemp just
+# created (mode 0600), never a name the admin could have planted a link at.
+staged=$(mktemp "$keys.XXXXXXXX")
+printf '%s' {authorized_keys} > "$staged"
+mv -f "$staged" "$keys"
 chown -R "$admin:" "$home/.ssh"
 chmod 700 "$home/.ssh"
 chmod 600 "$keys"
 
 # Before the package install, which can take minutes: a VM whose sshd is
-# broken gets its SSH access back first.
-if [ "$repair_sshd" = 1 ]; then
-    # The unit creates sshd's privilege separation directory; a stopped or
-    # masked one may have left none, and the configuration test needs it.
-    install -d -m 0755 /run/sshd
-    sshd -t || {{ echo "sshd's configuration test failed" >&2; exit 1; }}
-    systemctl unmask ssh.service
-    systemctl enable ssh.service
-    systemctl restart ssh.service
-fi
+# broken gets its SSH access back first. This runs on every channel, sshd's
+# own included: a channel that runs this script can still face a stopped,
+# masked or misconfigured sshd (Lima's persistent connection outlives the
+# daemon, and a running daemon does not reread its configuration), and
+# restarting ssh.service, whose KillMode is process, ends no session. The
+# unit creates sshd's privilege separation directory; a stopped or masked
+# one may have left none, and the configuration test needs it.
+install -d -m 0755 /run/sshd
+sshd -t || {{ echo "sshd's configuration test failed" >&2; exit 1; }}
+systemctl unmask ssh.service
+systemctl enable ssh.service
+# A unit that crash-looped on a bad configuration hit its start limit, and
+# systemd refuses to restart it until that is cleared.
+systemctl reset-failed ssh.service
+systemctl restart ssh.service
 
-# Debian's python3 package depends on its standard library, so this also
-# catches a VM with only python3-minimal. Package output goes to stderr,
-# which the operation log keeps, so stdout carries only the joined line.
-# The lock timeout waits out an unattended upgrade instead of failing.
-if ! dpkg -s python3 >/dev/null 2>&1; then
+# The interpreter agw-launch runs is what is tested, not the package: dpkg
+# still reports a removed but not purged python3, and python3-minimal alone
+# runs but has no json. Debian's python3 package depends on its standard
+# library. Package output goes to stderr, which the operation log keeps, so
+# stdout carries only the joined line. The lock timeout waits out an
+# unattended upgrade instead of failing.
+python_runs() {{ {python} -I -S -c 'import json' >/dev/null 2>&1; }}
+if ! python_runs; then
     apt-get -o DPkg::Lock::Timeout=120 update >&2
     DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=120 install -y python3 >&2
+    python_runs || {{ echo "{python} does not run with its standard library after installing python3" >&2; exit 1; }}
 fi
 
 command -v tailscale >/dev/null || {{ echo "Tailscale is not installed" >&2; exit 1; }}
@@ -172,20 +181,21 @@ def repair(
     vm: VMRow,
     ctx: RunContext,
     *,
-    public_key: str,
+    authorized_keys: str,
     auth_key: str,
     log: Callable[[RunRequest, Result], None] | None,
 ) -> RootScriptResult:
     """Run the repair script once; :func:`joined` says whether it joined the tailnet.
 
-    ``public_key`` is the configured key's one line. The sshd repair runs only
-    where the platform's channel does not go through the guest's sshd: where
-    it does, a broken sshd means nothing could run.
+    ``authorized_keys`` is the admin's whole managed file
+    (``ssh_keys.authorized_keys_content``). The sshd repair runs on
+    every platform: that this script runs at all says the channel works now,
+    not that sshd will accept the next connection or survive the next boot.
     """
     payload = _REPAIR.format(
         admin=shlex.quote(vm.admin_username),
-        key=shlex.quote(public_key),
-        repair_sshd=0 if platform.recovery_needs_guest_sshd else 1,
+        authorized_keys=shlex.quote(authorized_keys),
+        python=shlex.quote(ssh_process.DEFAULT_PYTHON),
         backend_state=BACKEND_STATE_FRAGMENT,
         state_reads=SETTLING_STATE_READS,
         state_interval=SETTLING_STATE_INTERVAL_SECONDS,

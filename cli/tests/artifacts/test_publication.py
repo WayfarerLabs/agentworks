@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -48,14 +49,143 @@ def test_owned_file_update_mode_and_idempotent_removal(target):
     assert publish_artifacts(target, (), updated, checkpoints.append, roots=(str(target.home),)).files == ()
 
 
-def test_entire_plan_collision_checked_before_first_write(target):
+def test_conflicting_artifact_does_not_block_an_independent_artifact(target):
     first, second = target.home / "first", target.home / "second"
-    second.write_bytes(b"content")
-    with pytest.raises(StateError):
-        publish_artifacts(
-            target, (artifact(first), artifact(second)), (), lambda files: None, roots=(str(target.home),)
+    second.write_bytes(b"operator content")
+    result = publish_artifacts(
+        target,
+        (artifact(first), replace(artifact(second), origins=("b" * 64,))),
+        (),
+        lambda files: None,
+        roots=(str(target.home),),
+    )
+    assert first.read_bytes() == b"content" and second.read_bytes() == b"operator content"
+    assert tuple(file.path for file in result.files) == (str(first),)
+    assert tuple(file.path for file in result.skipped) == (str(second),)
+
+
+def test_matching_unclaimed_file_is_adopted_and_retired(target, monkeypatch):
+    path = target.home / "matching"
+    path.write_bytes(b"content")
+    path.chmod(0o600)
+    before = path.stat().st_mtime_ns
+    checkpoints: list[tuple[OwnedArtifactFile, ...]] = []
+    reports: list[str] = []
+    monkeypatch.setattr("agentworks.artifacts.publication.output.info", reports.append)
+    result = publish_artifacts(target, (artifact(path),), (), checkpoints.append, roots=(str(target.home),))
+    assert len(result.files) == 1 and checkpoints == [result.files]
+    assert path.stat().st_mtime_ns == before and not result.skipped
+    assert len(reports) == 1 and str(path) in reports[0]
+    assert not publish_artifacts(target, (), result.files, checkpoints.append, roots=(str(target.home),)).files
+    assert not path.exists()
+    assert len(reports) == 2 and str(path) in reports[-1]
+
+
+@pytest.mark.parametrize("count", [1, 3, 5])
+def test_owned_file_retirement_reports_a_bounded_confirmed_summary(target, monkeypatch, count):
+    paths = tuple(target.home / f"retired-{chr(97 + index)}" for index in range(count))
+    previous = publish_artifacts(
+        target, tuple(artifact(path) for path in paths), (), lambda files: None, roots=(str(target.home),)
+    ).files
+    reports: list[str] = []
+    monkeypatch.setattr("agentworks.artifacts.publication.output.info", reports.append)
+    result = publish_artifacts(target, (), previous, lambda files: None, roots=(str(target.home),))
+    assert not result.files and all(not path.exists() for path in paths)
+    assert len(reports) == 1
+    for index, path in enumerate(paths):
+        assert (str(path) in reports[0]) == (index < (count if count <= 3 else 2))
+    reports.clear()
+    publish_artifacts(target, (), result.files, lambda files: None, roots=(str(target.home),))
+    assert not reports
+
+
+def test_owned_file_replacement_reports_confirmed_change_only(target, monkeypatch):
+    path = target.home / "replacement"
+    previous = publish_artifacts(target, (artifact(path),), (), lambda files: None, roots=(str(target.home),)).files
+    reports: list[str] = []
+    monkeypatch.setattr("agentworks.artifacts.publication.output.info", reports.append)
+    desired = (artifact(path, b"new content"),)
+    result = publish_artifacts(target, desired, previous, lambda files: None, roots=(str(target.home),))
+    assert path.read_bytes() == b"new content" and len(reports) == 1
+    assert str(path) in reports[0]
+    reports.clear()
+    publish_artifacts(target, desired, result.files, lambda files: None, roots=(str(target.home),))
+    assert not reports
+
+
+def test_generated_section_retirement_reports_without_removing_operator_content(target, monkeypatch):
+    path = target.home / "AGENTS.md"
+    original = b"Operator guidance.\n"
+    path.write_bytes(original)
+    desired = (replace(artifact(path), generated_section=True),)
+    previous = publish_artifacts(target, desired, (), lambda files: None, roots=(str(target.home),)).files
+    reports: list[str] = []
+    monkeypatch.setattr("agentworks.artifacts.publication.output.info", reports.append)
+    result = publish_artifacts(target, (), previous, lambda files: None, roots=(str(target.home),))
+    remaining = path.read_bytes()
+    assert not result.files and remaining.startswith(original)
+    from agentworks.artifacts.sections import BEGIN, END
+
+    assert remaining[len(original) :] == BEGIN + b"\n" + END + b"\n"
+    assert len(reports) == 1 and str(path) in reports[0]
+
+
+def test_retained_modified_file_is_not_reported_as_removed(target, monkeypatch):
+    path = target.home / "retained"
+    previous = publish_artifacts(target, (artifact(path),), (), lambda files: None, roots=(str(target.home),)).files
+    path.write_bytes(b"operator change")
+    reports: list[str] = []
+    monkeypatch.setattr("agentworks.artifacts.publication.output.info", reports.append)
+    result = publish_artifacts(target, (), previous, lambda files: None, roots=(str(target.home),))
+    assert result.files == previous and path.read_bytes() == b"operator change"
+    assert not reports
+
+
+def test_conflicting_skill_member_preserves_the_whole_package(target):
+    root = target.home / "skills/review"
+    root.mkdir(parents=True)
+    member = root / "run.sh"
+    member.write_bytes(b"operator script")
+    desired = tuple(replace(artifact(root / name), package_root=str(root)) for name in ("SKILL.md", "run.sh"))
+    result = publish_artifacts(target, desired, (), lambda files: None, roots=(str(target.home),))
+    assert not result.files
+    assert {entry.path for entry in result.skipped} == {entry.path for entry in desired}
+    assert not (root / "SKILL.md").exists() and member.read_bytes() == b"operator script"
+
+
+@pytest.mark.parametrize("rootless", [False, True])
+def test_modified_obsolete_member_preserves_requested_skill_as_a_unit(target, rootless, monkeypatch):
+    root = target.home / "skills/review"
+
+    def member(name: str, data: bytes = b"old") -> ArtifactFile:
+        return replace(
+            artifact(root / name, data),
+            package_root=None if rootless else str(root),
+            native_identity="skill:review",
         )
-    assert not first.exists() and second.read_bytes() == b"content"
+
+    previous = publish_artifacts(
+        target, (member("SKILL.md"), member("old.sh")), (), lambda files: None, roots=(str(target.home),)
+    ).files
+    (root / "old.sh").write_bytes(b"operator script")
+    independent = replace(artifact(target.home / "independent", b"independent"), origins=("b" * 64,))
+    desired = (member("SKILL.md", b"new instructions"), member("new.sh", b"new script"), independent)
+    warnings: list[str] = []
+    monkeypatch.setattr("agentworks.artifacts.publication.output.warn", warnings.append)
+    result = publish_artifacts(target, desired, previous, lambda files: None, roots=(str(target.home),))
+    assert len(warnings) == 1 and str(root / "old.sh") in warnings[0]
+    assert (root / "SKILL.md").read_bytes() == b"old"
+    assert (root / "old.sh").read_bytes() == b"operator script"
+    assert not (root / "new.sh").exists()
+    assert Path(independent.path).read_bytes() == independent.data
+    assert {entry.path for entry in result.skipped} == {str(root / name) for name in ("SKILL.md", "old.sh", "new.sh")}
+    assert {file.path for file in result.files} == {file.path for file in previous} | {independent.path}
+    # Resolving the local modification makes retry converge the complete package.
+    (root / "old.sh").write_bytes(b"old")
+    retried = publish_artifacts(target, desired, result.files, lambda files: None, roots=(str(target.home),))
+    assert not retried.skipped and not (root / "old.sh").exists()
+    assert (root / "SKILL.md").read_bytes() == b"new instructions"
+    assert (root / "new.sh").read_bytes() == b"new script"
 
 
 def test_modified_obsolete_file_retains_ownership(target):
@@ -64,18 +194,29 @@ def test_modified_obsolete_file_retains_ownership(target):
     path.write_bytes(b"operator edit")
     assert publish_artifacts(target, (), owned, lambda files: None, roots=(str(target.home),)).files == owned
     assert path.read_bytes() == b"operator edit"
-    with pytest.raises(StateError):
-        publish_artifacts(target, (artifact(path, b"update"),), owned, lambda files: None, roots=(str(target.home),))
+    result = publish_artifacts(
+        target, (artifact(path, b"update"),), owned, lambda files: None, roots=(str(target.home),)
+    )
+    assert result.files == owned and result.skipped[0].path == str(path)
+    assert path.read_bytes() == b"operator edit"
 
 
-def test_modified_file_mode_is_preserved_and_diagnosed(target):
+def test_modified_executable_intent_is_preserved_and_diagnosed(target):
     path = target.home / "managed"
     owned = publish_artifacts(target, (artifact(path),), (), lambda files: None, roots=(str(target.home),)).files
     path.chmod(0o700)
-    with pytest.raises(StateError):
-        publish_artifacts(target, (artifact(path),), owned, lambda files: None, roots=(str(target.home),))
-    assert publish_artifacts(target, (), owned, lambda files: None, roots=(str(target.home),)).files == owned
-    assert path.exists() and path.stat().st_mode & 0o777 == 0o700
+    result = publish_artifacts(target, (artifact(path),), owned, lambda files: None, roots=(str(target.home),))
+    assert result.files == owned and result.skipped[0].path == str(path)
+    assert path.stat().st_mode & 0o777 == 0o700
+
+
+def test_matching_unclaimed_content_converges_permissions_without_changing_executable_intent(target):
+    path = target.home / "matching"
+    path.write_bytes(b"content")
+    path.chmod(0o644)
+    result = publish_artifacts(target, (artifact(path),), (), lambda files: None, roots=(str(target.home),))
+    assert len(result.files) == 1 and not result.skipped
+    assert path.read_bytes() == b"content" and path.stat().st_mode & 0o777 == 0o600
 
 
 def test_checkpoint_failure_stops_further_publication(target):
@@ -89,6 +230,10 @@ def test_checkpoint_failure_stops_further_publication(target):
         publish_artifacts(target, (artifact(first), artifact(second)), (), unavailable, roots=(str(target.home),))
     assert first.exists() and not second.exists()
     assert not list((target.root / "tmp").iterdir())
+    retried = publish_artifacts(
+        target, (artifact(first), artifact(second)), (), lambda files: None, roots=(str(target.home),)
+    )
+    assert len(retried.files) == 2 and not retried.skipped
 
 
 def test_scope_escape_and_links_are_refused(target):

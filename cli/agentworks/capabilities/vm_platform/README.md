@@ -159,8 +159,8 @@ replicating it in another category would cross the platform's ownership boundary
 3. **Local platforms** (local Lima, `wsl2`). The host is the operator's own machine and exposure is
    inherently host-local (Lima forwards guest SSH to a local port, `localPort: 0` in
    `LIMA_TEMPLATE`; WSL2 traffic rides `wsl.exe` into a NAT'd virtual network). There is nothing to
-   arm or lift, which is why `secure_failed_vm` correctly stays at its default here and the clouds'
-   private route machinery has no counterpart.
+   arm or lift, which is why `close_provisioning_access` correctly stays at its default here and the
+   clouds' private route machinery has no counterpart.
 
 ### The Platform Surface
 
@@ -178,8 +178,8 @@ and DB migration.
   treats a failed collision query as absence
   ([#719](https://github.com/WayfarerLabs/agentworks/issues/719)). A create that cannot confirm
   rollback raises `RetainedProvisioningError` with addressable platform metadata; core persists that
-  metadata and retains the provisional row so `vm delete` can finish cleanup. EC2 currently
-  implements this retained-cleanup handoff; the other platforms are tracked in
+  metadata and retains the provisional row so `vm delete` can finish cleanup. EC2, Proxmox, Lima and
+  WSL2 implement this retained-cleanup handoff; Azure and GCE are tracked in
   [#718](https://github.com/WayfarerLabs/agentworks/issues/718).
 - `start(vm, ctx)`, `stop(vm, ctx)`, `delete(vm, ctx)` are flagged `@idempotent_op` and must land in
   the same place run twice as run once. The marker is inherited through the MRO, so an override does
@@ -192,16 +192,25 @@ and DB migration.
   an account-bound row; an ambiguous legacy `NotFound` retains the row. A delete that cannot remove
   the backend VM must raise because core drops the row only on success (#329). Azure confirms VM
   absence, GCE confirms instance absence before removing its lifetime deny, and EC2 verifies account
-  and ownership before terminating, waiting, and deleting its security group. Lima, WSL2, and
-  Proxmox remain fire-and-forget (#356).
+  and ownership before terminating, waiting, and deleting its security group. Proxmox first confirms
+  the guest at the VMID carries the name its create gave it, since a freed VMID is reissued, and
+  counts it gone when `/cluster/nextid` says nothing holds the VMID or another guest holds it, and
+  Lima relies on `limactl delete --force`, which fails unless the instance is gone or was never
+  there. WSL2 counts the distro gone only when `wsl --list` does not name it and either
+  `wsl --unregister` or the listing exited 0, or the listing reports that no distro is installed at
+  all; a listing that fails shows nothing.
 - `status(vm, ctx) -> VMStatus` is a read-only query.
 - `display_backend_name(vm) -> str` is pure display and takes no `ctx`.
 - `run_as_root(vm, ctx, script, deadline) -> RawRun` **MUST** run `/bin/bash -s` as root through the
   platform's own channel, independent of the VM's Tailscale state, with `script` on its stdin and
-  nowhere else, **MUST** run it once, and **MUST** return both streams without a status. Its
-  docstring in `base.py` is the full contract. The clouds inherit theirs from
-  `public_ssh.PublicAddressPlatform`, supplying how to read the live public address, the console
-  hint for a VM without one, and their route (below).
+  nowhere else, **MUST** run it once, and **MUST** return both streams without a status. A channel
+  that waits for the VM to answer before it dispatches anything (the clouds' public SSH and
+  Proxmox's guest agent each wait about two minutes) **MUST** raise `root_script.ChannelUnreachable`
+  when that wait runs out, since nothing was dispatched: callers then stop instead of retrying, and
+  do not try a logout they could not deliver. Any other channel failure raises `ConnectivityError`,
+  whose outcome is unknown. Its docstring in `base.py` is the full contract. The clouds inherit
+  theirs from `public_ssh.PublicAddressPlatform`, supplying how to read the live public address, the
+  console hint for a VM without one, and their route (below).
 - `read_host_keys(vm, ctx)` has a default over `run_as_root`; the clouds' base reads under an
   Unverified provisioning file and refuses a VM that already has a record.
 - `native_shell(vm, ctx) -> int` is optional: the default offers no shell, and a platform offers one
@@ -225,20 +234,25 @@ method semantics or ask a platform to interpret Debian's current release.
 
 **The clouds' route.** `public_ssh.PublicAddressPlatform`, the clouds' shared base, opens its own
 route around every `run_as_root`, `read_host_keys` and `native_shell` call and closes it before the
-call returns, so no firewall allow outlives one call; on macOS and Linux `SIGTERM` and `SIGHUP`
-unwind like Ctrl-C while the route may be open, so they close it too. Each cloud supplies it
-privately, as an abstract member of that base: `_transient_route(vm, ctx)`, a context manager that
-opens this call's own SSH allow scoped to the operator's egress prefixes (widened by
-`ctx.config.operator.ssh_allow_cidrs`) and removes exactly it in a `finally`. When the VM never
-answers, `PublicSSH.wait_until_answering` warns `public_ssh.PROBE_FAILURE_HINT`, the
-`ssh_allow_cidrs` advice. Azure also heals a missing public IP and converges the NSG onto the
-baseline-deny model on enter; concurrent operations on one VM each own an independent rule, so they
-never cross-remove. EC2 needs no public-IP heal (a running instance receives an address
-automatically), but its rule model forces a divergence: an EC2 ingress rule's identity is its
-`(protocol, port, cidr)` tuple, not a name, so two concurrent routes from one operator egress share
-ONE rule rather than owning independent ones. The poke is therefore idempotent (tolerate
-`InvalidPermission.Duplicate`) and the per-op remove tolerant (tolerate
-`InvalidPermission.NotFound`), failing CLOSED (the deny baseline), never open; see
+call returns, so no firewall allow outlives one call; `SIGTERM`, `SIGHUP` and, on Windows,
+`SIGBREAK` (Ctrl-Break) unwind like Ctrl-C while the route may be open, so they close it too. Once
+the route has closed, the base also calls `close_provisioning_access` (below). Each cloud supplies
+it privately, as an abstract member of that base: `_transient_route(vm, ctx)`, a context manager
+that opens this call's own SSH allow scoped to the operator's egress prefixes (widened by
+`ctx.config.operator.ssh_allow_cidrs`) and removes exactly it in a `finally`, under
+`interrupts_deferred`, so an interrupt that lands during the removal waits for it; Azure and GCP
+bound that wait, warning that the rule may remain when the provider has not answered in time. When
+the VM never answers, `PublicSSH.wait_until_answering` warns `public_ssh.PROBE_FAILURE_HINT`, the
+`ssh_allow_cidrs` advice, unless the address refused the last probe's connection: the allow let it
+through, and the `ChannelUnreachable` it raises names a restart for an SSH server that is not
+running. Azure also heals a missing public IP and converges the NSG onto the baseline-deny model on
+enter; concurrent operations on one VM each own an independent rule, so they never cross-remove. EC2
+needs no public-IP heal (a running instance receives an address automatically), but its rule model
+forces a divergence: an EC2 ingress rule's identity is its `(protocol, port, cidr)` tuple, not a
+name, so two concurrent routes from one operator egress share ONE rule rather than owning
+independent ones. The poke is therefore idempotent (tolerate `InvalidPermission.Duplicate`) and the
+per-op remove tolerant (tolerate `InvalidPermission.NotFound`, or a success that lists the rule
+under `UnknownIpPermissions`), failing CLOSED (the deny baseline), never open; see
 `plugins/aws/network.py`. GCE uses a distinct UUID-suffixed firewall rule and provider ID for each
 route, so concurrent routes close independently. The route's calls read the credential from `ctx`,
 so a credentials-configured site authenticates as itself with no ambient fallback.
@@ -250,29 +264,34 @@ the VM is running or was just started:
   keepalive that holds the distro against Windows' idle-shutdown for the span of a command, with
   Win32 Job-Object orphan-proofing for a hard-killed `agw`. No `ctx`: every hold that exists is
   local and makes no backend call. A cloud hold that did would take `ctx` as the ops do.
-- `post_tailscale_ready(vm, ctx) -> None` (default no-op). The contract is "close provisioning
-  access": Phase A calls it once the VM answers over Tailscale and the VM contract has passed. Azure
-  deletes the ephemeral bootstrap SSH allow rule here, leaving the VM with zero inbound exposure
-  behind its permanent deny-all-inbound baseline (the public IP itself stays attached for the VM's
-  whole lifetime); EC2 revokes exactly the bootstrap allow's tuples (recorded in platform_metadata
-  at create) to the same end, so a concurrent native route's distinct allow survives; GCE removes
-  its provider-ID-owned stable allow and retains its priority-1 all-ingress deny. The asymmetry with
-  the per-call route is intentional: the bootstrap ingress opens inside `create()` (cloud-init needs
-  inbound SSH from the operator), and neither that nor this closing point is context-manager-shaped.
-- `secure_failed_vm(vm, ctx) -> None` (default no-op). Same contract as `post_tailscale_ready`, for
-  the paths where a completed create is kept after Phase A fails (first contact, enrollment or the
-  VM contract, which marks the row FAILED) or the operator interrupts it (the row stays incomplete);
-  the success-only hook never fired on either. Create-time bootstrap failure stays inside the
-  platform rollback window and never reaches this hook. Azure and GCE delete the owned fixed-name
-  bootstrap allow and EC2 revokes the recorded bootstrap tuples, so the VM defaults to zero inbound
-  exposure. The ordinary-command gate refuses the kept VM, `vm shell --platform` included, so
-  debugging goes through the platform's serial console (not firewall-gated); `vm delete`'s logout
-  opens its own per-operation allow.
+- `close_provisioning_access(vm, ctx) -> None` (default no-op). Phase A calls it once, from a
+  `finally` around its span, so it runs whether the VM contract passed, Phase A failed (the row is
+  marked FAILED) or the operator interrupted it (the row stays incomplete). The clouds' base calls
+  it again each time a route closes, so an allow a failed close left is removed by the next
+  `vm recover`, `vm rekey`, delete's logout or `vm shell --platform`; a close with nothing left to
+  remove must therefore be a silent no-op. Both callers go through
+  `close_provisioning_access_or_warn`, which holds Ctrl-C and the terminations until the close
+  returns and then raises the interrupt, so one that lands mid-close cannot leave the allow open. A
+  create that fails before it returns rolls back its own ingress inside the platform's rollback
+  window and never reaches this hook. Azure deletes the ephemeral bootstrap SSH allow rule here,
+  leaving the VM with zero inbound exposure behind its permanent deny-all-inbound baseline (the
+  public IP itself stays attached for the VM's whole lifetime); EC2 revokes exactly the bootstrap
+  allow's tuples (recorded in platform_metadata at create) to the same end, so a concurrent native
+  route's distinct allow survives; GCE removes its provider-ID-owned stable allow and retains its
+  priority-1 all-ingress deny. The asymmetry with the per-call route is intentional: the bootstrap
+  ingress opens inside `create()` (cloud-init needs inbound SSH from the operator), and neither that
+  nor this closing point is context-manager-shaped. The hook must not assume the VM is reachable or
+  complete, and callers treat it as best effort: a failure warns with what the hook raised, so an
+  error should name the rule it left, and the warning adds the command that finishes the close; an
+  error or interrupt already propagating keeps going. The ordinary-command gate refuses a VM Phase A
+  did not complete, `vm shell --platform` included, so debugging such a VM goes through the
+  platform's serial console (not firewall-gated); `vm delete`'s logout opens its own per-operation
+  allow.
 
-The two closing hooks and the route take `ctx` because opening or closing the firewall route (an
-Azure NSG rule, an EC2 security-group rule) is a backend call; Phase A (`phase_a.bootstrap`) passes
-the two closing hooks the create's own scoped context, whose secrets are already resolved before
-Phase A begins, so even the interrupt path never resolves a secret for the first time.
+The closing hook and the route take `ctx` because opening or closing the firewall route (an Azure
+NSG rule, an EC2 security-group rule) is a backend call; Phase A (`phase_a.bootstrap`) passes the
+closing hook the create's own scoped context, whose secrets are already resolved before Phase A
+begins, so even the interrupt path never resolves a secret for the first time.
 
 Callers must pass the context their composition root already built for the platform's ops
 (`gated_vm_boundary` and `_live_vm_boundary` in `agentworks.vms.manager.boundary` both hand one out;
@@ -700,8 +719,10 @@ VNet / disk creation and calls `cleanup_vm_resources` on any exception). The sam
 an operator interrupt (`KeyboardInterrupt`) across the whole create span, including any inline
 readiness or bootstrap wait: warn with "Ctrl-C again to abandon" guidance, tear down what this
 create made, and re-raise the ORIGINAL interrupt; a second Ctrl-C abandons the cleanup loudly,
-naming the exact manual removal (Azure's `rollback_create_on_interrupt`; Proxmox, Lima, WSL2, and
-EC2 do the same over their single VM / instance / distro). That is distinct from, and composes
+naming the exact manual removal (Azure's `rollback_create_on_interrupt`). A platform that implements
+the retained-cleanup handoff (EC2, Proxmox, Lima and WSL2) raises `RetainedProvisioningError`
+instead whenever its cleanup, after a failure or an interrupt, is abandoned or cannot show the
+backend clean, so core keeps the row for `vm delete` to finish. That is distinct from, and composes
 under, the orchestrator's DB-row unwind (ADR 0019's `RealizationLog` / node `teardown`), which rolls
 back the persisted VM row. The platform's sweep undoes backend-side resources created inside
 `create()`; the orchestrator undoes the Agentworks-side record on top of it.

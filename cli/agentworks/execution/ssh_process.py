@@ -26,6 +26,7 @@ from agentworks.execution.client import install_guidance
 from agentworks.execution.envelope import classify
 from agentworks.execution.errors import ClientUnsupported
 from agentworks.execution.results import Completion, Result, Unknown
+from agentworks.programs import resolve_program
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -61,6 +62,9 @@ HOST_KEY_FAILURE = "Host key verification failed"
 # What the client logs when the server refused every key it offered, whatever follows the
 # parenthesis (a server that also allows other methods lists them there).
 AUTH_FAILURE = "Permission denied (publickey"
+# What the client logs when the address answered and nothing listens on the port: ssh's
+# "connect to host H port P: Connection refused", from the operating system's own text.
+CONNECTION_REFUSED = "Connection refused"
 
 _HOST = re.compile(r"[A-Za-z0-9_:][A-Za-z0-9_.:-]*")
 _USER = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]*\$?")
@@ -303,15 +307,22 @@ def spawn(
 ) -> subprocess.Popen[bytes]:
     """Start the process, or raise a typed error naming what could not start.
 
-    The one place a client process is started, so the environment strip and the
-    error mapping exist once. ``None`` for a stream inherits the operator's.
-    The OpenSSH client that cannot start is :class:`ClientUnsupported`; any
-    other program (a platform's ``limactl`` or ``wsl.exe``) is a
-    ``ConnectivityError`` naming it.
+    The one place a client process is started, so the environment strip, the
+    program lookup and the error mapping exist once. A bare program name (local
+    Lima's ``limactl``) is looked up by :func:`agentworks.programs.resolve_program`,
+    never in the current directory. ``None`` for a stream inherits the
+    operator's. The OpenSSH client that cannot start is
+    :class:`ClientUnsupported`; any other program (a platform's ``limactl`` or
+    ``wsl.exe``) is a ``ConnectivityError`` naming it.
     """
     try:
         return subprocess.Popen(
-            list(argv), stdin=stdin, stdout=stdout, stderr=stderr, bufsize=bufsize, env=child_environment()
+            [resolve_program(argv[0]), *argv[1:]],
+            stdin=stdin,
+            stdout=stdout,
+            stderr=stderr,
+            bufsize=bufsize,
+            env=child_environment(),
         )
     except OSError as error:
         reason = error.strerror or str(error)

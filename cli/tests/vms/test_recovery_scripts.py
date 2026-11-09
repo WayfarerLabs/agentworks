@@ -1,8 +1,9 @@
 """Core's recovery scripts, run for real by a local ``/bin/bash -s`` against stub system commands.
 
 Every command the scripts reach that would touch the system (``getent``,
-``dpkg``, ``apt-get``, ``install``, ``sshd``, ``systemctl``, ``tailscale``,
-``sleep``) is a stub first on ``PATH`` that records its arguments, so each
+``apt-get``, ``install``, ``sshd``, ``systemctl``, ``tailscale``, ``sleep``)
+is a stub first on ``PATH``, and agw-launch's interpreter, which the repair
+names by absolute path, is one too. Each records its arguments, so each
 test asserts what the script did, and its status, without root. The admin is
 the current user, with a scratch home.
 """
@@ -22,7 +23,7 @@ import pytest
 
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform.tailscale_join import log_out
-from agentworks.execution import root_script
+from agentworks.execution import root_script, ssh_process
 from agentworks.vms import recovery
 
 if TYPE_CHECKING:
@@ -38,13 +39,15 @@ pytestmark = pytest.mark.skipif(
 
 KEY = "tskey-auth-scripts-0123456789"
 PUBLIC_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOU3HUqrGubKZio8MVx9WOFPYHGIHl5tIyF3skwoAxv0 operator@host"
+AUTHORIZED_KEYS = f"# managed\n{PUBLIC_KEY}\n"
 
 _STUB = """#!/bin/bash
 name=$(basename "$0")
 printf '%s %s\\n' "$name" "$*" >> "{root}/calls"
 case "$name" in
     getent) [ "$2" = "{admin}" ] && printf '%s:x:1000:1000::{root}/home:/bin/bash\\n' "$2" && exit 0; exit 2 ;;
-    dpkg) exit "$(cat {root}/dpkg-status)" ;;
+    python3) exit "$(cat {root}/python-status)" ;;
+    apt-get) case "$*" in *" install "*) cat {root}/python-after-install > {root}/python-status ;; esac ;;
     sshd) exit "$(cat {root}/sshd-status)" ;;
     systemctl) [ "$1" = is-active ] && exit "$(cat {root}/tailscaled-active)" ;;
     tailscale)
@@ -99,19 +102,28 @@ class _Platform:
 
 
 @pytest.fixture
-def guest(tmp_path: Path) -> Guest:
+def guest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Guest:
     admin = getpass.getuser()
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     stub = _STUB.format(root=tmp_path, admin=admin)
-    for name in ("getent", "dpkg", "apt-get", "install", "sshd", "systemctl", "tailscale", "sleep"):
-        path = bin_dir / name
+    # The interpreter stub is off PATH: the scripts' own python3 reads Tailscale's JSON for real.
+    interpreter_dir = tmp_path / "interpreter"
+    interpreter_dir.mkdir()
+    for path in [
+        bin_dir / name for name in ("getent", "apt-get", "install", "sshd", "systemctl", "tailscale", "sleep")
+    ]:
         path.write_text(stub)
         path.chmod(stat.S_IRWXU)
+    interpreter = interpreter_dir / "python3"
+    interpreter.write_text(stub)
+    interpreter.chmod(stat.S_IRWXU)
+    monkeypatch.setattr(ssh_process, "DEFAULT_PYTHON", str(interpreter))
     (tmp_path / "home").mkdir()
     made = Guest(tmp_path)
     for knob, value in (
-        ("dpkg-status", "0"),
+        ("python-status", "0"),
+        ("python-after-install", "0"),
         ("sshd-status", "0"),
         ("state", "Running"),
         ("logout-status", "0"),
@@ -134,7 +146,7 @@ def _repair(guest: Guest, *, needs_guest_sshd: bool = True, admin: str | None = 
         _platform(guest, needs_guest_sshd=needs_guest_sshd),
         _vm(admin),
         RunContext(),
-        public_key=PUBLIC_KEY,
+        authorized_keys=AUTHORIZED_KEYS,
         auth_key=KEY,
         log=None,
     )
@@ -150,7 +162,7 @@ def test_a_running_node_is_not_joined_and_the_key_is_restored_once(guest: Guest)
     assert (first.status, second.status) == (0, 0)
     assert not recovery.joined(first)
     assert guest.called("tailscale") == ["tailscale status --json"] * 2
-    assert guest.authorized_keys == [PUBLIC_KEY]
+    assert guest.authorized_keys == AUTHORIZED_KEYS.splitlines()
 
 
 def test_a_node_that_needs_a_login_joins_with_the_key_on_stdin(guest: Guest) -> None:
@@ -192,45 +204,63 @@ def test_any_other_state_fails_without_a_join(guest: Guest) -> None:
     assert guest.called("tailscale") == ["tailscale status --json"]
 
 
-@pytest.mark.parametrize("installed", [True, False])
-def test_python3_is_installed_only_when_dpkg_does_not_report_it(guest: Guest, installed: bool) -> None:
-    guest.set("dpkg-status", "0" if installed else "1")
+@pytest.mark.parametrize("runs", [True, False])
+def test_python3_is_installed_only_when_the_launchers_interpreter_does_not_run(guest: Guest, runs: bool) -> None:
+    """Whatever dpkg says: a removed but unpurged python3 is still reported as installed."""
+    guest.set("python-status", "0" if runs else "1")
 
     assert _repair(guest).status == 0
 
-    assert guest.called("dpkg") == ["dpkg -s python3"]
+    assert guest.called("python3")[0] == "python3 -I -S -c import json"
     installs = [call for call in guest.called("apt-get") if call.endswith(" install -y python3")]
-    assert len(installs) == (0 if installed else 1)
+    assert len(installs) == (0 if runs else 1)
+    assert len(guest.called("python3")) == (1 if runs else 2)
 
 
-def test_sshd_is_repaired_only_where_the_channel_does_not_use_it(guest: Guest) -> None:
-    restart = "systemctl restart ssh.service"
+def test_an_install_that_leaves_the_interpreter_unrunnable_fails_the_repair(guest: Guest) -> None:
+    guest.set("python-status", "1")
+    guest.set("python-after-install", "1")
 
-    assert _repair(guest, needs_guest_sshd=True).status == 0
-    assert restart not in guest.calls
+    result = _repair(guest)
 
-    assert _repair(guest, needs_guest_sshd=False).status == 0
-    assert restart in guest.calls
+    assert result.status == 1
+    assert guest.called("tailscale") == []
+
+
+@pytest.mark.parametrize("needs_guest_sshd", [True, False])
+def test_sshd_is_repaired_whatever_the_channel(guest: Guest, needs_guest_sshd: bool) -> None:
+    """A channel through sshd can run the script while sshd is stopped or masked (Lima's persistent connection)."""
+    assert _repair(guest, needs_guest_sshd=needs_guest_sshd).status == 0
+
+    assert [call for call in guest.calls if call.endswith(" ssh.service")] == [
+        "systemctl unmask ssh.service",
+        "systemctl enable ssh.service",
+        "systemctl reset-failed ssh.service",  # a unit that crash-looped refuses a restart until this
+        "systemctl restart ssh.service",
+    ]
 
 
 def test_sshd_is_repaired_before_python3_is_installed(guest: Guest) -> None:
     """A broken sshd gets SSH access back before an install that can take minutes."""
-    guest.set("dpkg-status", "1")
+    guest.set("python-status", "1")
 
-    assert _repair(guest, needs_guest_sshd=False).status == 0
+    assert _repair(guest).status == 0
 
     commands = [call.split(" ", 1)[0] for call in guest.calls]
     assert commands.index("sshd") < commands.index("apt-get")
 
 
-def test_a_key_file_without_a_final_newline_keeps_its_last_key_whole(guest: Guest) -> None:
+def test_a_key_the_managed_file_does_not_list_is_removed(guest: Guest) -> None:
+    """Rotating a compromised key: the key the configured one replaced stops working at the recover."""
     keys = guest.root / "home" / ".ssh" / "authorized_keys"
     keys.parent.mkdir()
-    keys.write_text("ssh-ed25519 AAAAexisting other@host")
+    keys.write_text(f"ssh-ed25519 AAAAreplaced old@host\n{PUBLIC_KEY}\n")
 
     assert _repair(guest).status == 0
 
-    assert guest.authorized_keys == ["ssh-ed25519 AAAAexisting other@host", PUBLIC_KEY]
+    assert guest.authorized_keys == AUTHORIZED_KEYS.splitlines()
+    assert stat.S_IMODE(keys.stat().st_mode) == 0o600
+    assert [path.name for path in keys.parent.iterdir()] == ["authorized_keys"]  # no staging file left
 
 
 @pytest.mark.parametrize("active", [True, False])
@@ -249,7 +279,7 @@ def test_tailscaled_is_started_before_its_state_is_read_only_when_it_is_not_runn
 def test_an_sshd_configuration_that_fails_its_test_is_not_restarted(guest: Guest) -> None:
     guest.set("sshd-status", "255")
 
-    result = _repair(guest, needs_guest_sshd=False)
+    result = _repair(guest)
 
     assert result.status == 1
     assert "systemctl restart ssh.service" not in guest.calls

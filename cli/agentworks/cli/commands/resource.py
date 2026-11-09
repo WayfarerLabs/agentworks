@@ -331,6 +331,7 @@ def resource_edit(
     from agentworks import output
     from agentworks.bootstrap import load_request_registry
     from agentworks.config import load_config
+    from agentworks.programs import resolve_program
     from agentworks.resources.access import parse_resource_identity
     from agentworks.resources.inspect import edit_location
 
@@ -382,7 +383,7 @@ def resource_edit(
     # simple, per the maintainer's scope ruling.) Framed by the shared
     # helper so this reads the same as the errors that sent them here.
     output.info(f"Editing {kind}/{name} ({location_text(SourceLocation(file=path, line=line))})")
-    raise typer.Exit(subprocess.call([editor, str(path)]))
+    raise typer.Exit(subprocess.call([resolve_program(editor), str(path)]))
 
 
 @resource_app.command("sample")

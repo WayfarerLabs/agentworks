@@ -14,13 +14,17 @@ import pytest
 
 from agentworks.capabilities.vm_platform import tailscale_join
 from agentworks.db import ProvisioningStatus, VMStatus
+from agentworks.db.instance_state import AppliedStateKey
 from agentworks.errors import ConnectivityError, StateError, UserAbort, ValidationError
 from agentworks.execution import reachability, trust
 from agentworks.execution.root_script import RawRun
 from agentworks.plugins.proxmox.api import ProxmoxAPIError
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
+from agentworks.ssh_identity import VerifiedSSHIdentity
 from agentworks.vms import manager as vm_manager
+from agentworks.vms.applied_state import VMSSHIdentityState, compare_vm_ssh_identity, encode_ssh_identity
+from agentworks.vms.manager.boundary import require_vm_ssh_boundary
 from tests._root_channel_fakes import ADDRESS, Answer, FakeGuest
 from tests.conftest import seed_vm_trust
 from tests.ssh_fixtures import fake_host_key
@@ -46,7 +50,7 @@ def _world(monkeypatch: pytest.MonkeyPatch, vm_access_recorder: AccessRecorder) 
     synced: list[str] = []
     monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", KEY)
     monkeypatch.setattr(vm_manager, "verify_tailscale_available", lambda: None)
-    monkeypatch.setattr("agentworks.ssh_config.sync_ssh_config", lambda config, db: synced.append("sync"))
+    monkeypatch.setattr("agentworks.ssh_config.sync_ssh_config", lambda config, db, **kwargs: synced.append("sync"))
     monkeypatch.setattr("agentworks.capabilities.vm_platform.tailscale_join.time.sleep", lambda seconds: None)
     return synced
 
@@ -141,6 +145,46 @@ def test_a_healthy_node_is_repaired_read_and_verified_with_the_key_resolved_once
     assert waits == [reachability.Wording.VERIFY]
     row = db.get_vm("box")
     assert row is not None and row.tailscale_host == NEW_ADDRESS
+
+
+def test_the_ssh_config_is_synced_even_when_the_address_did_not_change(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+    _world: list[str],
+) -> None:
+    """The aliases name the configured key, which the repair just installed: after a key change it is a new one."""
+    _seed(db)
+    _guest(monkeypatch, address=Answer(stdout=f"{ADDRESS}\n".encode()))
+    _waits(monkeypatch)
+
+    _recover(db, make_config())
+
+    assert _world == ["sync"]
+
+
+@pytest.mark.parametrize("agents", [[], ["coder", "reviewer"]], ids=["no-agents", "agents"])
+def test_a_recovered_vm_s_agents_are_named_as_keeping_the_previous_key(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+    agents: list[str],
+) -> None:
+    """The repair rewrites only the admin's keys, so after a key change the agents need their own reinit."""
+    _seed(db)
+    for agent in agents:
+        db.insert_agent(agent, "box", f"agt-{agent}")
+    _guest(monkeypatch)
+    _waits(monkeypatch)
+
+    _recover(db, make_config())
+
+    # The note is the one line naming the agents; with none, no line names one.
+    noted = [line for line in captured_output.info if any(agent in line for agent in ("coder", "reviewer"))]
+    assert len(noted) == (1 if agents else 0)
+    assert all(agent in noted[0] for agent in agents)
 
 
 def test_the_operation_log_never_holds_the_key(
@@ -265,6 +309,28 @@ def test_a_repair_that_does_not_succeed_stops_before_the_address_read(
     assert waits == []
 
 
+@pytest.mark.parametrize("platform_name", ["wsl2", "aws-ec2"])
+@pytest.mark.parametrize("status", [1, None], ids=["failed", "unknown"])
+def test_a_failed_repair_names_the_native_shell_only_when_the_channel_answered(
+    platform_name: str, status: int | None
+) -> None:
+    """A repair that exited ran through the channel the native shell uses; one with no outcome may have lost it."""
+    from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
+    from agentworks.execution.root_script import RootScriptResult
+    from agentworks.plugins.aws.platform import EC2Platform
+    from agentworks.vms.manager.recover import _repair_hint
+
+    platform = (
+        WSL2Platform("wsl2", {})
+        if platform_name == "wsl2"
+        else EC2Platform("aws-site", {"region": "us-east-1", "auth": {"mode": "ambient"}})
+    )
+
+    hint = _repair_hint(platform, "box", RootScriptResult(status, b"", b"", ""))
+
+    assert ("agw vm shell --platform box" in hint) is (status is not None)
+
+
 def test_a_repaired_vm_that_does_not_answer_raises(
     db: Database,
     make_config,  # noqa: ANN001
@@ -319,6 +385,10 @@ class _BootingGuestAgent:
         self.pings = 0
         self.dispatches = 0
         self.finished: dict[int, RawRun] = {}
+
+    def vm_status(self, node: str, vmid: int, *, timeout: float | None = None) -> dict[str, object]:
+        """The guest at the row's VMID is the row's: its name is the hostname the clone set."""
+        return {"status": "running", "name": "box-node"}
 
     def guest_agent_ping(self, node: str, vmid: int, *, timeout: float) -> None:
         self.pings += 1
@@ -479,3 +549,92 @@ def test_a_refused_record_writes_nothing_and_stops(
 
     assert not trust.has_record("box")
     assert not any(_is_repair(payload) for payload in guest.payloads)
+
+
+# -- The SSH identity -------------------------------------------------------------------------
+
+
+def _identity_state(db: Database, config: Config) -> VMSSHIdentityState:
+    return compare_vm_ssh_identity(db, "box", config.operator.ssh_private_key).state
+
+
+def _record_another_identity(db: Database) -> None:
+    db.instance_state.replace_applied_slices(
+        "vm",
+        "box",
+        "vm-reinit",
+        {AppliedStateKey.SSH_IDENTITY: encode_ssh_identity("/old/key", VerifiedSSHIdentity("SHA256:" + "A" * 43))},
+    )
+
+
+@pytest.mark.parametrize("recorded", [True, False], ids=["another-key-recorded", "none-recorded"])
+def test_a_recovered_vm_records_the_configured_identity_it_answered_with(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+    recorded: bool,
+) -> None:
+    """After an operator key change the repair installs the new key, so every SSH command must then accept it."""
+    _seed(db)
+    if recorded:
+        _record_another_identity(db)
+    config = make_config()
+    _guest(monkeypatch)
+    _waits(monkeypatch)
+
+    _recover(db, config)
+
+    assert _identity_state(db, config) is VMSSHIdentityState.MATCH
+    require_vm_ssh_boundary(db, config, db.get_vm("box"))  # type: ignore[arg-type]
+
+
+def test_a_vm_that_does_not_answer_keeps_its_recorded_identity(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    _seed(db)
+    _record_another_identity(db)
+    config = make_config()
+    _guest(monkeypatch)
+    _waits(monkeypatch, answers=False)
+
+    with pytest.raises(ConnectivityError):
+        _recover(db, config)
+
+    assert _identity_state(db, config) is VMSSHIdentityState.DRIFT
+
+
+def test_a_key_replaced_while_recover_ran_is_not_recorded(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    from agentworks.ssh_identity import read_private_ssh_identity
+
+    _seed(db)
+    _record_another_identity(db)
+    config = make_config()
+    _guest(monkeypatch)
+    waits: list[str] = []
+
+    def wait_then_replace_the_key(access: object, *, wording: reachability.Wording) -> bool:
+        waits.append("wait")
+        monkeypatch.setattr(
+            "agentworks.vms.applied_state.read_private_ssh_identity",
+            lambda path: VerifiedSSHIdentity("SHA256:" + "B" * 43),
+        )
+        return True
+
+    monkeypatch.setattr(reachability, "wait", wait_then_replace_the_key)
+
+    with pytest.raises(StateError) as caught:
+        _recover(db, config)
+
+    assert waits == ["wait"]
+    assert "agw vm recover box" in (caught.value.hint or "")
+    monkeypatch.setattr("agentworks.vms.applied_state.read_private_ssh_identity", read_private_ssh_identity)
+    assert _identity_state(db, config) is VMSSHIdentityState.DRIFT

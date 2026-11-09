@@ -259,6 +259,25 @@ def test_rekey_running_check_runs_after_the_resolve_boundary(
     assert order == ["preflight", "resolve", "status"]
 
 
+def test_rekey_on_a_vm_whose_power_state_is_unknown_says_so_rather_than_stopped(
+    db: Database,
+    make_config,  # noqa: ANN001
+    _ts_key: None,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """A placement host that is down reports no state: "not running" sent the operator to start a running VM."""
+    from agentworks.errors import StateError
+
+    _seed_vm(db)
+    _fake_status(monkeypatch, VMStatus.UNKNOWN)
+
+    with pytest.raises(StateError) as caught:
+        vm_manager.rekey_vm(db, make_config(), "box", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert caught.value.hint  # where to look, which a VM that is merely stopped does not need
+
+
 def test_rekey_without_a_host_key_record_raises_before_resolving_or_touching_the_vm(
     db: Database,
     make_config,  # noqa: ANN001
@@ -390,7 +409,12 @@ NEW_ADDRESS = "100.64.0.77"
 
 
 def _fake_rekey_channel(
-    monkeypatch: pytest.MonkeyPatch, *, rekey_status: int | None = 0, answers: bool = True
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    rekey_status: int | None = 0,
+    answers: bool = True,
+    rekey: Answer | None = None,
+    read: Answer | None = None,
 ) -> FakeGuest:
     """Answer the platform's root channel from a fake guest (the rekey script, then the address read), let the
     wait answer as ``answers`` says, and keep the SSH config untouched."""
@@ -398,9 +422,9 @@ def _fake_rekey_channel(
 
     def respond(payload: str, seen: int) -> Answer:
         if JOIN_FRAGMENT in payload:
-            return Answer(status=rekey_status)
+            return rekey if rekey is not None else Answer(status=rekey_status)
         if payload == "tailscale ip -4":
-            return Answer(stdout=f"{NEW_ADDRESS}\n".encode())
+            return read if read is not None else Answer(stdout=f"{NEW_ADDRESS}\n".encode())
         return Answer()
 
     guest = FakeGuest(respond=respond)
@@ -878,3 +902,36 @@ def test_backup_wraps_phases_in_a_section(
         role is Role.RESULT and lvl == 0 and msg.startswith("Backup complete:")
         for role, lvl, msg in captured_output.lines
     )
+
+
+@pytest.mark.parametrize("unreachable_at", ["rekey", "read"])
+def test_a_channel_that_cannot_reach_the_vm_ends_the_rekey_at_once_naming_a_command_that_can_follow(
+    db: Database,
+    make_config,  # noqa: ANN001
+    _ts_key: None,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+    unreachable_at: str,
+) -> None:
+    """A dead public sshd made each read and the logout wait two minutes, then advised removing a healthy node."""
+    from agentworks.capabilities.vm_platform.tailscale_join import LOGOUT_SCRIPT
+    from agentworks.execution.root_script import ChannelUnreachable
+
+    config = make_config()
+    _seed_vm(db)
+    _reachable(monkeypatch, True)
+    _fake_status(monkeypatch, VMStatus.RUNNING)
+    unreachable = Answer(raises=ChannelUnreachable("VM 'box' did not answer over SSH at its public address"))
+    guest = _fake_rekey_channel(monkeypatch, **{unreachable_at: unreachable})
+
+    with pytest.raises(ChannelUnreachable) as caught:
+        vm_manager.rekey_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert len(guest.scripts) == (1 if unreachable_at == "rekey" else 2)
+    assert guest.count(LOGOUT_SCRIPT) == 0
+    hint = caught.value.hint or ""
+    # Before the script ran the node is as it was, so the rekey is what follows; after it, the repair is.
+    assert ("agw vm rekey box" if unreachable_at == "rekey" else "agw vm recover box") in hint
+    assert "admin console" not in hint
+    row = db.get_vm("box")
+    assert row is not None and row.tailscale_host == "100.64.0.9"

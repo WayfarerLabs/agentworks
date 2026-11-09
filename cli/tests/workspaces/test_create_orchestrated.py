@@ -396,7 +396,8 @@ def test_workspace_setup_joins_eager_env_and_follows_directory_creation(
     _reachable(monkeypatch, True)
     monkeypatch.setenv("AW_SECRET_PROJECT_TOKEN", "project-private")
     target = Mock(spec=Transport)
-    target.run.return_value.stdout = "native-identity"
+    target.logger = None
+    target.run.return_value.stdout = "\nAGW_NATIVE_ID=native-identity\n"
     monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: target)
     calls = []
 
@@ -422,3 +423,60 @@ def test_workspace_setup_joins_eager_env_and_follows_directory_creation(
     assert len(calls) == 1
     assert len(resolve_counter) == 1 and "project-token" in resolve_counter[0]
     assert read_native_setup(db, "workspace", "project").records[0].complete
+
+
+def test_native_failure_preserves_workspace_and_continues_sibling_and_grants(db, make_config, mutation, monkeypatch):
+    from dataclasses import replace
+    from unittest.mock import Mock
+
+    from agentworks.capabilities.harness_integration.shell import ShellIntegration
+    from agentworks.harness_setup.state import read_native_setup
+    from agentworks.plugins.codex.harness_integration import CodexIntegration
+    from agentworks.transports import Transport
+
+    config = make_config()
+    config = replace(config, enabled_system_plugins=(*config.enabled_system_plugins, "codex"))
+    _seed_vm(db)
+    _reachable(monkeypatch, True)
+    db.insert_agent("dev", "box", "agt-dev", template="default", grant_all=True)
+    target = Mock(spec=Transport)
+    target.logger = None
+    target.run.return_value.stdout = "\nAGW_NATIVE_ID=native-identity\n"
+    monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: target)
+    events = []
+
+    def fail_setup(self, invocation):
+        assert mutation["ws_name"] == "project"
+        events.append("shell")
+        raise StateError("fixture native failure")
+
+    def sibling_setup(self, invocation):
+        events.append("codex")
+        return ArtifactApplication()
+
+    monkeypatch.setattr(ShellIntegration, "workspace_init", fail_setup)
+    monkeypatch.setattr(CodexIntegration, "workspace_init", sibling_setup)
+    monkeypatch.setattr("agentworks.agents.grants.add_to_workspace_group", lambda *a, **k: events.append("grant"))
+    monkeypatch.setattr(
+        "agentworks.workspaces.backends.vm.delete_vm_workspace", lambda *a, **k: pytest.fail("workspace unwound")
+    )
+    monkeypatch.setattr("agentworks.workspaces.manager.create.resolve_program", lambda name: name)
+    monkeypatch.setattr("agentworks.workspaces.manager.create.subprocess.run", lambda *a, **k: events.append("open"))
+    with pytest.raises(StateError):
+        workspace_manager.create_workspace(
+            db,
+            config,
+            name="project",
+            vm_name="box",
+            open_vscode=True,
+            spec='{"harness_integrations": {"shell": {}, "codex": {}}}',
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert events == ["shell", "codex", "grant", "open"]
+    assert db.get_workspace("project") is not None
+    assert db.has_any_grant("dev", "project")
+    records = {record.integration: record for record in read_native_setup(db, "workspace", "project").records}
+    assert not records["shell"].complete
+    assert records["codex"].complete
+    assert db.instance_state.get_desired_overlay("workspace", "project") is not None

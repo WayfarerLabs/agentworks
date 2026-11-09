@@ -1292,7 +1292,8 @@ def test_active_user_setup_joins_eager_env_and_runs_after_core(
     if operation == "reinit":
         db.insert_agent("dev", "box", "agt-dev", template="default")
     target = MagicMock(spec=Transport)
-    target.run.return_value.stdout = "native-identity"
+    target.logger = None
+    target.run.return_value.stdout = "\nAGW_NATIVE_ID=native-identity\n"
     monkeypatch.setattr("agentworks.transports.transport_for_user", lambda *a, **k: target)
     calls = []
 
@@ -1349,7 +1350,8 @@ def test_legacy_overlay_conversion_waits_for_successful_native_reinit(
     original = db.instance_state.get_desired_overlay("agent", "dev")
     _reachable(monkeypatch, True)
     target = MagicMock(spec=Transport)
-    target.run.return_value.stdout = "native-identity"
+    target.logger = None
+    target.run.return_value.stdout = "\nAGW_NATIVE_ID=native-identity\n"
     monkeypatch.setattr("agentworks.transports.transport_for_user", lambda *a, **k: target)
 
     def setup(self, invocation):
@@ -1390,3 +1392,65 @@ def test_legacy_overlay_conversion_waits_for_successful_native_reinit(
                 else {"claude-code": {"plugins": ["legacy@fixture"]}}
             ),
         }
+
+
+@pytest.mark.parametrize("operation", ["create", "reinit"])
+def test_native_failure_preserves_agent_and_continues_sibling_grants_and_ssh(
+    db, make_config, mutation, monkeypatch, operation
+):
+    from dataclasses import replace
+
+    from agentworks.capabilities.harness_integration.shell import ShellIntegration
+    from agentworks.harness_setup.state import read_native_setup
+    from agentworks.plugins.codex.harness_integration import CodexIntegration
+    from agentworks.transports import Transport
+
+    config = make_config()
+    config = replace(config, enabled_system_plugins=(*config.enabled_system_plugins, "codex"))
+    _seed_vm(db)
+    _reachable(monkeypatch, True)
+    db.insert_workspace("project", "/srv/project", "box", "ws-project")
+    if operation == "reinit":
+        db.insert_agent("dev", "box", "agt-dev", template="default")
+        db.insert_agent_grant("dev", "project", "explicit")
+    target = MagicMock(spec=Transport)
+    target.logger = None
+    target.run.return_value.stdout = "\nAGW_NATIVE_ID=native-identity\n"
+    monkeypatch.setattr("agentworks.transports.transport_for_user", lambda *a, **k: target)
+    events = []
+
+    def fail_setup(self, invocation):
+        events.append("shell")
+        raise StateError("fixture native failure")
+
+    def sibling_setup(self, invocation):
+        events.append("codex")
+        return ArtifactApplication()
+
+    monkeypatch.setattr(ShellIntegration, "user_init", fail_setup)
+    monkeypatch.setattr(CodexIntegration, "user_init", sibling_setup)
+    monkeypatch.setattr(agent_grants, "add_to_workspace_group", lambda *a, **k: events.append("grant"))
+    monkeypatch.setattr("agentworks.ssh_config.sync_ssh_config", lambda *a, **k: events.append("ssh"))
+    monkeypatch.setattr(agent_initializer, "delete_agent_on_vm", lambda *a, **k: pytest.fail("agent unwound"))
+    spec = '{"harness_integrations": {"shell": {}, "codex": {}}}'
+    with pytest.raises(StateError):
+        if operation == "create":
+            agent_manager.create_agent(
+                db,
+                config,
+                name="dev",
+                vm_name="box",
+                spec=spec,
+                grant_all_workspaces=True,
+                interaction=TtyInteractionPolicy.REFUSE,
+            )
+        else:
+            agent_manager.reinit_agent(db, config, name="dev", spec=spec, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert events == ["shell", "codex", "grant", "ssh"]
+    assert db.get_agent("dev") is not None
+    assert db.has_any_grant("dev", "project")
+    records = {record.integration: record for record in read_native_setup(db, "agent", "dev").records}
+    assert not records["shell"].complete
+    assert records["codex"].complete
+    assert db.instance_state.get_desired_overlay("agent", "dev") is not None

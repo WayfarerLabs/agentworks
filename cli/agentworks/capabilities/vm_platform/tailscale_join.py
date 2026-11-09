@@ -18,7 +18,8 @@ from agentworks import output
 from agentworks.capabilities.vm_platform.base import parse_tailnet_address
 from agentworks.capabilities.vm_platform.public_ssh import SudoRefused
 from agentworks.errors import ConnectivityError, ProvisioningError
-from agentworks.execution import root_script
+from agentworks.execution import root_script, ssh_process
+from agentworks.execution.root_script import ChannelUnreachable
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -32,6 +33,8 @@ JOIN_FRAGMENT = """printf '%s\\n' "$AGW_SECRET" | tailscale up --auth-key=file:/
 """The one join command: the shell's ``printf`` builtin pipes the key to Tailscale, which reads the file."""
 
 JOIN_DEADLINE_SECONDS = 30
+JOIN_REASON_LINES = 5
+"""How many of a failed join's last stderr lines its error quotes: Tailscale's own reason is one or two."""
 ADDRESS_READS = 6
 ADDRESS_PAUSE_SECONDS = 2
 ADDRESS_READ_DEADLINE_SECONDS = 15
@@ -58,25 +61,55 @@ CREATE_RERUN_HINT = "The join spent the auth key: replace a single-use key befor
 The platform's rollback reports for itself whether the backend was removed.
 """
 
-DEFAULT_READINESS_COMMAND = "cloud-init status --wait"
+# ``--long`` adds cloud-init's own detail and errors to the status line, so a
+# failed wait can say why before the create's rollback removes the VM.
+DEFAULT_READINESS_COMMAND = "cloud-init status --wait --long"
 DEFAULT_READINESS_LABEL = "cloud-init"
+# ``cloud-init status --wait`` exits 2 when cloud-init finished with recoverable
+# errors (a deprecated key, a module that warned): the VM came up, so a wait
+# for it warns and carries on.
+CLOUD_INIT_RECOVERABLE_STATUS = 2
+READINESS_REASON_LINES = 12
+"""How many of a failed readiness wait's last output lines its error quotes: ``--long``'s detail and errors."""
+
+
+def readiness_failure(incomplete: str, result: RootScriptResult) -> str:
+    """A failed readiness wait's message: ``incomplete``, the wait's status and its last output lines.
+
+    The output's last :data:`READINESS_REASON_LINES` lines are quoted because
+    a create's rollback removes the VM, and with it the evidence of why.
+    """
+    outcome = "its outcome is unknown" if result.status is None else f"exit {result.status}"
+    printed = (result.stdout + b"\n" + result.stderr).decode("utf-8", errors="replace")
+    reason = ssh_process.tail_lines(printed, READINESS_REASON_LINES)
+    return f"{incomplete} ({outcome})" + (f":\n{reason}" if reason else "")
 
 
 def join_tailscale(run_as_root: Callable[[bytes, float], RawRun], auth_key: str, *, node: str) -> None:
     """Join the VM to the tailnet as ``node`` with ``auth_key``, exactly once.
 
-    A non-zero status raises ``ProvisioningError``. An outcome that cannot
-    be established, a channel that raised ``ConnectivityError`` included,
-    raises naming ``node``, since the node may have joined. Neither retries.
+    A non-zero status raises ``ProvisioningError`` quoting the last lines of
+    ``tailscale up``'s stderr, its reason (an invalid auth key, say), with
+    the key redacted as from every stream; the error reaches the create's
+    operation log as its outcome. A channel that raised
+    :class:`ChannelUnreachable` dispatched nothing, so the node did not join,
+    and that raises with the channel's own hint. Any other outcome that
+    cannot be established, another ``ConnectivityError`` included, raises
+    naming ``node``, since the node may have joined. None retries.
     """
     try:
         result = root_script.run(run_as_root, JOIN_FRAGMENT, deadline=JOIN_DEADLINE_SECONDS, secret=auth_key)
+    except ChannelUnreachable as error:
+        raise ProvisioningError(f"node '{node}' did not join the tailnet: {error}", hint=error.hint) from error
     except ConnectivityError as error:
         raise _join_unknown(node) from error
     if result.status is None:
         raise _join_unknown(node)
     if result.status != 0:
-        raise ProvisioningError(f"'tailscale up' exited with status {result.status} on node '{node}'")
+        reason = ssh_process.tail_lines(result.stderr.decode("utf-8", errors="replace"), JOIN_REASON_LINES)
+        raise ProvisioningError(
+            f"'tailscale up' exited with status {result.status} on node '{node}'" + (f": {reason}" if reason else "")
+        )
 
 
 def _join_unknown(node: str) -> ProvisioningError:
@@ -97,8 +130,10 @@ def read_tailnet_address(
     A read fails on a non-zero status, an unknown outcome, a value
     :func:`parse_tailnet_address` refuses, or a ``ConnectivityError`` from
     the channel. Any other error propagates at once, since reading again
-    cannot change it. After :data:`ADDRESS_READS` failed reads this raises
-    ``ConnectivityError`` naming ``node``. It never logs the node out.
+    cannot change it, and so does :class:`ChannelUnreachable`, whose channel
+    has already waited for the VM. After :data:`ADDRESS_READS` failed reads
+    this raises ``ConnectivityError`` naming ``node``. It never logs the node
+    out.
     ``log`` records each read in the caller's operation log.
     """
     reason = ""
@@ -109,6 +144,8 @@ def read_tailnet_address(
         cause = None
         try:
             result = root_script.run(run_as_root, "tailscale ip -4", deadline=ADDRESS_READ_DEADLINE_SECONDS, log=log)
+        except ChannelUnreachable:
+            raise
         except ConnectivityError as error:
             cause, reason = error, "the platform channel failed"
             continue
@@ -144,22 +181,29 @@ def settle_tailnet_address(
     when the reads are exhausted :func:`log_out` runs once over the same
     channel. The error's hint is ``rerun_hint`` (``agw vm recover`` after a
     rekey or a recover, a fresh key before a create runs again); when the
-    logout did not succeed, it first names ``node`` for removal in the
-    Tailscale admin console. ``log`` records the reads and the logout in the
+    logout ran and failed, it first names ``node`` for removal in the
+    Tailscale admin console. A :class:`ChannelUnreachable` read propagates at
+    once with ``rerun_hint`` and no logout: nothing reaches the VM, so the
+    node may well be healthy. ``log`` records the reads and the logout in the
     caller's operation log.
     """
     try:
         return read_tailnet_address(run_as_root, node=node, log=log)
+    except ChannelUnreachable as error:
+        error.add_hint(rerun_hint)
+        raise
     except ConnectivityError as error:
         failure = error
     try:
-        logged_out = log_out(run_as_root, log=log).status == 0
+        status = log_out(run_as_root, log=log).status
     except ConnectivityError:
-        logged_out = False
-    if logged_out:
+        status = None
+    if status == 0:
         raise ConnectivityError(f"{failure}; the node was logged out of the tailnet", hint=rerun_hint) from failure
+    if status is None:
+        raise ConnectivityError(f"{failure}, and the logout did not run to an outcome", hint=rerun_hint) from failure
     raise ConnectivityError(
-        f"{failure}, and it could not be logged out",
+        f"{failure}, and its logout exited with status {status}",
         hint=f"Remove '{node}' in the Tailscale admin console. {rerun_hint}",
     ) from failure
 
@@ -185,7 +229,11 @@ def complete_cloud_bootstrap(
     and retrying a refused key, since a cloud's guest agent may install the
     key after sshd starts. A readiness failure raises before the key is
     sent, so the platform's create rollback removes the partial VM with the
-    key never used.
+    key never used, quoting the command's status and its last
+    :data:`READINESS_REASON_LINES` lines, since the rollback destroys the
+    evidence. The default readiness command's
+    :data:`CLOUD_INIT_RECOVERABLE_STATUS` warns instead, as Proxmox's wait
+    for cloud-init does.
     """
     output.detail(f"Waiting for {readiness_label} bootstrap to complete (this may take several minutes)...")
     try:
@@ -197,6 +245,9 @@ def complete_cloud_bootstrap(
             f"{error}, so create-time bootstrap cannot run",
             hint="The image's admin account must have passwordless sudo; fix the image, then create the VM again.",
         ) from None
+    except ChannelUnreachable as error:
+        # Not its hint: the restart it names does not fit a VM the create's rollback is about to remove.
+        raise ProvisioningError(f"the VM did not answer over SSH for create-time bootstrap: {error}") from error
     except ConnectivityError as error:
         # A refused key's hint (load an encrypted key into the agent) is the operator's next step.
         raise ProvisioningError("the VM did not answer over SSH for create-time bootstrap", hint=error.hint) from error
@@ -206,7 +257,9 @@ def complete_cloud_bootstrap(
         result = root_script.run(target.run_as_root, readiness_command, deadline=READINESS_COMMAND_DEADLINE_SECONDS)
     except ConnectivityError as error:
         raise ProvisioningError(incomplete, hint=error.hint) from error
-    if result.status != 0:
-        raise ProvisioningError(incomplete)
+    if result.status == CLOUD_INIT_RECOVERABLE_STATUS and readiness_command == DEFAULT_READINESS_COMMAND:
+        output.warn(f"{readiness_label} completed with recoverable errors; continuing")
+    elif result.status != 0:
+        raise ProvisioningError(readiness_failure(incomplete, result))
     join_tailscale(target.run_as_root, auth_key, node=node)
     return settle_tailnet_address(target.run_as_root, node=node, rerun_hint=CREATE_RERUN_HINT)

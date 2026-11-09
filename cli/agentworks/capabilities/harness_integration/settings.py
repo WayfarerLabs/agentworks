@@ -71,11 +71,14 @@ class PreparedSettings:
     _document: SettingsObject = field(repr=False)
 
     @classmethod
-    def from_bytes(cls, source: bytes, *, format: SettingsFormat, strategy: SettingsStrategy) -> PreparedSettings:
+    def from_bytes(
+        cls, source: bytes, *, format: SettingsFormat, strategy: SettingsStrategy, source_path: str | None = None
+    ) -> PreparedSettings:
         """Parse captured source bytes, including for the skip-existing policy."""
-        return cls(format, strategy, parse_settings(source, format=format))
+        location = "workstation source" if source_path is None else f"workstation source {source_path!r}"
+        return cls(format, strategy, parse_settings(source, format=format, location=location))
 
-    def apply(self, destination: bytes | None) -> SettingsResult:
+    def apply(self, destination: bytes | None, *, destination_path: str | None = None) -> SettingsResult:
         """Compute output; None denotes absence, while empty bytes denote a file.
 
         The caller must reject directories and unsuitable links before calling.
@@ -85,12 +88,12 @@ class PreparedSettings:
             return SettingsResult(destination, skipped=True)
         document = self._document
         if destination is not None and self.strategy in ("merge-overwrite", "merge-preserve"):
-            existing = parse_settings(destination, format=self.format)
+            existing = parse_settings(destination, format=self.format, location=_destination(destination_path))
             document = _merge(existing, document) if self.strategy == "merge-overwrite" else _merge(document, existing)
         content = serialize_settings(document, format=self.format)
         return SettingsResult(content, skipped=False)
 
-    def contributions(self, destination: bytes | None) -> SettingsObject:
+    def contributions(self, destination: bytes | None, *, destination_path: str | None = None) -> SettingsObject:
         """Source values surviving this policy, for native declaration conflicts.
 
         Retained destination values are not a new request from the source.
@@ -100,7 +103,13 @@ class PreparedSettings:
             return dict(self._document)
         if self.strategy == "skip-existing":
             return {}
-        return _absent_source(self._document, parse_settings(destination, format=self.format))
+        return _absent_source(
+            self._document, parse_settings(destination, format=self.format, location=_destination(destination_path))
+        )
+
+
+def _destination(path: str | None) -> str:
+    return "guest destination" if path is None else f"guest destination {path!r}"
 
 
 def _absent_source(source: SettingsObject, existing: SettingsObject) -> SettingsObject:
@@ -118,11 +127,11 @@ def _absent_source(source: SettingsObject, existing: SettingsObject) -> Settings
 def prepare_settings(mapping: SettingsMapping, *, format: SettingsFormat) -> PreparedSettings:
     """Snapshot and validate a workstation source before any native mutation."""
     return PreparedSettings.from_bytes(
-        snapshot_workstation_file(mapping.source), format=format, strategy=mapping.strategy
+        snapshot_workstation_file(mapping.source), format=format, strategy=mapping.strategy, source_path=mapping.source
     )
 
 
-def parse_settings(content: bytes, *, format: SettingsFormat) -> SettingsObject:
+def parse_settings(content: bytes, *, format: SettingsFormat, location: str | None = None) -> SettingsObject:
     """Parse external native document bytes without reporting their values.
 
     JSON requires a root object, unique keys at every depth, and finite
@@ -139,7 +148,8 @@ def parse_settings(content: bytes, *, format: SettingsFormat) -> SettingsObject:
         if not isinstance(document, dict):
             raise ValueError("settings require a root object")
     except (ValueError, RecursionError):
-        raise ConfigError(f"invalid {format.upper()} settings document") from None
+        context = "" if location is None else f" at {location}"
+        raise ConfigError(f"invalid {format.upper()} settings document{context}") from None
     return cast("SettingsObject", document)
 
 

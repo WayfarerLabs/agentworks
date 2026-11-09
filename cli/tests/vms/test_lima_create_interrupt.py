@@ -25,7 +25,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from agentworks.capabilities.base import RunContext
-from agentworks.capabilities.vm_platform import ProvisionRequest
+from agentworks.capabilities.vm_platform import ProvisionRequest, RetainedProvisioningError
 from agentworks.capabilities.vm_platform.bootstrap_script import REBOOT_SENTINEL_PATH
 from agentworks.capabilities.vm_platform.lima import _REBOOT_CLEAR_MARKER, LimaPlatform
 from agentworks.capabilities.vm_platform.lima_host import LimaCommandFailed, LimaHost
@@ -260,7 +260,6 @@ def test_failure_mid_create_cleans_up_and_reraises(
 
     assert _deletes(ran) == ["limactl delete --force myvm"]
     assert not any("Interrupted" in w for w in captured_output.warnings)
-    assert not any("Cleanup abandoned" in w for w in captured_output.warnings)
 
 
 def test_interrupt_during_start_cleans_up_and_reraises_the_original(
@@ -282,7 +281,6 @@ def test_interrupt_during_start_cleans_up_and_reraises_the_original(
 
     assert exc.value is interrupt
     assert _deletes(ran) == ["limactl delete --force myvm"]
-    assert any("Ctrl-C again to abandon" in w for w in captured_output.warnings)
 
 
 def test_interrupt_during_post_start_steps_cleans_up_too(
@@ -342,12 +340,32 @@ def test_ephemeral_tailscale_join_failure_cleans_up_without_key_in_error(
     assert secret not in repr((ran, guest.argvs))
 
 
-def test_second_interrupt_abandons_cleanup_loudly(
+def test_an_interrupt_during_the_failure_rollback_restarts_it_and_retains_the_row(
+    monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+) -> None:
+    """A Ctrl-C during the failure arm's cleanup reaches the interrupt arm, which tries again;
+    interrupted there too, the cleanup is abandoned and the instance handed to core."""
+    ran = _wire(monkeypatch, errors={"limactl delete": KeyboardInterrupt("during the cleanup")})
+    monkeypatch.setattr(
+        LimaPlatform,
+        "_create_local",
+        lambda self, name, yaml: (_ for _ in ()).throw(LimaCommandFailed("original failure")),
+    )
+
+    with pytest.raises(RetainedProvisioningError) as exc:
+        LimaPlatform("lima", {"placement": {"mode": "local"}}).create(_request(), RunContext())
+
+    assert exc.value.platform_metadata == {"instance_name": "myvm"}
+    assert len(_deletes(ran)) == 2
+
+
+def test_second_interrupt_abandons_cleanup_and_retains_the_row(
     monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
 ) -> None:
     """A second Ctrl-C during the cleanup abandons it instead of
     wedging: the delete is attempted exactly once, the warning names the
-    exact removal command, and the ORIGINAL interrupt still propagates."""
+    exact removal command, and the instance is handed to core so the row
+    survives for ``vm delete``."""
     interrupt = KeyboardInterrupt("first")
     ran = _wire(monkeypatch, errors={"limactl delete": KeyboardInterrupt("second")})
     monkeypatch.setattr(
@@ -356,10 +374,10 @@ def test_second_interrupt_abandons_cleanup_loudly(
         lambda self, name, yaml: (_ for _ in ()).throw(interrupt),
     )
 
-    with pytest.raises(KeyboardInterrupt) as exc:
+    with pytest.raises(RetainedProvisioningError) as exc:
         LimaPlatform("lima", {"placement": {"mode": "local"}}).create(_request(), RunContext())
 
-    assert exc.value is interrupt
+    assert exc.value.platform_metadata == {"instance_name": "myvm"}
     assert len(_deletes(ran)) == 1
-    (abandoned,) = [w for w in captured_output.warnings if "Cleanup abandoned" in w]
-    assert "'limactl delete --force myvm'" in abandoned
+    warned = "\n".join(captured_output.warnings)
+    assert "'limactl delete --force myvm'" in warned

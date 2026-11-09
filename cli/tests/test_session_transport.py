@@ -107,6 +107,8 @@ def _patch_common(
             TmuxServerFingerprint(pid=12345, boot_id=BOOT_ID, start_ticks=1),
         ),
     )
+    monkeypatch.setattr("agentworks.sessions.tmux.finalize_session_start", lambda *a, **k: None)
+    monkeypatch.setattr("agentworks.sessions.manager._get_boot_id", lambda *a, **k: BOOT_ID)
     stub_vm_gates(monkeypatch)
     return targets
 
@@ -439,7 +441,23 @@ def test_create_session_uses_agent_target_for_tmux(tmp_path: Path, monkeypatch: 
 
     captured: dict[str, object] = {}
 
-    def _capture_create(name, ws_path, command, linux_user, *, run_command, target, admin_username, is_admin, env=None):  # type: ignore[no-untyped-def]
+    def _capture_create(
+        name,
+        ws_path,
+        command,
+        linux_user,
+        *,
+        run_command,
+        target,
+        admin_username,
+        is_admin,
+        env=None,
+        before_spawn=None,
+        session_uuid=None,
+        run_id=None,
+    ):  # type: ignore[no-untyped-def]
+        if before_spawn is not None:
+            before_spawn()
         captured["run_command"] = run_command
         captured["target"] = target
         captured["env"] = env
@@ -709,7 +727,23 @@ def test_launch_migrates_legacy_session_to_per_session_socket(
     # downstream atomic runtime update lands the migration.
     create_calls: list[dict[str, object]] = []
 
-    def _capture_create(name, ws_path, command, linux_user, *, run_command, target, admin_username, is_admin, env=None):  # type: ignore[no-untyped-def]
+    def _capture_create(
+        name,
+        ws_path,
+        command,
+        linux_user,
+        *,
+        run_command,
+        target,
+        admin_username,
+        is_admin,
+        env=None,
+        before_spawn=None,
+        session_uuid=None,
+        run_id=None,
+    ):  # type: ignore[no-untyped-def]
+        if before_spawn is not None:
+            before_spawn()
         create_calls.append({"name": name, "is_admin": is_admin})
         return ("/run/agentworks/admin-tmux-sockets/admin/legacy.sock", 67890)
 
@@ -815,11 +849,18 @@ def test_restart_dead_workload_error_propagates(tmp_path: Path, monkeypatch: pyt
             if cmd.startswith("test -e "):
                 return _ScriptedResult(ok=False)
             if "#{pane_dead}" in cmd:
-                return _ScriptedResult(ok=True, stdout="1 2\n")
+                return _ScriptedResult(ok=True, stdout="AGW_RUNTIME_PANE=1 2\n")
             if "capture-pane" in cmd:
                 return _ScriptedResult(ok=True, stdout=f"{clap_error}\n")
             return _ScriptedResult()
 
+    monkeypatch.setattr(
+        tmux_mod,
+        "capture_tmux_server_fingerprint",
+        lambda **kwargs: FingerprintProbe(
+            ProbeStatus.PRESENT, TmuxServerFingerprint(pid=12345, boot_id=BOOT_ID, start_ticks=1)
+        ),
+    )
     target = _DeadPaneTarget()
     factory = lambda *a, **k: target  # noqa: E731
     monkeypatch.setattr("agentworks.transports.transport", factory)
@@ -829,6 +870,7 @@ def test_restart_dead_workload_error_propagates(tmp_path: Path, monkeypatch: pyt
     stub_session_resolvers(monkeypatch)
 
     monkeypatch.setattr(session_manager, "_regenerate_tmuxinator", lambda *_a, **_kw: None)
+    monkeypatch.setattr(session_manager, "_get_boot_id", lambda *a, **k: BOOT_ID)
     monkeypatch.setattr(session_manager, "_resolve_session_linux_user", lambda *_a, **_kw: "admin")
     monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *_a, **_kw: None)
     monkeypatch.setattr(tmux_mod, "kill_session", lambda *_a, **_kw: True)

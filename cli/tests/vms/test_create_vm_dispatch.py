@@ -28,9 +28,10 @@ from agentworks.errors import (
     UserAbort,
     ValidationError,
 )
+from agentworks.execution import trust
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
-from tests.conftest import CapturedOutput, ManifestDoc, pin_wsl2_unsupported, write_manifests
+from tests.conftest import CapturedOutput, ManifestDoc, fake_installed_programs, pin_wsl2_unsupported, write_manifests
 from tests.orchestrated_fixtures import proxmox_site
 from tests.ssh_fixtures import TEST_SSH_PUBLIC_KEY, write_test_ssh_keypair
 
@@ -58,7 +59,7 @@ def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     # locally; pretend the tool exists regardless of the host. wsl2 is
     # host-ready on a Windows test host but not on Linux, so pin it
     # unsupported to keep exactly one site (lima-local) ready on any host.
-    monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+    fake_installed_programs(monkeypatch, lambda name: f"/usr/bin/{name}")
     pin_wsl2_unsupported(monkeypatch)
 
     def _make(extra: str = "", *, manifests: Sequence[ManifestDoc | str] = ()):
@@ -248,6 +249,8 @@ def test_create_vm_retains_platform_metadata_when_rollback_is_unconfirmed(
     assert row is not None
     assert row.platform_metadata == {"instance_name": "retained-backend", "create_incomplete": "true"}
     assert row.provisioning_status == ProvisioningStatus.FAILED.value
+    # A retained row keeps its store file, which delete removes with it.
+    assert trust.store_file("retained").exists()
     assert any(
         "retained-" in message and message.endswith("-vm-create.log")
         for _role, _level, message in captured_output.lines
@@ -332,6 +335,8 @@ def test_create_vm_preserves_typed_platform_failure(
 
     assert caught.value is failure
     assert db.get_vm("map-fail") is None
+    # The store file create reset for the name goes with the row.
+    assert not trust.store_file("map-fail").exists()
 
 
 @pytest.mark.parametrize(

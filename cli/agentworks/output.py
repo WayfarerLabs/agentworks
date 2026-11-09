@@ -40,16 +40,28 @@ future, as web markup, with the business logic unchanged. Set the handler
 once at the entry point via :func:`set_handler`. Color lives only in the
 terminal handler and only on an interactive TTY (suppressed under
 ``NO_COLOR`` and on a pipe or redirect).
+
+**A dead stream never fails the caller.** Once nothing reads a stream (the
+program on the other end of a pipe exited, or the terminal hung up), a write
+to it fails, and a status line must not be what decides a command's outcome:
+a rollback that dies on its first line leaves a VM running with no row. The
+handlers write their lines through :func:`tolerating_dead_sink`, which points
+the stream's descriptor at the null device on the first such failure, so the
+command carries on, silently on that stream. Prompts are not guarded: they
+read an answer, which a dead stream cannot give either.
 """
 
 from __future__ import annotations
 
+import contextlib
+import errno
+import os
 import sys
 import time
 from contextlib import contextmanager
 from contextvars import ContextVar
 from enum import Enum, auto
-from typing import TYPE_CHECKING, Protocol
+from typing import IO, TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping, Sequence
@@ -91,6 +103,57 @@ __all__ = [
     "UserAbort",
     "ValidationError",
 ]
+
+# ---------------------------------------------------------------------------
+# Dead streams
+# ---------------------------------------------------------------------------
+
+
+def consumer_left(error: OSError) -> bool:
+    """Whether a failed write or flush means nothing reads the stream any more.
+
+    That is ``BrokenPipeError`` or ``ConnectionResetError`` (``| head`` exited,
+    or ``| tee`` went with its terminal), ``EIO`` (the terminal itself hung
+    up), and on Windows ``EINVAL``, which is how CPython reports a pipe whose
+    reader closed there. Any other failure, a full disk under ``> file`` for
+    one, still means the output is wanted and was lost.
+    """
+    if isinstance(error, (BrokenPipeError, ConnectionResetError)) or error.errno == errno.EIO:
+        return True
+    return sys.platform == "win32" and error.errno == errno.EINVAL
+
+
+def point_at_null_device(stream: IO[Any]) -> None:
+    """Point ``stream``'s descriptor at the null device, best effort.
+
+    What the stream still buffers, every later write through any object on
+    that descriptor, a child process that inherits it, and the interpreter's
+    flush at exit then all succeed. A stream with no descriptor, or no null
+    device to open, is left as it is.
+    """
+    with contextlib.suppress(OSError, ValueError):
+        null = os.open(os.devnull, os.O_WRONLY)
+        try:
+            os.dup2(null, stream.fileno())
+        finally:
+            os.close(null)
+
+
+@contextmanager
+def tolerating_dead_sink(stream: IO[Any]) -> Iterator[None]:
+    """Carry on past a write or flush to ``stream`` that fails because :func:`consumer_left` holds.
+
+    The first such failure points the stream at the null device
+    (:func:`point_at_null_device`), so the rest of the process writes nowhere
+    on it rather than failing again. Any other error propagates.
+    """
+    try:
+        yield
+    except OSError as error:
+        if not consumer_left(error):
+            raise
+        point_at_null_device(stream)
+
 
 # ---------------------------------------------------------------------------
 # Roles and rendering helpers
@@ -247,6 +310,12 @@ class OutputHandler(Protocol):
 # ---------------------------------------------------------------------------
 
 
+def _print(message: str, *, err: bool = False) -> None:
+    stream = sys.stderr if err else sys.stdout
+    with tolerating_dead_sink(stream):
+        print(message, file=stream)
+
+
 class _DefaultProgress:
     # Progress sub-lines render one level deeper than the section body
     # (``pad(level + 1)``), which preserves today's hardcoded 2-space
@@ -264,12 +333,12 @@ class _DefaultProgress:
             parts.append(f" {pct:.0f}% ({current}/{self._total})")
         if message:
             parts.append(f" {message}")
-        print("".join(parts))
+        _print("".join(parts))
 
     def done(self, message: str | None = None) -> None:
         elapsed = time.monotonic() - self._start
         suffix = f" {message}" if message else ""
-        print(f"{_pad(self._level + 1)}{self._label} done ({elapsed:.0f}s){suffix}")
+        _print(f"{_pad(self._level + 1)}{self._label} done ({elapsed:.0f}s){suffix}")
 
 
 class _SilentProgress:
@@ -283,25 +352,25 @@ class _SilentProgress:
 class _DefaultHandler:
     def emit(self, role: Role, message: str, level: int) -> None:
         if role is Role.NOTICE:
-            print(f"{_pad(level)}Notice: {message}", file=sys.stderr)
+            _print(f"{_pad(level)}Notice: {message}", err=True)
         elif role is Role.WARNING:
-            print(f"{_pad(level)}Warning: {message}", file=sys.stderr)
+            _print(f"{_pad(level)}Warning: {message}", err=True)
         elif role is Role.ERROR:
-            print(f"{_pad(level)}Error: {message}", file=sys.stderr)
+            _print(f"{_pad(level)}Error: {message}", err=True)
         elif role is Role.HEADER:
             if level in (0, 1):
-                print("")
-            print(f"{_pad(level)}{_render_header(message, level)}")
+                _print("")
+            _print(f"{_pad(level)}{_render_header(message, level)}")
         elif role is Role.DETAIL:
-            print(f"{_pad(level + 1)}{message}")
+            _print(f"{_pad(level + 1)}{message}")
         elif role is Role.RESULT:
-            print(f"{_pad(0)}{message}")
+            _print(f"{_pad(0)}{message}")
         else:
             # BODY renders as a plain body line. Reserved roles fall
             # through here for now: wiring STATUS (the deferred
             # fast-follow) or ERROR (Phase 5) must add its own explicit
             # branch above, not lean on this BODY fall-through.
-            print(f"{_pad(level)}{message}")
+            _print(f"{_pad(level)}{message}")
 
     def style_status(self, text: str, style: StatusStyle) -> str:
         return text
@@ -364,7 +433,7 @@ class _DefaultHandler:
         raise UserAbort("interrupted") from None
 
     def progress(self, label: str, level: int, total: int | None = None) -> Progress:
-        print(f"{_pad(level + 1)}{label}...")
+        _print(f"{_pad(level + 1)}{label}...")
         return _DefaultProgress(label, level, total)
 
 
@@ -548,6 +617,8 @@ def error(message: str) -> None:
 
 def confirm(message: str, default: bool = False) -> bool:
     """Present a yes/no question. Returns True for yes, False for no."""
+    if non_interactive():
+        return False
     return _handler.confirm(message, _current_level(), default)
 
 
@@ -618,7 +689,10 @@ def is_interactive() -> bool:
     """
     if _non_interactive:
         return False
-    return sys.stdin.isatty()
+    try:
+        return sys.stdin.isatty()
+    except (AttributeError, OSError, ValueError):
+        return False
 
 
 def non_interactive() -> bool:

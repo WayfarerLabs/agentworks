@@ -50,6 +50,8 @@ def test_timeout_degrades_silently(monkeypatch: pytest.MonkeyPatch) -> None:
         raise subprocess.TimeoutExpired(cmd="tailscale", timeout=10)
 
     monkeypatch.setattr(subprocess, "run", _timeout)
+    # The binary is found, whatever this host's PATH holds.
+    monkeypatch.setattr("agentworks.vms.manager.tailscale.resolve_program", lambda name: f"/usr/bin/{name}")
 
     assert vm_manager._is_tailscale_reachable("100.64.0.1") is False
     assert warns == []

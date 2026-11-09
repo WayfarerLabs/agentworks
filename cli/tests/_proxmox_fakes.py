@@ -21,6 +21,14 @@ NEWID = 100
 TEMPLATE_VMID = 9001
 CLONE_UPID = "UPID:pve1:clone"
 START_UPID = "UPID:pve1:start"
+RESIZE_UPID = "UPID:pve1:resize"
+
+
+def refused(method: str, path: str) -> ProxmoxAPIError:
+    """The 403 a real PVE answers when the token's ACLs do not cover the VMID's path."""
+    error = ProxmoxAPIError(f"Proxmox API {method} {path} failed (403): Permission check failed")
+    error.code = 403
+    return error
 
 
 class FakeProxmoxAPI:
@@ -31,20 +39,29 @@ class FakeProxmoxAPI:
     ``wait_errors`` and ``status_errors`` queue raises consumed
     front-first, so a test can make one call raise and still choose
     what a later call on the same method sees (the rollback's settle
-    wait, the escalation re-entry, the orphan-backstop probe); a
-    ``None`` entry in ``status_errors`` means "this call succeeds",
-    letting a test target a later status call (e.g. the probe, the
-    second status call in a teardown flow) without failing the first.
-    A deleted VM is modeled: ``delete_vm`` marks it gone and
-    ``vm_status`` then raises the API error a real PVE returns, which
-    is what keeps the post-teardown existence probe quiet on the happy
-    paths."""
+    wait, the escalation re-entry); a ``None`` entry in
+    ``status_errors`` means "this call succeeds", letting a test target
+    a later status call without failing the first.
+
+    The guest at the VMID is modeled as the setup script's pool-scoped
+    token sees it. ``holder`` names the guest holding ``NEWID``, or is
+    ``None`` when nothing does: ``clone_vm`` sets it to the clone's name
+    and ``delete_vm`` clears it (a test sets it to model a guest that is
+    already there, ours or another's). ``auditable`` is whether the token
+    may audit that guest; one out of the pool is not. A VMID the token
+    cannot audit, which includes one nothing holds, answers status,
+    stop and DELETE with a 403, while ``vmid_in_use`` (``/cluster/nextid``)
+    answers for any token, as on PVE 8 and 9."""
 
     def __init__(self) -> None:
         self.calls: list[tuple[Any, ...]] = []
         self.running = False
-        self.vm_deleted = False
+        self.holder: str | None = None
+        self.auditable = True
+        self.list_error: BaseException | None = None
         self.next_id_error: BaseException | None = None
+        self.in_use_error: BaseException | None = None
+        self.clone_error: BaseException | None = None
         self.configure_error: BaseException | None = None
         self.stop_error: BaseException | None = None
         self.delete_error: BaseException | None = None
@@ -58,6 +75,11 @@ class FakeProxmoxAPI:
     def ops(self) -> list[str]:
         return [c[0] for c in self.calls]
 
+    def _audited(self, method: str, path: str) -> None:
+        """Refuse as PVE does unless the token may audit the guest at the VMID."""
+        if self.holder is None or not self.auditable:
+            raise refused(method, path)
+
     # -- cluster / VM ops ------------------------------------------------------
 
     def next_id(self) -> int:
@@ -66,11 +88,23 @@ class FakeProxmoxAPI:
         self.calls.append(("next_id",))
         return NEWID
 
+    def vmid_in_use(self, vmid: int, *, timeout: float | None = None) -> bool:
+        if self.in_use_error is not None:
+            raise self.in_use_error
+        self.calls.append(("vmid_in_use", vmid))
+        return vmid == NEWID and self.holder is not None
+
     def list_vms(self, node: str) -> list[dict[str, Any]]:
-        return []
+        if self.list_error is not None:
+            raise self.list_error
+        self.calls.append(("list_vms", node))
+        return [{"vmid": NEWID, "name": self.holder}] if self.holder is not None and self.auditable else []
 
     def clone_vm(self, node: str, template_vmid: int, newid: int, name: str, **kw: Any) -> str:
         self.calls.append(("clone_vm", node, template_vmid, newid, name))
+        if self.clone_error is not None:
+            raise self.clone_error
+        self.holder = name
         return CLONE_UPID
 
     def configure_vm(self, node: str, vmid: int, **params: Any) -> None:
@@ -78,8 +112,9 @@ class FakeProxmoxAPI:
             raise self.configure_error
         self.calls.append(("configure_vm", node, vmid))
 
-    def resize_disk(self, node: str, vmid: int, disk: str, size: str) -> None:
+    def resize_disk(self, node: str, vmid: int, disk: str, size: str) -> str:
         self.calls.append(("resize_disk", node, vmid, disk, size))
+        return RESIZE_UPID
 
     def start_vm(self, node: str, vmid: int) -> str:
         self.calls.append(("start_vm", node, vmid))
@@ -89,6 +124,7 @@ class FakeProxmoxAPI:
     def stop_vm(self, node: str, vmid: int) -> str:
         if self.stop_error is not None:
             raise self.stop_error
+        self._audited("POST", f"/nodes/{node}/qemu/{vmid}/status/stop")
         self.calls.append(("stop_vm", node, vmid))
         self.running = False
         return "UPID:pve1:stop"
@@ -96,19 +132,19 @@ class FakeProxmoxAPI:
     def delete_vm(self, node: str, vmid: int) -> str:
         if self.delete_error is not None:
             raise self.delete_error
+        self._audited("DELETE", f"/nodes/{node}/qemu/{vmid}")
         self.calls.append(("delete_vm", node, vmid))
-        self.vm_deleted = True
+        self.holder = None
         return "UPID:pve1:delete"
 
-    def vm_status(self, node: str, vmid: int) -> dict[str, Any]:
+    def vm_status(self, node: str, vmid: int, *, timeout: float | None = None) -> dict[str, Any]:
         if self.status_errors:
             err = self.status_errors.pop(0)
             if err is not None:
                 raise err
+        self._audited("GET", f"/nodes/{node}/qemu/{vmid}/status/current")
         self.calls.append(("vm_status", node, vmid))
-        if self.vm_deleted:
-            raise ProxmoxAPIError(f"Configuration file 'qemu-server/{vmid}.conf' does not exist")
-        return {"status": "running" if self.running else "stopped"}
+        return {"status": "running" if self.running else "stopped", "name": self.holder}
 
     # -- tasks -----------------------------------------------------------------
 

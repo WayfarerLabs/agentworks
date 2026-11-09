@@ -20,6 +20,7 @@ from agentworks.capabilities.vm_platform.ssh_exposure import config_allow_cidrs,
 from agentworks.capabilities.vm_platform.tailscale_join import complete_cloud_bootstrap
 from agentworks.db import VMStatus
 from agentworks.errors import AgentworksError, ConnectivityError, StateError
+from agentworks.interrupts import interrupts_deferred
 from agentworks.plugins.gcp.auth import GcpClientCache
 from agentworks.plugins.gcp.bootstrap import (
     GCE_READINESS_COMMAND,
@@ -579,10 +580,7 @@ class GCEPlatform(PublicAddressPlatform):
         verify_instance_network(current, network_url=identity.network_url, subnet_url=identity.subnet_url)
         return live_external_ipv4(current, access_config_name=identity.access_config_name)
 
-    def post_tailscale_ready(self, vm: VMRow, ctx: RunContext) -> None:
-        self._close_stable_allow(vm, ctx)
-
-    def secure_failed_vm(self, vm: VMRow, ctx: RunContext) -> None:
+    def close_provisioning_access(self, vm: VMRow, ctx: RunContext) -> None:
         self._close_stable_allow(vm, ctx)
 
     @contextlib.contextmanager
@@ -622,13 +620,14 @@ class GCEPlatform(PublicAddressPlatform):
             )
             yield
         finally:
-            result = delete_matching_firewall(
-                firewalls,
-                project_id=identity.project_id,
-                expected=route,
-                ownership=attempt.ownership,
-                timeout=_OPERATION_TIMEOUT_SECONDS,
-            )
+            with interrupts_deferred():
+                result = delete_matching_firewall(
+                    firewalls,
+                    project_id=identity.project_id,
+                    expected=route,
+                    ownership=attempt.ownership,
+                    timeout=_OPERATION_TIMEOUT_SECONDS,
+                )
             if result.state is not FirewallState.ABSENT:
                 output.warn(
                     f"GCE transient SSH rule '{route_name}' was not proven absent in project "
@@ -729,4 +728,6 @@ class GCEPlatform(PublicAddressPlatform):
                     "do not delete a mismatched rule by name"
                 )
         except AgentworksError:
-            output.warn("Could not verify closure of the provider-ID-owned GCE provisioning allow; inspect it")
+            rule = vm.platform_metadata.get("allow_rule")
+            named = f" '{rule}'" if rule else ""
+            output.warn(f"Could not verify closure of the provider-ID-owned GCE provisioning allow{named}; inspect it")

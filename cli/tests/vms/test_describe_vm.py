@@ -17,7 +17,7 @@ from agentworks.db import AppliedStateKey, VMStatus
 from agentworks.errors import StateError
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
-from tests.conftest import stub_vm_ssh_identity
+from tests.conftest import fake_installed_programs, stub_vm_ssh_identity
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -35,7 +35,7 @@ def config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Config:
     key = tmp_path / "id_ed25519"
     key.write_text("private")
     (tmp_path / "id_ed25519.pub").write_text("public")
-    monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+    fake_installed_programs(monkeypatch, lambda name: f"/usr/bin/{name}")
     path = tmp_path / "config.toml"
     path.write_text(f'[operator]\nssh_public_key = "{key.as_posix()}.pub"\nssh_private_key = "{key.as_posix()}"\n')
     return load_config(path, warn_issues=False, warn_deprecations=False)

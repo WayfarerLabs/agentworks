@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING
 
 from agentworks.errors import ConnectivityError
 from agentworks.path_rendering import format_host_path
+from agentworks.programs import resolve_program
 from agentworks.subprocess_io import decode_stream, stdin_bytes
 
 if TYPE_CHECKING:
@@ -89,6 +90,21 @@ class SSHError(ConnectivityError):
     """
 
 
+def openssh_program(name: str) -> str:
+    """The absolute path of the OpenSSH program ``name`` (``ssh``, ``scp``) on ``PATH``, for a legacy argv.
+
+    A missing program raises :class:`SSHError`, the failure every caller of
+    this module and of ``SSHTransport`` already handles.
+    """
+    try:
+        return resolve_program(name)
+    except FileNotFoundError as error:
+        raise SSHError(
+            f"'{name}' could not be started: {error}",
+            hint="Install the OpenSSH client on this machine, or check that it is on PATH.",
+        ) from error
+
+
 LOG_DIR = Path.home() / ".config" / "agentworks" / "logs"
 
 
@@ -123,6 +139,8 @@ class SSHLogger:
     ) -> None:
         from datetime import UTC, datetime
 
+        from agentworks.secrets.redaction import secret_redaction_forms
+
         timestamp = datetime.now(tz=UTC).strftime("%Y%m%dT%H%M%SZ")
         self.vm_name = vm_name
         self.path = LOG_DIR / f"{vm_name}-{timestamp}-{command_stem}.log"
@@ -132,7 +150,7 @@ class SSHLogger:
         for secret in redactions:
             if not secret:
                 continue
-            for representation in (secret, shlex.quote(secret)):
+            for representation in secret_redaction_forms(secret):
                 if representation not in normalized:
                     normalized.append(representation)
         # Prefer the longest representation so an overlapping shorter token
@@ -163,9 +181,16 @@ class SSHLogger:
         """
         return format_host_path(self.path)
 
-    def sanitize(self, text: str) -> str:
-        """Apply the operation redactions before publishing diagnostics or state."""
-        for secret in self._redact:
+    def sanitize(self, text: str, *, normalize: Callable[[str], str] | None = None) -> str:
+        """Redact operation secrets, optionally matching already-normalized text."""
+        patterns = (
+            self._redact
+            if normalize is None
+            else tuple(
+                sorted({value for secret in self._redact if (value := normalize(secret))}, key=len, reverse=True)
+            )
+        )
+        for secret in patterns:
             text = text.replace(secret, "[REDACTED]")
         return text
 
@@ -358,7 +383,7 @@ def _ssh_base_args(
     ``input_text`` payload is written, so callers set ``close_stdin`` only for
     the no-stdin-payload case.
     """
-    args = ["ssh", *target.host_key_options, "-o", "BatchMode=yes"]
+    args = [openssh_program("ssh"), *target.host_key_options, "-o", "BatchMode=yes"]
     if tty:
         args.insert(1, "-tt")
     else:
@@ -501,7 +526,7 @@ def run(
 
 def _scp_base_args(target: SSHTarget) -> list[str]:
     """Build the base scp argument list (flags and options, no paths)."""
-    args = ["scp", "-q", *target.host_key_options, "-o", "BatchMode=yes"]
+    args = [openssh_program("scp"), "-q", *target.host_key_options, "-o", "BatchMode=yes"]
     if target.port is not None:
         args.extend(["-P", str(target.port)])
     if target.identity_file is not None:

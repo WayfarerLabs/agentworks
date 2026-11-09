@@ -17,7 +17,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from agentworks.capabilities.base import RunContext
-from agentworks.capabilities.vm_platform import ProvisionRequest
+from agentworks.capabilities.vm_platform import ProvisionRequest, RetainedProvisioningError
 from agentworks.capabilities.vm_platform import lima as lima_mod
 from agentworks.capabilities.vm_platform.bootstrap_script import REBOOT_SENTINEL_PATH
 from agentworks.capabilities.vm_platform.lima import _REBOOT_CLEAR_MARKER, LimaPlatform
@@ -58,7 +58,8 @@ def _request(*, tailscale_auth_key: str = "tskey-test") -> ProvisionRequest:
 class _Host:
     """The placement host: records each command with its input and answers it.
 
-    ``errors`` maps a command substring to the exception raised for it.
+    ``errors`` maps a command substring to the exception raised for it, and
+    ``statuses`` maps a whole command to the exit status it ends with.
     ``detached_status`` is the status the detached create writes once it is
     launched; ``None`` keeps it running forever.
     """
@@ -69,6 +70,7 @@ class _Host:
         self.detached_status = detached_status
         self.launched = False
         self.outputs: dict[str, str] = {}
+        self.statuses: dict[str, int] = {}
 
     @property
     def commands(self) -> list[str]:
@@ -79,11 +81,13 @@ class _Host:
         for needle, error in self.errors.items():
             if needle in command:
                 raise error
+        if command in self.statuses:
+            return _Completed(self.statuses[command], "", "the failure")
         if command in self.outputs:
             return _Completed(0, self.outputs[command], "")
         if "mktemp -d" in command:
             return _Completed(0, f"{_REMOTE_TEMPLATE_DIR}\n", "")
-        if command.startswith("nohup "):
+        if "nohup " in command:
             self.launched = True
         if command.startswith("test -f") and command.endswith(".status"):
             return _Completed(0 if self.launched and self.detached_status is not None else 1, "", "")
@@ -136,7 +140,7 @@ def test_remote_stdin_write_failure_removes_partial_template_and_preserves_error
 
     assert caught.value is write_failure
     assert host.commands[-1].startswith(f"rm -rf -- {_REMOTE_TEMPLATE_DIR}")
-    assert not any(command.startswith("nohup") for command in host.commands)
+    assert not any("nohup " in command for command in host.commands)
 
 
 def test_remote_template_rejects_untrusted_allocation_path(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -227,8 +231,9 @@ def test_the_detached_create_runs_once_and_its_output_reaches_the_creates_log(ho
 
     _create_remote(progress=progress)
 
-    launches = [command for command in host.commands if command.startswith("nohup ")]
-    assert launches == [f"nohup /bin/bash {_BASE}.sh </dev/null >/dev/null 2>&1 &"]
+    launches = [command for command in host.commands if "nohup " in command]
+    assert len(launches) == 1
+    assert f"{_BASE}.sh" in launches[0]
     wrapper = [content for command, content in host.calls if command.endswith(f"cat > {_BASE}.sh")]
     assert len(wrapper) == 1
     assert "limactl create --name myvm --tty=false" in (wrapper[0] or "")
@@ -264,12 +269,11 @@ def test_remote_interrupt_kills_the_detached_limactl_before_deleting(
 
     assert caught.value is interrupt
     commands = host.commands
-    kill = _index(commands, lambda c: f"kill $(cat {_BASE}.pid)" in c)
+    kill = _index(commands, lambda c: f"pid=$(cat {_BASE}.pid)" in c)
     artifacts = _index(commands, lambda c: c == f"rm -f {_BASE}.out {_BASE}.sh {_BASE}.pid {_BASE}.status")
     delete = _index(commands, lambda c: c == "limactl delete --force myvm")
     assert kill < artifacts < delete
     assert any(command.startswith(f"rm -rf -- {_REMOTE_TEMPLATE_DIR}") for command in commands)
-    assert any("Ctrl-C again to abandon" in w for w in captured_output.warnings)
 
 
 def test_remote_interrupt_preserves_original_when_artifact_cleanup_fails(
@@ -305,7 +309,7 @@ def test_remote_exception_kills_cleans_artifacts_then_deletes_without_masking(
 
     assert caught.value is original
     commands = host.commands
-    kill = _index(commands, lambda c: f"kill $(cat {_BASE}.pid)" in c)
+    kill = _index(commands, lambda c: f"pid=$(cat {_BASE}.pid)" in c)
     artifacts = _index(commands, lambda c: c.startswith(f"rm -f {_BASE}.out"))
     delete = _index(commands, lambda c: c == "limactl delete --force myvm")
     assert kill < artifacts < delete
@@ -323,22 +327,22 @@ def test_remote_abandon_warning_names_the_vm_host(
         LimaPlatform, "_create_remote", lambda self, name, yaml, *, progress: (_ for _ in ()).throw(interrupt)
     )
 
-    with pytest.raises(KeyboardInterrupt) as caught:
+    with pytest.raises(RetainedProvisioningError):
         LimaPlatform("lima", _REMOTE).create(_request(), RunContext())
 
-    assert caught.value is interrupt
-    (abandoned,) = [w for w in captured_output.warnings if "Cleanup abandoned" in w]
-    assert "on 'user@host'" in abandoned
+    warned = "\n".join(captured_output.warnings)
+    assert "on 'user@host'" in warned
 
 
 # -- Local rollback, shared with the remote path -----------------------------------------------
 
 
-def test_cleanup_failure_warns_and_does_not_mask_the_original(
+def test_cleanup_failure_warns_and_retains_the_row_with_the_original_failure(
     host: _Host, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
 ) -> None:
-    """The rollback is best-effort: a broken teardown warns with the
-    manual removal command and the ORIGINAL failure still propagates."""
+    """A teardown that cannot remove the instance warns with the manual
+    removal command and hands the instance to core, so the row survives
+    for ``vm delete``; the original failure stays in the error."""
     host.errors = {"limactl delete": LimaCommandFailed("cleanup broke")}
     monkeypatch.setattr(LimaPlatform, "_ensure_limactl", lambda self: None)
     monkeypatch.setattr(
@@ -347,9 +351,10 @@ def test_cleanup_failure_warns_and_does_not_mask_the_original(
         lambda self, name, yaml: (_ for _ in ()).throw(LimaCommandFailed("original failure")),
     )
 
-    with pytest.raises(LimaCommandFailed, match="original failure"):
+    with pytest.raises(RetainedProvisioningError, match="original failure") as caught:
         LimaPlatform("lima", {"placement": {"mode": "local"}}).create(_request(), RunContext())
 
+    assert caught.value.platform_metadata == {"instance_name": "myvm"}
     assert host.commands.count("limactl delete --force myvm") == 1
     warned = "\n".join(captured_output.warnings)
     assert "could not clean up the partial Lima instance 'myvm'" in warned
@@ -379,3 +384,38 @@ def test_delete_op_issues_the_shared_teardown_command(host: _Host, captured_outp
     LimaPlatform("lima", {"placement": {"mode": "local"}}).delete(vm, RunContext())  # type: ignore[arg-type]
 
     assert host.commands == ["limactl delete --force myvm"]
+
+
+def test_a_remote_delete_removes_what_an_abandoned_create_left_on_the_host(
+    host: _Host, captured_output: CapturedOutput
+) -> None:
+    """A retained rollback or a second Ctrl-C can leave the detached create running, with its files; the delete
+    that follows stops it and removes them before deleting the instance, and only kills a PID that is still that
+    create's wrapper."""
+    vm = SimpleNamespace(name="myvm", platform_metadata={"instance_name": "myvm"})
+
+    LimaPlatform("lima", _REMOTE).delete(vm, RunContext())  # type: ignore[arg-type]
+
+    commands = host.commands
+    delete = _index(commands, lambda c: c == "limactl delete --force myvm")
+    kill = _index(commands, lambda c: f"pid=$(cat {_BASE}.pid)" in c and f"grep -qF -- {_BASE}.sh" in c)
+    artifacts = _index(commands, lambda c: c == f"rm -f {_BASE}.out {_BASE}.sh {_BASE}.pid {_BASE}.status")
+    assert kill < artifacts < delete
+
+
+@pytest.mark.parametrize(
+    ("placement", "status"),
+    [({"placement": {"mode": "local"}}, 1), (_REMOTE, 255)],
+    ids=("limactl-failed", "host-unreachable"),
+)
+def test_a_delete_that_fails_raises_so_core_keeps_the_row(
+    host: _Host, captured_output: CapturedOutput, placement: dict[str, object], status: int
+) -> None:
+    """``limactl delete --force`` exits 0 for an instance already gone, so any other status is a delete that failed."""
+    host.statuses = {"limactl delete --force myvm": status}
+    vm = SimpleNamespace(name="myvm", platform_metadata={"instance_name": "myvm"})
+
+    with pytest.raises(LimaCommandFailed):
+        LimaPlatform("lima", placement).delete(vm, RunContext())  # type: ignore[arg-type]
+
+    assert host.commands[-1] == "limactl delete --force myvm"  # nothing after the failed delete

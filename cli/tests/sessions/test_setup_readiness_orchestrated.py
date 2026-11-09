@@ -3,14 +3,17 @@
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Literal
+from uuid import uuid4
 
 import pytest
 
+from agentworks import output
 from agentworks.capabilities.harness_integration import ShellIntegration
 from agentworks.capabilities.harness_integration.setup import SetupEvidence, SetupGap, SetupReadiness
 from agentworks.db import Database, SessionStatus
-from agentworks.errors import BrokenStateError
+from agentworks.errors import BrokenStateError, StateError
 from agentworks.harness_setup.model import NativeSetupState, SetupFacet, SetupRecord
+from agentworks.harness_setup.outcomes import SetupFailure, describe_setup_failures, raise_setup_failures
 from agentworks.harness_setup.readiness import RequiredSetupMissingError
 from agentworks.harness_setup.state import write_native_setup
 from agentworks.instance_specs import persist_creation_overlay
@@ -162,19 +165,49 @@ def test_create_existing_owners_checks_setup_before_secrets_or_session_mutation(
 
 @pytest.mark.parametrize(("new_workspace", "new_agent"), [(False, True), (True, False), (True, True)])
 @pytest.mark.parametrize("complete", [False, True])
+@pytest.mark.parametrize("severity", ["required", "recommended"])
 def test_pending_owners_check_fresh_applied_setup_before_launch(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, config, new_workspace, new_agent, complete
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    config,
+    captured_output,
+    new_workspace,
+    new_agent,
+    complete,
+    severity,
 ) -> None:
     events: list[str] = []
     db = _create_stubs(tmp_path, monkeypatch, events)
     db.insert_agent("a1", "vm1", "agt-a1")
     facets: tuple[SetupFacet, ...] = (*(("workspace",) if new_workspace else ()), *(("user",) if new_agent else ()))
-    evidence = _record_setup_check(monkeypatch, events, facets=facets)
+    evidence = _record_setup_check(monkeypatch, events, facets=facets, severity=severity)
     _record_resolve(monkeypatch, events)
     monkeypatch.setattr("agentworks.harness_setup.readiness.destination_id", lambda *a, **k: "a" * 64)
 
+    collectors = []
+    failures = []
+    reported = []
+
+    def report(failures_: list[SetupFailure]) -> None:
+        reported.append(tuple(failures_))
+        raise_setup_failures(failures_)
+
+    monkeypatch.setattr("agentworks.sessions.manager._create.raise_setup_failures", report)
+    described = []
+
+    def describe(failures_: list[SetupFailure]) -> str:
+        described.append(tuple(failures_))
+        return describe_setup_failures(failures_)
+
+    monkeypatch.setattr("agentworks.sessions.manager._create_roll.describe_setup_failures", describe)
+
     def realize(db_: Database, config: Any, registry: Any, **kwargs: Any) -> None:
         inputs = kwargs["setup_inputs"]
+        collectors.append(kwargs["setup_failures"])
+        if not complete:
+            failure = SetupFailure(inputs.kind, inputs.name, inputs.facet, "shell", uuid4().hex)
+            kwargs["setup_failures"].append(failure)
+            failures.append(failure)
         events.append(f"realize_{inputs.kind}")
         if inputs.kind == "agent":
             db_.insert_agent(inputs.name, "vm1", f"agt-{inputs.name}")
@@ -225,8 +258,25 @@ def test_pending_owners_check_fresh_applied_setup_before_launch(
         if complete:
             create()
         else:
-            with pytest.raises(RequiredSetupMissingError):
+            error_type = RequiredSetupMissingError if severity == "required" else StateError
+            with pytest.raises(error_type) as caught:
                 create()
+            if severity == "required":
+                assert caught.value.entity_kind == ("workspace" if new_workspace else "agent")
+                assert caught.value.entity_name == "s1"
+                assert caught.value.hint is not None
+                assert all(failure.reason in caught.value.hint for failure in failures)
+                if new_workspace:
+                    assert "--workspace s1" in caught.value.hint
+                if new_agent:
+                    assert "--agent s1" in caught.value.hint
+        assert all(collector is collectors[0] for collector in collectors)
+        assert collectors[0] == failures
+        required_failure = not complete and severity == "required"
+        assert reported == ([] if required_failure else [tuple(failures)])
+        assert described == ([tuple(failures)] if required_failure else [])
+        result_roles = [role for role, _, _ in captured_output.lines if role is output.Role.RESULT]
+        assert result_roles == ([output.Role.RESULT] if complete else [])
         before_setup = [
             *([] if new_agent else ["probe"]),
             "resolve",
@@ -234,25 +284,90 @@ def test_pending_owners_check_fresh_applied_setup_before_launch(
             *(["realize_agent", "probe"] if new_agent else []),
             "setup",
         ]
-        after_setup = (
-            ["grant", "deploy", "tmux_create"]
-            if complete
-            else [
-                *(["delete_agent"] if new_agent else []),
-                *(["delete_workspace"] if new_workspace else []),
-            ]
-        )
+        launched = complete or severity == "recommended"
+        after_setup = ["grant", "deploy", "tmux_create"] if launched else []
         assert events == before_setup + after_setup
         assert [(item.owner_kind, item.owner_name, item.status) for item in evidence] == [
             ("workspace" if facet == "workspace" else "agent", "s1", "current" if complete else "incomplete")
             for facet in facets
         ]
-        assert (db.get_session("s1") is not None) is complete
-        if not complete:
+        assert (db.get_session("s1") is not None) is launched
+        if not launched:
             assert not db.has_any_grant("s1" if new_agent else "a1", "s1" if new_workspace else "ws1")
-            if new_agent:
-                assert db.get_agent("s1") is None
-            if new_workspace:
-                assert db.get_workspace("s1") is None
+        if new_agent:
+            assert db.get_agent("s1") is not None
+            assert db.instance_state.get_desired_overlay("agent", "s1") is not None
+        if new_workspace:
+            assert db.get_workspace("s1") is not None
+            assert db.instance_state.get_desired_overlay("workspace", "s1") is not None
+    finally:
+        db.close()
+
+
+@pytest.mark.parametrize("failure_type", [RuntimeError, KeyboardInterrupt])
+def test_optional_setup_failure_does_not_disable_core_failure_unwind(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, config, failure_type
+) -> None:
+    events: list[str] = []
+    db = _create_stubs(tmp_path, monkeypatch, events)
+    _record_setup_check(monkeypatch, events, facets=("workspace", "user"), severity="recommended")
+    core_error = failure_type("fixture session failure")
+    collectors = []
+
+    def realize(db_: Database, config: Any, registry: Any, **kwargs: Any) -> None:
+        inputs = kwargs["setup_inputs"]
+        collectors.append(kwargs["setup_failures"])
+        kwargs["setup_failures"].append(SetupFailure(inputs.kind, inputs.name, inputs.facet, "shell", uuid4().hex))
+        events.append(f"realize_{inputs.kind}")
+        if inputs.kind == "agent":
+            db_.insert_agent(inputs.name, "vm1", f"agt-{inputs.name}")
+        else:
+            db_.insert_workspace(inputs.name, "/srv/s1", "vm1", "ws-s1")
+
+    def delete_agent(db_: Database, config: Any, *, name: str, **kwargs: Any) -> None:
+        events.append("delete_agent")
+        db_.delete_agent(name)
+
+    def delete_workspace(db_: Database, config: Any, *, name: str, **kwargs: Any) -> None:
+        events.append("delete_workspace")
+        db_.delete_workspace(name)
+
+    def fail_session(*args: Any, **kwargs: Any) -> None:
+        events.append("config_fail")
+        raise core_error
+
+    monkeypatch.setattr("agentworks.agents.realize.realize_agent", realize)
+    monkeypatch.setattr("agentworks.workspaces.realize.realize_workspace", realize)
+    monkeypatch.setattr("agentworks.agents.manager.delete_agent", delete_agent)
+    monkeypatch.setattr("agentworks.workspaces.manager.delete_workspace", delete_workspace)
+    monkeypatch.setattr("agentworks.sessions.tmux.deploy_restricted_config", fail_session)
+    try:
+        with pytest.raises(failure_type) as caught:
+            manager.create_session(
+                db,
+                config,
+                name="s1",
+                new_workspace=True,
+                new_agent=True,
+                vm_name="vm1",
+                workspace_spec='{"harness_integrations": {"shell": {}}}',
+                agent_spec='{"harness_integrations": {"shell": {}}}',
+                interaction=TtyInteractionPolicy.REFUSE,
+            )
+        assert caught.value is core_error
+        assert collectors[0] is collectors[1]
+        assert len(collectors[0]) == 2
+        assert events == [
+            "realize_workspace",
+            "realize_agent",
+            "probe",
+            "setup",
+            "config_fail",
+            "delete_agent",
+            "delete_workspace",
+        ]
+        assert db.get_session("s1") is None
+        assert db.get_agent("s1") is None
+        assert db.get_workspace("s1") is None
     finally:
         db.close()

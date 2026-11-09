@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import signal
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -13,6 +14,7 @@ from agentworks.execution import reachability, trust
 from agentworks.execution.errors import TrustMismatch
 from agentworks.execution.requests import Command, Script
 from agentworks.execution.results import Result, Unknown, UnknownReason
+from agentworks.interrupts import termination_as_interrupt
 from agentworks.vms.manager import _guard_incomplete_vm
 from tests.vm_access_support import Admin
 from tests.vms.phase_a_support import (
@@ -45,7 +47,7 @@ def test_the_sequence_records_enrolls_checks_then_completes(phase: PhaseAHarness
 
     assert (address, release) == (ADDRESS, DebianRelease.TRIXIE)
     # The first contact enrolls; then the contract, release first, over the admin's VM-mode access, and
-    # after the platform's post-ready hook the reconnect probe over the same access.
+    # after the platform closes its provisioning access the reconnect probe over the same access.
     assert phase.recorder.operations == [("enroll", "run")] + [("admin", "run")] * 4
     first_contact, release_request, script, sudo, reconnect = phase.recorder.requests("run")
     assert reconnect == reachability.PROBE
@@ -65,8 +67,7 @@ def test_the_sequence_records_enrolls_checks_then_completes(phase: PhaseAHarness
     assert row.debian_release is DebianRelease.TRIXIE
     assert trust.has_record(VM)
     assert phase.events() == ["provisioning_started", "provisioning_complete"]
-    assert phase.platform.secured == []
-    assert phase.platform.ready == [ProvisioningStatus.COMPLETE.value]
+    assert phase.platform.closed == [ProvisioningStatus.COMPLETE.value]
 
 
 def test_the_requests_reach_the_operation_log(phase: PhaseAHarness) -> None:
@@ -76,7 +77,7 @@ def test_the_requests_reach_the_operation_log(phase: PhaseAHarness) -> None:
     assert phase.log.steps[-1] == "Check the VM contract"
 
 
-def test_an_address_core_cannot_parse_fails_before_any_connection_and_secures_the_vm(phase: PhaseAHarness) -> None:
+def test_an_address_core_cannot_parse_fails_before_any_connection_and_closes_access(phase: PhaseAHarness) -> None:
     with pytest.raises(ProvisioningError):
         phase.bootstrap(tailnet_address="203.0.113.7.attacker")
 
@@ -84,7 +85,7 @@ def test_an_address_core_cannot_parse_fails_before_any_connection_and_secures_th
     row = phase.row()
     assert row.provisioning_status == ProvisioningStatus.FAILED.value
     assert row.tailscale_host is None
-    assert phase.platform.secured == [VM]
+    assert phase.platform.closed == [ProvisioningStatus.FAILED.value]
 
 
 def _first_contact_times_out(phase: PhaseAHarness, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -104,7 +105,7 @@ def _base_failure(phase: PhaseAHarness, monkeypatch: pytest.MonkeyPatch) -> None
 
 
 @pytest.mark.parametrize("arrange", [_first_contact_times_out, _no_key_recorded, _release_mismatch, _base_failure])
-def test_a_failure_before_the_contract_passes_marks_failed_and_secures(
+def test_a_failure_before_the_contract_passes_marks_failed_and_closes_access(
     phase: PhaseAHarness, monkeypatch: pytest.MonkeyPatch, arrange: Callable[[PhaseAHarness, pytest.MonkeyPatch], None]
 ) -> None:
     arrange(phase, monkeypatch)
@@ -114,7 +115,7 @@ def test_a_failure_before_the_contract_passes_marks_failed_and_secures(
 
     assert phase.row().provisioning_status == ProvisioningStatus.FAILED.value
     assert phase.events()[-1] == "provisioning_failed"
-    assert phase.platform.secured == [VM]
+    assert phase.platform.closed == [ProvisioningStatus.FAILED.value]
 
 
 def test_a_failed_release_check_records_no_release(phase: PhaseAHarness) -> None:
@@ -127,7 +128,7 @@ def test_a_failed_release_check_records_no_release(phase: PhaseAHarness) -> None
 
 
 @pytest.mark.parametrize("request_index", [0, 1, 2, 3], ids=["first-contact", "release", "script", "sudo"])
-def test_an_interrupt_before_the_contract_passes_secures_and_leaves_the_vm_gated(
+def test_an_interrupt_before_the_contract_passes_closes_access_and_leaves_the_vm_gated(
     phase: PhaseAHarness, request_index: int
 ) -> None:
     if request_index == 0:
@@ -142,19 +143,38 @@ def test_an_interrupt_before_the_contract_passes_secures_and_leaves_the_vm_gated
 
     row = phase.row()
     assert row.provisioning_status != ProvisioningStatus.COMPLETE.value
-    assert phase.platform.secured == [VM]
+    assert phase.platform.closed == [row.provisioning_status]
     with pytest.raises(StateError):
         _guard_incomplete_vm(row)
 
 
-def test_an_interrupt_after_complete_leaves_the_vm_complete(phase: PhaseAHarness) -> None:
-    phase.platform.ready_error = KeyboardInterrupt()
+def test_an_interrupt_while_closing_after_complete_leaves_the_vm_complete(phase: PhaseAHarness) -> None:
+    phase.platform.close_error = KeyboardInterrupt()
 
     with pytest.raises(KeyboardInterrupt):
         phase.bootstrap()
 
     assert phase.row().provisioning_status == ProvisioningStatus.COMPLETE.value
-    assert phase.platform.secured == []
+    assert phase.platform.closed == [ProvisioningStatus.COMPLETE.value]
+
+
+@pytest.mark.parametrize("signal_name", ["SIGINT", "SIGTERM"])
+@pytest.mark.parametrize("fails", [False, True], ids=["contract-passed", "contract-failed"])
+def test_an_interrupt_that_lands_during_the_close_waits_for_it_to_finish(
+    phase: PhaseAHarness, signal_name: str, fails: bool
+) -> None:
+    """Ctrl-C or SIGTERM the instant the row reads complete: the allow is still removed, then the interrupt raises."""
+    if fails:
+        phase.admin.run_outcomes = contract_outcomes(script=b"AGW-CHECK systemd x\nAGW-CHECK-END\n")
+    phase.platform.signal_during_close = getattr(signal, signal_name)
+
+    # vm create holds Phase A inside this block, which is what turns SIGTERM into an interrupt.
+    with pytest.raises(KeyboardInterrupt), termination_as_interrupt():
+        phase.bootstrap()
+
+    assert phase.platform.close_finished
+    expected = ProvisioningStatus.FAILED if fails else ProvisioningStatus.COMPLETE
+    assert phase.row().provisioning_status == expected.value
 
 
 def test_a_post_ready_wait_that_runs_out_warns_and_proceeds(phase: PhaseAHarness, captured_output: Any) -> None:
@@ -178,7 +198,9 @@ def test_the_post_ready_wait_is_on_the_vm_mode_access_and_never_enrolls(phase: P
     assert phase.recorder.enrolled == [VM]
 
 
-def test_a_post_ready_wait_that_raises_leaves_the_vm_complete_and_unsecured(phase: PhaseAHarness) -> None:
+def test_a_post_ready_wait_that_raises_leaves_the_vm_complete_with_its_access_closed_once(
+    phase: PhaseAHarness,
+) -> None:
     """The VM was attested seconds earlier: the raise propagates, and create maps it to reinit advice."""
     phase.admin.run_outcomes = [*contract_outcomes(), Result(Unknown(UnknownReason.HOST_KEY))]
 
@@ -186,10 +208,10 @@ def test_a_post_ready_wait_that_raises_leaves_the_vm_complete_and_unsecured(phas
         phase.bootstrap()
 
     assert phase.row().provisioning_status == ProvisioningStatus.COMPLETE.value
-    assert phase.platform.secured == []
+    assert phase.platform.closed == [ProvisioningStatus.COMPLETE.value]
 
 
-def test_a_failing_write_in_the_failure_arm_neither_replaces_the_failure_nor_skips_securing(
+def test_a_failing_write_in_the_failure_arm_neither_replaces_the_failure_nor_skips_the_close(
     phase: PhaseAHarness, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     phase.admin.run_outcomes = contract_outcomes(script=b"AGW-CHECK systemd x\nAGW-CHECK-END\n")
@@ -205,28 +227,33 @@ def test_a_failing_write_in_the_failure_arm_neither_replaces_the_failure_nor_ski
     with pytest.raises(StateError):
         phase.bootstrap()
 
-    assert phase.platform.secured == [VM]
+    assert len(phase.platform.closed) == 1
 
 
-def test_a_secure_hook_failure_does_not_mask_the_phase_a_failure(phase: PhaseAHarness) -> None:
-    """secure_failed_vm is best-effort: its failure warns and the original Phase A error still propagates."""
+def test_a_close_failure_does_not_mask_the_phase_a_failure(phase: PhaseAHarness) -> None:
+    """The close is best effort: its failure warns and the original Phase A error still propagates."""
     phase.admin.run_outcomes = contract_outcomes(script=b"AGW-CHECK systemd x\nAGW-CHECK-END\n")
-    phase.platform.secure_error = RuntimeError("hook exploded")
+    phase.platform.close_error = RuntimeError("hook exploded")
 
     with pytest.raises(StateError):
         phase.bootstrap()
 
 
-def test_a_secure_hook_failure_does_not_mask_the_interrupt(phase: PhaseAHarness) -> None:
+def test_a_close_failure_does_not_mask_the_interrupt(phase: PhaseAHarness) -> None:
     phase.enrollment.run_outcomes = [KeyboardInterrupt()]
-    phase.platform.secure_error = RuntimeError("hook exploded")
+    phase.platform.close_error = RuntimeError("hook exploded")
 
     with pytest.raises(KeyboardInterrupt):
         phase.bootstrap()
 
 
-def test_the_post_ready_hook_fires_after_the_contract_and_never_secures(phase: PhaseAHarness) -> None:
-    phase.bootstrap()
+def test_a_close_failure_after_the_contract_passed_warns_and_completes(
+    phase: PhaseAHarness, captured_output: Any
+) -> None:
+    phase.platform.close_error = RuntimeError("hook exploded")
 
-    assert phase.platform.ready == [ProvisioningStatus.COMPLETE.value]
-    assert phase.platform.secured == []
+    address, _release = phase.bootstrap()
+
+    assert address == ADDRESS
+    assert phase.row().provisioning_status == ProvisioningStatus.COMPLETE.value
+    assert len(captured_output.warnings) == 1

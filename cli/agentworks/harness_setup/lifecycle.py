@@ -38,6 +38,7 @@ if TYPE_CHECKING:
     from agentworks.db.instance_state import InstanceKind
     from agentworks.harness_setup.locking import NativeMutationGuard
     from agentworks.harness_setup.model import NativeSetupState, SetupComponent
+    from agentworks.harness_setup.outcomes import SetupFailure
     from agentworks.resources.registry import Registry
     from agentworks.schema import CapabilityConfig
     from agentworks.ssh import SSHLogger
@@ -173,6 +174,7 @@ def apply_vm_setup(
     logger: SSHLogger,
     held: NativeMutationGuard,
     operation: str,
+    failures: list[SetupFailure],
 ) -> None:
     """Apply VM then admin setup on the already-established admin transport."""
     access = execution.vm_access(vm, config, Admin(), log=logger.record)
@@ -181,7 +183,7 @@ def apply_vm_setup(
             vm_name=vm.name, platform=site_platform_name(vm.site, registry), site=vm.site, user=vm.admin_username
         )
         environment = item.environment(values, context)
-        runner = SetupRunner(target, environment)
+        runner = SetupRunner(target, environment, redactions=values.values())
         if item.component == "vm":
             invocation: SetupInvocation = VMSetupInvocation(
                 vm=vm,
@@ -204,7 +206,7 @@ def apply_vm_setup(
                 username=vm.admin_username,
                 home=f"/home/{vm.admin_username}",
             )
-        run_setup(db, registry, item, invocation, operation=operation, held=held)
+        run_setup(db, registry, item, invocation, operation=operation, failures=failures, held=held)
 
 
 def apply_agent_setup(
@@ -219,6 +221,7 @@ def apply_agent_setup(
     logger: SSHLogger,
     held: NativeMutationGuard,
     operation: str,
+    failures: list[SetupFailure],
     buffered: bool = False,
 ) -> NativeSetupState:
     """Execute as the actual agent, after core establishes its SSH access."""
@@ -232,7 +235,9 @@ def apply_agent_setup(
         agent_name=inputs.name,
     )
     environment = inputs.environment(values, context)
-    runner = SetupRunner(transport_for_user(vm, config, user=username, logger=logger), environment)
+    runner = SetupRunner(
+        transport_for_user(vm, config, user=username, logger=logger), environment, redactions=values.values()
+    )
     invocation = UserSetupInvocation(
         vm=vm,
         access=execution.vm_access(vm, config, Agent(inputs.name, username), log=logger.record),
@@ -244,7 +249,9 @@ def apply_agent_setup(
         username=username,
         home=f"/home/{username}",
     )
-    return run_setup(db, registry, inputs, invocation, operation=operation, buffered=buffered, held=held)
+    return run_setup(
+        db, registry, inputs, invocation, operation=operation, failures=failures, buffered=buffered, held=held
+    )
 
 
 def apply_workspace_setup(
@@ -260,6 +267,7 @@ def apply_workspace_setup(
     logger: SSHLogger,
     held: NativeMutationGuard,
     operation: str,
+    failures: list[SetupFailure],
     buffered: bool = True,
 ) -> NativeSetupState:
     """Execute project setup as admin before publishing the new workspace row."""
@@ -274,7 +282,7 @@ def apply_workspace_setup(
         workspace_dir=root,
     )
     environment = inputs.environment(values, context)
-    runner = SetupRunner(transport(vm, config, logger=logger), environment)
+    runner = SetupRunner(transport(vm, config, logger=logger), environment, redactions=values.values())
     invocation = WorkspaceSetupInvocation(
         vm=vm,
         access=execution.vm_access(vm, config, Admin(), log=logger.record),
@@ -287,4 +295,6 @@ def apply_workspace_setup(
         root=root,
         linux_group=linux_group,
     )
-    return run_setup(db, registry, inputs, invocation, operation=operation, buffered=buffered, held=held)
+    return run_setup(
+        db, registry, inputs, invocation, operation=operation, failures=failures, buffered=buffered, held=held
+    )

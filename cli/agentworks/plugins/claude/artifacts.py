@@ -14,6 +14,7 @@ from agentworks.artifacts.application import ArtifactApplication
 from agentworks.artifacts.model import ArtifactType
 from agentworks.artifacts.native.common import (
     NativeSessionArtifacts,
+    ancestor_diagnostics,
     artifact_file,
     context_text,
     has_artifacts,
@@ -119,9 +120,9 @@ def session_artifacts(
     validate_names(inputs)
     selected_types = {item.content.type for item in inputs.items()}
     ancestor_names = {file.native_identity or "" for file in context.ancestor_files}
-    has_skills = ArtifactType.SKILL in selected_types or any(name.startswith("skill:") for name in ancestor_names)
-    has_agents = ArtifactType.AGENT in selected_types or any(name.startswith("agent:") for name in ancestor_names)
-    forbidden = {"--bare", "--settings", "--setting-sources"}
+    has_skills = ArtifactType.SKILL in selected_types
+    has_agents = ArtifactType.AGENT in selected_types
+    forbidden = {"--bare", "--settings", "--setting-sources"} if inputs else set()
     if selected_types & {ArtifactType.HINT, ArtifactType.RULE}:
         forbidden.update(
             {
@@ -136,7 +137,16 @@ def session_artifacts(
         forbidden.update({"--plugin-dir", "--disable-slash-commands"})
     if has_agents:
         forbidden.add("--agents")
-    reject_flags(extra_args, forbidden, "claude-code")
+    if inputs:
+        reject_flags(extra_args, forbidden, "claude-code")
+    if context.ancestor_files:
+        ancestor_flags = {"--bare", "--settings", "--setting-sources"}
+        if any(name.startswith("skill:") for name in ancestor_names):
+            ancestor_flags.update({"--plugin-dir", "--disable-slash-commands"})
+        if any(name.startswith("agent:") for name in ancestor_names):
+            ancestor_flags.add("--agents")
+        with ancestor_diagnostics("claude-code"):
+            reject_flags(extra_args, ancestor_flags, "claude-code")
     files = []
     argv: list[str] = []
     guidance = tuple(item for item in inputs.items() if item.content.type in (ArtifactType.HINT, ArtifactType.RULE))

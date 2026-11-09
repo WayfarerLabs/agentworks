@@ -12,6 +12,8 @@ from agentworks.capabilities.vm_platform.base import parse_tailnet_address
 from agentworks.capabilities.vm_platform.public_ssh import KeyRefused, PublicSSH
 from agentworks.capabilities.vm_platform.tailscale_join import (
     ADDRESS_READS,
+    CLOUD_INIT_RECOVERABLE_STATUS,
+    DEFAULT_READINESS_COMMAND,
     JOIN_FRAGMENT,
     LOGOUT_SCRIPT,
     READINESS_WAIT_SECONDS,
@@ -22,12 +24,14 @@ from agentworks.capabilities.vm_platform.tailscale_join import (
 )
 from agentworks.errors import ConnectivityError, ProvisioningError
 from agentworks.execution.errors import TrustMismatch
-from agentworks.execution.root_script import RawRun
+from agentworks.execution.root_script import ChannelUnreachable, RawRun
 from agentworks.execution.trust import TrustBinding, TrustMode
-from tests._root_channel_fakes import ADDRESS, Answer, FakeGuest
+from tests._root_channel_fakes import ADDRESS, Answer, FakeGuest, answer_by_payload
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from tests.conftest import CapturedOutput
 
 KEY = "tskey-auth-join-'swordfish"
 NODE = "lab-vm1"
@@ -201,9 +205,8 @@ def test_the_caller_s_log_records_every_read_and_the_logout() -> None:
     assert len(records) == ADDRESS_READS + 1 == len(guest.scripts)
 
 
-@pytest.mark.parametrize("logout", [Answer(status=1), Answer(status=None), Answer(raises=ConnectivityError("dropped"))])
-def test_a_failed_logout_names_the_node_for_the_admin_console(logout: Answer) -> None:
-    guest = reads_failing(Answer(status=1), logout=logout)
+def test_a_logout_that_ran_and_failed_names_the_node_for_the_admin_console() -> None:
+    guest = reads_failing(Answer(status=1), logout=Answer(status=1))
 
     with pytest.raises(ConnectivityError) as caught:
         settle_tailnet_address(guest.run_as_root, node=NODE, rerun_hint=HINT)
@@ -213,7 +216,64 @@ def test_a_failed_logout_names_the_node_for_the_admin_console(logout: Answer) ->
     assert NODE in (caught.value.hint or "")
 
 
+@pytest.mark.parametrize(
+    "logout", [Answer(status=None), Answer(raises=ConnectivityError("dropped"))], ids=["unknown", "channel-raised"]
+)
+def test_a_logout_that_did_not_run_to_an_outcome_does_not_advise_removing_the_node(logout: Answer) -> None:
+    """Nothing says the node is stuck: removing it could take a healthy node off the tailnet."""
+    guest = reads_failing(Answer(status=1), logout=logout)
+
+    with pytest.raises(ConnectivityError) as caught:
+        settle_tailnet_address(guest.run_as_root, node=NODE, rerun_hint=HINT)
+
+    assert guest.count(LOGOUT) == 1
+    assert caught.value.hint == HINT
+
+
+def test_an_unreachable_channel_ends_the_reads_at_once() -> None:
+    """The channel already waited for the VM; reading again would wait again for nothing."""
+    guest = reads_failing(Answer(raises=ChannelUnreachable("VM 'vm1' did not answer")))
+
+    with pytest.raises(ChannelUnreachable):
+        read_tailnet_address(guest.run_as_root, node=NODE)
+
+    assert guest.payloads == [READ]
+
+
+def test_a_settle_over_an_unreachable_channel_neither_logs_out_nor_advises_removing_the_node() -> None:
+    guest = reads_failing(Answer(raises=ChannelUnreachable("VM 'vm1' did not answer")))
+
+    with pytest.raises(ChannelUnreachable) as caught:
+        settle_tailnet_address(guest.run_as_root, node=NODE, rerun_hint=HINT)
+
+    assert guest.payloads == [READ]
+    assert caught.value.hint == HINT
+
+
 # -- The join --------------------------------------------------------------------------------
+
+
+def test_a_join_whose_channel_never_reached_the_vm_did_not_join() -> None:
+    """Nothing was dispatched, so there is no node to remove: the channel's own guidance stands."""
+    unreachable = ChannelUnreachable("the VM did not answer, so no script was dispatched", hint="Start the VM.")
+    guest = FakeGuest(lambda payload, seen: Answer(raises=unreachable))
+
+    with pytest.raises(ProvisioningError) as caught:
+        join_tailscale(guest.run_as_root, KEY, node=NODE)
+
+    assert caught.value.__cause__ is unreachable
+    assert caught.value.hint == unreachable.hint
+    assert_key_free(caught.value)
+
+
+def test_a_join_whose_channel_failed_after_dispatch_may_have_joined() -> None:
+    guest = FakeGuest(lambda payload, seen: Answer(raises=ConnectivityError("the connection dropped")))
+
+    with pytest.raises(ProvisioningError) as caught:
+        join_tailscale(guest.run_as_root, KEY, node=NODE)
+
+    assert NODE in (caught.value.hint or "")
+    assert_key_free(caught.value)
 
 
 def test_the_key_reaches_only_the_join_script() -> None:
@@ -239,6 +299,20 @@ def test_a_failed_join_raises_once_without_the_key(answer: Answer) -> None:
 
     assert guest.payloads == [JOIN_FRAGMENT]
     assert NODE in str(caught.value)
+    assert_key_free(caught.value)
+
+
+def test_a_refused_join_quotes_tailscale_s_reason_with_the_key_redacted() -> None:
+    """An invalid auth key said only 'exited with status 1' before; Tailscale's own stderr is the reason."""
+    reason = f"backend error: invalid key: unable to validate API key {KEY}"
+    guest = FakeGuest(lambda payload, seen: Answer(status=1, stderr=f"\x1b[31m{reason}\n".encode()))
+
+    with pytest.raises(ProvisioningError) as caught:
+        join_tailscale(guest.run_as_root, KEY, node=NODE)
+
+    message = str(caught.value)
+    assert "backend error: invalid key: unable to validate API key [REDACTED]" in message
+    assert "\x1b" not in message
     assert_key_free(caught.value)
 
 
@@ -335,6 +409,45 @@ def test_a_failed_readiness_command_raises_before_the_join(
     cloud: Callable[[FakeGuest], PublicSSH], answer: Answer
 ) -> None:
     guest = FakeGuest(lambda payload, seen: answer if payload == "ready" else Answer())
+
+    with pytest.raises(ProvisioningError):
+        complete_cloud_bootstrap(cloud(guest), KEY, node=NODE, readiness_command="ready")
+
+    assert guest.payloads == ["true", "ready"]
+
+
+def test_a_failed_cloud_init_s_reason_reaches_the_error(cloud: Callable[[FakeGuest], PublicSSH]) -> None:
+    """The create's rollback removes the VM, so what cloud-init said is kept in the error before it goes."""
+    reported = b"status: error\ndetail: DataSourceEc2Local\nerrors:\n\t- (scripts_user) failed\n"
+    failed = Answer(status=1, stdout=reported)
+    guest = FakeGuest(answer_by_payload(answers={DEFAULT_READINESS_COMMAND: failed}))
+
+    with pytest.raises(ProvisioningError) as caught:
+        complete_cloud_bootstrap(cloud(guest), KEY, node=NODE)
+
+    assert "(scripts_user) failed" in str(caught.value)
+    assert JOIN_FRAGMENT not in guest.payloads
+
+
+def test_cloud_init_s_recoverable_status_warns_and_the_bootstrap_carries_on(
+    cloud: Callable[[FakeGuest], PublicSSH], captured_output: CapturedOutput
+) -> None:
+    """cloud-init finished with recoverable errors, so the VM is up: warn and join, as Proxmox's wait does."""
+    recoverable = Answer(status=CLOUD_INIT_RECOVERABLE_STATUS)
+    guest = FakeGuest(answer_by_payload(answers={DEFAULT_READINESS_COMMAND: recoverable}))
+
+    address = complete_cloud_bootstrap(cloud(guest), KEY, node=NODE)
+
+    assert address == ADDRESS
+    assert guest.payloads == ["true", DEFAULT_READINESS_COMMAND, JOIN_FRAGMENT, READ]
+    assert len(captured_output.warnings) == 1
+
+
+def test_another_readiness_command_s_status_2_is_a_failure(cloud: Callable[[FakeGuest], PublicSSH]) -> None:
+    """Status 2 means recoverable errors only for cloud-init; GCE's marker wait, say, did not complete."""
+    guest = FakeGuest(
+        lambda payload, seen: Answer(status=CLOUD_INIT_RECOVERABLE_STATUS) if payload == "ready" else Answer()
+    )
 
     with pytest.raises(ProvisioningError):
         complete_cloud_bootstrap(cloud(guest), KEY, node=NODE, readiness_command="ready")
