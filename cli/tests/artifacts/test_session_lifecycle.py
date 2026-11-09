@@ -627,6 +627,7 @@ def test_real_native_probe_failure_preserves_existing_runtime_before_teardown(
     monkeypatch.setattr(module, "require_commands", lambda *args, **kwargs: None)
     observed = Mock(wraps=native.probe_native)
     monkeypatch.setattr(native, "probe_native", observed)
+    monkeypatch.setattr(module, "probe_native", observed)
     lifecycle.events.clear()
 
     # The isolated transport's login shell rejects -lic, producing a real failed

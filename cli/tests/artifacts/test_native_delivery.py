@@ -330,6 +330,10 @@ def test_native_launch_carries_literal_artifact_guidance_on_new_and_resumed_thre
     from tests.conftest import _FakeTarget
 
     monkeypatch.setattr("agentworks.artifacts.native.probe.probe_native", lambda *args, **kwargs: "/home/alice/.native")
+    if implementation is GrokBuildIntegration:
+        monkeypatch.setattr(
+            "agentworks.plugins.grok.harness_integration.probe_native", lambda *args, **kwargs: "/home/alice/.native"
+        )
     item = artifact(ArtifactType.RULE)
     integration = implementation(
         "native",
