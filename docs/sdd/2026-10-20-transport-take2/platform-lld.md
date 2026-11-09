@@ -881,8 +881,8 @@ refuses a provisioning-failed VM (step 1).
   baseline: the other modules those import (`capabilities.base`, `db`, `debian`, `schema`, `topics`,
   `subprocess_io`, `secrets.line_safety`, `execution`) load no legacy module.
 - **Static check.** The plugins cannot pass the import guard: importing any of them loads the plugin
-  index (`plugins/__init__.py:26-35`), which loads the harness plugins and `native_files`
-  (measured), until slice 5. They join `MIGRATED_FILES` instead
+  index (`plugins/__init__.py:26-35`), which loaded the harness plugins and `native_files`
+  (measured) until slice 5 deleted `native_files`. They join `MIGRATED_FILES` instead
   (`tests/test_execution_import_boundary.py:24`): the four plugin `platform.py` files,
   `plugins/proxmox/guest_agent.py`, `vms/manager/recover.py`, `vms/manager/tailscale.py`,
   `vms/nodes.py`, `orchestration/activation.py` and `vms/initializer/tailscale_preflight.py`.
