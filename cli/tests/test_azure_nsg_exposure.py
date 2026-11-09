@@ -23,6 +23,7 @@ no test hits the network.
 
 from __future__ import annotations
 
+import signal
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
@@ -402,6 +403,28 @@ class TestTransientRoute:
             DENY_ALL_INBOUND_RULE_NAME,
             transient[0],
         ]
+
+    def test_an_interrupt_during_the_routes_delete_waits_for_it(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Ctrl-C the moment the script ends: the rule's delete still reaches Azure, then the interrupt raises."""
+        network = _install_fakes(monkeypatch).network
+        rules = network.security_rules
+        delete = rules.begin_delete
+
+        armed = False
+
+        def interrupted_delete(rg: str, nsg: str, rule_name: str) -> Any:
+            if armed:
+                signal.raise_signal(signal.SIGINT)
+            return delete(rg, nsg, rule_name)
+
+        monkeypatch.setattr(rules, "begin_delete", interrupted_delete)
+        vm: VMRow = _fake_vm()  # type: ignore[assignment]
+
+        with pytest.raises(KeyboardInterrupt), _platform()._transient_route(vm, RunContext()):
+            armed = True
+
+        (transient,) = rules.transient_names()
+        assert ("rg1", "vm1-nsg", transient) in rules.deletes()
 
     def test_convergence_tolerates_absent_legacy_rule(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A 404 on the legacy SSH delete (an already-converged or

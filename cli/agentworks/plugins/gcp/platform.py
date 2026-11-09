@@ -20,6 +20,7 @@ from agentworks.capabilities.vm_platform.ssh_exposure import config_allow_cidrs,
 from agentworks.capabilities.vm_platform.tailscale_join import complete_cloud_bootstrap
 from agentworks.db import VMStatus
 from agentworks.errors import AgentworksError, ConnectivityError, StateError
+from agentworks.interrupts import interrupts_deferred
 from agentworks.plugins.gcp.auth import GcpClientCache
 from agentworks.plugins.gcp.bootstrap import (
     GCE_READINESS_COMMAND,
@@ -619,13 +620,14 @@ class GCEPlatform(PublicAddressPlatform):
             )
             yield
         finally:
-            result = delete_matching_firewall(
-                firewalls,
-                project_id=identity.project_id,
-                expected=route,
-                ownership=attempt.ownership,
-                timeout=_OPERATION_TIMEOUT_SECONDS,
-            )
+            with interrupts_deferred():
+                result = delete_matching_firewall(
+                    firewalls,
+                    project_id=identity.project_id,
+                    expected=route,
+                    ownership=attempt.ownership,
+                    timeout=_OPERATION_TIMEOUT_SECONDS,
+                )
             if result.state is not FirewallState.ABSENT:
                 output.warn(
                     f"GCE transient SSH rule '{route_name}' was not proven absent in project "
