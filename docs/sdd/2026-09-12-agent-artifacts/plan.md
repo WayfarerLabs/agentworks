@@ -9,6 +9,11 @@
 - [x] Verify Codex 0.167.0 project skill discovery after an exact Git exclusion and process-local
       app-server extra-root set/list/clear behavior without requesting model turns. Distinguish that
       API evidence from an unverified interactive-CLI private loader.
+- [x] Assess one output per rule, hints aggregated per original owner, and ordinary-home session
+      skills selected by names/descriptions. Identify native selection controls, existing workload
+      identities, publication/cleanup restrictions and the shared-catalog tradeoff. Record a
+      concrete opt-in candidate without claiming runtime support or treating semantic applicability
+      as native catalog isolation.
 - [ ] Review the concrete [delivery proposal](delivery-reassessment.md), obtain the operator's
       amended contract, then update the HLA, native LLD, permanent teaching and implementation
       together. The current FRD and support matrix remain unchanged until that decision.
