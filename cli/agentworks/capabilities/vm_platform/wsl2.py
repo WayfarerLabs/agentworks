@@ -455,6 +455,14 @@ def _download_debian_rootfs(tarball_path: Path, *, tag: str) -> None:
         raise
 
 
+def _windows_status(code: int) -> str:
+    """A Windows exit status as ``wsl.exe`` means it: Windows reports a 32-bit value, unsigned, so
+    ``wsl.exe``'s -1 for a distro it cannot find arrives as 4294967295."""
+    if code > 0x7FFFFFFF:
+        return f"{code - 0x100000000} (0x{code:08X})"
+    return str(code)
+
+
 @contextlib.contextmanager
 def _keepalive(distro_name: str) -> Iterator[None]:
     """Anchor a WSL2 distro for the duration of the context.
@@ -545,7 +553,7 @@ def _keepalive(distro_name: str) -> Iterator[None]:
         reason = sanitize_terminal_output(printed.replace("\x00", "").strip()) or "no output"
         raise WSLCommandFailed(
             f"WSL2 distro '{distro_name}' could not be held running: "
-            f"'wsl --distribution {distro_name} -- sleep infinity' exited with status {rc}: {reason}",
+            f"'wsl --distribution {distro_name} -- sleep infinity' exited with status {_windows_status(rc)}: {reason}",
             hint=(
                 f"Check that 'wsl --list --verbose' lists '{distro_name}'. A distro unregistered outside "
                 "Agentworks leaves a VM that only 'agw vm delete' can remove."
