@@ -70,6 +70,10 @@ Release Please parses `BREAKING CHANGE:` footers as trailers. Keep each footer t
 no blank lines or indented code blocks. No continuation line may begin with a trailer-like `token:`;
 keep before/after examples inline instead.
 
+For a temporary compatibility window, follow the
+[compatibility and deprecation pattern](docs/arch/deprecations.md): source-owned adapters,
+request-scoped notices, doctor visibility, and a tracked removal release.
+
 ## Code Quality
 
 - **Python**: ruff (linting + formatting), mypy (type checking), pytest
