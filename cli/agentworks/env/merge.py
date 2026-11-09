@@ -14,6 +14,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Collection
+
     from agentworks.env.entry import EnvEntry
 
 
@@ -24,6 +26,7 @@ def effective_env(
     admin: dict[str, EnvEntry] | None = None,
     agent: dict[str, EnvEntry] | None = None,
     session: dict[str, EnvEntry] | None = None,
+    identity_keys: Collection[str] = (),
 ) -> dict[str, EnvEntry]:
     """Merge env dicts low-to-high, returning the effective per-key map.
 
@@ -33,6 +36,8 @@ def effective_env(
 
     Empty / None scopes contribute nothing. Later scopes overwrite earlier
     scopes on key collision; entries appearing only at one scope pass through.
+    ``identity_keys`` discards authored entries overwritten by managed identity,
+    before either plaintext rendering or secret collection can inspect them.
     """
     if admin is not None and agent is not None:
         raise ValueError("effective_env: pass exactly one of admin / agent, not both")
@@ -46,4 +51,6 @@ def effective_env(
         merged.update(admin)
     if session:
         merged.update(session)
+    for key in identity_keys:
+        merged.pop(key, None)
     return merged

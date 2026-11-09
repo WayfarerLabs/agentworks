@@ -229,18 +229,42 @@ and defers other types to user. Grok defers VM inputs to user. Shell applies all
 `/opt/agentworks/artifacts`. Workspace-owned bundles remain useful independently: their workspace
 facet handles them in project locations or passes them to each consuming session. Workspace
 placement is shared with other users of that workspace, so session-only content belongs in the
-private session directory under the actual user's home.
+private session directory under the actual user's home. The
+[two concurrent Shell sessions example](../../cli/agentworks/artifacts/README.md#two-concurrent-sessions)
+uses an existing workspace and distinct private run paths, with inspection and teardown commands.
 
 Applying files at a facet updates its native locations during that setup. Whether a running workload
 reloads them depends on the harness. Deferring inputs updates only the reusable result; existing
 descendants and running sessions keep their prior delivery until the receiving user's setup or
-managed session start/restart runs. Stale ancestors must be refreshed in their own lifecycle order.
+managed session start/restart runs. Missing, stale or incomplete ancestor state is reported with its
+owner and supported repair operation; it does not block descendant setup or session launch. Runtime
+routing uses available captures and explicit known deferrals without guessing unknown handling or
+refreshing ancestors.
+
+A routing result is usable only when its recorded input identities cover the applicable current
+inputs, including incoming routes whose payload is unavailable. An old empty table cannot confirm
+new or changed inputs. A confirmed empty set of deferrals remains usable when the ancestor has an
+unrelated unfinished native entry. It does not hold a descendant's own updates or removals. An
+unknown applicable input set is reported by artifact inspection and session routing, separately from
+the receiving facet's completed local setup. It does not permanently fail a fresh workspace merely
+because its VM was temporarily unavailable. Incoming route health is recalculated from the available
+ancestor evidence; local completion acknowledges only the known inputs actually supplied to that
+invocation. An unrelated ancestor failure with a fully covered routing table is reported separately.
+Saved interrupted evidence that cannot establish whether local routing finished remains unknown; use
+the reported owning operation to confirm it.
+
+A missing, unreadable or stale ancestor capture does not authorize retirement of its existing
+placements. Independently attributable local files can still update or retire. A shared generated
+file that needs unknown ancestor content remains held. Required/recommended prerequisites retain
+their native setup contract; optional incoming artifact health is advisory.
 
 Workspace setup runs only at creation. There is no workspace reinit, and workspace repair does not
-refresh artifacts. An existing workspace cannot adopt changed workspace-routed inputs in place;
-recreation is a separate lifecycle decision. Setup warns about deferred application without scanning
-or changing descendants. Removal has the same timing boundary: ancestor refresh does not remove
-files previously applied by a descendant.
+refresh artifacts. If a VM recovers and confirms that nothing further needs workspace placement,
+artifact inspection clears the temporary upstream warning without recreating the workspace. An
+existing workspace cannot adopt genuinely new workspace-routed inputs in place; recreation is a
+separate lifecycle decision. Setup warns about deferred application without scanning or changing
+descendants. Removal has the same timing boundary: ancestor refresh does not remove files previously
+applied by a descendant.
 
 See `agw guide show concept-agent-artifacts` for bundle examples, source capture, native support,
 and inspection. `agw artifact show` includes upstream handling even when handled payloads no longer
@@ -252,14 +276,17 @@ An integration can require or recommend prior setup through its session `check_s
 provides evidence for the session's actual VM, user, and workspace, and enforces the severity the
 integration returns: a required gap refuses launch before runtime replacement; a recommended gap
 warns and permits launch. Integrations supply the reason, and core adds the owning remediation.
-These are integration policies, not a generic operator-authored list of required facets.
+These are integration policies, not a generic operator-authored list of required facets. A required
+gap means that the consuming session needs a specific prerequisite to function; it does not mean
+that all upstream artifact state must match its latest declarations.
 
 The shipped integrations currently declare no ancestor requirement, so session-only use is valid
 when the tool is otherwise installed and ready and any supplied artifacts can be delivered there.
-Artifact delivery additionally requires current ancestor capture and handling evidence; unsupported
-final-session delivery warns and continues without claiming those inputs were handled. Selecting a
-user activation does not select a session integration, and selecting a session integration does not
-implicitly enable or run user setup.
+Artifact delivery uses available captures, known recorded routes and existing placement. Stale or
+incomplete ancestor evidence is reported without blocking launch; unsupported final-session delivery
+warns and continues without claiming those inputs were handled. Selecting a user activation does not
+select a session integration, and selecting a session integration does not implicitly enable or run
+user setup.
 
 Evidence can be absent, incomplete, stale, unavailable, or current. Current means a completed
 applied-state record matches the effective declaration and destination identity. It does not mean
@@ -270,17 +297,61 @@ new setup secrets.
 ## Inspecting and reconciling setup
 
 Owning setup records confirmed native claims through instance state. Applied-state records track
-integration and component identity, completion, pending cleanup, and native ownership metadata.
-Resolved secrets and settings contents are not stored. A failure keeps the last confirmed mutation
-prefix so a retry can reconcile what actually completed. Fresh agent and workspace applied-state
-records commit with their owner rows.
+integration and component identity, completion, pending cleanup, native ownership metadata and
+current-attempt incomplete reasons. Resolved secrets and settings contents are not stored. A failure
+keeps the last confirmed mutation prefix so a retry can reconcile what actually completed. Fresh
+agent and workspace applied-state records commit with their owner rows.
+
+If a valid setup facet fails, initialization stops that facet, records its failure, and continues
+other independent facets and the remaining owner setup. At the end the command lists the failed
+owner, facet and integration with repair guidance and exits unsuccessfully. A newly created agent or
+workspace remains available with its partial setup; it is not reported as fully initialized.
+Explicit required prerequisites still block their consumer, while recommended prerequisites warn.
+Cancellation, shared state failures, invalid activation preflight and unexpected internal errors
+still abort immediately. A failed facet is distinct from an entry skipped with a warning. Creation
+messages confirm that the core owner exists; inspect completion evidence for harness setup health.
+
+A non-zero session-create result can leave a running session when only ancestor facet failures were
+collected. Inspect the session before retrying. An explicit required prerequisite can instead leave
+no session while keeping the newly created ancestors. Reuse those owners with `--agent <name>` or
+`--workspace <name>`, rather than repeating `--new-agent` or `--new-workspace`. Remove the
+corresponding creation-only `--agent-name`, `--agent-template`, `--agent-spec`, `--workspace-name`,
+`--workspace-template` and `--workspace-spec` options when switching to an existing owner. Keep
+session-level template/spec selection as appropriate. Reuse does not repair an incomplete owner;
+repair the required prerequisite before retrying. Agent and VM setup can be retried with their
+reinit commands. Workspaces have no integration retry command: `workspace repair` handles access and
+Git identity only. Before destructive recreation, preserve tracked edits, untracked files, commits
+not yet pushed and stashes outside the workspace. Correct the configured source first: push needed
+repository changes, fix the workstation settings source, or choose the intended template as
+applicable. Editing only the guest checkout does not change what a fresh clone will receive.
+
+Confirmed deferrals survive failed setup attempts. If a recorded input is no longer readable from
+its owner's capture, owning setup reports the unknown route and preserves affected prior placements,
+including shared generated sections and related packages. Independent native setup and new
+independent paths can still apply. Repair the source owner's capture/setup before retrying the
+affected descendant; unknown content is never substituted with a current revision or treated as an
+empty declaration authorizing cleanup.
+
+At session launch, content that cannot be reconstructed from the available captures is explicitly
+unhandled. A known route reports its recorded input identity and owner; unknown routing without an
+input identity reports the owner without inventing content. Launch continues with available inputs,
+while the session's artifact evidence remains incomplete. A later restart after the owning repair
+can resolve that evidence. New-run preparation leaves the old runtime and its files intact until
+teardown; obsolete private-run files retire after the old runtime is removed.
+
+Harness setup and artifact-delivery diagnostics redact known secrets and remove guest terminal
+controls. Each diagnostic reason or hint is bounded to one line of at most 2 KiB; output can add
+owner and retry context. Human inspection also bounds older saved diagnostics without rewriting the
+recorded state.
 
 Use the existing owning inspection commands, such as `agw agent describe worker`,
 `agw workspace describe project`, or `agw vm describe dev`, to inspect the `harness-native-setup`
 lifecycle evidence. The summary includes completion, pending cleanup, and claim counts, without
-native I/O or settings values. Use `agw artifact show` to inspect artifact capture, handling, and
-deferral along the actual lineage. Doctor also checks stored evidence; it does not complete setup or
-repair native drift.
+native I/O or settings values. Use `agw artifact show` to inspect artifact capture, handling,
+deferral and the full recorded incomplete reasons along the actual lineage. Only the selected
+integration's ancestor status is relevant to its session; a shell session does not report unrelated
+Claude or Codex setup. Doctor also checks stored evidence; it does not complete setup or repair
+native drift.
 
 After editing VM/admin or agent activations, run `agw vm reinit <name>` or
 `agw agent reinit <name>`. Removing a declaration, or disabling an inherited activation with `null`,

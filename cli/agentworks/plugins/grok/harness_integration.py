@@ -28,8 +28,10 @@ from agentworks.artifacts.application import ArtifactApplication
 from agentworks.artifacts.native.common import (
     NativeSessionArtifacts,
     defer,
-    delivery_files,
+    defer_setup_conflicts,
     native_home,
+    prepare_session_delivery,
+    render_setup_artifacts,
     validate_discovery_paths,
     validate_native_command,
     validate_user_placement,
@@ -39,7 +41,6 @@ from agentworks.capabilities.harness_integration.base import (
     HarnessIntegration,
     HarnessLaunchIntent,
     HarnessStart,
-    quote_literal_argv,
     require_commands,
 )
 from agentworks.errors import StateError
@@ -112,14 +113,20 @@ class GrokBuildConfig(AgwModel):
     enabled_workarounds: Annotated[
         list[Literal["session-rules", "session-agent-definitions"]], MergeStrategy.REPLACE
     ] = Field(default_factory=list)
-    """Explicitly enabled session artifact carriers. An authored list replaces inherited opt-ins."""
+    """Explicitly enabled session artifact carriers; replaces inherited opt-ins.
+
+    ``session-agent-definitions`` remains accepted for config compatibility,
+    but private session personas have no verified carrier and stay unhandled.
+    """
 
     extra_args: Annotated[list[str], MergeStrategy.REPLACE] = Field(default_factory=list)
-    """Raw argv tokens appended verbatim after every managed flag and before
+    """Argv tokens appended after every managed flag and before
     any fresh positional prompt. Grok Build 1.0.4 rejects repeated managed
     flags, so use this for unmodeled flags rather than overriding a modeled
     field. A child template's declared list replaces its parent's instead of
-    accumulating."""
+    accumulating. Context references such as
+    ${agw:workspace_dir} render before each argument is shell-quoted; replacement
+    contents are literal data."""
 
 
 # Grok Build 1.0.4 resolves its user-state root through the official
@@ -147,10 +154,10 @@ class GrokBuildIntegration(HarnessIntegration):
 
         User and workspace facets publish native rules, skills and agent personas.
         Session artifacts are optional and unhandled by default. `enabled_workarounds`
-        can opt into `session-rules` for rules/hints through `--rules`, and
-        `session-agent-definitions` for personas through `--agents`. Private session
-        skills have no supported workaround; activate the user or workspace facet
-        to publish those skills at their native scope.
+        can opt into `session-rules` for rules/hints through `--rules`. Private session
+        skills and personas have no verified carrier and remain unhandled. The accepted
+        `session-agent-definitions` spelling does not enable persona delivery. Activate
+        the user or workspace facet to publish skills and personas at their native scope.
         """,
     )
 
@@ -174,6 +181,7 @@ class GrokBuildIntegration(HarnessIntegration):
                 invocation.runner,
                 tool="grok",
                 environment=invocation.environment,
+                redactions=invocation.secrets.values(),
                 home=invocation.home,
                 check_policy=False,
             )
@@ -183,19 +191,27 @@ class GrokBuildIntegration(HarnessIntegration):
         plan = (
             ArtifactApplication()
             if self.retiring
-            else outer_artifacts(
-                invocation.artifacts, root or native_home(invocation.home, invocation.environment, "GROK_HOME", ".grok")
+            else render_setup_artifacts(
+                invocation,
+                lambda inputs: outer_artifacts(
+                    inputs, root or native_home(invocation.home, invocation.environment, "GROK_HOME", ".grok")
+                ),
             )
         )
         validate_user_placement(plan, invocation.home)
 
         if plan.files:
-            probe_native(
-                invocation.runner,
-                tool="grok",
-                environment=invocation.environment,
-                home=invocation.home,
-                files=plan.files,
+            plan = defer_setup_conflicts(
+                plan,
+                invocation,
+                lambda files: probe_native(
+                    invocation.runner,
+                    tool="grok",
+                    environment=invocation.environment,
+                    redactions=invocation.secrets.values(),
+                    home=invocation.home,
+                    files=files,
+                ),
             )
         return plan
 
@@ -203,16 +219,21 @@ class GrokBuildIntegration(HarnessIntegration):
         plan = (
             ArtifactApplication()
             if self.retiring
-            else outer_artifacts(invocation.artifacts, f"{invocation.root}/.grok")
+            else render_setup_artifacts(invocation, lambda inputs: outer_artifacts(inputs, f"{invocation.root}/.grok"))
         )
         if plan.files:
-            probe_native(
-                invocation.runner,
-                tool="grok",
-                environment=invocation.environment,
-                workspace=invocation.root,
-                files=plan.files,
-                workspace_only=True,
+            plan = defer_setup_conflicts(
+                plan,
+                invocation,
+                lambda files: probe_native(
+                    invocation.runner,
+                    tool="grok",
+                    environment=invocation.environment,
+                    redactions=invocation.secrets.values(),
+                    workspace=invocation.root,
+                    files=files,
+                    workspace_only=True,
+                ),
             )
         return plan
 
@@ -228,31 +249,23 @@ class GrokBuildIntegration(HarnessIntegration):
         intent: HarnessLaunchIntent = HarnessLaunchIntent.RESUME_OR_NEW,
     ) -> HarnessStart:
         """Choose the requested fresh, strict-resume, or fallback policy."""
-        self._artifact_plan = session_artifacts(
-            self._session_binding.artifact_context,
-            configured=self.config.rules,
-            extra_args=self.config.extra_args,
-            enabled_workarounds=self.config.enabled_workarounds,
-        )
         artifact_context = self._session_binding.artifact_context
-        if artifact_context is not None and (
-            artifact_context.ancestor_files or self._artifact_plan.application.files or self._artifact_plan.argv
-        ):
-            runner = ctx.admin_target() if self._admin else ctx.agent_target()
-            if runner is None:
-                raise StateError("artifact delivery requires the actual native launch target")
-            files = delivery_files(artifact_context, self._artifact_plan.application)
-            native_root = probe_native(
-                runner,
-                tool="grok",
-                environment=artifact_context.environment,
-                home=artifact_context.home,
-                workspace=self._workspace_path,
-                files=files,
-                session_plugin="--plugin-dir" in self._artifact_plan.argv,
-            )
+        runner = ctx.admin_target() if self._admin else ctx.agent_target()
+        self._artifact_plan, native_root = prepare_session_delivery(
+            runner,
+            tool="grok",
+            integration=self.name,
+            context=artifact_context,
+            render=lambda prepared: session_artifacts(
+                prepared,
+                configured=self.config.rules,
+                extra_args=self.config.extra_args,
+                enabled_workarounds=self.config.enabled_workarounds,
+            ),
+            workspace=self._workspace_path,
+        )
+        if artifact_context is not None and native_root is not None:
             validate_discovery_paths(artifact_context, (native_root, f"{self._workspace_path}/.grok"))
-
         command = self._resume_or_launch(ctx, intent=intent)
         if intent is HarnessLaunchIntent.FORCE_NEW:
             note = "Fresh Grok Build session requested. Starting a new one without resuming prior state..."
@@ -288,13 +301,13 @@ class GrokBuildIntegration(HarnessIntegration):
 
         parts = [shlex.quote(token) for token in (*identity, *self._managed_flags())]
         if self.config.agent is not None:
-            parts += ["--agent", quote_literal_argv(self.config.agent)]
+            parts += ["--agent", shlex.quote(self.config.agent)]
         if self.config.rules is not None and "--rules" not in self._artifact_plan.argv:
-            parts += ["--rules", quote_literal_argv(self.config.rules)]
-        parts += [quote_literal_argv(token) for token in self._artifact_plan.argv]
-        parts += [shlex.quote(token) for token in self.config.extra_args]
+            parts += ["--rules", shlex.quote(self.config.rules)]
+        parts += [shlex.quote(token) for token in self._artifact_plan.argv]
+        parts += [self.quote_context_argv(token) for token in self.config.extra_args]
         if not resume and (prompt := self._fresh_prompt()) is not None:
-            parts += ["--", quote_literal_argv(prompt)]
+            parts += ["--", shlex.quote(prompt)]
         argv = " ".join(parts)
         inner = f"echo {shlex.quote(message)}; exec grok {argv}"
         return f"sh -c {shlex.quote(inner)}"

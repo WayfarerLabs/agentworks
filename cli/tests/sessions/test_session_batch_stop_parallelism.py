@@ -340,6 +340,8 @@ def test_incomplete_synchronous_teardown_persists_fingerprint_before_kill(
         real_update(name, **kwargs)  # type: ignore[arg-type]
 
     monkeypatch.setattr(db, "update_session_runtime", update)
+    monkeypatch.setattr(tmux_mod, "require_socket_path", lambda *args, **kwargs: None)
+    monkeypatch.setattr(tmux_mod, "_matches_launch_attempt", lambda **kwargs: True)
     monkeypatch.setattr(
         tmux_mod,
         "capture_tmux_server_fingerprint",

@@ -7,6 +7,7 @@ from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor
 from concurrent.futures import wait as _wait_for_futures
 from dataclasses import dataclass
 from enum import Enum
+from functools import partial
 from pathlib import PurePosixPath
 from threading import Event
 from typing import TYPE_CHECKING
@@ -208,7 +209,12 @@ def _remove_stale_socket(
     from agentworks.sessions.tmux import _test_presence_from_result
 
     q_socket = shlex.quote(socket_path)
-    removed = target.run(f"rm -f {q_socket}", sudo=sudo, check=False)
+    removed = target.run(
+        f"if test -L {q_socket} || {{ test -e {q_socket} && ! test -S {q_socket}; }}; then exit 2; fi; "
+        f"if test -S {q_socket}; then rm -f -- {q_socket}; fi",
+        sudo=sudo,
+        check=False,
+    )
     if _test_presence_from_result(removed) is not ProbeStatus.PRESENT:
         raise ExternalError(
             f"failed to remove stale tmux socket for session '{session_name}'",
@@ -266,7 +272,9 @@ def _execute_reachable_dedicated_teardown(
 
 def execute_dedicated_teardown(plan: DedicatedTeardownPlan) -> DedicatedTeardownEvidence:
     """Run one complete dedicated remote teardown without SQLite or output."""
-    from agentworks.sessions.tmux import capture_tmux_server_fingerprint
+    from agentworks.sessions.tmux import capture_tmux_server_fingerprint, require_socket_path
+
+    require_socket_path(plan.socket_path, run_command=partial(plan.target.run, sudo=plan.sudo))
 
     probe = capture_tmux_server_fingerprint(
         target=plan.target,
@@ -327,13 +335,16 @@ def teardown_dedicated_session(
     force: bool,
 ) -> None:
     """Run the synchronous dedicated compatibility path."""
-    from agentworks.sessions.tmux import capture_tmux_server_fingerprint
+    from agentworks.sessions.tmux import _matches_launch_attempt, capture_tmux_server_fingerprint, require_socket_path
 
-    if session.pid == PID_STOPPED:
-        return
     socket_path = _validated_socket_path(db, session)
     sudo = not target_owns_session
+    require_socket_path(socket_path, run_command=partial(target.run, sudo=sudo))
     probe = capture_tmux_server_fingerprint(target=target, socket_path=socket_path, sudo=sudo)
+    if session.pid == PID_STOPPED and probe.status is ProbeStatus.ABSENT:
+        _remove_stale_socket(session_name=session.name, socket_path=socket_path, target=target, sudo=sudo)
+        _mark_stopped(db, session)
+        return
     if probe.status is not ProbeStatus.PRESENT:
         try:
             if not _mgr._prove_stored_runtime_absent(session, target=target, sudo=sudo):
@@ -364,6 +375,13 @@ def teardown_dedicated_session(
     observed = probe.fingerprint
     assert observed is not None
     observed_boot_id = _mgr._validated_observed_boot_id(observed.boot_id, session=session)
+    if session.pid == PID_STOPPED:
+        raise StateError(
+            f"session '{session.name}' has an unrecorded server at its managed socket",
+            entity_kind="session",
+            entity_name=session.name,
+            hint="Inspect the conflicting server manually; its runtime was preserved.",
+        )
     stored_boot_id = _mgr._validated_stored_boot_id(session)
     if observed.pid != session.pid or observed_boot_id != stored_boot_id:
         raise BrokenStateError(
@@ -373,6 +391,21 @@ def teardown_dedicated_session(
         )
     stored_ticks = _mgr._validated_stored_start_ticks(session)
     if stored_ticks is None:
+        if not _matches_launch_attempt(
+            target=target,
+            socket_path=socket_path,
+            session_name=session.name,
+            session_uuid=session.session_uuid,
+            run_id=session.run_id,
+            fingerprint=observed,
+            sudo=sudo,
+        ):
+            raise StateError(
+                f"session '{session.name}' has an incomplete stored runtime identity",
+                entity_kind="session",
+                entity_name=session.name,
+                hint="Stop the native workload manually, or stop and start its VM, then retry.",
+            )
         db.update_session_runtime(
             session.name,
             socket_path=socket_path,

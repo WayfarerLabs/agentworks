@@ -10,6 +10,7 @@ from agentworks import output
 from agentworks.agents.grants import MAX_WORKSPACE_NAME_LENGTH
 from agentworks.db.projections import project_session_mode
 from agentworks.errors import AlreadyExistsError, NotFoundError
+from agentworks.harness_setup.outcomes import SetupFailure, raise_setup_failures
 from agentworks.list_sorting import nullable_sort_value, sort_rows
 from agentworks.name_filters import validate_name_filters
 from agentworks.naming import validate_name
@@ -263,7 +264,9 @@ def create_workspace(
 
     from agentworks.harness_setup.lifecycle import prepare_workspace_setup
 
-    setup_inputs = prepare_workspace_setup(db, registry, vm=vm, name=ws_name, template=template)
+    setup_inputs = prepare_workspace_setup(
+        db, registry, vm=vm, name=ws_name, template=template, root=pending_workspace.workspace_path
+    )
     if setup_inputs is not None:
         setup_inputs.register(resolver, registry)
 
@@ -288,6 +291,7 @@ def create_workspace(
 
         from agentworks.workspaces.realize import realize_workspace
 
+        setup_failures: list[SetupFailure] = []
         vscode_path = realize_workspace(
             db,
             config,
@@ -295,6 +299,7 @@ def create_workspace(
             name=ws_name,
             vm=vm,
             template=template,
+            setup_failures=setup_failures,
             setup_inputs=setup_inputs,
             setup_values=resolver.values,
             overlay=overlay,
@@ -308,6 +313,8 @@ def create_workspace(
 
         if open_vscode:
             subprocess.run(["code", str(vscode_path)], check=False)
+
+        raise_setup_failures(setup_failures)
 
 
 def workspace_description(db: Database, config: Config, name: str) -> WorkspaceDescription:

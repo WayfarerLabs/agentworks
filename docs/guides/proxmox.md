@@ -133,7 +133,7 @@ spec:
     storage: data
     bridge: vmbr0
     pool: agentworks
-    verify_ssl: false
+    verify_ssl: true
 ```
 
 `agw resource explain vm-platform/proxmox` documents every field above with its type, whether it is
@@ -198,11 +198,30 @@ agw vm describe test-vm
 agw vm delete test-vm
 ```
 
+On Proxmox, `vm stop` uses the platform's hard power-off operation. It does not request a graceful
+guest shutdown. Save and flush work before stopping; request shutdown inside the guest when a
+graceful shutdown is needed.
+
+Deletion targets the recorded node and VMID. Verify that binding in Proxmox before operating on a VM
+whose provider identity may have changed. The current Proxmox implementation treats API and task
+failures during stop and delete as best-effort: a successful Agentworks command alone does not prove
+that the guest was removed. Inspect Proxmox and finish any remaining cleanup there. A protected VM
+can be powered off before its deletion fails.
+
+Whole-VM deletion does not first tear down guest sessions or log out of Tailscale. External tailnet
+records and workstation SSH known-hosts entries can remain after guest deletion. Remove a retired
+node from the Tailscale admin console separately.
+
+`--force` permits deleting dependent workspaces, agents and sessions; it does not authorize the
+confirmation prompt. Use `--yes` separately when deletion is intended without a prompt. A backend
+binding failure warns and removes local state without attempting remote deletion. An exception
+raised by a bound platform's delete operation retains local state for retry.
+
 ### Native recovery and interactive access
 
 Agentworks uses QEMU Guest Agent for Tailscale-independent administrative commands. Start-time
-Tailscale rejoin, `vm rekey`, logout during deletion, and create-time release verification therefore
-remain available when Tailscale SSH is unavailable.
+Tailscale rejoin, `vm rekey` and create-time release verification therefore remain available when
+Tailscale SSH is unavailable.
 
 QEMU Guest Agent does not provide an interactive terminal, so `vm shell --platform` is unavailable
 for Proxmox. Use the Proxmox web UI's serial console for interactive access. Normal Agentworks work
@@ -264,5 +283,10 @@ repository, then rerun the script. The script does not alter package sources.
 
 ### Self-signed certificate errors
 
-Set `verify_ssl: false` in the site's `platform` table. This is common for homelab setups without a
-trusted CA.
+Keep certificate verification enabled and trust your Proxmox certificate authority on the
+workstation. Python's TLS trust configuration also accepts `SSL_CERT_FILE` pointing to a PEM CA
+bundle; set it in the environment running Agentworks. The certificate must still match the site's
+API hostname.
+
+`verify_ssl: false` in the site's `platform` table disables certificate verification entirely. Use
+it only when that is the trust policy you intend for this site.

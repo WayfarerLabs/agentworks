@@ -114,8 +114,10 @@ from agentworks.artifacts.application import ArtifactApplication
 from agentworks.artifacts.model import ArtifactType
 from agentworks.artifacts.native.common import (
     NativeSessionArtifacts,
-    delivery_files,
+    defer_setup_conflicts,
     native_home,
+    prepare_session_delivery,
+    render_setup_artifacts,
     validate_discovery_paths,
     validate_native_command,
     validate_user_placement,
@@ -125,7 +127,6 @@ from agentworks.capabilities.harness_integration.base import (
     HarnessIntegration,
     HarnessLaunchIntent,
     HarnessStart,
-    quote_literal_argv,
     require_commands,
 )
 from agentworks.errors import StateError
@@ -244,13 +245,15 @@ class CodexConfig(AgwModel):
     """Explicitly enabled session artifact carriers. An authored list replaces inherited opt-ins."""
 
     extra_args: Annotated[list[str], MergeStrategy.REPLACE] = Field(default_factory=list)
-    """Raw argv tokens appended verbatim after every generated CLI option,
+    """Argv tokens appended after every generated CLI option,
     so they can add unmodeled arguments or override managed ``-c`` values.
     Codex 0.147.0 takes the last value for a repeated ``-c`` key. On a fresh
     launch with an initial input, only the ``--`` prompt separator and prompt
     value follow these option tokens. Overriding ``notify`` disables
     deterministic id binding, leaving discovery and the picker as fallbacks.
-    A child template's declared list replaces its parent's."""
+    A child template's declared list replaces its parent's. Context references such as
+    ${agw:workspace_dir} render before each argument is shell-quoted; replacement
+    contents are literal data."""
 
 
 # Config field -> the codex flag it forwards to, in emission order. The
@@ -463,10 +466,19 @@ class CodexIntegration(HarnessIntegration):
         return super().config_for(facet)
 
     def vm_init(self, invocation: VMSetupInvocation) -> ArtifactApplication:
-        plan = ArtifactApplication() if self.retiring else vm_artifacts(invocation.artifacts)
+        plan = ArtifactApplication() if self.retiring else render_setup_artifacts(invocation, vm_artifacts)
         if plan.files:
-            probe_native(
-                invocation.runner, tool="codex", environment=invocation.environment, files=plan.files, vm_only=True
+            plan = defer_setup_conflicts(
+                plan,
+                invocation,
+                lambda files: probe_native(
+                    invocation.runner,
+                    tool="codex",
+                    environment=invocation.environment,
+                    redactions=invocation.secrets.values(),
+                    files=files,
+                    vm_only=True,
+                ),
             )
         return plan
 
@@ -477,6 +489,7 @@ class CodexIntegration(HarnessIntegration):
                 invocation.runner,
                 tool="codex",
                 environment=invocation.environment,
+                redactions=invocation.secrets.values(),
                 home=invocation.home,
                 check_policy=False,
             )
@@ -489,17 +502,17 @@ class CodexIntegration(HarnessIntegration):
         plan = (
             ArtifactApplication()
             if self.retiring
-            else outer_artifacts(
-                invocation.artifacts,
-                skills_root=f"{invocation.home}/.agents/skills",
-                agents_root=f"{root}/agents",
-                instructions_path=(
-                    guidance_path(invocation.runner, root)
-                    if any(
-                        item.content.type in (ArtifactType.HINT, ArtifactType.RULE)
-                        for item in invocation.artifacts.items()
-                    )
-                    else f"{root}/AGENTS.md"
+            else render_setup_artifacts(
+                invocation,
+                lambda inputs: outer_artifacts(
+                    inputs,
+                    skills_root=f"{invocation.home}/.agents/skills",
+                    agents_root=f"{root}/agents",
+                    instructions_path=(
+                        guidance_path(invocation.runner, root)
+                        if any(item.content.type in (ArtifactType.HINT, ArtifactType.RULE) for item in inputs.items())
+                        else f"{root}/AGENTS.md"
+                    ),
                 ),
             )
         )
@@ -509,12 +522,17 @@ class CodexIntegration(HarnessIntegration):
         )
         setup_user("codex", config, setup_invocation)
         if plan.files:
-            probe_native(
-                invocation.runner,
-                tool="codex",
-                environment=invocation.environment,
-                home=invocation.home,
-                files=plan.files,
+            plan = defer_setup_conflicts(
+                plan,
+                invocation,
+                lambda files: probe_native(
+                    invocation.runner,
+                    tool="codex",
+                    environment=invocation.environment,
+                    redactions=invocation.secrets.values(),
+                    home=invocation.home,
+                    files=files,
+                ),
             )
         return plan
 
@@ -524,29 +542,34 @@ class CodexIntegration(HarnessIntegration):
         plan = (
             ArtifactApplication()
             if self.retiring
-            else outer_artifacts(
-                invocation.artifacts,
-                skills_root=f"{invocation.root}/.agents/skills",
-                agents_root=f"{invocation.root}/.codex/agents",
-                instructions_path=(
-                    guidance_path(invocation.runner, invocation.root)
-                    if any(
-                        item.content.type in (ArtifactType.HINT, ArtifactType.RULE)
-                        for item in invocation.artifacts.items()
-                    )
-                    else f"{invocation.root}/AGENTS.md"
+            else render_setup_artifacts(
+                invocation,
+                lambda inputs: outer_artifacts(
+                    inputs,
+                    skills_root=f"{invocation.root}/.agents/skills",
+                    agents_root=f"{invocation.root}/.codex/agents",
+                    instructions_path=(
+                        guidance_path(invocation.runner, invocation.root)
+                        if any(item.content.type in (ArtifactType.HINT, ArtifactType.RULE) for item in inputs.items())
+                        else f"{invocation.root}/AGENTS.md"
+                    ),
                 ),
             )
         )
         setup_workspace("codex", config, invocation)
         if plan.files:
-            probe_native(
-                invocation.runner,
-                tool="codex",
-                environment=invocation.environment,
-                workspace=invocation.root,
-                files=plan.files,
-                workspace_only=True,
+            plan = defer_setup_conflicts(
+                plan,
+                invocation,
+                lambda files: probe_native(
+                    invocation.runner,
+                    tool="codex",
+                    environment=invocation.environment,
+                    redactions=invocation.secrets.values(),
+                    workspace=invocation.root,
+                    files=files,
+                    workspace_only=True,
+                ),
             )
         return plan
 
@@ -596,29 +619,22 @@ class CodexIntegration(HarnessIntegration):
         asymmetry to apologize for: a fresh launch resumes nothing, while its
         effective workload config may provide initial input.
         """
-        self._artifact_plan = session_artifacts(
-            self._session_binding.artifact_context,
-            configured=self.config.developer_instructions,
-            extra_args=self.config.extra_args,
-            enabled_workarounds=self.config.enabled_workarounds,
-        )
         artifact_context = self._session_binding.artifact_context
-        if artifact_context is not None and (
-            artifact_context.ancestor_files or self._artifact_plan.application.files or self._artifact_plan.argv
-        ):
-            runner = ctx.admin_target() if self._admin else ctx.agent_target()
-            if runner is None:
-                raise StateError("artifact delivery requires the actual native launch target")
-            files = delivery_files(artifact_context, self._artifact_plan.application)
-            native_root = probe_native(
-                runner,
-                tool="codex",
-                environment=artifact_context.environment,
-                home=artifact_context.home,
-                workspace=self._workspace_path,
-                files=files,
-                session_plugin="--plugin-dir" in self._artifact_plan.argv,
-            )
+        runner = ctx.admin_target() if self._admin else ctx.agent_target()
+        self._artifact_plan, native_root = prepare_session_delivery(
+            runner,
+            tool="codex",
+            integration=self.name,
+            context=artifact_context,
+            render=lambda prepared: session_artifacts(
+                prepared,
+                configured=self.config.developer_instructions,
+                extra_args=self.config.extra_args,
+                enabled_workarounds=self.config.enabled_workarounds,
+            ),
+            workspace=self._workspace_path,
+        )
+        if artifact_context is not None and native_root is not None:
             validate_discovery_paths(
                 artifact_context,
                 (
@@ -635,7 +651,6 @@ class CodexIntegration(HarnessIntegration):
                     f"{self._workspace_path}/AGENTS.override.md",
                 ),
             )
-
         self._decision = None
         self._adopted_id = None
         self._dropped_stale = False
@@ -941,8 +956,8 @@ class CodexIntegration(HarnessIntegration):
 
         A single ``sh -c`` so the whole thing survives the ``exec``
         wrapping the tmux pane applies (``exec`` takes one simple
-        command). The message and the generated argv carry no ``{{word}}``
-        tokens, so the core template-var substitution does not mangle them.
+        command). Structured extra arguments render before argv quoting;
+        generated and modeled arguments retain their literal content.
         """
         parts = [f"echo {shlex.quote(msg)}"]
         if legacy_marker is not None:
@@ -1022,11 +1037,11 @@ class CodexIntegration(HarnessIntegration):
             token.startswith("developer_instructions=") for token in self._artifact_plan.argv
         ):
             value = _toml_basic_string(self.config.developer_instructions)
-            parts += ["-c", quote_literal_argv(f"developer_instructions={value}")]
-        parts += [quote_literal_argv(token) for token in self._artifact_plan.argv]
-        parts += [shlex.quote(token) for token in self._extra_arg_tokens()]
+            parts += ["-c", shlex.quote(f"developer_instructions={value}")]
+        parts += [shlex.quote(token) for token in self._artifact_plan.argv]
+        parts += [self.quote_context_argv(token) for token in self._extra_arg_tokens()]
         if fresh and (prompt := self._fresh_prompt()) is not None:
-            parts += ["--", quote_literal_argv(prompt)]
+            parts += ["--", shlex.quote(prompt)]
         return " ".join(parts)
 
     def _fresh_prompt(self) -> str | None:

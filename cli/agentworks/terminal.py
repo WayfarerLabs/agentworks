@@ -70,6 +70,7 @@ import contextlib
 import io
 import re
 import sys
+import unicodedata
 from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
@@ -87,6 +88,14 @@ _TERMINAL_CONTROL_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
 def sanitize_terminal_output(value: str) -> str:
     """Remove terminal controls while preserving ordinary line feeds and tabs."""
     return _TERMINAL_CONTROL_RE.sub("", value)
+
+
+def sanitize_fact_line(value: str) -> str:
+    """Remove terminal controls and unsafe Unicode categories from a scalar line."""
+    sanitized = sanitize_terminal_output(value)
+    return "".join(
+        character for character in sanitized if unicodedata.category(character) not in {"Cc", "Cf", "Cs", "Zl", "Zp"}
+    )
 
 
 # DECRST reset disabling every common xterm mouse-reporting mode: 1000

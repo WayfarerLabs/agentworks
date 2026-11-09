@@ -17,6 +17,7 @@ from agentworks.harness_setup.inputs import SetupInputs
 from agentworks.harness_setup.lifecycle import prepare_agent_setup, prepare_vm_setup, prepare_workspace_setup
 from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
 from agentworks.harness_setup.model import NativeClaim, NativeSetupState, SetupRecord
+from agentworks.harness_setup.outcomes import SetupFailure, raise_setup_failures
 from agentworks.harness_setup.state import read_native_setup, write_native_setup
 from agentworks.origin import Origin
 from agentworks.resources.registry import Registry
@@ -101,7 +102,8 @@ def test_component_inputs_keep_only_ancestors_and_retirement(db, registry, vm, m
 @pytest.fixture
 def native(monkeypatch, tmp_path):
     target = Mock(spec=Transport)
-    target.run.return_value = SimpleNamespace(stdout="native-identity", ok=True)
+    target.logger = None
+    target.run.return_value = SimpleNamespace(stdout="\nAGW_NATIVE_ID=native-identity\n", ok=True)
     monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: target)
     monkeypatch.setattr("agentworks.transports.transport_for_user", lambda *a, **k: target)
     monkeypatch.setattr("agentworks.harness_setup.lifecycle.site_platform_name", lambda *a: "fixture")
@@ -128,6 +130,14 @@ def native(monkeypatch, tmp_path):
             self.redactions = redactions
             loggers.append(self)
 
+        def sanitize(self, text):
+            for value in self.redactions:
+                text = text.replace(value, "[REDACTED]")
+            return text
+
+        def warning(self, text):
+            pass
+
         def close(self):
             self.closed = True
 
@@ -137,7 +147,10 @@ def native(monkeypatch, tmp_path):
 
 @pytest.mark.parametrize("kind", ["agent", "workspace"])
 @pytest.mark.parametrize("fail_insert", [False, True])
-def test_fresh_owner_buffers_setup_until_atomic_row_commit(db, registry, vm, native, monkeypatch, kind, fail_insert):
+@pytest.mark.parametrize("fail_setup", [False, True])
+def test_fresh_owner_buffers_setup_until_atomic_row_commit(
+    db, registry, vm, native, monkeypatch, kind, fail_insert, fail_setup
+):
     name = "agent" if kind == "agent" else "project"
     env = _env(TOKEN={"secret": "setup-token"}, AGENTWORKS_SESSION="forged")
     inputs = SetupInputs(
@@ -166,6 +179,8 @@ def test_fresh_owner_buffers_setup_until_atomic_row_commit(db, registry, vm, nat
         invocation.checkpoint((claim,))
         assert read_native_setup(db, kind, name).records == ()
         calls.append(claim)
+        if fail_setup:
+            raise ExternalError("fixture setup interruption: private-value")
         return ArtifactApplication()
 
     monkeypatch.setattr(ShellIntegration, "user_init" if kind == "agent" else "workspace_init", initialize)
@@ -176,12 +191,15 @@ def test_fresh_owner_buffers_setup_until_atomic_row_commit(db, registry, vm, nat
 
         monkeypatch.setattr(db, "insert_agent" if kind == "agent" else "insert_workspace", fail)
 
+    failures: list[SetupFailure] = []
+
     def create() -> None:
         if kind == "agent":
             realize_agent(
                 db,
                 MagicMock(),
                 registry,
+                setup_failures=failures,
                 name=name,
                 vm=vm,
                 template=ResolvedAgentTemplate("default"),
@@ -195,6 +213,7 @@ def test_fresh_owner_buffers_setup_until_atomic_row_commit(db, registry, vm, nat
                 db,
                 MagicMock(),
                 registry,
+                setup_failures=failures,
                 name=name,
                 vm=vm,
                 template=ResolvedTemplate("default"),
@@ -202,16 +221,24 @@ def test_fresh_owner_buffers_setup_until_atomic_row_commit(db, registry, vm, nat
                 setup_values={"setup-token": "private-value"},
             )
 
+        raise_setup_failures(failures)
+
     if fail_insert:
         with pytest.raises(ExternalError):
             create()
         assert read_native_setup(db, kind, name).records == ()
         (native.removed_agent if kind == "agent" else native.removed_project).assert_called_once()
     else:
-        create()
+        if fail_setup:
+            with pytest.raises(StateError):
+                create()
+        else:
+            create()
         (record,) = read_native_setup(db, kind, name).records
-        assert record.complete and record.claims == tuple(calls)
+        assert record.complete is not fail_setup and record.claims == tuple(calls)
         assert "private-value" not in record.model_dump_json()
+        assert (db.get_agent(name) if kind == "agent" else db.get_workspace(name)) is not None
+        (native.removed_agent if kind == "agent" else native.removed_project).assert_not_called()
     assert calls and native.loggers[0].closed
 
 
@@ -255,6 +282,7 @@ def test_failed_exclusive_creation_never_arms_realizer_rollback(db, registry, vm
             db,
             MagicMock(),
             registry,
+            setup_failures=[],
             name="a",
             vm=vm,
             template=ResolvedAgentTemplate("default"),
@@ -312,7 +340,14 @@ def test_config_secret_registration_and_delivery_share_actual_owner(db, vm, nati
         )
         resolver = Mock()
         inputs.register(resolver, registry)
-        resolver.register_targets.assert_called_once_with([inputs.target])
+        from agentworks.secrets.orchestration import compute_needed_secrets
+
+        resolver.register_targets.assert_called_once()
+        registered_targets = resolver.register_targets.call_args.args[0]
+        assert [
+            decl.name
+            for decl in compute_needed_secrets(registered_targets, registry, allow_transient_auto_declare=True)
+        ] == ["env-secret"]
         resolver.register_name.assert_called_once_with("config-secret")
         with native_mutation_guard(db.path, vm.name) as guard:
             apply_agent_setup(
@@ -330,6 +365,7 @@ def test_config_secret_registration_and_delivery_share_actual_owner(db, vm, nati
                 logger=Mock(),
                 held=guard,
                 operation="agent-create",
+                failures=[],
                 buffered=True,
             )
         assert len(observed) == 1
@@ -350,6 +386,7 @@ def test_applied_state_appearing_after_empty_preparation_refuses_before_core(db,
             db,
             MagicMock(),
             registry,
+            setup_failures=[],
             name="a",
             vm=vm,
             template=template,
@@ -362,8 +399,10 @@ def test_applied_state_appearing_after_empty_preparation_refuses_before_core(db,
     assert read_native_setup(db, "agent", "a") == later
 
 
-@pytest.mark.parametrize("fail_user", [False, True])
-def test_vm_and_admin_setup_follow_core_before_terminal_checkpoint(db, registry, vm, native, monkeypatch, fail_user):
+@pytest.mark.parametrize("failed_components", [(), ("vm",), ("admin",), ("vm", "admin")])
+def test_vm_and_admin_setup_follow_core_before_terminal_checkpoint(
+    db, registry, vm, native, monkeypatch, failed_components
+):
     from agentworks.db import InitStatus
     from agentworks.debian import DebianRelease
     from agentworks.vms.initializer.driver import VMInitializationOperation, run_initialization
@@ -390,6 +429,8 @@ def test_vm_and_admin_setup_follow_core_before_terminal_checkpoint(db, registry,
         assert "ADMIN_ONLY" not in invocation.environment
         assert "AGENTWORKS_AGENT" not in invocation.environment
         events.append("vm")
+        if "vm" in failed_components:
+            raise ExternalError("VM setup failed: vm-private")
         return ArtifactApplication()
 
     def user_setup(self, invocation):
@@ -399,8 +440,8 @@ def test_vm_and_admin_setup_follow_core_before_terminal_checkpoint(db, registry,
         assert self.owner_kind == "vm" and self.owner_name == vm.name
         assert db.get_vm(vm.name).init_status != InitStatus.COMPLETE.value
         events.append("admin")
-        if fail_user:
-            raise RuntimeError("admin setup failed: vm-private")
+        if "admin" in failed_components:
+            raise ExternalError("admin setup failed: vm-private")
         return ArtifactApplication()
 
     def final_keys(*args, **kwargs):
@@ -414,6 +455,8 @@ def test_vm_and_admin_setup_follow_core_before_terminal_checkpoint(db, registry,
     monkeypatch.setattr(ShellIntegration, "user_init", user_setup)
     monkeypatch.setattr("agentworks.ssh.LOG_DIR", db.path.parent / "logs")
     logger = _RealSSHLogger(vm.name, "setup-fixture", redactions=("vm-private",))
+
+    failures: list[SetupFailure] = []
 
     def run() -> None:
         run_initialization(
@@ -432,17 +475,121 @@ def test_vm_and_admin_setup_follow_core_before_terminal_checkpoint(db, registry,
             operation=VMInitializationOperation.VM_REINIT,
             setup_inputs=inputs,
             setup_values={"vm-token": "vm-private"},
+            setup_failures=failures,
         )
 
-    if fail_user:
-        with pytest.raises(RuntimeError):
-            run()
-    else:
-        run()
-    assert events == ["core", "vm", "admin"] + ([] if fail_user else ["keys"])
+    run()
+    assert len(failures) == len(failed_components)
+    assert events == ["core", "vm", "admin", "keys"]
     logger.close()
     assert all("vm-private" not in (event.detail or "") for event in db.list_vm_events(vm.name))
     records = read_native_setup(db, "vm", vm.name).records
-    assert records[0].component == "vm" and records[0].complete
-    assert records[1].component == "admin" and records[1].complete is not fail_user
-    assert db.get_vm(vm.name).init_status == (InitStatus.FAILED if fail_user else InitStatus.COMPLETE).value
+    assert records[0].component == "vm" and records[0].complete == ("vm" not in failed_components)
+    assert records[1].component == "admin" and records[1].complete == ("admin" not in failed_components)
+    assert db.get_vm(vm.name).init_status == (InitStatus.PARTIAL if failed_components else InitStatus.COMPLETE).value
+
+
+@pytest.mark.parametrize("component", ["vm", "admin", "agent", "workspace", "session"])
+@pytest.mark.parametrize("key", ["AGENTWORKS_VM", "AGENTWORKS_SESSION", "AGENTWORKS_CUSTOM"])
+@pytest.mark.parametrize("entry", [EnvEntry("${agw:session_name}"), EnvEntry({"secret": "ignored"})])
+def test_setup_identity_filter_precedes_validation_resolution_and_rendering(
+    tmp_path, registry, monkeypatch, component, key, entry
+):
+    import hashlib
+
+    from agentworks.config import Config, DefaultsConfig, OperatorConfig, PathsConfig, SessionConfig
+    from agentworks.env.identity import ResourceContext, agentworks_identity_env
+    from agentworks.interpolation import runtime_values
+    from agentworks.secrets.policy import TtyInteractionPolicy
+    from agentworks.secrets.resolver import Resolver
+
+    scope = {key: entry, "CONFIG": EnvEntry("${agw:user_home_dir}/config")}
+    target = SecretTarget(
+        vm=scope if component == "vm" else {},
+        admin=scope if component == "admin" else None,
+        agent=scope if component == "agent" else None,
+        workspace=scope if component == "workspace" else None,
+        session=scope if component == "session" else None,
+    )
+    inputs = SetupInputs("vm", "box", "vm", {}, target)
+    context = ResourceContext(vm_name="box", platform="lima", site="local", user="admin")
+    inputs.environment_target.validate_context(runtime_values(context))
+
+    def unexpected_resolution(*args, **kwargs):
+        pytest.fail("Ignored setup identity must not reach a provider or prompt")
+
+    monkeypatch.setattr("agentworks.secrets.resolve.resolve_batch", unexpected_resolution)
+    config = Config(
+        operator=OperatorConfig(tmp_path / "id.pub", tmp_path / "id"),
+        paths=PathsConfig(),
+        defaults=DefaultsConfig(),
+        source_path=tmp_path / "config.toml",
+        session=SessionConfig(),
+    )
+    resolver = Resolver(config, registry, interaction=TtyInteractionPolicy.REFUSE)
+    inputs.register(resolver, registry)
+    resolver.resolve()
+    assert resolver.values == {}
+    assert inputs.environment(resolver.values, context) == {
+        "CONFIG": "/home/admin/config",
+        **agentworks_identity_env(context),
+    }
+    assert inputs.target is target
+    assert scope[key] is entry
+    declaration = inputs.declaration("shell", CapabilityConfig())
+    captured_entry = (
+        {"secret": entry.secret} if entry.secret else {"sha256": hashlib.sha256(entry.value.encode()).hexdigest()}
+    )
+    captured_env = declaration["env"]
+    assert isinstance(captured_env, dict)
+    captured_scope = captured_env[component]
+    assert isinstance(captured_scope, dict)
+    assert captured_scope[key] == captured_entry
+
+
+def test_setup_projection_preserves_winning_plaintext_and_validation():
+    from agentworks.env.identity import ResourceContext
+    from agentworks.errors import ValidationError
+    from agentworks.interpolation import runtime_values
+
+    context = ResourceContext(vm_name="box", platform="lima", site="local", user="admin")
+    target = SecretTarget(vm={"CONFIG": EnvEntry("${agw:session_name}")})
+    inputs = SetupInputs("vm", "box", "vm", {}, target)
+    with pytest.raises(ValidationError):
+        inputs.environment_target.validate_context(runtime_values(context))
+    with pytest.raises(ValidationError):
+        inputs.environment({}, context)
+    inputs = SetupInputs("vm", "box", "vm", {}, SecretTarget(vm=target.vm, admin={"CONFIG": EnvEntry("winner")}))
+    inputs.environment_target.validate_context(runtime_values(context))
+    assert inputs.environment({}, context)["CONFIG"] == "winner"
+
+
+def test_lifecycle_early_validation_uses_setup_identity_policy(db, registry, vm, monkeypatch):
+    selected = {"shell": CapabilityConfig()}
+    parent = resolve_vm({})
+    parent.env = {"AGENTWORKS_VM": EnvEntry("${agw:session_name}")}
+    parent.harness_integrations = selected
+    monkeypatch.setattr("agentworks.vms.templates.resolve_live_template", lambda *args: parent)
+    user_env = {"AGENTWORKS_CUSTOM": EnvEntry({"secret": "ignored"})}
+    system, admin = prepare_vm_setup(
+        db, registry, name=vm.name, template=parent, admin=AdminConfig(env=user_env, harness_integrations=selected)
+    )
+    agent = prepare_agent_setup(
+        db,
+        registry,
+        vm=vm,
+        name="agent",
+        template=ResolvedAgentTemplate("default", env=user_env, harness_integrations=selected),
+    )
+    project = prepare_workspace_setup(
+        db,
+        registry,
+        vm=vm,
+        name="project",
+        template=ResolvedTemplate("default", env=user_env, harness_integrations=selected),
+        root="/work/project",
+    )
+    assert agent is not None and project is not None
+    assert all(inputs.environment_target.vm == {} for inputs in (system, admin, agent, project))
+    assert system.target.vm == parent.env
+    assert admin.target.admin == user_env and agent.target.agent == user_env and project.target.workspace == user_env

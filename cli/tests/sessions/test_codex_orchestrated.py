@@ -164,6 +164,7 @@ def _common_stubs(monkeypatch: pytest.MonkeyPatch) -> None:
     stub_vm_gates(monkeypatch)
     stub_session_resolvers(monkeypatch)
     monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *a, **k: None)
+    monkeypatch.setattr(tmux_mod, "finalize_session_start", lambda *a, **k: None)
     monkeypatch.setattr(session_manager, "_get_boot_id", lambda *a, **k: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
     monkeypatch.setattr(session_manager, "_regenerate_tmuxinator", lambda *a, **k: None)
 
@@ -434,14 +435,17 @@ def test_codex_and_claude_code_state_coexist_in_one_blob(tmp_path: Path, monkeyp
 # -- substitution-safety: the generated snippet is not mangled ----------------
 
 
+@pytest.mark.parametrize("literal", ["${agw:session_name}", "${agw:unknown}", "$${agw:session_name}"])
 def test_substitution_preserves_workload_values_and_substitutes_extra_args(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, literal: str
 ) -> None:
     """Codex JSON setup and TOML developer instructions remain literal
     across manager substitution, while ``extra_args`` still expands."""
     from agentworks.sessions.manager import create_session
 
     db = _seed_db(tmp_path)
+    workspace_path = "/srv/a project's $cache/${agw:unknown}"
+    db.update_workspace_path("ws1", workspace_path)
     events: list[str] = []
     captured: dict[str, str] = {}
     _patch_transport(monkeypatch, _CodexTarget(events))
@@ -449,11 +453,24 @@ def test_substitution_preserves_workload_values_and_substitutes_extra_args(
     _harness_integration_template(
         monkeypatch,
         {
-            "goal": "goal {{session_name}} {{component}}",
-            "initial_prompt": "prompt {{session_name}} {{component}}",
-            "agent": "agent {{session_name}} {{component}}",
-            "developer_instructions": 'developer {{session_name}} {{component}} "quoted"\nline',
-            "extra_args": ["-p", "profile-{{session_name}}"],
+            "model": literal,
+            "reasoning_effort": literal,
+            "profile": literal,
+            "writable_dirs": [f"/srv/a '{literal}/path"],
+            "approvals_reviewer": literal,
+            "web_search": literal,
+            "goal": "goal ${agw:session_name} ${agw:component}",
+            "initial_prompt": "prompt ${agw:session_name} ${agw:component}",
+            "agent": "agent ${agw:session_name} ${agw:component}",
+            "developer_instructions": 'developer ${agw:session_name} ${agw:component} "quoted"\nline',
+            "extra_args": [
+                "-p",
+                "profile-${agw:session_name}",
+                "--future-path",
+                "${agw:workspace_dir}",
+                "--literal",
+                "$${agw:session_name}",
+            ],
         },
     )
     _capture_pane_command(monkeypatch, events, captured)
@@ -480,14 +497,22 @@ def test_substitution_preserves_workload_values_and_substitutes_extra_args(
     argv = inner_argv[inner_argv.index("codex") + 1 :]
     developer = next(token for token in argv if token.startswith("developer_instructions="))
     assert tomllib.loads(developer)["developer_instructions"] == (
-        'developer {{session_name}} {{component}} "quoted"\nline'
+        'developer ${agw:session_name} ${agw:component} "quoted"\nline'
     )
     prompt = argv[-1]
     setup_json = next(part for part in prompt.split("\n\n") if part.startswith("{"))
     assert json.loads(setup_json) == {
-        "agent": "agent {{session_name}} {{component}}",
-        "goal": "goal {{session_name}} {{component}}",
+        "agent": "agent ${agw:session_name} ${agw:component}",
+        "goal": "goal ${agw:session_name} ${agw:component}",
     }
-    assert "prompt {{session_name}} {{component}}" in prompt
-    assert argv[argv.index("-p") + 1] == "profile-s1"
+    assert "prompt ${agw:session_name} ${agw:component}" in prompt
+    profiles = [argv[index + 1] for index, token in enumerate(argv) if token == "-p"]
+    assert profiles == [literal, "profile-s1"]
+    assert argv[argv.index("-m") + 1] == literal
+    assert argv[argv.index("--add-dir") + 1] == f"/srv/a '{literal}/path"
+    for key in ("approvals_reviewer", "model_reasoning_effort", "web_search"):
+        token = next(token for token in argv if token.startswith(f"{key}="))
+        assert tomllib.loads(token)[key] == literal
+    assert argv[argv.index("--future-path") + 1] == workspace_path
+    assert argv[argv.index("--literal") + 1] == "${agw:session_name}"
     db.close()

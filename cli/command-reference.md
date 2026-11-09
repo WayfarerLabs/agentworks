@@ -706,7 +706,12 @@ refreshes its timestamp and leaves initialization state unchanged. See
 provider-recovery boundary.
 
 `vm delete` requires `--force` if the VM has workspaces, agents, or sessions. The confirmation
-message shows what will be deleted. Pass `--yes` to skip the prompt.
+message shows what will be deleted. Pass `--yes` to skip the prompt. If backend binding fails, the
+command warns and removes local state without attempting remote deletion. A bound platform's delete
+exception aborts local removal. Check the provider's cleanup result; local removal alone does not
+prove the remote VM is gone. Whole-VM deletion does not first stop individual workloads or log out
+of Tailscale, so an external tailnet entry can remain for separate removal in the Tailscale admin
+console.
 
 `vm backup` exports the VM row and exact owner tree of agents, workspaces, sessions, events, grants,
 desired instance specs, and workspace files. It does not create or copy a provider VM snapshot,
@@ -773,7 +778,8 @@ and destination can be the same VM (a clone) or different VMs.
 the filter is an error, not an empty result.
 
 `workspace delete` requires `--force` if the workspace has sessions. Running sessions are killed
-during deletion. Pass `--yes` to skip the confirmation prompt.
+during deletion. Its confirmation warns that workspace files, uncommitted changes, stashes and
+commits not pushed elsewhere will be lost. Pass `--yes` to skip the confirmation prompt.
 
 There is deliberately no `workspace shell`: a shell rooted in a workspace is always _somebody's_
 shell. Use `agw vm shell <vm> --workspace <ws>` for an admin shell or
@@ -1176,12 +1182,16 @@ spec:
     required_commands: [htop]
 ```
 
-`agw resource explain harness-integration/shell` documents its config field by field. Two things
-that reference cannot tell you: command strings support `{{session_name}}` and `{{workspace_name}}`
-substitution (double-brace syntax), and the executables an integration checks are checked on the
-session's launch target (the agent, or the VM admin for admin sessions) before any state mutation,
-so launching a session whose tool is not installed fails fast with a clear error instead of a
-cryptic downstream tmux failure.
+`agw resource explain harness-integration/shell` documents its config field by field. Command
+strings support context substitution such as `${agw:session_name}`, `${agw:workspace_name}`, and
+`${agw:user_home_dir}`. Only `${agw:...}` belongs to Agentworks; text outside that namespace remains
+literal to its renderer and does not produce placeholder errors. The namespace keeps shell variables
+and Go templates available to their own consumers. The executables an integration requires are
+checked on the session's launch target before state mutation, so a missing tool fails with an
+actionable error.
+
+See [runtime context and interpolation](../docs/arch/runtime-context.md) for the complete
+vocabulary, literal escaping, env precedence, and command quoting rules.
 
 Those config keys live only inside the `harness_integration` table; spelling any of them at the
 `spec` top level is a load error that points you at the nested shape.

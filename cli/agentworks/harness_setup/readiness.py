@@ -12,7 +12,9 @@ from agentworks.capabilities.harness_integration.setup import (
 )
 from agentworks.errors import StateError
 from agentworks.harness_setup.dispatch import destination_id
+from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
 from agentworks.harness_setup.state import read_native_setup
+from agentworks.linux_users import managed_home
 from agentworks.ssh import SSHError
 
 if TYPE_CHECKING:
@@ -42,12 +44,15 @@ def evaluate_setup(
 ) -> SetupEvidence:
     """Compare native setup configuration and destination evidence.
 
-    Artifact freshness is a separate condition enforced by session preparation's
-    routing check. This result alone does not authorize an artifact-bearing launch.
+    Session routing reports artifact drift separately. The integration's explicit
+    required or recommended prerequisite determines how this evidence affects launch.
     """
 
     def result(status: SetupStatus, record: SetupRecord | None = None) -> SetupEvidence:
-        return SetupEvidence(status, inputs.kind, inputs.name, remediation, record)
+        hint = remediation
+        if status == "incomplete" and record is not None and record.incomplete_reasons:
+            hint = f"{sanitize_setup_diagnostic(' '.join(record.incomplete_reasons))} {hint}"
+        return SetupEvidence(status, inputs.kind, inputs.name, hint, record)
 
     try:
         state = read_native_setup(db, inputs.kind, inputs.name)
@@ -156,7 +161,7 @@ def _applicable_evidence(
             )
             username = agent.linux_user
             remedy = f"Enable the integration activation and run 'agw agent reinit {agent.name}'."
-        location = f"/home/{username}"
+        location = managed_home(username)
     else:
         if workspace.vm_name != vm.name:
             raise StateError("setup readiness requires the session's workspace on this VM")

@@ -77,7 +77,9 @@ before shallower ones. Unowned files do not keep an obsolete entrypoint active.
 A VM deferral chooses exactly one of user, workspace or session. User/workspace deferrals can only
 target session. Core sends an inactive VM's inputs to user, then passes an inactive user or
 workspace's applicable inputs to session. It does not rerun ancestor setup during session start.
-Missing or stale active artifact results require the owning setup operation.
+Missing, stale or incomplete ancestor artifact results are reported with their owner and repair
+operation. They do not block a receiving facet. Runtime routing reuses available captures and known
+explicit deferrals, never recaptures an ancestor, and reports unknown handling without guessing.
 
 Before `start`, core calls `prepare_artifacts` with the immutable `SessionArtifactContext` available
 on the session binding. This includes completed environment, actual home, prospective session/run
@@ -85,14 +87,22 @@ IDs, grouped remaining inputs and ancestor file ownership metadata. Return the s
 in `HarnessStart.artifacts`. Core warns about unhandled inputs after validating the full result and
 restricts session file publication to that run's private directory under the actual user's home.
 First-party session facets default to no artifact delivery. Their typed `enabled_workarounds` config
-lists specific supported delivery methods, with an empty default and replacement inheritance. Return
-an explicit deferral for each disabled or unsupported input, including its relevant workaround in
-the reason when one exists. Filter disabled inputs before applying delivery-specific validation or
-compatibility probes. Keep unsafe paths, conflicting ownership, malformed results and invalid
-configuration as errors. Do not turn an optional artifact into a blanket version requirement.
+lists specific delivery opt-ins, with an empty default and replacement inheritance. A recognized
+compatibility name need not have a verified carrier: Grok accepts `session-agent-definitions` but
+returns its private session personas unhandled in every launch mode. Return an explicit deferral for
+each disabled or unsupported input, including its relevant workaround in the reason when one exists.
+Filter disabled inputs before applying delivery-specific validation or compatibility probes. Keep
+unsafe paths, conflicting ownership, malformed results and invalid configuration as errors. Do not
+turn an optional artifact into a blanket version requirement.
 
-Generated literal argv values must use `quote_literal_argv` so artifact text is not interpreted as
-Agentworks template substitutions. Native conversation IDs remain integration-owned.
+Native-name collisions that prevent an input from being represented become terminal session
+deferrals. Rerender the remaining inputs so rejected content and carrier arguments are both absent,
+then validate that remaining delivery. A namespace that resolves the collision may permit handling
+at the receiving facet; an earlier deferral is not a permanent refusal. Hard failures in input,
+transport or private filesystem publication remain errors of the running facet.
+
+Generated literal argv values use ordinary shell quoting. Only fields declared as templates are
+rendered, before command assembly. Native conversation IDs remain integration-owned.
 
 And note that regardless of integration, all sessions run inside the standard tmux session. This
 provides both access to stdin/stdout/stderr for interactivity as well as the persistent execution
@@ -113,6 +123,13 @@ shared files or silently provision a missing ancestor. Core owns accounts, direc
 and lifecycle transactions; integrations own their native placements and report confirmed claims.
 Authentication files are not supported settings roles. Put session-local secrets in the session's
 environment rather than command text.
+
+The shared native plugin reconciler holds whole-document native CLI mutations when its association
+comparator cannot verify preservation of listed settings entries. An unrecognized source form can be
+valid native configuration. Describe this as a verification limit rather than a syntax error or
+proven native data loss. Independent mappings, file publication and no-op adoption remain available;
+explicit mapped entries follow their selected settings policy. See the
+[native setup guide](../../../../docs/guides/native-harness-setup.md) for the operator workflow.
 
 ## Available Integrations
 
@@ -339,10 +356,18 @@ their respective live owners, including resources still pending during session c
 
 A VM-family mutation guard spans core provisioning, integration setup, and failed-create cleanup.
 Setup checkpoints record confirmed native claims through instance state. Fresh agent and workspace
-applied-state records remain buffered until the owner row and desired overlay commit atomically;
-failed creation cleans up the newly owned native resource. Fresh agent creation refuses an existing
-unowned Linux account or home before arming rollback. Existing agents retain the create-or-converge
-reinit path. VM/admin setup finishes before the final VM initialization and SSH-identity checkpoint.
+applied-state records remain buffered until the owner row and desired overlay commit atomically. A
+core creation failure cleans up the newly owned native resource. A valid setup facet's domain or
+transport failure instead preserves confirmed progress, records the current failure and lets
+independent facets and core bookkeeping finish. The command reports collected failures at its outer
+boundary with a failing exit status; newly created owners and their partial records remain. Shared
+persistence failures, cancellation, invalid activation preflight and unexpected internal errors
+still abort immediately. Fresh agent creation refuses an existing unowned Linux account or home
+before arming rollback. Existing agents retain the create-or-converge reinit path. VM/admin setup
+finishes before the final VM initialization and SSH-identity checkpoint, even with collected facet
+failures. See
+[reconciling setup](../../../../docs/guides/harness-facets.md#inspecting-and-reconciling-setup) for
+inspection and repair.
 
 Session create, start, and restart check the integration's declared setup prerequisites before
 session mutation. These checks inspect evidence and native placement; they do not provision an
@@ -360,12 +385,22 @@ Return `SetupGap` entries with `required` or `recommended` severity and an integ
 reason. Core refuses required gaps before session runtime replacement and warns for recommended
 gaps. The base and all shipped integrations currently return no gaps, preserving session-only use;
 there is no operator-authored universal `required_facets` field. This hook is separate from the
-capability's executable-readiness probe.
+capability's executable-readiness probe. A required gap represents a specific dependency of the
+consuming integration; it is not a blanket artifact-freshness requirement on every ancestor.
 
 Setup invocations carry prior claims and a callback for the complete remaining claim set after each
-confirmed ownership change. Core persists completion and cleanup evidence in the owning
-instance-state slice; it does not infer native ownership from filenames. Removed activations are
-invoked with absent config for retirement, and failed retirement retains evidence for retry. See
+confirmed ownership change. Report an entry skipped because of differing unowned content through
+`report_incomplete(reason)` and continue independent work. Core reports the owning resource and
+integration, and retains incomplete evidence without failing the whole initialization. Matching
+native entries can be adopted after observing their full native-reported association and source;
+adoption is recorded and reported and makes the entry eligible for safe managed cleanup. Installed
+versions are mutable observation metadata, not ownership identity. This does not verify historical
+cache origin. Core persists current-attempt `report_incomplete` reasons with completion and cleanup
+evidence in the owning instance-state slice. Reasons must be credential-free metadata identifying
+the retained entry and needed repair, without settings bodies, artifact content or resolved secrets.
+A new attempt clears prior reasons; successful setup leaves none. Core does not infer native
+ownership from filenames. Removed activations are invoked with absent config for retirement, and
+failed retirement retains evidence for retry. See
 [native harness setup](../../../../docs/guides/native-harness-setup.md) for the shipped cleanup
 rules and the [instance-state contract](../../db/README.md) for persistence and inspection.
 
@@ -469,11 +504,11 @@ unsupported intent leaves the managed tmux runtime and integration-owned state i
 #### Operation: Returning the Launch Decision
 
 - The return value is a `HarnessStartResult`, not an execution. `HarnessStart(command, note)` is the
-  implemented result: the session manager wraps the command (template-var substitution, then the
-  tmux pane's `$SHELL -lic 'cd <dir> && exec <command>'`) and runs it. Empty string means "just the
-  login shell". `HarnessStartNotImplemented` reports that the integration does not implement that
-  intent; every intent may produce it. Any other return shape is a contract error, not an
-  unsupported intent.
+  implemented result: the session manager passes the command to the tmux pane's
+  `$SHELL -lic 'cd <dir> && exec <command>'` wrapper and runs it, without further interpolation.
+  Empty string means "just the login shell". `HarnessStartNotImplemented` reports that the
+  integration does not implement that intent; every intent may produce it. Any other return shape is
+  a contract error, not an unsupported intent.
 - Core passes a `HarnessLaunchIntent`: `CREATE` for `session create`, `RESUME_ONLY` for an explicit
   `--resume-only`, `FORCE_NEW` for an explicit `--force-new`, and `RESUME_OR_NEW` for an ordinary
   `session start` or `session restart`. Core obtains and validates the result before teardown.
@@ -538,9 +573,15 @@ The surrounding wiring supplies the following behavior and debugging boundaries:
   node's composed `preflight` / `runup` on create; the existing-session launch path builds no runup
   context (its only readiness pass is the pre-kill preflight sweep), and on both paths only the op
   context carries secrets. An integration cannot depend on runup firing before `start`.
-- **Substitution stays outside:** the returned string is passed through `{{session_name}}` /
-  `{{workspace_name}}` substitution at the call site. The resulting constraints appear under
-  "Building the pane command" below.
+- **Context binding and rendering:** before preflight, the manager binds the invocation's planned
+  facts and launch intent through `prepare_context`. Shell preflight checks that its selected
+  `command` or `resume_command` renders, including when a pending target defers the required-command
+  probe. This precedes workload/env secret resolution; the VM activation gate may need its own
+  credentials before remote preflight. The checks cover rendering and declared-command availability;
+  execution determines command behavior. During launch selection, shell renders the selected field
+  again from its declaration and native integrations render structured extra arguments before
+  quoting. Returned commands receive no further interpolation. See
+  [runtime context and interpolation](../../../../docs/arch/runtime-context.md).
 - **Display:** `session list` / `session describe` show the resolved integration name by
   re-resolving the template read-only (no instance is built, no gate runs);
   `resource list --kind harness-integration` inventories rows,
@@ -603,17 +644,17 @@ sessions. Five rules, each earned:
   and `exec` takes one simple command: with a bare `echo ...; exec tool ...` the shell would `exec`
   the `echo` and nothing after the `;` would ever run. Return `sh -c '<inner>'` with the inner
   `shlex.quote`d, and `exec` the tool inside it so the pane process becomes the tool.
-- **`shlex.quote` every generated token.** Build an argv token list, quote each, and space-join.
-  Never interpolate raw values into shell syntax.
-- **Generated pieces must not emit `{{word}}`.** The call-site substitution raises on unknown
-  `{{word}}` tokens and substitutes known ones over the entire returned string. Operator-authored
-  slices (shell's commands, `extra_args` elements) carry `{{session_name}}` semantics on purpose.
-  Free-form workload fields are literal harness input, so integrations use the shared argv quoting
-  seam that hides doubled opening braces from manager substitution while the target shell
-  reconstructs the exact token. Single braces (`${VAR}`, JSON) are untouched.
+- **Quote generated argv data.** Build a token list and use `shlex.quote` for each generated or
+  modeled argument, preserving literal profile names, model values, settings, and workload input.
+- **Render declared template fields in the integration.** Use `self.quote_context_argv` for
+  designated `extra_args` values. It renders against the bound context, then shell-quotes the
+  result. A workspace path containing an apostrophe remains one argument, and namespace-looking
+  replacement data is not interpreted twice. Shell renders its selected command field as
+  operator-authored source with ordinary shell quoting responsibilities. The manager never
+  interpolates returned commands.
 - **Model the common flags; leave the rest to `extra_args`.** A small optional vocabulary
-  (`permission_mode`, `model`, `reasoning_effort`, workload inputs, and session preferences) plus a
-  verbatim `extra_args` list emitted after generated options keeps the integration useful without
+  (`permission_mode`, `model`, `reasoning_effort`, workload inputs, and session preferences) plus an
+  explicit `extra_args` list emitted after generated options keeps the integration useful without
   chasing the tool's whole flag surface. Session-local tool settings share one generated
   `--settings` JSON argument. Append `extra_args` after the managed options for deterministic
   ordering, but let the upstream tool define repeated-flag behavior. If Claude, Codex, or Grok also

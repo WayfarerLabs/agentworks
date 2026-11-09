@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import shlex
 from abc import abstractmethod
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import TYPE_CHECKING, Literal, Protocol, Self
 
@@ -191,27 +191,6 @@ def require_commands(
     )
 
 
-def quote_literal_argv(value: str) -> str:
-    """Quote one shell argv value while shielding literal ``{{`` text.
-
-    The session manager applies template-variable substitution to the full
-    pane command returned by an integration. Workload fields are literal
-    harness input, so split adjacent opening braces across concatenated shell
-    quote fragments. The target shell reconstructs the exact value while the
-    manager never sees a template placeholder. Callers must continue using
-    ordinary :func:`shlex.quote` for ``extra_args``, whose placeholders are
-    intentionally expanded by the manager.
-    """
-    chunks: list[str] = []
-    start = 0
-    for index in range(1, len(value)):
-        if value[index - 1 : index + 1] == "{{":
-            chunks.append(value[start:index])
-            start = index
-    chunks.append(value[start:])
-    return "".join(shlex.quote(chunk) for chunk in chunks)
-
-
 @dataclass(frozen=True, kw_only=True)
 class SessionBinding:
     """The existing session identity and mutable conversation namespace."""
@@ -224,6 +203,8 @@ class SessionBinding:
     admin: bool
     state: dict[str, object]
     artifact_context: SessionArtifactContext | None = None
+    context_values: Mapping[str, str] = field(default_factory=dict)
+    launch_intent: HarnessLaunchIntent = HarnessLaunchIntent.RESUME_OR_NEW
 
 
 class HarnessIntegration(Capability):
@@ -277,6 +258,24 @@ class HarnessIntegration(Capability):
         self._probed = False
 
     @classmethod
+    def implements_setup(cls, facet: Literal["vm", "user", "workspace"]) -> bool:
+        """Distinguish implemented setup from the base unsupported-facet refusal."""
+        method = f"{facet}_init"
+        return getattr(cls, method) is not getattr(HarnessIntegration, method)
+
+    @classmethod
+    def require_setup_implementation(
+        cls, facet: Literal["vm", "user", "workspace"], *, owner_kind: str, owner_name: str
+    ) -> None:
+        """Refuse an unsupported selected setup facet before owning mutations."""
+        if not cls.implements_setup(facet):
+            raise StateError(
+                f"harness integration '{cls.name}' does not implement setup facet '{facet}'",
+                entity_kind=owner_kind,
+                entity_name=owner_name,
+            )
+
+    @classmethod
     def for_setup(
         cls,
         *,
@@ -293,6 +292,8 @@ class HarnessIntegration(Capability):
         """
         if facet not in ("vm", "user", "workspace"):
             raise StateError("setup construction requires a setup facet")
+        if config is not None:
+            cls.require_setup_implementation(facet, owner_kind=owner_kind, owner_name=owner_name)
         instance = cls.__new__(cls)
         Capability.__init__(instance, owner_name, config, facet=facet, owner_kind=owner_kind)
         instance._session = None
@@ -341,6 +342,26 @@ class HarnessIntegration(Capability):
     def prepare_artifacts(self, context: SessionArtifactContext) -> None:
         """Bind core-prepared inputs before the integration chooses its launch."""
         self._session = replace(self._session_binding, artifact_context=context)
+
+    def prepare_context(self, values: Mapping[str, str], *, intent: HarnessLaunchIntent) -> None:
+        """Bind known launch facts before preflight selects or renders input."""
+        self._session = replace(self._session_binding, context_values=dict(values), launch_intent=intent)
+
+    def quote_context_argv(self, value: str) -> str:
+        """Render one structured extra argument as data, then quote it once.
+
+        The returned command is consumed directly, so replacement contents
+        remain literal without another rendering pass.
+        """
+        from agentworks.interpolation import render_template
+
+        return shlex.quote(
+            render_template(
+                value,
+                self._session_binding.context_values,
+                field=f"{self.owner_kind}/{self.owner_name}.extra_args",
+            )
+        )
 
     @property
     def _session_binding(self) -> SessionBinding:

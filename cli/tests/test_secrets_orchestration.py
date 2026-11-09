@@ -244,7 +244,7 @@ def test_secret_references_invariant_under_value_substitution(
 ) -> None:
     """Callers may hand pre- or post-substitution env dicts to
     SecretTarget. The computed SecretDecl union is invariant because
-    _substitute_template_vars_in_env only rewrites EnvEntry.value
+    Plaintext interpolation only reads EnvEntry.value
     (plaintext), never EnvEntry.secret (the reference name). This is
     load-bearing for Phase 6.2 wiring, which builds targets from
     un-substituted template env dicts."""
@@ -260,7 +260,7 @@ def test_secret_references_invariant_under_value_substitution(
 
     pre_subst = {
         "API": EnvEntry({"secret": "api"}),
-        "GREETING": EnvEntry({"value": "hello {{session_name}}"}),
+        "GREETING": EnvEntry({"value": "hello ${agw:session_name}"}),
     }
     post_subst = {
         "API": EnvEntry({"secret": "api"}),
@@ -563,3 +563,48 @@ def test_label_round_trips() -> None:
         label="agent-bootstrap",
     )
     assert target.label == "agent-bootstrap"
+
+
+@pytest.mark.parametrize("entry", [EnvEntry("${agw:agent_name}"), EnvEntry({"secret": "ignored"})])
+def test_identity_collisions_do_not_validate_collect_or_resolve(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, entry: EnvEntry
+) -> None:
+    from agentworks.interpolation import context_values
+    from agentworks.secrets.orchestration import validate_target_values
+
+    config = load_config(_write_config(tmp_path), warn_issues=False)
+    registry = build_registry(config)
+    target = SecretTarget(
+        vm={
+            "AGENTWORKS_WORKSPACE": entry,
+            "AGENTWORKS_WORKSPACE_DIR": entry,
+            "AGENTWORKS_SESSION": entry,
+            "AGENTWORKS_SESSION_KIND": entry,
+        },
+        workspace={},
+        session={},
+    )
+    target.validate_context(context_values(vm_name="vm", user="admin", workspace_name="ws", session_name="s"))
+    assert compute_needed_secrets([target], registry) == []
+    validate_target_values([target], {})
+
+    def unexpected_resolve(*args: object, **kwargs: object) -> None:
+        pytest.fail("An ignored secret must not reach resolution")
+
+    monkeypatch.setattr("agentworks.secrets.resolve.resolve_batch", unexpected_resolve)
+    assert resolve_for_command([target], config, registry, interaction=TtyInteractionPolicy.REFUSE) == {}
+
+
+@pytest.mark.parametrize(
+    "key", ["AGENTWORKS_WORKSPACE", "AGENTWORKS_SESSION_KIND", "AGENTWORKS_VM", "AGENTWORKS_CUSTOM"]
+)
+def test_absent_identity_context_does_not_discard_authored_entries(tmp_path: Path, key: str) -> None:
+    from agentworks.interpolation import context_values
+
+    config = load_config(_write_config(tmp_path), warn_issues=False)
+    target = SecretTarget(vm={key: EnvEntry("${agw:agent_name}")})
+    with pytest.raises(ValidationError):
+        target.validate_context(context_values(vm_name="vm", user="admin"))
+    target = SecretTarget(vm={key: EnvEntry({"secret": "still-needed"})})
+    needed = compute_needed_secrets([target], build_registry(config), allow_transient_auto_declare=True)
+    assert [decl.name for decl in needed] == ["still-needed"]

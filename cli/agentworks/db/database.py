@@ -935,7 +935,7 @@ class Database:
         boot_id: str | None,
         tmux_server_start_ticks: int | None,
     ) -> None:
-        """Persist or clear the session runtime identity as one fact."""
+        """Persist a runtime fingerprint or the boot of an uncertain launch."""
         if pid is not None and pid != _db.PID_STOPPED and pid <= 0:
             raise ValueError(f"invalid runtime PID: {pid}")
         if (
@@ -944,8 +944,10 @@ class Database:
             and (boot_id is None or tmux_server_start_ticks is None or tmux_server_start_ticks <= 0)
         ):
             raise ValueError("a live runtime requires boot ID and positive process start time")
-        if (pid is None or pid == _db.PID_STOPPED) and (boot_id is not None or tmux_server_start_ticks is not None):
-            raise ValueError("an unknown or stopped runtime cannot retain a process fingerprint")
+        if pid == _db.PID_STOPPED and (boot_id is not None or tmux_server_start_ticks is not None):
+            raise ValueError("a stopped runtime cannot retain a process fingerprint")
+        if pid is None and tmux_server_start_ticks is not None:
+            raise ValueError("an unknown runtime cannot retain process start time")
         self._conn.execute(
             "UPDATE sessions SET socket_path = ?, pid = ?, boot_id = ?, "
             "tmux_server_start_ticks = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') "

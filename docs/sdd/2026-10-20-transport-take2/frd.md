@@ -1,7 +1,7 @@
 # Transport Take 2: Functional Requirements
 
-- Status: Requirements baseline accepted by the operator on 2026-10-20 and amended on 2026-10-23;
-  HLA and plan follow. No design or implementation is claimed.
+- Status: Requirements baseline accepted by the operator on 2026-10-20 and amended on 2026-10-23,
+  2026-10-31 and 2026-11-01. Design in [hla.md](./hla.md); work tracked in [plan.md](./plan.md).
 - Started: 2026-10-20
 - Effort: `transport-take2`
 - Supersedes: [transport-improv](../2026-09-12-transport-improv/locked.md) and
@@ -189,6 +189,118 @@ operator chose:]
 
 > VMs only (Recommended)
 
+### 2026-10-31
+
+On the open questions in the high-level architecture:
+
+[The lead asked four questions: whether the names `agw vm import-host-keys` and `agw vm recover`
+stand; whether account-shell startup running before Agentworks code satisfies R3; whether the
+activation gate's announced automatic Tailscale rejoin counts as explicit recovery under R7, or
+should instead fail and name the recovery command; and whether local Lima on Windows is a supported
+pairing for R11's evidence. The operator answered the first, third and fourth in one numbered list,
+quoted here one item at a time, and answered the second separately (below).]
+
+On the command names:
+
+> Yep, those commands are good
+
+On the activation gate's automatic rejoin:
+
+> Given that we now have a command for this, I think it would be better to fail with a hint to use
+> it.
+
+On local Lima on Windows:
+
+> Yeah, let's add that to the evidence. I'll have the integration tester add support.
+
+On the launcher's name and the number of implementation PRs, after the lead proposed folding the
+plan's eight slices into three PRs:
+
+> Ok. Let's go with the 'agentworks launcher', (agw-launch). Undersells but clean.
+>
+> The reduced PRs sound great. Thanks!
+
+On python3, after the lead found it installed only at init on `main`:
+
+> Are you sure that Python isn't now part of provisioning? I swear we changed that. It should still
+> be installed via init to account for older machines. But if it isn't, I'm 100% ok with adding it
+> as a provisioning requirement. And/or we can run the first apt commands during init in a special
+> way so as to not require Python. It's up to you but my feeling is that it would ultimately be way
+> easier to implement agw-launch in Python vs bash.
+
+On the lead's final delivery recommendation and R3:
+
+[The lead's final recommendation, in one message: every request travels on stdin, with the terminal
+half of an attach fetching its request over a second connection; agw-launch is written in Python,
+and python3 is installed at provisioning; managed accounts' login shells stay limited to `sh`,
+`dash`, `bash` and `zsh`, since the account shell still parses one fixed line. The same message
+asked whether R3 can be read as "the command never sees the effects of startup", since sshd always
+runs the account's login shell first. The operator answered:]
+
+> Sounds good. And I agree with that change to R3.
+
+Later the same day, reversing the answer on local Lima on Windows:
+
+> Btw, I'd like to reverse myself on Lima on Windows. As far as I can tell, this is still based on
+> WSL2 and doesn't offer anything beyond our existing WSL2 support.
+
+### 2026-11-01
+
+On the items the design left for the operator, and on rejoining at VM start:
+
+[The lead recommended: rewording R3 to list what is reset and to state resource limits, scheduling
+priority, a startup file's background process and swapped discarding streams as known gaps; refusing
+local Lima on Windows in Lima's readiness check, as its own issue; keeping script-bundle
+capabilities out of this effort; keeping stage 0 reading agw-launch from stdin; and leaving `vm
+start`'s own Tailscale rejoin in place. The operator answered in one numbered list, quoted here one
+item at a time.]
+
+On R3:
+
+> I accept your recommendations on R3
+
+On refusing local Lima on Windows:
+
+> Yeah, let's refuse it
+
+On script-bundle capabilities:
+
+> Totally agreed. I just wanted to make sure that our work here will support that future work, out
+> of scope of this PR
+
+On stage 0:
+
+> Confirmed
+
+On rejoining at VM start:
+
+> I think I'd rather simplify here. VM start should just start the VM and wait for Tailscale to
+> reconnect. If that fails, it should hint at recover.
+
+### 2026-11-01, later
+
+[On the three behavior changes PR A ships (no MOTD or last-login line without `--workspace`; an
+encrypted key must be loaded in the SSH agent, since ssh never prompts for a passphrase; pam_env not
+applied), the operator accepted all three and wrote:]
+
+> So please, please, please don't take on a bunch of extra complexity to solve problems like this.
+> Agentworks is a controlled environment. I'm much rather just not support stuff like PAM. But if we
+> do that, we need to check and alert if someone tries to use it.
+
+[On the two items #856 left for the operator, the operator selected both:]
+
+> Amend R1 (auth key once)
+
+[and]
+
+> Keep python3 at init
+
+[On R4's "Sensitive input, environment and script content never appear in command arguments, logs,
+exceptions or retained artifacts", asked whether "sensitive" qualifies all three or whether all
+script source stays out of logs, the operator chose:]
+
+> Sensitive qualifies all three (Recommended)
+
 ### Rulings carried forward
 
 These predecessor rulings still hold, quoted from the transport-improv FRD.
@@ -279,8 +391,9 @@ an actionable diagnosis. Release support keeps the existing policy: current and 
 are ordinarily operable, and older recognized releases continue best effort with a warning.
 
 Platform provisioning performs the VM's first Tailscale join, installs the admin's authorized key
-and reports the VM's tailnet address, using whatever native access the platform needs. Core's work
-on a new VM starts over SSH at that address.
+and reports the VM's tailnet address, using whatever native access the platform needs. That first
+join sends the auth key once and keeps it out of retained provisioning artifacts, command lines,
+logs and exceptions. Core's work on a new VM starts over SSH at that address.
 
 A difference between platforms is fixed in provisioning or initialization, not carried as a branch
 in core. Reinit converges an existing VM onto the contract. Differences inherent to a platform
@@ -303,11 +416,16 @@ channel; what it runs there is the platform's concern.
 ### R3. Commands and scripts
 
 Literal arguments reach the guest exactly, including empty arguments, whitespace and shell special
-characters, and literal execution applies no shell startup implicitly. Scripts select a fixed
-interpreter (`sh`, `bash` or the execution user's default shell) explicitly, with login and
-interactive startup as separate explicit choices. The default shell is the destination identity's,
-never the workstation's, and a missing interpreter fails without substitution. A script and its
-stdin are separate inputs.
+characters, and literal execution applies no shell startup implicitly. The destination account's
+login shell, which sshd always runs first, may read its own startup files before Agentworks code
+starts. The command still starts from known state: output written before Agentworks code starts is
+discarded, and the environment, working directory, umask, signal handling and open descriptors are
+reset. Three effects of a startup file are known gaps rather than guarantees: resource limits or
+scheduling priority it lowered, output from a background process it leaves running, and both output
+streams swapped for pipes that discard what they receive. Scripts select a fixed interpreter (`sh`,
+`bash` or the execution user's default shell) explicitly, with login and interactive startup as
+separate explicit choices. The default shell is the destination identity's, never the workstation's,
+and a missing interpreter fails without substitution. A script and its stdin are separate inputs.
 
 Execution uses the bound identity; explicit elevation covers the whole operation, and elevation the
 identity lacks is a permission failure, never a reroute to another identity or to native access, so
@@ -375,7 +493,10 @@ first, never a later check over SSH. Apart from recovery, logout and the optiona
 makes no use of a native channel.
 
 The capability has no environment seeding, file API, detached work or streaming. Core invokes it
-only explicitly. An interactive native shell is optional and platform-declared, and it does not seed
+only explicitly, through the operator's recovery, rekey and delete commands. Starting a VM, whether
+by command or by the activation gate on another command's behalf, starts it and waits for Tailscale
+to reconnect; when it does not reconnect, the start fails with a hint to run recovery rather than
+rejoining it. An interactive native shell is optional and platform-declared, and it does not seed
 the operation environment. Everything else a platform does natively, including its own provisioning,
 stays private to that platform.
 

@@ -548,6 +548,8 @@ def error(message: str) -> None:
 
 def confirm(message: str, default: bool = False) -> bool:
     """Present a yes/no question. Returns True for yes, False for no."""
+    if non_interactive():
+        return False
     return _handler.confirm(message, _current_level(), default)
 
 
@@ -618,7 +620,10 @@ def is_interactive() -> bool:
     """
     if _non_interactive:
         return False
-    return sys.stdin.isatty()
+    try:
+        return sys.stdin.isatty()
+    except (AttributeError, OSError, ValueError):
+        return False
 
 
 def non_interactive() -> bool:

@@ -38,14 +38,38 @@ if TYPE_CHECKING:
 CON = "aw-console-con"
 
 
-def _mark_stopped(db: Database, name: str) -> None:
+def _mark_stopped(db: Database, name: str, target: _FakeTarget, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Model a stopped dedicated runtime, including absence observations."""
+    import shlex
+
+    row = db.get_session(name)
+    assert row is not None
+    workspace = db.get_workspace(row.workspace_name)
+    assert workspace is not None
+    vm = db.get_vm(workspace.vm_name)
+    assert vm is not None
+    if row.agent_name is None:
+        socket_path = f"/run/agentworks/admin-tmux-sockets/{vm.admin_username}/{name}.sock"
+    else:
+        agent = db.get_agent(row.agent_name)
+        assert agent is not None
+        socket_path = f"/run/agentworks/agent-tmux-sockets/{agent.linux_user}/{name}.sock"
     db.update_session_runtime(
-        name,
-        socket_path=f"/tmp/{name}.sock",
-        pid=PID_STOPPED,
-        boot_id=None,
-        tmux_server_start_ticks=None,
+        name, socket_path=socket_path, pid=PID_STOPPED, boot_id=None, tmux_server_start_ticks=None
     )
+    q_socket = shlex.quote(socket_path)
+    for operation in ("has-session", "list-sessions", "display-message"):
+        target.responses[f"tmux -S {q_socket} {operation}"] = _FakeResult(
+            returncode=1, stderr=f"no server running on {socket_path}"
+        )
+    original = target.run
+
+    def run(command: str, **kwargs: object) -> _FakeResult:
+        if command == f"test -e {q_socket}":
+            return _FakeResult(returncode=1)
+        return original(command, **kwargs)
+
+    monkeypatch.setattr(target, "run", run)
 
 
 def test_add_session_live_sync_skipped_when_console_absent(db: Database, fake_target: _FakeTarget) -> None:
@@ -531,8 +555,8 @@ def test_delete_session_kills_console_windows(
 
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["s", "other"])
-    # Mark 's' STOPPED so check_session_status short-circuits with no SSH.
-    _mark_stopped(db, "s")
+    # Model both the stopped record and authoritative native absence.
+    _mark_stopped(db, "s", fake_target, monkeypatch)
     create_console(db, name="alpha", vm_name="vm1", session_specs=["s", "other"])
     create_console(db, name="beta", vm_name="vm1", session_specs=["s"])
     create_console(db, name="gamma", vm_name="vm1", session_specs=["other"])
@@ -566,7 +590,7 @@ def test_delete_session_skips_kill_when_no_member_consoles(
 
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["lonely"])
-    _mark_stopped(db, "lonely")
+    _mark_stopped(db, "lonely", fake_target, monkeypatch)
 
     monkeypatch.setattr(manager_mod, "_regenerate_tmuxinator", lambda *a, **k: None)
 
@@ -598,7 +622,7 @@ def test_delete_session_reports_affected_consoles(
 
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["s", "other"])
-    _mark_stopped(db, "s")
+    _mark_stopped(db, "s", fake_target, monkeypatch)
     # alpha keeps 'other' after the cascade; beta is emptied.
     create_console(db, name="alpha", vm_name="vm1", session_specs=["s", "other"])
     create_console(db, name="beta", vm_name="vm1", session_specs=["s"])
@@ -627,7 +651,7 @@ def test_delete_session_offers_and_deletes_now_empty_console(
 
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["s", "other"])
-    _mark_stopped(db, "s")
+    _mark_stopped(db, "s", fake_target, monkeypatch)
     create_console(db, name="alpha", vm_name="vm1", session_specs=["s", "other"])
     create_console(db, name="beta", vm_name="vm1", session_specs=["s"])
 
@@ -668,7 +692,7 @@ def test_delete_session_declined_offer_keeps_empty_console(
 
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["s"])
-    _mark_stopped(db, "s")
+    _mark_stopped(db, "s", fake_target, monkeypatch)
     create_console(db, name="beta", vm_name="vm1", session_specs=["s"])
 
     monkeypatch.setattr(manager_mod, "_regenerate_tmuxinator", lambda *a, **k: None)
@@ -702,7 +726,7 @@ def test_delete_session_does_not_offer_console_with_remaining_sessions(
 
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["s", "other"])
-    _mark_stopped(db, "s")
+    _mark_stopped(db, "s", fake_target, monkeypatch)
     create_console(db, name="alpha", vm_name="vm1", session_specs=["s", "other"])
 
     monkeypatch.setattr(manager_mod, "_regenerate_tmuxinator", lambda *a, **k: None)
@@ -740,7 +764,7 @@ def test_delete_session_leaves_no_dangling_console_reference(
 
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["s", "other"])
-    _mark_stopped(db, "s")
+    _mark_stopped(db, "s", fake_target, monkeypatch)
     create_console(db, name="alpha", vm_name="vm1", session_specs=["s", "other"])
 
     monkeypatch.setattr(manager_mod, "_regenerate_tmuxinator", lambda *a, **k: None)
@@ -767,7 +791,7 @@ def test_delete_session_yes_reports_but_keeps_empty_console(
 
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["s"])
-    _mark_stopped(db, "s")
+    _mark_stopped(db, "s", fake_target, monkeypatch)
     create_console(db, name="beta", vm_name="vm1", session_specs=["s"])
 
     monkeypatch.setattr(manager_mod, "_regenerate_tmuxinator", lambda *a, **k: None)
@@ -799,7 +823,7 @@ def test_delete_session_warns_when_offered_console_delete_raises(
 
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["s"])
-    _mark_stopped(db, "s")
+    _mark_stopped(db, "s", fake_target, monkeypatch)
     create_console(db, name="beta", vm_name="vm1", session_specs=["s"])
 
     monkeypatch.setattr(manager_mod, "_regenerate_tmuxinator", lambda *a, **k: None)
@@ -1016,8 +1040,8 @@ def test_delete_workspace_kills_console_windows(
 
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["s1", "s2"])
-    _mark_stopped(db, "s1")
-    _mark_stopped(db, "s2")
+    _mark_stopped(db, "s1", fake_target, monkeypatch)
+    _mark_stopped(db, "s2", fake_target, monkeypatch)
     create_console(db, name="con1", vm_name="vm1", session_specs=["s1", "s2"])
     create_console(db, name="con2", vm_name="vm1", session_specs=["s1"])
 
@@ -1065,7 +1089,6 @@ def test_delete_agent_kills_console_windows(
     """``delete_agent --force`` runs the same cleanup over its agent's
     sessions."""
     from agentworks.agents import manager as agent_manager
-    from agentworks.db import PID_STOPPED
 
     _seed_vm(db, with_tailscale=True)
     db._conn.execute("INSERT INTO agents (name, vm_name, linux_user) VALUES ('bot', 'vm1', 'bot-user')")
@@ -1073,9 +1096,7 @@ def test_delete_agent_kills_console_windows(
         db.insert_session(
             name, "ws-vm1", "default", SessionMode.AGENT, agent_name="bot", socket_path=f"/tmp/{name}.sock"
         )
-        db.update_session_runtime(
-            name, socket_path=f"/tmp/{name}.sock", pid=PID_STOPPED, boot_id=None, tmux_server_start_ticks=None
-        )
+        _mark_stopped(db, name, fake_target, monkeypatch)
     db._conn.commit()
     create_console(db, name="con", vm_name="vm1", session_specs=["s1", "s2"])
 

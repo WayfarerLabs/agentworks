@@ -105,7 +105,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # (the EC2 VM platform), and `gcp`
 # (the Google Compute Engine VM platform and optional guest `gcloud-cli` apt
 # package). Core still owns runners and executors, plus snap, mise, dotfiles,
-# tmuxinator, and Claude marketplace/plugin setup.
+# and tmuxinator. Harness integrations own native marketplace/plugin setup.
 # `agw doctor` shows a System plugins roster with each plugin's state. For a
 # template that selects an apt catalog entry, add `apt`; for one that selects a
 # shipped user install command, add `install-command`. Keep existing names. If
@@ -144,8 +144,10 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # Secrets
 # =============================================================================
 #
-# A pluggable, named-secret system. In a resource manifest, anywhere an env
-# value can be a string it can also be `{ secret: <name> }`, referencing a
+# A pluggable, named-secret system. In resource manifests, plaintext env values
+# can use context references such as `${agw:user_home_dir}/.config/tool`.
+# Secret names and contents remain literal. Any env value can also be
+# `{ secret: <name> }`, referencing a
 # declared secret. The chain's configured sources produce the value at command
 # time; agentworks never persists secret values to disk.
 #

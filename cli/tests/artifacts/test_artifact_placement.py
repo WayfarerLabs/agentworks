@@ -28,7 +28,9 @@ def test_vm_plans_apply_supported_types_without_descendant_context(monkeypatch, 
         module = __import__(integration_type.__module__, fromlist=["probe_native"])
         calls = []
         monkeypatch.setattr(module, "probe_native", lambda *args, **kwargs: calls.append(kwargs))
-    result = integration.vm_init(SimpleNamespace(artifacts=received(*items), runner=object(), environment={}))
+    result = integration.vm_init(
+        SimpleNamespace(artifacts=received(*items), runner=object(), environment={}, secrets={})
+    )
     applied = {origin for file in result.files for origin in file.origins}
     expected = {
         item.origin_identity
@@ -89,5 +91,5 @@ def test_codex_aggregates_all_guidance_without_losing_same_named_scoped_inputs(r
     assert len(plan.files) == 1
     assert plan.files[0].generated_section
     assert plan.files[0].origins == tuple(item.origin_identity for item in inputs.items())
-    assert plan.files[0].data.count(b"before {{session_name}} after") == 4
+    assert plan.files[0].data.count(b"before ${agw:session_name} after") == 4
     assert plan.deferred == ()

@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, cast
 
 from agentworks.artifacts.declarations import ArtifactsConfig
 from agentworks.capabilities.config import validate_capability_config
-from agentworks.capabilities.harness_integration import ensure_harness_integration_enabled
+from agentworks.capabilities.harness_integration import ensure_harness_integration_enabled, harness_integration_for
 from agentworks.env.compose import compose_env
 from agentworks.env.identity import ResourceContext, agentworks_identity_env
 from agentworks.schema import RefOwner
@@ -51,30 +51,42 @@ class SetupInputs:
     def facet(self) -> SetupFacet:
         return _FACET[self.component]
 
+    @property
+    def environment_target(self) -> SecretTarget:
+        """Project setup's authored inputs before validation or secret use.
+
+        Setup reserves the entire core identity namespace. Keep the original
+        scopes on ``target`` for declaration hashes and ancestor ownership.
+        """
+
+        from agentworks.secrets.orchestration import SecretTarget
+
+        return SecretTarget(
+            vm={key: entry for key, entry in self.target.effective_env().items() if not key.startswith("AGENTWORKS_")},
+            label=self.target.label,
+        )
+
     def register(self, resolver: Resolver, registry: Registry) -> None:
         """Join the operation's eager resolution before mutation or log creation."""
         from agentworks.capabilities.harness_integration.activations import activation_references, validate_activations
 
         source = (self.kind, self.name)
         validate_activations(self.activations, facet=self.facet, source=source, provenance={})
+        facet = self.facet
         for name in self.activations:
             ensure_harness_integration_enabled(registry, name)
-        resolver.register_targets([self.target])
+            if facet in ("vm", "user", "workspace"):
+                harness_integration_for(name).require_setup_implementation(
+                    facet, owner_kind=self.kind, owner_name=self.name
+                )
+        resolver.register_targets([self.environment_target])
         for reference in activation_references(self.activations, facet=self.facet, source=source, provenance={}):
             if reference.kind == "secret":
                 resolver.register_name(reference.name)
 
     def environment(self, values: Mapping[str, str], context: ResourceContext) -> dict[str, str]:
-        """Use the same scope dictionaries, protecting every core identity field."""
-        merged = compose_env(
-            values=values,
-            ctx=context,
-            vm=self.target.vm,
-            admin=self.target.admin,
-            agent=self.target.agent,
-            workspace=self.target.workspace,
-            session=self.target.session,
-        )
+        """Render setup's authored winners and supply its complete managed identity."""
+        merged = compose_env(values=values, ctx=context, vm=self.environment_target.vm)
         return {
             **{name: value for name, value in merged.items() if not name.startswith("AGENTWORKS_")},
             **agentworks_identity_env(context),
