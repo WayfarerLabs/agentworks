@@ -89,3 +89,25 @@ Deliver the feature and full SDD in PR #867. Mark the completed implementation r
 standard review and integration-testing pipeline. The operator authorizes up to three final PR
 review iterations; wait for the integration report before a subsequent round, allowing up to four
 hours for its arrival.
+
+## Operator rulings
+
+### 2026-11-08: command checks and transport scope
+
+The following authenticated operator rulings govern FR5 and FR6 and the transport scope of this
+feature. They are recorded verbatim.
+
+> Yeah, agreed that the current behavior is fine. And to be clear, we shouldn't be validating the
+> actual command. Rather just that it renders and that required_commands are present. The command
+> itself just need to be executed to see if it works.
+
+> For #1, please just file an issue. We're completely reworking the ssh and transport stack. I think
+> this is already addressed but I'll have the dev look at your issue to make sure. We should not do
+> anything special here.
+
+<!-- cspell:ignore tbh -->
+
+The operator subsequently requested earlier shell template preflight:
+
+> And yeah, tbh, we should "preflight" the shell integration prior to secret resolution. That would
+> at least identify rendering failures before secret resolution, right?

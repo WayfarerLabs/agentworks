@@ -71,10 +71,16 @@ entries are neither rendered nor resolved.
 | Workspace setup              | VM admin and workspace                                              |
 
 Existing processes keep their initial environment. A new invocation recomputes values. Invalid env
-references are checked before secret prompts and mutations where context is known. Integrations
-render their declared command fields while selecting the launch command, before launch or
-destructive replacement. A create may already have realized workspace access; a command error then
-uses the normal rollback. Native transports retain their documented env-delivery limitations.
+references are checked before workload secret prompts and mutations where context is known. Shell
+preflight checks that its selected `command` or `resume_command` renders, including for a planned
+agent or workspace, before workload/env secret resolution. The existing VM activation gate may need
+its own credentials before remote preflight.
+
+The readiness path checks declared `required_commands` on an available target; a new target's probe
+defers until that target exists. These checks cover template renderability and declared-command
+availability. Command behavior is determined by execution. Launch renders the selected field again
+from its declaration before launch or destructive replacement. Native transports retain their
+documented env-delivery limitations.
 
 `agw env show --session NAME` previews winning plaintext values and their scopes from managed state
 without connecting to the VM. `--vm`, `--workspace`, and `--agent` select other contexts. Secrets
@@ -83,9 +89,10 @@ of a process's live environment or user shell startup effects.
 
 SSH delivery uses the client's `SetEnv` option. Clients that expand SetEnv values can reinterpret
 literal `${...}` text using the controller's environment, or refuse it when that variable is absent.
-This affects escaped plaintext and opaque secrets as well as ordinary shell-looking text. Preview
-and setup rendering do not perform that client expansion. Literal-value delivery on those clients is
-an unresolved transport dependency; changing Agentworks template escaping does not suppress it.
+Ordinary `${agw:user_name}` references render to the consuming username before transport. Literal
+namespace text can remain intentionally through plaintext escaping or opaque secret content. Preview
+and setup rendering do not perform the SSH client expansion. This transport behavior is tracked in
+[issue #873](https://github.com/WayfarerLabs/agentworks/issues/873).
 
 ## Secrets
 
@@ -136,7 +143,8 @@ profile fragments. Placeholder values come from explicit context rather than rea
 
 Supply the managed identity and resource facts the invocation actually knows. Runtime callers use
 the existing `ResourceContext`; preparation can supply planned facts before a full runtime context
-exists. Both use the same finite catalogue and context projection.
+exists. Both use the same finite catalogue and context projection. Session preparation binds those
+facts and the explicit launch intent before preflight, so shell checks only its selected field.
 
 Render only fields whose contract calls for interpolation. Render winning plaintext env entries
 without requiring secret values; keep provenance independent. Validate before side effects when

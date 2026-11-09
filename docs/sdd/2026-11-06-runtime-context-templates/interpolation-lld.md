@@ -50,9 +50,17 @@ Bind the selected context to the integration before launch selection. Shell rend
 `command` or `resume_command` field against that context. Native integrations render structured
 extra arguments as individual data values before quoting them with `shlex.quote`; other native
 fields remain literal argv data. Core consumes the returned command without further interpolation.
-Preserve exact native harness data and its argument boundaries. Command validation occurs during
-launch selection before a restart destroys the current runtime. Env context is validated before
-boundary prompts when its facts are known; command generation needs no separate preflight interface.
+Preserve exact native harness data and its argument boundaries. Bind launch intent and planned
+context before preflight. Shell preflight checks rendering of the selected field before workload/env
+secret resolution, even when a pending target defers the required-command probe. Startup uses the
+same selection/rendering helper on the declaration, without caching its rendered value. The existing
+VM activation gate can resolve its own credentials before remote preflight.
+
+Declared `required_commands` use the existing target availability probe. Template renderability and
+declared-command availability are the checks; command success is established by execution. Native
+structured arguments render during launch selection before destructive replacement. Env context is
+validated before workload boundary prompts when its facts are known; no separate generic preflight
+interface is introduced.
 
 ## Behavioral vectors
 

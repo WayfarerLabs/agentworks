@@ -573,11 +573,14 @@ The surrounding wiring supplies the following behavior and debugging boundaries:
   node's composed `preflight` / `runup` on create; the existing-session launch path builds no runup
   context (its only readiness pass is the pre-kill preflight sweep), and on both paths only the op
   context carries secrets. An integration cannot depend on runup firing before `start`.
-- **Context binding and rendering:** before `start`, the manager supplies the invocation's explicit
-  context through `prepare_context`. Each integration renders its declared `${agw:NAME}` template
-  fields during launch selection, before artifact staging or runtime replacement. Shell renders its
-  selected command field; native integrations render structured extra arguments before quoting.
-  Returned command strings receive no further interpolation. See
+- **Context binding and rendering:** before preflight, the manager binds the invocation's planned
+  facts and launch intent through `prepare_context`. Shell preflight checks that its selected
+  `command` or `resume_command` renders, including when a pending target defers the required-command
+  probe. This precedes workload/env secret resolution; the VM activation gate may need its own
+  credentials before remote preflight. The checks cover rendering and declared-command availability;
+  execution determines command behavior. During launch selection, shell renders the selected field
+  again from its declaration and native integrations render structured extra arguments before
+  quoting. Returned commands receive no further interpolation. See
   [runtime context and interpolation](../../../../docs/arch/runtime-context.md).
 - **Display:** `session list` / `session describe` show the resolved integration name by
   re-resolving the template read-only (no instance is built, no gate runs);

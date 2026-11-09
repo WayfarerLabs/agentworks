@@ -6,9 +6,10 @@ Lifecycle: [delivery](migration-strategy.md).
 
 Delivery: one PR containing the full feature, full SDD, permanent documentation, and validation.
 [PR 867](https://github.com/WayfarerLabs/agentworks/pull/867) is a draft correction checkpoint after
-its first ready handoff. Completion is tracked against the accepted namespaced contract; transport
-acceptance and validation timing remain unresolved. Lock only after all feature work and final
-feedback are complete.
+its first ready handoff. Completion follows the accepted namespaced contract and the operator
+rulings recorded in the FRD. Transport observations are tracked separately in issue #873; shell
+rendering preflight is being completed before the next ready handoff. Lock only after all feature
+work and final feedback are complete.
 
 ## Design checkpoint
 
@@ -39,8 +40,10 @@ feedback are complete.
       integration's literal workload fields and intentionally expanded extra args.
 - [x] Cover VM/agent shell and exec, session create/start/restart, console extra panes, and setup
       composition, including new agents and contexts missing workspace/session values.
-- [ ] Reject invalid winning expressions before prompts and mutations whenever their context is
-      known, including before a restart destroys the current runtime.
+- [ ] Check winning env references before workload secret prompts and mutations. Preflight shell's
+      selected template rendering before workload/env secret resolution, including planned users and
+      workspaces. Keep required-command checks in the existing readiness path, deferring a pending
+      target's remote probe until it exists. Do not parse, dry-run, or predict command success.
 - [x] Update `docs/arch/runtime-context.md` with the accepted vocabulary, grammar, availability,
       phase, consumer boundaries, examples, and how another consumer should adopt the renderer.
       Update schema-owned field descriptions, CLI reference, applicable guide signposts, sample
@@ -108,36 +111,36 @@ field-owned command rendering, the retained resource guide, dollar-adjacency gui
 validation timing. Independent private reviews and required gates must pass before the resulting
 head is handed off.
 
-### Acceptance-blocking transport dependency
+### Transport disposition
 
-The inherited `_set_env_args` implementation in `cli/agentworks/ssh.py` quotes SSH configuration
-syntax but does not preserve arbitrary literal values on clients that expand SetEnv values. The
-reported Linux/macOS failures include escaped namespace text, opaque secrets containing that text,
-and ordinary `${HOME}`. Native Windows cases passed on the measured client; no universal transport
-pass follows from that result.
+The inherited SetEnv literal-delivery observations are tracked in
+[issue #873](https://github.com/WayfarerLabs/agentworks/issues/873), with the tested heads, paired
+Linux/macOS failures, bounded Windows passes, root-cause path, and verification cases for the
+SSH/transport rewrite owner. Ordinary Agentworks references render before SSH; intentional literal
+text can remain through plaintext escaping, opaque secrets, or ordinary shell-looking text.
 
-Read-only investigation compared official OpenSSH source and actual offline local 9.2 client probes.
-Inspected 9.x sources preserve SetEnv text; 10.0 adds expansion with no portable dollar escape. A
-transport fix needs a design covering old and new clients and the low-level run, transport run,
-interactive, and streaming paths. Child-environment forwarding must not allow remote declarations to
-alter local client execution; shell preludes would reopen ADR 0014. This exceeds a small incidental
-correction. The accepted literal-data and preview-parity requirements remain in force;
-operator/transport-owner disposition is pending, and the SDD remains open. Critical reading and
-call-site evidence are recorded in PR comment 6728073054.
+The operator directed filing the issue and making no special SSH/transport change in this feature.
+The transport concern is therefore disposed for this effort, without claiming that the rewrite or
+all transport delivery cases have been verified. No transport code changes are included.
 
-### Validation timing ruling pending
+### Shell preflight refinement
 
-The accepted FRD requires known winning references to fail before prompts and mutations. Env checks
-run at that boundary, but selected command fields render inside integration launch selection, after
-secret resolution and potentially workspace access realization. They still fail before destructive
-runtime replacement. The earlier completion checkbox for the broader timing requirement was
-premature and is corrected while unmerged, under the SDD's erroneous-checkbox carve-out.
+The operator accepted the existing command-check boundary, clarified that only rendering and
+`required_commands` presence are checked, and then requested earlier shell rendering preflight. The
+verbatim rulings are in the FRD. The broad timing checkbox had been premature and was corrected
+while unmerged; its definition now follows those rulings.
 
-The proposed requirement amendment would retain early env validation and require selected command
-validation before launch or destructive replacement, without a generic integration preflight hook.
-This is a request for operator disposition, not an amendment to the accepted FRD. The current FRD
-remains unchanged and this requirement remains incomplete until the operator rules or implementation
-meets its existing timing.
+Bind the planned invocation facts and launch intent before the existing preflight. Shell checks only
+its selected `command` or `resume_command`, including when the required-command probe defers for a
+pending target. Startup uses the same renderer without caching a rendered command. The regular
+preflight precedes workload/env secret resolution. The existing VM activation gate may need its own
+credentials before remote preflight; this refinement does not redesign activation.
+
+- [ ] Implement and verify early shell rendering preflight for create, start, and restart,
+      preserving unused-field selection, pending identities, required-command deferral, and existing
+      runtime on refusal.
+- [ ] Update permanent integration/lifecycle guidance to distinguish template rendering and required
+      command availability from executing a command to discover its result.
 
 ### Correction evidence
 
@@ -162,8 +165,9 @@ unavailable-context refusal, with zero transport attempts. Website validation pa
 103 Node tests and deterministic double builds at both site bases. File-quality checks accompany the
 final bookkeeping commit. None of this replaces current-head live acceptance.
 
-This correction checkpoint remains draft, `review-requested`, and `awaiting-direction`. The
-transport and timing rulings above remain open, the accepted FRD is unchanged, and the SDD is
-unlocked. The operator's remaining feedback allowance is dormant while those dispositions are
-pending; a new correction cycle must still wait for its integration report. No merge is authorized
-or claimed.
+The operator disposed the checkpoint questions through the authenticated session: transport is
+tracked outside this feature and shell rendering preflight is requested. This continues correction
+cycle 1 of the two additional authorized cycles; it is not a new feedback batch. The next ready
+handoff must contain the complete reviewed refinement. A subsequent feedback/fix cycle still waits
+for that head's integration report. The SDD remains unlocked pending final feedback and closeout. No
+merge is authorized or claimed.

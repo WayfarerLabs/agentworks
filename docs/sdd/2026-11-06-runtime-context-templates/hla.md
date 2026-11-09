@@ -43,12 +43,17 @@ A common plaintext-rendering path serves execution and offline inspection. It mu
 resolving secrets, so redacted inspection and context validation do not require secret values. Keep
 winning-scope provenance independent of rendering.
 
-Check winning env references before secret prompts and mutations when the invocation knows its
-identity. Each integration renders its declared command fields while selecting its launch command,
-before launch or destructive session replacement. Create may already have realized workspace access;
-a command failure then follows the normal rollback. Core consumes returned commands directly. Do not
-inspect integration-owned config generically or add a separate validation hook. Deriving context and
-validating text require no target connection.
+Check winning env references before workload secret prompts and mutations when the invocation knows
+its identity. Bind the planned context and explicit launch intent before the existing preflight.
+Shell preflight checks that the selected command field renders, including when the required-command
+probe defers for a pending target. The check precedes workload/env secret resolution; the existing
+VM activation gate may resolve its own credentials before remote preflight.
+
+The existing readiness path checks declared command availability. These checks do not predict
+command behavior; execution determines that result. Each integration renders its declared template
+fields while selecting its launch command, before launch or destructive replacement. Core consumes
+returned commands directly. No separate generic validation hook is needed. Deriving context and
+checking rendering require no target connection.
 
 ## Invocation coverage
 
@@ -63,8 +68,9 @@ validating text require no target connection.
 | Workspace setup              | VM admin                           | Workspace; no agent or session                  |
 | Offline `env show`           | Selected agent, otherwise VM admin | Selected/inferred workspace and session         |
 
-Native transports retain their documented env-delivery limitations. Interpolation does not add a
-transport capability. Setup and runtime must use the same managed identity semantics.
+Native transports retain their documented env-delivery limitations. The operator directed tracking
+the inherited SSH literal-value observations in issue #873 for the transport rewrite, with no SSH
+special case in this feature. Setup and runtime use the same managed identity semantics.
 
 ## Literal data and shell source
 
