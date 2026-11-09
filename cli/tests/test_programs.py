@@ -231,10 +231,27 @@ def _powershell_available() -> bool:
     return _shell_available("powershell")
 
 
+def _local_lima_ready() -> bool:
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+
+    return LimaPlatform.not_ready({"placement": {"mode": "local"}}).is_ready
+
+
+def _remote_lima_ready() -> bool:
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+
+    return LimaPlatform.not_ready({"placement": {"mode": "ssh", "host": "box"}}).is_ready
+
+
 @pytest.mark.parametrize(
     ("names", "installed"),
-    [(("op",), _onepassword_ready), (("pwsh", "powershell"), _powershell_available)],
-    ids=["onepassword-readiness", "doctor-shell"],
+    [
+        (("op",), _onepassword_ready),
+        (("pwsh", "powershell"), _powershell_available),
+        (("limactl",), _local_lima_ready),
+        (("ssh",), _remote_lima_ready),
+    ],
+    ids=["onepassword-readiness", "doctor-shell", "local-lima-readiness", "remote-lima-readiness"],
 )
 def test_a_decoy_in_the_current_directory_does_not_count_as_installed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, names: tuple[str, ...], installed: Callable[[], bool]

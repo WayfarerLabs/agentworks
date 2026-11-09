@@ -24,6 +24,7 @@ from agentworks.config import load_config
 from agentworks.errors import ConfigError, StateError, ValidationError
 from agentworks.schema import RefOwner
 from agentworks.vms.sites import resolve_site, select_site
+from tests.conftest import fake_installed_programs
 
 if TYPE_CHECKING:
     from agentworks.capabilities.vm_platform import VMPlatform
@@ -401,13 +402,13 @@ def test_wsl2_not_ready_additionally_needs_wsl_exe(
     Through :func:`_readiness`, so the empty blob this reads nothing out
     of is still one the wsl2 model accepts: taking no configuration at all
     is the assumption its ``not_ready`` is built on."""
-    monkeypatch.setattr("shutil.which", lambda name: None)
+    fake_installed_programs(monkeypatch, lambda name: None)
     verdict = _readiness(WSL2Platform, {})
     assert not verdict.is_ready
     assert verdict.reason is not None
     assert "wsl.exe" in verdict.reason
 
-    monkeypatch.setattr("shutil.which", lambda name: "/x/wsl")
+    fake_installed_programs(monkeypatch, lambda name: "/x/wsl")
     assert _readiness(WSL2Platform, {}).is_ready
 
 
@@ -431,7 +432,7 @@ def test_lima_not_ready_matches_the_placement_dependency(
     the comment on it says why."""
     assert LimaPlatform.unsupported_reason() is None
 
-    monkeypatch.setattr("shutil.which", lambda name: None)
+    fake_installed_programs(monkeypatch, lambda name: None)
     local = _readiness(LimaPlatform, {"placement": {"mode": "local"}})
     assert not local.is_ready
     assert local.reason is not None
@@ -448,7 +449,7 @@ def test_lima_not_ready_matches_the_placement_dependency(
     # exists for.
     assert LimaPlatform.not_ready({"placement": "junk"}).is_ready
 
-    monkeypatch.setattr("shutil.which", lambda name: f"/x/{name}")
+    fake_installed_programs(monkeypatch, lambda name: f"/x/{name}")
     assert _readiness(LimaPlatform, {"placement": {"mode": "local"}}).is_ready
     assert _readiness(LimaPlatform, {}).is_ready
     assert _readiness(LimaPlatform, {"placement": {"mode": "ssh", "host": "me@box"}}).is_ready

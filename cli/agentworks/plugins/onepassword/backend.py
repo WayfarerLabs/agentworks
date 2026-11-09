@@ -35,7 +35,7 @@ from agentworks.capabilities.secret_backend.client import (
     TtyInteractionAccess,
 )
 from agentworks.errors import ConfigError, StateError
-from agentworks.programs import resolve_program
+from agentworks.programs import is_installed, resolve_program
 from agentworks.schema import AgwModel, AgwRootModel, NonEmptyStr
 from agentworks.topics import TopicProse
 
@@ -272,9 +272,7 @@ class OnePasswordBackend(SecretBackend):
     def backend_readiness(cls) -> Readiness:
         from agentworks.resources.graph import Readiness
 
-        try:
-            resolve_program(_OP_BINARY)
-        except FileNotFoundError:
+        if not is_installed(_OP_BINARY):
             return Readiness.blocked("op CLI not installed")
         return Readiness.ready()
 

@@ -6,7 +6,7 @@ import contextlib
 import os
 import sqlite3
 import tempfile
-from collections.abc import Generator, Iterator
+from collections.abc import Callable, Generator, Iterator
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -1004,6 +1004,17 @@ def _isolated_host_key_store(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) ->
     store = tmp_path / "host-key-store"
     monkeypatch.setattr("agentworks.execution.trust.STORE_DIR", store)
     return store
+
+
+def fake_installed_programs(monkeypatch: pytest.MonkeyPatch, which: Callable[[str], str | None]) -> None:
+    """Decide which workstation programs count as installed: ``which`` answers as ``shutil.which`` would.
+
+    Both lookups get it: ``programs.is_installed``, which the presence checks
+    ask, and ``shutil.which``, which WSL2 still asks about ``wsl.exe``'s fixed
+    path.
+    """
+    monkeypatch.setattr("shutil.which", which)
+    monkeypatch.setattr("agentworks.programs.is_installed", lambda name: which(name) is not None)
 
 
 def provisioning_trust_for_tests(vm_name: str) -> TrustBinding:

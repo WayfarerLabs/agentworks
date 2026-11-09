@@ -1099,16 +1099,10 @@ def _shell_available(shell_name: str) -> bool:
     enumeration ever changes to include a static PowerShell path, this
     branch becomes load-bearing.
     """
-    from agentworks.programs import resolve_program
+    from agentworks.programs import is_installed
 
     candidates = {"powershell": ("pwsh", "powershell")}.get(shell_name, (shell_name,))
-    for candidate in candidates:
-        try:
-            resolve_program(candidate)
-        except FileNotFoundError:
-            continue
-        return True
-    return False
+    return any(is_installed(candidate) for candidate in candidates)
 
 
 def _get_completion_paths() -> list[tuple[str, list[Path]]]:

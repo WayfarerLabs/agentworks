@@ -20,7 +20,7 @@ import pytest
 
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
-from tests.conftest import ManifestDoc
+from tests.conftest import ManifestDoc, fake_installed_programs
 from tests.orchestrated_fixtures import PLUGINS_ENABLED, proxmox_site, write_operator_config
 
 if TYPE_CHECKING:
@@ -36,7 +36,7 @@ def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     deterministic platform preflights (lima checks for limactl locally;
     pretend the tool exists regardless of the host)."""
     monkeypatch.setenv("AW_SECRET_PROXMOX_TOKEN", "pve-token")
-    monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+    fake_installed_programs(monkeypatch, lambda name: f"/usr/bin/{name}")
 
     def _make(extra: str = "", *, manifests: Sequence[ManifestDoc | str] = ()):
         return write_operator_config(tmp_path, extra, manifests=list(manifests))
