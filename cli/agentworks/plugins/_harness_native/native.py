@@ -179,10 +179,7 @@ class _MappingPlan:
                 conflict.vm_name,
                 "settings publication",
                 destination,
-                hint=(
-                    "Another writer changed the file during setup; rerunning setup reads it again and "
-                    "applies the settings to its current content."
-                ),
+                hint="Another writer changed the file between setup's read and its write.",
             ) from None
 
 

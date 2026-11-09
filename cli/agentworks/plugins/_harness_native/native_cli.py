@@ -45,14 +45,14 @@ _EXPLICIT_PATH = "AGW_NATIVE_EXPLICIT_PATH"
 # PATH from the setup environment wins. The tool is the one argument, the PATH
 # an environment value, so nothing reaches the program on stdin, which login
 # startup could read first, and the log records the tool but no value.
-_LOGIN_RESOLVE_PROGRAM = r"""
+_LOGIN_RESOLVE_PROGRAM = rf"""
 import json, os, shutil, sys
-path = os.environ.get('AGW_NATIVE_EXPLICIT_PATH', os.environ.get('PATH', ''))
+path = os.environ.get({_EXPLICIT_PATH!r}, os.environ.get('PATH', ''))
 executable = shutil.which(sys.argv[1], path=path)
 if executable is None:
     sys.exit(1)
-observed = {'executable': os.path.abspath(executable), 'path': path}
-sys.stdout.write('\nAGW_NATIVE_EXECUTABLE=' + json.dumps(observed) + '\n')
+observed = {{'executable': os.path.abspath(executable), 'path': path}}
+sys.stdout.write('\n' + {_RESOLVED_PREFIX!r} + json.dumps(observed) + '\n')
 """
 
 _CAPTURE = CaptureOutput()
