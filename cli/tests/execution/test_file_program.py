@@ -431,6 +431,24 @@ def test_a_failed_write_leaves_no_temporary_file_but_keeps_created_parents_and_o
         assert destination.read_bytes() == b"before"
 
 
+def test_a_failure_after_the_rename_still_reports_the_write_done(guest: Guest) -> None:
+    destination = guest.tree / "file"
+    patch = (
+        "import os, stat, errno\n"
+        "real = os.fsync\n"
+        "def fsync(fd):\n"
+        "    if stat.S_ISDIR(os.fstat(fd).st_mode):\n"
+        "        raise OSError(errno.EIO, 'directory fsync failed')\n"
+        "    real(fd)\n"
+        "os.fsync = fsync"
+    )
+
+    result = guest.write_if(destination, b"content", patch=patch)
+
+    assert result.returncode == 0, result.stderr
+    assert destination.read_bytes() == b"content"
+
+
 def test_a_termination_during_a_write_exits_nonzero_and_leaves_no_temporary_file(guest: Guest) -> None:
     destination = guest.tree / "file"
     marker = guest.root / "writing"

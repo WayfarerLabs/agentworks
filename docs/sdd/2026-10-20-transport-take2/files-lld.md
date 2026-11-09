@@ -304,7 +304,8 @@ Under the lock, `write_if`:
 5. `fsync`s the temporary file, after the attribute copy so the copy is durable too.
 6. Renames it over the destination, then `fsync`s the directory through an
    `O_RDONLY | O_DIRECTORY | O_NOFOLLOW` open of `.` relative to the parent (an `O_PATH` descriptor
-   cannot be `fsync`ed; `native_files.py:174-179`).
+   cannot be `fsync`ed; `native_files.py:174-179`). That `fsync` is best effort: the write is in
+   place once renamed, so a failure there does not report it failed.
 
 - **Unelevated**, `group` must be one the identity belongs to; the kernel refuses anything else
   (status 5). Workspace settings and artifacts use the workspace group this way

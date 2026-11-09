@@ -263,11 +263,13 @@ def _write_if(params: Params) -> int:
         finally:
             os.close(output)
         os.rename(temporary, walk.name, src_dir_fd=parent, dst_dir_fd=parent)
-        directory = os.open(".", _OPEN_DIRECTORY, dir_fd=parent)
-        try:
-            os.fsync(directory)
-        finally:
-            os.close(directory)
+        # The write is done once renamed; making the rename durable is best effort, not its outcome.
+        with contextlib.suppress(OSError):
+            directory = os.open(".", _OPEN_DIRECTORY, dir_fd=parent)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
         return 0
     finally:
         with contextlib.suppress(FileNotFoundError):
