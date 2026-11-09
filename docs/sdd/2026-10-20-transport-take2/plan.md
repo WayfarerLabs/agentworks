@@ -489,6 +489,12 @@ reads a legacy transport.
 
 ## Slice 6: Initialization (PR C)
 
+- [ ] Write `init-lld.md`. It covers:
+  - Phase B's move onto VMAccess, request by request, with each bound;
+  - `write`, `update` and `upload_tree` on the file program and its lock;
+  - each hand-written write it replaces, with mode, owner and secret handling;
+  - the git-credential and agent-grant paths;
+  - the incident audit of the entry points this slice moves.
 - [ ] Migrate:
   - `vms/initializer/`, `vms/hardening.py` and `vms/tailscale_dns.py`;
   - `sources.py` (with `upload_tree`) and `git_config.py`;
