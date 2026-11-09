@@ -306,13 +306,33 @@ def _copy_metadata(source: int, target: int) -> None:
     metadata = os.fstat(source)
     os.fchown(target, metadata.st_uid, metadata.st_gid)
     os.fchmod(target, stat.S_IMODE(metadata.st_mode))
-    wanted = {key: os.getxattr(source, key) for key in os.listxattr(source)}
-    present = {key: os.getxattr(target, key) for key in os.listxattr(target)}
+    wanted, present = _attributes(source), _attributes(target)
     for key in present.keys() - wanted.keys():
         os.removexattr(target, key)
     for key, value in wanted.items():
         if present.get(key) != value:
             os.setxattr(target, key, value)
+
+
+def _attributes(descriptor: int) -> dict[str, bytes]:
+    """The extended attributes of ``descriptor``: none on a filesystem that keeps none.
+
+    One removed between listing and reading (``ENODATA``) is left out.
+    """
+    try:
+        keys = os.listxattr(descriptor)
+    except OSError as error:
+        if error.errno == errno.ENOTSUP:
+            return {}
+        raise
+    attributes: dict[str, bytes] = {}
+    for key in keys:
+        try:
+            attributes[key] = os.getxattr(descriptor, key)
+        except OSError as error:
+            if error.errno != errno.ENODATA:
+                raise
+    return attributes
 
 
 def _remove_if(params: Params) -> int:
@@ -342,7 +362,8 @@ def _prune_empty_parents(params: Params) -> int:
             except FileNotFoundError:
                 continue
             except OSError as error:
-                if error.errno in (errno.ENOTEMPTY, errno.EEXIST):
+                # Not empty, or busy as a mount point: pruning stops here.
+                if error.errno in (errno.ENOTEMPTY, errno.EEXIST, errno.EBUSY):
                     return 0
                 if index == root_depth - 1 and error.errno in (errno.EACCES, errno.EPERM, errno.EROFS):
                     walked = chain[index + 1][0] if index + 1 < len(chain) else walk.parent

@@ -392,6 +392,48 @@ def test_preserve_keeps_the_existing_mode_and_extended_attributes(guest: Guest) 
     assert os.getxattr(destination, "user.agentworks-test") == b"kept"
 
 
+def test_preserve_tolerates_an_attribute_that_vanishes_while_copied(guest: Guest) -> None:
+    destination = guest.tree / "file"
+    destination.write_bytes(b"before")
+    try:
+        os.setxattr(destination, "user.agentworks-test", b"kept")
+        os.setxattr(destination, "user.agentworks-vanishing", b"removed while read")
+    except OSError:
+        pytest.skip("this filesystem keeps no user extended attributes")
+    patch = (
+        "import os, errno\n"
+        "real = os.getxattr\n"
+        "def getxattr(target, key, *a, **k):\n"
+        "    if key == 'user.agentworks-vanishing':\n"
+        "        raise OSError(errno.ENODATA, 'no data')\n"
+        "    return real(target, key, *a, **k)\n"
+        "os.getxattr = getxattr"
+    )
+
+    result = guest.write_if(destination, b"after", expected=digest(b"before"), preserve=True, patch=patch)
+
+    assert result.returncode == 0, result.stderr
+    assert os.getxattr(destination, "user.agentworks-test") == b"kept"
+    assert "user.agentworks-vanishing" not in os.listxattr(destination)
+
+
+def test_preserve_on_a_filesystem_without_extended_attributes_keeps_the_mode(guest: Guest) -> None:
+    destination = guest.tree / "file"
+    destination.write_bytes(b"before")
+    destination.chmod(0o640)
+    patch = (
+        "import os, errno\n"
+        "def listxattr(*a, **k): raise OSError(errno.ENOTSUP, 'unsupported')\n"
+        "os.listxattr = listxattr"
+    )
+
+    result = guest.write_if(destination, b"after", expected=digest(b"before"), mode=0o600, preserve=True, patch=patch)
+
+    assert result.returncode == 0, result.stderr
+    assert destination.read_bytes() == b"after"
+    assert stat.S_IMODE(destination.stat().st_mode) == 0o640
+
+
 def test_preserve_keeps_the_existing_owner_and_group(guest: Guest, as_root: None) -> None:
     destination = guest.tree / "file"
     destination.write_bytes(b"before")
@@ -441,7 +483,7 @@ def test_a_failed_write_leaves_no_temporary_file_but_keeps_its_parent_and_others
         parent.mkdir()
         destination.write_bytes(b"before")
         expected, preserve = digest(b"before"), True
-        patch = "import os\ndef listxattr(*a, **k): raise OSError(95, 'unsupported')\nos.listxattr = listxattr"
+        patch = "import os\ndef listxattr(*a, **k): raise OSError(5, 'input/output error')\nos.listxattr = listxattr"
 
     result = guest.write_if(destination, b"after", expected=expected, preserve=preserve, patch=patch)
 
@@ -549,6 +591,27 @@ def test_prune_removes_empty_parents_up_to_the_root_and_stops_at_a_non_empty_one
 
     assert result.returncode == 0, result.stderr
     assert sorted(os.listdir(root)) == ["keep"]
+
+
+def test_prune_stops_at_a_busy_directory(guest: Guest) -> None:
+    root = guest.tree / "package"
+    (root / "mount" / "inner").mkdir(parents=True)
+    patch = (
+        "import os, errno\n"
+        "real = os.rmdir\n"
+        "def rmdir(name, dir_fd=None):\n"
+        "    if name == 'mount':\n"
+        "        raise OSError(errno.EBUSY, 'busy')\n"
+        "    return real(name, dir_fd=dir_fd)\n"
+        "os.rmdir = rmdir"
+    )
+
+    result = guest.run(
+        "prune_empty_parents", {"path": str(root / "mount" / "inner" / "file"), "root": str(root)}, patch=patch
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (root / "mount").is_dir() and not (root / "mount" / "inner").exists()
 
 
 def test_prune_keeps_a_verified_empty_root_whose_parent_denies_removal(guest: Guest) -> None:

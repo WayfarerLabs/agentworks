@@ -303,8 +303,9 @@ Under the lock, `write_if`:
    mode, then removes every extended attribute the temporary file has that the destination lacks (an
    ACL inherited from a default directory ACL) and sets every one the destination has, ACLs
    included. This is `native_files.py:155-172`'s order, so an ACL's mask survives the `fchmod`. A
-   failure exits before the rename, leaving the original untouched
-   (`cli/tests/artifacts/test_generated_sections.py:226-247`).
+   filesystem that keeps no extended attributes (`ENOTSUP`) has none to copy, and one removed while
+   the copy reads it (`ENODATA`) is left out. A failure exits before the rename, leaving the
+   original untouched (`cli/tests/artifacts/test_generated_sections.py:226-247`).
 5. `fsync`s the temporary file, after the attribute copy so the copy is durable too.
 6. Renames it over the destination, then `fsync`s the directory through an
    `O_RDONLY | O_DIRECTORY | O_NOFOLLOW` open of `.` relative to the parent (an `O_PATH` descriptor
@@ -385,11 +386,11 @@ def prune_empty_parents(path: str, *, root: str, elevated: bool = False) -> Prun
   changes an existing directory.
 - **`prune_empty_parents`** removes the empty parents of `path` from the deepest up to and including
   `root`, which must be a proper ancestor (refused before dispatch, `native_files.py:411-412`), and
-  stops at the first non-empty one (`native_files.py:41-81`). When removing `root` itself is denied,
-  the program opens it again without following links, checks it is the directory it walked by
-  `(st_dev, st_ino)` and that it is empty, and only then reports status 3, `Pruned.ROOT_RETAINED`;
-  otherwise the denial is an error (`cd735e8b6`, `native_files.py:64-76`). The caller warns, as
-  `native_files.py:415-418` does.
+  stops at the first one that is not empty, or is busy as a mount point (`native_files.py:41-81`).
+  When removing `root` itself is denied, the program opens it again without following links, checks
+  it is the directory it walked by `(st_dev, st_ino)` and that it is empty, and only then reports
+  status 3, `Pruned.ROOT_RETAINED`; otherwise the denial is an error (`cd735e8b6`,
+  `native_files.py:64-76`). The caller warns, as `native_files.py:415-418` does.
 
 **Errors**, in `execution/errors.py`. Each names the VM, the operation and the path, never content
 or a stream (D13).

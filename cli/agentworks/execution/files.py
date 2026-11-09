@@ -181,7 +181,7 @@ class Files:
         """Remove the empty parents of ``path``, deepest first, up to and including ``root``.
 
         ``root`` must be a proper ancestor of ``path``. Pruning stops at the
-        first parent that is not empty.
+        first parent that is not empty or is busy (a mount point).
         """
         path, root = guest_path(path), guest_path(root)
         if not path.startswith(root + "/"):
