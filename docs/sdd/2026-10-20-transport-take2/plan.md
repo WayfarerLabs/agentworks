@@ -406,10 +406,30 @@ Line numbers in this slice are at `60d347220`, the platform LLD's baseline.
   - a closed terminal during `vm create` on Remote Lima and Proxmox as well as the clouds;
   - `vm recover` of a python3 that was removed but not purged;
   - cloud-init's recoverable status 2 on AWS and Azure;
-  - that `wsl --list` on a workstation with no distro prints `WSL_E_DEFAULT_DISTRO_NOT_FOUND`, the
-    token WSL2's delete and rollback read as an empty listing;
+  - that WSL2's delete and rollback read an empty `wsl --list` as the distro gone on a release that
+    prints `WSL_E_DEFAULT_DISTRO_NOT_FOUND`, if one is at hand: WSL 2.7.14.0 exits 0 with no output
+    instead (measured), which reads as an empty listing;
   - recovery of a lost store record on one cloud and on Remote Lima;
   - the V cells of vectors W1 and W3 to W9.
+- [ ] Live evidence for round 3's output and signal fixes:
+  - a create, and its rollback, whose output pipe loses its reader, on each platform, on Linux and
+    on Windows (where a closed pipe reports `EINVAL`): the rollback finishes and the exit status is
+    the command's own;
+  - on the clouds, an interrupt as Phase A writes `COMPLETE`, closing the bootstrap allow before it
+    propagates, and a termination during a Ctrl-C rollback, which does not cut it short;
+  - on WSL2, Ctrl-C during the base package install; also measure the untested candidate of starting
+    `wsl.exe` without a console (`CREATE_NO_WINDOW`).
+- [ ] Live evidence for round 3's Proxmox identity checks, with the setup script's pool token: a
+      gone VM deleted, a reissued VMID left untouched by delete and refused by the other commands, a
+      create that lost the `next_id` race rolled back without touching the winner, and a VMID held
+      by a guest the token cannot audit refused.
+- [ ] Live evidence for `vm delete` under the operator's [2026-11-08 ruling](./frd.md#2026-11-08): a
+      VM whose site cannot be bound refused, then removed with `--force` and the backend's
+      identifiers warned; the logout before the provider delete; and a delete that fails after it,
+      whose hint leads with finishing the delete and names `vm rekey` only as the way back onto
+      Tailscale.
+- [ ] Live evidence on Windows: current-directory decoys for `op`, `git`, `code`, `taskkill` and the
+      legacy `ssh` and `scp` are never started.
 
 Definition of done: core reaches a native channel only through `run_as_root` or `native_shell`, and
 no platform's private access imports a legacy module.
