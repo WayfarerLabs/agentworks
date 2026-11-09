@@ -464,7 +464,7 @@ no platform's private access imports a legacy module.
 - [ ] Tests:
   - `write_if` and `remove_if` detect a concurrent writer;
   - a truncated stdin publishes nothing;
-  - JSON null survives an update;
+  - JSON null survives a settings merge;
   - a malformed destination is refused;
   - a symlinked destination is refused;
   - cleanup touches only what the operation created;
@@ -490,7 +490,8 @@ reads a legacy transport.
   - `git_credentials/`;
   - the agent initializer and grants.
 - [ ] Replace hand-written `printf | sudo tee`, `tee -a` and `write_file` plus `chmod` sequences
-      with `files.write` and `files.update`.
+      with `files.write` and `files.update`, adding `Files.update` here with its first callers
+      (slice 5's native settings call `read` and `write_if` themselves).
 - [ ] Tests: `write` applies mode and owner before the rename, and a tree upload replacing the
       directory above a `write_if` target is detected.
 - [ ] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked

@@ -398,10 +398,11 @@ use it. There is no scp.
   races.
 - **Symlinks.** A destination that is a symlink is refused, as `native_files.py` refuses today,
   rather than followed as the hand-written `tee` paths do.
-- **The merge stays on the workstation.** `update` runs
-  `capabilities/harness_integration/settings.py` locally. That module already keeps JSON null as a
-  value and rejects malformed input, so R5's merge rules hold by construction, and TOML merges get
-  the same conditional write.
+- **The merge stays on the workstation.** Native setup runs
+  `capabilities/harness_integration/settings.py` locally on what it read and publishes with
+  `write_if`, as `update` does once slice 6 adds it. That module already keeps JSON null as a value
+  and rejects malformed input, so R5's merge rules hold by construction, and TOML merges get the
+  same conditional write.
 - **Opaque archives.** Workspace copy moves an opaque tar stream with `run`, `ToFile` and
   `FromFile`, and never extracts on the workstation, so modes, owners and symlinks survive a Windows
   workstation.
