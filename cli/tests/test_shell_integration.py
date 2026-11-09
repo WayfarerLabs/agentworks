@@ -683,3 +683,24 @@ def test_shell_mixed_replacements_do_not_rescan_either_syntax(warnings: list[str
     assert isinstance(result, HarnessStart)
     assert result.command == "${{workspace_name}} ${agw:session_name}"
     assert len(warnings) == 1
+
+
+def test_shell_shares_the_legacy_warning_with_other_consumers(warnings: list[str]) -> None:
+    from agentworks.interpolation_compat import warn_legacy_placeholders
+
+    warn_legacy_placeholders()
+    integration = _harness_integration({"command": "{{session_name}}"})
+    integration.prepare_context({"session_name": "work"}, intent=HarnessLaunchIntent.CREATE)
+    result = integration.start(RunContext(), intent=HarnessLaunchIntent.CREATE)
+    assert isinstance(result, HarnessStart)
+    assert result.command == "work"
+    assert len(warnings) == 1
+
+
+def test_shell_does_not_warn_for_legacy_text_inserted_as_data(warnings: list[str]) -> None:
+    integration = _harness_integration({"command": "${agw:session_name}"})
+    integration.prepare_context({"session_name": "{{workspace_name}}"}, intent=HarnessLaunchIntent.CREATE)
+    result = integration.start(RunContext(), intent=HarnessLaunchIntent.CREATE)
+    assert isinstance(result, HarnessStart)
+    assert result.command == "{{workspace_name}}"
+    assert warnings == []

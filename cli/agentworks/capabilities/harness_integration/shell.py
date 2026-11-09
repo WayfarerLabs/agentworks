@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING, ClassVar
 
 from pydantic import Field
 
-from agentworks import output
 from agentworks.artifacts.application import ArtifactApplication
 from agentworks.artifacts.native.shell import shell_artifacts
 from agentworks.capabilities.base import ScopeLevel
@@ -19,6 +18,11 @@ from agentworks.capabilities.harness_integration.base import (
     require_commands,
 )
 from agentworks.interpolation import render_template
+from agentworks.interpolation_compat import (
+    LEGACY_PLACEHOLDERS,
+    uses_legacy_placeholders,
+    warn_legacy_placeholders,
+)
 from agentworks.schema import AgwModel
 from agentworks.topics import TopicProse
 
@@ -33,15 +37,6 @@ if TYPE_CHECKING:
         WorkspaceSetupInvocation,
     )
     from agentworks.transports import Transport
-
-
-LEGACY_SHELL_PLACEHOLDER_REMOVAL = "0.22.0"
-LEGACY_SHELL_PLACEHOLDERS = {"{{session_name}}": "session_name", "{{workspace_name}}": "workspace_name"}
-
-
-def uses_legacy_shell_placeholders(text: str) -> bool:
-    """Whether authored Shell source uses one of its two temporary aliases."""
-    return any(token in text for token in LEGACY_SHELL_PLACEHOLDERS)
 
 
 class ShellConfig(AgwModel):
@@ -68,12 +63,12 @@ class ShellConfig(AgwModel):
     login shell. Supports ${agw:NAME} context substitution; ordinary shell
     expressions and Go templates retain their own syntax. The legacy
     {{session_name}} and {{workspace_name}} placeholders remain accepted
-    with a deprecation warning until removal in 0.22.0."""
+    with a deprecation warning until removal in 2.0.0."""
 
     resume_command: str = ""
     """The command a resumed session's pane runs. Empty (the default)
     reruns ``command``. Supports ${agw:NAME} context substitution. Legacy
-    {{session_name}} and {{workspace_name}} are deprecated for removal in 0.22.0."""
+    {{session_name}} and {{workspace_name}} are deprecated for removal in 2.0.0."""
 
     required_commands: list[str] = Field(default_factory=list, examples=[["htop"]])
     """Commands that must exist on the session's target before it starts.
@@ -165,15 +160,10 @@ class ShellIntegration(HarnessIntegration):
             command,
             self._session_binding.context_values,
             field=f"session={self._session_name}.{field}",
-            legacy_placeholders=LEGACY_SHELL_PLACEHOLDERS,
+            legacy_placeholders=LEGACY_PLACEHOLDERS,
         )
-        if uses_legacy_shell_placeholders(command):
-            output.deprecation(
-                "Shell command placeholders {{session_name}} and {{workspace_name}} are deprecated; "
-                "use ${agw:session_name} and ${agw:workspace_name}. "
-                f"Legacy placeholders will be removed in {LEGACY_SHELL_PLACEHOLDER_REMOVAL}.",
-                key="shell-template-placeholders",
-            )
+        if uses_legacy_placeholders(command):
+            warn_legacy_placeholders()
         return rendered
 
     def start(
