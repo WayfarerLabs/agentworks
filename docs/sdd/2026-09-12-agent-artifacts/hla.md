@@ -473,6 +473,12 @@ relative assets and executable intent. Session name qualification changes native
 adapters do not rewrite arbitrary body references or promise transparent references between renamed
 skills.
 
+Generated guidance skills keep canonical rule/hint text in a literal supporting file and use a fixed
+navigation entrypoint. Its content revision changes with that supporting text. This avoids giving
+guidance the native command/substitution behavior of an authored skill body; ordinary authored
+skills keep that native behavior. Supporting-file access remains voluntary and subject to the
+harness's tools and permissions.
+
 Codex no longer writes AGENTS instruction sections. Claude VM guidance uses a suitable machine skill
 location where native discovery supports it; otherwise it defers to user handling. Codex machine
 skill placement can likewise handle generated guidance when supported; unsupported machine types
@@ -510,6 +516,13 @@ sharing it: an unrelated untracked file at the same relative path is also ignore
 ownership does not provide worktree-specific Git behavior. Grok skips ignored rule files, so use a
 verified compatible skill representation or report unsupported discovery instead of claiming
 success.
+
+Workspace deletion retires known unchanged exclusion associations before removing their directory
+and applied state, because shared Git metadata can survive that directory. Incomplete known cleanup
+retains the owner and evidence for retry. Unreadable historical native setup evidence keeps the
+existing best-effort deletion fallback with a warning. Whole-VM deletion gains no guest-cleanup
+prerequisite. Git-relative lookup avoids physical/lexical path comparisons; only Git's current
+independently resolved metadata path can authorize writes, including after a Git-directory move.
 
 Registering an agent persona makes a definition available; choosing it as the primary persona is a
 separate native launch behavior. Claude supports that selection. Codex's existing primary `agent`

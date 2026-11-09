@@ -1,5 +1,40 @@
 # Acceptance reconciliation
 
+## Current disposition, 2026-11-09
+
+The
+[final PR 871 report](https://github.com/WayfarerLabs/agentworks/pull/871#issuecomment-6752844405)
+tested `1ecffc5ce84dabe4418bfeebaffe8578c9373ef7` and recommends fixes before merge. All 12 required
+gates passed there, including 11,345 non-integration tests and 11 skips; the tester checked 471
+installed candidate files. Actual Windows Server 2025 PowerShell 5.1 and 7.6.9 drove remote Lima on
+msm4. This establishes neither Windows 11 nor WSL2 coverage. Earlier evidence below retains its own
+source and mode attribution.
+
+| Obligation | Current evidence and remaining work                                                                                                                                                                                                                                                                                                                    |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| R1-R4/R9   | The new campaign corroborates unchanged capture, refresh, provenance, independent consumers and read-only explanation. The existing local boundary proofs remain attributed below.                                                                                                                                                                     |
+| R5/R6      | Native catalogs/carriers were observed, but generated Claude rule skills interpreted native shell-preprocessing syntax instead of preserving literal guidance. The fixed-entrypoint/supporting-file correction needs actual implementation and retest; hints use the same generated renderer.                                                          |
+| R7         | Current native argv, ownership, three concurrent Shell sessions, user isolation, supported deletion/name reuse, strict no-history refusal, fallback and force-new run retirement were measured. Qualification of the new public-alias input guard and literal carrier still needs corrected-head validation.                                           |
+| R8         | Drift preservation and recovery, removal, disabling, native-home migration and session retirement were measured. Shared Git exclusions survived workspace deletion while their state was deleted, contradicting the owning-resource cleanup promise. Known associations must retire before destructive workspace cleanup or retain retryable evidence. |
+| R10        | A full independent report now exists, but known material defects and the rebase onto main `438c4546` require correction and fresh gates/review. Permanent teaching must match that implementation before locks.                                                                                                                                        |
+
+The separate
+[literal-carrier experiment](https://github.com/WayfarerLabs/agentworks/pull/871#issuecomment-6734297569)
+at `1ecffc5c` used fixture-only navigation wrappers and real Claude 2.1.319 Read results. Rule and
+hint text retained inline command syntax and native variable placeholders literally; an unchanged
+authored skill retained permitted native preprocessing. It used four native invocations and five
+synthetic loopback requests with no real inference. The fenced command form was not tested. This
+supports the correction's design, not acceptance of unimplemented or later product bytes.
+
+The live report's OAuth print health succeeded. Genuine interactive API health/history/resume did
+not reach a health prompt because of native onboarding and remains unvalidated. No product
+authentication defect or model-cooperation proof follows. R10 explicitly avoids model calls; this
+cell does not create an additional acceptance requirement. The report preserves original failed
+observers, later reconciliation and independent cleanup rather than relabeling failures as passes.
+Both locks remain absent while the material correction and its actual acceptance are pending.
+
+## Retained reconciliation, 2026-11-08
+
 Date: 2026-11-08. Earlier executable acceptance used `eddf7501a5bacde0222471e09d5ea5060a6d2972`,
 merged through PR [862](https://github.com/WayfarerLabs/agentworks/pull/862). This record
 distinguishes that proven behavior from the approved native-file correction awaiting independent

@@ -132,10 +132,19 @@ output. Hints aggregate per original owner; equal keys from different original s
 distinct native identities. Generated helper names are bounded and use the same collision checks as
 imported skills.
 
+Generated guidance skills have two ordinary owned package members: a fixed navigation `SKILL.md` and
+sibling `guidance.md` containing the literal rule or owner hints aggregate. Keep freeform guidance
+and source descriptions out of the native preprocessing entrypoint. Include a deterministic content
+digest in its body so changed guidance changes the rendered entrypoint too. Session applicability
+stays in the wrapper; canonical types, captures and origin identities do not change. Do not escape
+selected syntax, run a shell loader or grant tools. Authored skills retain their native body
+processing and complete supporting files.
+
 Retire old recorded instruction sections by removing only Agentworks content and paired markers,
 preserving surrounding bytes, ownership, permissions and extended attributes. Malformed markers warn
 and retain cleanup evidence. Do not infer ownership of an entire shared file merely because it
-becomes empty. Ordinary skill/package replacement still requires matching recorded bytes.
+becomes empty. Ordinary skill/package replacement still requires matching recorded bytes. The
+complete correctly delimited interior is managed, including any later operator edits there.
 
 Skill support files and executable intent are preserved. The Claude private plugin contains only
 selected skill and agent definitions plus its manifest, with no hook or MCP configuration. Its
@@ -350,11 +359,22 @@ and skill bodies are file content and do not consume that argv budget.
 ## Git exclusion scope
 
 Exclusion claims own exact marker/pattern associations, not the repository's other metadata or
-worktree contents. Resolve repository-relative paths from Git's root-aware output, including nested
-workspace directories. Git can share info/exclude across linked working trees; the same untracked
-relative path in another worktree is then ignored too. This native repository-level effect is
-explicitly disclosed, not presented as per-worktree isolation. Do not introduce another Git settings
-or reference-count engine to hide that limitation.
+worktree contents. Resolve repository-relative patterns from Git's prefix and literal
+workspace-relative file names, including nested workspace directories. Do not compare Git's physical
+root spelling with a lexical configured path. Only the metadata destination independently resolved
+by current Git authorizes I/O. After a Git-directory move, matching owned pairs there can converge
+without following old persisted destinations. Invalid associations warn and release; modified pairs
+retain their evidence. Existing native file path guards still apply.
+
+Before destructive workspace directory/group/record removal, reconcile known artifact exclusion
+claims with no desired files and checkpoint the remaining ordinary native setup state. Failure or
+modified pairs retain the workspace and cleanup evidence for retry. Unreadable historical setup
+state retains the existing warning/best-effort parent-deletion fallback; non-exclusion claims do not
+create another teardown engine. Missing-VM cleanup and whole-VM deletion retain their existing
+behavior. Git can share info/exclude across linked working trees; the same untracked relative path
+in another worktree is then ignored too. This native repository-level effect is explicitly
+disclosed, not presented as per-worktree isolation. Do not introduce another Git settings or
+reference-count engine to hide that limitation.
 
 ## Evidence and acceptance
 

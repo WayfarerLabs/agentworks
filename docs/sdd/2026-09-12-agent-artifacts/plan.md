@@ -1,5 +1,38 @@
 # Agent artifacts: implementation plan
 
+## Native delivery feedback, round 1 of 3, 2026-11-09
+
+The
+[final independent report](https://github.com/WayfarerLabs/agentworks/pull/871#issuecomment-6752844405)
+at `1ecffc5c` satisfies the operator's report gate. The
+[critical reading](https://github.com/WayfarerLabs/agentworks/pull/871#issuecomment-6753135303)
+freezes this round's complete review/test batch. PR 871 returned to draft before changes. The
+initial six-hour observation window elapsed without a final report; this round starts only after its
+actual arrival, not on an interim finding. This is the first of three authorized rounds on this PR,
+independent of earlier merged PR budgets.
+
+- [x] Assess the complete report and Muntz batch; preserve the measured native/lifecycle evidence,
+      authentication limits and cleanup attribution. Rebase onto main `438c4546`, retaining its
+      runtime-context quoting contract.
+- [ ] Keep generated rule/hint data literal through fixed skill navigation and a supporting file,
+      with content revision in the entrypoint. Preserve authored skill semantics and ordinary
+      package ownership; verify actual native consumption without claiming model obedience.
+- [ ] Correct Git-relative lookup and current-metadata-only recovery. Retire known shared exclusions
+      before destructive workspace deletion; retain incomplete known evidence for retry without
+      changing VM deletion or adding a new ownership mechanism.
+- [ ] Complete setup collision coverage, Claude selection simplification, filesystem-renderer
+      naming, public identity-alias validation and legacy-section teaching.
+- [ ] Run the required gates and independent project, Muntz and correctness lanes on the combined
+      correction; publish an exact green ready handoff with scoped evidence and limitations.
+- [ ] Wait for the next actual integration report, up to six hours, before another authorized round.
+      Finish both acceptance audits and locks only after retained requirements are proved.
+
+The current report establishes native discovery, file ownership and multi-session lifecycle at its
+tested head, and identifies two material failures: shared exclusion retirement on workspace deletion
+and Rule-to-Skill preprocessing. Its interactive API history/resume cell did not reach a health
+prompt because of native onboarding; it is unvalidated, not an established authentication defect.
+R10 does not require model calls. Workspace modes remain a separate owned additional PR.
+
 ## Delivery reassessment, 2026-11-08
 
 The approved design is promoted into the FRD, HLA and native LLD. The private exploratory response
@@ -42,7 +75,7 @@ prerequisite for accepting this multi-session correction.
       Verify both concurrent-session applicability metadata and safe restart, failed replacement,
       removal, deletion and name reuse. Run private project/Muntz/correctness reviews and required
       gates.
-- [ ] Publish one implementation PR for the current artifact correction, with both governing SDD
+- [x] Publish one implementation PR for the current artifact correction, with both governing SDD
       labels and an explicit independent integration-testing handoff. Wait for its actual report, up
       to six hours per iteration, before starting another of the three authorized fix rounds.
 - [ ] Complete both acceptance records and locks after the retained current requirements have real

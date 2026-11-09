@@ -332,6 +332,13 @@ Native invocation names may acquire a session qualifier or plugin namespace; ins
 recorded native identities and destinations. Literal invocation names inside imported skill bodies
 are not rewritten.
 
+Generated guidance skills contain a fixed `SKILL.md` entrypoint that directs the reader to sibling
+`guidance.md`. That supporting file holds the literal rule body or owner hints aggregate. The
+entrypoint includes its content revision, so changing the guidance also changes the entrypoint. Rule
+and hint text therefore stays out of native skill-body command and variable preprocessing. Authored
+skills retain their native semantics; using a skill can run native preprocessing permitted by the
+harness. Reading a supporting file still requires tool access and agent cooperation.
+
 Codex guidance uses generated skills under its ordinary skill roots; it does not edit AGENTS.md or
 AGENTS.override.md. Claude user/project guidance uses separate native rule files. Grok workspace
 guidance uses skills because Grok skips ignored rule files; user guidance uses separate native
@@ -347,10 +354,11 @@ scope.
 
 Previously recorded generated instruction sections are retired through their
 `<!-- BEGIN AGENTWORKS GENERATED -->` and `<!-- END AGENTWORKS GENERATED -->` delimiters. Retirement
-removes the recorded body and markers, preserving surrounding bytes, ownership, permissions and
-extended attributes. Ambiguous or malformed markers are retained and diagnosed with cleanup
-evidence. An otherwise empty shared document is retained without whole-file ownership. There is no
-new shared instruction-section application.
+removes everything between a correctly paired set of delimiters, including later operator edits
+inside that managed section, plus the markers. It preserves surrounding bytes, ownership,
+permissions and extended attributes. Ambiguous or malformed markers are retained and diagnosed with
+cleanup evidence. An otherwise empty shared document is retained without whole-file ownership. There
+is no new shared instruction-section application.
 
 Claude managed skills and personas use `/etc/claude-code/.claude/skills/` and
 `/etc/claude-code/.claude/agents/`; generated VM guidance uses skills. Codex machine skills and
@@ -361,10 +369,14 @@ Confirmed workspace artifact files receive exact repository-local exclusions in 
 `info/exclude`. Git metadata files and linked worktrees are supported; linked worktrees can share
 that metadata. An exclusion also ignores an unrelated untracked file at the same repository-relative
 path in another worktree sharing it. Ordinary applied state records ownership of each marked pattern
-pair. Updates/removal retire only those pairs; unrelated exclusions and operator modifications
-remain. Tracked artifact files stay tracked and visible, with a warning. Exclusions cannot conceal
-tracked changes. Agentworks does not edit shared `.gitignore`, hide whole native directories or
-change index flags.
+pair. Updates/removal retire only unchanged owned pairs; unrelated exclusions and operator
+modifications remain. Workspace deletion retires known pairs before removing its directory and
+ownership records. If that cleanup cannot finish safely, deletion retains the workspace and evidence
+for retry. Resolve the reported conflict, then retry the deletion. Unreadable native setup evidence
+cannot identify the pairs; that limitation warns while ordinary workspace deletion continues.
+Whole-VM deletion does not require guest artifact cleanup. Tracked artifact files stay tracked and
+visible, with a warning. Exclusions cannot conceal tracked changes. Agentworks does not edit shared
+`.gitignore`, hide whole native directories or change index flags.
 
 Elevated native file operations share a fixed allowlist: `/etc/claude-code`, `/etc/codex` and
 `/opt/agentworks/artifacts`. Reads, writes and cleanup outside those trees are refused, including

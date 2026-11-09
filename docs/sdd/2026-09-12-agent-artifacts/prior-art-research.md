@@ -1,5 +1,25 @@
 # Agent artifacts: prior-art research
 
+## Literal guidance carrier, 2026-11-09
+
+Claude documents
+[skill-body command preprocessing](https://code.claude.com/docs/en/skills#inject-dynamic-context),
+[supporting files](https://code.claude.com/docs/en/skills#add-supporting-files) and
+[deduplication of identical rendered invocations](https://code.claude.com/docs/en/skills#skill-content-lifecycle).
+The independent
+[native comparison](https://github.com/WayfarerLabs/agentworks/pull/871#issuecomment-6733959485) at
+`1ecffc5c` confirms that rendering literal rule text as a skill changes its interpretation when
+native command permission is supplied. It establishes preprocessing, not a permission bypass.
+
+The selected correction uses fixed navigation to a literal supporting file. A deterministic content
+revision changes that entrypoint when its data changes; this is a design response to documented
+deduplication, not a separately measured cache claim. A
+[bounded fixture experiment](https://github.com/WayfarerLabs/agentworks/pull/871#issuecomment-6734297569)
+observed actual Claude 2.1.319 Read results preserving Rule/Hint inline command and variable forms,
+while an unchanged authored skill retained native processing. No real inference was used; fenced
+commands and actual corrected product bytes still need verification. The native LLD records the
+implementation response without creating another artifact format.
+
 ## Status and terminology decision
 
 Research for the initial HLA, checked 2026-09-12 and 2026-09-13. It covers terminology, existing

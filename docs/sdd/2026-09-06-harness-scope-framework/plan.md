@@ -1,5 +1,22 @@
 # Harness Scope Framework: Implementation Plan
 
+## Native delivery feedback, round 1 of 3, 2026-11-09
+
+PR 871's [final report](https://github.com/WayfarerLabs/agentworks/pull/871#issuecomment-6752844405)
+at `1ecffc5c` supplies new scoped live evidence and two material artifact corrections. The
+companion's
+[round 1 plan](../2026-09-12-agent-artifacts/plan.md#native-delivery-feedback-round-1-of-3-2026-11-09)
+owns the implementation batch and validation record. The PR is draft before correction. This session
+retains both closeouts; the framework's transferred artifact obligations are not waived by the
+earlier clean intermediate merge.
+
+- [x] Assess the final report and preserve its tested-head, native, workstation and authentication
+      limits. Rebase onto main `438c4546` without undoing runtime-context behavior.
+- [ ] Complete the companion's literal guidance and safe shared-exclusion deletion corrections,
+      smaller review fixes, current gates and three independent private review lanes.
+- [ ] Reconcile the next report against retained R1-R16 and companion R1-R10, then add both locks
+      only when the final evidence proves completion. Workspace modes remain a separate PR.
+
 ## Acceptance reconciliation, 2026-11-08
 
 - [x] Reconcile R1-R16 and the definition of done against current source, meaningful local controls

@@ -1,5 +1,18 @@
 # Acceptance reconciliation
 
+## Current disposition, 2026-11-09
+
+The companion's
+[current acceptance disposition](../2026-09-12-agent-artifacts/acceptance.md#current-disposition-2026-11-09)
+records PR 871's full independent report at `1ecffc5c`: current multi-session/native-file evidence,
+two material artifact defects and the exact coverage limits. R7/R12/R16 remain transferred to that
+effort. Existing framework proofs below retain their tested-head attribution; they do not certify
+the new correction or the rebase onto main `438c4546`. The companion's corrected-head validation and
+final acceptance remain necessary before both locks. No new framework scope or workspace-mode
+prerequisite is introduced.
+
+## Retained reconciliation, 2026-11-08
+
 Date: 2026-11-08. Product source: `eddf7501a5bacde0222471e09d5ea5060a6d2972`. This record reconciles
 the retained framework requirements. The companion artifact effort has its own acceptance record; a
 clean correction report alone does not close either SDD.
