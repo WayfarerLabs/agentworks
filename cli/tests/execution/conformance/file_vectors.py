@@ -28,8 +28,8 @@ if TYPE_CHECKING:
 REQUEST_DEADLINE = 60
 
 
-def _owner(lane: Lane, path: str) -> str:
-    result = lane.run(Command(("stat", "-c", "%u", "--", path), deadline=REQUEST_DEADLINE))
+def _owner(lane: Lane, path: str, *, elevated: bool = False) -> str:
+    result = lane.run(Command(("stat", "-c", "%u", "--", path), elevated=elevated, deadline=REQUEST_DEADLINE))
     assert result.completion == Completed(0)
     return result.stdout.decode().strip()
 
@@ -78,7 +78,8 @@ def elevated_write_and_read_of_a_root_owned_file(lane: Lane) -> None:
     try:
         files.write_if(path, b"root content", expected=None, mode=0o600, parent_mode=0o700, elevated=True)
 
-        assert _owner(lane, path) == "0"
+        # The parent is root's 0700 directory, which the admin cannot search.
+        assert _owner(lane, path, elevated=True) == "0"
         assert files.read(path, elevated=True) == b"root content"
     finally:
         lane.run(Command(("rm", "-rf", "--", f"{directory}/root"), elevated=True, deadline=REQUEST_DEADLINE))

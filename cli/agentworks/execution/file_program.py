@@ -57,9 +57,12 @@ EXIT_LOCK_TIMEOUT = 7
 EXIT_ABSENT = 8
 """``read`` of a file that, or a parent of which, does not exist."""
 
-_TRAVERSE = getattr(os, "O_PATH", os.O_RDONLY) | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
-_OPEN_DIRECTORY = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
-_OPEN_FILE = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
+if sys.platform != "win32":
+    # The flags exist only on POSIX; the workstation imports this module for its
+    # constants on any platform, and the program itself runs only on the guest.
+    _TRAVERSE = getattr(os, "O_PATH", os.O_RDONLY) | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    _OPEN_DIRECTORY = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    _OPEN_FILE = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
 _TEMPORARY_PREFIX = ".agentworks-tmp-"
 
 
