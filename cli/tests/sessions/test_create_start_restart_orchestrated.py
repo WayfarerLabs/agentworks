@@ -2087,6 +2087,8 @@ def test_invalid_selected_shell_command_preserves_running_session(
             interaction=TtyInteractionPolicy.REFUSE,
         )
     assert db.get_session("s1") == before
+    assert "resolve" not in events
+    assert "resolve_env" not in events
     assert "kill" not in events
     assert "tmux_create" not in events
     db.close()
@@ -2152,3 +2154,98 @@ def test_admin_session_create_discards_managed_identity_before_preparation(
     assert captured_env["AGENTWORKS_SESSION_KIND"] == "admin"
     assert all("ignored-collision" not in batch for batch in resolve_counter)
     assert "tmux_create" in events
+
+
+def test_bad_selected_create_command_refuses_before_resolve_or_ephemeral_creation(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.sessions.manager import create_session
+
+    config = make_config()
+    _seed_stopped_proxmox_vm(db)
+    db.update_vm_init_status("box", InitStatus.COMPLETE)
+    monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: True)
+    events: list[str] = []
+    captured_env: dict[str, str] = {}
+    _patch_session_ops(monkeypatch, events, captured_env)
+    with pytest.raises(ValidationError):
+        create_session(
+            db,
+            config,
+            name="s1",
+            spec='{"harness_integration": {"name": "shell", "command": "tool ${agw:unknown}"}}',
+            new_workspace=True,
+            workspace_name="fresh-ws",
+            new_agent=True,
+            agent_name="fresh-agent",
+            vm_name="box",
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+    assert resolve_counter == []
+    assert db.get_session("s1") is None
+    assert db.get_agent("fresh-agent") is None
+    assert db.get_workspace("fresh-ws") is None
+    assert events == []
+    assert captured_env == {}
+
+
+def test_create_command_preflight_uses_planned_identity_and_workspace_before_rows_exist(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.capabilities.harness_integration import shell
+    from agentworks.interpolation import render_template
+    from agentworks.secrets.resolver import Resolver
+    from agentworks.sessions.manager import create_session
+    from agentworks.workspaces.backends.vm import default_workspace_path
+
+    class BeforeMutation(Exception):
+        pass
+
+    config = make_config()
+    _seed_stopped_proxmox_vm(db)
+    db.update_vm_init_status("box", InitStatus.COMPLETE)
+    monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: True)
+    events: list[str] = []
+    _patch_session_ops(monkeypatch, events, {})
+    rendered: list[str] = []
+    original_render = render_template
+
+    def record_render(text: str, values: dict[str, str], *, field: str) -> str:
+        result = original_render(text, values, field=field)
+        rendered.append(result)
+        return result
+
+    def stop_before_mutation(self: Resolver) -> None:
+        raise BeforeMutation
+
+    monkeypatch.setattr(shell, "render_template", record_render)
+    monkeypatch.setattr(Resolver, "resolve", stop_before_mutation)
+    with pytest.raises(BeforeMutation):
+        create_session(
+            db,
+            config,
+            name="s1",
+            spec=(
+                '{"harness_integration": {"name": "shell", "command": '
+                '"${agw:user_name}|${agw:user_home_dir}|${agw:agent_name}|'
+                '${agw:workspace_name}|${agw:workspace_dir}|${agw:session_name}"}}'
+            ),
+            new_workspace=True,
+            workspace_name="fresh-ws",
+            new_agent=True,
+            agent_name="fresh-agent",
+            vm_name="box",
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+    assert rendered == [
+        f"agt-fresh-agent|/home/agt-fresh-agent|fresh-agent|fresh-ws|{default_workspace_path(config, 'fresh-ws')}|s1"
+    ]
+    assert db.get_session("s1") is None
+    assert db.get_agent("fresh-agent") is None
+    assert db.get_workspace("fresh-ws") is None
+    assert events == []

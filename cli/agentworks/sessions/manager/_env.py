@@ -225,9 +225,7 @@ def _session_secret_target_pre_create(
     registry: Registry,
     *,
     name: str,
-    workspace_name: str,
-    workspace_dir: str,
-    agent_name: str | None,
+    context: Mapping[str, str],
     vm: VMRow,
     session_template: ResolvedSessionTemplate,
     new_workspace: bool,
@@ -284,26 +282,7 @@ def _session_secret_target_pre_create(
         session=session_template.env,
         label=f"session={name}",
     )
-    from agentworks.agents.manager import derive_linux_user
-    from agentworks.interpolation import context_values
-
-    if is_admin_mode:
-        user = vm.admin_username
-    elif existing_agent is not None:
-        user = existing_agent.linux_user
-    else:
-        assert agent_name is not None
-        user = derive_linux_user(agent_name)
-    target.validate_context(
-        context_values(
-            vm_name=vm.name,
-            user=user,
-            workspace_name=workspace_name,
-            workspace_dir=workspace_dir,
-            agent_name=agent_name,
-            session_name=name,
-        )
-    )
+    target.validate_context(context)
     return target
 
 

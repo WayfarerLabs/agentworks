@@ -204,6 +204,7 @@ class SessionBinding:
     state: dict[str, object]
     artifact_context: SessionArtifactContext | None = None
     context_values: Mapping[str, str] = field(default_factory=dict)
+    launch_intent: HarnessLaunchIntent = HarnessLaunchIntent.RESUME_OR_NEW
 
 
 class HarnessIntegration(Capability):
@@ -342,9 +343,9 @@ class HarnessIntegration(Capability):
         """Bind core-prepared inputs before the integration chooses its launch."""
         self._session = replace(self._session_binding, artifact_context=context)
 
-    def prepare_context(self, values: Mapping[str, str]) -> None:
-        """Bind the invocation's context before selecting or quoting launch data."""
-        self._session = replace(self._session_binding, context_values=dict(values))
+    def prepare_context(self, values: Mapping[str, str], *, intent: HarnessLaunchIntent) -> None:
+        """Bind known launch facts before preflight selects or renders input."""
+        self._session = replace(self._session_binding, context_values=dict(values), launch_intent=intent)
 
     def quote_context_argv(self, value: str) -> str:
         """Render one structured extra argument as data, then quote it once.

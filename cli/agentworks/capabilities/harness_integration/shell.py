@@ -8,6 +8,7 @@ from pydantic import Field
 
 from agentworks.artifacts.application import ArtifactApplication
 from agentworks.artifacts.native.shell import shell_artifacts
+from agentworks.capabilities.base import ScopeLevel
 from agentworks.capabilities.harness_integration.base import (
     HarnessIntegration,
     HarnessLaunchIntent,
@@ -132,6 +133,23 @@ class ShellIntegration(HarnessIntegration):
         """This session's validated shell config."""
         return self._config_as(ShellConfig)
 
+    def preflight(self, ctx: RunContext) -> None:
+        """Check the selected template even when its target probe defers."""
+        super().preflight(ctx)
+        scope = ctx.operation_scope
+        if scope is not None and scope.level is ScopeLevel.SESSION:
+            intent = self._session_binding.launch_intent
+            if intent is not HarnessLaunchIntent.RESUME_ONLY:
+                self._render_selected_command(intent)
+
+    def _render_selected_command(self, intent: HarnessLaunchIntent) -> str:
+        command = self.config.command if intent.starts_fresh else self.config.resume_command or self.config.command
+        return render_template(
+            command,
+            self._session_binding.context_values,
+            field=f"session={self._session_name}.command",
+        )
+
     def start(
         self,
         ctx: RunContext,
@@ -146,12 +164,7 @@ class ShellIntegration(HarnessIntegration):
         selected before rendering."""
         if intent is HarnessLaunchIntent.RESUME_ONLY:
             return HarnessStartNotImplemented()
-        command = self.config.command if intent.starts_fresh else self.config.resume_command or self.config.command
-        command = render_template(
-            command,
-            self._session_binding.context_values,
-            field=f"session={self._session_name}.command",
-        )
+        command = self._render_selected_command(intent)
         context = self._session_binding.artifact_context
         application = ArtifactApplication()
         if context:

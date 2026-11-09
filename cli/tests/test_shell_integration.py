@@ -512,7 +512,7 @@ def test_shell_renders_only_its_selected_command_once(intent: HarnessLaunchInten
             "resume_command": "resume ${agw:workspace_dir} $${agw:unknown}",
         }
     )
-    integration.prepare_context({"workspace_dir": "/srv/path ${agw:user_name}"})
+    integration.prepare_context({"workspace_dir": "/srv/path ${agw:user_name}"}, intent=intent)
     result = integration.start(RunContext(), intent=intent)
     assert isinstance(result, HarnessStart)
     action = "fresh" if intent.starts_fresh else "resume"
@@ -524,3 +524,69 @@ def test_shell_does_not_validate_an_unselected_command() -> None:
     result = integration.start(RunContext(), intent=HarnessLaunchIntent.CREATE)
     assert isinstance(result, HarnessStart)
     assert result.command == "fresh"
+
+
+@pytest.mark.parametrize(
+    "intent",
+    [HarnessLaunchIntent.CREATE, HarnessLaunchIntent.RESUME_OR_NEW, HarnessLaunchIntent.FORCE_NEW],
+)
+def test_preflight_renders_only_the_command_selected_by_the_launch_intent(intent: HarnessLaunchIntent) -> None:
+    integration = _harness_integration(
+        {
+            "command": "${agw:workspace_dir}" if intent.starts_fresh else "${agw:unknown}",
+            "resume_command": "${agw:unknown}" if intent.starts_fresh else "${agw:workspace_dir}",
+        }
+    )
+    integration.prepare_context({"workspace_dir": "/path ${agw:literal}"}, intent=intent)
+    probe = _Probe()
+    integration.preflight(RunContext(operation_scope=_session_scope(), admin_target=probe))
+    assert probe.commands == []
+    result = integration.start(RunContext(), intent=intent)
+    assert isinstance(result, HarnessStart)
+    assert result.command == "/path ${agw:literal}"
+
+
+def test_pending_target_defers_required_commands_but_not_template_validation() -> None:
+    from agentworks.errors import ValidationError
+
+    integration = _harness_integration(
+        {"command": "${agw:unknown}", "required_commands": ["tool"]},
+        target=SimpleNamespace(name="dev", realized=False),
+        admin=False,
+    )
+    integration.prepare_context({}, intent=HarnessLaunchIntent.CREATE)
+    probe = _Probe()
+    with pytest.raises(ValidationError):
+        integration.preflight(RunContext(operation_scope=_session_scope(agent="dev", admin=False), agent_target=probe))
+    assert probe.commands == []
+
+
+def test_preflight_checks_required_commands_without_executing_or_parsing_shell_source() -> None:
+    command = "if deliberately incomplete; ( ${agw:workspace_dir}"
+    integration = _harness_integration({"command": command, "required_commands": ["rg"]})
+    integration.prepare_context({"workspace_dir": "/srv/work"}, intent=HarnessLaunchIntent.CREATE)
+    probe = _Probe()
+    integration.preflight(RunContext(operation_scope=_session_scope(), admin_target=probe))
+    assert len(probe.commands) == 1
+    assert "command -v rg " in probe.commands[0]
+    assert "deliberately" not in probe.commands[0]
+
+
+def test_resume_only_remains_unsupported_without_validating_unused_shell_commands() -> None:
+    integration = _harness_integration({"command": "${agw:unknown}", "resume_command": "${agw:unknown}"})
+    integration.prepare_context({}, intent=HarnessLaunchIntent.RESUME_ONLY)
+    integration.preflight(RunContext(operation_scope=_session_scope(), admin_target=_Probe()))
+    assert isinstance(
+        integration.start(RunContext(), intent=HarnessLaunchIntent.RESUME_ONLY), HarnessStartNotImplemented
+    )
+
+
+def test_broader_scope_does_not_validate_a_session_command() -> None:
+    integration = _harness_integration({"command": "${agw:unknown}"})
+    integration.prepare_context({}, intent=HarnessLaunchIntent.CREATE)
+    integration.preflight(RunContext(operation_scope=OperationScope(level=ScopeLevel.SYSTEM)))
+
+
+def test_setup_shell_readiness_needs_no_session_binding() -> None:
+    integration = ShellIntegration.for_setup(owner_kind="vm", owner_name="box", facet="vm", config={})
+    integration.preflight(RunContext(operation_scope=OperationScope(level=ScopeLevel.VM, vm="box")))

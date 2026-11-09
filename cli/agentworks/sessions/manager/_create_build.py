@@ -289,6 +289,26 @@ def _build_session_graph(
         workspace=workspace_node,
         vm=vm_node,
     )
+    from agentworks.agents.manager import derive_linux_user
+    from agentworks.capabilities.harness_integration import HarnessLaunchIntent
+    from agentworks.interpolation import context_values
+
+    if plan.is_admin_mode:
+        user = vm.admin_username
+    elif existing_agent is not None:
+        user = existing_agent.linux_user
+    else:
+        assert agent_name is not None
+        user = derive_linux_user(agent_name)
+    template_values = context_values(
+        vm_name=vm.name,
+        user=user,
+        workspace_name=workspace_name,
+        workspace_dir=workspace_node.workspace_path,
+        agent_name=agent_name,
+        session_name=name,
+    )
+    session_node.harness_integration.prepare_context(template_values, intent=HarnessLaunchIntent.CREATE)
     nodes = walk(session_node)
 
     # The walk supplies the boundary union, and the session's
@@ -305,9 +325,7 @@ def _build_session_graph(
                 db,
                 registry,
                 name=name,
-                workspace_name=workspace_name,
-                workspace_dir=workspace_node.workspace_path,
-                agent_name=agent_name,
+                context=template_values,
                 vm=vm,
                 session_template=template,
                 new_workspace=new_workspace,

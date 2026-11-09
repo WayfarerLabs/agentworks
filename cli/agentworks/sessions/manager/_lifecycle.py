@@ -654,6 +654,8 @@ def _launch_existing_session(
         workspace=workspace_node,
         vm=vm_node,
     )
+    template_values = _mgr._session_context_values(db, vm, ws, name, SessionMode(session.mode), session.agent_name)
+    session_node.harness_integration.prepare_context(template_values, intent=intent)
     nodes = walk(session_node)
     # The walk supplies the boundary union (the site's config secrets;
     # live nodes declare nothing else). The session's env chain is
@@ -992,7 +994,7 @@ def _launch_existing_session(
             template_values = _mgr._session_context_values(
                 db, vm, ws, name, SessionMode(session.mode), session.agent_name
             )
-            session_node.harness_integration.prepare_context(template_values)
+            session_node.harness_integration.prepare_context(template_values, intent=intent)
             harness_start = require_implemented_start(
                 session_node.harness_integration.start(start_ctx, intent=intent),
                 intent=intent,

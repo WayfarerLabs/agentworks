@@ -332,7 +332,7 @@ def _start_session_slice(
                 secrets=ScopedSecrets(secret_values, session_node.secret_refs()),
             )
             template_values = _mgr._session_context_values(db, vm, ws, name, mode, resolved_agent_name)
-            session_node.harness_integration.prepare_context(template_values)
+            session_node.harness_integration.prepare_context(template_values, intent=HarnessLaunchIntent.CREATE)
             harness_start = require_implemented_start(
                 session_node.harness_integration.start(start_ctx, intent=HarnessLaunchIntent.CREATE),
                 intent=HarnessLaunchIntent.CREATE,
