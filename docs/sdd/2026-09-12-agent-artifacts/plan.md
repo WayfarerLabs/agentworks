@@ -23,8 +23,10 @@
       on future workspace exclusivity.
 - [ ] Implement current multi-session delivery. Use a native private plugin for Claude session
       artifacts; replace Codex/Grok session rule/hint prompt injection with explicitly enabled home
-      skill packages whose bounded names and descriptions carry session/run applicability. Preserve
-      full skill support files, native persona registration where supported, and ordinary state.
+      skills. Codex uses bounded per-run packages; Grok uses one stable session entry and current
+      private files/index because native resume retains its original catalog. Preserve complete
+      skills, supported native persona registration and ordinary state; document first-adoption
+      limits and index-based access instead of individual Grok skill registration.
 - [ ] Replace shared generated instruction sections with separate per-rule guidance skills where
       native separate rules are unavailable. Aggregate hints per original owner. Retire only
       recorded Agentworks section content and preserve repository/operator bytes.
@@ -39,8 +41,11 @@
       labels and an explicit independent integration-testing handoff. Wait for its actual report, up
       to six hours per iteration, before starting another of the three authorized fix rounds.
 - [ ] Complete both acceptance records and locks after the retained current requirements have real
-      evidence. Implement workspace modes in an additional PR; no existing workspace mode changes
-      belong to the current artifact PR.
+      evidence. No existing workspace mode changes belong to the current artifact PR.
+- [x] Transfer workspace-mode implementation to the separately authorized additional PR, still owned
+      by this effort lead: new workspaces single-session, existing workspaces multi-session, one
+      registered session in single mode until deletion. It is not a current SDD closeout
+      prerequisite.
 
 ## Acceptance reconciliation, 2026-11-08
 

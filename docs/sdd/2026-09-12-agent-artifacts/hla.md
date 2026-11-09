@@ -216,16 +216,16 @@ provenance, logical origin and normalized content identity are distinct fields.
 | Content identity  | Digest of normalized content, relative member paths and executable intent, excluding timestamps and provenance. |
 | Deferred artifact | An existing input with its origin unchanged, one destination facet and an integration-supplied reason.          |
 
-Hints carry plain UTF-8/LF text. Rules carry an always-loaded Markdown body and an optional
-inspection description parsed from YAML frontmatter. Rule metadata accepts only `description`;
-persona metadata accepts only `name`, `description` and `native_options`. Unexpected or duplicate
-fields and invalid structure fail capture. Inline and file rules normalize to the same content
-shape, and adapters render their instruction bodies without source frontmatter. Skills retain
-standard metadata, `SKILL.md` and their complete member tree. Agents carry name, description,
-instructions and supported integration-specific options. Supporting members distinguish normalized
-text from opaque bytes and retain executable intent; the codec represents opaque bytes losslessly,
-for example with base64 within JSON. Exact codec fields and bounded sizes belong in the LLD, not a
-new public distribution format.
+Hints carry plain UTF-8/LF text. Rules carry a standing-guidance Markdown body and an optional
+description parsed from YAML frontmatter, usable in native discovery metadata. Rule metadata accepts
+only `description`; persona metadata accepts only `name`, `description` and `native_options`.
+Unexpected or duplicate fields and invalid structure fail capture. Inline and file rules normalize
+to the same content shape, and adapters render their instruction bodies without source frontmatter.
+Skills retain standard metadata, `SKILL.md` and their complete member tree. Agents carry name,
+description, instructions and supported integration-specific options. Supporting members distinguish
+normalized text from opaque bytes and retain executable intent; the codec represents opaque bytes
+losslessly, for example with base64 within JSON. Exact codec fields and bounded sizes belong in the
+LLD, not a new public distribution format.
 
 The normalized representation is independent of source transport. Source readers converge here;
 future automatic emissions construct the same typed inputs without pretending to be Git sources. Two
@@ -385,17 +385,25 @@ cleanup does not become a prerequisite for VM deletion or an unreachable-backend
 ## Session application and isolation
 
 Use the saga's `session_uuid` for durable session ownership and `run_id` for one workload
-incarnation. The existing session name remains a display/selection key. The current session row does
-not contain these IDs. This effort implements the early shared identity slice permitted by the saga
-contract, together with session publication. The
+incarnation. The existing session name remains a display/selection key. The current session row
+already contains these IDs through this effort's early shared identity slice permitted by the saga
+contract. The
 [coordination record](../2026-08-04-next-steps/message-2026-09-13-agent-artifacts-identity-implementation.md)
 identifies this ownership; no artifact-specific replacement is introduced.
 
 Private publication lives under the actual user's home, conceptually
-`~/.agentworks-artifacts/session/<session_uuid>/<run_id>/`. Parent directories are private to that
-Linux user. A workspace can be shared by different users; placing session files there would expose
-them more broadly. Sessions sharing one Linux user are not isolated from each other's files, so the
-directory protects user boundaries and native application specificity, not same-user secrecy.
+`~/.agentworks-artifacts/session/<session_uuid>/<run_id>/`. A native invocation-local loader is
+preferred where supported. An explicit `session-home-skills` workaround can instead publish narrowly
+recognized session-owned packages in that user's ordinary native skill discovery directory. Names
+and descriptions carry exact managed session/run applicability, and public UUID/run environment
+variables identify the launched workload. Those catalogs are shared: other sessions under that user
+may discover the metadata and can read the files. The model decides applicability. This is an honest
+best-effort mechanism, not a native visibility boundary or guaranteed adherence.
+
+Both placements stay beneath the actual user's home. No session artifact is placed in today's shared
+workspace. Single-session workspace modes, including their defaults and admission rule, are a
+separate PR and cannot justify assuming exclusivity here. Original scope/type/key groups remain
+unchanged by native skill projection.
 
 Move session env preparation ahead of the integration's launch decision. Extend the prepared session
 input with artifacts, actual user/home, prospective session/run identity and applied-state evidence.
@@ -409,10 +417,11 @@ inputs; rerender files and launch arguments without them and revalidate the rema
 Malformed inputs, failed transport/probes and unsafe private-file publication remain errors. On
 create, compute the prospective identity for the launch decision, then persist the session row
 before publishing owned files, fitting the existing rollback boundary. On restart, stage files under
-the new run directory so preflight or publication failure does not overwrite files used by the old
-workload. Only after preparation succeeds does core stop the old runtime and launch the new one.
-Record confirmed publication before launch and retain enough ownership evidence to clean up a failed
-start idempotently.
+the new private run directory or disjoint UUID-qualified native skill packages for the prospective
+run, so preflight or publication failure does not overwrite files used by the old workload. Only
+after preparation succeeds does core stop the old runtime and launch the new one. Record confirmed
+publication before launch and retain enough ownership evidence to clean up a failed start
+idempotently.
 
 Retire the previous run's owned files after it is no longer using them. Session deletion and failed
 creation clean owned files and explicit skill package roots; empty session/run directories can
@@ -436,51 +445,67 @@ output structure and destinations before emitting warnings. It stores these term
 ordinary applied-state record for inspection. No new routing service, retry loop, native
 compatibility table or hook executor is introduced.
 
-The [native delivery LLD](native-delivery-lld.md) names the methods and the narrow Claude prompt
-recording behavior. Opt-in authorizes using a documented native carrier; an incompatible native CLI
-can still reject that explicit launch configuration. It is not a certification of native support,
-and missing help text is not proof that a flag is unavailable.
+The [native delivery LLD](native-delivery-lld.md) names the file and skill methods. Artifact
+delivery adds no native prompt snapshot/version workaround. Opt-in authorizes using a documented
+native carrier; an incompatible native CLI can still reject that explicit launch configuration. It
+is not a certification of native support, and missing help text is not proof that a flag is
+unavailable.
 
 ## First-party delivery matrix
 
-The table lists native outer behavior and available opt-in session methods. Session delivery is off
-by default for Claude, Codex and Grok. Shell publishes files at every facet without a workaround.
-Unsupported means a reasoned deferral at an outer facet and a terminal warning if no later facet
-handles it. Unsafe publication and invalid plugin results remain errors. Compatibility checks cannot
-impose a blanket native-version floor.
+Native session delivery is off by default. Named opt-ins select the documented mechanisms;
+unsupported inputs warn and remain unhandled. Shell continues file publication at every facet.
+Native file, catalog and explicit-read behavior define delivery, not automatic context insertion or
+model obedience.
 
-| Integration | User facet                                                                            | Workspace facet                                                                               | Opt-in session facet                                                                                                            |
-| ----------- | ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| Shell       | Publish all types as files below the actual user's `.agentworks-artifacts` directory. | Publish all types in a workspace-owned artifact directory, deliberately shared at this scope. | Publish all remaining types in the private session/run directory.                                                               |
-| Claude Code | Unconditional `.claude/rules`; standard `.claude/skills`; `.claude/agents`.           | Corresponding project directories owned by the workspace.                                     | Additive prompt file for hints/rules; session-only plugin for skills; `--agents` definitions for agents.                        |
-| Codex       | Native `.agents/skills`, `.codex/agents` and a generated native instruction section.  | Native project skills/agents and a generated instruction section.                             | Additional `developer_instructions` for hints/rules; private agent TOML files selected by config overrides; skills unsupported. |
-| Grok Build  | Native `.grok` rules, skills and agents.                                              | Corresponding project directories, with discovery exclusions checked.                         | Additive `--rules` text; private session personas and skills unsupported.                                                       |
+| Integration | User facet                                                               | Workspace facet                                                    | Opt-in session facet                                                                                                    |
+| ----------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| Shell       | Grouped files under the actual user's artifact directory                 | Grouped workspace-owned files                                      | Grouped private session/run files                                                                                       |
+| Claude Code | Separate native rule files, complete skills and agent definitions        | Corresponding native project locations                             | One private plugin: rules as individual skills, hints as owner aggregates, complete skills and native agent definitions |
+| Codex       | Rules/hints as generated skills, complete skills and native persona TOML | Generated guidance skills, complete skills and native persona TOML | Best-effort session-qualified home skills for rules/hints/skills; existing private native role configuration for agents |
+| Grok Build  | Native separate rules, complete skills and native agent definitions      | Compatible project guidance skills, complete skills and agents     | Stable session-owned home entry skill reading the current private files/index; session agents remain unhandled          |
 
-Codex uses a generated section of user or project `AGENTS.md`, or the existing nonempty
-`AGENTS.override.md` selected by native precedence. It does not create an override to suppress
-ordinary instructions. Other harnesses reading that shared file can see the same generated content.
-Native instruction budgets and loading behavior remain native constraints, not a release-by-release
-certification layer. Session-scoped guidance remains an explicit `developer_instructions`
-workaround. Native execution-policy `.rules` files are unrelated to prose rules.
+Rules have one file or generated skill per rule. Hints have one aggregate per original owner.
+Generated names preserve original groups and participate in ordinary native collision checks against
+authored skills; no prefix reserves an identity. Captured skills remain standard packages, with full
+relative assets and executable intent. Session name qualification changes native invocation names;
+adapters do not rewrite arbitrary body references or promise transparent references between renamed
+skills.
 
-Claude VM placement uses `/etc/claude-code/CLAUDE.md` for a generated hints/rules section and the
-managed `.claude/skills` and `.claude/agents` directories under `/etc/claude-code`. Codex VM skills
-use `/etc/codex/skills`; other Codex VM types defer to user. Grok continues user deferral because
-machine discovery registration needs additional configuration-composition and trust handling.
+Codex no longer writes AGENTS instruction sections. Claude VM guidance uses a suitable machine skill
+location where native discovery supports it; otherwise it defers to user handling. Codex machine
+skill placement can likewise handle generated guidance when supported; unsupported machine types
+defer user. Grok retains VM deferral until suitable machine discovery exists. Only recorded
+Agentworks sections are retired from old shared instruction files, preserving unrelated bytes and
+malformed-marker reporting. Empty shared files are not inferred to be wholly owned.
 
-Claude similarly composes existing append instructions with generated hint/rule text. Its private
-session plugin is an integration-generated carrier, not workspace marketplace/plugin installation.
-Skill names acquire the documented plugin namespace, for example `agentworks-artifacts:review`;
-inspection reports that name. Persona JSON avoids assuming that plugin persona fields are all
-preserved. Only the enabled session-prompt workaround considers native prompt recording; ancestor
-rules and skills do not justify changing system-prompt behavior.
+Claude's `session-skill-plugin` selects guidance and skill packages, while
+`session-agent-definitions` selects personas in the same invocation-local plugin. Remove
+`session-prompt` and artifact-specific snapshot/version checks. The plugin's native namespace is
+qualified to avoid shadowing installed plugins. Codex/Grok use `session-home-skills` instead of
+`session-developer-instructions`/`session-rules`. Codex retains `session-agent-config`
+independently; Grok has no supported session persona workaround. Removed spellings receive ordinary
+configuration validation and documented migration, not parallel legacy injection.
 
-Grok uses a flat rules directory and honors discovery exclusions. No private session persona carrier
-has verified native availability, so those inputs remain unhandled in all launch modes, even with
-the accepted `session-agent-definitions` compatibility spelling. Native user/workspace persona
-discovery remains supported. ACP plugin flags are not evidence of support in the launched command.
-Persona options that the selected native mechanism cannot preserve receive an explicit unsupported
-result.
+Grok's native resume retains its original skill catalog. Its workaround therefore uses one stable
+session-owned entry skill whose immutable name/description identify the logical UUID, not a changing
+run. The entry reads the current `AGENTWORKS_ARTIFACTS_DIR/index.json` at use time. The private run
+bundle preserves separate rule files, hints aggregated per original owner and complete skill
+packages. It reuses the filesystem index, not another wire format or an external dispatcher. Old
+processes retain their old directory environment while the prospective run receives its new one.
+
+Grok's indexed skills have no individual native slash/catalog entry, and native per-skill activation
+controls are not automatically applied. Unsupported requested native controls receive a precise
+unhandled result; the integration does not emulate a policy engine. A native conversation created
+before first installing the stable entry can still lack it in its cached catalog. Resumes explain
+the fresh-conversation/manual-current-index limitation without claiming that applied state proves
+what the model has read. This is best-effort file access, not guaranteed automatic context refresh.
+
+Generated workspace files should be excluded locally through Git-resolved metadata, using exact
+confirmed paths and ordinary applied-state associations. Do not edit shared `.gitignore`, hide whole
+native directories, conceal tracked changes or untrack files. Preserve unrelated exclusion lines and
+scope ownership in linked working trees. Grok skips ignored rule files, so use a verified compatible
+skill representation or report unsupported discovery instead of claiming success.
 
 Registering an agent persona makes a definition available; choosing it as the primary persona is a
 separate native launch behavior. Claude supports that selection. Codex's existing primary `agent`
@@ -540,19 +565,22 @@ Worked cases the HLA and subsequent tests share:
 
 1. **Inactive VM and user.** VM core has captured a rules bundle. Neither ancestor activates Codex.
    Core routes its input to user and lazily passes it through that inactive facet to the selected
-   Codex session. The session warns by default, or injects rule text when its named workaround is
-   enabled; it performs no implicit user setup. `show` identifies VM origin and the inactive
-   passthrough.
+   Codex session. The session warns by default, or publishes a session-qualified home guidance skill
+   when `session-home-skills` is enabled; it performs no implicit user setup. `show` identifies VM
+   origin and the inactive passthrough.
 2. **Upstream skills.** An agent user activates Codex and applies a skill bundle. Its sessions do
    not receive those skill payloads again. Inspection still lists the user placement and recorded
-   handling. Without upstream handling, the same session skill warns with an unsupported
-   private-session-placement reason and identifies which owner can provide native handling.
+   handling. Without upstream handling, the same session skill warns by default or is published as a
+   session-qualified home package under the explicit best-effort workaround.
 3. **The diamond.** A VM facet routes one entry to user, another to workspace and a third directly
    to session. Each branch sees only its assigned VM entries plus its own local declarations. A
    session joins the three disjoint results; a second user gets an independent evaluation.
 4. **Two users in one workspace.** Workspace artifacts are intentionally shared. Session-owned
    Claude skills with the skill-plugin workaround enabled load from each actual user's private
-   session plugin. No session artifact is installed into the shared project directory.
+   session plugin. No session artifact is installed into the shared project directory. For two
+   sessions of the same user under the home workaround, both can discover catalog metadata;
+   descriptions identify the intended managed UUID/run and package ownership prevents one deleting
+   the other's files.
 5. **Change and removal.** Updating a Git ref and reinitializing its owner captures a new commit and
    applies/removes owned outputs. Only descendants whose actual prepared inputs change become stale.
    Inspection explains the mismatch; managed launch reports the owning repair operation and uses
@@ -609,9 +637,10 @@ Inspection tests must prove no acquisition, native invocation or state mutation 
 
 The operator approved capture during owning setup and single-destination deferrals. The 2026-09-15
 ruling replaces automatic session delivery and final-session errors with named opt-in workarounds
-and terminal warnings; unsupported native session skill types remain unhandled. The
-[implementation plan](plan.md) sequences the complete delivery on this branch and PR, including the
-shared identity prerequisite and acceptance.
+and terminal warnings. The 2026-11-08 ruling permits explicitly enabled best-effort ordinary-home
+session skills while retaining their shared-catalog disclosure. The [implementation plan](plan.md)
+sequences the complete delivery on this branch and PR, including the shared identity prerequisite
+and acceptance.
 
 ## Setup-facet failures and command outcomes
 

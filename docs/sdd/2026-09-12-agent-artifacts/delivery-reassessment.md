@@ -1,12 +1,11 @@
 # Artifact delivery reassessment
 
-2026-11-08. Proposal responding to the operator's request to reconsider delivery across all four
-artifact types, avoid generated `AGENTS.md` content, and seriously consider generated guidance
-skills. The operator endorsed that direction and asked to refine per-rule granularity and consider
-ordinary-home session skills and workspaces reserved for one session. Session visibility policy
-remains under discussion; this response does not claim that new carriers ship or that the FRD has
-been amended. Current main: `f78ffb3f`. Artifact and session implementation is unchanged from the
-source-review baseline `89bb63e4`, including merged PR #862.
+2026-11-08. Design exploration for the operator's native-file and guidance-skill direction. The
+selected current contract is now in the [FRD](frd.md), [HLA](hla.md) and
+[native delivery LLD](native-delivery-lld.md). Implementation is underway. Current main is
+`f78ffb3f`; affected source is unchanged from the source-review baseline `89bb63e4`, including PR
+[862](https://github.com/WayfarerLabs/agentworks/pull/862). This note retains the alternatives and
+measured limits rather than providing another normative contract.
 
 ## Recommendation
 
@@ -177,11 +176,12 @@ replacement can then be created. A multi-session workspace retains the current a
 multiple independent logical sessions. Keep these names explicit: filesystem grants can be shared in
 either mode, so naming the modes private/shared would confuse access with session admission.
 
-Use the durable session UUID for the current reservation, not a reusable name or an active-runtime
-lease. Existing start/restart can switch the effective harness through configuration while
-preserving the logical UUID and each integration's separate native conversation state. Deleting the
-old session and creating a new one is also an intentional handoff, with ordinary cleanup between
-owners. This does not translate conversation history between harnesses.
+The workspace mode and sole registered session row express ownership. Use that row's durable UUID;
+do not add another reservation record or an active-runtime lease. Existing start/restart can switch
+the effective harness through configuration while preserving the logical UUID and each integration's
+separate native conversation state. Deleting the old session and creating a new one is also an
+intentional handoff, with ordinary cleanup between owners. This does not translate conversation
+history between harnesses.
 
 Single-session mode supplies a provisioning invariant for native project placement of session
 artifacts. Workspace and session declarations retain separate original scopes, native identities,
@@ -198,12 +198,11 @@ lifecycle and cleanup policy. The baseline has no mode or admission check; obser
 no other running session cannot substitute for this implemented invariant. Filesystem grants remain
 independent, and granted users can still read the project files.
 
-Prefer native project placement for session inputs in this mode where the integration supports it.
-Native invocation-local loading remains appropriate for multi-session workspaces or where it better
-fits the artifact. Git exclusions, native discovery, trust, collisions and failed-start behavior
-still need verification; single-session mode does not make Grok load ignored rule files. For
-multi-session workspaces lacking an invocation-local loader, keep optional unsupported inputs
-explained as unhandled rather than building the home fallback speculatively.
+For the future single-session mode, native project placement is a clean candidate. Native
+invocation-local loading also remains useful. Git exclusion, discovery, trust, collision and
+failed-start behavior still require verification. Today's multi-session correction instead uses
+private native loaders where suitable and explicitly enabled ordinary-home skills elsewhere, with
+shared catalog visibility and semantic applicability documented.
 
 The operator selected single-session as the default for new workspaces and preserving existing
 workspaces as multi-session. The operator also explicitly separated this into an additional PR:
@@ -230,26 +229,26 @@ instruction files to preserve an automatic-context ideal.
 
 Existing tracked files require explicit treatment: an ignore pattern cannot conceal changes inside
 them. Newly generated helpers should use their own paths and preserve/refuse conflicting native
-content through the existing ownership rules. Tracked-file adoption and local-exclusion ownership
-must be decided explicitly before implementation; this proposal does not silently change the
-existing matching-content adoption contract.
+content through the existing ownership rules. Preserve the matching-content adoption contract and
+report tracked files honestly: ignore patterns cannot conceal their modifications. Exact local
+exclusion associations reuse ordinary applied state; no separate ledger is introduced.
 
 ## Migration and acceptance
 
 Retire only recorded Agentworks content from old instruction sections and preserve unrelated bytes.
-Current retirement leaves empty markers, so complete marker cleanup needs a deliberate decision; it
-must never reset an instruction file from Git or discard unrelated edits. User/VM owners migrate
-through their supported reinit operations. Workspace setup is creation-only: existing workspaces
-need an explicit supported migration/recreation path, not hidden workspace setup during a session
-restart or a fabricated workspace reinit command.
+The correction removes recorded generated markers as well as their content while preserving
+surrounding bytes. It never resets an instruction file from Git or discards unrelated edits. User/VM
+owners migrate through their supported reinit operations. Workspace setup is creation-only: existing
+workspaces need an explicit supported migration/recreation path, not hidden workspace setup during a
+session restart or a fabricated workspace reinit command.
 
 Keep acceptance focused on the native mechanism: exact current files, correct permissions/scope,
 catalog/registration, explicit activation, changed-content behavior across fresh/resumed processes,
 collision preservation, Git status and safe update/removal. Retain ordinary malformed-input and
 publication failures. Avoid a native-version framework or tests that claim to prove model obedience.
 
-The operator would need to approve replacing the current always-loaded rule definition with standing
-guidance delivered through the suitable native mechanism. The support matrix, named opt-ins, guides
-and migration details must follow the chosen verified carriers. Current unsupported private cases
-must stay explicit. The two SDD locks remain conditional on that accepted contract and actual
-implementation/evidence, not on this recommendation alone.
+The operator approved replacing the universal always-loaded rule definition with standing guidance
+through suitable native delivery, and selected best-effort multi-session support now. The support
+matrix, named opt-ins, guides and migration follow that contract. The two SDD locks still require
+actual implementation, independent acceptance evidence and final reviews; this research alone does
+not close them. Workspace modes remain a separate PR with the accepted defaults.
