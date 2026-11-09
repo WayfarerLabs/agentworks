@@ -712,6 +712,11 @@ credential using its default reference (`git-token-<name>`) reads from `AW_SECRE
 and so on. Override the convention per secret via the secret's `backend_mappings`
 (`env-var: CUSTOM_NAME`).
 
+`agw` takes every `AW_SECRET_` variable out of its own environment as it starts, keeping the values
+for the `env-var` backend, so no program it runs (`ssh`, `limactl` and the host agent Lima leaves
+running, `wsl.exe`, `op`, your editor) inherits one. A variable that a mapping names is your own and
+is passed on like the rest of your environment.
+
 Use `agw secret list` to see the exact env var name for each declared or auto-declared secret, and
 `agw secret describe <name>` for the full per-secret view (origin, usages, backend mappings,
 resolution preview).

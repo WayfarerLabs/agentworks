@@ -260,6 +260,10 @@ def _isolate_inherited_aw_secrets(
     for name in tuple(os.environ):
         if name.startswith("AW_SECRET_"):
             monkeypatch.delenv(name, raising=False)
+    # And those an earlier test's run of the entry point withheld.
+    from agentworks.capabilities.secret_backend import env_var
+
+    monkeypatch.setattr(env_var, "_withheld", {})
 
 
 @pytest.fixture

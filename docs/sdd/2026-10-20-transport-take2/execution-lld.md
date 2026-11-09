@@ -271,11 +271,15 @@ stderr after the marker; the terminal half takes neither.
 **Spawning.** One `spawn(argv, ...)` in `ssh_process.py` runs
 `subprocess.Popen(argv, stdin=PIPE, stdout=PIPE, stderr=PIPE, bufsize=0)` (the forward passes no
 pipes) with the proof's Windows environment strip (`_io.py:104-114`, at `fd1256b1f`), and maps a
-failure of the resolved client to start to `ClientUnsupported`. The pump lives in `pump.py`. The
-pump is the proof's single-threaded loop (`_io.py:32-205`): non-blocking pipes (supported on Windows
-pipes from Python 3.12), 64 KiB chunks, a 10 ms sleep when nothing moved, the deadline, then kill
-and a 0.5 s reap, and cleanup on `BaseException`. It is argv-agnostic, which is what lets the
-conformance suite run it against a local shell.
+failure of the resolved client to start to `ClientUnsupported`. No child, this one or any other the
+workstation starts, inherits the `env-var` secret backend's `AW_SECRET_` carriers: the entry point
+moves them out of `os.environ` before anything spawns (`env_var.withhold_carriers`), and only that
+backend reads them afterwards. A long-lived child kept one otherwise; the live run found the auth
+key's carrier in local Lima's host agent after a create. The pump lives in `pump.py`. The pump is
+the proof's single-threaded loop (`_io.py:32-205`): non-blocking pipes (supported on Windows pipes
+from Python 3.12), 64 KiB chunks, a 10 ms sleep when nothing moved, the deadline, then kill and a
+0.5 s reap, and cleanup on `BaseException`. It is argv-agnostic, which is what lets the conformance
+suite run it against a local shell.
 
 - **Who uses it.** `run`, `stream` and the parking connection of an attach reuse the one pump. The
   terminal half (inherited stdio, `subprocess` wait) and the forward (no pipes) do not. The parking
