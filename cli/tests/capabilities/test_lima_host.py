@@ -7,6 +7,7 @@ import os
 import shutil
 import signal
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -243,6 +244,31 @@ def test_a_kill_reaches_only_the_wrapper_its_pid_file_names(tmp_path: Path) -> N
         bystander.wait()
 
 
+@pytest.mark.parametrize("names_the_wrapper", ["as_an_argument", "as_a_longer_script_path"])
+def test_a_kill_leaves_a_process_that_only_mentions_the_wrapper_alone(tmp_path: Path, names_the_wrapper: str) -> None:
+    """A reused PID whose command line mentions the wrapper's path (a ``tail`` of it, say) is not the wrapper."""
+    if shutil.which("ps") is None or not Path("/bin/bash").exists():
+        pytest.skip("needs ps and /bin/bash")
+    from agentworks.capabilities.vm_platform.lima_host import _DetachedFiles, _kill_wrapper
+
+    files = _DetachedFiles(str(tmp_path / "agw-x"))
+    if names_the_wrapper == "as_an_argument":
+        argv = [sys.executable, "-c", "import time; time.sleep(30)", files.wrapper]
+    else:
+        lookalike = Path(f"{files.wrapper}.bak")
+        lookalike.write_text("sleep 30\n")
+        argv = ["/bin/bash", str(lookalike)]
+    # Its own group's leader, as the wrapper would be, so only the command line can tell them apart.
+    bystander = subprocess.Popen(argv, start_new_session=True)
+    try:
+        Path(files.pid).write_text(f"{bystander.pid}\n")
+        subprocess.run(["bash", "-c", _kill_wrapper(files)], check=False)
+        assert not _eventually(lambda: bystander.poll() is not None, within=0.5)
+    finally:
+        os.killpg(bystander.pid, signal.SIGKILL)
+        bystander.wait()
+
+
 def test_a_kill_stops_the_command_the_wrapper_started(tmp_path: Path) -> None:
     """Killing only the bash wrapper left the limactl it started running on the placement host."""
     if shutil.which("ps") is None or not Path("/bin/bash").exists():
@@ -273,6 +299,33 @@ def test_a_kill_stops_the_command_the_wrapper_started(tmp_path: Path) -> None:
                 os.kill(pid, signal.SIGKILL)
 
 
+def test_a_kill_reaches_a_wrapper_that_leads_no_group(tmp_path: Path) -> None:
+    """A host bash that gives the job no group of its own still has its wrapper killed, and only it."""
+    if shutil.which("ps") is None or not Path("/bin/bash").exists():
+        pytest.skip("needs ps and /bin/bash")
+    from agentworks.capabilities.vm_platform.lima_host import _WRAPPER_TEMPLATE, _DetachedFiles, _kill_wrapper
+
+    files = _DetachedFiles(str(tmp_path / "agw-x"))
+    child_pid_file = tmp_path / "child.pid"
+    command = f"sleep 300 & echo $! > {child_pid_file}; wait"
+    Path(files.wrapper).write_text(_WRAPPER_TEMPLATE.format(command=command, **files.template_fields()))
+    # Started in this test's own process group, the group a group kill must never reach.
+    wrapper = subprocess.Popen(["/bin/bash", files.wrapper])
+    child_pid = _wait_for_pid(child_pid_file)
+    try:
+        assert _wait_for_pid(Path(files.pid)) == wrapper.pid
+
+        subprocess.run(["bash", "-c", _kill_wrapper(files)], check=False)
+
+        assert wrapper.wait(timeout=10) == -signal.SIGTERM
+    finally:
+        with contextlib.suppress(ProcessLookupError):
+            os.kill(wrapper.pid, signal.SIGKILL)
+        wrapper.wait()
+        with contextlib.suppress(ProcessLookupError):
+            os.kill(child_pid, signal.SIGKILL)
+
+
 def _wait_for_pid(path: Path) -> int:
     assert _eventually(lambda: path.exists() and path.read_text().strip().isdigit())
     return int(path.read_text())
@@ -284,8 +337,8 @@ def _alive(pid: int) -> bool:
     return bool(state) and not state.startswith("Z")
 
 
-def _eventually(condition: Callable[[], bool]) -> bool:
-    deadline = time.monotonic() + 10
+def _eventually(condition: Callable[[], bool], *, within: float = 10) -> bool:
+    deadline = time.monotonic() + within
     while time.monotonic() < deadline:
         if condition():
             return True

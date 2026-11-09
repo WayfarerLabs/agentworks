@@ -398,7 +398,7 @@ def test_a_remote_delete_removes_what_an_abandoned_create_left_on_the_host(
 
     commands = host.commands
     delete = _index(commands, lambda c: c == "limactl delete --force myvm")
-    kill = _index(commands, lambda c: f"pid=$(cat {_BASE}.pid)" in c and f"grep -qF -- {_BASE}.sh" in c)
+    kill = _index(commands, lambda c: f"pid=$(cat {_BASE}.pid)" in c)
     artifacts = _index(commands, lambda c: c == f"rm -f {_BASE}.out {_BASE}.sh {_BASE}.pid {_BASE}.status")
     assert kill < artifacts < delete
 

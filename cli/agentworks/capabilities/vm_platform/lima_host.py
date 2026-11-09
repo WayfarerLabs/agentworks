@@ -275,6 +275,11 @@ class LimaHost:
         return _Completed(process.returncode, decode_stream(stdout), decode_stream(stderr))
 
 
+def _wrapper_invocation(files: _DetachedFiles) -> str:
+    """The wrapper's whole command line once ``nohup`` has exec'd it, which :func:`_kill_wrapper` matches exactly."""
+    return f"/bin/bash {files.wrapper}"
+
+
 def _launch_wrapper(files: _DetachedFiles) -> str:
     """The command that starts ``files.wrapper`` under ``nohup``, in the background, as a process group leader.
 
@@ -283,20 +288,24 @@ def _launch_wrapper(files: _DetachedFiles) -> str:
     wrapper, so the wrapper's PID is that group's ID. An explicit
     ``/bin/bash`` keeps this independent of the host user's login shell.
     """
-    return shlex.join(["/bin/bash", "-c", f"set -m; nohup /bin/bash {files.wrapper} </dev/null >/dev/null 2>&1 &"])
+    return shlex.join(["/bin/bash", "-c", f"set -m; nohup {_wrapper_invocation(files)} </dev/null >/dev/null 2>&1 &"])
 
 
 def _kill_wrapper(files: _DetachedFiles) -> str:
-    """The command that kills the process group the PID in ``files.pid`` leads, only while that PID is still
-    ``files.wrapper``: the wrapper and the command it started, which signalling the wrapper alone leaves running.
+    """The command that kills the wrapper the PID in ``files.pid`` names and the command it started.
 
-    Where no such group exists (a host bash that did not give the job its own group), it falls back to
-    the wrapper alone. ``-ww`` keeps ``ps`` from cutting the command line to ``COLUMNS``, which would
-    hide the wrapper's path and skip the kill.
+    The PID file can be days old, so the PID is signalled only while its whole command line is exactly
+    this run's :func:`_wrapper_invocation`; a reused PID whose arguments merely mention the wrapper's
+    path (an editor or a ``tail`` of it) is left alone. While that wrapper leads its own process
+    group, the group is signalled, reaching the command it started, which signalling the wrapper alone
+    leaves running; a host bash that did not give the job its own group gets the wrapper alone.
+    ``-ww`` keeps ``ps`` from cutting the command line to ``COLUMNS``.
     """
     return (
-        f'test -f {files.pid} && pid=$(cat {files.pid}) && ps -ww -p "$pid" -o args= | grep -qF -- {files.wrapper} '
-        '&& { kill -- -"$pid" 2>/dev/null || kill "$pid" 2>/dev/null; }'
+        f"test -f {files.pid} && pid=$(cat {files.pid}) "
+        f'&& test "$(ps -ww -p "$pid" -o args=)" = {shlex.quote(_wrapper_invocation(files))} '
+        '&& if test "$(ps -p "$pid" -o pgid= | tr -d " ")" = "$pid"; '
+        'then kill -- -"$pid"; else kill "$pid"; fi 2>/dev/null'
     )
 
 
