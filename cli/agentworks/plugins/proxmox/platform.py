@@ -28,6 +28,7 @@ from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
 from agentworks.errors import ConnectivityError, ProvisioningError, StateError
 from agentworks.execution import root_script
+from agentworks.execution.root_script import ChannelUnreachable
 from agentworks.plugins.proxmox import guest_agent
 from agentworks.plugins.proxmox.api import REQUEST_TIMEOUT_SECONDS, ProxmoxAPI, ProxmoxAPIError
 from agentworks.plugins.proxmox.identity import Gone, find_guest
@@ -534,11 +535,19 @@ class ProxmoxPlatform(VMPlatform):
     def run_as_root(self, vm: VMRow, ctx: RunContext, script: bytes, deadline: float) -> RawRun:
         """Run ``script`` as root through the QEMU Guest Agent, which needs no guest sshd, once the guest is ours.
 
-        The identity check spends the same ``deadline`` the script runs under.
+        The identity check spends the same ``deadline`` the script runs under;
+        one that spends all of it raises ``ChannelUnreachable`` with nothing
+        dispatched, as the guest agent's own wait does.
         """
         expires = time.monotonic() + deadline
         self._guest(vm, ctx)
-        remaining = max(expires - time.monotonic(), 0.1)
+        remaining = expires - time.monotonic()
+        if remaining <= 0:
+            raise ChannelUnreachable(
+                f"confirming that Proxmox VMID {self._vmid(vm)} is VM '{vm.name}' took the whole "
+                f"{deadline:.0f}-second deadline, so no script was dispatched",
+                hint="Check that the Proxmox API is answering promptly, then run the command again.",
+            )
         return guest_agent.run_as_root(self._api(ctx), self._vm_node(vm), self._vmid(vm), script, remaining)
 
     # -- Helpers ---------------------------------------------------------------
