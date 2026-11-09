@@ -433,10 +433,6 @@ class ClaudeCodeIntegration(HarnessIntegration):
                 and file.native_identity.startswith("agent:")
                 and selected_origins.intersection(file.origins)
             }
-            if len(delivered) > 1:
-                raise StateError(
-                    f"Claude persona selection '{selected_agent}' has multiple delivered native identities"
-                )
             selected_agent = next(iter(delivered), selected_agent)
             parts += ["--agent", shlex.quote(selected_agent)]
         if self.config.append_system_prompt is not None:

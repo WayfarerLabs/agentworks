@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from dataclasses import replace
 from importlib import import_module
 from unittest.mock import Mock
@@ -155,3 +156,50 @@ def test_deferring_a_renamed_existing_entry_exposes_its_other_native_collision(d
     assert {item.input_id for item in result.deferred} == {renamed.identity, competing.identity}
     assert {origin for file in result.files for origin in file.origins} == {independent.origin_identity}
     assert incomplete.called
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux guest native probe")
+def test_real_workspace_setup_defers_generated_helper_and_authored_skill_identity_collision(db, tmp_path):
+    from agentworks.artifacts.capture import content_from_members
+    from agentworks.artifacts.model import ArtifactMember
+    from agentworks.artifacts.publication import validate_application
+    from agentworks.plugins.codex.artifacts import outer_artifacts
+    from tests.native_setup_fixtures import LocalFixtureTransport
+
+    target = LocalFixtureTransport(tmp_path / "guest")
+    login = target.root / "login-shell"
+    login.write_text(
+        login.read_text().replace('[ "$1" = "-lc" ] || exit 9', 'case "$1" in -lc|-lic) ;; *) exit 9 ;; esac')
+    )
+    workspace = target.home / "project"
+    workspace.mkdir()
+    rule = artifact(ArtifactType.RULE)
+    generated = outer_artifacts(received(rule), skills_root="/skills", agents_root="/agents").files[0]
+    assert generated.native_identity is not None
+    name = generated.native_identity.removeprefix("skill:")
+    body = f"---\nname: {name}\ndescription: Fixture procedure\n---\nProcedure body.\n".encode()
+    skill = replace(
+        artifact(ArtifactType.SKILL, name=name),
+        content=content_from_members(ArtifactType.SKILL, name, (ArtifactMember("SKILL.md", body, text=True),), name),
+    )
+    hint = artifact(ArtifactType.HINT, name="independent")
+    inputs = received(rule, skill, hint)
+    incomplete: list[str] = []
+    invocation = WorkspaceSetupInvocation(
+        vm=db.insert_vm("vm", "site", "host"),
+        runner=target,
+        prior=None,
+        checkpoint=lambda claims: None,
+        report_incomplete=incomplete.append,
+        artifacts=inputs,
+        workspace_name="ws",
+        root=str(workspace),
+        linux_group="",
+    )
+    integration = CodexIntegration.for_setup(owner_kind="workspace", owner_name="ws", facet="workspace", config={})
+    result = integration.workspace_init(invocation)
+    assert {item.input_id for item in result.deferred} == {rule.identity, skill.identity}
+    assert all(item.destination == "session" for item in result.deferred)
+    assert {origin for file in result.files for origin in file.origins} == {hint.origin_identity}
+    assert incomplete and target.commands
+    validate_application(result, inputs, "workspace", integration="codex")

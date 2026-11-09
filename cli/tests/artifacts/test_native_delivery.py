@@ -27,7 +27,7 @@ from agentworks.artifacts.model import (
 )
 from agentworks.artifacts.native.common import NativeSessionArtifacts, native_home, validate_ancestor_names
 from agentworks.artifacts.native.probe import NativeArtifactConflictError, probe_native
-from agentworks.artifacts.native.shell import shell_artifacts
+from agentworks.artifacts.native.shell import filesystem_artifacts
 from agentworks.artifacts.publication import validate_application
 from agentworks.artifacts.session import validate_session_application
 from agentworks.capabilities.base import RunContext
@@ -120,15 +120,15 @@ def test_rules_are_unconditional_and_hints_do_not_collide_with_named_rule(render
 
 def test_shell_index_has_only_this_run_inputs_and_private_relative_paths():
     item = artifact(ArtifactType.SKILL)
-    result = shell_artifacts(received(item), "/private/run", session=True)
+    result = filesystem_artifacts(received(item), "/private/run", session=True)
     index = json.loads(next(file.data for file in result.files if file.path.endswith("/index.json")))
     assert index["groups"][0]["skills"]["review"]["files"] == [
         f"scopes/session/s1/skills/review/{member.path}" for member in item.content.members
     ]
     assert index["groups"][0]["skills"]["review"]["origin"]["resource_name"] == "s1"
     assert result.artifacts_dir == "/private/run"
-    assert shell_artifacts(received(item), "/outer").artifacts_dir is None
-    assert shell_artifacts(received(), "/private/run", session=True) == ArtifactApplication()
+    assert filesystem_artifacts(received(item), "/outer").artifacts_dir is None
+    assert filesystem_artifacts(received(), "/private/run", session=True) == ArtifactApplication()
 
 
 @pytest.mark.parametrize(
@@ -149,7 +149,7 @@ def test_outer_facet_cannot_supply_a_session_artifact_directory(facet):
 
 def test_session_artifact_directory_is_bound_to_the_prepared_run():
     prepared = context(artifact(ArtifactType.HINT))
-    application = shell_artifacts(prepared.inputs, prepared.directory, session=True)
+    application = filesystem_artifacts(prepared.inputs, prepared.directory, session=True)
     assert validate_session_application(application, prepared, integration="shell") is application
     for directory in ("/outside", prepared.directory + "/nested", prepared.directory + "-other"):
         with pytest.raises(StateError):
@@ -566,7 +566,7 @@ def test_shell_index_preserves_declared_key_order_with_fixed_type_order():
         artifact(ArtifactType.HINT, name="zebra"),
         artifact(ArtifactType.HINT, name="alpha"),
     )
-    application = shell_artifacts(inputs, "/private", session=True)
+    application = filesystem_artifacts(inputs, "/private", session=True)
     index = json.loads(next(file.data for file in application.files if file.path.endswith("/index.json")))
     owner = index["groups"][0]
     assert list(owner) == ["owner", "hints", "rules", "skills", "agents"]

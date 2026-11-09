@@ -72,6 +72,3 @@ def filesystem_artifacts(
             )
         )
     return ArtifactApplication(tuple(files), artifacts_dir=root if session and inputs else None)
-
-
-shell_artifacts = filesystem_artifacts

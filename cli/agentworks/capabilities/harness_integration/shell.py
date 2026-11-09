@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, ClassVar
 from pydantic import Field
 
 from agentworks.artifacts.application import ArtifactApplication
-from agentworks.artifacts.native.shell import shell_artifacts
+from agentworks.artifacts.native.shell import filesystem_artifacts
 from agentworks.capabilities.base import ScopeLevel
 from agentworks.capabilities.harness_integration.base import (
     HarnessIntegration,
@@ -111,21 +111,21 @@ class ShellIntegration(HarnessIntegration):
         return (
             ArtifactApplication()
             if self.retiring
-            else shell_artifacts(invocation.artifacts, "/opt/agentworks/artifacts")
+            else filesystem_artifacts(invocation.artifacts, "/opt/agentworks/artifacts")
         )
 
     def user_init(self, invocation: UserSetupInvocation) -> ArtifactApplication:
         return (
             ArtifactApplication()
             if self.retiring
-            else shell_artifacts(invocation.artifacts, f"{invocation.home}/.agentworks-artifacts/user")
+            else filesystem_artifacts(invocation.artifacts, f"{invocation.home}/.agentworks-artifacts/user")
         )
 
     def workspace_init(self, invocation: WorkspaceSetupInvocation) -> ArtifactApplication:
         return (
             ArtifactApplication()
             if self.retiring
-            else shell_artifacts(invocation.artifacts, f"{invocation.root}/.agentworks-artifacts")
+            else filesystem_artifacts(invocation.artifacts, f"{invocation.root}/.agentworks-artifacts")
         )
 
     @property
@@ -171,7 +171,7 @@ class ShellIntegration(HarnessIntegration):
         context = self._session_binding.artifact_context
         application = ArtifactApplication()
         if context:
-            application = shell_artifacts(context.inputs, context.directory, session=True)
+            application = filesystem_artifacts(context.inputs, context.directory, session=True)
         return HarnessStart(command, artifacts=application)
 
     def _probe_target(self, transport: Transport) -> None:

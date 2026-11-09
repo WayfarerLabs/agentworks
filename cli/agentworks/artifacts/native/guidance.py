@@ -63,7 +63,7 @@ def _condition(context: SessionArtifactContext) -> str:
 def guidance_skills(
     root: str, inputs: ArtifactInputs, *, context: SessionArtifactContext | None = None, namespace: str = ""
 ) -> tuple[ArtifactFile, ...]:
-    files = []
+    files: list[ArtifactFile] = []
     for items in guidance_entries(inputs):
         first = items[0]
         name = _guidance_name(items) if context is None else _session_name(items, context)

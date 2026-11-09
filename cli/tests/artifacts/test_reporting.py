@@ -69,12 +69,13 @@ def test_deferrals_keep_routes_reasons_and_duplicate_owner_names(monkeypatch):
     assert all(value in messages[1] for value in ("1", third.content.name, routes[2].reason, routes[2].destination))
 
 
-def test_aggregate_file_reports_each_artifact_type(monkeypatch):
+def test_guidance_packages_report_each_artifact_type(monkeypatch):
     rule = artifact(ArtifactType.RULE, name="policy")
     hint = replace(rule, content=replace(rule.content, type=ArtifactType.HINT))
     inputs = received(rule, hint)
     rendered = codex.outer_artifacts(inputs, skills_root="/skills", agents_root="/agents")
-    assert len(rendered.files) == 2 and all(len(file.origins) == 1 for file in rendered.files)
+    assert len({file.native_identity for file in rendered.files}) == 2
+    assert all(len(file.origins) == 1 for file in rendered.files)
     messages: list[str] = []
     monkeypatch.setattr(output, "info", messages.append)
     report_applied(inputs, integration="native", owner="user", deferred=rendered.deferred)
