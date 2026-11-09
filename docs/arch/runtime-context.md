@@ -47,18 +47,20 @@ because the last two dollar signs start the namespace escape.
 Rendering takes one pass. Namespace-looking text in a replacement value is not interpreted again.
 There are no expressions, filters, ambient lookups, or references between env entries.
 
-Shell's `command` and `resume_command` temporarily also accept `{{session_name}}` and
-`{{workspace_name}}`. They mean `${agw:session_name}` and `${agw:workspace_name}` respectively. Only
-these two exact aliases are recognized; other brace text remains literal. Both syntaxes render in
-one pass, so inserted values containing either syntax are not scanned again. A dollar before an old
-token remains a literal dollar followed by its replacement.
+Shell's `command` and `resume_command`, and winning session-scope plaintext env values, temporarily
+also accept `{{session_name}}` and `{{workspace_name}}`. They mean `${agw:session_name}` and
+`${agw:workspace_name}` respectively. Only these two exact aliases are recognized; other brace text
+remains literal. Both syntaxes render in one pass, so inserted values containing either syntax are
+not scanned again. A dollar before an old token remains a literal dollar followed by its
+replacement.
 
-These Shell aliases are deprecated through CLI 0.20.x and 0.21.x, with deliberate removal planned
-for 0.22.0 in [issue #878](https://github.com/WayfarerLabs/agentworks/issues/878). Affected launches
-warn once per CLI request; `--no-deprecations` suppresses that notice. `agw doctor` reports affected
-effective templates and stored session overrides even when ambient warnings are suppressed. Env
-values and native integration arguments use only the namespaced syntax. See the
-[compatibility and deprecation pattern](deprecations.md).
+These aliases remain supported throughout CLI 1.x, with deliberate removal planned for 2.0.0 in
+[issue #878](https://github.com/WayfarerLabs/agentworks/issues/878). Affected operations warn once
+per CLI request; `--no-deprecations` suppresses that notice. `agw doctor` reports affected effective
+session templates and stored session overrides even when ambient warnings are suppressed. Session
+env compatibility applies to every integration; other env scopes and native integration arguments
+use only the namespaced syntax. Secrets and losing or identity-discarded entries bypass the alias
+renderer. See the [compatibility and deprecation pattern](deprecations.md).
 
 ## Scope, lifecycle, and inspection
 
@@ -165,8 +167,8 @@ context is available. Treat env strings, argv elements, and shell source as diff
 quote argv elements once if they must be serialized into shell source. Each integration owns the
 rendering of its declared template fields; returned command strings are ready for execution and
 receive no further interpolation. No consumer may reinterpret secret contents as expressions. Shell
-alone supplies its temporary exact-token alias map to the renderer; new consumers use the default
-namespaced grammar.
+command fields and winning session-scope plaintext env entries opt into the temporary exact-token
+alias map. New consumers use the default namespaced grammar.
 
 See the [CLI session-template reference](../../cli/command-reference.md#session-templates) for the
 shell integration configuration.

@@ -60,9 +60,10 @@ contract it relies on (validate / construct / preflight / runup / ops) is docume
 > Note (2026-11-09): runtime context uses `${agw:NAME}`. Each integration renders its declared
 > template fields before returning its command; core does not interpolate the returned string. Shell
 > checks its selected command during preflight, before workload/env secret resolution and
-> destructive replacement. Its two released brace placeholders remain temporary deprecated aliases
-> under the [runtime context contract](../arch/runtime-context.md). This supersedes the earlier
-> postprocessing and post-kill rendering description below.
+> destructive replacement. Shell fields and session-scope plaintext env retain the two released
+> brace placeholders as deprecated aliases under the
+> [runtime context contract](../arch/runtime-context.md). This supersedes the earlier postprocessing
+> and post-kill rendering description below.
 
 ## Context
 

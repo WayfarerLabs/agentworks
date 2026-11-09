@@ -366,8 +366,9 @@ spec:
   references, including `${agw:session_name}` and `${agw:workspace_dir}`. Native extra arguments
   render before shell quoting; prompt, profile, and model fields remain literal. See the
   [runtime context reference](../arch/runtime-context.md) for names, availability, and quoting.
-  Shell temporarily accepts two deprecated brace aliases; the reference documents their replacements
-  and removal release. Use the namespaced form in new definitions.
+  Shell command fields and session-scope plaintext env temporarily accept two deprecated brace
+  aliases; the reference documents their replacements and removal release. Use the namespaced form
+  in new definitions.
 - The integration-plus-config pair inherits as a unit. A child restating the same integration uses
   that integration's config model to merge with the parent: objects and mappings recursively merge
   by key, lists append unequal items and deduplicate equal items, and incoming scalars replace prior

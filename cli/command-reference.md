@@ -1177,12 +1177,13 @@ spec:
 strings support context substitution such as `${agw:session_name}`, `${agw:workspace_name}`, and
 `${agw:user_home_dir}`. The namespaced syntax keeps shell variables and Go templates available to
 their own consumers. For existing Shell configurations, `{{session_name}}` and `{{workspace_name}}`
-remain accepted in `command` and `resume_command` through CLI 0.21.x, with removal planned for
-0.22.0. Replace them with `${agw:session_name}` and `${agw:workspace_name}`. Launches emit a
-suppressible deprecation notice; `agw doctor` also identifies affected effective templates and
-stored session overrides. Other brace text remains literal. The executables an integration requires
-are checked on the session's launch target before state mutation, so a missing tool fails with an
-actionable error.
+remain accepted in `command` and `resume_command` throughout CLI 1.x, with removal planned for
+2.0.0. They also remain accepted in winning session-scope plaintext env values for every
+integration. Replace them with `${agw:session_name}` and `${agw:workspace_name}`. Affected
+operations emit one suppressible deprecation notice; `agw doctor` also identifies affected effective
+templates and stored session overrides. Other brace text remains literal. The executables an
+integration requires are checked on the session's launch target before state mutation, so a missing
+tool fails with an actionable error.
 
 See [runtime context and interpolation](../docs/arch/runtime-context.md) for the complete
 vocabulary, literal escaping, env precedence, and command quoting rules.
