@@ -83,8 +83,13 @@ def _restore_handlers(previous: dict[int, _Handler]) -> None:
     the others.
     """
     order = sorted(previous, key=lambda number: number == signal.SIGINT)
-    mask = signal.pthread_sigmask(signal.SIG_BLOCK, _INTERRUPTS) if hasattr(signal, "pthread_sigmask") else None
+    # Read the mask before blocking: CPython runs pending handlers inside
+    # pthread_sigmask itself, so the blocking call can raise and must already
+    # be inside the try that puts the mask back.
+    mask = signal.pthread_sigmask(signal.SIG_BLOCK, []) if hasattr(signal, "pthread_sigmask") else None
     try:
+        if mask is not None:
+            signal.pthread_sigmask(signal.SIG_BLOCK, _INTERRUPTS)
         for number in order:
             signal.signal(number, previous[number])
     finally:
