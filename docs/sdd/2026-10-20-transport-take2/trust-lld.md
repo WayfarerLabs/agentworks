@@ -93,8 +93,8 @@ policy ignores configuration.
   state the operator must fix, not an unreachable VM, so no best-effort `except SSHError` handler
   swallows it: otherwise `agent delete` and `workspace delete` would delete their rows and orphan
   the VM-side account and workspace. A loop that reports per VM across several VMs reports it for
-  that VM instead of aborting, and `vm delete`'s best-effort teardown carries on as it does for any
-  failure. `trust.py` imports nothing legacy.
+  that VM instead of aborting, and `vm delete`'s best-effort logout reports it and carries on as it
+  does for any failure. `trust.py` imports nothing legacy.
 - **Preflight.** `require_vm_ssh_boundary` (`vms/manager/boundary.py:64`), the SSH precondition the
   session, agent and workspace commands already run before the gate and any secret, checks the
   record, so those commands refuse before any prompt or best-effort step. Backup checks it before it
@@ -177,14 +177,16 @@ operator confirms what it reads against the VM's console before anything is reco
      provisioning file is removed when the platform's `create` returns or raises.
 - **A create that fails before enrolling** is kept as failed (`lifecycle.py:595-606`), and its
   remedy is delete and recreate: `agw vm recover` refuses a VM whose provisioning failed.
-- **Delete.** `trust.remove(vm_name)` runs after the row is deleted (`power.py:336`), and even when
-  the following `sync_ssh_config` fails, so the store file goes whenever the row goes and a failure
-  in between never leaves a live row without its record. It runs on the path that skips backend
-  cleanup after a binding failure (`power.py:245-256`), and not when `platform.delete` raises, which
-  keeps the row. Logout and session teardown (279-301) still have the store. A cloud VM with no
+- **Delete.** `trust.remove(vm_name)` runs after the row is deleted (`delete_vm`,
+  `vms/manager/power.py`), and even when the following `sync_ssh_config` fails, so the store file
+  goes whenever the row goes and a failure in between never leaves a live row without its record.
+  Without `--force`, a binding failure or a `platform.delete` that raises keeps both the row and the
+  record; with it, both go whatever kept the backend delete from completing. The logout, the only
+  step before the provider delete that reaches the VM, still has the store. A cloud VM with no
   record is not logged out of Tailscale: its `run_as_root` raises `TrustMissing` before any route
-  opens, and delete never logs out under Unverified trust. Delete warns naming the node and carries
-  on, and the upgrade guide says to import first or remove the node in the admin console.
+  opens, and delete never logs out under Unverified trust. Delete names the node for removal in the
+  admin console when the row goes and carries on, and the upgrade guide says to import first or
+  remove the node in the admin console.
 - **Rekey and address changes** need nothing: the alias, not the address, keys the record.
 - **Stop and start** need nothing: the key persists on the guest (incident row I9).
 

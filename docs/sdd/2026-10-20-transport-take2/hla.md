@@ -106,8 +106,9 @@ directory.
 - **Windows 10.** Its inbox client is 8.1 (measured, per the salvage message), so a Windows 10
   workstation needs the MSI install. The refusal says so.
 - **Doctor.** `agw doctor` reports this resolver's verdict beside its existing `PATH` presence rows
-  for `ssh`, `scp` and `tailscale`. The legacy paths still run bare `ssh` and `scp`, so the `ssh`
-  and `scp` rows stay until the last legacy user goes (slice 7 or 8).
+  for `ssh`, `scp` and `tailscale`. The legacy paths still find `ssh` and `scp` along `PATH`
+  (absolute elements only, `programs.resolve_program`), so the `ssh` and `scp` rows stay until the
+  last legacy user goes (slice 7 or 8).
 
 ### D2. Policies and request delivery (R4, R8)
 
@@ -651,31 +652,38 @@ The channels' details are in [platform-lld.md](./platform-lld.md).
   price is that an operator's `ssh_config` stanza for a cloud address no longer applies to recovery
   and provisioning. agw-launch is not involved, so a VM without python3 can still be recovered.
 - **Core's recovery scripts** live in `vms/recovery.py`:
-  - **Repair** restores the admin's authorized key, installs python3 when the interpreter agw-launch
-    runs does not start, repairs sshd (unmask, enable, configuration test, restart) on every
-    platform, and joins Tailscale only when the node reports `NeedsLogin`. Only `agw vm recover`
-    runs it. Starting a VM, by `vm start` (`vms/manager/power.py:83-112`) or by the activation gate
-    (`LiveVMNode.auto_start`, `vms/nodes.py:232-273`), starts it and waits for it to answer over
-    SSH; when it does not, the start fails with a hint naming `agw vm recover`, as the operator
-    ruled on 2026-10-31 and 2026-11-01. Both starts' rejoin code goes, and with it the secret
-    resolution that exists only for it: `vm start`'s conditional auth-key read, and the gate's lazy
-    repair-secret protocol, `GateTarget.repair_secret_refs` and `_GateSecrets`
-    (`orchestration/activation.py:96-202`), `vms/nodes.py:186-205` and
+  - **Repair** rewrites the admin's managed `authorized_keys` as reinit does, so a key the
+    configured one replaced stops working, installs python3 when the interpreter agw-launch runs
+    does not start, repairs sshd (unmask, enable, configuration test, clearing a crash loop's failed
+    state, restart) on every platform, and joins Tailscale only when the node reports `NeedsLogin`.
+    Only `agw vm recover` runs it. Starting a VM, by `vm start` (`vms/manager/power.py:83-112`) or
+    by the activation gate (`LiveVMNode.auto_start`, `vms/nodes.py:232-273`), starts it and waits
+    for it to answer over SSH; when it does not, the start fails with a hint naming
+    `agw vm recover`, as the operator ruled on 2026-10-31 and 2026-11-01. Both starts' rejoin code
+    goes, and with it the secret resolution that exists only for it: `vm start`'s conditional
+    auth-key read, and the gate's lazy repair-secret protocol, `GateTarget.repair_secret_refs` and
+    `_GateSecrets` (`orchestration/activation.py:96-202`), `vms/nodes.py:186-205` and
     `sessions/manager/_scope.py:366-433`. A VM whose ephemeral-key node was removed while it was
     offline therefore fails `vm start` with that hint, and `agw vm recover` rejoins it in one step;
     the operator ruled to document this rather than detect it.
   - **Rekey** is `vm rekey`: one script that restarts `tailscaled`, logs out, joins and restarts
     again, then the address settle and a wait over SSH.
-  - **Logout** runs at delete. Its result is the script's own status, or unknown if the connection
-    drops first. A cloud VM with no store record is not logged out, since delete never logs out
-    under Unverified trust; it warns naming the node.
+  - **Logout** runs at delete (the operator's 2026-11-08 ruling), after the checks that can refuse
+    and the site binding, and before the provider delete, best effort inside a hold that never
+    gates. Its result is the script's own status, or unknown if the connection drops first. A cloud
+    VM with no store record is not logged out, since delete never logs out under Unverified trust,
+    nor is a guest the platform cannot confirm is the VM's; a node not logged out is named for the
+    admin console once the row goes. A delete that fails after a logout keeps the row, and its hint
+    leads with finishing the delete, naming `vm rekey` only as the way back onto Tailscale.
 - **The operator entry point** is the new `agw vm recover <vm>`. It refuses a VM whose provisioning
   failed or whose power state the platform cannot report, starts a stopped VM itself, and resolves
   the auth key in its boundary. It first offers host-key re-establishment (D9) when the VM has no
   store record, since every other step needs trust. It then runs the repair, reads the address
-  (settling, with its logout on exhaustion, only when the repair joined), and waits once over SSH.
-  When the channel needs the guest's sshd and sshd is broken, or recovery fails, it stops and tells
-  the operator to repair or recreate the machine (R7).
+  (settling, with its logout on exhaustion, only when the repair joined), syncs the SSH config,
+  whose aliases name the configured key, and waits once over SSH. It then names any agent accounts,
+  which keep their previous key until `agw agent reinit`. When the channel needs the guest's sshd
+  and sshd is broken, or recovery fails, it stops and tells the operator to repair the machine (the
+  platform's native shell when the repair ran, its console otherwise) or recreate it (R7).
 - **Debian attestation at create** moves from the native transport to the base checks (D10). The
   Phase A `tailscale ip -4` fallback goes away with the required `tailnet_address` (R10).
 
@@ -811,43 +819,43 @@ the plan. Rows I1 to I3 come from the transport-improv migration strategy, and t
 scouting. The seed is not exhaustive, so each slice audits the entry points it moves (their ADRs,
 linked issues and fix history) and adds rows before anything is deleted.
 
-| Row | Behavior                                                                                                                                                                                                                                           | Re-proved in |
-| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
-| I1  | Closed stdin instead of a forced TTY on Windows (ADR 0020)                                                                                                                                                                                         | 2            |
-| I2  | Byte-exact stdin on Windows (text-mode rewrite)                                                                                                                                                                                                    | 2            |
-| I3  | Guest mechanics tested on real targets, not Git for Windows tools                                                                                                                                                                                  | 2            |
-| I4  | Sensitive input refused with a forced TTY; value-free errors                                                                                                                                                                                       | 2            |
-| I5  | The `--` fence for dash-led commands: inherent in a literal argv, and in `vm exec`'s shell-joined form because the line is delivered as a script file, never as a shell argument                                                                   | 2            |
-| I6  | The attach notice after the terminal guard                                                                                                                                                                                                         | 2            |
-| I6a | Console recovery after a killed `ssh -t`                                                                                                                                                                                                           | 7            |
-| I7  | Keepalives on long-lived paths                                                                                                                                                                                                                     | 2            |
-| I8  | `nohup` outside `sudo` is replaced by whole-operation elevation plus `setsid`; the output-capturing brace group is kept                                                                                                                            | 7            |
-| I9  | Host-key preservation across stop and start                                                                                                                                                                                                        | 1            |
-| I10 | Provisioning's first Tailscale join sends the auth key once, out of command lines, logs, exceptions and retained provisioning artifacts (`bootstrap_script.py:262-265`, `lima.py:181-183`, `tailscale_join.py:22-48`, `wsl2_bootstrap.py:100-120`) | 4            |
-| I11 | A bash child of the payload reads no account startup file (measured in the integration report on #856: Debian bash sources `~/.bashrc` when `SSH_CLIENT` is set)                                                                                   | 2            |
-| I12 | No connection sharing: no `ControlMaster`, since a shared master keeps stale supplementary groups and PAM state (ADR 0015; `execution/carriers/ssh/connection.py:140-141` at `fd1256b1f`)                                                          | 2            |
-| I13 | The operator's identity file passed explicitly on every VM connection, for keys with non-default names on Windows (`3b8413291`; `transports/__init__.py:97`)                                                                                       | 2            |
-| I14 | `-T` on every non-terminal run, so an operator's `RequestTTY force` never injects a pseudo-terminal (`584ac5f6e`, `e9eb9565a`; `transports/ssh.py:186-192`, `:443`)                                                                                | 2            |
-| I15 | The reconnect wait: bounded at about 240 s, with a second probe confirming a success that follows a failed attempt, with closed wording (#251; `transports/__init__.py:241`, `:272-309`)                                                           | 3            |
-| I16 | A failed or interrupted Phase A secures the VM before the error propagates (`vms/initializer/driver.py:188`, `:206`)                                                                                                                               | 3            |
-| I17 | Azure's network propagation: the provisioning probe retries and shows the platform's hint before the error (`eb99a3f99`, `17f5c92c8`; `transports/__init__.py:223-237`)                                                                            | 4            |
-| I18 | A backend delete that runs and fails keeps the VM's row and its store record; one that cannot run because the site no longer binds drops the row with a warning naming what may remain (#329; `vms/manager/power.py`)                              | 4            |
-| I19 | The agent probe tells an unreachable VM from an agent that predates the rollout (ADR 0011; `agents/manager/_common.py:237-286`)                                                                                                                    | 2, 6         |
-| I20 | Backup's download stops the copy and removes the partial file on Ctrl-C (`97e11a168`; `vms/backup.py:504-505`)                                                                                                                                     | 7            |
-| I21 | The local terminal is sanitized on entry and restored on exit after a dropped or killed attach (`897248ead`, `80c813db4`)                                                                                                                          | 2            |
-| I22 | An operator interrupt during Phase A still closes the kept VM's provisioning access before it propagates (`vms/initializer/driver.py:193-210`)                                                                                                     | 3            |
-| I23 | A first connection that left no key makes create fail where the cause is known (`vms/initializer/driver.py:438-445`)                                                                                                                               | 3            |
-| I24 | The auth key is joined exactly once: a failed address read never causes a second join, and now logs the node out (`tailscale_join.py:65-71`, `7307e2f60`)                                                                                          | 3            |
-| I25 | The platform's availability hold spans Phase A and Phase B (WSL2 idle shutdown) (`vms/manager/lifecycle.py:643`)                                                                                                                                   | 3            |
-| I26 | A release the guest reports is attested by core, never taken from the platform; an unattested or mismatched VM is retained unattested and gated, with delete guidance, never recorded (`93aca2cfb`, `vms/manager/lifecycle.py:599-626`)            | 3            |
-| I27 | Ordinary operations refuse live release drift; adoption is the explicit `confirm-release` (`vms/manager/release.py:28-35`)                                                                                                                         | 3            |
-| I28 | A log's redaction set is complete before its first write, and no secret is retained in raw or shell-quoted form (`a38e49489`, `ssh.py:127-137`)                                                                                                    | 3            |
-| I29 | Rekey restarts `tailscaled` before the logout and after the join, with 15-second pauses, because a stale daemon hangs the logout and a rekeyed node can be unreachable (`cdd7a0045`, `vms/manager/power.py:489-518`)                               | 4            |
-| I30 | Over an SSH channel, a logout or rekey whose channel drops mid-command still finishes on the guest (`21bb259f9`, `fae1d7dd2`; `vms/manager/tailscale.py:177-181`)                                                                                  | 4            |
-| I31 | A Tailscale key never reaches an operation log in clear; the rejoin refused any logger (`vms/manager/tailscale.py:108-118`), and recover's and rekey's loggers register the key before their first write                                           | 4            |
-| I32 | A cloud VM whose provider reports no public address fails with a typed error naming the console, not a connection to an empty host (#118; `transports/__init__.py:215-228`)                                                                        | 4            |
-| I33 | A failing logout never skips the backend delete, and an operator abort still keeps the row (#329; `vms/manager/power.py:268-310`)                                                                                                                  | 4            |
-| I34 | WSL2's bootstrap runs with no controlling terminal, so `dpkg` cannot stop apt with `SIGTTIN` (`1ae933a88`; `wsl2_bootstrap.py:131`)                                                                                                                | 4            |
+| Row | Behavior                                                                                                                                                                                                                                                                                                              | Re-proved in |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
+| I1  | Closed stdin instead of a forced TTY on Windows (ADR 0020)                                                                                                                                                                                                                                                            | 2            |
+| I2  | Byte-exact stdin on Windows (text-mode rewrite)                                                                                                                                                                                                                                                                       | 2            |
+| I3  | Guest mechanics tested on real targets, not Git for Windows tools                                                                                                                                                                                                                                                     | 2            |
+| I4  | Sensitive input refused with a forced TTY; value-free errors                                                                                                                                                                                                                                                          | 2            |
+| I5  | The `--` fence for dash-led commands: inherent in a literal argv, and in `vm exec`'s shell-joined form because the line is delivered as a script file, never as a shell argument                                                                                                                                      | 2            |
+| I6  | The attach notice after the terminal guard                                                                                                                                                                                                                                                                            | 2            |
+| I6a | Console recovery after a killed `ssh -t`                                                                                                                                                                                                                                                                              | 7            |
+| I7  | Keepalives on long-lived paths                                                                                                                                                                                                                                                                                        | 2            |
+| I8  | `nohup` outside `sudo` is replaced by whole-operation elevation plus `setsid`; the output-capturing brace group is kept                                                                                                                                                                                               | 7            |
+| I9  | Host-key preservation across stop and start                                                                                                                                                                                                                                                                           | 1            |
+| I10 | Provisioning's first Tailscale join sends the auth key once, out of command lines, logs, exceptions and retained provisioning artifacts (`bootstrap_script.py:262-265`, `lima.py:181-183`, `tailscale_join.py:22-48`, `wsl2_bootstrap.py:100-120`)                                                                    | 4            |
+| I11 | A bash child of the payload reads no account startup file (measured in the integration report on #856: Debian bash sources `~/.bashrc` when `SSH_CLIENT` is set)                                                                                                                                                      | 2            |
+| I12 | No connection sharing: no `ControlMaster`, since a shared master keeps stale supplementary groups and PAM state (ADR 0015; `execution/carriers/ssh/connection.py:140-141` at `fd1256b1f`)                                                                                                                             | 2            |
+| I13 | The operator's identity file passed explicitly on every VM connection, for keys with non-default names on Windows (`3b8413291`; `transports/__init__.py:97`)                                                                                                                                                          | 2            |
+| I14 | `-T` on every non-terminal run, so an operator's `RequestTTY force` never injects a pseudo-terminal (`584ac5f6e`, `e9eb9565a`; `transports/ssh.py:186-192`, `:443`)                                                                                                                                                   | 2            |
+| I15 | The reconnect wait: bounded at about 240 s, with a second probe confirming a success that follows a failed attempt, with closed wording (#251; `transports/__init__.py:241`, `:272-309`)                                                                                                                              | 3            |
+| I16 | A failed or interrupted Phase A secures the VM before the error propagates (`vms/initializer/driver.py:188`, `:206`)                                                                                                                                                                                                  | 3            |
+| I17 | Azure's network propagation: the provisioning probe retries and shows the platform's hint before the error (`eb99a3f99`, `17f5c92c8`; `transports/__init__.py:223-237`)                                                                                                                                               | 4            |
+| I18 | A backend delete that cannot run (the site no longer binds) or runs and fails keeps the VM's row and its store record, naming the backend identifiers the row holds; `vm delete --force` removes them whatever kept the backend delete from completing, warning with those identifiers (#329; `vms/manager/power.py`) | 4            |
+| I19 | The agent probe tells an unreachable VM from an agent that predates the rollout (ADR 0011; `agents/manager/_common.py:237-286`)                                                                                                                                                                                       | 2, 6         |
+| I20 | Backup's download stops the copy and removes the partial file on Ctrl-C (`97e11a168`; `vms/backup.py:504-505`)                                                                                                                                                                                                        | 7            |
+| I21 | The local terminal is sanitized on entry and restored on exit after a dropped or killed attach (`897248ead`, `80c813db4`)                                                                                                                                                                                             | 2            |
+| I22 | An operator interrupt during Phase A still closes the kept VM's provisioning access before it propagates (`vms/initializer/driver.py:193-210`)                                                                                                                                                                        | 3            |
+| I23 | A first connection that left no key makes create fail where the cause is known (`vms/initializer/driver.py:438-445`)                                                                                                                                                                                                  | 3            |
+| I24 | The auth key is joined exactly once: a failed address read never causes a second join, and now logs the node out (`tailscale_join.py:65-71`, `7307e2f60`)                                                                                                                                                             | 3            |
+| I25 | The platform's availability hold spans Phase A and Phase B (WSL2 idle shutdown) (`vms/manager/lifecycle.py:643`)                                                                                                                                                                                                      | 3            |
+| I26 | A release the guest reports is attested by core, never taken from the platform; an unattested or mismatched VM is retained unattested and gated, with delete guidance, never recorded (`93aca2cfb`, `vms/manager/lifecycle.py:599-626`)                                                                               | 3            |
+| I27 | Ordinary operations refuse live release drift; adoption is the explicit `confirm-release` (`vms/manager/release.py:28-35`)                                                                                                                                                                                            | 3            |
+| I28 | A log's redaction set is complete before its first write, and no secret is retained in raw or shell-quoted form (`a38e49489`, `ssh.py:127-137`)                                                                                                                                                                       | 3            |
+| I29 | Rekey restarts `tailscaled` before the logout and after the join, with 15-second pauses, because a stale daemon hangs the logout and a rekeyed node can be unreachable (`cdd7a0045`, `vms/manager/power.py:489-518`)                                                                                                  | 4            |
+| I30 | Over an SSH channel, a logout or rekey whose channel drops mid-command still finishes on the guest (`21bb259f9`, `fae1d7dd2`; `vms/manager/tailscale.py:177-181`)                                                                                                                                                     | 4            |
+| I31 | A Tailscale key never reaches an operation log in clear; the rejoin refused any logger (`vms/manager/tailscale.py:108-118`), and recover's and rekey's loggers register the key before their first write                                                                                                              | 4            |
+| I32 | A cloud VM whose provider reports no public address fails with a typed error naming the console, not a connection to an empty host (#118; `transports/__init__.py:215-228`)                                                                                                                                           | 4            |
+| I33 | A failing logout never skips the backend delete, and an operator abort still keeps the row (#329; `vms/manager/power.py:268-310`)                                                                                                                                                                                     | 4            |
+| I34 | WSL2's bootstrap runs with no controlling terminal, so `dpkg` cannot stop apt with `SIGTTIN` (`1ae933a88`; `wsl2_bootstrap.py:131`)                                                                                                                                                                                   | 4            |
 
 Rows I29 to I34 cite `60d347220`, the platform LLD's baseline.
 

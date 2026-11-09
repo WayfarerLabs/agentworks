@@ -353,13 +353,18 @@ SSH-config sync (non-fatal, as today) and Phase B's `SSHTransport(..., trust=VM,
 
 Any `Exception` in steps 1 to 5's span takes the existing arm: provisioning `FAILED`, the
 `provisioning_failed` event, the log pointer, re-raise (`driver.py:175-192`). However the span ends,
-its `finally` then calls `platform.close_provisioning_access` once, on the re-read row with the
-create's context (a hook failure warns and replaces nothing), so the clouds' bootstrap allow closes
-after a contract that passed, a failure, and an interrupt anywhere in the span, including one that
-lands just after the `COMPLETE` write. The hook replaces version 1's two, `post_tailscale_ready` on
-success and `secure_failed_vm` on failure, which every cloud implemented identically. The
-provisioning event's detail was the native transport's description (`exec_target.describe()`,
-`driver.py:149`); it becomes `ssh ADDRESS`.
+its `finally` then closes the provisioning access once, on the re-read row with the create's
+context, through `close_provisioning_access_or_warn` (`capabilities/vm_platform/base.py`), so the
+clouds' bootstrap allow closes after a contract that passed, a failure, and an interrupt anywhere in
+the span, including one that lands just after the `COMPLETE` write. The row's read and the close run
+under `interrupts.interrupts_deferred`, so an interrupt that lands during them waits for the
+provider call and is raised after it. A failing close warns, naming what the platform says stays
+open and the command that finishes the close (`agw vm recover` on a `COMPLETE` row, `agw vm delete`
+otherwise), and replaces nothing. The clouds' root channel calls the same helper after each route,
+so any later root-channel operation removes an allow this close left. The hook replaces version 1's
+two, `post_tailscale_ready` on success and `secure_failed_vm` on failure, which every cloud
+implemented identically. The provisioning event's detail was the native transport's description
+(`exec_target.describe()`, `driver.py:149`); it becomes `ssh ADDRESS`.
 
 **Status and interrupts.** `COMPLETE` is now written after the contract passes, not before the first
 connection (`driver.py:396-404`). An interrupt that lands before then finds the row `PENDING` or
@@ -617,11 +622,11 @@ None restates the implementation or our prose.
   release mismatch and a base failure marks `FAILED`, records `provisioning_failed`, closes the
   provisioning access once and leaves the process raising; **an interrupt before the contract passes
   closes the access and leaves the VM gated, and one after `COMPLETE` leaves it `COMPLETE`**; a
-  failing close warns and replaces neither a failure nor an interrupt; the post-ready wait returning
-  `False` warns and proceeds; Phase B receives a VM-bound legacy target; the only
-  `enrollment_access` call is the first contact. Reinit: no enrollment and no reachability wait,
-  release drift refuses, a base failure stops before `run_initialization`, the agents reach the
-  script's environment.
+  failing close warns and replaces neither a failure nor an interrupt; an interrupt that lands
+  during the close waits for it to finish; the post-ready wait returning `False` warns and proceeds;
+  Phase B receives a VM-bound legacy target; the only `enrollment_access` call is the first contact.
+  Reinit: no enrollment and no reachability wait, release drift refuses, a base failure stops before
+  `run_initialization`, the agents reach the script's environment.
 - **Provisioning.** `read_tailnet_address` and `settle_tailnet_address` over a fake `run_as_root`: a
   first-read success and a success on the last read; a value that does not parse, a non-zero status,
   an unknown outcome and a platform `ConnectivityError` each treated as a failed read; a
@@ -731,16 +736,16 @@ proof is below; no live cell has yet run against PR B's Phase A, so I25's live h
 whose hold is all that keeps the distro up through Phase A) has no evidence. It belongs to slice 3's
 open live-evidence box.
 
-| Row | Where it holds now                                                                                                                                                                                        | Proof                                                                                                                                                                                                                                             |
-| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| I16 | Phase A's failure arm marks the row `FAILED`, and the span's `finally` runs `_close_provisioning_access` on every exit, each before the error propagates (`vms/initializer/phase_a.py:116-132`)           | `test_a_failure_before_the_contract_passes_marks_failed_and_closes_access`, `test_an_interrupt_before_the_contract_passes_closes_access_and_leaves_the_vm_gated`, `test_a_close_failure_does_not_mask_the_phase_a_failure`                        |
-| I22 | An interrupt passes the failure arm, and the span's `finally` runs `_close_provisioning_access` before it propagates (`vms/initializer/phase_a.py:128-132`)                                               | `test_an_interrupt_before_the_contract_passes_closes_access_and_leaves_the_vm_gated`, `test_a_close_failure_does_not_mask_the_interrupt`                                                                                                          |
-| I23 | After the first contact, a store with no record raises `ProvisioningError` with delete guidance (`vms/initializer/phase_a.py:98-106`)                                                                     | `test_a_failure_before_the_contract_passes_marks_failed_and_closes_access` (its `_no_key_recorded` case)                                                                                                                                          |
-| I24 | `join_tailscale` runs once and never retries; the settle reads the address, and when the reads run out logs the node out and never joins again (`capabilities/vm_platform/tailscale_join.py:65`, `:133`)  | `test_a_failed_join_raises_once_without_the_key`, `test_exhaustion_logs_out_once_and_gives_the_rerun_hint`, `test_exhausted_reads_after_the_join_log_out_without_joining_again`, `test_a_failed_join_or_address_rolls_back_without_a_second_join` |
-| I25 | The hold enters `init_stack` just before Phase A, and the stack closes after Phase B (`vms/manager/lifecycle.py:364`, `:612`)                                                                             | `test_create_keeps_a_vm_whose_phase_a_did_not_complete_out_of_every_command` (the hold precedes Phase A); the span through Phase B is by construction, with no test of its own; the live half has no evidence                                     |
-| I26 | The release is the contract's first request, recorded from the guest's answer and enforced before `COMPLETE` (`vms/initializer/phase_a.py:107-111`)                                                       | `test_the_sequence_records_enrolls_checks_then_completes`, `test_a_failure_before_the_contract_passes_marks_failed_and_closes_access` (its `_release_mismatch` case), `test_a_failed_release_check_records_no_release`                            |
-| I27 | `reconcile_release` raises `StateError` on live drift, and `confirm_vm_release` is the explicit adoption (`vms/manager/release.py:23-42`)                                                                 | `test_reconcile_release_refuses_recorded_live_drift`, the `test_confirm_release_*` tests in `tests/test_vm_release.py`                                                                                                                            |
-| I28 | `SSHLogger` takes its redactions at construction, before any write (`ssh.py:117-132`); `_operation_log` passes them (`vms/manager/_helpers.py:215-223`); `root_script.run` redacts every field it returns | `test_redactions_cannot_be_registered_after_writes`, `test_shell_quoted_secret_is_redacted_from_command`, `test_record_redacts_a_registered_secret_in_the_argv_the_streams_and_the_diagnostics`, `test_the_operation_log_never_holds_the_key`     |
+| Row | Where it holds now                                                                                                                                                                                                                      | Proof                                                                                                                                                                                                                                             |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| I16 | Phase A's failure arm marks the row `FAILED`, and the span's `finally` runs `_close_provisioning_access` on every exit, each before the error propagates (`vms/initializer/phase_a.py:116-132`)                                         | `test_a_failure_before_the_contract_passes_marks_failed_and_closes_access`, `test_an_interrupt_before_the_contract_passes_closes_access_and_leaves_the_vm_gated`, `test_a_close_failure_does_not_mask_the_phase_a_failure`                        |
+| I22 | An interrupt passes the failure arm, and the span's `finally` runs `_close_provisioning_access` before it propagates (`vms/initializer/phase_a.py:128-132`), under `interrupts_deferred`, so an interrupt during the close waits for it | `test_an_interrupt_before_the_contract_passes_closes_access_and_leaves_the_vm_gated`, `test_a_close_failure_does_not_mask_the_interrupt`, `test_an_interrupt_that_lands_during_the_close_waits_for_it_to_finish`                                  |
+| I23 | After the first contact, a store with no record raises `ProvisioningError` with delete guidance (`vms/initializer/phase_a.py:98-106`)                                                                                                   | `test_a_failure_before_the_contract_passes_marks_failed_and_closes_access` (its `_no_key_recorded` case)                                                                                                                                          |
+| I24 | `join_tailscale` runs once and never retries; the settle reads the address, and when the reads run out logs the node out and never joins again (`capabilities/vm_platform/tailscale_join.py:65`, `:133`)                                | `test_a_failed_join_raises_once_without_the_key`, `test_exhaustion_logs_out_once_and_gives_the_rerun_hint`, `test_exhausted_reads_after_the_join_log_out_without_joining_again`, `test_a_failed_join_or_address_rolls_back_without_a_second_join` |
+| I25 | The hold enters `init_stack` just before Phase A, and the stack closes after Phase B (`vms/manager/lifecycle.py:364`, `:612`)                                                                                                           | `test_create_keeps_a_vm_whose_phase_a_did_not_complete_out_of_every_command` (the hold precedes Phase A); the span through Phase B is by construction, with no test of its own; the live half has no evidence                                     |
+| I26 | The release is the contract's first request, recorded from the guest's answer and enforced before `COMPLETE` (`vms/initializer/phase_a.py:107-111`)                                                                                     | `test_the_sequence_records_enrolls_checks_then_completes`, `test_a_failure_before_the_contract_passes_marks_failed_and_closes_access` (its `_release_mismatch` case), `test_a_failed_release_check_records_no_release`                            |
+| I27 | `reconcile_release` raises `StateError` on live drift, and `confirm_vm_release` is the explicit adoption (`vms/manager/release.py:23-42`)                                                                                               | `test_reconcile_release_refuses_recorded_live_drift`, the `test_confirm_release_*` tests in `tests/test_vm_release.py`                                                                                                                            |
+| I28 | `SSHLogger` takes its redactions at construction, before any write (`ssh.py:117-132`); `_operation_log` passes them (`vms/manager/_helpers.py:215-223`); `root_script.run` redacts every field it returns                               | `test_redactions_cannot_be_registered_after_writes`, `test_shell_quoted_secret_is_redacted_from_command`, `test_record_redacts_a_registered_secret_in_the_argv_the_streams_and_the_diagnostics`, `test_the_operation_log_never_holds_the_key`     |
 
 ## Collateral
 
