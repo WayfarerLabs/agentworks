@@ -143,11 +143,15 @@ class ShellIntegration(HarnessIntegration):
                 self._render_selected_command(intent)
 
     def _render_selected_command(self, intent: HarnessLaunchIntent) -> str:
-        command = self.config.command if intent.starts_fresh else self.config.resume_command or self.config.command
+        config = self.config
+        if not intent.starts_fresh and config.resume_command:
+            field, command = "resume_command", config.resume_command
+        else:
+            field, command = "command", config.command
         return render_template(
             command,
             self._session_binding.context_values,
-            field=f"session={self._session_name}.command",
+            field=f"session={self._session_name}.{field}",
         )
 
     def start(
@@ -158,10 +162,9 @@ class ShellIntegration(HarnessIntegration):
     ) -> HarnessStartResult:
         """Select the configured launch command for a supported intent.
 
-        The remaining ``or`` is the cross-field derivation the model's
-        own description states, not a fallback to a literal: an empty
-        ``resume_command`` means "rerun ``command``", and ``command`` is
-        selected before rendering."""
+        An empty ``resume_command`` selects ``command`` before rendering,
+        so template errors identify the declaration that supplied the text.
+        """
         if intent is HarnessLaunchIntent.RESUME_ONLY:
             return HarnessStartNotImplemented()
         command = self._render_selected_command(intent)

@@ -546,6 +546,34 @@ def test_preflight_renders_only_the_command_selected_by_the_launch_intent(intent
     assert result.command == "/path ${agw:literal}"
 
 
+@pytest.mark.parametrize("preflight", [False, True])
+@pytest.mark.parametrize(
+    ("intent", "resume_command", "field"),
+    [
+        (HarnessLaunchIntent.CREATE, "resume", "command"),
+        (HarnessLaunchIntent.FORCE_NEW, "resume", "command"),
+        (HarnessLaunchIntent.RESUME_OR_NEW, "${agw:unknown}", "resume_command"),
+        (HarnessLaunchIntent.RESUME_OR_NEW, "", "command"),
+    ],
+)
+def test_selected_template_error_identifies_owning_field(
+    intent: HarnessLaunchIntent, resume_command: str, field: str, preflight: bool
+) -> None:
+    from agentworks.errors import ValidationError
+
+    integration = _harness_integration(
+        {"command": "${agw:unknown}" if field == "command" else "fresh", "resume_command": resume_command}
+    )
+    integration.prepare_context({}, intent=intent)
+    with pytest.raises(ValidationError) as exc:
+        if preflight:
+            integration.preflight(RunContext(operation_scope=_session_scope(), admin_target=_Probe()))
+        else:
+            integration.start(RunContext(), intent=intent)
+    assert exc.value.entity_kind == "template"
+    assert exc.value.entity_name == f"session=s1.{field}"
+
+
 def test_pending_target_defers_required_commands_but_not_template_validation() -> None:
     from agentworks.errors import ValidationError
 
