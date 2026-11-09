@@ -316,15 +316,16 @@ def test_create_vm_metadata_failure_retains_owner_and_reports_once(
         StateError("plugin has no Trixie selector", hint="update the plugin"),
         AuthorizationError("provider denied create", hint="grant the required action"),
         TokenRejectedError("provider rejected the credential", hint="check the credential"),
+        ValidationError("the platform would rename this hostname", hint="pick another VM name"),
     ],
-    ids=("operator-map", "code-map", "authorization", "credential"),
+    ids=("operator-map", "code-map", "authorization", "credential", "refused-request"),
 )
 def test_create_vm_preserves_typed_platform_failure(
     db: Database,
     make_config,
     monkeypatch: pytest.MonkeyPatch,
     captured_output: object,
-    failure: ConfigError | StateError | AuthorizationError | TokenRejectedError,
+    failure: ConfigError | StateError | AuthorizationError | TokenRejectedError | ValidationError,
 ) -> None:
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
 

@@ -39,6 +39,7 @@ from agentworks.errors import (
     StateError,
     TokenRejectedError,
     UserAbort,
+    ValidationError,
 )
 from agentworks.execution import trust
 from agentworks.execution.errors import TrustMissing, VMNotReady
@@ -571,9 +572,11 @@ def create_vm(
                 log.unwind()
                 output.warn(f"Log: {logger.display_path}")
                 raise
-            except (AuthorizationError, ConfigError, StateError, TokenRejectedError):
+            except (AuthorizationError, ConfigError, StateError, TokenRejectedError, ValidationError):
                 # These failures are already typed with their owning
-                # platform's remediation.
+                # platform's remediation (a ValidationError is a request the
+                # platform refuses before it mutates anything, such as a
+                # hostname WSL2 would rename).
                 # A compliant platform has not mutated, or has rolled back,
                 # so only the provisional row remains to unwind.
                 log.unwind()
