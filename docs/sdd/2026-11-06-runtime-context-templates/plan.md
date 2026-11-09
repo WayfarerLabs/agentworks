@@ -8,7 +8,8 @@ Delivery: one PR containing the full feature, full SDD, permanent documentation,
 [PR 867](https://github.com/WayfarerLabs/agentworks/pull/867) contains the complete feature and SDD.
 Completion follows the accepted namespaced contract and the operator rulings recorded in the FRD.
 Transport observations are tracked separately in issue #873. Shell rendering preflight is
-implemented and reviewed. Lock only after all feature work and final feedback are complete.
+implemented and reviewed. Closeout records implementation completion separately from the ready-head
+validation result; the lock takes effect at merge.
 
 ## Design checkpoint
 
@@ -56,7 +57,7 @@ implemented and reviewed. Lock only after all feature work and final feedback ar
 - [x] Load `integration-testing` and `agw-test-env` before PR validation/live testing; derive a
       bounded charter from the accepted change. Do not infer permission to probe live user
       environments.
-- [ ] Hand off one exact reviewed and validated state with its documentation and migration notes.
+- [x] Hand off one exact reviewed and validated state with its documentation and migration notes.
 - [ ] Once implementation and documentation are complete, record truthful completion and add the
       lockfile. The permanent reference must stand alone if this entire SDD directory is deleted.
 
@@ -192,3 +193,64 @@ fixture state and no operator infrastructure. The standard ready-triggered pipel
 validation under its own environment inventory and budget. Its report must be received before the
 next feedback/fix cycle. Remaining acceptance and SDD closeout are tracked by the unchecked delivery
 items; the transport observations are disposed to issue #873 under the operator's ruling.
+
+## Final review iteration 3
+
+The completed bounded integration report for `425d015be071a91b5c17235fcb0daa96545dc9cd` arrived on
+2026-11-09 in
+[PR comment 6739353604](https://github.com/WayfarerLabs/agentworks/pull/867#issuecomment-6739353604).
+It explicitly ends that head's campaign, with no test still running. All 12 gates returned zero,
+including 11,415 passing tests and 11 skips. Its independent source reviews found no new material
+renderer or identity-filtering defect. The PR returned to draft before this final correction round.
+This is iteration three of the three authorized iterations, not a correction started from a partial
+report.
+
+### Fixed feedback batch
+
+The selected Shell resume command's rendering failure must identify `resume_command`; fresh
+selection and an empty-resume fallback must identify `command`. Preflight and launch retain one
+selection/rendering helper. The correction changes diagnostic field identity, without changing
+selection, rendering timing, or runtime preservation.
+
+Release metadata must exist in actual CLI-component commit history. The delivery correction uses a
+`feat!:` subject and one-paragraph `BREAKING CHANGE:` footer alongside CLI reference guidance. It
+describes only the active namespace and literal text outside it, preserving the operator's
+destination-focused requirement. No legacy detector or configuration rewrite is introduced.
+
+Muntz's optional late context rebind, setup-filter, identity-constant, and probe-order
+simplifications remain acknowledged without being taken. Existing readiness guards, recomputation at
+launch, and setup's reserved-prefix contract remain explicit. The stale helper reference in the
+separate agent artifacts SDD was recorded for that owner; this effort does not edit that artifact.
+
+### Bounded live evidence and remaining acceptance
+
+Linux workstation OpenSSH 10.0p2 to remote Lima 2.3 on Debian 13.7/aarch64 exercised consuming-user
+identity, four exec/context paths, four setup scopes, planned agent/workspace creation, console
+shells, and persistent Shell lifecycle. Invalid winning values and selected templates preserved old
+runtime identity, UUID, and run; invalid unused fields did not block valid selections. Native
+Claude, Codex, and Grok argument refusals and opaque-field delivery were exercised. Native argument
+rendering follows workload-secret resolution and precedes destructive replacement. Shell rendering
+preflight precedes workload/env resolution, under the operator's specific ruling. Neither result
+claims resolver-call counts or predicts actual command success.
+
+These results are bounded evidence, not whole-PR clearance:
+
+| Finding or cell               | Disposition                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Quoted global workspace root  | Failed in inherited VM initialization. `vms/initializer/workspaces_dir.py:57` interpolates `mkdir -p` without quoting; the later traversal assignment also interpolates that path and was not reached in the failed cell. The owner must preserve ACL application before parent traversal when correcting both shell fragments. Unchanged owning reinit repeated partial initialization; an ordinary-path control completed. This feature does not correct or claim that cell. |
+| Literal SSH env delivery      | Inherited failure on measured Linux/macOS clients, with bounded Windows passes from iteration one. Operator-disposed to issue #873; no transport fix or universal preview/delivery parity claim.                                                                                                                                                                                                                                                                               |
+| Refused native launch cleanup | Six inert sockets remained at live inspection after rows/servers rolled back. This is recorded for session lifecycle rollback ownership at `_create_roll.py`'s failed-launch teardown and the tmux cleanup boundary. The cause and complete per-session filesystem cleanup are not established by VM power-off.                                                                                                                                                                |
+| Codex API login/catalog       | Passed native login and catalog HTTP 200. Persistent health input remained unvalidated; separate structured native exec was quota-blocked with no assistant completion. No retry or fallback.                                                                                                                                                                                                                                                                                  |
+| Grok API print                | Native exit zero and exact health response with one reported turn/end-turn. Original strict-predicate failure remains preserved. Tool availability, token-limit enforcement, and persistent mode are unvalidated.                                                                                                                                                                                                                                                              |
+| Other authenticated modes     | Anthropic API/interactive and Grok persistent were not run on that head. No inference job remains queued.                                                                                                                                                                                                                                                                                                                                                                      |
+| Workstation coverage          | No fresh full Windows/macOS campaign on that exact head. Other PR campaigns do not substitute.                                                                                                                                                                                                                                                                                                                                                                                 |
+
+The testing session stopped its retained Linux VM, independently confirmed managed workloads absent,
+and removed staged model credentials. That bounds its cleanup claim; it does not turn any failed or
+untested cell into a pass. Full details and supplementary evidence remain linked from the completed
+report.
+
+The final ready-triggered campaign must confirm the diagnostic correction and report remaining
+workstation and harness coverage explicitly. No additional inference budget is requested. No merge
+or acceptance waiver is authorized. Implementation closeout, private review, and local gates do not
+replace that final-head report.

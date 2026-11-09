@@ -42,3 +42,9 @@ Validation includes planned identities, discarded definitions, opaque secrets, c
 handling, and errors before destructive restart. Mark the locally validated implementation ready for
 the normal review and integration-testing pipeline. Wait for the integration report before starting
 the next authorized final review iteration.
+
+The CLI release is announced through a component-touching Conventional Commit with a `feat!:`
+subject and a one-paragraph `BREAKING CHANGE:` footer. Release Please reads commit history for the
+`cli` component; a PR title or body alone does not supply that release metadata. The disclosure
+states the active `${agw:NAME}` contract, that text outside the namespace is literal to Agentworks,
+and the namespace's separation from shell and Go-template syntax.
