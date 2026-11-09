@@ -98,6 +98,24 @@ which join the list in `vectors.py`:
 On L, a 3.11 interpreter that is not the system one becomes the program interpreter as well as the
 launcher's, so a `PythonProgram` runs under it too.
 
+`conformance/file_vectors.py` holds the file operations' vectors, which join the same list:
+
+- F6 (V): the VM-wide file lock under the image's `fs.protected_regular`. The admin and root each
+  create it in turn, and the other then takes it unelevated or elevated and completes a `write_if`.
+  The lane reaches the VM as its admin only, so root stands in for a second account. It removes the
+  lock file between rounds.
+- F7 (S and V): an elevated `write_if` creates a root-owned file that an elevated `read` returns
+  (with `sudo -n` on S), and an agent's elevated `write_if` is refused before anything is sent.
+
+`test_file_program.py` runs the guest file program's `main` in its own interpreter, under each
+interpreter the L lane uses, on a temporary tree with its lock in a sticky directory of its own:
+conflicts, truncated input, links at the destination, a parent and the lock path, the lock's mode,
+wait and sharing, metadata preservation, cleanup after a failure or `SIGTERM`, and pruning. Its sudo
+lane (a lock root created first, owner preservation, a root-owned write) needs the runner's
+passwordless `sudo -n` and follows the elevation vectors' rule. `test_files.py` covers `Files`: the
+status-to-error mapping, `update`'s retries and refusals before dispatch over the recording access,
+and a round trip, a link refusal and the settings merge through `update` over the L lane.
+
 `conformance/test_attach_terminal.py` and `conformance/test_forward.py` cover what happens around
 the terminal half and a forward, on the same lanes.
 

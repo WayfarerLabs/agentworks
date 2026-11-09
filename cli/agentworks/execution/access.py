@@ -22,6 +22,7 @@ from agentworks.execution import attach as attach_module
 from agentworks.execution import client, envelope, forwarding, pump, ssh_process
 from agentworks.execution.agw_launch import refusal_status
 from agentworks.execution.errors import CommandFailed, ExecutionIncomplete, PermissionDenied, describe_refusal
+from agentworks.execution.files import Files
 from agentworks.execution.requests import Bytes, CaptureOutput, DiscardOutput, NoInput
 from agentworks.execution.results import Completed, NotDelivered, NotDeliveredReason, Result, Unknown, UnknownReason
 from agentworks.execution.trust import TrustBinding, TrustMode
@@ -215,6 +216,13 @@ class VMAccess:
                 verbose=verbose,
             )
             return forwarding.run_forward(argv, vm_name=self.vm_name, log=log)
+
+    def files(self, *, deadline: float | None = None) -> Files:
+        """This identity's file operations on the VM, each request bounded by ``deadline`` seconds.
+
+        Building it connects to nothing; each operation is one ``run``.
+        """
+        return Files(self, deadline=deadline)
 
     def passphrase_hint(self) -> str | None:
         """:func:`client.agent_load_hint` for the operator's key; ask only after a connection failure."""

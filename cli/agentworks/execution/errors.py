@@ -8,6 +8,7 @@ diagnostics, which the client keeps apart from the payload's output.
 
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from agentworks.errors import AuthorizationError, ConfigError, ConnectivityError, ExternalError, StateError
@@ -250,4 +251,69 @@ class CommandFailed(ExternalError):
             f"command on VM '{vm_name}' failed with exit status {status}",
             entity_kind="vm",
             entity_name=vm_name,
+        )
+
+
+class FileConflict(StateError):
+    """A conditional file operation found the destination changed since its caller observed it.
+
+    Nothing was written or removed. Names the VM, the operation and the path,
+    never content.
+    """
+
+    def __init__(self, vm_name: str, operation: str, path: str) -> None:
+        self.vm_name = vm_name
+        self.operation = operation
+        self.path = path
+        super().__init__(
+            f"'{path}' on VM '{vm_name}' changed since it was read, so {operation} left it as it is",
+            entity_kind="vm",
+            entity_name=vm_name,
+            hint="Inspect the file, then retry the operation against its current content.",
+        )
+
+
+class PathRefusal(StrEnum):
+    """Why the file program would not use a path."""
+
+    UNSUITABLE = "unsuitable"
+    """A symbolic link, or the wrong type of file, at the path or one of its parents."""
+    DENIED = "denied"
+    """The account may not use the path: ``EACCES``, ``EPERM`` or ``EROFS``."""
+
+
+class PathRefused(StateError):
+    """The file program refused a path: a link or wrong type at it or a parent, or a permission denial."""
+
+    def __init__(self, vm_name: str, operation: str, path: str, reason: PathRefusal) -> None:
+        self.vm_name = vm_name
+        self.operation = operation
+        self.path = path
+        self.reason = reason
+        if reason is PathRefusal.UNSUITABLE:
+            message = (
+                f"{operation} refused '{path}' on VM '{vm_name}': a link or another file type is at it or a parent"
+            )
+            hint = (
+                "Agentworks never reads or writes through a link. Inspect the path and whatever created it "
+                "(a dotfile installer is the usual cause), then put a regular file or directory there."
+            )
+        else:
+            message = f"{operation} was denied access to '{path}' on VM '{vm_name}'"
+            hint = "Check the ownership and mode of the path and each of its parent directories, then retry."
+        super().__init__(message, entity_kind="vm", entity_name=vm_name, hint=hint)
+
+
+class FileLockTimeout(StateError):
+    """A mutating file operation could not take the VM's file lock within its wait. Nothing changed."""
+
+    def __init__(self, vm_name: str, operation: str, path: str) -> None:
+        self.vm_name = vm_name
+        self.operation = operation
+        self.path = path
+        super().__init__(
+            f"{operation} of '{path}' on VM '{vm_name}' timed out waiting for the VM's file lock",
+            entity_kind="vm",
+            entity_name=vm_name,
+            hint="Another Agentworks operation is writing files on this VM; retry once it has finished.",
         )

@@ -26,7 +26,7 @@ result = access.run(Command(("systemctl", "is-active", "ssh"), deadline=10), che
 Always call `vm_access` and `resolve_ssh` through the package attribute, as above. Tests replace
 those two attributes once (the `vm_access_recorder` fixture) and every manager follows.
 
-`VMAccess` has four operations:
+`VMAccess` has four operations, and `files()` (below) for file operations built on `run`:
 
 | Operation                                     | Returns                  | Use                                                       |
 | --------------------------------------------- | ------------------------ | --------------------------------------------------------- |
@@ -137,6 +137,41 @@ closes its read end, so a writer takes `SIGPIPE`, while a quiet payload still ru
 `stream` reports its own status. A departed stderr ends the request once held stdout is delivered,
 since ssh does not end the channel for it, unless its trailer had already arrived; then stdout is
 read to its end and the guest's status stands. With no status to report, `stream` returns 141.
+
+## Files
+
+`access.files(deadline=None)` returns that identity's `Files` (`files.py`). Each method is one `run`
+of the guest file program (`file_program.py`, sent as a `PythonProgram` like agw-launch's source,
+with no import-time effect): the operation and one JSON object of parameters are its arguments, and
+content travels as `Bytes` on stdin, never as an argument. The deadline bounds every request.
+
+| Method                                        | Does                                                                             |
+| --------------------------------------------- | -------------------------------------------------------------------------------- |
+| `read(path, limit=1 MiB)`                     | `FileContent(data, digest)`, or `None` when the file or a parent is absent       |
+| `stat(path)`                                  | `Absent()`, `Directory()` or `RegularFile(digest, mode)`, hashed on the guest    |
+| `write_if(path, data, expected=, mode=, ...)` | Replaces the file only while its digest is `expected` (`None`: still absent)     |
+| `update(path, transform, mode=, ...)`         | Reads, transforms on the workstation, writes back if changed; retries a conflict |
+| `remove_if(path, expected=)`                  | Removes the file only while its digest is `expected`                             |
+| `ensure_directory(path, mode=)`               | Creates the directory and missing parents; never changes an existing one         |
+| `prune_empty_parents(path, root=)`            | Removes empty parents up to and including `root`; returns a `Pruned`             |
+
+Each takes `elevated`, which an agent's access refuses before dispatch. Paths must be absolute and
+normalized (`guest_path`). Nothing is read or written through a symbolic link: every component is
+opened relative to its parent without following links, and a link or the wrong type anywhere on the
+path is `PathRefused(UNSUITABLE)`, a permission denial `PathRefused(DENIED)`. `write_if` reads its
+whole content and checks its size and SHA-256 before creating anything, so a dropped connection
+publishes nothing; it writes a sibling temporary file with the requested mode (and group), and
+`preserve_metadata=True` gives it the existing file's owner, group, mode and extended attributes
+before the rename. A changed destination is `FileConflict`, and nothing is written. `read` and
+`stat` keep their streams out of the operation log.
+
+Every mutating operation holds one VM-wide lock, `/run/lock/agentworks-files.lock`, from its walk to
+its last system call, whichever identity runs it: opened read-only, created world-readable only when
+absent (an `O_CREAT` open of another identity's file in the sticky `/run/lock` is refused under
+`fs.protected_regular`), and locked with `flock`. A lock not taken within 30 seconds is
+`FileLockTimeout`. Reads take no lock, since a rename replaces a file whole. The lock orders
+Agentworks operations among themselves; a writer that ignores it is out of scope. Modes and
+placement policy (which directories root may write) belong to the caller.
 
 ## Client and policy
 
