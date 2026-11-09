@@ -10,6 +10,7 @@ from enum import Enum
 from functools import partial
 from pathlib import PurePosixPath
 from threading import Event
+from time import monotonic, sleep
 from typing import TYPE_CHECKING
 
 import agentworks.sessions.manager as _mgr
@@ -29,6 +30,8 @@ DEDICATED_TEARDOWN_MAX_WORKERS = 8
 DEDICATED_TEARDOWN_TIMEOUT_SECONDS = 10
 DEDICATED_TEARDOWN_ATTEMPTS = 1
 DEDICATED_TEARDOWN_HEARTBEAT_SECONDS = 5
+DEDICATED_TEARDOWN_EXIT_GRACE_SECONDS = 1
+DEDICATED_TEARDOWN_EXIT_POLL_SECONDS = 0.05
 
 
 @dataclass(frozen=True)
@@ -255,7 +258,19 @@ def _execute_reachable_dedicated_teardown(
         return plan.target.run(command, sudo=plan.sudo, check=check, env=env)
 
     kill_server(run_command=run_runtime, socket_path=plan.socket_path)
-    if not _prove_plan_runtime_absent(plan):
+    # Acknowledging kill-server can precede the server finishing its exit.
+    # Bound further observations, without retrying mutation or uncertain probes.
+    deadline = monotonic() + DEDICATED_TEARDOWN_EXIT_GRACE_SECONDS
+    absent = _prove_plan_runtime_absent(plan)
+    while not absent:
+        remaining = deadline - monotonic()
+        if remaining <= 0:
+            break
+        sleep(min(DEDICATED_TEARDOWN_EXIT_POLL_SECONDS, remaining))
+        if monotonic() >= deadline:
+            break
+        absent = _prove_plan_runtime_absent(plan)
+    if not absent:
         raise ExternalError(
             f"tmux server for session '{plan.session_name}' survived kill-server",
             entity_kind="session",

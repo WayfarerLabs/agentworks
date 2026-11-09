@@ -297,7 +297,7 @@ def test_admin_transport_elevates_agent_runtime_absence_proof(
                 legacy_running_authorized=True,
             )
 
-    assert observed_sudo == [True]
+    assert observed_sudo and all(observed_sudo)
     assert db.get_session("s1") == session
 
 

@@ -308,6 +308,58 @@ def test_absence_proof_rechecks_process_after_unreadable_start_time(
     assert privileges == [True, True]
 
 
+@pytest.mark.parametrize("observation", ["exits", "survives", "unknown"])
+def test_post_kill_observation_grace_never_repeats_mutation(
+    monkeypatch: pytest.MonkeyPatch,
+    observation: str,
+) -> None:
+    from agentworks.sessions import tmux as tmux_mod
+
+    plan = _plan("session")
+    now = [0.0]
+    events: list[str] = []
+
+    def sleep_for(seconds: float) -> None:
+        assert 0 < seconds <= teardown_mod.DEDICATED_TEARDOWN_EXIT_POLL_SECONDS
+        now[0] += seconds
+        events.append("sleep")
+
+    def prove(candidate: DedicatedTeardownPlan) -> bool:
+        assert candidate is plan
+        events.append("observe")
+        if observation == "unknown":
+            raise StateError("unavailable observation")
+        return observation == "exits" and events.count("observe") > 1
+
+    monkeypatch.setattr(teardown_mod, "monotonic", lambda: now[0])
+    monkeypatch.setattr(teardown_mod, "sleep", sleep_for)
+    monkeypatch.setattr(teardown_mod, "_prove_plan_runtime_absent", prove)
+    monkeypatch.setattr(tmux_mod, "kill_server", lambda **kwargs: events.append("kill"))
+    monkeypatch.setattr(teardown_mod, "_remove_stale_socket", lambda **kwargs: events.append("cleanup"))
+
+    def execute() -> DedicatedTeardownEvidence:
+        return teardown_mod._execute_reachable_dedicated_teardown(
+            plan,
+            observed_pid=plan.stored_pid,
+            observed_boot_id=plan.stored_boot_id,
+            observed_start_ticks=plan.stored_start_ticks,
+        )
+
+    if observation == "exits":
+        assert execute() is DedicatedTeardownEvidence.VERIFIED_STOPPED
+        assert events == ["kill", "observe", "sleep", "observe", "cleanup"]
+    elif observation == "survives":
+        with pytest.raises(ExternalError):
+            execute()
+        assert now[0] == pytest.approx(teardown_mod.DEDICATED_TEARDOWN_EXIT_GRACE_SECONDS)
+        assert "cleanup" not in events
+    else:
+        with pytest.raises(StateError):
+            execute()
+        assert events == ["kill", "observe"]
+    assert events.count("kill") == 1
+
+
 def test_invalid_complete_fingerprint_fails_preparation_closed(db: Database) -> None:
     socket_path = "/run/agentworks/admin-tmux-sockets/agentworks/session.sock"
     session = _seed_session(db, "session", socket_path=socket_path, pid=-2, start_ticks=201)
