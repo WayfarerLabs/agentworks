@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import yaml
 
 from agentworks import output
-from agentworks.artifacts.application import ArtifactApplication
+from agentworks.artifacts.application import ArtifactApplication, ArtifactDeferral, ArtifactFile
 from agentworks.artifacts.model import ArtifactType
 from agentworks.artifacts.native.common import (
     NativeSessionArtifacts,
@@ -17,12 +18,15 @@ from agentworks.artifacts.native.common import (
     native_home,
     persona_options,
     reject_flags,
+    select_inputs,
     select_session_artifacts,
     skill_files,
     validate_ancestor_names,
     validate_names,
 )
-from agentworks.artifacts.native.guidance import guidance_rules, guidance_skills, session_skill_files
+from agentworks.artifacts.native.guidance import guidance_rules, guidance_skills
+from agentworks.artifacts.native.shell import filesystem_artifacts
+from agentworks.artifacts.session_paths import session_package_prefix
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -81,6 +85,25 @@ def session_artifacts(
     if context is None or not has_artifacts(context):
         return NativeSessionArtifacts()
     inputs, deferred = select_session_artifacts(context.inputs, enabled_workarounds, _SESSION_WORKAROUNDS)
+    unsupported = {
+        item.identity: sorted(set(item.content.metadata) & {"paths", "disable-model-invocation", "user-invocable"})
+        for item in inputs.items()
+        if item.content.type is ArtifactType.SKILL
+        and set(item.content.metadata) & {"paths", "disable-model-invocation", "user-invocable"}
+    }
+    if unsupported:
+        deferred = (
+            *deferred,
+            *(
+                ArtifactDeferral(
+                    input_id=identity,
+                    destination="session",
+                    reason="Grok indexed skill access cannot preserve native activation controls: " + ", ".join(fields),
+                )
+                for identity, fields in unsupported.items()
+            ),
+        )
+        inputs = select_inputs(inputs, {item.identity for item in inputs.items() if item.identity not in unsupported})
     if not inputs and not context.ancestor_files:
         return NativeSessionArtifacts(ArtifactApplication(deferred=deferred))
     selected_types = {item.content.type for item in inputs.items()}
@@ -96,15 +119,37 @@ def session_artifacts(
         with ancestor_diagnostics("grok-build"):
             reject_flags(extra_args, ancestor_flags, "grok-build")
     root = native_home(context.home, context.environment, "GROK_HOME", ".grok")
-    files = list(guidance_skills(f"{root}/skills", inputs, context=context))
-    for item in inputs.items():
-        if item.content.type is ArtifactType.SKILL:
-            files.extend(session_skill_files(f"{root}/skills", item, context))
-    if files:
-        output.warn(
-            "Grok session-home-skills uses the shared user skill catalog. "
-            "Session/run applicability is best effort; other sessions can discover these entries."
+    private = filesystem_artifacts(inputs, context.directory, session=True, aggregate_hints=True)
+    files = [replace(file, native_identity=None) for file in private.files]
+    if inputs:
+        name = session_package_prefix(context.session_uuid) + "entry"
+        description = (
+            f"Use only when AGENTWORKS_SESSION_UUID={context.session_uuid}. "
+            "Read the current Agentworks session artifact index before work or resuming work."
         )
-    application = ArtifactApplication(tuple(files), deferred)
+        body = (
+            f"Use this skill only when AGENTWORKS_SESSION_UUID={context.session_uuid}.\n\n"
+            "Read AGENTWORKS_ARTIFACTS_DIR from this workload's current environment, then open "
+            "index.json in that directory. Read every listed rule and hints file. For skills, use "
+            "the index's names and descriptions to choose a SKILL.md and its supporting files. "
+            "Re-read the current index after a managed restart; do not reuse an earlier run's path.\n"
+        )
+        header = yaml.safe_dump({"name": name, "description": description}, sort_keys=False)
+        package = f"{root}/skills/{name}"
+        files.append(
+            ArtifactFile(
+                f"{package}/SKILL.md",
+                f"---\n{header}---\n{body}".encode(),
+                tuple(item.origin_identity for item in inputs.items()),
+                native_identity=f"skill:{name}",
+                package_root=package,
+            )
+        )
+        output.warn(
+            "Grok session-home-skills advertises one session entry in the shared user skill catalog. "
+            "Applicability is best effort; skills are accessed through the private index, "
+            "not individual native commands."
+        )
+    application = ArtifactApplication(tuple(files), deferred, artifacts_dir=private.artifacts_dir)
     validate_ancestor_names(context, application)
     return NativeSessionArtifacts(application)

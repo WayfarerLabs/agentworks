@@ -61,10 +61,10 @@ def select_session_artifacts(
                 else f"No supported session workaround for artifact type {item.content.type.value}"
             )
             deferred.append(ArtifactDeferral(input_id=item.identity, destination="session", reason=reason))
-    return _select_inputs(inputs, selected), tuple(deferred)
+    return select_inputs(inputs, selected), tuple(deferred)
 
 
-def _select_inputs(inputs: ArtifactInputs, selected: set[str]) -> ArtifactInputs:
+def select_inputs(inputs: ArtifactInputs, selected: set[str]) -> ArtifactInputs:
     return ArtifactInputs(
         local=inputs.local.select(selected) if inputs.local is not None else None,
         deferred={owner: group.select(selected) for owner, group in inputs.deferred.items()},
@@ -127,6 +127,16 @@ def defer_setup_conflicts(
 
     while application.files:
         try:
+            identities: dict[str, tuple[str, ...]] = {}
+            for file in application.files:
+                if file.native_identity is not None:
+                    prior = identities.setdefault(file.native_identity, file.origins)
+                    if set(prior) != set(file.origins):
+                        raise NativeArtifactConflictError(
+                            f"multiple artifacts claim native identity '{file.native_identity}'",
+                            (file.native_identity,),
+                            hint="Rename the conflicting artifact before retrying setup.",
+                        )
             probe(application.files)
             return application
         except NativeArtifactConflictError as error:
@@ -184,7 +194,7 @@ def render_setup_artifacts(
         invocation.report_incomplete(reason)
         rejected.update((item.identity, reason) for item in items)
     selected = {item.identity for item in invocation.artifacts.items() if item.identity not in rejected}
-    application = render(_select_inputs(invocation.artifacts, selected))
+    application = render(select_inputs(invocation.artifacts, selected))
     return replace(
         application,
         deferred=(
@@ -340,7 +350,7 @@ def prepare_session_delivery(
     plan: NativeSessionArtifacts | None = None
     while True:
         selected = {item.identity for item in context.inputs.items() if item.identity not in rejected}
-        current = replace(context, inputs=_select_inputs(context.inputs, selected))
+        current = replace(context, inputs=select_inputs(context.inputs, selected))
         plan = None
         try:
             plan = render(current)

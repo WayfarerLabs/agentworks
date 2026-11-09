@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Annotated, ClassVar, Literal
 
 from pydantic import Field
 
+from agentworks import output
 from agentworks.artifacts.application import ArtifactApplication
 from agentworks.artifacts.native.common import (
     NativeSessionArtifacts,
@@ -113,11 +114,7 @@ class GrokBuildConfig(AgwModel):
     enabled_workarounds: Annotated[list[Literal["session-home-skills"]], MergeStrategy.REPLACE] = Field(
         default_factory=list
     )
-    """Explicitly enabled session artifact carriers; replaces inherited opt-ins.
-
-    ``session-agent-definitions`` remains accepted for config compatibility,
-    but private session personas have no verified carrier and stay unhandled.
-    """
+    """Explicitly enabled session artifact carriers; replaces inherited opt-ins."""
 
     extra_args: Annotated[list[str], MergeStrategy.REPLACE] = Field(default_factory=list)
     """Argv tokens appended after every managed flag and before
@@ -152,12 +149,12 @@ class GrokBuildIntegration(HarnessIntegration):
         Ships as the opt-in `grok` system plugin and requires the `grok` CLI on
         the session's launch target.
 
-        User and workspace facets publish native rules, skills and agent personas.
-        Session artifacts are optional and unhandled by default. `enabled_workarounds`
-        can opt into `session-rules` for rules/hints through `--rules`. Private session
-        skills and personas have no verified carrier and remain unhandled. The accepted
-        `session-agent-definitions` spelling does not enable persona delivery. Activate
-        the user or workspace facet to publish skills and personas at their native scope.
+        User facets publish native rules, skills and personas. Workspace guidance uses
+        skills so exact local Git exclusions do not disable native rule discovery.
+        Session artifacts are unhandled by default. `session-home-skills` publishes
+        session-qualified rules, hints and skills in the shared user skill catalog;
+        applicability through UUID/run metadata is best effort. Session personas remain
+        unhandled. Native trust, discovery and model cooperation still govern consumption.
         """,
     )
 
@@ -268,6 +265,12 @@ class GrokBuildIntegration(HarnessIntegration):
         if artifact_context is not None and native_root is not None:
             validate_discovery_paths(artifact_context, (native_root, f"{self._workspace_path}/.grok"))
         command = self._resume_or_launch(ctx, intent=intent)
+        if self._resumed and self._artifact_plan.application.artifacts_dir is not None:
+            output.warn(
+                "Grok resume may retain a catalog from before this session's artifact entry was installed. "
+                "If the entry is unavailable, use --force-new for a fresh conversation or read "
+                "$AGENTWORKS_ARTIFACTS_DIR/index.json manually in the current workload."
+            )
         if intent is HarnessLaunchIntent.FORCE_NEW:
             note = "Fresh Grok Build session requested. Starting a new one without resuming prior state..."
         elif intent is HarnessLaunchIntent.CREATE:

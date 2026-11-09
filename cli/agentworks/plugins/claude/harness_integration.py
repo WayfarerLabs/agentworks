@@ -185,10 +185,10 @@ class ClaudeCodeIntegration(HarnessIntegration):
 
         Artifact bundles activated at a user or workspace facet publish native rules,
         skills and agent personas. Session artifacts are optional and unhandled by
-        default. `enabled_workarounds` can opt into `session-prompt` for rules/hints,
-        `session-skill-plugin` for skills in a private `agentworks-artifacts:` plugin,
-        and `session-agent-definitions` for personas. The prompt workaround refreshes
-        appended guidance on resume when Claude's version is known. Raw arguments
+        default. `session-skill-plugin` delivers rules, hints and skills through a
+        private native plugin; `session-agent-definitions` adds personas to that plugin.
+        Generated guidance skills request reading before work; publication does not
+        guarantee model cooperation or replace old conversation content. Raw arguments
         that disable or replace active artifact carriers are rejected.
         """,
     )

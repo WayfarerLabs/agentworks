@@ -426,14 +426,12 @@ class CodexIntegration(HarnessIntegration):
         Ships as the opt-in `codex` system plugin, and needs the `codex` CLI on the
         session's target.
 
-        The VM facet publishes machine-wide skills. User and workspace facets publish
-        standard skills, native agent personas, and generated instruction sections in
-        the selected `AGENTS.md` or `AGENTS.override.md`. Session artifacts remain
-        unhandled by default.
-        `enabled_workarounds` can opt into `session-developer-instructions` for
-        rules/hints and `session-agent-config` for delegated personas. Private session
-        skills have no supported workaround; activate an outer facet for native skill
-        placement. Primary `agent` selection remains prompt-mediated.
+        Machine, user and workspace facets publish standard skills, generated guidance
+        skills and supported native personas. Session artifacts are unhandled by default.
+        `session-home-skills` publishes session-qualified rules, hints and skills in the
+        shared user skill catalog: applicability through UUID/run metadata is best effort.
+        `session-agent-config` supplies private delegated-persona configuration. Primary
+        `agent` selection remains prompt-mediated. Model cooperation is not guaranteed.
         """,
     )
 

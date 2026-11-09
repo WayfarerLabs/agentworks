@@ -18,7 +18,7 @@ from agentworks.artifacts.application import (
 )
 from agentworks.artifacts.publication import publish_artifacts, validate_application
 from agentworks.artifacts.reporting import report_applied, report_deferrals
-from agentworks.artifacts.session_paths import session_package_prefix, session_publication_roots
+from agentworks.artifacts.session_paths import session_publication_roots
 from agentworks.artifacts.state import CapturedArtifacts, capture_owner, write_capture
 from agentworks.errors import StateError
 from agentworks.harness_setup.inputs import SetupInputs
@@ -217,7 +217,9 @@ def stage_session_artifacts(
 
     def checkpoint(files: tuple[OwnedArtifactFile, ...]) -> None:
         nonlocal state, current
-        current = current.model_copy(update={"artifact_files": (*retained, *files)})
+        owned = {file.path: file for file in retained}
+        owned.update((file.path, file) for file in files)
+        current = current.model_copy(update={"artifact_files": tuple(owned.values())})
         state = replace_setup_record(state, current)
         write_native_setup(db, "session", name, state, operation="session-prepare")
 
@@ -256,6 +258,7 @@ def commit_session_artifacts(
     integration: str,
     runner: Transport,
     prepared: PreparedSessionArtifacts,
+    application: ArtifactApplication,
 ) -> None:
     """After old runtime teardown, retire obsolete runs and record the new inputs."""
     context = prepared.context
@@ -266,17 +269,10 @@ def commit_session_artifacts(
         session_uuid=context.session_uuid,
         directory=f"{context.home}/.agentworks-artifacts/session/{context.session_uuid}",
     )
+    desired = {file.path for file in application.files}
     for record in tuple(state.records):
         keep = tuple(
-            item
-            for item in record.artifact_files
-            if item.path.startswith(context.directory + "/")
-            or (
-                item.package_root is not None
-                and item.package_root.rsplit("/", 1)[-1].startswith(
-                    session_package_prefix(context.session_uuid, context.run_id)
-                )
-            )
+            item for item in record.artifact_files if item.path in desired and record.integration == integration
         )
         obsolete = tuple(item for item in record.artifact_files if item not in keep)
 

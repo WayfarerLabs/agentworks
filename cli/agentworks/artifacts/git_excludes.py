@@ -134,9 +134,10 @@ def reconcile_workspace_excludes(
                     preserve_metadata=current is not None,
                 )
                 current = replacement
-            updated = [item for item in remaining if item != claim]
             if claim in desired:
-                updated.append(claim)
+                updated = remaining if claim in remaining else [*remaining, claim]
+            else:
+                updated = [item for item in remaining if item != claim]
             if updated != remaining:
                 checkpoint(tuple(updated))
                 remaining = updated

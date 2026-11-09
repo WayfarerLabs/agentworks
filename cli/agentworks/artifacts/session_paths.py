@@ -38,6 +38,7 @@ def session_publication_roots(
     native_path(home)
     roots = [native_path(directory)]
     prefix = session_package_prefix(session_uuid, run_id)
+    entry = session_package_prefix(session_uuid) + "entry"
     for file in files:
         path = native_path(file.path)
         if path.startswith(directory + "/"):
@@ -46,16 +47,18 @@ def session_publication_roots(
         if package is not None:
             package = native_path(package)
             name = PurePosixPath(package).name
+            parent = str(PurePosixPath(package).parent)
             if (
                 package.startswith(home + "/")
-                and name.startswith(prefix)
+                and parent.startswith(home + "/")
+                and (name.startswith(prefix) or name == entry)
                 and is_artifact_name(name)
                 and path.startswith(package + "/")
                 and file.native_identity == f"skill:{name}"
                 and not file.generated_section
             ):
-                if package not in roots:
-                    roots.append(package)
+                if parent not in roots:
+                    roots.append(parent)
                 continue
         raise StateError(
             "session artifact publication requires its private directory or an owned session skill package"
