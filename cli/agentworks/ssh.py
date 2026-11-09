@@ -191,16 +191,9 @@ class SSHLogger:
         """
         return self._secrets
 
-    def sanitize(self, text: str, *, normalize: Callable[[str], str] | None = None) -> str:
-        """Redact operation secrets, optionally matching already-normalized text."""
-        patterns = (
-            self._redact
-            if normalize is None
-            else tuple(
-                sorted({value for secret in self._redact if (value := normalize(secret))}, key=len, reverse=True)
-            )
-        )
-        for secret in patterns:
+    def sanitize(self, text: str) -> str:
+        """Redact operation secrets."""
+        for secret in self._redact:
             text = text.replace(secret, "[REDACTED]")
         return text
 
