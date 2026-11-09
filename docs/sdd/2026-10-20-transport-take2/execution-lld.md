@@ -263,22 +263,24 @@ against a local shell.
   call blocked in a read; `stream` is the last thing a command does. A stdout consumer that leaves
   (`| head`, quitting `less`) gets the semantics ssh gave it when ssh held the operator's stdout.
   The client discards the rest of that stream and closes its read end of it once the guest writes to
-  it again, so ssh sees `EPIPE` on the guest's next write, and keeps pumping stderr until the
+  it again, so ssh sees `EPIPE` on the write after that one, and keeps pumping stderr until the
   channel ends: a writer that keeps writing takes `SIGPIPE` and the channel closes, while a quiet
-  payload runs to its end. The end marker is not a guest write, so it never meets a closed read end:
-  once ssh's write to its stdout fails, the OpenSSH client writes none of the stderr it receives
-  after that, and a trailer arriving behind the end marker would be lost. A stderr consumer that
-  leaves, with no trailer yet, ends the request once held stdout is delivered, and ending the
-  session kills the client after its one-second natural-exit wait, which ends the guest's writer:
-  ssh only discards stderr after a failed write and keeps the channel up, and the status travels on
-  stderr, so nothing more could be learned. With the trailer already in hand, stdout is pumped to
-  its end marker and the result is `Completed(N)`. When stdout was abandoned and the stderr trailer
-  still arrives, the result is the guest's own `Completed(N)`; otherwise it is
-  `Unknown(CONSUMER_LEFT)`, which `stream` alone reports as 141, the status of a writer killed by
-  `SIGPIPE`. `stream_to_operator` flushes both streams once as it returns, and that flush is how a
-  departure it did not see earlier is detected: a stream whose consumer has gone is pointed at the
-  null device, so interpreter shutdown cannot fail on the bytes left in its buffer. That flush tries
-  both streams and never replaces a failure already in flight.
+  payload runs to its end. Once ssh's write to its stdout fails, the OpenSSH client writes none of
+  the stderr it receives after that, so a quiet payload's end marker must not meet a closed read
+  end, and kept open it does not. A guest that writes once more after its consumer left and then
+  goes quiet has closed the read end, so its end marker is ssh's failed write: the trailer survives
+  only when it reaches ssh in the same batch, and otherwise the result is `Unknown(CONSUMER_LEFT)`.
+  A stderr consumer that leaves, with no trailer yet, ends the request once held stdout is
+  delivered, and ending the session kills the client after its one-second natural-exit wait, which
+  ends the guest's writer: ssh only discards stderr after a failed write and keeps the channel up,
+  and the status travels on stderr, so nothing more could be learned. With the trailer already in
+  hand, stdout is pumped to its end marker and the result is `Completed(N)`. When stdout was
+  abandoned and the stderr trailer still arrives, the result is the guest's own `Completed(N)`;
+  otherwise it is `Unknown(CONSUMER_LEFT)`, which `stream` alone reports as 141, the status of a
+  writer killed by `SIGPIPE`. `stream_to_operator` flushes both streams once as it returns, and that
+  flush is how a departure it did not see earlier is detected: a stream whose consumer has gone is
+  pointed at the null device, so interpreter shutdown cannot fail on the bytes left in its buffer.
+  That flush tries both streams and never replaces a failure already in flight.
 - **Binary stdio.** Callers pass `sys.stdout.buffer` and `sys.stderr.buffer` (the text layer's
   `newline="\n"` at `cli/_entry.py:38` does not apply), after flushing the text layer (I2).
   `stream_to_operator(access, request)` in `access.py` is that wiring, flush, raw stdin and binary

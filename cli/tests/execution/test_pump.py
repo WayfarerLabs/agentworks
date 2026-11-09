@@ -222,7 +222,7 @@ ENDLESS = (
 
 @pytest.mark.parametrize("stream", ["out", "err"])
 def test_an_endless_writer_whose_consumer_leaves_ends_with_the_consumer_left(stream: str) -> None:
-    """Closing the client's read end is what ends the writer: the child only stops on ``EPIPE``."""
+    """A departed stdout's writer stops on ``EPIPE`` once its read end closes; a departed stderr's, with the session."""
     leaving = leaving_session(
         ENDLESS.format(stream=stream),
         **{"stdout" if stream == "out" else "stderr": leaving_sink(3)},

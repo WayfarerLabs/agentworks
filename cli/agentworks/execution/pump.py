@@ -189,12 +189,15 @@ class PipeSession:
     an error for which :func:`consumer_left` holds is the consumer of that
     stream leaving. The session discards the rest of that stream and closes
     its read end once the guest writes to it again, so ssh sees ``EPIPE`` on
-    the guest's next write, as it did when it held the operator's streams. The
-    closing line is not a guest write, so it never meets a closed read end:
-    once ssh's write to its stdout fails, ssh writes none of the stderr it
-    receives after that, and the trailer would be lost. A departed stdout makes ssh close the channel when
-    the guest writes again, and the session keeps pumping stderr until then,
-    so a quiet payload still reports its status. ssh does not end the channel
+    the write after that one, as it did when it held the operator's streams.
+    Once ssh's write to its stdout fails, ssh writes none of the stderr it
+    receives after that, so a quiet payload's closing line must not be what
+    meets the closed read end: kept open, it reaches ssh's stdout and the
+    trailer follows, so a quiet payload still reports its status. A guest that
+    writes once more after its consumer left and then goes quiet closes the
+    read end, and its closing line is then ssh's failed write; the trailer
+    survives only if it reaches ssh in the same batch, and otherwise the
+    result is ``Unknown(CONSUMER_LEFT)``. ssh does not end the channel
     for a departed stderr, and the status travels on stderr, so :meth:`pump`
     returns :attr:`StopReason.STDERR_CONSUMER_LEFT` once stdout has nothing
     held for a slow consumer and the trailer has not already arrived (with it
@@ -347,11 +350,8 @@ class PipeSession:
         except OSError as error:
             if not consumer_left(error):
                 raise
-            self._abandon(which)
-
-    def _abandon(self, which: str) -> None:
-        """Record that the consumer of ``which`` left; :meth:`_read` closes it once the guest writes to it again."""
-        self._abandoned.add(which)
+            # The consumer left; _read closes the stream once the guest writes to it again.
+            self._abandoned.add(which)
 
     def _close_unread(self, which: str) -> None:
         """Stop reading ``which`` and close the client's read end of it, so ssh sees ``EPIPE``."""
