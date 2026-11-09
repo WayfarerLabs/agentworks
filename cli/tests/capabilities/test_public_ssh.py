@@ -147,7 +147,7 @@ def test_a_refused_key_in_the_client_log_leads_with_the_agent_load_hint_when_the
 def test_a_refused_connection_in_the_client_log_raises_as_nothing_ran(monkeypatch: pytest.MonkeyPatch) -> None:
     answering(monkeypatch, log_text="ssh: connect to host 203.0.113.7 port 22: Connection refused\n", status=None)
 
-    with pytest.raises(public_ssh.ConnectionRefused):
+    with pytest.raises(public_ssh._ConnectionRefused):
         target().run_as_root(b"true\n", 5)
 
 

@@ -253,14 +253,14 @@ the agent, as for every VM connection.
   recreation. When the key is encrypted and the agent does not hold it, the hint leads with the
   passphrase hint from `client.agent_load_hint`, the check `VMAccess.passphrase_hint` makes, since
   it is given only when it is the likely cause. Its `Connection refused`
-  (`ssh_process.CONNECTION_REFUSED`) raises `ConnectionRefused`, a `ConnectivityError`: the address
+  (`ssh_process.CONNECTION_REFUSED`) raises `_ConnectionRefused`, a `ConnectivityError`: the address
   answered and nothing listens on the SSH port, so nothing ran.
 - `wait_until_answering(*, seconds=PROBE_WAIT_SECONDS, retry_refused_key=False)` probes with
   `root_script.run(self.run_as_root, "true", deadline=10)` three seconds apart until one completes
   or `seconds` (120 s by default) have passed, then raises `root_script.ChannelUnreachable`, a
   `ConnectivityError` saying the channel's own bounded wait found no way to the VM, so callers stop
   at the first one instead of retrying it. Its hint names a restart (`agw vm stop` and
-  `agw vm start`) or the provider's serial console. A `ConnectionRefused` probe is waited out like
+  `agw vm start`) or the provider's serial console. A `_ConnectionRefused` probe is waited out like
   no answer, since a booting VM refuses too; when the last probe was refused, the hint says the VM's
   SSH server is likely not running, and nothing more. When no probe got an answer, the wait first
   warns `PROBE_FAILURE_HINT`, the module's `operator.ssh_allow_cidrs` advice, and its hint names the
@@ -860,7 +860,7 @@ operation log, and the error names the script, its status and `agw vm logs NAME`
 | A channel's own wait finds no way to the VM                | `ChannelUnreachable`, at the first call; no retry and no logout      | The channel's (a cloud's names a restart), then the caller's: `rerun_hint`, or a rekey rerun                      |
 | Cloud: the VM refuses the key at its public address        | `KeyRefused` from `PublicSSH`                                        | The provider console, or recreate                                                                                 |
 | A cloud VM with no store record                            | `TrustMissing` from `run_as_root`, before the route                  | Recover re-establishes; delete warns naming the node                                                              |
-| Cloud: the public address refuses the connection           | `ConnectionRefused`, waited out; `ChannelUnreachable` at the bound   | A restart, or the provider's serial console; no firewall advice                                                   |
+| Cloud: the public address refuses the connection           | `_ConnectionRefused`, waited out; `ChannelUnreachable` at the bound  | A restart, or the provider's serial console; no firewall advice                                                   |
 | Proxmox: the guest at the VMID is not the row's            | `StateError`, before anything is sent                                | `agw vm delete NAME`; delete itself removes the row and leaves another guest untouched                            |
 | Delete: the site cannot bind, or the backend delete raises | `StateError`, or the platform's error; the row and record stay       | Finish the delete (fix and rerun, or remove the backend and rerun with `--force`); the rekey aside after a logout |
 | Provisioning join or bootstrap: not status 0               | `ProvisioningError`, inside the platform's rollback                  | An unknown join names the node                                                                                    |

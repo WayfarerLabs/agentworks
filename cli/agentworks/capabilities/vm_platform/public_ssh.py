@@ -74,7 +74,7 @@ class KeyRefused(ConnectivityError):
     """The VM answered at its public address and refused the configured SSH key."""
 
 
-class ConnectionRefused(ConnectivityError):
+class _ConnectionRefused(ConnectivityError):
     """The VM's public address refused the connection: nothing listens on the SSH port, so nothing ran."""
 
 
@@ -98,7 +98,7 @@ class PublicSSH:
         The log is read only when the script never started: ssh writes the
         server's banner there too, and a script that started has already
         connected and logged in, so text in the log cannot mean either failure.
-        A refused connection raises :class:`ConnectionRefused` the same way.
+        A refused connection raises :class:`_ConnectionRefused` the same way.
         """
         with ssh_process.client_log() as log:
             argv = ssh_process.build_argv(
@@ -127,7 +127,7 @@ class PublicSSH:
                 hint=" ".join(part for part in (load_hint, _PROVIDER_ACCESS_HINT) if part),
             )
         if ssh_process.CONNECTION_REFUSED in text:
-            raise ConnectionRefused(
+            raise _ConnectionRefused(
                 f"VM '{self._vm_name}' refused SSH connections at its public address {self._destination.host}",
                 entity_kind="vm",
                 entity_name=self._vm_name,
@@ -165,10 +165,10 @@ class PublicSSH:
         waited = False
         refused: KeyRefused | None = None
         while True:
-            connection_refused: ConnectionRefused | None = None
+            connection_refused: _ConnectionRefused | None = None
             try:
                 result = root_script.run(self.run_as_root, "true", deadline=PROBE_DEADLINE_SECONDS)
-            except ConnectionRefused as error:
+            except _ConnectionRefused as error:
                 # A VM that has just started refuses until its sshd listens, so this is waited out too.
                 refused, connection_refused = None, error
             except KeyRefused as error:
