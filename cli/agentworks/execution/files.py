@@ -2,10 +2,12 @@
 
 ``VMAccess.files()`` returns a :class:`Files`. Each method is one ``run`` of
 ``file_program.py`` as a ``PythonProgram``: the source travels on the
-connection, the parameters as one JSON argument, content on stdin. Nothing is
-read or written through a symbolic link, every mutation is conditional on what
-the caller observed and holds the VM-wide file lock, and ``elevated=True`` runs
-the operation as root, which an agent's access refuses before dispatch.
+connection, the parameters as one JSON argument, and content and its digests
+on stdin, so the operation log, which records arguments, holds neither.
+Nothing is read or written through a symbolic link, every mutation is
+conditional on what the caller observed and holds the VM-wide file lock, and
+``elevated=True`` runs the operation as root, which an agent's access refuses
+before dispatch.
 
 Modes and placement policy are the caller's: this module enforces only that a
 path is absolute and normalized (:func:`guest_path`).
@@ -41,6 +43,11 @@ if TYPE_CHECKING:
 
 _NO_INPUT = NoInput()
 _CAPTURE = CaptureOutput()
+
+
+def _encode(params: Mapping[str, object]) -> bytes:
+    """One compact JSON object, ASCII only, on one line."""
+    return json.dumps(params, ensure_ascii=True, separators=(",", ":")).encode("ascii")
 
 
 def program_source() -> str:
@@ -167,21 +174,20 @@ class Files:
         path = guest_path(path)
         params = {
             "path": path,
-            "expected": expected,
             "mode": mode,
             "group": group,
             "parent_mode": parent_mode,
             "preserve": preserve_metadata,
             "size": len(data),
-            "sha256": hashlib.sha256(data).hexdigest(),
         }
-        status, result = self._run("write_if", params, elevated=elevated, stdin=Bytes(data))
+        sealed = {"expected": expected, "sha256": hashlib.sha256(data).hexdigest()}
+        status, result = self._run("write_if", params, sealed=sealed, data=data, elevated=elevated)
         self._require_done("write_if", path, status, result)
 
     def remove_if(self, path: str, *, expected: str, elevated: bool = False) -> None:
         """Remove the regular file at ``path`` only while it has digest ``expected``; absent is a conflict."""
         path = guest_path(path)
-        status, result = self._run("remove_if", {"path": path, "expected": expected}, elevated=elevated)
+        status, result = self._run("remove_if", {"path": path}, sealed={"expected": expected}, elevated=elevated)
         self._require_done("remove_if", path, status, result)
 
     def prune_empty_parents(self, path: str, *, root: str, elevated: bool = False) -> Pruned:
@@ -205,13 +211,16 @@ class Files:
         params: Mapping[str, object],
         *,
         elevated: bool,
-        stdin: NoInput | Bytes = _NO_INPUT,
+        sealed: Mapping[str, object] | None = None,
+        data: bytes = b"",
         stdout: CaptureOutput = _CAPTURE,
         log_streams: bool = True,
     ) -> tuple[int, Result]:
+        """Run ``operation``: ``params`` as its logged argument, ``sealed`` and then ``data`` on its stdin."""
+        stdin = _NO_INPUT if sealed is None else Bytes(_encode(sealed) + b"\n" + data)
         request = PythonProgram(
             program_source(),
-            args=(operation, json.dumps(params, ensure_ascii=True, separators=(",", ":"))),
+            args=(operation, _encode(params).decode("ascii")),
             elevated=elevated,
             stdin=stdin,
             deadline=self.deadline,

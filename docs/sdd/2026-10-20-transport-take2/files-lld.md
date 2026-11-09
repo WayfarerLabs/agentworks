@@ -164,18 +164,20 @@ launch-target probes, which run `"$SHELL" -lic '<inner>'` today
 
 Every operation is one `run` of one `PythonProgram`: `source` is `program_source()`, `args` is
 `(op, params)` with `params` one JSON object (`ensure_ascii=True`, compact), and `elevated` is the
-caller's flag. JSON keeps every parameter named. Parameters are paths, modes, a group name and
-digests; content is never an argument. Paths are text: `guest_path` refuses a path that is not
-printable (`native_files.py:218-226`), which is the intended stance.
+caller's flag. JSON keeps every parameter named. Parameters are paths, modes and a group name;
+content is never an argument, and neither is a digest: `write_if`'s and `remove_if`'s digests
+(`file_program.SEALED`) travel as one JSON line at the start of stdin, ahead of any content. Paths
+are text: `guest_path` refuses a path that is not printable (`native_files.py:218-226`), which is
+the intended stance.
 
-| Op                    | Params                                                                           | stdin   | stdout                       |
-| --------------------- | -------------------------------------------------------------------------------- | ------- | ---------------------------- |
-| `read`                | `path`                                                                           | none    | the file's bytes             |
-| `stat`                | `path`                                                                           | none    | `{"kind", "mode", "digest"}` |
-| `write_if`            | `path`, `expected`, `mode`, `group`, `parent_mode`, `preserve`, `size`, `sha256` | content | none                         |
-| `remove_if`           | `path`, `expected`                                                               | none    | none                         |
-| `ensure_directory`    | `path`, `mode`                                                                   | none    | none                         |
-| `prune_empty_parents` | `path`, `root`                                                                   | none    | none                         |
+| Op                    | Params                                                     | stdin                              | stdout                       |
+| --------------------- | ---------------------------------------------------------- | ---------------------------------- | ---------------------------- |
+| `read`                | `path`                                                     | none                               | the file's bytes             |
+| `stat`                | `path`                                                     | none                               | `{"kind", "mode", "digest"}` |
+| `write_if`            | `path`, `mode`, `group`, `parent_mode`, `preserve`, `size` | `expected`, `sha256`, then content | none                         |
+| `remove_if`           | `path`                                                     | `expected`                         | none                         |
+| `ensure_directory`    | `path`, `mode`                                             | none                               | none                         |
+| `prune_empty_parents` | `path`, `root`                                             | none                               | none                         |
 
 - **stdout** is the file's bytes for `read` and one JSON line for `stat`. The other operations print
   nothing: their exit status is the whole result, and `files` parses nothing for them. agw-launch's
@@ -382,7 +384,8 @@ def prune_empty_parents(path: str, *, root: str, elevated: bool = False) -> Prun
   permission bits, also with `log_streams=False`. It ports today's `fingerprint` and `directory`
   (`native_files.py:307-332`, `:425-446`).
 - **`write_if`** publishes only while the destination still has digest `expected`, or is still
-  absent for `None`. Content travels as `Bytes(data)`, with `size` and `sha256` in the params.
+  absent for `None`. Content travels as `Bytes`, after the line holding `expected` and `sha256`,
+  with `size` in the params.
 - **`remove_if`** removes a regular file whose digest is `expected`. An absent file is a conflict,
   as `native_files.py:140-141` treats it, because the caller observed it present.
 - **`ensure_directory`** creates the directory and its missing parents with `mode`, and never
@@ -453,11 +456,10 @@ raise FileConflict(...)
   the operator's own; native settings and Codex's override file keep the default.
 - **Writes** are bounded by memory on both ends (D3).
 - **`stat`** transfers no content, which is why publication uses it.
-- **Digests are logged.** `write_if`'s `expected` and `sha256` and `remove_if`'s `expected` are
-  arguments, which the operation log records. Batch B's callers write artifacts, whose digests
-  disclose nothing; batch C must not route a secret-bearing document (a settings file holding a
-  credential, say) through these operations without revisiting this, since a digest of a short or
-  guessable secret confirms it.
+- **Digests stay out of the log.** `write_if`'s `expected` and `sha256` and `remove_if`'s `expected`
+  travel on stdin, not as arguments, because native settings files can hold a credential and a
+  digest of a short or guessable secret confirms it. `stat` and `read` withhold their streams
+  (`log_streams=False`), so no digest is logged.
 
 ## Capability delivery: `admin_access()` and `agent_access()`
 

@@ -23,7 +23,8 @@ from agentworks.execution.errors import (
     PermissionDenied,
 )
 from agentworks.execution.files import Absent, Directory, Files, Pruned, RegularFile, guest_path
-from agentworks.execution.requests import Bytes, PythonProgram
+from agentworks.execution.oplog import format_record
+from agentworks.execution.requests import PythonProgram
 from agentworks.execution.results import Completed, Result, Unknown, UnknownReason
 from tests.vm_access_support import Admin, Agent, RecordingVMAccess, account_shell, local_vm_access
 from tests.vm_access_support import local_files as recorded_local_files
@@ -119,29 +120,16 @@ def test_an_incomplete_outcome_raises_its_transport_error() -> None:
         files.write_if("/home/a/file", b"x", expected=None, mode=0o600, parent_mode=0o700)
 
 
-def test_content_travels_on_stdin_with_its_size_and_digest_as_parameters() -> None:
-    files, access = recording(Result(Completed(0)))
+def test_the_operation_log_holds_no_content_and_no_digest_of_it() -> None:
+    files, access = recording(Result(Completed(0)), Result(Completed(0)))
 
     files.write_if("/home/a/file", b"secret content", expected=DIGEST, mode=0o640, parent_mode=0o750, group="ws")
+    files.remove_if("/home/a/file", expected=DIGEST)
 
-    (request,) = access.requests()
-    assert isinstance(request, PythonProgram) and request.stdin == Bytes(b"secret content")
-    assert all("secret content" not in argument for argument in request.args)
-    assert operations(access) == [
-        (
-            "write_if",
-            {
-                "path": "/home/a/file",
-                "expected": DIGEST,
-                "mode": 0o640,
-                "group": "ws",
-                "parent_mode": 0o750,
-                "preserve": False,
-                "size": 14,
-                "sha256": hashlib.sha256(b"secret content").hexdigest(),
-            },
-        )
-    ]
+    records = "".join(format_record(request, Result(Completed(0)), label="file") for request in access.requests())
+    assert "/home/a/file" in records
+    for secret in ("secret content", DIGEST, hashlib.sha256(b"secret content").hexdigest()):
+        assert secret not in records
 
 
 # -- Refusals before dispatch ------------------------------------------------------------------

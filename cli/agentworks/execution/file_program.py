@@ -1,9 +1,11 @@
 """The guest file program: every file operation core performs on a managed VM.
 
 ``files.Files`` sends this file's source as a ``PythonProgram`` whose arguments
-are the operation's name and one JSON object of parameters; content travels on
-stdin, never as an argument. The exit status is the answer (the ``EXIT_*``
-constants). stdout carries ``read``'s bytes or ``stat``'s one JSON line and
+are the operation's name and one JSON object of parameters. Content travels on
+stdin, never as an argument, and so do content digests (``SEALED``): stdin
+starts with one JSON line of them, then the content. The operation log records
+arguments, so neither ever reaches it. The exit status is the answer (the
+``EXIT_*`` constants). stdout carries ``read``'s bytes or ``stat``'s one JSON line and
 nothing else. stderr carries a traceback for status 1.
 
 Every path component is opened relative to its parent without following links,
@@ -61,8 +63,11 @@ _OPEN_FILE = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
 _TEMPORARY_PREFIX = ".agentworks-tmp-"
 
 
+SEALED = {"write_if": ("expected", "sha256"), "remove_if": ("expected",)}
+"""The parameters each operation takes from stdin's first line rather than its arguments: content digests."""
+
 Params = dict[str, Any]
-"""One operation's decoded JSON parameters (``write_if`` adds its content as ``data``)."""
+"""One operation's decoded JSON parameters, its ``SEALED`` ones included (``write_if`` adds its content as ``data``)."""
 
 
 class _Exit(Exception):
@@ -411,13 +416,16 @@ def main(argv: list[str], *, lock_path: str = LOCK_PATH, lock_wait: float = LOCK
     if operation in _READERS:
         return _status(_READERS[operation], params)
     mutate = _MUTATORS[operation]
-    if operation == "write_if":
-        # The whole content arrives before anything is created, so a dropped connection
+    if operation in SEALED:
+        # The whole input arrives before anything is created, so a dropped connection
         # (a short stdin) publishes nothing.
-        data = sys.stdin.buffer.read()
-        if len(data) != params["size"] or hashlib.sha256(data).hexdigest() != params["sha256"]:
-            return EXIT_CORRUPT_INPUT
-        params["data"] = data
+        header, _, data = sys.stdin.buffer.read().partition(b"\n")
+        sealed = json.loads(header)
+        params.update((name, sealed[name]) for name in SEALED[operation])
+        if operation == "write_if":
+            if len(data) != params["size"] or hashlib.sha256(data).hexdigest() != params["sha256"]:
+                return EXIT_CORRUPT_INPUT
+            params["data"] = data
     lock = _lock(lock_path, lock_wait)
     if lock is None:
         return EXIT_LOCK_TIMEOUT

@@ -63,6 +63,11 @@ class Guest:
         sudo: bool = False,
         umask: int | None = None,
     ) -> subprocess.Popen[bytes]:
+        """Start ``operation``, its ``SEALED`` parameters sent ahead of ``stdin`` as ``Files`` sends them."""
+        sealed = file_program.SEALED.get(operation, ())
+        if sealed:
+            stdin = json.dumps({name: params[name] for name in sealed}).encode() + b"\n" + stdin
+            params = {name: value for name, value in params.items() if name not in sealed}
         argv = [
             self.python,
             "-I",

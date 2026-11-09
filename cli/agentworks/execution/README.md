@@ -143,7 +143,9 @@ read to its end and the guest's status stands. With no status to report, `stream
 `access.files(deadline=None)` returns that identity's `Files` (`files.py`). Each method is one `run`
 of the guest file program (`file_program.py`, sent as a `PythonProgram` like agw-launch's source,
 with no import-time effect): the operation and one JSON object of parameters are its arguments, and
-content travels as `Bytes` on stdin, never as an argument. The deadline bounds every request.
+content travels as `Bytes` on stdin, never as an argument. So do the digests `write_if` and
+`remove_if` compare and verify, so the operation log, which records arguments, holds no content and
+no digest of it. The deadline bounds every request.
 
 | Method                                        | Does                                                                          |
 | --------------------------------------------- | ----------------------------------------------------------------------------- |
