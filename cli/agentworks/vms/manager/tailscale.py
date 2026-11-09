@@ -115,8 +115,9 @@ def _tailscale_logout(vm: VMRow, platform: VMPlatform, ctx: RunContext) -> str |
     stopped or deallocated is not asked: no channel reaches it, and a cloud's
     would wait two minutes to find that out (a WSL2 distro the caller's hold
     has booted reports running). A status the platform refuses with a
-    ``StateError`` means it cannot confirm the guest is this VM's (a Proxmox
-    VMID another guest now holds), so nothing is sent to it. A cloud VM whose
+    ``StateError`` means it cannot confirm the guest is this VM's, so nothing
+    is sent to it: a promise to every platform, whichever ones refuse today
+    (Proxmox does, for a VMID another guest now holds). A cloud VM whose
     host key was never recorded refuses inside ``run_as_root``, before any
     route opens: an impostor could report a logout that never happened.
     """
