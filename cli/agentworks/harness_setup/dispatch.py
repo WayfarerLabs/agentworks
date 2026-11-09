@@ -52,7 +52,7 @@ class _SetupInfrastructureFailure(Exception):
 
 def _sanitize(invocation: SetupInvocation, text: str) -> str:
     """Redact diagnostics before they enter persisted state or the failure list."""
-    return sanitize_setup_diagnostic(text, redactions=invocation.secrets.values(), logger=invocation.runner.logger)
+    return sanitize_setup_diagnostic(text, redactions=invocation.redactions)
 
 
 def destination_id(vm: VMRow, access: VMAccess, *, location: str | None = None, username: str | None = None) -> str:

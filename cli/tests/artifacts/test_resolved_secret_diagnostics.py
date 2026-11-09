@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
@@ -127,6 +128,57 @@ def test_logger_only_secret_is_removed_before_terminal_normalization(
     assert caught.value is failure
     assert marker not in str(failure) and marker not in (failure.hint or "")
     assert path in str(failure)
+
+
+def test_logger_only_secret_is_removed_from_setup_probe_diagnostics(
+    db, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A secret only the operation log registered reaches the setup probe, which removes it from its error."""
+    from agentworks.artifacts.model import ArtifactType
+    from agentworks.harness_setup.inputs import SetupInputs
+    from agentworks.harness_setup.lifecycle import apply_agent_setup
+    from agentworks.harness_setup.model import NativeSetupState
+    from agentworks.plugins.claude.harness_integration import ClaudeCodeIntegration
+    from agentworks.secrets.orchestration import SecretTarget
+    from tests.artifacts._fixtures import received
+    from tests.artifacts.test_native_delivery import artifact
+    from tests.vm_access_support import install_access_recorder
+
+    marker = uuid4().hex.upper()
+    secret = "x" + marker + "\nsecond-part"
+    path = "/home/worker/.claude/skills/review/SKILL.md"
+    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path / "logs")
+    install_access_recorder(monkeypatch)
+    monkeypatch.setattr("agentworks.transports.transport_for_user", lambda *args, **kwargs: Mock(spec=Transport))
+    monkeypatch.setattr("agentworks.harness_setup.lifecycle.site_platform_name", lambda *args: "fixture")
+    invocations = []
+
+    def capture(db, registry, inputs, invocation, **kwargs):
+        invocations.append(invocation)
+        return NativeSetupState()
+
+    monkeypatch.setattr("agentworks.harness_setup.lifecycle.run_setup", capture)
+    apply_agent_setup(
+        db,
+        Mock(),
+        Mock(),
+        inputs=SetupInputs("agent", "agent", "agent", {}, SecretTarget(vm={})),
+        vm=db.insert_vm("vm", "site", "host"),
+        username="worker",
+        values={"TOKEN": "resolved-value"},
+        logger=SSHLogger("resolved-values", "probe", redactions=(secret,)),
+        held=Mock(),
+        operation="agent-init",
+        failures=[],
+    )
+    (invocation,) = invocations
+    access = RecordingVMAccess([], Admin())
+    access.run_outcomes = [Result(Completed(1), b"", ("\x1b[" + secret + " " + path).encode())]
+    setup = ClaudeCodeIntegration.for_setup(owner_kind="agent", owner_name="agent", facet="user", config={})
+    with pytest.raises(ExternalError) as caught:
+        setup.user_init(replace(invocation, access=access, artifacts=received(artifact(ArtifactType.SKILL))))
+    assert marker not in str(caught.value) and marker not in (caught.value.hint or "")
+    assert path in str(caught.value)
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="executes Linux guest native-file helpers")

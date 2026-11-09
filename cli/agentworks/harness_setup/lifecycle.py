@@ -165,6 +165,11 @@ def prepare_workspace_setup(
     )
 
 
+def _redactions(logger: SSHLogger, values: Mapping[str, str]) -> tuple[str, ...]:
+    """Every secret the operation's log registered or its setup resolved."""
+    return tuple(dict.fromkeys((*logger.redactions, *values.values())))
+
+
 def apply_vm_setup(
     db: Database,
     config: Config,
@@ -196,6 +201,7 @@ def apply_vm_setup(
                 runner=runner,
                 environment=environment,
                 secrets=values,
+                redactions=_redactions(logger, values),
                 prior=None,
                 checkpoint=lambda claims: None,
             )
@@ -207,6 +213,7 @@ def apply_vm_setup(
                 runner=runner,
                 environment=environment,
                 secrets=values,
+                redactions=_redactions(logger, values),
                 prior=None,
                 checkpoint=lambda claims: None,
                 username=vm.admin_username,
@@ -252,6 +259,7 @@ def apply_agent_setup(
         runner=runner,
         environment=environment,
         secrets=values,
+        redactions=_redactions(logger, values),
         prior=None,
         checkpoint=lambda claims: None,
         username=username,
@@ -299,6 +307,7 @@ def apply_workspace_setup(
         runner=runner,
         environment=environment,
         secrets=values,
+        redactions=_redactions(logger, values),
         prior=None,
         checkpoint=lambda claims: None,
         workspace_name=inputs.name,

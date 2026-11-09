@@ -230,7 +230,9 @@ session facet. Its session implementation:
 It does not own the tmux session, the user, the workspace, or attach and detach. Agentworks provides
 those; the session facet only decides what runs in the pane. Setup facets use the core-supplied
 access (`invocation.access`), its file operations (`invocation.files`) and checkpoint callback to
-configure native tooling at their owning scope.
+configure native tooling at their owning scope. Guest text a facet quotes in an error or warning is
+sanitized with `invocation.redactions`, every secret the operation resolved or logs, which is wider
+than the facet's own `secrets`; `probe_native` takes it.
 
 ## Technical Overview
 

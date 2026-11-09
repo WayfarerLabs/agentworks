@@ -49,7 +49,8 @@ def test_dispatch_redacts_canonicalized_invocation_and_logger_patterns_before_bo
         monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path / "logs")
         logger = SSHLogger("private-diagnostics", "setup", redactions=(log_token,))
     invocation.runner.logger = logger
-    invocation = replace(invocation, secrets={"credential": token})
+    # Core hands the invocation every secret the operation log registered.
+    invocation = replace(invocation, secrets={"credential": token}, redactions=logger.redactions if logger else ())
     # The logger-only value precedes a long invocation value crossing the storage
     # limit. Redacting a truncated or pre-normalized copy cannot protect both.
     payload = "failure " + (log_rendered + " " if with_logger else "")

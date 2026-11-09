@@ -362,7 +362,7 @@ def test_config_secret_registration_and_delivery_share_actual_owner(db, vm, nati
                     "env-secret": "env-private",
                     "other-secret": "other-private",
                 },
-                logger=Mock(),
+                logger=Mock(redactions=()),
                 held=guard,
                 operation="agent-create",
                 failures=[],

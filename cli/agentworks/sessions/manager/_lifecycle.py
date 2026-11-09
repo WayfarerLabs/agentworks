@@ -969,7 +969,8 @@ def _launch_existing_session(
                 agent_name=session.agent_name,
                 access=session_access,
                 environment=session_env,
-                redactions=redactions,
+                # The start stages sanitize probe diagnostics with everything the operation log redacts.
+                redactions=logger.redactions,
                 session_uuid=session.session_uuid,
                 linux_user=linux_user,
                 secret_target=_mgr._session_secret_target(

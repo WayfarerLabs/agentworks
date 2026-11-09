@@ -146,6 +146,7 @@ class SSHLogger:
         self.path = LOG_DIR / f"{vm_name}-{timestamp}-{command_stem}.log"
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._active_handler: _PropagatingFileHandler | None = None
+        self._secrets = tuple(dict.fromkeys(secret for secret in redactions if secret))
         normalized: list[str] = []
         for secret in redactions:
             if not secret:
@@ -180,6 +181,15 @@ class SSHLogger:
         down.
         """
         return format_host_path(self.path)
+
+    @property
+    def redactions(self) -> tuple[str, ...]:
+        """The secrets registered at construction, for text this operation reports outside its log.
+
+        A guest diagnostic quoted in an error never passes through the log's
+        sink, so code that builds one sanitizes it with these.
+        """
+        return self._secrets
 
     def sanitize(self, text: str, *, normalize: Callable[[str], str] | None = None) -> str:
         """Redact operation secrets, optionally matching already-normalized text."""

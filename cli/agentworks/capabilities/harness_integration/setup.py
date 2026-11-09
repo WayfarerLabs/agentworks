@@ -31,6 +31,11 @@ class SetupInvocation:
     Initial creation may buffer until the owning row is inserted. Report an
     entry that cannot converge without failing unrelated setup entries; core
     retains incomplete evidence and reports the owning repair operation.
+
+    ``secrets`` holds only this integration's own config secrets. ``redactions``
+    is every secret the operation resolved or its log registered, and always
+    includes ``secrets``: sanitize any guest text an error or warning quotes
+    with it (``probe_native`` takes it).
     """
 
     vm: VMRow
@@ -43,6 +48,11 @@ class SetupInvocation:
     artifacts: ArtifactInputs = field(default_factory=ArtifactInputs)
     environment: Mapping[str, str] = field(default_factory=dict, repr=False)
     secrets: Mapping[str, str] = field(default_factory=dict, repr=False)
+    redactions: tuple[str, ...] = field(default=(), repr=False)
+
+    def __post_init__(self) -> None:
+        # Narrowing ``secrets`` for an integration never narrows what is redacted.
+        object.__setattr__(self, "redactions", tuple(dict.fromkeys((*self.redactions, *self.secrets.values()))))
 
 
 @dataclass(frozen=True, kw_only=True)

@@ -179,7 +179,10 @@ def test_failure_message_and_hint_redact_all_operation_secrets(setup_case, monke
         monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path / "logs")
         logger = SSHLogger("fixture", "setup", redactions=(extra,))
     invocation.runner.logger = logger
-    invocation = replace(invocation, secrets={"token": token, "overlap": token[:8]})
+    # Core hands the invocation every secret the operation log registered.
+    invocation = replace(
+        invocation, secrets={"token": token, "overlap": token[:8]}, redactions=logger.redactions if logger else ()
+    )
     reason = f"{uuid4()}: {token} {shlex.quote(token)} {extra if with_logger else ''}"
     hint = f"{uuid4()}: {token} {shlex.quote(token)}"
     original = harness_integration_for("first").user_init

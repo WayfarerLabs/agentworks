@@ -291,7 +291,8 @@ def _start_session_slice(
                 agent_name=resolved_agent_name,
                 access=agent_access or admin_access,
                 environment=session_env,
-                redactions=tuple(secret_values.values()),
+                # The start stages sanitize probe diagnostics with everything the operation log redacts.
+                redactions=logger.redactions,
                 linux_user=linux_user,
                 secret_target=_mgr._session_secret_target(
                     registry,

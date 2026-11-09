@@ -344,9 +344,11 @@ for it can register. Beyond the version and the accessors:
 - **Harness integrations.** `_probe_target(access)` receives the launch target's `VMAccess` and
   passes it to `require_commands(commands, access, ...)`. A setup facet's invocation carries
   `access`, and `files`, that access's file operations under setup's per-request bound, beside
-  `runner`; `SetupReadiness` no longer carries a runner. `probe_native` takes a `VMAccess` first.
-  `check_required_commands` and `run_user_shell_command` take a `VMAccess` and an optional
-  `deadline` in seconds, and `run_user_shell_command` returns the command's exit status.
+  `runner`, and `redactions`, every secret the operation resolved or logs, to sanitize any guest
+  text an error quotes; `SetupReadiness` no longer carries a runner. `probe_native` takes a
+  `VMAccess` first and the invocation's `redactions`. `check_required_commands` and
+  `run_user_shell_command` take a `VMAccess` and an optional `deadline` in seconds, and
+  `run_user_shell_command` returns the command's exit status.
 - **Git credential providers.** A provider's runup check reads the access the same way.
 - **Secret backends.** Nothing else changes.
 
