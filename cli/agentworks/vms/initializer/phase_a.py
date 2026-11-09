@@ -30,11 +30,12 @@ from typing import TYPE_CHECKING, Protocol
 
 import agentworks.execution as execution
 from agentworks import output
-from agentworks.capabilities.vm_platform.base import parse_tailnet_address
+from agentworks.capabilities.vm_platform.base import close_provisioning_access_or_warn, parse_tailnet_address
 from agentworks.db import ProvisioningStatus
 from agentworks.errors import ProvisioningError
 from agentworks.execution import reachability, trust
 from agentworks.execution.access import Admin
+from agentworks.interrupts import interrupts_deferred
 from agentworks.path_rendering import format_host_path
 from agentworks.vms import contract
 
@@ -165,11 +166,14 @@ def _close_provisioning_access(db: Database, vm_name: str, platform: VMPlatform,
 
     The ordinary-command gate refuses a VM that Phase A did not complete,
     ``vm shell --platform`` included, so the operator reaches it through the
-    platform's console.
+    platform's console. An interrupt waits for the close, the row's read
+    included (:func:`close_provisioning_access_or_warn`).
     """
-    try:
-        vm = db.get_vm(vm_name)
+    with interrupts_deferred():
+        try:
+            vm = db.get_vm(vm_name)
+        except Exception as read_error:
+            output.warn(f"could not close the provisioning access of VM '{vm_name}': {read_error}")
+            return
         assert vm is not None, "create_vm inserts the row before Phase A"
-        platform.close_provisioning_access(vm, ctx)
-    except Exception as close_error:
-        output.warn(f"could not close the provisioning access of VM '{vm_name}': {close_error}")
+        close_provisioning_access_or_warn(platform, vm, ctx)

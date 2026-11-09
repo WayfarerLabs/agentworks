@@ -426,11 +426,16 @@ class VMPlatform(Capability):
         whether the VM contract passed, Phase A failed (the row is marked
         FAILED) or the operator interrupted it (the row stays incomplete). A
         create that fails before it returns rolls back its own ingress
-        inside :meth:`create` and never reaches this hook.
+        inside :meth:`create` and never reaches this hook. The clouds' base
+        (``public_ssh.PublicAddressPlatform``) calls it again after each
+        root-channel route, so an access an earlier close left open is
+        closed then, and a close with nothing to remove must be silent.
 
         Implementations must not assume the VM is reachable or complete, and
-        the caller treats the hook as best effort: a failure warns, and an
-        error or interrupt already propagating keeps going. The
+        the callers treat the hook as best effort
+        (:func:`close_provisioning_access_or_warn`): a failure warns with what
+        it raised, so an error should name what stays open, and an error or
+        interrupt already propagating keeps going. The
         ordinary-command gate refuses a VM Phase A did not complete,
         ``vm shell --platform`` included, so debugging such a VM goes
         through the platform's console outside the firewalled path.
@@ -481,6 +486,32 @@ def require_native_shell(platform: VMPlatform, vm_name: str) -> None:
     """
     if type(platform).native_shell is VMPlatform.native_shell:
         raise _native_shell_unavailable(platform, vm_name)
+
+
+def close_provisioning_access_or_warn(platform: VMPlatform, vm: VMRow, ctx: RunContext) -> None:
+    """Run :meth:`VMPlatform.close_provisioning_access` to its end, warning rather than raising when it fails.
+
+    An interrupt that arrives meanwhile waits for the close to finish and is
+    raised then (:func:`agentworks.interrupts.interrupts_deferred`), since a
+    close cut short before its provider call leaves the allow open. A failure
+    warns with what the platform said, which names the rule, and the command
+    that finishes the close: any later root-channel operation, of which
+    ``vm recover`` is the one a complete VM always allows, or ``vm delete``
+    for a VM that never completed provisioning.
+    """
+    from agentworks import output
+    from agentworks.db import ProvisioningStatus
+    from agentworks.interrupts import interrupts_deferred
+
+    with interrupts_deferred():
+        try:
+            platform.close_provisioning_access(vm, ctx)
+        except Exception as error:
+            if vm.provisioning_status == ProvisioningStatus.COMPLETE.value:
+                remedy = f"run 'agw vm recover {vm.name}' to close it"
+            else:
+                remedy = f"run 'agw vm delete {vm.name}' to remove it with the VM"
+            output.warn(f"could not close the provisioning access of VM '{vm.name}': {error}; {remedy}")
 
 
 def _native_shell_unavailable(platform: VMPlatform, vm_name: str) -> FeatureUnavailable:

@@ -341,12 +341,14 @@ state the full contract, and the
   the key after sshd starts; then it waits for cloud-init, joins and settles the address. A
   cloud-init that finished with recoverable errors (exit status 2) warns and lets create carry on.
 - **`close_provisioning_access(vm, ctx)` replaces `post_tailscale_ready` and `secure_failed_vm`.**
-  Phase A calls it exactly once with the create's own context, however Phase A ends: after the VM
-  contract passes, when Phase A fails, and when it is interrupted. A platform that opens
-  provisioning access in `create`, such as a bootstrap firewall allow, closes it there. Rename an
-  override of either old hook; a platform that overrode both with the same body keeps one.
-  Registration refuses a platform that still defines either old name, naming
-  `close_provisioning_access`, since nothing calls them any more.
+  Phase A calls it once with the create's own context, however Phase A ends: after the VM contract
+  passes, when Phase A fails, and when it is interrupted. A platform that opens provisioning access
+  in `create`, such as a bootstrap firewall allow, closes it there. A platform built on
+  `public_ssh.PublicAddressPlatform` has it called again after each root-channel route, so it must
+  do nothing, silently, when the access is already closed. Rename an override of either old hook; a
+  platform that overrode both with the same body keeps one. Registration refuses a platform that
+  still defines either old name, naming `close_provisioning_access`, since nothing calls them any
+  more.
 - **`generate_bootstrap_script()` no longer takes `tailscale_auth_key`.** The script it generates
   holds no secret and stops once Tailscale is installed, so a provider may retain it.
   `run_bootstrap()` runs it through a root channel, and `parse_bootstrap_steps()` replaces

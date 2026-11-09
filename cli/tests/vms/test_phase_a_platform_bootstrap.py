@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import signal
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -13,6 +14,7 @@ from agentworks.execution import reachability, trust
 from agentworks.execution.errors import TrustMismatch
 from agentworks.execution.requests import Command, Script
 from agentworks.execution.results import Result, Unknown, UnknownReason
+from agentworks.interrupts import termination_as_interrupt
 from agentworks.vms.manager import _guard_incomplete_vm
 from tests.vm_access_support import Admin
 from tests.vms.phase_a_support import (
@@ -154,6 +156,25 @@ def test_an_interrupt_while_closing_after_complete_leaves_the_vm_complete(phase:
 
     assert phase.row().provisioning_status == ProvisioningStatus.COMPLETE.value
     assert phase.platform.closed == [ProvisioningStatus.COMPLETE.value]
+
+
+@pytest.mark.parametrize("signal_name", ["SIGINT", "SIGTERM"])
+@pytest.mark.parametrize("fails", [False, True], ids=["contract-passed", "contract-failed"])
+def test_an_interrupt_that_lands_during_the_close_waits_for_it_to_finish(
+    phase: PhaseAHarness, signal_name: str, fails: bool
+) -> None:
+    """Ctrl-C or SIGTERM the instant the row reads complete: the allow is still removed, then the interrupt raises."""
+    if fails:
+        phase.admin.run_outcomes = contract_outcomes(script=b"AGW-CHECK systemd x\nAGW-CHECK-END\n")
+    phase.platform.signal_during_close = getattr(signal, signal_name)
+
+    # vm create holds Phase A inside this block, which is what turns SIGTERM into an interrupt.
+    with pytest.raises(KeyboardInterrupt), termination_as_interrupt():
+        phase.bootstrap()
+
+    assert phase.platform.close_finished
+    expected = ProvisioningStatus.FAILED if fails else ProvisioningStatus.COMPLETE
+    assert phase.row().provisioning_status == expected.value
 
 
 def test_a_post_ready_wait_that_runs_out_warns_and_proceeds(phase: PhaseAHarness, captured_output: Any) -> None:

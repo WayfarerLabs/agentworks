@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, ClassVar
 
 import agentworks.execution as execution
 from agentworks import output
-from agentworks.capabilities.vm_platform.base import VMPlatform
+from agentworks.capabilities.vm_platform.base import VMPlatform, close_provisioning_access_or_warn
 from agentworks.errors import ConnectivityError, StateError
 from agentworks.execution import client, envelope, root_script, ssh_process, trust
 from agentworks.execution.errors import TrustMismatch
@@ -276,19 +276,26 @@ class PublicAddressPlatform(VMPlatform):
 
         ``SIGTERM`` and ``SIGHUP`` unwind like Ctrl-C for as long as the route
         may be open, so ending any command that reaches a cloud VM this way
-        still closes its allow.
+        still closes its allow. Once the route has closed, so does the
+        provisioning access, in case create's close of it failed: the
+        bootstrap allow is not the route's own, so nothing else would remove
+        it while the VM lives.
         """
-        with termination_as_interrupt(), self._transient_route(vm, ctx):
-            address = self._public_address(vm, ctx)
-            if not address:
-                raise StateError(
-                    f"VM '{vm.name}' has no public IP address",
-                    entity_kind="vm",
-                    entity_name=vm.name,
-                    hint=self.public_address_hint,
-                )
-            # Every operation's context is built with the operator's configuration.
-            assert ctx.config is not None
-            target = PublicSSH(address, vm.admin_username, ctx.config.operator.ssh_private_key, binding)
-            target.wait_until_answering()
-            yield target
+        with termination_as_interrupt():
+            try:
+                with self._transient_route(vm, ctx):
+                    address = self._public_address(vm, ctx)
+                    if not address:
+                        raise StateError(
+                            f"VM '{vm.name}' has no public IP address",
+                            entity_kind="vm",
+                            entity_name=vm.name,
+                            hint=self.public_address_hint,
+                        )
+                    # Every operation's context is built with the operator's configuration.
+                    assert ctx.config is not None
+                    target = PublicSSH(address, vm.admin_username, ctx.config.operator.ssh_private_key, binding)
+                    target.wait_until_answering()
+                    yield target
+            finally:
+                close_provisioning_access_or_warn(self, vm, ctx)

@@ -18,6 +18,10 @@ terminal closes.
 A hangup needs nothing more: the cleanup's output to the terminal it took
 away, or to a pipe into a program in that terminal's session, goes nowhere
 (see :func:`agentworks.output.tolerating_dead_sink`) rather than failing.
+
+:func:`interrupts_deferred` holds every one of these signals for a short step
+that must not stop halfway, such as removing a firewall allow, and delivers
+the first of them once the step is done.
 """
 
 from __future__ import annotations
@@ -72,3 +76,34 @@ def termination_as_interrupt() -> Iterator[None]:
     finally:
         for number, handler in previous.items():
             signal.signal(number, handler)
+
+
+@contextlib.contextmanager
+def interrupts_deferred() -> Iterator[None]:
+    """Hold Ctrl-C and the terminations until the block ends, then deliver the first that arrived.
+
+    The held signal reaches whatever handler was in place before the block,
+    so it does there exactly what it would have done when it arrived: inside
+    :func:`termination_as_interrupt` it raises ``KeyboardInterrupt``, and
+    outside one a ``SIGTERM`` ends the process. It is delivered even while an
+    exception leaves the block, which it then replaces. Off the main thread
+    it changes nothing.
+    """
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+    arrived: list[int] = []
+
+    def hold(signal_number: int, _frame: object) -> None:
+        arrived.append(signal_number)
+
+    previous = {
+        number: signal.signal(number, hold) for number in _INTERRUPTS if signal.getsignal(number) is not signal.SIG_IGN
+    }
+    try:
+        yield
+    finally:
+        for number, handler in previous.items():
+            signal.signal(number, handler)
+        if arrived:
+            signal.raise_signal(arrived[0])

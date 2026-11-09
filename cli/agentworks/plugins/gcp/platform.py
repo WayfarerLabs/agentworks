@@ -726,4 +726,6 @@ class GCEPlatform(PublicAddressPlatform):
                     "do not delete a mismatched rule by name"
                 )
         except AgentworksError:
-            output.warn("Could not verify closure of the provider-ID-owned GCE provisioning allow; inspect it")
+            rule = vm.platform_metadata.get("allow_rule")
+            named = f" '{rule}'" if rule else ""
+            output.warn(f"Could not verify closure of the provider-ID-owned GCE provisioning allow{named}; inspect it")

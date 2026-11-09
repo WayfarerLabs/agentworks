@@ -33,7 +33,7 @@ import pytest
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import ProvisionRequest, ssh_exposure
 from agentworks.debian import DebianRelease
-from agentworks.errors import ConfigError, ConnectivityError
+from agentworks.errors import ConfigError, ConnectivityError, ProvisioningError
 from agentworks.plugins.azure import network as azure_network
 from agentworks.plugins.azure.network import (
     ALLOW_PRIORITY_BAND_END,
@@ -301,8 +301,10 @@ class TestCloseProvisioningAccessHooks:
         assert network.security_rules.deletes() == [("rg1", "vm1-nsg", BOOTSTRAP_ALLOW_RULE_NAME)]
         assert network.security_rules.creates() == []
 
-    def test_the_close_tolerates_a_missing_allow(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """A 404 on the delete (hook re-run, already-closed VM) is fine."""
+    def test_the_close_tolerates_a_missing_allow_silently(
+        self, monkeypatch: pytest.MonkeyPatch, captured_output: Any
+    ) -> None:
+        """A 404 on the delete is fine: every root-channel route closes the provisioning access again."""
         from azure.core.exceptions import ResourceNotFoundError
 
         network = _install_fakes(monkeypatch).network
@@ -310,6 +312,23 @@ class TestCloseProvisioningAccessHooks:
         vm: VMRow = _fake_vm()  # type: ignore[assignment]
 
         _platform().close_provisioning_access(vm, RunContext())  # no raise
+
+        assert captured_output.info == []
+        assert captured_output.warnings == []
+
+    def test_a_close_that_cannot_build_its_client_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The caller warns with what it raises, so the rule left open is named there, not lost."""
+        _install_fakes(monkeypatch)
+        platform = _platform()
+
+        def no_client(*_args: object, **_kwargs: object) -> None:
+            raise ConfigError("the site's client secret is unset")
+
+        monkeypatch.setattr(platform, "_network_client", no_client)
+        vm: VMRow = _fake_vm()  # type: ignore[assignment]
+
+        with pytest.raises(ProvisioningError):
+            platform.close_provisioning_access(vm, RunContext())
 
 
 class TestTransientRoute:

@@ -23,6 +23,7 @@ from agentworks.errors import (
     AuthorizationError,
     ConfigError,
     ConnectivityError,
+    ProvisioningError,
     StateError,
     TokenRejectedError,
 )
@@ -628,6 +629,34 @@ class TestCloseProvisioningHooks:
 
         platform.close_provisioning_access(_vm(), RunContext())
         assert set(ec2.ingress["sg-123"]) == {"198.51.100.7/32"}
+
+    def test_a_close_with_nothing_left_to_revoke_reports_nothing_closed(
+        self, monkeypatch: pytest.MonkeyPatch, captured_output: Any
+    ) -> None:
+        """Every root-channel route closes the provisioning access again, silently once the close has worked."""
+        install_fakes(monkeypatch)
+        platform = _platform()
+        platform.create(_request(), RunContext(config=_config()))
+        platform.close_provisioning_access(_vm(), RunContext())
+        captured_output.info.clear()
+
+        platform.close_provisioning_access(_vm(), RunContext())
+
+        assert captured_output.info == []
+        assert captured_output.warnings == []
+
+    def test_a_close_that_cannot_reach_ec2_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The caller warns with what it raises, so the tuples left open are named there, not lost."""
+        install_fakes(monkeypatch)
+        platform = _platform()
+
+        def no_client(*_args: object, **_kwargs: object) -> None:
+            raise ConfigError("the site's access key secret is unset")
+
+        monkeypatch.setattr(platform, "_client", no_client)
+
+        with pytest.raises(ProvisioningError):
+            platform.close_provisioning_access(_vm(), RunContext())
 
     def test_hook_tolerates_missing_security_group(self, monkeypatch: pytest.MonkeyPatch, captured_output: Any) -> None:
         """A row with no recorded security group is warned and skipped, not an

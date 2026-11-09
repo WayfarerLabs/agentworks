@@ -38,7 +38,14 @@ from agentworks.capabilities.vm_platform.ssh_exposure import config_allow_cidrs,
 from agentworks.capabilities.vm_platform.tailscale_join import complete_cloud_bootstrap
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
-from agentworks.errors import AuthorizationError, ConfigError, NotFoundError, StateError, TokenRejectedError
+from agentworks.errors import (
+    AuthorizationError,
+    ConfigError,
+    NotFoundError,
+    ProvisioningError,
+    StateError,
+    TokenRejectedError,
+)
 from agentworks.plugins.aws.auth import _build_access_key_session, _build_ambient_session
 from agentworks.plugins.aws.config import (
     AwsAmbientAuth,
@@ -678,8 +685,11 @@ class EC2Platform(PublicAddressPlatform):
         security group, leaving zero inbound exposure (the empty security
         group is the deny-all-inbound baseline; the public IP stays for the
         VM's lifetime). Phase A calls it once, however it ends, with the
-        create op's own scoped context; on an ``access-key`` site the network
-        call authenticates as the configured key, with no ambient fallback.
+        create op's own scoped context, and every root-channel route calls it
+        again once it closes; on an ``access-key`` site the network call
+        authenticates as the configured key, with no ambient fallback. A
+        failure before the revoke raises naming the tuples, and a refused
+        revoke warns naming them.
         A kept VM Phase A did not complete is debugged through the EC2 serial
         console; ``vm delete``'s logout pokes a fresh transient allow via
         :meth:`_transient_route`.
@@ -704,7 +714,13 @@ class EC2Platform(PublicAddressPlatform):
         if not prefixes:
             output.warn(f"VM '{vm.name}' has no recorded bootstrap SSH prefixes; cannot close provisioning access")
             return
-        ec2 = self._client("ec2", self._region_of(vm), ctx)
+        try:
+            ec2 = self._client("ec2", self._region_of(vm), ctx)
+        except Exception as exc:
+            raise ProvisioningError(
+                f"the bootstrap SSH allow for {', '.join(prefixes)} on security group "
+                f"'{security_group_id}' stays open: {exc}"
+            ) from exc
         remove_ssh_allow(ec2, str(security_group_id), prefixes)
 
     @contextlib.contextmanager

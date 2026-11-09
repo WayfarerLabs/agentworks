@@ -1,4 +1,4 @@
-"""``termination_as_interrupt``: the signals that end a command unwind it like Ctrl-C, and only inside the block."""
+"""``termination_as_interrupt`` and ``interrupts_deferred``: the signals that end a command, inside the block only."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import sys
 
 import pytest
 
-from agentworks.interrupts import termination_as_interrupt
+from agentworks.interrupts import interrupts_deferred, termination_as_interrupt
 
 posix_only = pytest.mark.skipif(sys.platform == "win32", reason="SIGHUP and os.kill delivery are POSIX")
 # SIGBREAK, Ctrl-Break's signal, exists only on Windows.
@@ -126,7 +126,7 @@ def test_a_block_off_the_main_thread_changes_nothing() -> None:
     seen: list[object] = []
 
     def worker() -> None:
-        with termination_as_interrupt():
+        with termination_as_interrupt(), interrupts_deferred():
             seen.append(signal.getsignal(signal.SIGTERM))
 
     thread = threading.Thread(target=worker)
@@ -134,3 +134,59 @@ def test_a_block_off_the_main_thread_changes_nothing() -> None:
     thread.join()
 
     assert seen == [before]
+
+
+# -- Deferred ------------------------------------------------------------------------------------
+
+
+@pytest.mark.windows
+@pytest.mark.parametrize("name", _FIRST_SIGNALS)
+def test_a_deferred_signal_lets_the_step_finish_and_then_interrupts(name: str) -> None:
+    """Closing an allow is one step: an interrupt that lands inside it must wait for the provider call to return."""
+    finished = False
+
+    with pytest.raises(KeyboardInterrupt), termination_as_interrupt(), interrupts_deferred():
+        _deliver(name)
+        finished = True
+
+    assert finished
+
+
+@pytest.mark.windows
+def test_a_deferred_signal_is_delivered_once_and_the_handlers_are_restored() -> None:
+    """Several signals inside the step still make one interrupt, and the first sets what follows."""
+    before = {number: signal.getsignal(number) for number in (signal.SIGINT, signal.SIGTERM)}
+    raised = 0
+    finished = False
+
+    with termination_as_interrupt():
+        try:
+            with interrupts_deferred():
+                _deliver("SIGTERM")
+                _deliver("SIGINT")
+                finished = True
+        except KeyboardInterrupt:
+            raised += 1
+        # The SIGTERM came first, so the cleanup it starts ignores another one.
+        _deliver("SIGTERM")
+
+    assert finished
+    assert raised == 1
+    assert {number: signal.getsignal(number) for number in before} == before
+
+
+@pytest.mark.windows
+def test_a_step_with_no_signal_returns_normally() -> None:
+    with termination_as_interrupt(), interrupts_deferred():
+        pass
+
+
+@posix_only
+def test_an_ignored_signal_stays_ignored_through_a_deferred_step() -> None:
+    before = signal.signal(signal.SIGHUP, signal.SIG_IGN)
+    try:
+        with interrupts_deferred():
+            os.kill(os.getpid(), signal.SIGHUP)
+        assert signal.getsignal(signal.SIGHUP) is signal.SIG_IGN
+    finally:
+        signal.signal(signal.SIGHUP, before)

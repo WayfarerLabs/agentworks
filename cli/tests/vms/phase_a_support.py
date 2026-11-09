@@ -7,6 +7,7 @@ admin's access answers the VM contract cleanly unless a test scripts otherwise.
 
 from __future__ import annotations
 
+import signal
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
@@ -36,18 +37,28 @@ def contract_outcomes(
 
 
 class SpyPlatform:
-    """Records the provisioning status of the row each close was given; ``close_error`` makes the close fail."""
+    """Records the provisioning status of the row each close was given; ``close_error`` makes the close fail.
+
+    ``signal_during_close`` delivers that signal as the close begins, as an
+    operator's would arrive while the provider call is in flight;
+    ``close_finished`` then says whether the close still ran to its end.
+    """
 
     name = "stub"
 
     def __init__(self) -> None:
         self.closed: list[str] = []
         self.close_error: BaseException | None = None
+        self.signal_during_close: int | None = None
+        self.close_finished = False
 
     def close_provisioning_access(self, vm: Any, ctx: object) -> None:
         self.closed.append(vm.provisioning_status)
+        if self.signal_during_close is not None:
+            signal.raise_signal(self.signal_during_close)
         if self.close_error is not None:
             raise self.close_error
+        self.close_finished = True
 
 
 class SpyLog:
