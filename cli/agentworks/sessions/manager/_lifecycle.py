@@ -637,6 +637,16 @@ def _launch_existing_session(
     # resource before start or restart (Phase 7, LLD b). Drift guard:
     # tests/agents/test_recipe_gate_drift.py.
     ensure_recipe_enabled(registry, "session-template", template.name)
+    env_target = _mgr._session_secret_target(
+        registry,
+        db=db,
+        vm=vm,
+        ws=ws,
+        session_name=name,
+        session_template=template,
+        mode=SessionMode(session.mode),
+        agent_name=session.agent_name,
+    )
     session_node = live_session_node(
         session,
         template,
@@ -644,6 +654,8 @@ def _launch_existing_session(
         workspace=workspace_node,
         vm=vm_node,
     )
+    template_values = _mgr._session_context_values(db, vm, ws, name, SessionMode(session.mode), session.agent_name)
+    session_node.harness_integration.prepare_context(template_values, intent=intent)
     nodes = walk(session_node)
     # The walk supplies the boundary union (the site's config secrets;
     # live nodes declare nothing else). The session's env chain is
@@ -866,16 +878,7 @@ def _launch_existing_session(
 
             secret_values = resolve_for_command(
                 [
-                    _mgr._session_secret_target(
-                        registry,
-                        db=db,
-                        vm=vm,
-                        ws=ws,
-                        session_name=name,
-                        session_template=template,
-                        mode=SessionMode(session.mode),
-                        agent_name=session.agent_name,
-                    ),
+                    env_target,
                 ],
                 config,
                 registry,
@@ -988,6 +991,10 @@ def _launch_existing_session(
                 agent_target=None if is_admin else session_target,
                 secrets=ScopedSecrets(graph_secret_values, session_node.secret_refs()),
             )
+            template_values = _mgr._session_context_values(
+                db, vm, ws, name, SessionMode(session.mode), session.agent_name
+            )
+            session_node.harness_integration.prepare_context(template_values, intent=intent)
             harness_start = require_implemented_start(
                 session_node.harness_integration.start(start_ctx, intent=intent),
                 intent=intent,
@@ -1002,10 +1009,7 @@ def _launch_existing_session(
             stage_session_artifacts(
                 db, name, template.harness_integration, session_target, prepared_artifacts, artifact_application
             )
-            command = _mgr._substitute_template_vars(
-                harness_start.command,
-                {"session_name": name, "workspace_name": session.workspace_name},
-            )
+            command = harness_start.command
 
             with output.section("Starting Session"):
                 output.info(f"{operation.title()}ing session '{name}'...")

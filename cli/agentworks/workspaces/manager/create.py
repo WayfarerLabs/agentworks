@@ -264,7 +264,9 @@ def create_workspace(
 
     from agentworks.harness_setup.lifecycle import prepare_workspace_setup
 
-    setup_inputs = prepare_workspace_setup(db, registry, vm=vm, name=ws_name, template=template)
+    setup_inputs = prepare_workspace_setup(
+        db, registry, vm=vm, name=ws_name, template=template, root=pending_workspace.workspace_path
+    )
     if setup_inputs is not None:
         setup_inputs.register(resolver, registry)
 

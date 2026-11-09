@@ -166,11 +166,19 @@ def _resolve_agent_direct_env_scopes(
     ws_env: dict[str, EnvEntry] | None = None
     if ws is not None:
         ws_env = _resolve_ws_template(db, registry, ws.name, ws.template).env
-    return _AgentDirectEnvScopes(
-        vm=vm_tmpl.env,
-        workspace=ws_env,
-        agent=agent_tmpl.env,
+    scopes = _AgentDirectEnvScopes(vm=vm_tmpl.env, workspace=ws_env, agent=agent_tmpl.env)
+    from agentworks.interpolation import context_values
+
+    _agent_direct_secret_target(scopes, label=f"agent={agent.name}").validate_context(
+        context_values(
+            vm_name=vm.name,
+            user=agent.linux_user,
+            agent_name=agent.name,
+            workspace_name=ws.name if ws else None,
+            workspace_dir=ws.workspace_path if ws else None,
+        ),
     )
+    return scopes
 
 
 def _agent_direct_secret_target(

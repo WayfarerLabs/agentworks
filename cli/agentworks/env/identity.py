@@ -14,6 +14,9 @@ from typing import Literal
 
 SessionKind = Literal["admin", "agent"]
 
+WORKSPACE_IDENTITY_KEYS = frozenset({"AGENTWORKS_WORKSPACE", "AGENTWORKS_WORKSPACE_DIR"})
+SESSION_IDENTITY_KEYS = frozenset({"AGENTWORKS_SESSION", "AGENTWORKS_SESSION_KIND"})
+
 
 @dataclass(frozen=True)
 class ResourceContext:
