@@ -7,7 +7,6 @@ and reported without preventing independent entries from converging.
 
 from __future__ import annotations
 
-import hashlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -129,7 +128,7 @@ class _MappingPlan:
         removed: tuple[tuple[str, str], ...] = (),
         protected: tuple[tuple[str, str], ...] = (),
     ) -> None:
-        """Write the planned settings over ``current``, what was last read, only while the file still holds it.
+        """Publish the planned settings over ``current``, what was last read, through :meth:`Files.update`.
 
         User files are 0600 under 0700 parents; workspace files, with
         ``group``, 0660 under setgid 2770 parents. Settings equal to
@@ -163,13 +162,11 @@ class _MappingPlan:
         retained = tuple((key, name) for key, name in protected if name not in _table(contributions, key))
         _preserve_entries(document, native, retained)
         content = serialize_settings(document, format=self.prepared.format)
-        if content == current:
-            return
         try:
-            files.write_if(
+            files.update(
                 destination,
                 content,
-                expected=None if current is None else hashlib.sha256(current).hexdigest(),
+                observed=current,
                 mode=0o600 if group is None else 0o660,
                 parent_mode=0o700 if group is None else 0o2770,
                 group=group,
