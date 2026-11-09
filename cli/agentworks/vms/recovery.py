@@ -80,8 +80,11 @@ keys="$home/.ssh/authorized_keys"
 mkdir -p "$home/.ssh"
 # The whole managed file, as reinit writes it, so a key it no longer lists
 # (one the configured key replaced) stops working now, not at the next reinit.
-(umask 077 && printf '%s' {authorized_keys} > "$keys.agw-recover")
-mv -f "$keys.agw-recover" "$keys"
+# The admin owns this directory, so root writes only a file mktemp just
+# created (mode 0600), never a name the admin could have planted a link at.
+staged=$(mktemp "$keys.XXXXXXXX")
+printf '%s' {authorized_keys} > "$staged"
+mv -f "$staged" "$keys"
 chown -R "$admin:" "$home/.ssh"
 chmod 700 "$home/.ssh"
 chmod 600 "$keys"
