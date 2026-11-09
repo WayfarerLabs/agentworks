@@ -10,10 +10,12 @@ Pins:
   fallbacks (``${AGENTWORKS_AGENT:-admin}`` / ``${AGENTWORKS_VM:-...}``)
   so a user who opens a shell before init populates the identity
   profile still sees a usable prompt.
-- ``_write_skel_seeds`` writes both seeds to ``/etc/skel/.bashrc``
-  and ``/etc/skel/.zshrc`` via ``sudo tee`` and chmods 644. The
-  ``/etc/skel`` location is what makes ``useradd -m`` (i.e. agent
-  creation) inherit the seed without an explicit copy step.
+- The seeds' paths are ``/etc/skel/.bashrc`` and ``/etc/skel/.zshrc``:
+  the ``/etc/skel`` location is what makes ``useradd -m`` (i.e. agent
+  creation) inherit the seed without an explicit copy step. What
+  ``_write_skel_seeds`` leaves on disk is in
+  ``test_initializer_system_fragments.py``, and its order after apt in
+  ``tests/vms/test_phase_b_driver.py``.
 """
 
 from __future__ import annotations
@@ -205,39 +207,3 @@ def test_write_skel_seeds_skel_paths_are_etc_skel() -> None:
     wouldn't propagate to future agents automatically."""
     assert SKEL_BASHRC_PATH == "/etc/skel/.bashrc"
     assert SKEL_ZSHRC_PATH == "/etc/skel/.zshrc"
-
-
-def test_write_skel_seeds_runs_after_apt_install_in_initializer() -> None:
-    """Regression guard: ``/etc/skel/.bashrc`` is a Debian conffile
-    shipped by ``bash``. Running ``_write_skel_seeds`` BEFORE
-    ``_install_apt_packages`` would let apt's ``--force-confnew``
-    silently replace the seed on any reinit that upgrades bash
-    (the seed lands at ``/etc/skel/.bashrc.dpkg-old`` and future
-    ``useradd -m`` inherits Debian's stock skel instead). Same
-    conffile-clobber pattern as ``_write_agentworks_identity_profile``,
-    which carries an explanatory comment for exactly this reason.
-
-    This test scans the init source for the relative positions of the
-    two calls so a refactor that reorders them has to update a test.
-    """
-    import inspect
-    import re
-
-    from agentworks.vms import initializer
-
-    # Inspect ``_phase_b_setup`` -- the function that actually houses
-    # both calls. ``run_initialization`` is the public entry; the
-    # ordering constraint is on the helper.
-    src = inspect.getsource(initializer._phase_b_setup)
-    # Match only actual call sites (line starts with whitespace + the
-    # function name + ``(``) so a stray reference inside a comment
-    # can't trip the assertion.
-    skel = re.search(r"^\s+_write_skel_seeds\(", src, re.MULTILINE)
-    apt = re.search(r"^\s+_install_apt_packages\(", src, re.MULTILINE)
-    assert skel is not None, "expected _write_skel_seeds call in _phase_b_setup"
-    assert apt is not None, "expected _install_apt_packages call in _phase_b_setup"
-    assert skel.start() > apt.start(), (
-        "_write_skel_seeds must run AFTER _install_apt_packages so apt's "
-        "--force-confnew doesn't replace /etc/skel/.bashrc (a bash-package "
-        "conffile) with Debian's stock skel."
-    )

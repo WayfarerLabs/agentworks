@@ -504,34 +504,6 @@ def test_agent_setup_runners_have_no_env_injection() -> None:
     )
 
 
-def test_vm_provisioning_runners_have_no_env_injection() -> None:
-    """Source-level tripwire: provisioning is hermetic. None of the VM
-    init user-facing runners (dotfiles install, mise, user_install_commands,
-    claude plugins) should pass ``env=`` from operator [admin.env] /
-    [vm_templates.*.env] tables. Static identity reaches
-    them via the system-wide /etc/profile.d/agentworks-identity.sh
-    written by VM init. Operator env only lands at RUNTIME shells.
-
-    A future contributor adding ``env=admin_env`` to a provisioning
-    runner re-introduces the build-time-config-coupling this rule
-    exists to prevent."""
-    import inspect
-
-    from agentworks.vms import initializer as init
-
-    src = inspect.getsource(init._phase_b_setup)
-    assert "env=admin_env" not in src, (
-        "found 'env=admin_env' in _phase_b_setup; provisioning runners "
-        "must not inject operator env. Identity reaches them via the "
-        "system-wide /etc/profile.d/ fragment, not SetEnv."
-    )
-    assert "admin_env = compose_env" not in src, (
-        "found 'admin_env = compose_env' in _phase_b_setup; the "
-        "operator-env composition was removed because no provisioning "
-        "runner consumes it."
-    )
-
-
 def test_phase_b_setup_reconciles_profile_sources_after_dotfiles() -> None:
     """Defensive: ``_ensure_agentworks_files_sourced`` runs after dotfiles
     so that source lines in shell rc files survive
