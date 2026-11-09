@@ -40,6 +40,7 @@ from agentworks.errors import (
     UserAbort,
 )
 from agentworks.harness_setup.outcomes import SetupFailure, raise_setup_failures
+from agentworks.linux_users import managed_home
 from agentworks.naming import MAX_VM_NAME_LENGTH, validate_name
 
 from ._helpers import _require_vm
@@ -947,7 +948,7 @@ def reinit_vm(
         )
         ts_target = transport(vm, config, default_timeout=60, logger=logger)
 
-        home = f"/home/{vm.admin_username}"
+        home = managed_home(vm.admin_username)
 
         # try/finally ensures the SSH logger is closed exactly once,
         # AFTER any warning output. Matches the pattern used by agent

@@ -87,11 +87,20 @@ def _resolve_vm_admin_env_scopes(
 
     from agentworks.vms.admin_templates import resolve_live_template as resolve_admin_template
 
-    return _VmAdminEnvScopes(
-        vm=vm_env,
-        workspace=ws_env,
-        admin=resolve_admin_template(db, registry, vm.name, vm.admin_template).env,
+    admin_env = resolve_admin_template(db, registry, vm.name, vm.admin_template).env
+    scopes = _VmAdminEnvScopes(vm=vm_env, workspace=ws_env, admin=admin_env)
+    from agentworks.interpolation import context_values
+
+    _vm_secret_target(scopes, label=f"vm={vm.name}").validate_context(
+        context_values(
+            vm_name=vm.name,
+            user=vm.admin_username,
+            agent_name=None,
+            workspace_name=ws.name if ws else None,
+            workspace_dir=ws.workspace_path if ws else None,
+        ),
     )
+    return scopes
 
 
 def _vm_secret_target(

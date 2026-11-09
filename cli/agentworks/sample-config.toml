@@ -144,8 +144,10 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # Secrets
 # =============================================================================
 #
-# A pluggable, named-secret system. In a resource manifest, anywhere an env
-# value can be a string it can also be `{ secret: <name> }`, referencing a
+# A pluggable, named-secret system. In resource manifests, plaintext env values
+# can use context references such as `${agw:user_home_dir}/.config/tool`.
+# Secret names and contents remain literal. Any env value can also be
+# `{ secret: <name> }`, referencing a
 # declared secret. The chain's configured sources produce the value at command
 # time; agentworks never persists secret values to disk.
 #
