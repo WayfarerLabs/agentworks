@@ -439,7 +439,9 @@ Line numbers in this slice are at `60d347220`, the platform LLD's baseline.
   - the Apple-vz SVE restart path on Lima: a first boot that fails before its restart leaves no
     bootstrap marker and runs the bootstrap again;
   - the Remote Lima wrapper kill gets its own process group under macOS's `/bin/bash`;
-  - a WSL2 distro keeps `vms.hostname` across a recover that creates a new incarnation;
+  - a WSL2 distro keeps `vms.hostname` (kernel hostname, `/etc/hostname` and the Tailscale DNS name)
+    across `vm stop` then `vm start`, or `wsl --terminate`, which also shows the `wsl.conf` content
+    with real newlines passing through `wsl.exe`'s command line intact;
   - on GCP, a stop and start after this round still finds the startup wrapper's marker and leaves
     the guest unchanged;
   - after a local Lima `vm create` with `AW_SECRET_TAILSCALE_AUTH_KEY` set, no `limactl` process

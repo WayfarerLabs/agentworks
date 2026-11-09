@@ -26,7 +26,6 @@ touches the network.
 from __future__ import annotations
 
 import configparser
-import dataclasses
 import json
 import shlex
 import subprocess
@@ -163,15 +162,14 @@ def test_the_distro_keeps_its_vms_hostname_in_wsl_conf(monkeypatch: pytest.Monke
 
 
 @pytest.mark.parametrize("hostname", ["vm_1", "team--vm1"])
-def test_a_hostname_wsl_would_rename_is_refused_before_anything_runs(
-    monkeypatch: pytest.MonkeyPatch, hostname: str
-) -> None:
-    calls = _wire(monkeypatch)
+def test_a_hostname_wsl_would_rename_is_refused(hostname: str) -> None:
+    with pytest.raises(ValidationError) as caught:
+        WSL2Platform("wsl2", {}).validate_create_hostname(hostname)
+    assert caught.value.hint
 
-    with pytest.raises(ValidationError):
-        WSL2Platform("wsl2", {}).create(dataclasses.replace(_request(), hostname=hostname), RunContext())
 
-    assert calls.events == []
+def test_a_hostname_wsl_keeps_is_accepted() -> None:
+    WSL2Platform("wsl2", {}).validate_create_hostname("team-vm1")
 
 
 def _assert_teardown_ran(calls: _Calls) -> None:

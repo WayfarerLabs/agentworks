@@ -315,8 +315,10 @@ before they resolve the auth key.
   unless `/etc/wsl.conf` names it, and a later Tailscale join takes that name too. A WSL2 VM created
   by 0.20 has `hostname` set under `[network]` there; one created before does not. Add it yourself
   (the hostname is in `agw vm describe NAME --output json`) and restart the distro with
-  `wsl --terminate`, or recreate the VM. `vm create` on WSL2 now refuses a hostname that WSL would
-  rename: one with an underscore, or with consecutive hyphens from the system slug.
+  `wsl --terminate`, or recreate the VM. WSL still renames a VM whose hostname has an underscore,
+  since it keeps only letters, digits and single hyphens, so such a VM keeps drifting until it is
+  recreated under another name. `vm create` on WSL2 now refuses such a hostname before it does
+  anything: one with an underscore, or with consecutive hyphens from the system slug.
 - **Output nobody reads no longer fails a command.** When the reader of `agw`'s output has gone (a
   pipe into `head` that has exited, `2>&1 | tee create.log` in a closed window, or the closed
   terminal itself), the rest of that output is dropped and the command carries on to the end, a
@@ -340,6 +342,10 @@ and make the changes below. The docstrings in
 [`cli/agentworks/capabilities/vm_platform/base.py`](../../cli/agentworks/capabilities/vm_platform/base.py)
 state the full contract, and the
 [vm-platform README](../../cli/agentworks/capabilities/vm_platform/README.md) its obligations.
+
+An optional hook is new as well: core calls `validate_create_hostname(hostname)` with the hostname
+it composed for a new VM before any secret resolves. Override it to refuse a hostname your backend
+would change; the default accepts every hostname.
 
 ### A root channel replaces the native transport
 

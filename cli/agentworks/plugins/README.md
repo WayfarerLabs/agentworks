@@ -218,6 +218,10 @@ it, then reaches the VM over SSH there: its first connection enrolls the host ke
 contract follows, with `/etc/os-release` first. Core persists its own observation rather than
 trusting a platform result field.
 
+A platform whose backend rewrites some hostnames overrides the pure
+`validate_create_hostname(hostname)` hook to refuse them before secrets resolve; its default accepts
+every hostname.
+
 An operator-owned release catalog also overrides the pure `validate_create_release(release)` hook.
 Core calls it with the concrete selection before resolving secrets or running authenticated platform
 readiness, while `create()` repeats the lookup before mutation. Do not turn that operation-specific

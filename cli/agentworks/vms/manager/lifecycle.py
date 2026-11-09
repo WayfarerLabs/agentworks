@@ -294,6 +294,17 @@ def create_vm(
     # leaves nothing behind.
     slug = _mgr._resolve_system_slug(db)
 
+    # The VM's OS hostname, computed once at create time and recorded on the
+    # row: {slug}-{name} with a slug, the bare name without. Bounded by
+    # construction: slug max 20 + dash + name max 38 (MAX_VM_NAME_LENGTH)
+    # = 59 characters, inside the 63-char DNS-label limit. The cap is 38
+    # (not 42) because the tighter sink is Azure's virtual-network name
+    # {slug}-{name}-vnet, capped at 64: 20 + 1 + 38 + 5 = 64. See
+    # naming.py MAX_VM_NAME_LENGTH for the MIN-over-sinks derivation. The
+    # pending node's preflight hands it to the platform before any secret
+    # resolves.
+    hostname = f"{slug}-{vm_name}" if slug else vm_name
+
     template_node = vm_template_node(vm_tmpl)
     site_node = vm_site_node(registry, site)
     creation_release = CURRENT_DEBIAN_RELEASE
@@ -301,6 +312,7 @@ def create_vm(
         db,
         vm_name,
         creation_release,
+        hostname,
         template_node,
         site_node,
         cred_nodes,
@@ -400,16 +412,6 @@ def create_vm(
             credential_ops = credential_requests(cred_nodes, scoped_ctx)
             git_redactions = credential_redactions(cred_nodes, resolver.values)
             site_node.runup(scoped_ctx(site_node.secret_refs()))
-
-            # The VM's OS hostname, computed once at create time and recorded on the
-            # row: {slug}-{name} with a slug, the bare name without. Bounded by
-            # construction: slug max 20 + dash + name max 38 (MAX_VM_NAME_LENGTH)
-            # = 59 characters, inside the 63-char DNS-label limit. The cap is 38
-            # (not 42) because the tighter sink is Azure's virtual-network name
-            # {slug}-{name}-vnet, capped at 64: 20 + 1 + 38 + 5 = 64. See
-            # config/validation.py MAX_VM_NAME_LENGTH for the MIN-over-sinks
-            # derivation.
-            hostname = f"{slug}-{vm_name}" if slug else vm_name
 
             # Create DB record with as-provisioned resource values. This is the
             # pending VM's realization artifact (what teardown deletes), so the

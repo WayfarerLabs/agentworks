@@ -385,7 +385,7 @@ def _pending(db: Database):
 
     template = vm_template_node(ResolvedVMTemplate(name="default"))
     site = VMSiteNode("stub", cast("VMPlatform", _GatePlatform()), (), cast("Registry", object()))
-    return pending_vm_node(db, "nvm", DebianRelease.TRIXIE, template, site, ()), template, site
+    return pending_vm_node(db, "nvm", DebianRelease.TRIXIE, "nvm", template, site, ()), template, site
 
 
 def test_pending_vm_node_shape_and_edges(db: Database) -> None:

@@ -707,6 +707,25 @@ class WSL2Platform(VMPlatform):
         # every platform); wsl2's anchor needs only the distro name.
         return _keepalive(self._distro_name(vm))
 
+    def validate_create_hostname(self, hostname: str) -> None:
+        """Refuse a hostname WSL would rename (``_WSL_HOSTNAME_RE``), which the guest would then not carry.
+
+        A VM name may hold underscores and a system slug consecutive hyphens;
+        core composes the hostname from both, and no command changes the slug.
+        """
+        if _WSL_HOSTNAME_RE.fullmatch(hostname):
+            return
+        if "_" in hostname:
+            hint = "Pick a VM name without underscores."
+        else:
+            hint = "This install's system slug has consecutive hyphens, so it cannot be part of a WSL2 hostname."
+        raise ValidationError(
+            f"WSL2 would rename the VM's hostname '{hostname}': it keeps only lowercase letters and digits "
+            "joined by single hyphens",
+            entity_kind="vm",
+            hint=hint,
+        )
+
     def create(self, request: ProvisionRequest, ctx: RunContext) -> ProvisionResult:
         image_tag = code_owned_release_value(
             _DEBIAN_OCI_TAGS,
@@ -722,14 +741,6 @@ class WSL2Platform(VMPlatform):
                 entity_kind="vm",
                 entity_name=request.vm_name,
                 hint=("unregister it first (wsl --unregister) or pick a different VM name"),
-            )
-        if not _WSL_HOSTNAME_RE.fullmatch(request.hostname):
-            raise ValidationError(
-                f"WSL2 would rename the VM's hostname '{request.hostname}': it keeps only lowercase letters "
-                "and digits joined by single hyphens",
-                entity_kind="vm",
-                entity_name=request.vm_name,
-                hint="Pick a VM name without underscores (and a system slug without consecutive hyphens).",
             )
         vm_name = distro_name
         swap = request.swap_gib

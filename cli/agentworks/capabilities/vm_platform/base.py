@@ -264,6 +264,16 @@ class VMPlatform(Capability):
         artifact a load-time requirement for sites used only by existing VMs.
         """
 
+    def validate_create_hostname(self, hostname: str) -> None:  # noqa: B027  # intentional concrete no-op
+        """Refuse a create-time ``hostname`` the platform cannot give the VM, before secret resolution.
+
+        Pure and offline, called beside :meth:`validate_create_release` before
+        the create boundary resolves anything or writes the VM's row. Raise
+        ``ValidationError`` for a hostname the backend would change (WSL2
+        keeps only alphanumerics joined by single hyphens). The default
+        accepts every hostname core composes.
+        """
+
     @abstractmethod
     def create(self, request: ProvisionRequest, ctx: RunContext) -> ProvisionResult:
         """Create the backend-side VM.

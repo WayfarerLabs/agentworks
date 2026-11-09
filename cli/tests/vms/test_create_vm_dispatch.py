@@ -349,6 +349,34 @@ def test_create_vm_preserves_typed_platform_failure(
     assert not trust.store_file("map-fail").exists()
 
 
+def test_create_vm_refuses_a_platform_refused_hostname_before_anything_resolves(
+    db: Database,
+    make_config,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: object,
+) -> None:
+    """The platform sees the composed hostname in preflight: no secret resolves and no row or store file is made."""
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+    from agentworks.secrets.resolver import Resolver
+
+    seen: list[str] = []
+
+    def refuse(platform: object, hostname: str) -> None:
+        seen.append(hostname)
+        raise ValidationError("the platform would rename this hostname")
+
+    monkeypatch.setattr(LimaPlatform, "validate_create_hostname", refuse)
+    monkeypatch.setattr(Resolver, "resolve", lambda self: pytest.fail("a secret resolved"))
+    monkeypatch.setattr(LimaPlatform, "create", lambda *args, **kwargs: pytest.fail("create ran"))
+
+    with pytest.raises(ValidationError):
+        vm_manager.create_vm(db, make_config(), name="host_fail", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert seen == ["host_fail"]
+    assert db.get_vm("host_fail") is None
+    assert not trust.store_file("host_fail").exists()
+
+
 @pytest.mark.parametrize(
     "failure",
     [ConnectivityError("node did not report its address", hint="log in again"), RuntimeError("no hint here")],
