@@ -7,7 +7,6 @@ import json
 import signal
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import pytest
 
@@ -23,15 +22,12 @@ from agentworks.execution.errors import (
     PathRefused,
     PermissionDenied,
 )
-from agentworks.execution.files import UPDATE_ATTEMPTS, Absent, Directory, Files, Pruned, RegularFile, guest_path
+from agentworks.execution.files import Absent, Directory, Files, Pruned, RegularFile, guest_path
 from agentworks.execution.oplog import format_record
 from agentworks.execution.requests import PythonProgram
 from agentworks.execution.results import Completed, Result, Unknown, UnknownReason
 from tests.vm_access_support import Admin, Agent, RecordingVMAccess, account_shell, local_vm_access
 from tests.vm_access_support import local_files as recorded_local_files
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
 
 DIGEST = hashlib.sha256(b"current").hexdigest()
 
@@ -136,63 +132,6 @@ def test_the_operation_log_holds_no_content_and_no_digest_of_it() -> None:
         assert secret not in records
 
 
-# -- update ------------------------------------------------------------------------------------
-
-
-def _append(suffix: bytes) -> Callable[[bytes | None], bytes]:
-    return lambda current: (current or b"") + suffix
-
-
-def test_update_transforms_what_the_caller_observed_and_rereads_after_a_conflict() -> None:
-    files, access = recording(Result(Completed(file_program.EXIT_CONFLICT)), Result(Completed(0), b"theirs"))
-    seen: list[bytes | None] = []
-
-    def transform(current: bytes | None) -> bytes:
-        seen.append(current)
-        return (current or b"") + b"+ours"
-
-    assert files.update("/home/a/file", transform, observed=b"mine", mode=0o600, parent_mode=0o700) is True
-    assert seen == [b"mine", b"theirs"]
-    assert [operation for operation, _ in operations(access)] == ["write_if", "read", "write_if"]
-
-
-def test_update_gives_up_after_its_attempts_with_a_conflict() -> None:
-    conflict = Result(Completed(file_program.EXIT_CONFLICT))
-    files, access = recording(conflict, Result(Completed(0), b"a"), conflict, Result(Completed(0), b"b"), conflict)
-
-    with pytest.raises(FileConflict) as caught:
-        files.update("/home/a/file", _append(b"x"), observed=None, mode=0o600, parent_mode=0o700)
-
-    assert caught.value.operation == "update"
-    writes = [operation for operation, _ in operations(access) if operation == "write_if"]
-    assert len(writes) == UPDATE_ATTEMPTS
-
-
-@pytest.mark.parametrize(
-    "outcome,error",
-    [
-        (Result(Completed(file_program.EXIT_LOCK_TIMEOUT)), FileLockTimeout),
-        (Result(Completed(file_program.EXIT_DENIED)), PathRefused),
-        (Result(Unknown(UnknownReason.DEADLINE)), ExecutionIncomplete),
-    ],
-)
-def test_update_retries_nothing_but_a_conflict(outcome: Result, error: type[Exception]) -> None:
-    files, access = recording(outcome)
-
-    with pytest.raises(error):
-        files.update("/home/a/file", _append(b"x"), observed=b"mine", mode=0o600, parent_mode=0o700)
-
-    assert len(access.requests()) == 1
-
-
-@pytest.mark.parametrize("transform", [lambda current: None, lambda current: current])
-def test_update_writes_nothing_when_the_transform_changes_nothing(transform: Callable[[bytes | None], bytes]) -> None:
-    files, access = recording()
-
-    assert files.update("/home/a/file", transform, observed=b"same", mode=0o600, parent_mode=0o700) is False
-    assert access.requests() == []
-
-
 # -- Refusals before dispatch ------------------------------------------------------------------
 
 
@@ -257,8 +196,6 @@ def test_operations_round_trip_on_a_real_filesystem(local_files: Files, tmp_path
     assert not package.exists()
     local_files.ensure_directory(str(package / "made"), mode=0o700)
     assert local_files.stat(str(package / "made")) == Directory()
-    assert local_files.update(str(destination), _append(b"!"), observed=None, mode=0o600, parent_mode=0o700)
-    assert local_files.read(str(destination)) == b"!"
 
 
 def test_programs_run_on_this_machine_take_the_private_lock(

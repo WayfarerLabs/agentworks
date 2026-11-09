@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import shutil
+import stat
 import sys
 import tempfile
 from collections.abc import Iterator
@@ -20,7 +21,7 @@ from agentworks.capabilities.harness_integration.setup import WorkspaceSetupInvo
 from agentworks.db import VMRow
 from agentworks.errors import ConfigError, ExternalError
 from agentworks.execution.errors import FileConflict, PathRefusal, PathRefused
-from agentworks.execution.files import UPDATE_ATTEMPTS, Files
+from agentworks.execution.files import Files
 from agentworks.harness_setup.model import NativeClaim
 from agentworks.plugins._harness_native.native import setup_user, setup_workspace
 from agentworks.plugins._harness_native.native_cli import NativeCLI, NativeTool
@@ -126,6 +127,7 @@ def test_actual_native_lifecycle_and_checkpointed_idempotency(
     config = NativeUserConfig(marketplaces=[str(market)], plugins=["one@fixture-market"])
     setup_user(tool, config, invocation(transport, claims))
     assert [claim.role for claim in claims[-1]] == ["marketplace", "plugin"]
+    assert stat.S_IMODE((transport.home / (".codex" if tool == "codex" else ".claude")).stat().st_mode) == 0o700
     assert len(reports) == 2
     assert "fixture-market" in reports[0] and "one@fixture-market" in reports[1]
     assert all(tool in report and str(market) not in report for report in reports)
@@ -158,6 +160,8 @@ def test_identical_unowned_native_setup_is_adopted(transport: LocalFixtureTransp
 def test_workspace_mapping_uses_group_and_fixed_project_role(transport: LocalFixtureTransport) -> None:
     import grp
 
+    # A supplementary group, when the account has one, is one a new file would not get by default.
+    gid = next((group for group in os.getgroups() if group != os.getgid()), os.getgid())
     workspace = transport.root / "workspace"
     workspace.mkdir()
     source = transport.root / "source.json"
@@ -174,12 +178,14 @@ def test_workspace_mapping_uses_group_and_fixed_project_role(transport: LocalFix
             checkpoint=claims.append,
             workspace_name="fixture",
             root=str(workspace),
-            linux_group=grp.getgrgid(os.getgid()).gr_name,
+            linux_group=grp.getgrgid(gid).gr_name,
         ),
     )
     destination = workspace / ".claude/settings.json"
-    assert destination.stat().st_mode & 0o777 == 0o660
-    assert destination.stat().st_gid == os.getgid()
+    assert stat.S_IMODE(destination.stat().st_mode) == 0o660
+    assert destination.stat().st_gid == gid
+    assert stat.S_IMODE(destination.parent.stat().st_mode) == 0o2770
+    assert destination.parent.stat().st_gid == gid
     assert not any(claims)
     assert not (transport.home / ".claude/settings.json").exists()
 
@@ -427,7 +433,9 @@ def test_user_setup_binding_uses_native_model_and_config_home(
     root = transport.root / "overridden-config"
     key = "CODEX_HOME" if tool == "codex" else "CLAUDE_CONFIG_DIR"
     bound.user_init(invocation(transport, claims, env={key: str(root)}))
-    assert (root / ("config.toml" if tool == "codex" else "settings.json")).is_file()
+    settings = root / ("config.toml" if tool == "codex" else "settings.json")
+    assert stat.S_IMODE(settings.stat().st_mode) == 0o600
+    assert stat.S_IMODE(root.stat().st_mode) == 0o700
     assert not any(claims)
     assert not (transport.home / (".codex" if tool == "codex" else ".claude")).exists()
 
@@ -770,51 +778,55 @@ def test_a_malformed_destination_is_refused_and_left_byte_identical(
     assert os.listdir(destination.parent) == [destination.name]
 
 
-def test_settings_publication_merges_a_change_made_after_its_read(transport, monkeypatch):
+@pytest.mark.parametrize("initial", [None, b'{"before": true}'])
+def test_settings_publication_refuses_a_change_made_after_its_read(
+    transport: LocalFixtureTransport, monkeypatch: pytest.MonkeyPatch, initial: bytes | None
+) -> None:
     source = transport.root / "mapping.json"
     source.write_bytes(b'{"mapped": true}')
     destination = transport.home / ".claude/settings.json"
+    if initial is not None:
+        destination.parent.mkdir()
+        destination.write_bytes(initial)
     original = Files.write_if
-    edits = iter([b'{"external": true}'])
 
     def concurrent_edit(self, path, data, **kwargs):
-        edit = next(edits, None)
-        if edit is not None:
-            destination.parent.mkdir(exist_ok=True)
-            destination.write_bytes(edit)
-        original(self, path, data, **kwargs)
-
-    monkeypatch.setattr(Files, "write_if", concurrent_edit)
-    setup_user(
-        "claude",
-        NativeUserConfig(settings=SettingsMapping(source=str(source), strategy="merge-preserve")),
-        invocation(transport, []),
-    )
-    assert json.loads(destination.read_bytes()) == {"external": True, "mapped": True}
-
-
-def test_settings_publication_gives_up_when_every_write_meets_a_change(transport, monkeypatch):
-    source = transport.root / "mapping.json"
-    source.write_bytes(b'{"mapped": true}')
-    destination = transport.home / ".claude/settings.json"
-    original = Files.write_if
-    writes: list[str] = []
-
-    def concurrent_edit(self, path, data, **kwargs):
-        writes.append(path)
         destination.parent.mkdir(exist_ok=True)
-        destination.write_bytes(json.dumps({"external": len(writes)}).encode())
+        destination.write_bytes(b'{"external": true}')
         original(self, path, data, **kwargs)
 
     monkeypatch.setattr(Files, "write_if", concurrent_edit)
-    with pytest.raises(FileConflict):
+    with pytest.raises(FileConflict) as refused:
         setup_user(
             "claude",
-            NativeUserConfig(settings=SettingsMapping(source=str(source), strategy="replace")),
+            NativeUserConfig(settings=SettingsMapping(source=str(source), strategy="merge-preserve")),
             invocation(transport, []),
         )
-    assert len(writes) == UPDATE_ATTEMPTS
-    assert json.loads(destination.read_bytes()) == {"external": UPDATE_ATTEMPTS}
+    assert refused.value.path == str(destination)
+    assert destination.read_bytes() == b'{"external": true}'
+
+
+@pytest.mark.parametrize("tool", ["codex", "claude"])
+def test_settings_that_change_nothing_leave_the_file_and_its_mode_alone(
+    transport: LocalFixtureTransport, tool: NativeTool
+) -> None:
+    format = "toml" if tool == "codex" else "json"
+    source = transport.root / "mapping"
+    source.write_bytes(serialize_settings({"mapped": True}, format=format))
+    destination = transport.home / (".codex/config.toml" if tool == "codex" else ".claude/settings.json")
+    destination.parent.mkdir()
+    destination.write_bytes(serialize_settings({"mapped": True}, format=format))
+    destination.chmod(0o640)
+    before = destination.stat().st_ino
+
+    setup_user(
+        tool,
+        NativeUserConfig(settings=SettingsMapping(source=str(source), strategy="merge-overwrite")),
+        invocation(transport, []),
+    )
+
+    assert destination.stat().st_ino == before
+    assert stat.S_IMODE(destination.stat().st_mode) == 0o640
 
 
 def test_marketplace_only_repeat_does_not_read_available_catalog(transport, monkeypatch):

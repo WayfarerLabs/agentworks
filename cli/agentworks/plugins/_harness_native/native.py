@@ -7,6 +7,7 @@ and reported without preventing independent entries from converging.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -21,7 +22,7 @@ from agentworks.capabilities.harness_integration.settings import (
     serialize_settings,
 )
 from agentworks.errors import ConfigError, StateError
-from agentworks.execution.errors import PathRefusal, PathRefused
+from agentworks.execution.errors import FileConflict, PathRefusal, PathRefused
 from agentworks.execution.files import Absent, Directory, guest_path
 from agentworks.harness_setup.model import NativeClaim
 from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
@@ -128,50 +129,61 @@ class _MappingPlan:
         removed: tuple[tuple[str, str], ...] = (),
         protected: tuple[tuple[str, str], ...] = (),
     ) -> None:
-        """Write the planned settings over ``current``, what was last read, recomputing them if the file changes.
+        """Write the planned settings over ``current``, what was last read, only while the file still holds it.
 
         User files are 0600 under 0700 parents; workspace files, with
-        ``group``, 0660 under setgid 2770 parents.
+        ``group``, 0660 under setgid 2770 parents. Settings equal to
+        ``current`` write nothing, so the file keeps its permissions. A file
+        that changed since ``current`` was read is ``FileConflict``, and
+        nothing is written.
         """
         if self.skipped:
             return
-
-        def render(existing: bytes | None) -> bytes:
-            # Keep the initial skip decision even when plugin commands create the file.
-            result = self.prepared.apply(
-                None if self.prepared.strategy == "skip-existing" else existing, destination_path=destination
-            )
-            document = parse_settings(result.content, format=self.prepared.format)
-            for key, name in removed:
-                _table(document, key).pop(name, None)
-            native = (
-                {}
-                if existing is None or not (overlays or protected)
-                else parse_settings(
-                    existing, format=self.prepared.format, location=f"guest destination {destination!r}"
-                )
-            )
-            for (key, name), value in overlays:
-                if key not in document:
-                    document[key] = {}
-                table = _table(document, key)
-                baseline = _table(native, key).get(name)
-                table[name] = _overlay_fields(_overlay_fields(baseline, table.get(name, baseline)), value)
-            # A skipped native association is not permission to undo an explicit
-            # settings mapping. Preserve only values the selected policy leaves alone.
-            contributions = self.prepared.contributions(existing, destination_path=destination)
-            retained = tuple((key, name) for key, name in protected if name not in _table(contributions, key))
-            _preserve_entries(document, native, retained)
-            return serialize_settings(document, format=self.prepared.format)
-
-        files.update(
-            destination,
-            render,
-            observed=current,
-            mode=0o600 if group is None else 0o660,
-            parent_mode=0o700 if group is None else 0o2770,
-            group=group,
+        # Keep the initial skip decision even when plugin commands create the file.
+        result = self.prepared.apply(
+            None if self.prepared.strategy == "skip-existing" else current, destination_path=destination
         )
+        document = parse_settings(result.content, format=self.prepared.format)
+        for key, name in removed:
+            _table(document, key).pop(name, None)
+        native = (
+            {}
+            if current is None or not (overlays or protected)
+            else parse_settings(current, format=self.prepared.format, location=f"guest destination {destination!r}")
+        )
+        for (key, name), value in overlays:
+            if key not in document:
+                document[key] = {}
+            table = _table(document, key)
+            baseline = _table(native, key).get(name)
+            table[name] = _overlay_fields(_overlay_fields(baseline, table.get(name, baseline)), value)
+        # A skipped native association is not permission to undo an explicit
+        # settings mapping. Preserve only values the selected policy leaves alone.
+        contributions = self.prepared.contributions(current, destination_path=destination)
+        retained = tuple((key, name) for key, name in protected if name not in _table(contributions, key))
+        _preserve_entries(document, native, retained)
+        content = serialize_settings(document, format=self.prepared.format)
+        if content == current:
+            return
+        try:
+            files.write_if(
+                destination,
+                content,
+                expected=None if current is None else hashlib.sha256(current).hexdigest(),
+                mode=0o600 if group is None else 0o660,
+                parent_mode=0o700 if group is None else 0o2770,
+                group=group,
+            )
+        except FileConflict as conflict:
+            raise FileConflict(
+                conflict.vm_name,
+                "settings publication",
+                destination,
+                hint=(
+                    "Another writer changed the file during setup; rerunning setup reads it again and "
+                    "applies the settings to its current content."
+                ),
+            ) from None
 
 
 def setup_workspace(

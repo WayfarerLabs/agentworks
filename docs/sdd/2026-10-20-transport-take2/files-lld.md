@@ -38,7 +38,7 @@ lock. `FromFile`, `ToFile` and the `observation` option stay slice 7.
 | `execution/access.py`                                             | `run(request, *, stdout=, stderr=, check=)`, the `files` property, `stream`'s refusal of input                                                                                        |
 | `execution/oplog.py`                                              | The `PythonProgram` shape; `log_streams=False` withholds both streams                                                                                                                 |
 | `execution/file_program.py` (new)                                 | The guest file program: plain syntax, standard library only, importable                                                                                                               |
-| `execution/files.py` (new)                                        | `Files`, `guest_path`, the result types, `update`, `program_source()`                                                                                                                 |
+| `execution/files.py` (new)                                        | `Files`, `guest_path`, the result types, `program_source()`                                                                                                                           |
 | `execution/errors.py`                                             | `FileConflict`, `PathRefused`, `FileLockTimeout`, `FileContentMismatch`                                                                                                               |
 | `capabilities/base.py`                                            | `RunContext.admin_access()` and `agent_access()`; `admin_target()` and `agent_target()` deleted                                                                                       |
 | `capabilities/harness_integration/setup.py`                       | `SetupInvocation.access`, `files` and `request_environment()`; `runner` deleted; `SetupReadiness.runner` deleted                                                                      |
@@ -167,7 +167,7 @@ Every operation is one `run` of one `PythonProgram`: `source` is `program_source
 caller's flag. JSON keeps every parameter named. Parameters are paths, modes and a group name;
 content is never an argument, and neither is a digest: `write_if`'s and `remove_if`'s digests
 (`file_program.SEALED`) travel as one JSON line at the start of stdin, ahead of any content. Paths
-are text: `guest_path` refuses a path that is not printable (`native_files.py:218-226`), which is
+are text: `guest_path` refuses a path that is not printable (`execution/files.py:58-72`), which is
 the intended stance.
 
 | Op                    | Params                                                     | stdin                              | stdout                       |
@@ -345,14 +345,14 @@ Under the lock, `write_if`:
   between the create and the rename can leave a `.agentworks-tmp-*` file, which no operation reads
   and the next write to the same destination replaces.
 - **An ambiguous outcome.** A write whose `run` ends `Unknown` may or may not have renamed. `files`
-  raises `ExecutionIncomplete` and nothing retries it, `update` included (R4).
+  raises `ExecutionIncomplete` and nothing retries it (R4).
 - **`remove_if`, `ensure_directory`, `prune_empty_parents`** create nothing to clean up.
 
 ## The workstation API
 
 `VMAccess.files(*, deadline: float | None = None)` returns `Files(self, deadline=deadline)`,
-building nothing else (R9). The deadline is the bound on every request that `Files` makes,
-`update`'s reads and writes included, and `Files.deadline` exposes it.
+building nothing else (R9). The deadline is the bound on every request that `Files` makes, and
+`Files.deadline` exposes it.
 
 **Setup keeps its per-call bound.** VM-scope setup at create and reinit runs every call under
 `default_timeout=60` today (`vms/initializer/driver.py:142-148`, `vms/manager/reinit.py:267`), which
@@ -360,8 +360,10 @@ building nothing else (R9). The deadline is the bound on every request that `Fil
 (`transports/__init__.py:47`, `:93`). So `SetupInvocation` gains `files: Files`, which
 `harness_setup/lifecycle.py` builds as `access.files(deadline=60)` for VM-scope setup and
 `access.files()` otherwise, and setup code uses `invocation.files` for every file operation. The
-native CLI's scratch-directory `Command`s take `invocation.files.deadline`, and requests with their
-own bound (the probe, `destination_id`, the native CLI's commands) keep it. A `DEADLINE` there is
+native CLI's housekeeping requests (the scratch directory's `mktemp` and `rm`, a discovery home's
+`mkdir` and `add_market`'s `test -e`) take `invocation.files.deadline`, so they keep the bound the
+setup runner gave them, and requests with their own bound (the probe, `destination_id`, the native
+CLI's resolution at 30 s and commands at 180 s) keep it. A `DEADLINE` there is
 `ExecutionIncomplete`, and setup fails, as today's timeout did. The methods:
 
 ```python
@@ -370,9 +372,6 @@ def stat(path: str, *, elevated: bool = False) -> PathState
 def write_if(path: str, data: bytes, *, expected: str | None, mode: int, parent_mode: int,
              group: str | None = None, preserve_metadata: bool = False,
              elevated: bool = False) -> None
-def update(path: str, transform: Callable[[bytes | None], bytes | None], *,
-           observed: bytes | None, mode: int, parent_mode: int,
-           group: str | None = None) -> bool
 def remove_if(path: str, *, expected: str, elevated: bool = False) -> None
 def ensure_directory(path: str, *, mode: int) -> None
 def prune_empty_parents(path: str, *, root: str, elevated: bool = False) -> Pruned
@@ -403,7 +402,7 @@ or a stream (D13).
 
 | Error                  | Kind            | Raised for                                                                |
 | ---------------------- | --------------- | ------------------------------------------------------------------------- |
-| `FileConflict`         | `StateError`    | Status 2, and `update` after its last attempt                             |
+| `FileConflict`         | `StateError`    | Status 2                                                                  |
 | `PathRefused(reason)`  | `StateError`    | `UNSUITABLE` (status 4) or `DENIED` (5)                                   |
 | `FileLockTimeout`      | `StateError`    | Status 7; the hint says another Agentworks operation is writing on the VM |
 | `FileContentMismatch`  | `ExternalError` | Status 6; nothing was written                                             |
@@ -415,49 +414,30 @@ or writes through a link, and dotfile installers are the usual cause. The per-su
 today's messages add (`native_files.py:199-215`) goes, since the path already says which file failed
 and no caller branches on it; its test (`cli/tests/test_native_path_failures.py:46`) goes with it.
 
-### `update`
+### Native settings publication
 
-D6's read, transform on the workstation, conditional write, retry on conflict. Its one caller,
-native settings, has already read the file to plan (`native.py`'s `_MappingPlan.build` and its
-inventory checks), so the caller passes what it read as `observed` and the first attempt reads
-nothing:
+Native settings, the one caller that rewrites a file it has read, has no read-modify-write
+operation. `native.py` reads the file to plan (`_MappingPlan.build` and its inventory checks) and
+reads it again just before each publish, computes the settings on the workstation from that content,
+and calls `write_if` with `expected` the SHA-256 of what it read (`None` for absent):
 
-```python
-before = observed
-for attempt in range(UPDATE_ATTEMPTS):  # 3
-    if attempt:
-        before = self.read(path)
-    after = transform(before)
-    if after is None or after == before:
-        return False
-    try:
-        self.write_if(path, after, expected=None if before is None else sha256(before), ...)
-        return True
-    except FileConflict:
-        continue
-raise FileConflict(vm, "update", path)
-```
-
-It takes no `limit`, `preserve_metadata` or `elevated`, and `ensure_directory` no `elevated`, since
-native settings, their only caller, needs none.
-
-- **`transform`** may run more than once, always on the current content. It returns the new bytes,
-  or `None` to leave the file alone. An exception from it (a malformed existing document) propagates
-  with nothing written.
+- **A change is a refusal.** No Agentworks path races that publish, so a `FileConflict` means
+  another writer changed the file during setup. It propagates with nothing written and nothing
+  retried; rerunning setup reads the changed file and applies the settings to it.
 - **Unchanged content writes nothing**, so the file keeps its permissions (I47).
-- **Only `FileConflict` retries.** `FileLockTimeout`, refusals and every transport outcome
-  propagate: a lock held for 30 s will not clear in milliseconds, and an `Unknown` write must not be
-  dispatched again (R4).
-- **The merge stays on the workstation** (D6). `native.py`'s transform calls
+- **The merge stays on the workstation** (D6). `native.py` calls
   `capabilities/harness_integration/settings.py`, which keeps JSON null as a value and rejects
   malformed input (`settings.py:78-104`, `:125-144`), so R5's merge rules hold by construction.
+
+`ensure_directory` takes no `elevated`, since native settings, its only caller, needs none. D6's
+`update` (read, transform, `write_if`) arrives with its first callers in slice 6.
 
 ### Digests and size limits
 
 - **SHA-256**, lowercase hex: the form `OwnedArtifactFile.sha256` records and `publication.py:184`
   computes, so recorded ownership needs no migration.
-- **Where.** `update`'s `expected` and `write_if`'s `sha256` are computed on the workstation;
-  `stat`'s and every compare are computed by the program, the compares under the lock.
+- **Where.** `write_if`'s `expected` and `sha256` are computed on the workstation; `stat`'s and
+  every compare are computed by the program, the compares under the lock.
 - **The capture limit is the only read bound.** The default is the pump's 1 MiB. Publication's
   generated-section reads pass `DEFAULT_CAPTURE_LIMITS.total_bytes` (64 MiB,
   `package_sources.py:27-36`), since a section file holds artifact content up to that bound around
@@ -567,7 +547,7 @@ module. Today's timeouts become `deadline=` with the same value; the last column
 | Setup lifecycle, `harness_setup/lifecycle.py:162-281`                                                                                    | Wraps the target in `SetupRunner` (`:179`, `:228`, `:269`)                                                                                                                                                                                                                                                                         | Builds the invocation's `access` for the same identity, and its `files` with `deadline=60` in `apply_vm_setup`, none in `apply_agent_setup` and `apply_workspace_setup`; `SetupRunner` goes with the last `runner` reader                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | sets the 60 s bound for VM scope                                                                                                              |
 | Session artifacts, `artifacts/session.py:36-236`                                                                                         | `runner.run('printf "%s" "$HOME"')` (`:76`, `:220`); publication through the runner (`:152`, `:190`, `:228`)                                                                                                                                                                                                                       | Each function takes a `VMAccess`. `HOME` is `Script('printf "%s" "$HOME"', Shell.SH)`, which sees the passwd home agw-launch sets (D4). The callers in `sessions/manager/` and `workspaces/manager/delete.py:190` build it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | no deadline today or now                                                                                                                      |
 | Native probing, `artifacts/native/probe.py:370-437`                                                                                      | `require_python3` (`:384`), then `"$SHELL" -lic 'python3 -c <probe>'` with the request on stdin, `timeout=30` (`:402-410`)                                                                                                                                                                                                         | `PythonProgram(_PROBE, login=True, interactive=True, env=..., stdin=Bytes(request), deadline=30)`, stdout `CaptureOutput(16 MiB)`: the reply holds up to 1 MiB of frontmatter, which JSON escaping can grow sixfold, and up to 512 paths. `require_python3` goes: every request proves python3 or is `VMNotReady` (D4). The `AGW_ARTIFACT_PROBE=` parse and the diagnostics redaction (`:411-437`) stay, on `result.stdout` and `result.stderr` decoded. Runs `/usr/bin/python3`, not the login `PATH`'s                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | `ExecutionIncomplete`; setup or the session start fails, as today                                                                             |
-| Native settings merge, `plugins/_harness_native/native.py:97-397`                                                                        | `NativeFiles(invocation.runner)`: `read`, `publish(expected=...)` that fails on a concurrent change (`:123`, `native_files.py:389-390`), `directory(root)` and `directory(root, create=True)` (`:238`, `:335`)                                                                                                                     | `invocation.files`: `read` for the plan and the inventory checks, `update` for each publish with the plan's computation as `transform` (the initial skip decision kept, `:109-110`), `stat` for the root (`Directory` exists, `Absent` does not, a file is `PathRefused` as today), `ensure_directory(root, mode=0o700)`. User files 0600 with parents 0700; workspace files 0660 with parents 2770 and the group. A concurrent change is now retried, up to 3 times                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | 60 s under VM-scope setup, as today; `ExecutionIncomplete`, and setup fails                                                                   |
+| Native settings merge, `plugins/_harness_native/native.py:97-397`                                                                        | `NativeFiles(invocation.runner)`: `read`, `publish(expected=...)` that fails on a concurrent change (`:123`, `native_files.py:389-390`), `directory(root)` and `directory(root, create=True)` (`:238`, `:335`)                                                                                                                     | `invocation.files`: `read` for the plan, the inventory checks and again before each publish, `write_if` with the digest of that read for each publish (the initial skip decision kept, `:109-110`), `stat` for the root (`Directory` exists, `Absent` does not, a file is `PathRefused` as today), `ensure_directory(root, mode=0o700)`. User files 0600 with parents 0700; workspace files 0660 with parents 2770 and the group. A concurrent change still refuses, as `FileConflict`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | 60 s under VM-scope setup, as today; `ExecutionIncomplete`, and setup fails                                                                   |
 | Native CLI, `plugins/_harness_native/native_cli.py:97-324`                                                                               | `NativeFiles`' staging directory is the working directory and holds outputs (`:122-144`, `:148-185`, `:308-315`); resolution runs `$SHELL -lc` inside `python3 -c` with the request on stdin, `timeout=30` (`:29-57`, `:123-131`); commands run as a `bash` script on stdin with stderr to `/dev/null`, `timeout=180` (`:170-176`) | A guest scratch directory owned by `NativeCLI` (below). Resolution is `PythonProgram(_LOGIN_RESOLVE_PROGRAM, login=True, stdin=Bytes(request), env=..., deadline=30, log_streams=False)`: the request, with any explicit `PATH`, stays on stdin and out of the logged args, and the program prints one marked JSON line. Each command is a `Script(..., Shell.BASH, cwd=scratch, env=..., deadline=180, log_streams=False)` running `shlex.join([executable, *args])` with its stderr in a scratch file, so its line stays out of the log as today; stdout `CaptureOutput(16 MiB)` when structured, else `DiscardOutput`; on failure the script copies the first 8192 bytes of that file to its stderr, which is captured and searched for a named marketplace (`78d742347`, `bc1dd4b4a`, after this LLD's baseline). `mkdir -p -m 700` becomes a `Command`; `test -e` stays script text, since its path can hold a marketplace URL's credentials (`:274`, `:310`). `NativeCLI` takes the invocation, for its access, files, home and `request_environment` | `ExecutionIncomplete`; setup fails, as today's `ExternalError` did                                                                            |
 | Codex guidance, `plugins/codex/artifacts.py:61-66`                                                                                       | `guidance_path(invocation.runner, root)` reads with `NativeFiles(runner).read(override)`                                                                                                                                                                                                                                           | `guidance_path(invocation.files, root)` reads with `files.read(override)`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | 60 s under VM-scope setup, as today; `ExecutionIncomplete`, and setup fails                                                                   |
 | Tmux stale-socket cleanup, `sessions/tmux.py:367-370`                                                                                    | `native_path` from `native_files` validates the socket directory before the cleanup script lists it, and each listed socket path after (`:392`)                                                                                                                                                                                    | `files.guest_path` for both; the script and its target stay until slice 6                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | Unchanged: no file operation                                                                                                                  |
@@ -636,8 +616,8 @@ None restates the implementation or our prose (`no-prose-policing-tests`).
 | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `write_if` and `remove_if` detect a concurrent writer                       | The test changes the destination after the caller read it; the operation raises `FileConflict` and the destination keeps the test's bytes. Two concurrent `write_if`s with one expectation: exactly one wins |
 | a truncated stdin publishes nothing                                         | A `write_if` whose stdin ends short of `size`, and one whose bytes differ from `sha256`: status 6, the destination untouched, no temporary file, no created parent                                           |
-| JSON null survives an update                                                | `update` with the settings merge over an existing document holding `null`                                                                                                                                    |
-| a malformed destination is refused                                          | `update` with a merge strategy over malformed JSON and TOML raises `ConfigError`; the file is byte-identical                                                                                                 |
+| JSON null survives an update                                                | The native settings merge over an existing document holding `null`                                                                                                                                           |
+| a malformed destination is refused                                          | The native settings merge over malformed JSON and TOML raises `ConfigError`; the file is byte-identical                                                                                                      |
 | a symlinked destination is refused                                          | A link at the destination and at a parent, for every operation: `PathRefused(UNSUITABLE)`, and the link's target is untouched                                                                                |
 | cleanup touches only what the operation created                             | A conflict, a denied rename and an attribute-copy failure each leave no `.agentworks-tmp-*`; an unrelated pre-existing one survives; created parents remain                                                  |
 | `preserve_metadata=True` keeps owner, group, mode and ACLs                  | `cli/tests/artifacts/test_generated_sections.py:193-265`, moved; owner and group under the sudo lane (below)                                                                                                 |
@@ -672,14 +652,13 @@ The sudo lane runs where `sudo -n true` succeeds. CI's Linux jobs already use pa
 treats `sshd`.
 
 **Unit, every CI host:** the envelope round trip for `python` and `interactive`; the status-to-error
-mapping for 0 to 8, `128 + n` and an unknown status; `update` retries a conflict, stops after three,
-and does not retry `FileLockTimeout` or `Unknown`; `transform` returning `None` or the same bytes
-writes nothing; a `format_record` of a request with `Bytes(marker)` and of a result whose streams
-hold `marker`, under `log_streams=False`, does not contain the marker's bytes; `stream` refuses
-`Bytes` with `ValidationError`; `RunContext` construction is passive; `guest_path`'s refusals;
-`files` on an agent access refuses `elevated=True` before dispatch;
-`SetupInvocation.request_environment` keeps core's `AGENTWORKS_*` values and drops a plugin's (moved
-from `cli/tests/capabilities/test_native_setup_runner.py` to `test_setup_request_environment.py`).
+mapping for 0 to 8, `128 + n` and an unknown status; a `format_record` of a request with
+`Bytes(marker)` and of a result whose streams hold `marker`, under `log_streams=False`, does not
+contain the marker's bytes; `stream` refuses `Bytes` with `ValidationError`; `RunContext`
+construction is passive; `guest_path`'s refusals; `files` on an agent access refuses `elevated=True`
+before dispatch; `SetupInvocation.request_environment` keeps core's `AGENTWORKS_*` values and drops
+a plugin's (moved from `cli/tests/capabilities/test_native_setup_runner.py` to
+`test_setup_request_environment.py`).
 
 **Caller tests stay green.** The native setup, publication and probe tests already run the real
 guest program against local files on Linux (`cli/tests/native_setup_fixtures.py:20-80`,
@@ -746,9 +725,9 @@ inventory, whose last row is I34 (`hla.md:850`):
 the sudo lane and its ACLs live; I42 by F1 and a native setup test that reads its log; I43 by the
 native CLI discovery tests (`cli/tests/test_native_cli_discovery.py`) on the local access; I44 by
 the probe protocol tests over the recording fake and F5; I45, I46 and I53 by the probe tests and F4;
-I47 by the `update` unit test and the native setup tests; I48 and I49 by the provider readiness and
-command check tests, with a startup file that exits 0 and a command that prints; I50 by F8; I51 by
-`request_environment`'s test; I52 by the prompt snapshot test. Each row also gets a live cell.
+I47 by the native setup tests; I48 and I49 by the provider readiness and command check tests, with a
+startup file that exits 0 and a command that prints; I50 by F8; I51 by `request_environment`'s test;
+I52 by the prompt snapshot test. Each row also gets a live cell.
 
 `2841cb9fa` (python3 guaranteed for native helpers) needs no row: D10 makes python3 a provisioning
 requirement, and every request is `VMNotReady` without it.
@@ -775,12 +754,12 @@ requirement, and every request is `VMNotReady` without it.
   runner" becomes the invocation's request environment.
 - **`docs/guides/native-harness-setup.md`:** `:8-13` (python3 is proven by every request and
   `VMNotReady` names recover; there is no staging), `:46-53` (publication under the VM-wide lock; a
-  concurrent change is retried before it fails), `:55-57` (unchanged promise).
+  concurrent change still refuses), `:55-57` (unchanged promise).
 - **`cli/agentworks/execution/README.md`:** `Bytes`, `log_streams`, the sinks, `PythonProgram`,
   `Script.interactive`, `files` and the lock, and `:197-198`'s module list;
   `cli/tests/execution/README.md`: the F vectors and the sudo lane.
-- **`docs/guides/upgrading-to-0.20.md` and release notes:** the probe runs `/usr/bin/python3`;
-  settings conflicts are retried; the contract versions.
+- **`docs/guides/upgrading-to-0.20.md` and release notes:** the probe runs `/usr/bin/python3`; the
+  contract versions.
 - **The HLA's inventory** carries rows I35 to I53.
 - **Completions and sample config:** no command, option or setting changes.
 
@@ -814,13 +793,13 @@ Three batches, each green on its own, in the order they land in PR C:
   sudo-lane tests, F6 and F7; `dispatch.py`, `readiness.py` (with `SetupReadiness.runner` deleted),
   `artifacts/publication.py`, `artifacts/session.py` and codex's `guidance_path`
   (`harness_integration.py:497`, `:532`), with `SetupInvocation.files` and their callers. `Files`
-  ships without `update` and `ensure_directory` (and the program without its `ensure_directory`
-  operation), since nothing in B calls them.
-- **C, native setup and deletions.** `native.py` and `native_cli.py`, adding `Files.update` and
-  `ensure_directory` with their tests only where a caller needs them; the last two `native_files`
-  importers, `sessions/tmux.py` and `workspaces/backends/vm.py` (Migration); `request_environment`;
-  deleting `SetupInvocation.runner`, `SetupRunner`, `native_files.py` and `require_python3` with the
-  guard updates above; the package guard check; the inventory rows.
+  ships without `ensure_directory` (and the program without its `ensure_directory` operation), since
+  nothing in B calls it.
+- **C, native setup and deletions.** `native.py` and `native_cli.py`, adding `ensure_directory` with
+  its tests; the last two `native_files` importers, `sessions/tmux.py` and
+  `workspaces/backends/vm.py` (Migration); `request_environment`; deleting `SetupInvocation.runner`,
+  `SetupRunner`, `native_files.py` and `require_python3` with the guard updates above; the package
+  guard check; the inventory rows.
 
 Each batch carries the collateral it makes true.
 

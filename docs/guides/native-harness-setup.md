@@ -52,11 +52,11 @@ Publication uses a private sibling temporary file, checks the observed destinati
 atomically, holding the VM-wide file lock that every Agentworks file write takes. Traversal respects
 search-only ancestors. After plugin commands finish, merge policies use the current settings and
 preserve the native associations. If the file changes between that read and the atomic write,
-publication reads it again and recomputes the settings from the new content, up to three writes in
-all, then fails leaving the file as the other writer left it. Publication sets user files to mode
-`0600`, creating missing directories `0700`, and workspace files to mode `0660` with the workspace
-group, creating missing directories `2770`. Unchanged or skipped files retain their existing
-permissions. Permission failures do not trigger elevation.
+publication refuses and leaves the file as the other writer left it; rerunning setup reads the
+changed file and applies the settings to it. Publication sets user files to mode `0600`, creating
+missing directories `0700`, and workspace files to mode `0660` with the workspace group, creating
+missing directories `2770`. Unchanged or skipped files retain their existing permissions. Permission
+failures do not trigger elevation.
 
 Use non-secret settings sources. Authentication files are not supported settings roles. Captured
 contents and native command output are transferred privately and are not stored in applied-state

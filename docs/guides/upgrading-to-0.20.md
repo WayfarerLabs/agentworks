@@ -323,10 +323,6 @@ staged in a temporary directory on the VM. Every such write on a VM, by any acco
 `/run/lock/agentworks-files.lock`; one that cannot take it within 30 seconds fails, saying that
 another Agentworks operation is writing files on the VM, and changes nothing.
 
-A settings file that changes between setup's read and its write is no longer a failure on the first
-try: setup reads it again and recomputes the mapped settings from the new content, up to three
-writes, and fails only when every one meets a further change.
-
 ## Third-party harness integrations, Git credential providers and secret backends
 
 Every capability's stages receive a `RunContext`, whose execution accessors changed: a stage that

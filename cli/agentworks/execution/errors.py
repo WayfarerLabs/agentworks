@@ -272,10 +272,10 @@ class FileConflict(StateError):
     """A conditional file operation found the destination changed since its caller observed it.
 
     Nothing was written or removed. Names the VM, the operation and the path,
-    never content.
+    never content. A caller that knows what rerunning does passes its own ``hint``.
     """
 
-    def __init__(self, vm_name: str, operation: str, path: str) -> None:
+    def __init__(self, vm_name: str, operation: str, path: str, *, hint: str | None = None) -> None:
         self.vm_name = vm_name
         self.operation = operation
         self.path = path
@@ -283,7 +283,7 @@ class FileConflict(StateError):
             f"'{path}' on VM '{vm_name}' changed since it was read, so {operation} left it as it is",
             entity_kind="vm",
             entity_name=vm_name,
-            hint="Inspect the file, then retry the operation against its current content.",
+            hint=hint or "Inspect the file, then retry the operation against its current content.",
         )
 
 

@@ -147,19 +147,16 @@ content travels as `Bytes` on stdin, never as an argument. So do the digests `wr
 `remove_if` compare and verify, so the operation log, which records arguments, holds no content and
 no digest of it. The deadline bounds every request.
 
-| Method                                        | Does                                                                           |
-| --------------------------------------------- | ------------------------------------------------------------------------------ |
-| `read(path, limit=1 MiB)`                     | The file's bytes, or `None` when the file or a parent is absent                |
-| `stat(path)`                                  | `Absent()`, `Directory()` or `RegularFile(digest, mode)`, hashed on the guest  |
-| `write_if(path, data, expected=, mode=, ...)` | Replaces the file only while its digest is `expected` (`None`: still absent)   |
-| `update(path, transform, observed=, ...)`     | `write_if` of `transform(content)`, up to 3 writes, rereading after a conflict |
-| `remove_if(path, expected=)`                  | Removes the file only while its digest is `expected`                           |
-| `ensure_directory(path, mode=)`               | Creates the directory and missing parents with `mode`; never changes one       |
-| `prune_empty_parents(path, root=)`            | Removes empty parents up to and including `root`; returns a `Pruned`           |
+| Method                                        | Does                                                                          |
+| --------------------------------------------- | ----------------------------------------------------------------------------- |
+| `read(path, limit=1 MiB)`                     | The file's bytes, or `None` when the file or a parent is absent               |
+| `stat(path)`                                  | `Absent()`, `Directory()` or `RegularFile(digest, mode)`, hashed on the guest |
+| `write_if(path, data, expected=, mode=, ...)` | Replaces the file only while its digest is `expected` (`None`: still absent)  |
+| `remove_if(path, expected=)`                  | Removes the file only while its digest is `expected`                          |
+| `ensure_directory(path, mode=)`               | Creates the directory and missing parents with `mode`; never changes one      |
+| `prune_empty_parents(path, root=)`            | Removes empty parents up to and including `root`; returns a `Pruned`          |
 
-Each but `update` and `ensure_directory` takes `elevated`, which an agent's access refuses before
-dispatch. `update` starts from `observed`, what its caller last read, so it reads only after a
-conflict; `transform` returns the new bytes or `None`, and unchanged content writes nothing. Paths
+Each but `ensure_directory` takes `elevated`, which an agent's access refuses before dispatch. Paths
 must be absolute and normalized (`guest_path`). Nothing is read or written through a symbolic link:
 every component is opened relative to its parent without following links, and a link or the wrong
 type anywhere on the path is `PathRefused(UNSUITABLE)`, a permission denial `PathRefused(DENIED)`.

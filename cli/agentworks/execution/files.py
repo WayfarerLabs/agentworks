@@ -36,17 +36,13 @@ from agentworks.execution.errors import (
 from agentworks.execution.requests import CAPTURE_LIMIT_BYTES, Bytes, CaptureOutput, NoInput, PythonProgram
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Mapping
 
     from agentworks.execution.access import VMAccess
     from agentworks.execution.results import Result
 
 _NO_INPUT = NoInput()
 _CAPTURE = CaptureOutput()
-
-
-UPDATE_ATTEMPTS = 3
-"""How many writes :meth:`Files.update` makes before a conflict is final."""
 
 
 def _encode(params: Mapping[str, object]) -> bytes:
@@ -183,46 +179,11 @@ class Files:
             "parent_mode": parent_mode,
             "preserve": preserve_metadata,
             "size": len(data),
+            "expected": expected,
+            "sha256": hashlib.sha256(data).hexdigest(),
         }
-        sealed = {"expected": expected, "sha256": hashlib.sha256(data).hexdigest()}
-        status, result = self._run("write_if", params, sealed=sealed, data=data, elevated=elevated)
+        status, result = self._run("write_if", params, data=data, elevated=elevated)
         self._require_done("write_if", path, status, result)
-
-    def update(
-        self,
-        path: str,
-        transform: Callable[[bytes | None], bytes | None],
-        *,
-        observed: bytes | None,
-        mode: int,
-        parent_mode: int,
-        group: str | None = None,
-    ) -> bool:
-        """Replace ``path`` with ``transform`` of its content, retrying while another writer changes it first.
-
-        ``observed`` is what the caller last read at ``path`` (``None``:
-        absent), so the first attempt transforms it without reading again; a
-        ``FileConflict`` reads the current content and transforms that, up to
-        ``UPDATE_ATTEMPTS`` writes in all, and the last conflict raises.
-        ``transform`` returns the new bytes, or ``None`` to leave the file
-        alone, and may run more than once. Unchanged content writes nothing,
-        so the file keeps its mode. Nothing but a conflict retries: an
-        ``Unknown`` write may have landed. Returns whether it wrote.
-        """
-        current = observed
-        for attempt in range(UPDATE_ATTEMPTS):
-            if attempt:
-                current = self.read(path)
-            content = transform(current)
-            if content is None or content == current:
-                return False
-            expected = None if current is None else hashlib.sha256(current).hexdigest()
-            try:
-                self.write_if(path, content, expected=expected, mode=mode, parent_mode=parent_mode, group=group)
-                return True
-            except FileConflict:
-                continue
-        raise FileConflict(self.access.vm_name, "update", guest_path(path))
 
     def ensure_directory(self, path: str, *, mode: int) -> None:
         """Create the directory ``path``, and its missing parents, with ``mode``; an existing one is left as it is."""
@@ -233,7 +194,7 @@ class Files:
     def remove_if(self, path: str, *, expected: str, elevated: bool = False) -> None:
         """Remove the regular file at ``path`` only while it has digest ``expected``; absent is a conflict."""
         path = guest_path(path)
-        status, result = self._run("remove_if", {"path": path}, sealed={"expected": expected}, elevated=elevated)
+        status, result = self._run("remove_if", {"path": path, "expected": expected}, elevated=elevated)
         self._require_done("remove_if", path, status, result)
 
     def prune_empty_parents(self, path: str, *, root: str, elevated: bool = False) -> Pruned:
@@ -257,16 +218,17 @@ class Files:
         params: Mapping[str, object],
         *,
         elevated: bool,
-        sealed: Mapping[str, object] | None = None,
         data: bytes = b"",
         stdout: CaptureOutput = _CAPTURE,
         log_streams: bool = True,
     ) -> tuple[int, Result]:
-        """Run ``operation``: ``params`` as its logged argument, ``sealed`` and then ``data`` on its stdin."""
-        stdin = _NO_INPUT if sealed is None else Bytes(_encode(sealed) + b"\n" + data)
+        """Run ``operation``: its ``SEALED`` parameters and then ``data`` on stdin, the rest as its logged argument."""
+        sealed = file_program.SEALED.get(operation, ())
+        argument = {name: value for name, value in params.items() if name not in sealed}
+        stdin = Bytes(_encode({name: params[name] for name in sealed}) + b"\n" + data) if sealed else _NO_INPUT
         request = PythonProgram(
             program_source(),
-            args=(operation, _encode(params).decode("ascii")),
+            args=(operation, _encode(argument).decode("ascii")),
             elevated=elevated,
             stdin=stdin,
             deadline=self.deadline,
