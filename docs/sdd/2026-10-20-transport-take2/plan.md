@@ -430,6 +430,15 @@ Line numbers in this slice are at `60d347220`, the platform LLD's baseline.
       Tailscale.
 - [ ] Live evidence on Windows: current-directory decoys for `op`, `git`, `code`, `taskkill` and the
       legacy `ssh` and `scp` are never started.
+- [ ] Live evidence for round 5:
+  - on local Lima from macOS, a VM created by this round keeps an operator's edit to the admin's
+    `.bashrc` and init's source lines across `vm stop` then `vm start`, and across a `vm recover` of
+    the stopped VM, and a key `vm recover` replaced does not come back after a restart;
+  - on GCP, a stop and start after this round still finds the startup wrapper's marker and leaves
+    the guest unchanged;
+  - after a local Lima `vm create` with `AW_SECRET_TAILSCALE_AUTH_KEY` set, no `limactl` process
+    left running on the workstation has an `AW_SECRET_` variable in its environment;
+  - a frozen install on Windows with Python 3.15 resolves cffi 2.1.1 from its cp315 wheel.
 
 Definition of done: core reaches a native channel only through `run_as_root` or `native_shell`, and
 no platform's private access imports a legacy module.
