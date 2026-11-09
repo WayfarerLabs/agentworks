@@ -724,6 +724,7 @@ The channels' details are in [platform-lld.md](./platform-lld.md).
 | `FileConflict`                               | `StateError`         |
 | `PathRefused`                                | `StateError`         |
 | `FileLockTimeout`                            | `StateError`         |
+| `FileContentMismatch`                        | `ExternalError`      |
 | `ClientUnsupported`                          | `ConfigError`        |
 
 `ExecutionIncomplete` covers both `NotDelivered` and `Unknown` completions and names which one, so

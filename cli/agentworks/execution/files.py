@@ -23,7 +23,14 @@ from typing import TYPE_CHECKING
 
 from agentworks.errors import ExternalError, StateError
 from agentworks.execution import file_program
-from agentworks.execution.errors import CommandFailed, FileConflict, FileLockTimeout, PathRefusal, PathRefused
+from agentworks.execution.errors import (
+    CommandFailed,
+    FileConflict,
+    FileContentMismatch,
+    FileLockTimeout,
+    PathRefusal,
+    PathRefused,
+)
 from agentworks.execution.requests import CAPTURE_LIMIT_BYTES, Bytes, CaptureOutput, NoInput, PythonProgram
 
 if TYPE_CHECKING:
@@ -225,4 +232,6 @@ class Files:
             raise PathRefused(vm_name, operation, path, reason)
         if status == file_program.EXIT_LOCK_TIMEOUT:
             raise FileLockTimeout(vm_name, operation, path)
+        if status == file_program.EXIT_CORRUPT_INPUT:
+            raise FileContentMismatch(vm_name, path)
         raise CommandFailed(vm_name, status, result)

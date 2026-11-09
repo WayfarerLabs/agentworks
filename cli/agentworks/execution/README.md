@@ -158,10 +158,10 @@ normalized (`guest_path`). Nothing is read or written through a symbolic link: e
 opened relative to its parent without following links, and a link or the wrong type anywhere on the
 path is `PathRefused(UNSUITABLE)`, a permission denial `PathRefused(DENIED)`. `write_if` reads its
 whole content and checks its size and SHA-256 before creating anything, so a dropped connection
-publishes nothing; it writes a sibling temporary file with the requested mode (and group), and
-`preserve_metadata=True` gives it the existing file's owner, group, mode and extended attributes
-before the rename. A changed destination is `FileConflict`, and nothing is written. `read` and
-`stat` keep their streams out of the operation log.
+publishes nothing (`FileContentMismatch`); it writes a sibling temporary file with the requested
+mode (and group), and `preserve_metadata=True` gives it the existing file's owner, group, mode and
+extended attributes before the rename. A changed destination is `FileConflict`, and nothing is
+written. `read` and `stat` keep their streams out of the operation log.
 
 Every mutating operation holds one VM-wide lock, `/run/lock/agentworks-files.lock`, from its walk to
 its last system call, whichever identity runs it: opened read-only, created world-readable only when

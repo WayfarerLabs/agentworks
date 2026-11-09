@@ -254,6 +254,20 @@ class CommandFailed(ExternalError):
         )
 
 
+class FileContentMismatch(ExternalError):
+    """``write_if``'s content reached the VM with a size or SHA-256 other than what was sent. Nothing changed."""
+
+    def __init__(self, vm_name: str, path: str) -> None:
+        self.vm_name = vm_name
+        self.path = path
+        super().__init__(
+            f"the content written to '{path}' on VM '{vm_name}' did not arrive as sent, so nothing was written",
+            entity_kind="vm",
+            entity_name=vm_name,
+            hint="Retry the operation; if it recurs, check the connection to the VM.",
+        )
+
+
 class FileConflict(StateError):
     """A conditional file operation found the destination changed since its caller observed it.
 

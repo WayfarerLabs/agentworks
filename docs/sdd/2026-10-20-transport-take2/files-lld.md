@@ -39,7 +39,7 @@ lock. `FromFile`, `ToFile` and the `observation` option stay slice 7.
 | `execution/oplog.py`                                              | The `PythonProgram` shape; `log_streams=False` withholds both streams                                                                                                                 |
 | `execution/file_program.py` (new)                                 | The guest file program: plain syntax, standard library only, importable                                                                                                               |
 | `execution/files.py` (new)                                        | `Files`, `guest_path`, the result types, `update`, `program_source()`                                                                                                                 |
-| `execution/errors.py`                                             | `FileConflict`, `PathRefused`, `FileLockTimeout`                                                                                                                                      |
+| `execution/errors.py`                                             | `FileConflict`, `PathRefused`, `FileLockTimeout`, `FileContentMismatch`                                                                                                               |
 | `capabilities/base.py`                                            | `RunContext.admin_access()` and `agent_access()`; `admin_target()` and `agent_target()` deleted                                                                                       |
 | `capabilities/harness_integration/setup.py`                       | `SetupInvocation.access`, `files` and `request_environment()`; `runner` deleted; `SetupReadiness.runner` deleted                                                                      |
 | `command_checks.py`                                               | On `VMAccess`                                                                                                                                                                         |
@@ -192,7 +192,7 @@ printable (`native_files.py:218-226`), which is the intended stance.
 | 3       | `prune_empty_parents` kept an empty root its parent will not release (`native_files.py:73`) | `Pruned.ROOT_RETAINED`                      |
 | 4       | A link or wrong type at the destination or a parent (`native_files.py:36-37`)               | `PathRefused(UNSUITABLE)`                   |
 | 5       | `EACCES`, `EPERM` or `EROFS` (`native_files.py:38-39`)                                      | `PathRefused(DENIED)`                       |
-| 6       | `write_if`'s content did not arrive as sent: its size or SHA-256 differs from the params    | `CommandFailed`                             |
+| 6       | `write_if`'s content did not arrive as sent: its size or SHA-256 differs from the params    | `FileContentMismatch`                       |
 | 7       | The lock was not acquired within its wait                                                   | `FileLockTimeout`                           |
 | 8       | `read` of an absent file                                                                    | `None`                                      |
 
@@ -395,13 +395,14 @@ def prune_empty_parents(path: str, *, root: str, elevated: bool = False) -> Prun
 **Errors**, in `execution/errors.py`. Each names the VM, the operation and the path, never content
 or a stream (D13).
 
-| Error                  | Kind         | Raised for                                                                |
-| ---------------------- | ------------ | ------------------------------------------------------------------------- |
-| `FileConflict`         | `StateError` | Status 2, and `update` after its last attempt                             |
-| `PathRefused(reason)`  | `StateError` | `UNSUITABLE` (status 4) or `DENIED` (5)                                   |
-| `FileLockTimeout`      | `StateError` | Status 7; the hint says another Agentworks operation is writing on the VM |
-| `CommandFailed`        | existing     | Status 1, 6 or `128 + n`, or any status the table does not list           |
-| D13's transport errors | existing     | Any completion other than `Completed`, through `require_completed`        |
+| Error                  | Kind            | Raised for                                                                |
+| ---------------------- | --------------- | ------------------------------------------------------------------------- |
+| `FileConflict`         | `StateError`    | Status 2, and `update` after its last attempt                             |
+| `PathRefused(reason)`  | `StateError`    | `UNSUITABLE` (status 4) or `DENIED` (5)                                   |
+| `FileLockTimeout`      | `StateError`    | Status 7; the hint says another Agentworks operation is writing on the VM |
+| `FileContentMismatch`  | `ExternalError` | Status 6; nothing was written                                             |
+| `CommandFailed`        | existing        | Status 1 or `128 + n`, or any status the table does not list              |
+| D13's transport errors | existing        | Any completion other than `Completed`, through `require_completed`        |
 
 `PathRefused(UNSUITABLE)` carries today's hint (`native_files.py:204-208`): Agentworks never reads
 or writes through a link, and dotfile installers are the usual cause. The per-surface subject
