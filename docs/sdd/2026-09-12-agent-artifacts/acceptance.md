@@ -2,7 +2,7 @@
 
 Date: 2026-11-08. Earlier executable acceptance used `eddf7501a5bacde0222471e09d5ea5060a6d2972`,
 merged through PR [862](https://github.com/WayfarerLabs/agentworks/pull/862). This record
-distinguishes that proven behavior from the approved native-file correction now under independent
+distinguishes that proven behavior from the approved native-file correction awaiting independent
 integration testing. Neither lock is authorized by earlier evidence alone; changed carriers and
 cleanup need current acceptance.
 
