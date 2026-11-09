@@ -434,6 +434,11 @@ Line numbers in this slice are at `60d347220`, the platform LLD's baseline.
   - on local Lima from macOS, a VM created by this round keeps an operator's edit to the admin's
     `.bashrc` and init's source lines across `vm stop` then `vm start`, and across a `vm recover` of
     the stopped VM, and a key `vm recover` replaced does not come back after a restart;
+  - the OS hostname and the tailnet node name still equal `vms.hostname` after a Lima `vm stop` then
+    `vm start`;
+  - the Apple-vz SVE restart path on Lima: a first boot that fails before its restart leaves no
+    bootstrap marker and runs the bootstrap again;
+  - the Remote Lima wrapper kill gets its own process group under macOS's `/bin/bash`;
   - on GCP, a stop and start after this round still finds the startup wrapper's marker and leaves
     the guest unchanged;
   - after a local Lima `vm create` with `AW_SECRET_TAILSCALE_AUTH_KEY` set, no `limactl` process

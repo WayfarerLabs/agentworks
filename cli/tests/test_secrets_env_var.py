@@ -205,6 +205,7 @@ main()
 """
 
 
+@pytest.mark.windows
 def test_no_child_inherits_a_carrier_and_the_backend_still_reads_it() -> None:
     """A long-lived child (Lima's host agent) kept a carrier it inherited for as long as it ran."""
     result = subprocess.run(
