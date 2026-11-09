@@ -13,7 +13,7 @@ source and mode attribution.
 | Obligation | Current evidence and remaining work                                                                                                                                                                                                                                                                                                                    |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | R1-R4/R9   | The new campaign corroborates unchanged capture, refresh, provenance, independent consumers and read-only explanation. The existing local boundary proofs remain attributed below.                                                                                                                                                                     |
-| R5/R6      | Native catalogs/carriers were observed, but generated Claude rule skills interpreted native shell-preprocessing syntax instead of preserving literal guidance. The fixed-entrypoint/supporting-file correction needs actual implementation and retest; hints use the same generated renderer.                                                          |
+| R5/R6      | Native catalogs/carriers were observed, but generated Claude rule skills interpreted native shell-preprocessing syntax instead of preserving literal guidance. The corrected renderer at `818ccee9` passed the actual native check below; full corrected-head integration revalidation remains pending.                                                |
 | R7         | Current native argv, ownership, three concurrent Shell sessions, user isolation, supported deletion/name reuse, strict no-history refusal, fallback and force-new run retirement were measured. Qualification of the new public-alias input guard and literal carrier still needs corrected-head validation.                                           |
 | R8         | Drift preservation and recovery, removal, disabling, native-home migration and session retirement were measured. Shared Git exclusions survived workspace deletion while their state was deleted, contradicting the owning-resource cleanup promise. Known associations must retire before destructive workspace cleanup or retain retryable evidence. |
 | R10        | A full independent report now exists, but known material defects and the rebase onto main `438c4546` require correction and fresh gates/review. Permanent teaching must match that implementation before locks.                                                                                                                                        |
@@ -25,6 +25,25 @@ hint text retained inline command syntax and native variable placeholders litera
 authored skill retained permitted native preprocessing. It used four native invocations and five
 synthetic loopback requests with no real inference. The fenced command form was not tested. This
 supports the correction's design, not acceptance of unimplemented or later product bytes.
+
+The corrected product at `818ccee98ca5bbe3633a21797a415afc85bc818c` was then exercised without
+editing its emitted files. Canonical VM Rule/Hint inputs were deferred into the actual Claude
+private session-plugin renderer, validated and published through the real guarded file publisher.
+All seven plan files matched before and after native consumption; publication and retirement each
+had zero skips, with no remaining files after retirement. Claude 2.1.319 performed actual native
+Read calls: both guidance results preserved inline and fenced bang-command forms plus all three
+tested native variable forms. Joined command results and substituted variable markers were absent.
+The unchanged authored Skill control retained both permitted command forms and substitutions. Read's
+numeric line labels were preserved in raw observations and removed only for the exact fenced-block
+comparison.
+
+Four native invocations, including version, used five synthetic loopback requests and all exited 0.
+The deterministic provider requested Read, so this establishes native file consumption rather than
+model willingness or obedience. No VM transport, real inference, operator credentials or full
+session database lifecycle was exercised in this private check. The delegate reaped its handles; the
+lead independently verified fixture/environment/cache absence and the closed listener. Later
+`guidance.py` changes through worker `17456c60` add only a list type annotation, leaving rendered
+bytes unchanged. The complete corrected branch still needs its independent integration report.
 
 The live report's OAuth print health succeeded. Genuine interactive API health/history/resume did
 not reach a health prompt because of native onboarding and remains unvalidated. No product

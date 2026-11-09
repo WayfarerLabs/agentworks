@@ -14,13 +14,13 @@ independent of earlier merged PR budgets.
 - [x] Assess the complete report and Muntz batch; preserve the measured native/lifecycle evidence,
       authentication limits and cleanup attribution. Rebase onto main `438c4546`, retaining its
       runtime-context quoting contract.
-- [ ] Keep generated rule/hint data literal through fixed skill navigation and a supporting file,
+- [x] Keep generated rule/hint data literal through fixed skill navigation and a supporting file,
       with content revision in the entrypoint. Preserve authored skill semantics and ordinary
       package ownership; verify actual native consumption without claiming model obedience.
-- [ ] Correct Git-relative lookup and current-metadata-only recovery. Retire known shared exclusions
+- [x] Correct Git-relative lookup and current-metadata-only recovery. Retire known shared exclusions
       before destructive workspace deletion; retain incomplete known evidence for retry without
       changing VM deletion or adding a new ownership mechanism.
-- [ ] Complete setup collision coverage, Claude selection simplification, filesystem-renderer
+- [x] Complete setup collision coverage, Claude selection simplification, filesystem-renderer
       naming, public identity-alias validation and legacy-section teaching.
 - [ ] Run the required gates and independent project, Muntz and correctness lanes on the combined
       correction; publish an exact green ready handoff with scoped evidence and limitations.
