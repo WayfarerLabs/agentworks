@@ -1,6 +1,6 @@
 # Implementation Plan: Session Batch Stop Parallelism
 
-- Status: Implementation complete; live and published closeout pending
+- Status: Integrating current main; live and published closeout pending
 - Date: 2026-09-06
 - Requirements: [frd.md](./frd.md)
 - Architecture: [hla.md](./hla.md)
@@ -201,8 +201,22 @@ The isolated installed CLI also passed config initialization, empty batch stop, 
 listing. All disposable processes, sockets, homes, keys, and databases were independently checked
 after cleanup. Operator state was untouched. Remote SSH, multiple actual VMs, Windows, live
 interruption, compatibility lanes, and supported-environment timeout calibration remain gaps because
-this workspace has no configured test inventory or workstation bed. Publication remains blocked by
-automatic approval review requiring destination-specific authorization for the private repository.
+this workspace has no configured test inventory or workstation bed. At that checkpoint, publication
+was blocked by automatic approval review requiring destination-specific authorization.
+
+#### November 9 main integration
+
+The operator authorized normal branch publication on 2026-11-09. Commit `391216dc1` was pushed and
+the PR body updated. A subsequent fetch found main at `438c4546c`, including stronger session
+ownership, partial-runtime recovery, and native-socket cleanup checks. GitHub reports conflicts and
+cannot run the PR's normal merge-based CI until the integration is complete. CodeQL passed on the
+published head; the earlier local evidence above remains evidence for its recorded baseline.
+
+- [x] Integrate `438c4546c`, preserving its launch-attempt ownership and native-socket checks in
+      both synchronous and concurrent dedicated teardown.
+- [x] Revalidate changed-boot recovery for uncertain launches and stopped-row socket conflicts.
+- [ ] Repeat full gates and private review on the integrated implementation, then publish it.
+- [ ] Recheck hosted CI and record the remaining live coverage before the final handoff.
 
 - [x] Update active command reference and session lifecycle/status guidance.
 - [ ] Add `locked.md` from the implemented exact head and run locked-SDD validation.

@@ -104,7 +104,8 @@ presentation or bootstrap service.
 
 ### Reachable fingerprint
 
-1. Capture the tmux server fingerprint through the exact socket.
+1. Apply the current native-socket check, refusing symlinks and existing non-socket objects, then
+   capture the tmux server fingerprint through the exact socket.
 2. Require a present capture to contain a complete fingerprint.
 3. Validate the observed boot ID.
 4. Require observed PID, boot ID, and start ticks to equal the complete plan.
@@ -114,7 +115,10 @@ presentation or bootstrap service.
 8. Return normally as verified stopped.
 
 The absence proof helper accepts explicit fingerprint values so it no longer needs a refreshed
-database row after the kill.
+database row after the kill. An unreadable process stat may follow a process exiting after its
+presence probe; one further explicit absence observation can prove that exit, while present or
+unknown observations still refuse cleanup. Socket removal applies the current native-socket check
+again and removes only a socket, never a symlink or another filesystem object.
 
 ### Unreachable or indeterminate fingerprint
 
@@ -137,8 +141,14 @@ coordinator's abort-and-drain path before propagation.
 
 Dedicated rows with a missing persisted fingerprint field remain on the current invoking-thread
 path. In particular, when start ticks are missing, that path captures and validates a complete
-fingerprint, persists it, rereads the session, and only then invokes `kill-server`. This preserves
-the current persistence-failure and crash boundary without adding a staged concurrent protocol.
+fingerprint and verifies the recorded launch attempt before filling the missing identity. It
+persists the result, rereads the session, and only then invokes `kill-server`. This preserves the
+current persistence-failure and crash boundary without adding a staged concurrent protocol.
+
+The compatibility path also preserves current-main recovery for uncertain launches: a positively
+observed VM boot change proves the previous workload gone even without a known PID; an uncertain
+launch on the current boot cannot gain cleanup authority. A stopped row with a live server at its
+socket is a conflict, not authority to destroy that server.
 
 The existing legacy function stays on the invoking thread:
 
