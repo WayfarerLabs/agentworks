@@ -5,6 +5,7 @@ from __future__ import annotations
 import shlex
 from typing import TYPE_CHECKING
 
+import agentworks.execution as execution
 from agentworks import output
 from agentworks.errors import (
     AgentworksError,
@@ -14,6 +15,8 @@ from agentworks.errors import (
     UserAbort,
     ValidationError,
 )
+from agentworks.execution.access import Admin
+from agentworks.execution.errors import CommandFailed, ExecutionIncomplete, RequestRefused
 from agentworks.path_rendering import format_host_path
 from agentworks.secrets.policy import require_exact_tty_interaction_policy
 from agentworks.vms.manager import gated_vm_boundary
@@ -256,8 +259,9 @@ def _rehome_vm(
                 # (warn and continue, exactly as before): the rsync copy already
                 # succeeded, so a later repair converges the tree.
                 try:
-                    apply_workspace_acls(target, new_path)
-                except SSHError as e:
+                    admin = execution.vm_access(vm, config, Admin(), log=ssh_logger.record)
+                    apply_workspace_acls(admin.files(), new_path)
+                except (SSHError, CommandFailed, ExecutionIncomplete, RequestRefused) as e:
                     output.warn(f"ACL setup failed: {e}")
 
                 # Fix parent directory traversal. Seed the walk from the PARENT

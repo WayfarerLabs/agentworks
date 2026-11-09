@@ -549,7 +549,7 @@ def _phase_b_setup(
         # ACL (recursive over all workspaces). The ACL apply and the
         # parent-traversal re-grant are order-dependent, so they live in one
         # helper that documents and enforces the order (see #254).
-        _setup_workspaces_directory(legacy_target, config, logger)
+        _setup_workspaces_directory(files, config, logger)
 
         # Non-fatal: mise config (written before dotfiles so dotfiles can override)
         mise_path: list[str] = _mise_shims_path(home)

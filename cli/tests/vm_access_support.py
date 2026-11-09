@@ -421,6 +421,7 @@ __all__ = [
     "account_shell",
     "answer_command_checks",
     "answer_destination_identity",
+    "answer_from_target",
     "check_result",
     "command_check_access",
     "is_command_check",
@@ -429,6 +430,7 @@ __all__ = [
     "local_remote_argv",
     "local_vm_access",
     "rewrite_launcher",
+    "route_vm_access_to_target",
     "run_file_program_locally",
     "run_requests_locally",
 ]
@@ -485,3 +487,40 @@ def answer_destination_identity(call: Call) -> Result | None:
     if isinstance(request, Command) and request.argv[:2] in (("cat", "/etc/machine-id"), ("stat", "-Lc")):
         return Result(Completed(0), b"native-identity\n")
     return None
+
+
+def answer_from_target(target: Any) -> Callable[[Call], Result | None]:
+    """An ``answer`` that runs each ``Command`` and ``Script`` on a legacy transport double, as its command line.
+
+    For manager tests whose double models the guest as a legacy ``Transport``
+    while a step they drive has moved onto ``VMAccess``: the double sees the
+    same command it did, ``shlex.join`` of a command's argv or a script's
+    source, with ``sudo`` for an elevated request. Anything else is left to
+    the access's other outcomes.
+    """
+    from agentworks.execution.requests import Command, Script
+
+    def answer(call: Call) -> Result | None:
+        request = call.request
+        if isinstance(request, Command):
+            line = shlex.join(request.argv)
+        elif isinstance(request, Script):
+            line = request.source
+        else:
+            return None
+        outcome = target.run(line, sudo=request.elevated, check=False, timeout=request.deadline)
+        stdout, stderr = getattr(outcome, "stdout", "") or "", getattr(outcome, "stderr", "") or ""
+        return Result(
+            Completed(getattr(outcome, "returncode", 0 if getattr(outcome, "ok", True) else 1)),
+            stdout.encode() if isinstance(stdout, str) else stdout,
+            stderr.encode() if isinstance(stderr, str) else stderr,
+        )
+
+    return answer
+
+
+def route_vm_access_to_target(monkeypatch: pytest.MonkeyPatch, target: Any) -> AccessRecorder:
+    """Route ``execution.vm_access`` to a recording fake whose commands run on ``target`` (see answer_from_target)."""
+    recorder = install_access_recorder(monkeypatch)
+    recorder.answer = answer_from_target(target)
+    return recorder

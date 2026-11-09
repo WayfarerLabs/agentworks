@@ -191,7 +191,8 @@ def create_vm_workspace(
         # clone, the tmuxinator config) is covered, and future entries inherit via
         # the default ACL. Shared with workspace repair so the two never drift and
         # a first repair of this workspace is a no-op.
-        apply_workspace_acls(target, workspace_path)
+        admin = execution.vm_access(vm, config, Admin(), log=None if logger is None else logger.record)
+        apply_workspace_acls(admin.files(), workspace_path)
     except BaseException:
         # A guest clone may survive the controller's cancellation or timeout.
         # Only its unique attempt path is recursively removed until publication

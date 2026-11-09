@@ -81,6 +81,8 @@ MIGRATED_FILES = (
     "vms/initializer/packages.py",
     "vms/hardening.py",
     "vms/tailscale_dns.py",
+    "vms/initializer/workspaces_dir.py",
+    "workspaces/acls.py",
 )
 
 

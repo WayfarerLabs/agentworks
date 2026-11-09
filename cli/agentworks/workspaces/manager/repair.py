@@ -10,8 +10,11 @@ from __future__ import annotations
 import shlex
 from typing import TYPE_CHECKING
 
+import agentworks.execution as execution
 from agentworks import output
 from agentworks.errors import NotFoundError
+from agentworks.execution.access import Admin
+from agentworks.execution.errors import CommandFailed, ExecutionIncomplete, RequestRefused
 from agentworks.vms.manager import gated_vm_boundary
 from agentworks.workspaces.acls import apply_workspace_acls
 from agentworks.workspaces.manager._common import _workspace_scope
@@ -214,7 +217,7 @@ def repair_workspace(
         # indeterminate rather than claiming a confirmed OK.
         try:
             before = target.run(f"getfacl -R -n {quoted_ws}", sudo=True, check=False, timeout=120)
-            apply_workspace_acls(target, ws.workspace_path)
+            apply_workspace_acls(execution.vm_access(vm, config, Admin()).files(), ws.workspace_path)
             after = target.run(f"getfacl -R -n {quoted_ws}", sudo=True, check=False, timeout=120)
             if not before.ok or not after.ok:
                 # Convergence still ran (apply_workspace_acls above), but the
@@ -228,7 +231,7 @@ def repair_workspace(
                 fixes += 1
             else:
                 output.detail("OK: ACLs")
-        except SSHError as e:
+        except (SSHError, CommandFailed, ExecutionIncomplete, RequestRefused) as e:
             output.warn(f"ACL fix failed: {e}")
 
         # 5. Fix parent directory traversal. The walk seeds from the PARENT of

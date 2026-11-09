@@ -15,6 +15,7 @@ import pytest
 
 from agentworks.workspaces.backends.vm import create_vm_workspace
 from agentworks.workspaces.templates import ResolvedTemplate
+from tests.vm_access_support import route_vm_access_to_target
 
 
 class _Result:
@@ -48,6 +49,7 @@ def fake_target(monkeypatch: pytest.MonkeyPatch) -> _FakeTarget:
         "agentworks.workspaces.backends.vm.transport",
         lambda vm, config, logger=None: target,
     )
+    route_vm_access_to_target(monkeypatch, target)
     return target
 
 

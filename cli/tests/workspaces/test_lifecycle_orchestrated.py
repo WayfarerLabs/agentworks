@@ -47,6 +47,7 @@ from agentworks.vms import manager as vm_manager
 from agentworks.vms.manager.boundary import require_vm_ssh_boundary
 from agentworks.workspaces import manager as workspace_manager
 from tests.conftest import ManifestDoc, seed_vm_trust, stub_vm_ssh_identity
+from tests.vm_access_support import route_vm_access_to_target
 
 # Captured at import, before the autouse fixture stubs the SSH precondition.
 _REAL_SSH_BOUNDARY = require_vm_ssh_boundary
@@ -194,6 +195,7 @@ def target(monkeypatch: pytest.MonkeyPatch) -> _FakeAdminTarget:
     fake = _FakeAdminTarget()
     factory = lambda vm, config, **kwargs: fake  # noqa: E731
     monkeypatch.setattr("agentworks.transports.transport", factory)
+    route_vm_access_to_target(monkeypatch, fake)
     monkeypatch.setattr("agentworks.workspaces.backends.vm.transport", factory)
     return fake
 
@@ -328,6 +330,7 @@ def _wire_target(monkeypatch: pytest.MonkeyPatch, fake: _FakeAdminTarget) -> Non
 
     factory = lambda vm, config, **kwargs: fake  # noqa: E731
     monkeypatch.setattr("agentworks.transports.transport", factory)
+    route_vm_access_to_target(monkeypatch, fake)
     monkeypatch.setattr("agentworks.workspaces.backends.vm.transport", factory)
 
 
@@ -1572,6 +1575,7 @@ def test_rehome_confirm_sits_inside_the_span_after_the_dir_checks(
     _stop_the_vm(monkeypatch, events)
     fake = _FakeAdminTarget(events=events, failing=("test -d /dst/ws1",))
     monkeypatch.setattr("agentworks.transports.transport", lambda vm, config_, **kwargs: fake)
+    route_vm_access_to_target(monkeypatch, fake)
 
     def _decline(message: str, default: bool = False) -> bool:
         events.append("confirm")
@@ -1619,6 +1623,7 @@ def _wire_copy_fakes(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> _Fak
 
     fake = _FakeSSHTarget()
     monkeypatch.setattr("agentworks.transports.transport", lambda vm, config, **kwargs: fake)
+    route_vm_access_to_target(monkeypatch, fake)
 
     def _fake_pack(args: object, **kwargs: object) -> SimpleNamespace:
         events.append("pack")
@@ -1930,6 +1935,7 @@ def test_rehome_routes_through_the_canonical_acl_helper(
     _reachable(monkeypatch, True)
     fake = _RehomeTarget()
     monkeypatch.setattr("agentworks.transports.transport", lambda vm, config_, **kwargs: fake)
+    route_vm_access_to_target(monkeypatch, fake)
 
     workspace_manager.rehome_workspace(
         db, config, "ws1", target_path="/dst/ws1", yes=True, interaction=TtyInteractionPolicy.REFUSE
@@ -1967,6 +1973,7 @@ def test_rehome_removes_tmuxinator_projections_when_live_overlay_disables_them(
     _reachable(monkeypatch, True)
     fake = _RehomeTarget()
     monkeypatch.setattr("agentworks.transports.transport", lambda vm, config_, **kwargs: fake)
+    route_vm_access_to_target(monkeypatch, fake)
 
     workspace_manager.rehome_workspace(
         db, config, "ws1", target_path="/dst/ws1", yes=True, interaction=TtyInteractionPolicy.REFUSE
@@ -2027,6 +2034,7 @@ def test_first_repair_after_rehome_is_a_noop(
     both paths."""
     fake = _RehomeThenRepairTarget()
     monkeypatch.setattr("agentworks.transports.transport", lambda vm, config, **kwargs: fake)
+    route_vm_access_to_target(monkeypatch, fake)
 
     config = make_config()
     _seed(db)
@@ -2095,6 +2103,7 @@ def test_first_repair_after_copy_is_a_noop(
 
     fake = _CopyThenRepairTarget()
     monkeypatch.setattr("agentworks.transports.transport", lambda vm, config, **kwargs: fake)
+    route_vm_access_to_target(monkeypatch, fake)
     monkeypatch.setattr(subprocess_mod, "run", lambda args, **kwargs: SimpleNamespace(returncode=0, stderr=b""))
 
     config = make_config()

@@ -6,9 +6,11 @@ import shlex
 import subprocess
 from typing import TYPE_CHECKING
 
+import agentworks.execution as execution
 from agentworks import output
 from agentworks.agents.grants import MAX_WORKSPACE_NAME_LENGTH
 from agentworks.errors import AlreadyExistsError, ExternalError, NotFoundError, StateError
+from agentworks.execution.access import Admin
 from agentworks.naming import validate_name
 from agentworks.path_rendering import format_host_path
 from agentworks.programs import resolve_program
@@ -200,7 +202,8 @@ def copy_workspace(
                 # workspace lands in the canonical state (its first repair is an ACL
                 # no-op) and, per #254, denies `other` on both the access and default
                 # ACLs, which the old inline top-dir-only default did not.
-                apply_workspace_acls(dest_target, workspace_path)
+                dest_admin = execution.vm_access(dest_vm, config, Admin(), log=lg.record)
+                apply_workspace_acls(dest_admin.files(), workspace_path)
 
                 db.insert_workspace(
                     dest_name,
