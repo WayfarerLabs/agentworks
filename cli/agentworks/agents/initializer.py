@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 
 import agentworks.execution as execution
 from agentworks import output
-from agentworks.execution.access import Agent
+from agentworks.execution.access import Admin, Agent
 from agentworks.git_config import ensure_safe_directory_wildcard
 from agentworks.transports import transport
 
@@ -196,15 +196,16 @@ def create_agent_on_vm(
             f"and reinit, or check the image's group model."
         )
 
-    # Tmux socket infrastructure for the agent (root-owned ``/var/lib/``
-    # parent; admin is the only transport that can create it).
+    # Tmux socket infrastructure for the agent (root-owned ``/run/agentworks/``
+    # parent; only the admin's access can create it).
     # ensure_agent_socket_root first so this works on VMs that haven't
     # been reinited since the socket feature was added. The per-agent
     # dir won't exist for a brand-new agent, so we suppress the
     # "missing" warning; misconfiguration of an existing dir still warns.
-    ensure_agent_socket_root(admin_target, vm.admin_username)
-    ensure_agent_socket_dir(admin_target, linux_user, warn_if_missing=False)
-    removed = cleanup_stale_sockets(admin_target, linux_user)
+    admin_files = execution.vm_access(vm, config, Admin(), log=logger.record).files()
+    ensure_agent_socket_root(admin_files, vm.admin_username)
+    ensure_agent_socket_dir(admin_files, linux_user, warn_if_missing=False)
+    removed = cleanup_stale_sockets(admin_files, linux_user)
     if removed:
         output.detail(f"Cleaned up {output.count(removed, 'stale socket')}")
 

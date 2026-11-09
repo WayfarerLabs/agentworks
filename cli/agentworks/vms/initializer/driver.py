@@ -509,19 +509,17 @@ def _phase_b_setup(
             output.info("Setting up agent tmux socket infrastructure...")
 
             ensure_agent_socket_root(
-                legacy_target,
+                files,
                 admin_username,
                 warn_if_missing=operation is not VMInitializationOperation.VM_CREATE,
             )
             for agent in db.list_agents(vm_name=vm_name):
-                ensure_agent_socket_dir(legacy_target, agent.linux_user)
-                removed = cleanup_stale_sockets(legacy_target, agent.linux_user)
+                ensure_agent_socket_dir(files, agent.linux_user)
+                removed = cleanup_stale_sockets(files, agent.linux_user)
                 if removed:
                     output.detail(f"Cleaned up {output.count(removed, 'stale socket')} for {agent.linux_user}")
-        except SSHError as e:
-            msg = f"agent tmux socket setup failed: {e}"
-            logger.warning(msg)
-            output.warn(msg)
+        except STEP_FAILURES as error:
+            warn_step(logger, "agent tmux socket setup failed", error)
 
     with output.section("Admin Initialization"):
         # Non-fatal: set default shell (before the USER install commands so

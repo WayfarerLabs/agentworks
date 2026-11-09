@@ -15,12 +15,12 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
 from agentworks.db import Database
-from agentworks.execution.access import Agent
+from agentworks.execution.access import Admin, Agent
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.tmux import FingerprintProbe, ProbeStatus, TmuxServerFingerprint
 from tests.vm_access_support import check_result, is_command_check, presence_check
@@ -439,7 +439,7 @@ def test_create_session_uses_agent_target_for_tmux(tmp_path: Path, monkeypatch: 
     # scps a YAML file which doesn't help this test's transport assertion.
     monkeypatch.setattr(session_manager, "_regenerate_tmuxinator", lambda *a, **k: None)
 
-    captured: dict[str, object] = {}
+    captured: dict[str, Any] = {}
 
     def _capture_create(
         name,
@@ -448,7 +448,7 @@ def test_create_session_uses_agent_target_for_tmux(tmp_path: Path, monkeypatch: 
         linux_user,
         *,
         run_command,
-        target,
+        admin_files,
         admin_username,
         is_admin,
         env=None,
@@ -459,7 +459,7 @@ def test_create_session_uses_agent_target_for_tmux(tmp_path: Path, monkeypatch: 
         if before_spawn is not None:
             before_spawn()
         captured["run_command"] = run_command
-        captured["target"] = target
+        captured["admin_files"] = admin_files
         captured["env"] = env
         return ("/tmp/sock", 12345)
 
@@ -481,8 +481,8 @@ def test_create_session_uses_agent_target_for_tmux(tmp_path: Path, monkeypatch: 
 
     # run_command must be agent_target.run, not admin_target.run.
     assert captured["run_command"] == targets["agent"].run
-    # `target` (used for socket-root setup) is still admin's.
-    assert captured["target"] is targets["admin"]
+    # The socket roots are still set up on the admin's access.
+    assert isinstance(captured["admin_files"].access.identity, Admin)
     db.close()
 
 
@@ -734,7 +734,7 @@ def test_launch_migrates_legacy_session_to_per_session_socket(
         linux_user,
         *,
         run_command,
-        target,
+        admin_files,
         admin_username,
         is_admin,
         env=None,

@@ -29,6 +29,7 @@ import pytest
 
 from agentworks.agents import initializer as agent_initializer
 from tests.orchestrated_fixtures import proxmox_site, write_operator_config
+from tests.vm_access_support import route_vm_access_to_target
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -131,6 +132,8 @@ def _run_create_on_vm(
     agent = _RecordingTransport(user_exists=user_exists)
     monkeypatch.setattr(agent_initializer, "transport", lambda *a, **k: admin)
     monkeypatch.setattr("agentworks.transports.transport_for_user", lambda *a, **k: agent)
+    # The socket helpers run on the admin's access, whose commands reach the same admin double.
+    route_vm_access_to_target(monkeypatch, admin)
 
     agent_initializer.create_agent_on_vm(
         vm,

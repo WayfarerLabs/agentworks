@@ -1069,7 +1069,7 @@ def _launch_existing_session(
                         command,
                         linux_user,
                         run_command=session_run_command,
-                        target=admin_target,
+                        admin_files=admin_access.files(),
                         admin_username=vm.admin_username,
                         is_admin=is_admin,
                         env=session_env,

@@ -18,6 +18,7 @@ from agentworks.sessions.tmux import (
     ensure_agent_socket_root,
 )
 from agentworks.workspaces.tmuxinator import GENERATED_HEADER, console_session_name, generate_config
+from tests.vm_access_support import files_over_target
 
 
 def test_generate_config_no_sessions() -> None:
@@ -153,12 +154,14 @@ def test_generate_config_admin_session_no_socket() -> None:
 class _FakeResult:
     stdout: str = ""
     ok: bool = True
+    returncode: int = 0
 
 
 class _FakeTarget:
-    """Fake ``Transport`` that returns canned output for the first probe call
-    (the only call that determines warning behavior) and ignores subsequent
-    setup commands. Records whether sudo was requested for each call."""
+    """The guest behind the admin's access (``files_over_target``): canned output
+    for the first probe call (the only call that determines warning behavior),
+    success for the setup commands after it. Records whether each request was
+    elevated."""
 
     def __init__(self, probe_stdout: str) -> None:
         self._probe_stdout = probe_stdout
@@ -166,7 +169,7 @@ class _FakeTarget:
         self.commands: list[str] = []
         self.sudo_calls: list[bool] = []
 
-    def run(self, command: str, *, check: bool = True, sudo: bool = False, tty: bool | None = None) -> _FakeResult:
+    def run(self, command: str, *, check: bool = True, sudo: bool = False, **kwargs: object) -> _FakeResult:
         self.commands.append(command)
         self.sudo_calls.append(sudo)
         # The first call is the probe (contains "if test -d").
@@ -178,7 +181,7 @@ class _FakeTarget:
 
 def test_ensure_agent_socket_root_missing_warns_by_default(warnings: list[str]) -> None:
     runner = _FakeTarget("MISSING")
-    ensure_agent_socket_root(runner, "agentworks")
+    ensure_agent_socket_root(files_over_target(runner), "agentworks")
     assert any("missing" in w for w in warnings)
     # Probe uses sudo; getent does not; all setup commands use sudo
     assert runner.sudo_calls[0] is True  # probe
@@ -187,27 +190,27 @@ def test_ensure_agent_socket_root_missing_warns_by_default(warnings: list[str]) 
 
 
 def test_ensure_agent_socket_root_missing_silent_when_expected(warnings: list[str]) -> None:
-    ensure_agent_socket_root(_FakeTarget("MISSING"), "agentworks", warn_if_missing=False)
+    ensure_agent_socket_root(files_over_target(_FakeTarget("MISSING")), "agentworks", warn_if_missing=False)
     assert warnings == []
 
 
 def test_ensure_agent_socket_root_misconfigured_warns_even_when_missing_suppressed(
     warnings: list[str],
 ) -> None:
-    ensure_agent_socket_root(_FakeTarget("root 755"), "agentworks", warn_if_missing=False)
+    ensure_agent_socket_root(files_over_target(_FakeTarget("root 755")), "agentworks", warn_if_missing=False)
     assert any("misconfigured" in w for w in warnings)
 
 
 def test_ensure_agent_socket_root_probe_failed_warns_even_when_missing_suppressed(
     warnings: list[str],
 ) -> None:
-    ensure_agent_socket_root(_FakeTarget("PROBE_FAILED"), "agentworks", warn_if_missing=False)
+    ensure_agent_socket_root(files_over_target(_FakeTarget("PROBE_FAILED")), "agentworks", warn_if_missing=False)
     assert any("probe failed" in w for w in warnings)
 
 
 def test_ensure_agent_socket_root_ok_fast_path_no_warning(warnings: list[str]) -> None:
     runner = _FakeTarget(f"{AGENT_SOCKET_GROUP} 2771")
-    ensure_agent_socket_root(runner, "agentworks")
+    ensure_agent_socket_root(files_over_target(runner), "agentworks")
     assert warnings == []
     # Fast path: probe + group membership check only (no full setup)
     assert len(runner.commands) == 2
@@ -217,34 +220,34 @@ def test_ensure_agent_socket_root_ok_fast_path_no_warning(warnings: list[str]) -
 
 def test_ensure_agent_socket_dir_missing_warns_by_default(warnings: list[str]) -> None:
     runner = _FakeTarget("MISSING")
-    ensure_agent_socket_dir(runner, "agt--alice")
+    ensure_agent_socket_dir(files_over_target(runner), "agt--alice")
     assert any("agt--alice" in w and "missing" in w for w in warnings)
     # All commands (probe + full setup) must use sudo
     assert all(runner.sudo_calls)
 
 
 def test_ensure_agent_socket_dir_missing_silent_when_expected(warnings: list[str]) -> None:
-    ensure_agent_socket_dir(_FakeTarget("MISSING"), "agt--alice", warn_if_missing=False)
+    ensure_agent_socket_dir(files_over_target(_FakeTarget("MISSING")), "agt--alice", warn_if_missing=False)
     assert warnings == []
 
 
 def test_ensure_agent_socket_dir_misconfigured_warns_even_when_missing_suppressed(
     warnings: list[str],
 ) -> None:
-    ensure_agent_socket_dir(_FakeTarget("root root 755"), "agt--alice", warn_if_missing=False)
+    ensure_agent_socket_dir(files_over_target(_FakeTarget("root root 755")), "agt--alice", warn_if_missing=False)
     assert any("misconfigured" in w for w in warnings)
 
 
 def test_ensure_agent_socket_dir_probe_failed_warns_even_when_missing_suppressed(
     warnings: list[str],
 ) -> None:
-    ensure_agent_socket_dir(_FakeTarget("PROBE_FAILED"), "agt--alice", warn_if_missing=False)
+    ensure_agent_socket_dir(files_over_target(_FakeTarget("PROBE_FAILED")), "agt--alice", warn_if_missing=False)
     assert any("probe failed" in w for w in warnings)
 
 
 def test_ensure_agent_socket_dir_ok_fast_path_no_warning(warnings: list[str]) -> None:
     runner = _FakeTarget(f"agt--alice {AGENT_SOCKET_GROUP} 2770")
-    ensure_agent_socket_dir(runner, "agt--alice")
+    ensure_agent_socket_dir(files_over_target(runner), "agt--alice")
     # Probe must use sudo
     assert runner.sudo_calls[0] is True
     assert warnings == []

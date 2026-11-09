@@ -424,6 +424,7 @@ __all__ = [
     "answer_from_target",
     "check_result",
     "command_check_access",
+    "files_over_target",
     "is_command_check",
     "presence_check",
     "local_files",
@@ -524,3 +525,10 @@ def route_vm_access_to_target(monkeypatch: pytest.MonkeyPatch, target: Any) -> A
     recorder = install_access_recorder(monkeypatch)
     recorder.answer = answer_from_target(target)
     return recorder
+
+
+def files_over_target(target: Any, *, deadline: float | None = None) -> Files:
+    """The admin's ``Files`` over a recording access whose commands run on ``target`` (see answer_from_target)."""
+    access = RecordingVMAccess([], Admin())
+    access.answer = answer_from_target(target)
+    return access.files(deadline=deadline)

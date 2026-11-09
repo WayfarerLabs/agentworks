@@ -4,13 +4,23 @@ from __future__ import annotations
 
 import copy
 import re
+import shlex
 from typing import Protocol
 
 _FRAME = re.compile(r"printf '\\nAGW_RUNTIME_([A-Z]+)='; (?:printf '\\nAGW_RUNTIME_STDERR=' >&2; )?")
 
 
+def owner_probe_line(command: str) -> str:
+    """The line a stale-socket probe runs as the socket's owner (``runuser -u O -- sh -c LINE``), else ``command``."""
+    if "runuser -u " not in command:
+        return command
+    words = shlex.split(command)
+    start = words.index("runuser")
+    return words[words.index("-c", start) + 1]
+
+
 def runtime_probe_parts(command: str) -> tuple[str, str] | None:
-    match = _FRAME.search(command)
+    match = _FRAME.search(owner_probe_line(command))
     if match is None:
         return None
     return match.group(1), command[match.end() :]

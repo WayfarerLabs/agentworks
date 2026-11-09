@@ -21,6 +21,7 @@ from agentworks.sessions import manager, tmux
 from agentworks.sessions.manager._pids import _repair_session_pid
 from agentworks.sessions.manager._status import check_session_status
 from agentworks.ssh import SSHError, SSHResult
+from tests.vm_access_support import Admin, RecordingVMAccess
 
 from .test_create_start_restart_orchestrated import (
     _create_stubs,
@@ -122,7 +123,7 @@ def launch(native: NativeTarget, command: str, *, is_admin: bool = True, launch_
         command,
         linux_user="owned",
         run_command=native.run,
-        target=native,
+        admin_files=RecordingVMAccess([], Admin()).files(),
         admin_username="owned",
         is_admin=is_admin,
         env=options.get("env"),

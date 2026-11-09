@@ -17,11 +17,14 @@ from enum import Enum
 from typing import TYPE_CHECKING, Literal, NoReturn, Protocol
 
 from agentworks.errors import ConnectivityError, ExternalError, StateError
+from agentworks.execution.requests import Command, DiscardOutput, Script, Shell
 from agentworks.naming import LINUX_USERNAME_MAX_LENGTH
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
 
+    from agentworks.execution.access import VMAccess
+    from agentworks.execution.files import Files
     from agentworks.transports import Transport
 
 RESTRICTED_CONFIG_PATH = "/opt/agentworks/tmux-session.conf"
@@ -69,11 +72,11 @@ ADMIN_SOCKET_ROOT = "/run/agentworks/admin-tmux-sockets"
 
 
 class RunCommand(Protocol):
-    """Callable that runs a shell command on a target (e.g. partial of ``Transport.run``).
+    """Callable that runs a shell command on a target: ``access_run_command`` over a ``VMAccess``, or ``Transport.run``.
 
-    The ``env`` kwarg is materialized by the underlying SSH layer as
-    ``-o SetEnv=KEY=VALUE`` arguments; see ``Transport.run`` /
-    ``agentworks.transports.ssh.SSHTransport.run``.
+    The result has ``stdout``, ``stderr``, ``returncode`` and ``ok``. Over a
+    ``VMAccess`` the ``env`` kwarg travels in the request; over a legacy
+    ``Transport`` its SSH layer sends it as ``-o SetEnv=KEY=VALUE`` arguments.
     """
 
     def __call__(
@@ -83,6 +86,37 @@ class RunCommand(Protocol):
         check: bool = True,
         env: dict[str, str] | None = None,
     ) -> object: ...
+
+
+@dataclass(frozen=True)
+class CommandOutcome:
+    """A request's outcome as a ``RunCommand`` caller reads it: the decoded streams and the exit status."""
+
+    stdout: str
+    stderr: str
+    returncode: int
+
+    @property
+    def ok(self) -> bool:
+        return self.returncode == 0
+
+
+def access_run_command(access: VMAccess, *, deadline: float | None, elevated: bool) -> RunCommand:
+    """The tmux probes' ``RunCommand`` over ``access``: each line runs as one ``/bin/sh`` script with its ``env``.
+
+    A completion that is not ``Completed`` raises its typed error; with
+    ``check`` a non-zero status raises ``CommandFailed``.
+    """
+
+    def run(command: str, *, check: bool = True, env: dict[str, str] | None = None) -> CommandOutcome:
+        request = Script(command, Shell.SH, env=env or {}, elevated=elevated, deadline=deadline)
+        result = access.run(request, check=check)
+        status = result.require_completed(access.vm_name)
+        return CommandOutcome(
+            result.stdout.decode("utf-8", "replace"), result.stderr.decode("utf-8", "replace"), status
+        )
+
+    return run
 
 
 @dataclass(frozen=True)
@@ -238,7 +272,7 @@ def admin_socket_path(admin_username: str, session_name: str) -> str:
 
 
 def ensure_agent_socket_root(
-    target: Transport,
+    files: Files,
     admin_username: str,
     *,
     warn_if_missing: bool = True,
@@ -246,25 +280,25 @@ def ensure_agent_socket_root(
     """Create the agent tmux socket root directory and group (idempotent).
 
     Fast-paths when the directory already exists with the correct group and
-    permissions (probe + group membership check).
+    permissions (probe + group membership check). Every request runs on
+    ``files.access``, the admin's, bounded by ``files.deadline``.
 
     Pass ``warn_if_missing=False`` when the caller already knows the directory
     won't exist (e.g. first-time VM init), to avoid a misleading warning.
     """
-    grp = shlex.quote(AGENT_SOCKET_GROUP)
+    access, deadline = files.access, files.deadline
     q_root = shlex.quote(AGENT_SOCKET_ROOT)
 
-    probe = target.run(
+    stdout = _socket_probe(
+        files,
         f'if test -d {q_root}; then stat -c "%G %a" {q_root} 2>/dev/null || echo PROBE_FAILED; else echo MISSING; fi',
-        sudo=True,
-        check=False,
     )
-    stdout = probe.stdout.strip()
     if stdout == f"{AGENT_SOCKET_GROUP} 2771":
         # Directory is correct, but still ensure admin is in the group.
-        admin = shlex.quote(admin_username)
-        result = target.run(f"usermod -aG {grp} {admin}", sudo=True, check=False)
-        if not result.ok:
+        joined = access.run(
+            Command(("usermod", "-aG", AGENT_SOCKET_GROUP, admin_username), elevated=True, deadline=deadline)
+        )
+        if joined.require_completed(access.vm_name) != 0:
             from agentworks import output
 
             output.warn(f"Failed to add {admin_username} to {AGENT_SOCKET_GROUP}, tmux socket access may fail")
@@ -282,18 +316,21 @@ def ensure_agent_socket_root(
 
         output.warn(f"Socket root {AGENT_SOCKET_ROOT} {state}, recreating")
 
-    admin = shlex.quote(admin_username)
-    result = target.run(f"getent group {grp} >/dev/null 2>&1", check=False)
-    if not result.ok:
-        target.run(f"/usr/sbin/groupadd {grp}", sudo=True)
-    target.run(f"usermod -aG {grp} {admin}", sudo=True)
-    target.run(f"mkdir -p {AGENT_SOCKET_ROOT}", sudo=True)
-    target.run(f"chown root:{grp} {AGENT_SOCKET_ROOT}", sudo=True)
-    target.run(f"chmod 2771 {AGENT_SOCKET_ROOT}", sudo=True)
+    group = access.run(
+        Command(("getent", "group", AGENT_SOCKET_GROUP), deadline=deadline),
+        stdout=DiscardOutput(),
+        stderr=DiscardOutput(),
+    )
+    if group.require_completed(access.vm_name) != 0:
+        _run_root(files, "/usr/sbin/groupadd", AGENT_SOCKET_GROUP)
+    _run_root(files, "usermod", "-aG", AGENT_SOCKET_GROUP, admin_username)
+    _run_root(files, "mkdir", "-p", "--", AGENT_SOCKET_ROOT)
+    _run_root(files, "chown", f"root:{AGENT_SOCKET_GROUP}", "--", AGENT_SOCKET_ROOT)
+    _run_root(files, "chmod", "2771", "--", AGENT_SOCKET_ROOT)
 
 
 def ensure_agent_socket_dir(
-    target: Transport,
+    files: Files,
     linux_user: str,
     *,
     warn_if_missing: bool = True,
@@ -301,19 +338,16 @@ def ensure_agent_socket_dir(
     """Create a per-agent tmux socket directory (idempotent).
 
     Fast-paths when the directory already exists with the correct owner/group
-    and permissions (single SSH round-trip).
+    and permissions (one probe).
     """
-    q_user = shlex.quote(linux_user)
-    grp = shlex.quote(AGENT_SOCKET_GROUP)
-    q_path = shlex.quote(agent_socket_dir(linux_user))
+    path = agent_socket_dir(linux_user)
+    q_path = shlex.quote(path)
 
-    probe = target.run(
+    stdout = _socket_probe(
+        files,
         f'if test -d {q_path}; then stat -c "%U %G %a" {q_path} 2>/dev/null || echo PROBE_FAILED; '
-        f"else echo MISSING; fi",
-        sudo=True,
-        check=False,
+        "else echo MISSING; fi",
     )
-    stdout = probe.stdout.strip()
     if stdout == f"{linux_user} {AGENT_SOCKET_GROUP} 2770":
         return
 
@@ -329,58 +363,44 @@ def ensure_agent_socket_dir(
 
         output.warn(f"Socket directory for {linux_user} {state}, recreating")
 
-    target.run(f"mkdir -p {q_path}", sudo=True)
-    target.run(f"chown {q_user}:{grp} {q_path}", sudo=True)
-    target.run(f"chmod 2770 {q_path}", sudo=True)
+    _run_root(files, "mkdir", "-p", "--", path)
+    _run_root(files, "chown", f"{linux_user}:{AGENT_SOCKET_GROUP}", "--", path)
+    _run_root(files, "chmod", "2770", "--", path)
 
 
-def cleanup_stale_sockets(target: Transport, linux_user: str) -> int:
-    """Remove socket files whose tmux server is no longer running.
+def cleanup_stale_sockets(files: Files, linux_user: str) -> int:
+    """Remove socket files in ``linux_user``'s agent socket directory whose tmux server is no longer running.
 
-    Targets the per-user agent socket directory under ``AGENT_SOCKET_ROOT``.
-    Use ``cleanup_stale_admin_sockets`` for admin sessions (different root).
-    Uses sudo for both the tmux check and file removal -- this is an
-    infrastructure maintenance context (vm reinit / agent create).
-
-    Returns the number of stale sockets removed.
+    An infrastructure maintenance step (vm reinit, agent create): the
+    inventory and each guarded removal run as root, and each server probe
+    runs as ``linux_user``, the sockets' owner. Returns the number of stale
+    sockets removed.
     """
-    return _cleanup_stale_sockets_under(
-        target,
-        agent_socket_dir(linux_user),
-    )
+    return _cleanup_stale_sockets_under(files, agent_socket_dir(linux_user), owner=linux_user)
 
 
-def cleanup_stale_admin_sockets(target: Transport, admin_username: str) -> int:
-    """Remove admin-side socket files whose tmux server is no longer running.
-
-    Mirrors ``cleanup_stale_sockets`` for the per-session admin socket
-    directory introduced by the env-and-secrets SDD. Called from VM reinit
-    to keep the directory from accumulating cruft over a long-lived VM's
-    repeated session create/delete cycles.
-    """
-    return _cleanup_stale_sockets_under(
-        target,
-        f"{ADMIN_SOCKET_ROOT}/{admin_username}",
-    )
-
-
-def _cleanup_stale_sockets_under(target: Transport, dir_path: str) -> int:
-    """Remove only observed direct sockets whose native server is confirmed absent."""
+def _cleanup_stale_sockets_under(files: Files, dir_path: str, *, owner: str) -> int:
+    """Remove only observed direct sockets whose server is confirmed absent by a probe run as ``owner``."""
     from agentworks.execution.files import guest_path
 
+    access, deadline = files.access, files.deadline
     dir_path = guest_path(dir_path)
     q_dir = shlex.quote(dir_path)
     begin, end = "\nAGW_STALE_SOCKETS_BEGIN\0", "AGW_STALE_SOCKETS_END\0"
-    result = target.run(
-        "printf '\\nAGW_STALE_SOCKETS_BEGIN\\0'; "
-        f"find {q_dir} -maxdepth 1 -name '*.sock' -type s -print0 2>/dev/null "
-        "&& printf 'AGW_STALE_SOCKETS_END\\0'",
-        sudo=True,
-        check=False,
+    listed = access.run(
+        Script(
+            "printf '\\nAGW_STALE_SOCKETS_BEGIN\\0'; "
+            f"find {q_dir} -maxdepth 1 -name '*.sock' -type s -print0 2>/dev/null "
+            "&& printf 'AGW_STALE_SOCKETS_END\\0'",
+            Shell.SH,
+            elevated=True,
+            deadline=deadline,
+        )
     )
-    if not result.ok or result.stdout.count(begin) != 1 or result.stdout.count(end) != 1:
+    stdout = listed.stdout.decode("utf-8", "surrogateescape")
+    if listed.require_completed(access.vm_name) != 0 or stdout.count(begin) != 1 or stdout.count(end) != 1:
         return 0
-    _, _, payload = result.stdout.partition(begin)
+    _, _, payload = stdout.partition(begin)
     payload, _, trailing = payload.partition(end)
     if trailing or (payload and not payload.endswith("\0")):
         return 0
@@ -396,52 +416,65 @@ def _cleanup_stale_sockets_under(target: Transport, dir_path: str) -> int:
     except StateError:
         return 0
 
+    as_root = access_run_command(access, deadline=deadline, elevated=True)
     removed = 0
     for sock_path in paths:
         q_sock = shlex.quote(sock_path)
         socket_guard = f"test -S {q_sock} && ! test -L {q_sock}"
 
-        def run(
+        def probe(
             command: str, *, check: bool = True, env: dict[str, str] | None = None, guard: str = socket_guard
         ) -> object:
-            return target.run(f"{guard} && {{ {command}; }}", sudo=True, check=check, env=env or {})
+            # Root runs only the guard; tmux runs as the socket's owner.
+            as_owner = f"runuser -u {shlex.quote(owner)} -- sh -c {shlex.quote(command)}"
+            return as_root(f"{guard} && {{ {as_owner}; }}", check=check, env=env)
 
-        if probe_tmux_server(run_command=run, socket_path=sock_path) is ProbeStatus.ABSENT:
-            result = target.run(f"{socket_guard} && rm -f -- {q_sock}", sudo=True, check=False)
-            if result.ok:
-                removed += 1
+        absent = probe_tmux_server(run_command=probe, socket_path=sock_path) is ProbeStatus.ABSENT
+        if absent and getattr(as_root(f"{socket_guard} && rm -f -- {q_sock}", check=False), "ok", False):
+            removed += 1
     return removed
 
 
 def ensure_admin_socket_root(
-    target: Transport,
+    files: Files,
     admin_username: str,
 ) -> None:
     """Create the admin tmux socket root directory (idempotent).
 
     Simpler than ``ensure_agent_socket_root``: admin sockets only need to be
     accessible to the admin user, so no shared group is involved. The root
-    directory is owned by the admin user and sits at mode 0700.
+    directory is owned by root at 0755 and the admin's directory under it by
+    the admin at 0700.
     """
-    q_root = shlex.quote(ADMIN_SOCKET_ROOT)
-    q_admin_dir = shlex.quote(f"{ADMIN_SOCKET_ROOT}/{admin_username}")
-    q_admin = shlex.quote(admin_username)
+    admin_dir = f"{ADMIN_SOCKET_ROOT}/{admin_username}"
+    q_admin_dir = shlex.quote(admin_dir)
 
-    probe = target.run(
+    stdout = _socket_probe(
+        files,
         f'if test -d {q_admin_dir}; then stat -c "%U %a" {q_admin_dir} 2>/dev/null || echo PROBE_FAILED; '
-        f"else echo MISSING; fi",
-        sudo=True,
-        check=False,
+        "else echo MISSING; fi",
     )
-    if probe.stdout.strip() == f"{admin_username} 700":
+    if stdout == f"{admin_username} 700":
         return
 
-    target.run(f"mkdir -p {q_root}", sudo=True)
-    target.run(f"chown root:root {q_root}", sudo=True)
-    target.run(f"chmod 0755 {q_root}", sudo=True)
-    target.run(f"mkdir -p {q_admin_dir}", sudo=True)
-    target.run(f"chown {q_admin}:{q_admin} {q_admin_dir}", sudo=True)
-    target.run(f"chmod 0700 {q_admin_dir}", sudo=True)
+    _run_root(files, "mkdir", "-p", "--", ADMIN_SOCKET_ROOT)
+    _run_root(files, "chown", "root:root", "--", ADMIN_SOCKET_ROOT)
+    _run_root(files, "chmod", "0755", "--", ADMIN_SOCKET_ROOT)
+    _run_root(files, "mkdir", "-p", "--", admin_dir)
+    _run_root(files, "chown", f"{admin_username}:{admin_username}", "--", admin_dir)
+    _run_root(files, "chmod", "0700", "--", admin_dir)
+
+
+def _socket_probe(files: Files, source: str) -> str:
+    """The stripped stdout of a socket-directory probe run as root; its exit status is not read."""
+    result = files.access.run(Script(source, Shell.SH, elevated=True, deadline=files.deadline))
+    result.require_completed(files.access.vm_name)
+    return result.stdout.decode("utf-8", "replace").strip()
+
+
+def _run_root(files: Files, *argv: str) -> None:
+    """Run ``argv`` as root on ``files.access``; anything but status 0 raises."""
+    files.access.run(Command(argv, elevated=True, deadline=files.deadline), check=True)
 
 
 def generate_restricted_config(history_limit: int = DEFAULT_HISTORY_LIMIT) -> str:
@@ -826,7 +859,7 @@ def create_session(
     linux_user: str | None,
     *,
     run_command: RunCommand,
-    target: Transport | None = None,
+    admin_files: Files | None = None,
     admin_username: str | None = None,
     is_admin: bool = True,
     env: dict[str, str] | None = None,
@@ -842,10 +875,10 @@ def create_session(
     delivered env from the SSH connection reaches the pane via the server
     inheriting its own creation env).
 
-    For admin mode, ``run_command`` is admin's SSH connection. ``target`` is
-    used for sudo socket-root setup (writing under ``/run/agentworks/``).
-    For agent mode, ``run_command`` is the AGENT's SSH connection,
-    and ``target`` must be admin's ``Transport`` (for AGENT_SOCKET_ROOT setup).
+    For admin mode, ``run_command`` is admin's SSH connection. For agent
+    mode, ``run_command`` is the AGENT's SSH connection. ``admin_files`` is
+    the admin's ``Files``, whose access sets up the socket roots as root
+    (writing under ``/run/agentworks/``) in either mode.
 
     ``env`` flows to the pane via two channels (belt and suspenders):
     1. ``run_command`` materializes ``-o SetEnv=K=V`` args on the SSH
@@ -869,7 +902,7 @@ def create_session(
     """
     assert linux_user is not None
     assert admin_username is not None, "admin_username required for create_session"
-    assert target is not None, "target (admin's Transport) required for create_session"
+    assert admin_files is not None, "admin_files (the admin's Files) required for create_session"
 
     q_session = shlex.quote(session_name)
     q_path = shlex.quote(workspace_path)
@@ -884,11 +917,11 @@ def create_session(
     # plumbing because admin needs attach access to the agent's tmux server
     # (per the 2026-04-10 agent-tmux-sockets SDD).
     if is_admin:
-        ensure_admin_socket_root(target, admin_username)
+        ensure_admin_socket_root(admin_files, admin_username)
         sock = admin_socket_path(admin_username, session_name)
     else:
-        ensure_agent_socket_root(target, admin_username)
-        ensure_agent_socket_dir(target, linux_user)
+        ensure_agent_socket_root(admin_files, admin_username)
+        ensure_agent_socket_dir(admin_files, linux_user)
         sock = agent_socket_path(linux_user, session_name)
     q_sock = shlex.quote(sock)
     require_socket_path(sock, run_command=run_command)

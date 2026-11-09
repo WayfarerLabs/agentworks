@@ -16,6 +16,7 @@ from agentworks.errors import AgentworksError, ExternalError, StateError
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import manager, tmux
 from agentworks.sessions.manager import _lifecycle
+from tests.vm_access_support import files_over_target
 
 from .test_create_start_restart_orchestrated import _create_stubs, _restart_fixture
 from .test_create_start_restart_orchestrated import _stub_build_registry as _stub_build_registry
@@ -297,6 +298,9 @@ def test_maintenance_socket_guard_covers_the_entire_framed_probe(monkeypatch, na
     binary = native.root / "tmux"
     binary.write_text(f'#!/bin/sh\nprintf called >> {observed}\nexec {shutil.which("tmux")} "$@"\n')
     binary.chmod(0o700)
+    runuser = native.root / "runuser"
+    runuser.write_text('#!/bin/sh\nshift 3\nexec "$@"\n')
+    runuser.chmod(0o700)
     native.environment["PATH"] = f"{native.root}:/usr/bin:/bin"
     original_run = native.run
 
@@ -308,7 +312,7 @@ def test_maintenance_socket_guard_covers_the_entire_framed_probe(monkeypatch, na
         return result
 
     monkeypatch.setattr(native, "run", replace_after_enumeration)
-    assert tmux._cleanup_stale_sockets_under(native, str(scan)) == 0
+    assert tmux._cleanup_stale_sockets_under(files_over_target(native), str(scan), owner="agt-a") == 0
     assert stale.is_symlink()
     assert not observed.exists()
     assert native.native("list-sessions").ok

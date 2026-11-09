@@ -429,7 +429,7 @@ def _start_session_slice(
                 command,
                 linux_user,
                 run_command=session_run_command,
-                target=target,
+                admin_files=admin_access.files(),
                 admin_username=vm.admin_username,
                 is_admin=(mode == SessionMode.ADMIN),
                 env=session_env,
