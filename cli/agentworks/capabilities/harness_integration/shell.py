@@ -8,6 +8,7 @@ from pydantic import Field
 
 from agentworks.artifacts.application import ArtifactApplication
 from agentworks.artifacts.native.shell import shell_artifacts
+from agentworks.capabilities.base import ScopeLevel
 from agentworks.capabilities.harness_integration.base import (
     HarnessIntegration,
     HarnessLaunchIntent,
@@ -16,6 +17,7 @@ from agentworks.capabilities.harness_integration.base import (
     HarnessStartResult,
     require_commands,
 )
+from agentworks.interpolation import render_template
 from agentworks.schema import AgwModel
 from agentworks.topics import TopicProse
 
@@ -53,11 +55,12 @@ class ShellConfig(AgwModel):
 
     command: str = Field(default="", examples=["htop"])
     """The command the session's pane runs. Empty (the default) is a bare
-    login shell."""
+    login shell. Supports ${agw:NAME} context substitution; ordinary shell
+    expressions and Go templates retain their own syntax."""
 
     resume_command: str = ""
     """The command a resumed session's pane runs. Empty (the default)
-    reruns ``command``."""
+    reruns ``command``. Supports the same ${agw:NAME} context substitution."""
 
     required_commands: list[str] = Field(default_factory=list, examples=[["htop"]])
     """Commands that must exist on the session's target before it starts.
@@ -130,6 +133,27 @@ class ShellIntegration(HarnessIntegration):
         """This session's validated shell config."""
         return self._config_as(ShellConfig)
 
+    def preflight(self, ctx: RunContext) -> None:
+        """Check the selected template even when its target probe defers."""
+        super().preflight(ctx)
+        scope = ctx.operation_scope
+        if scope is not None and scope.level is ScopeLevel.SESSION:
+            intent = self._session_binding.launch_intent
+            if intent is not HarnessLaunchIntent.RESUME_ONLY:
+                self._render_selected_command(intent)
+
+    def _render_selected_command(self, intent: HarnessLaunchIntent) -> str:
+        config = self.config
+        if not intent.starts_fresh and config.resume_command:
+            field, command = "resume_command", config.resume_command
+        else:
+            field, command = "command", config.command
+        return render_template(
+            command,
+            self._session_binding.context_values,
+            field=f"session={self._session_name}.{field}",
+        )
+
     def start(
         self,
         ctx: RunContext,
@@ -138,13 +162,12 @@ class ShellIntegration(HarnessIntegration):
     ) -> HarnessStartResult:
         """Select the configured launch command for a supported intent.
 
-        The remaining ``or`` is the cross-field derivation the model's
-        own description states, not a fallback to a literal: an empty
-        ``resume_command`` means "rerun ``command``", and ``command`` is
-        already resolved by the time it is read."""
+        An empty ``resume_command`` selects ``command`` before rendering,
+        so template errors identify the declaration that supplied the text.
+        """
         if intent is HarnessLaunchIntent.RESUME_ONLY:
             return HarnessStartNotImplemented()
-        command = self.config.command if intent.starts_fresh else self.config.resume_command or self.config.command
+        command = self._render_selected_command(intent)
         context = self._session_binding.artifact_context
         application = ArtifactApplication()
         if context:

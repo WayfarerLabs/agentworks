@@ -22,6 +22,7 @@ from agentworks.harness_setup.dispatch import run_setup
 from agentworks.harness_setup.inputs import SetupInputs
 from agentworks.harness_setup.runner import SetupRunner
 from agentworks.harness_setup.state import read_native_setup
+from agentworks.linux_users import managed_home
 from agentworks.package_sources import PackageCapture
 from agentworks.secrets.orchestration import SecretTarget
 from agentworks.vms.sites import site_platform_name
@@ -117,6 +118,12 @@ def prepare_vm_setup(
                     capture_owner(registry, "vm", name, "admin", admin.artifacts, operation=operation),
                 )
             )
+    from agentworks.interpolation import context_values
+
+    row = db.get_vm(name)
+    values = context_values(vm_name=name, user=row.admin_username if row else admin.username)
+    for inputs in result:
+        inputs.environment_target.validate_context(values)
     return tuple(result)
 
 
@@ -129,7 +136,7 @@ def prepare_agent_setup(
     from agentworks.vms.templates import resolve_live_template
 
     ancestor = resolve_live_template(db, registry, vm.name, vm.template)
-    return SetupInputs(
+    inputs = SetupInputs(
         "agent",
         name,
         "agent",
@@ -138,10 +145,22 @@ def prepare_agent_setup(
         template.artifacts,
         capture_owner(registry, "agent", name, "agent", template.artifacts),
     )
+    from agentworks.agents.manager import derive_linux_user
+    from agentworks.interpolation import context_values
+
+    row = db.get_agent(name)
+    inputs.environment_target.validate_context(
+        context_values(
+            vm_name=vm.name,
+            user=row.linux_user if row else derive_linux_user(name),
+            agent_name=name,
+        )
+    )
+    return inputs
 
 
 def prepare_workspace_setup(
-    db: Database, registry: Registry, *, vm: VMRow, name: str, template: ResolvedTemplate
+    db: Database, registry: Registry, *, vm: VMRow, name: str, template: ResolvedTemplate, root: str | None = None
 ) -> SetupInputs | None:
     """Prepare this project's VM + workspace chain, without either user env."""
     if not _needed(db, "workspace", name, "workspace", template.harness_integrations, template.artifacts):
@@ -149,7 +168,7 @@ def prepare_workspace_setup(
     from agentworks.vms.templates import resolve_live_template
 
     ancestor = resolve_live_template(db, registry, vm.name, vm.template)
-    return SetupInputs(
+    inputs = SetupInputs(
         "workspace",
         name,
         "workspace",
@@ -158,6 +177,17 @@ def prepare_workspace_setup(
         template.artifacts,
         capture_owner(registry, "workspace", name, "workspace", template.artifacts),
     )
+    from agentworks.interpolation import context_values
+
+    inputs.environment_target.validate_context(
+        context_values(
+            vm_name=vm.name,
+            user=vm.admin_username,
+            workspace_name=name,
+            workspace_dir=root,
+        )
+    )
+    return inputs
 
 
 def apply_vm_setup(
@@ -197,7 +227,7 @@ def apply_vm_setup(
                 prior=None,
                 checkpoint=lambda claims: None,
                 username=vm.admin_username,
-                home=f"/home/{vm.admin_username}",
+                home=managed_home(vm.admin_username),
             )
         run_setup(db, registry, item, invocation, operation=operation, failures=failures, held=held)
 
@@ -239,7 +269,7 @@ def apply_agent_setup(
         prior=None,
         checkpoint=lambda claims: None,
         username=username,
-        home=f"/home/{username}",
+        home=managed_home(username),
     )
     return run_setup(
         db, registry, inputs, invocation, operation=operation, failures=failures, buffered=buffered, held=held

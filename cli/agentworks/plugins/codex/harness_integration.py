@@ -127,7 +127,6 @@ from agentworks.capabilities.harness_integration.base import (
     HarnessIntegration,
     HarnessLaunchIntent,
     HarnessStart,
-    quote_literal_argv,
     require_commands,
 )
 from agentworks.errors import StateError
@@ -246,13 +245,15 @@ class CodexConfig(AgwModel):
     """Explicitly enabled session artifact carriers. An authored list replaces inherited opt-ins."""
 
     extra_args: Annotated[list[str], MergeStrategy.REPLACE] = Field(default_factory=list)
-    """Raw argv tokens appended verbatim after every generated CLI option,
+    """Argv tokens appended after every generated CLI option,
     so they can add unmodeled arguments or override managed ``-c`` values.
     Codex 0.147.0 takes the last value for a repeated ``-c`` key. On a fresh
     launch with an initial input, only the ``--`` prompt separator and prompt
     value follow these option tokens. Overriding ``notify`` disables
     deterministic id binding, leaving discovery and the picker as fallbacks.
-    A child template's declared list replaces its parent's."""
+    A child template's declared list replaces its parent's. Context references such as
+    ${agw:workspace_dir} render before each argument is shell-quoted; replacement
+    contents are literal data."""
 
 
 # Config field -> the codex flag it forwards to, in emission order. The
@@ -955,8 +956,8 @@ class CodexIntegration(HarnessIntegration):
 
         A single ``sh -c`` so the whole thing survives the ``exec``
         wrapping the tmux pane applies (``exec`` takes one simple
-        command). The message and the generated argv carry no ``{{word}}``
-        tokens, so the core template-var substitution does not mangle them.
+        command). Structured extra arguments render before argv quoting;
+        generated and modeled arguments retain their literal content.
         """
         parts = [f"echo {shlex.quote(msg)}"]
         if legacy_marker is not None:
@@ -1036,11 +1037,11 @@ class CodexIntegration(HarnessIntegration):
             token.startswith("developer_instructions=") for token in self._artifact_plan.argv
         ):
             value = _toml_basic_string(self.config.developer_instructions)
-            parts += ["-c", quote_literal_argv(f"developer_instructions={value}")]
-        parts += [quote_literal_argv(token) for token in self._artifact_plan.argv]
-        parts += [shlex.quote(token) for token in self._extra_arg_tokens()]
+            parts += ["-c", shlex.quote(f"developer_instructions={value}")]
+        parts += [shlex.quote(token) for token in self._artifact_plan.argv]
+        parts += [self.quote_context_argv(token) for token in self._extra_arg_tokens()]
         if fresh and (prompt := self._fresh_prompt()) is not None:
-            parts += ["--", quote_literal_argv(prompt)]
+            parts += ["--", shlex.quote(prompt)]
         return " ".join(parts)
 
     def _fresh_prompt(self) -> str | None:

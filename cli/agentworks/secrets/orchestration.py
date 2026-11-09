@@ -37,13 +37,8 @@ Usage at a manager entry point:
 The orchestrator is generic: it doesn't know about VMs, workspaces, or
 agents. It just walks env dicts.
 
-**Substitution invariance:** callers may hand in either pre- or
-post-substitution env dicts (e.g. before or after
-``_substitute_template_vars_in_env``). The computed union of
-``SecretDecl``s is invariant under substitution because substitution
-only rewrites ``EnvEntry.value`` (plaintext), never ``EnvEntry.secret``
-(the reference name). This is load-bearing for callers that build
-targets from un-substituted template env dicts.
+Plaintext interpolation leaves secret-reference names unchanged, so the secret
+union depends only on the winning entries' secret arms.
 
 **Non-interactive errors:** ``resolve_for_command`` raises
 ``SecretUnavailableError`` if the active sources cannot satisfy a
@@ -102,6 +97,39 @@ class SecretTarget:
     """Optional human-readable label for diagnostics. Not part of
     equality, hashing, or identity."""
 
+    def effective_env(self) -> dict[str, EnvEntry]:
+        """Return authored winners after scope and managed-identity precedence.
+
+        A present workspace or session scope, including an empty map, denotes
+        the corresponding invocation context. Its managed identity keys cannot
+        contribute authored plaintext or secret references.
+        """
+        from agentworks.env.identity import SESSION_IDENTITY_KEYS, WORKSPACE_IDENTITY_KEYS
+
+        identity_keys = set[str]()
+        if self.workspace is not None:
+            identity_keys.update(WORKSPACE_IDENTITY_KEYS)
+        if self.session is not None:
+            identity_keys.update(SESSION_IDENTITY_KEYS)
+        return effective_env(
+            vm=self.vm,
+            workspace=self.workspace,
+            admin=self.admin,
+            agent=self.agent,
+            session=self.session,
+            identity_keys=identity_keys,
+        )
+
+    def validate_context(self, values: Mapping[str, str]) -> None:
+        """Check authored winning plaintext before the operation resolves secrets."""
+        from agentworks.env.render import render_plaintext
+
+        render_plaintext(
+            self.effective_env(),
+            values,
+            field=f"{self.label}.env" if self.label else "env",
+        )
+
 
 def compute_needed_secrets(
     targets: Sequence[SecretTarget],
@@ -133,13 +161,7 @@ def compute_needed_secrets(
     seen: set[str] = set()
     out: list[SecretDecl] = []
     for target in targets:
-        merged = effective_env(
-            vm=target.vm,
-            workspace=target.workspace,
-            admin=target.admin,
-            agent=target.agent,
-            session=target.session,
-        )
+        merged = target.effective_env()
         for key, entry in merged.items():
             name = entry.secret
             if name is None or name in seen:
@@ -195,13 +217,7 @@ def validate_target_values(
 
     seen: set[str] = set()
     for target in targets:
-        merged = effective_env(
-            vm=target.vm,
-            workspace=target.workspace,
-            admin=target.admin,
-            agent=target.agent,
-            session=target.session,
-        )
+        merged = target.effective_env()
         for entry in merged.values():
             name = entry.secret
             if name is None or name in seen:

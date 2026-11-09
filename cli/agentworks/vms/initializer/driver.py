@@ -28,6 +28,7 @@ from agentworks.env import ResourceContext, vm_stable_identity_env
 from agentworks.execution import trust
 from agentworks.git_config import ensure_safe_directory_wildcard
 from agentworks.git_credentials import configure_user_git_credentials
+from agentworks.linux_users import managed_home
 from agentworks.ssh import SSHError, SSHLogger
 from agentworks.transports import SSHTransport, Transport
 
@@ -142,7 +143,7 @@ def bootstrap_vm(
         default_timeout=60,
         logger=logger,
     )
-    return ts_target, f"/home/{admin_username}", release
+    return ts_target, managed_home(admin_username), release
 
 
 def run_initialization(

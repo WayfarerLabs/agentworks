@@ -1518,12 +1518,11 @@ def test_create_passes_new_session_intent_to_the_harness_integration(
     db.close()
 
 
-# -- pane-command parity: integration op string + relocated substitution -----
+# -- pane-command parity: selected fields render inside their integration -----
 #
-# The command reaching tmux is the harness integration's start output with the
-# {{session_name}} / {{workspace_name}} substitution applied at the CALL
-# SITE (lifted out of the deleted _build_session_command). These pin that
-# every template produces the same pane command it did before the swap.
+# The command reaching tmux is the integration's completed start output.
+# Shell renders its selected command, and structured native extra arguments
+# render before quoting. Other integration fields remain literal data.
 
 
 def _template(
@@ -1566,15 +1565,13 @@ def _capture_pane_command(monkeypatch: pytest.MonkeyPatch, captured: dict[str, s
 def test_create_pane_command_is_the_harness_integration_output_substituted(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """create: the pane command is the shell integration's start() output
-    (the template's ``command``) with BOTH template vars substituted at
-    the call site."""
+    """Create consumes the shell integration's rendered command directly."""
     from agentworks.sessions.manager import create_session
 
     events: list[str] = []
     db = _create_stubs(tmp_path, monkeypatch, events)
     db.insert_agent("a1", "vm1", "agt-a1")
-    _template(monkeypatch, command="claude {{session_name}} in {{workspace_name}}")
+    _template(monkeypatch, command="claude ${agw:session_name} in ${agw:workspace_name}")
     captured: dict[str, str] = {}
     _capture_pane_command(monkeypatch, captured)
 
@@ -1606,7 +1603,7 @@ def test_restart_pane_command_uses_resume_command_and_session_workspace(
     _template(
         monkeypatch,
         command="claude",
-        resume_command="resume {{session_name}} {{workspace_name}}",
+        resume_command="resume ${agw:session_name} ${agw:workspace_name}",
     )
     captured: dict[str, str] = {}
     _capture_pane_command(monkeypatch, captured)
@@ -2071,3 +2068,185 @@ def test_restart_multiline_environment_secret_refuses_before_kill(
     assert "session-restart-sentinel" not in repr((caught.value.args, vars(caught.value)))
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
+
+
+def test_invalid_selected_shell_command_preserves_running_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from agentworks.errors import ValidationError
+    from agentworks.sessions.manager import restart_session
+
+    db, events = _restart_fixture(tmp_path, monkeypatch)
+    _template(monkeypatch, resume_command="tool ${agw:unknown}")
+    before = db.get_session("s1")
+    with pytest.raises(ValidationError):
+        restart_session(
+            db,
+            SimpleNamespace(session=SimpleNamespace(history_limit=1)),
+            name="s1",
+            yes=True,
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+    assert db.get_session("s1") == before
+    assert "resolve" not in events
+    assert "resolve_env" not in events
+    assert "kill" not in events
+    assert "tmux_create" not in events
+    db.close()
+
+
+def test_invalid_env_reference_refuses_before_secret_resolution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from agentworks.env import EnvEntry
+    from agentworks.errors import ValidationError
+    from agentworks.sessions import manager
+
+    db, events = _restart_fixture(tmp_path, monkeypatch)
+    _template(monkeypatch, command="tool")
+    template = manager._resolve_template(None, None)
+    template.env = {"CONFIG": EnvEntry("${agw:unknown}")}
+    from agentworks.sessions.manager._env import _session_secret_target
+
+    monkeypatch.setattr(manager, "_session_secret_target", _session_secret_target)
+    before = db.get_session("s1")
+    with pytest.raises(ValidationError):
+        manager.restart_session(
+            db,
+            SimpleNamespace(session=SimpleNamespace(history_limit=1)),
+            name="s1",
+            yes=True,
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+    assert db.get_session("s1") == before
+    assert "resolve" not in events
+    assert "resolve_env" not in events
+    assert "kill" not in events
+    assert "tmux_create" not in events
+    db.close()
+
+
+@pytest.mark.parametrize("entry", ["${agw:agent_name}", {"secret": "ignored-collision"}])
+def test_admin_session_create_discards_managed_identity_before_preparation(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+    entry: str | dict[str, str],
+) -> None:
+    import json
+
+    from agentworks.instance_specs import parse_instance_spec
+    from agentworks.sessions.manager import create_session
+
+    config = make_config()
+    _seed_stopped_proxmox_vm(db)
+    db.update_vm_init_status("box", InitStatus.COMPLETE)
+    overlay = parse_instance_spec("vm", json.dumps({"env": {"AGENTWORKS_SESSION_KIND": entry}}))
+    db.instance_state.put_desired_overlay("vm", "box", overlay.payload)
+    monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: True)
+    events: list[str] = []
+    captured_env: dict[str, str] = {}
+    _patch_session_ops(monkeypatch, events, captured_env)
+
+    create_session(db, config, name="s1", workspace="ws1", admin=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert db.get_session("s1") is not None
+    assert captured_env["AGENTWORKS_SESSION_KIND"] == "admin"
+    assert all("ignored-collision" not in batch for batch in resolve_counter)
+    assert "tmux_create" in events
+
+
+def test_bad_selected_create_command_refuses_before_resolve_or_ephemeral_creation(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.sessions.manager import create_session
+
+    config = make_config()
+    _seed_stopped_proxmox_vm(db)
+    db.update_vm_init_status("box", InitStatus.COMPLETE)
+    monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: True)
+    events: list[str] = []
+    captured_env: dict[str, str] = {}
+    _patch_session_ops(monkeypatch, events, captured_env)
+    with pytest.raises(ValidationError):
+        create_session(
+            db,
+            config,
+            name="s1",
+            spec='{"harness_integration": {"name": "shell", "command": "tool ${agw:unknown}"}}',
+            new_workspace=True,
+            workspace_name="fresh-ws",
+            new_agent=True,
+            agent_name="fresh-agent",
+            vm_name="box",
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+    assert resolve_counter == []
+    assert db.get_session("s1") is None
+    assert db.get_agent("fresh-agent") is None
+    assert db.get_workspace("fresh-ws") is None
+    assert events == []
+    assert captured_env == {}
+
+
+def test_create_command_preflight_uses_planned_identity_and_workspace_before_rows_exist(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.capabilities.harness_integration import shell
+    from agentworks.interpolation import render_template
+    from agentworks.secrets.resolver import Resolver
+    from agentworks.sessions.manager import create_session
+    from agentworks.workspaces.backends.vm import default_workspace_path
+
+    class BeforeMutation(Exception):
+        pass
+
+    config = make_config()
+    _seed_stopped_proxmox_vm(db)
+    db.update_vm_init_status("box", InitStatus.COMPLETE)
+    monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: True)
+    events: list[str] = []
+    _patch_session_ops(monkeypatch, events, {})
+    rendered: list[str] = []
+    original_render = render_template
+
+    def record_render(text: str, values: dict[str, str], *, field: str) -> str:
+        result = original_render(text, values, field=field)
+        rendered.append(result)
+        return result
+
+    def stop_before_mutation(self: Resolver) -> None:
+        raise BeforeMutation
+
+    monkeypatch.setattr(shell, "render_template", record_render)
+    monkeypatch.setattr(Resolver, "resolve", stop_before_mutation)
+    with pytest.raises(BeforeMutation):
+        create_session(
+            db,
+            config,
+            name="s1",
+            spec=(
+                '{"harness_integration": {"name": "shell", "command": '
+                '"${agw:user_name}|${agw:user_home_dir}|${agw:agent_name}|'
+                '${agw:workspace_name}|${agw:workspace_dir}|${agw:session_name}"}}'
+            ),
+            new_workspace=True,
+            workspace_name="fresh-ws",
+            new_agent=True,
+            agent_name="fresh-agent",
+            vm_name="box",
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+    assert rendered == [
+        f"agt-fresh-agent|/home/agt-fresh-agent|fresh-agent|fresh-ws|{default_workspace_path(config, 'fresh-ws')}|s1"
+    ]
+    assert db.get_session("s1") is None
+    assert db.get_agent("fresh-agent") is None
+    assert db.get_workspace("fresh-ws") is None
+    assert events == []
