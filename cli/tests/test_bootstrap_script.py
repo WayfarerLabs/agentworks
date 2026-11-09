@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from pathlib import Path
+
+import pytest
 
 from agentworks.capabilities.vm_platform.bootstrap_script import (
     REBOOT_SENTINEL_PATH,
     generate_bootstrap_script,
     parse_bootstrap_steps,
+    run_once_marker,
     run_once_script,
 )
 from agentworks.execution import root_script
@@ -351,8 +355,7 @@ def test_run_once_script_runs_the_bootstrap_on_the_first_boot_only(tmp_path: Pat
     wrapper.write_text(
         run_once_script(
             '#!/bin/bash\necho ran >> "$LEDGER"\n',
-            marker=str(tmp_path / "state" / "bootstrap.complete"),
-            script_path=str(tmp_path / "state" / "bootstrap.sh"),
+            stem=str(tmp_path / "state" / "bootstrap"),
         ),
         newline="\n",
     )
@@ -365,13 +368,12 @@ def test_run_once_script_runs_the_bootstrap_on_the_first_boot_only(tmp_path: Pat
 def test_run_once_script_runs_a_failed_bootstrap_again(tmp_path: Path) -> None:
     """A first run that fails leaves no marker, so the next boot runs the bootstrap again."""
     ledger = tmp_path / "ledger"
-    marker = tmp_path / "state" / "bootstrap.complete"
+    marker = Path(run_once_marker(str(tmp_path / "state" / "bootstrap")))
     wrapper = tmp_path / "wrapper.sh"
     wrapper.write_text(
         run_once_script(
             '#!/bin/bash\necho ran >> "$LEDGER"\nexit 3\n',
-            marker=str(marker),
-            script_path=str(tmp_path / "state" / "bootstrap.sh"),
+            stem=str(tmp_path / "state" / "bootstrap"),
         ),
         newline="\n",
     )
@@ -379,3 +381,11 @@ def test_run_once_script_runs_a_failed_bootstrap_again(tmp_path: Path) -> None:
     assert [_boot(wrapper, ledger) for _ in range(2)] == [3, 3]
     assert ledger.read_text().splitlines() == ["ran", "ran"]
     assert not marker.exists()
+
+
+def test_run_once_script_refuses_a_bootstrap_holding_its_delimiter() -> None:
+    """A line equal to the heredoc delimiter would end the copy early and run the rest as the wrapper."""
+    delimiter = re.search(r"<<'(\w+)'", run_once_script("", stem="/x"))
+    assert delimiter is not None
+    with pytest.raises(ValueError):
+        run_once_script(f"echo before\n{delimiter[1]}\necho after\n", stem="/x")

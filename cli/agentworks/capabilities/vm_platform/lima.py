@@ -72,8 +72,7 @@ _STATUS_TIMEOUT_SECONDS = 10
 # Where the bootstrap's run-once gate keeps its marker and its copy of the
 # script: Lima runs every system provisioner on every boot, and the bootstrap
 # is create-time only.
-LIMA_BOOTSTRAP_MARKER = "/var/lib/agentworks/lima-bootstrap.complete"
-LIMA_BOOTSTRAP_PATH = "/var/lib/agentworks/lima-bootstrap.sh"
+LIMA_BOOTSTRAP_STEM = "/var/lib/agentworks/lima-bootstrap"
 
 # Lima template for Debian cloud VMs (values substituted at create time).
 # The provision block runs the non-secret bootstrap script (user, packages,
@@ -402,8 +401,7 @@ class LimaPlatform(VMPlatform):
                 hostname=request.hostname,
                 swap=swap,
             ),
-            marker=LIMA_BOOTSTRAP_MARKER,
-            script_path=LIMA_BOOTSTRAP_PATH,
+            stem=LIMA_BOOTSTRAP_STEM,
         )
 
         # Indent the provision script for YAML embedding (6 spaces)

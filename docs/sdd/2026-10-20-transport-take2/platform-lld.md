@@ -395,11 +395,12 @@ can hold the key: I10 holds by construction, and the staging files go.
 appended the create-time key that `vm recover` or `vm reinit` had replaced, and ran
 `apt-get dist-upgrade` with `--force-confnew`. GCE already wrapped the same payload in a durable
 success marker because its `startup-script` runs on every boot too. That wrapper moves into
-`bootstrap_script.run_once_script(script, *, marker, script_path)`, and Lima's provision step uses
-it with its own marker, `/var/lib/agentworks/lima-bootstrap.complete`; the payload itself is
-unchanged, and the platforms that run it once already (WSL2, Proxmox, cloud-init's per-instance
-`runcmd` on AWS and Azure) do not wrap it. A Lima VM created before this keeps its old provision
-step; the 0.20 upgrade guide says so.
+`bootstrap_script.run_once_script(script, *, stem)`, which keeps `<stem>.sh` and the marker
+`<stem>.complete` (GCE's paths are unchanged) and refuses a payload holding its heredoc delimiter as
+a line. Lima's provision step uses it with its own stem, `/var/lib/agentworks/lima-bootstrap`; the
+payload itself is unchanged, and the platforms that run it once already (WSL2, Proxmox, cloud-init's
+per-instance `runcmd` on AWS and Azure) do not wrap it. A Lima VM created before this keeps its old
+provision step; the 0.20 upgrade guide says so.
 
 **The bootstrap's output against the 1 MiB capture.** Its package steps run `apt-get -qq`
 (`bootstrap_script.py:114-117`) and every other step prints one marker line. No create log exists

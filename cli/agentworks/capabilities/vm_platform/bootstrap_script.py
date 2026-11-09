@@ -291,16 +291,29 @@ def generate_bootstrap_script(
     )
 
 
-def run_once_script(bootstrap_script: str, *, marker: str, script_path: str) -> str:
+_RUN_ONCE_DELIMITER = "AGW_RUN_ONCE_EOF"
+
+
+def run_once_marker(stem: str) -> str:
+    """The success marker :func:`run_once_script` keeps beside ``stem``."""
+    return f"{stem}.complete"
+
+
+def run_once_script(bootstrap_script: str, *, stem: str) -> str:
     """Wrap ``bootstrap_script`` for a backend that runs its payload on every boot, so it runs once.
 
-    The wrapper checks ``marker`` before any mutation and exits 0 when it is
-    there. Otherwise it writes the bootstrap to ``script_path``, runs it, and
-    moves the marker into place only once the bootstrap exits 0, so a failed
-    or interrupted first run leaves no marker and runs again on the next
-    boot. ``marker`` and ``script_path`` share one directory, which the
-    wrapper creates.
+    The wrapper checks the marker (:func:`run_once_marker`) before any
+    mutation and exits 0 when it is there. Otherwise it writes the bootstrap
+    to ``<stem>.sh``, runs it, and moves the marker into place only once the
+    bootstrap exits 0, so a failed or interrupted first run leaves no marker
+    and runs again on the next boot. It creates ``stem``'s directory. A
+    bootstrap with a line equal to the wrapper's heredoc delimiter, which
+    would end the copy early, raises ``ValueError``.
     """
+    if _RUN_ONCE_DELIMITER in bootstrap_script.splitlines():
+        raise ValueError(f"the bootstrap holds a line equal to the wrapper's delimiter {_RUN_ONCE_DELIMITER}")
+    marker = run_once_marker(stem)
+    script_path = f"{stem}.sh"
     return f"""\
 #!/bin/bash
 set -euo pipefail
@@ -312,9 +325,9 @@ fi
 
 install -d -m 0755 "$(dirname "$MARKER")"
 BOOTSTRAP={script_path}
-cat > "$BOOTSTRAP" <<'AGW_RUN_ONCE_EOF'
+cat > "$BOOTSTRAP" <<'{_RUN_ONCE_DELIMITER}'
 {bootstrap_script.rstrip()}
-AGW_RUN_ONCE_EOF
+{_RUN_ONCE_DELIMITER}
 chmod 0700 "$BOOTSTRAP"
 "$BOOTSTRAP"
 

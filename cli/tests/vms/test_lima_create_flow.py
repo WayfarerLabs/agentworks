@@ -28,8 +28,7 @@ from agentworks.capabilities.vm_platform.lima import (
     _REBOOT_CLEAR_MARKER,
     _REBOOT_PENDING_MARKER,
     _TAILSCALED_WAIT_PAYLOAD,
-    LIMA_BOOTSTRAP_MARKER,
-    LIMA_BOOTSTRAP_PATH,
+    LIMA_BOOTSTRAP_STEM,
     LimaPlatform,
 )
 from agentworks.capabilities.vm_platform.lima_host import LimaCommandFailed, LimaHost
@@ -318,5 +317,5 @@ def test_lima_runs_the_bootstrap_once_although_it_provisions_on_every_boot(
     )
     provision = cast("dict[str, Any]", yaml.safe_load(submitted[0]))["provision"]
     assert [step["script"] for step in provision if step["mode"] == "system"][-1] == run_once_script(
-        bootstrap, marker=LIMA_BOOTSTRAP_MARKER, script_path=LIMA_BOOTSTRAP_PATH
+        bootstrap, stem=LIMA_BOOTSTRAP_STEM
     )

@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from agentworks.capabilities.vm_platform.bootstrap_script import run_once_script
+from agentworks.capabilities.vm_platform.bootstrap_script import run_once_marker, run_once_script
 from agentworks.errors import ConfigError
 
-GCE_BOOTSTRAP_MARKER = "/var/lib/agentworks/gce-bootstrap-v1.complete"
-GCE_BOOTSTRAP_PATH = "/var/lib/agentworks/gce-bootstrap-v1.sh"
+GCE_BOOTSTRAP_STEM = "/var/lib/agentworks/gce-bootstrap-v1"
+GCE_BOOTSTRAP_MARKER = run_once_marker(GCE_BOOTSTRAP_STEM)
 GCE_READINESS_COMMAND = f"until test -f {GCE_BOOTSTRAP_MARKER}; do sleep 2; done"
 GCE_READINESS_LABEL = "GCE startup script"
 GCE_STARTUP_SCRIPT_LIMIT_BYTES = 256 * 1024
@@ -20,7 +20,7 @@ def build_startup_script(bootstrap_script: str, *, instance_name: str) -> str:
     :data:`GCE_READINESS_COMMAND` waits for. The result is refused when its
     UTF-8 size exceeds the metadata limit.
     """
-    script = run_once_script(bootstrap_script, marker=GCE_BOOTSTRAP_MARKER, script_path=GCE_BOOTSTRAP_PATH)
+    script = run_once_script(bootstrap_script, stem=GCE_BOOTSTRAP_STEM)
     encoded_size = len(script.encode("utf-8"))
     if encoded_size > GCE_STARTUP_SCRIPT_LIMIT_BYTES:
         raise ConfigError(
