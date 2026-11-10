@@ -378,8 +378,9 @@ def _run_agent_install_commands(
     passes is skipped, and a failure warns but does not abort. The profile
     fragment is rewritten unconditionally (even when there are no install
     commands and no PATH additions) so that reinit can clear previously set
-    paths, with mise's shims last, as the admin's profile always carries
-    them, so they take precedence.
+    paths. Mise's shims always come first and the install commands' paths
+    after them, so the install commands' paths take precedence, as in the
+    admin's profile.
 
     Install commands run without any injected environment: provisioning is
     hermetic. Static identity (``AGENTWORKS_AGENT``, etc.) reaches them
@@ -404,9 +405,13 @@ def _run_agent_install_commands(
         logger,
         label="Agent install command",
     )
-    path_additions.extend(_mise_shims_path(home))
     _write_agentworks_profile(
-        agent_files, path_additions, logger, home=home, shell=agent_tmpl.shell, identity_env=identity_env
+        agent_files,
+        _mise_shims_path(home) + path_additions,
+        logger,
+        home=home,
+        shell=agent_tmpl.shell,
+        identity_env=identity_env,
     )
 
 

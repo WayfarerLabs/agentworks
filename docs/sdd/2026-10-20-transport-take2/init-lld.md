@@ -621,9 +621,9 @@ request before dispatch (D12), so the self-configure phase cannot regress into r
   `_run_agent_install_commands` rewrote it (`agents/initializer.py:652-658`), and adds source lines
   to `~/.profile` and `~/.zprofile` whatever the shell (`:659-663`). The fragment is
   Agentworks-owned and rewritten every time, so `_run_agent_install_commands` writes it with the
-  shims path last when mise is configured, which keeps its precedence (each export prepends,
-  `:507-512`), and the extra source lines go, since `source_files` covers the files the agent's
-  shell reads.
+  shims path and then the install commands' paths, the admin's precedence (each export prepends, so
+  the install commands' paths win, `:507-512`), and the extra source lines go, since `source_files`
+  covers the files the agent's shell reads.
 - **Grants** keep their signatures (`grants.py:243-273`): each builds the admin's access from the
   `vm` and `config` it already takes, with `log=logger.record` when it has a logger. No caller
   catches `SSHError` by name: each either catches `Exception` (`grants.py:328`, `:346`;
@@ -1039,9 +1039,13 @@ no longer use them. The departures from the tables above, each recorded where it
   staging removal's completion and status, warning when it fails.
 - The agent follows the admin's order: its mise config (when `mise_packages` is set), dotfiles, mise
   lockfile and install (when packages, a lockfile or a config in the home, `mise._has_mise_config`),
-  then its user install commands, with mise's shims always on its profile's `PATH`
-  (`_write_agent_mise_config`, `_install_agent_mise`). Through v0.19.0 the agent ran its install
-  commands, then dotfiles, then mise, so its template's config overwrote the dotfiles'.
+  then its user install commands, with mise's shims always on its profile's `PATH` behind the
+  install commands' paths (`_write_agent_mise_config`, `_install_agent_mise`). Through v0.19.0 the
+  agent ran its install commands, then dotfiles, then mise, so its template's config overwrote the
+  dotfiles', and its shims took precedence over its install commands' paths. On a first create
+  neither account's profile carries the shims yet when its install commands run; they still find
+  mise's tools, because they run in an interactive login shell (`-lic`) whose rc fragment activates
+  mise.
 - A stored overlay that fails only on source reference fields this release refuses (every
   `errors.RefusedSourceReference`: `dotfiles_source`, `mise_lockfile` and a harness settings
   `source`, all through `sources.check_source_ref`) decodes to

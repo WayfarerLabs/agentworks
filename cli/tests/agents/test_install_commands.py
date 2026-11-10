@@ -100,7 +100,7 @@ def test_an_install_with_no_declared_test_always_runs(home: Path) -> None:
 
 @requires_file_program
 @pytest.mark.parametrize("shell", ["sh", "bash", "zsh"])
-def test_the_profile_keeps_install_paths_in_precedence_with_mise_s_shims_first(home: Path, shell: str) -> None:
+def test_the_profile_puts_install_paths_ahead_of_mise_s_shims_as_the_admin_s_does(home: Path, shell: str) -> None:
     shell_path = shutil.which(shell)
     if shell_path is None:
         pytest.skip(f"{shell} is unavailable")
@@ -120,7 +120,7 @@ def test_the_profile_keeps_install_paths_in_precedence_with_mise_s_shims_first(h
         text=True,
     )
     shims = f"{home}/.local/share/mise/shims"
-    assert result.stdout.splitlines() == [f"{shims}:{home}/.local/bin:/opt/tools:/usr/bin:/bin", "dev"]
+    assert result.stdout.splitlines() == [f"{home}/.local/bin:/opt/tools:{shims}:/usr/bin:/bin", "dev"]
     profile_line = f". {home}/.agentworks-profile.sh"
     for name in [".profile", ".bashrc"] + ([".zprofile"] if shell == "zsh" else []):
         assert (home / name).read_text().splitlines() == [profile_line]
