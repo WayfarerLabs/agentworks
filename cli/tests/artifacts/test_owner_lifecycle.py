@@ -182,7 +182,6 @@ def test_vm_admin_capture_shares_revision_and_refreshes_next_operation(owner, mo
 def test_buffered_capture_commits_atomically_with_realized_owner(owner, monkeypatch, tmp_path, component, fail_commit):
     import agentworks.artifacts.state as captures
 
-    monkeypatch.setattr("agentworks.transports.transport_for_user", lambda *a, **k: owner.target)
     monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: owner.target)
     monkeypatch.setattr("agentworks.agents.initializer.create_new_agent_user", lambda *a, **k: None)
     monkeypatch.setattr("agentworks.agents.initializer.create_agent_on_vm", lambda *a, **k: None)

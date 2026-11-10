@@ -13,7 +13,6 @@ from agentworks.artifacts.native.probe import probe_native
 from agentworks.errors import ExternalError
 from agentworks.execution.results import Completed, Result
 from agentworks.ssh import SSHLogger
-from agentworks.transports import Transport
 from tests.vm_access_support import Admin, RecordingVMAccess
 
 
@@ -124,7 +123,6 @@ def test_logger_only_secret_is_removed_from_setup_probe_diagnostics(
     path = "/home/worker/.claude/skills/review/SKILL.md"
     monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path / "logs")
     install_access_recorder(monkeypatch)
-    monkeypatch.setattr("agentworks.transports.transport_for_user", lambda *args, **kwargs: Mock(spec=Transport))
     monkeypatch.setattr("agentworks.harness_setup.lifecycle.site_platform_name", lambda *args: "fixture")
     invocations = []
 

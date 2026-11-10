@@ -1295,7 +1295,6 @@ def test_active_user_setup_joins_eager_env_and_runs_after_core(
     target = MagicMock(spec=Transport)
     target.logger = None
     install_access_recorder(monkeypatch).answer = answer_destination_identity
-    monkeypatch.setattr("agentworks.transports.transport_for_user", lambda *a, **k: target)
     calls = []
 
     def setup(self, invocation):
@@ -1353,7 +1352,6 @@ def test_legacy_overlay_conversion_waits_for_successful_native_reinit(
     target = MagicMock(spec=Transport)
     target.logger = None
     install_access_recorder(monkeypatch).answer = answer_destination_identity
-    monkeypatch.setattr("agentworks.transports.transport_for_user", lambda *a, **k: target)
 
     def setup(self, invocation):
         assert db.instance_state.get_desired_overlay("agent", "dev") == original
@@ -1417,7 +1415,6 @@ def test_native_failure_preserves_agent_and_continues_sibling_grants_and_ssh(
     target = MagicMock(spec=Transport)
     target.logger = None
     install_access_recorder(monkeypatch).answer = answer_destination_identity
-    monkeypatch.setattr("agentworks.transports.transport_for_user", lambda *a, **k: target)
     events = []
 
     def fail_setup(self, invocation):
