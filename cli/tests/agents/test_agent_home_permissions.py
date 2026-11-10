@@ -63,6 +63,7 @@ def _run_create_on_vm(
     dotfiles: Path | str | None = None,
     mise_packages: list[str] | None = None,
     mise_lockfile: str | None = None,
+    dotfiles_destination: str | None = None,
 ) -> AccessRecorder:
     """Drive ``create_agent_on_vm`` over a recording access and return it.
 
@@ -90,6 +91,8 @@ def _run_create_on_vm(
         template = dataclasses.replace(template, mise_packages=mise_packages)
     if mise_lockfile is not None:
         template = dataclasses.replace(template, mise_lockfile=mise_lockfile)
+    if dotfiles_destination is not None:
+        template = dataclasses.replace(template, dotfiles_destination=dotfiles_destination)
     recorder = install_access_recorder(monkeypatch)
 
     def answer(call: Call) -> Result | None:
@@ -429,3 +432,16 @@ def test_dotfiles_that_supply_a_mise_config_get_an_install_without_mise_packages
     commands = _commands(recorder)
     assert ("test", "-f", f"{HOME}/.config/mise/config.toml") in commands
     assert any(argv[-1].startswith("mise install") for argv in commands)
+
+
+def test_an_agent_s_dotfiles_may_own_its_config_directory(
+    db: Database, config: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The workspace tmuxinator links live in the admin's home only, so an agent's ~/.config is its dotfiles'."""
+    (tmp_path / "dots").mkdir()
+    recorder = _run_create_on_vm(
+        db, config, monkeypatch, user_exists=False, dotfiles=tmp_path / "dots", dotfiles_destination=f"{HOME}/.config"
+    )
+
+    uploads = [r for r in recorder.requests("run") if isinstance(r, Script) and "AGW_TREE_DEST" in r.env]
+    assert [upload.env["AGW_TREE_DEST"] for upload in uploads] == [f"{HOME}/.config"]

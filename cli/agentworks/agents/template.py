@@ -131,16 +131,17 @@ class AgentTemplate(DeclaredResource):
     """Where the fetched dotfiles are checked out: a path in the agent's home
     (`dots` or `~/dots`), or an absolute path. It may not be the home itself or one
     of its parents, be, hold or lie inside a path Agentworks manages in the home
-    (`~/.ssh`, `~/.agentworks`, `~/.agentworks-artifacts`, `~/.config/tmuxinator`
-    and the `~/.agentworks-*.sh` fragments), or have an empty, `.` or `..`
-    component; a trailing `/` is dropped."""
+    (`~/.ssh`, `~/.agentworks`, `~/.agentworks-artifacts` and the
+    `~/.agentworks-*.sh` fragments), or have an empty, `.` or `..` component; a
+    trailing `/` is dropped."""
 
     @field_validator("dotfiles_destination")
     @classmethod
     def _normalize_destination(cls, value: str | None) -> str | None:
         from agentworks.sources import normalize_destination
+        from agentworks.vms.home_layout import MANAGED
 
-        return None if value is None else normalize_destination(value)
+        return None if value is None else normalize_destination(value, managed=MANAGED)
 
     dotfiles_install_cmd: str | None = None
     """The command run inside the checkout to install the dotfiles."""

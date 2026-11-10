@@ -487,15 +487,17 @@ a relative path, a bare relative path (normalized to `~/` and the path, which is
 meant, so a stored `dots` keeps working), or an absolute path; it has no empty, `.` or `..`
 component and no other user's `~`; a trailing `/` is dropped; and `~` or `~/` alone, the home
 itself, is refused, since replacing it would move the home aside. A path in the home that is, holds
-or lies inside one Agentworks manages there (`vms/home_layout.py`'s `MANAGED`: the two fragments,
-`.ssh`, the state directory `.agentworks`, `.agentworks-artifacts` and the workspace links'
-`.config/tmuxinator`) is refused too, so `~/.config` is. `.config/mise` is not among them: dotfiles
-may own or override the mise config, since both accounts write it before the dotfiles sync and fetch
-the lockfile and install after it (`docs/guides/mise.md`). Refusals are `DestinationError`, an
-`errors.ValueFreeError` whose message names the accepted forms and no part of the value, which
-`instance_overlay_codec` shows in place of its generic message. `expand_destination(value, home)`
-replaces only the leading `~` and refuses, before any request, an absolute value that is the home or
-one of its ancestors, or that lands on a managed path.
+or lies inside one Agentworks manages in that account's home is refused too. `vms/home_layout.py`
+holds a set per account, which `normalize_destination` and `expand_destination` take as `managed`:
+`MANAGED` (the two fragments, `.ssh`, the state directory `.agentworks` and `.agentworks-artifacts`)
+for an agent, and `ADMIN_MANAGED`, which adds the workspace links' `.config/tmuxinator`, for the
+admin, so an admin's `~/.config` is refused and an agent's is not. `.config/mise` is in neither:
+dotfiles may own or override the mise config, since both accounts write it before the dotfiles sync
+and fetch the lockfile and install after it (`docs/guides/mise.md`). Refusals are
+`DestinationError`, an `errors.ValueFreeError` whose message names the accepted forms and no part of
+the value, which `instance_overlay_codec` shows in place of its generic message.
+`expand_destination(value, home)` replaces only the leading `~` and refuses, before any request, an
+absolute value that is the home or one of its ancestors, or that lands on a managed path.
 
 ### Source lines
 

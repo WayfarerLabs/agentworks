@@ -30,7 +30,7 @@ from agentworks.execution.errors import (
     TrustMissing,
     VMNotReady,
 )
-from agentworks.execution.requests import Command, PythonProgram
+from agentworks.execution.requests import Command, PythonProgram, Script
 from agentworks.execution.results import Completed, NotDelivered, NotDeliveredReason, Result, Unknown, UnknownReason
 from agentworks.install_commands import SystemInstallCommandEntry, UserInstallCommandEntry
 from agentworks.sessions.tmux import AGENT_SOCKET_ROOT
@@ -173,6 +173,21 @@ def _local_dotfiles(tmp_path: Path) -> AdminConfig:
     (tmp_path / "dots").mkdir()
     (tmp_path / "dots" / "install.sh").write_text("#!/bin/sh\n")
     return AdminConfig(user_install_commands=["user-tool"], dotfiles_source=str(tmp_path / "dots"))
+
+
+def test_the_admin_s_dotfiles_are_not_synced_over_its_workspace_tmuxinator_links(
+    run_section: Callable[..., None], tmp_path: Path
+) -> None:
+    """An absolute destination passes load; the admin's set refuses it when initialization expands it."""
+    guest = Guest()
+    admin = _local_dotfiles(tmp_path).model_copy(update={"dotfiles_destination": f"{HOME}/.config"})
+
+    run_section(guest, admin)
+
+    assert not any(
+        isinstance(request, Script) and "AGW_TREE_DEST" in request.env for request in guest.access.requests()
+    )
+    assert len(guest.log.warned) == 1
 
 
 def test_no_request_carries_an_environment_but_apts_and_the_tree_upload_s(

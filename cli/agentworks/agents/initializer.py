@@ -17,6 +17,7 @@ from agentworks import output
 from agentworks.execution.access import Admin, Agent
 from agentworks.execution.requests import Command, Script, Shell
 from agentworks.git_config import ensure_safe_directory_wildcard
+from agentworks.vms.home_layout import MANAGED
 from agentworks.vms.initializer.dotfiles import sync_dotfiles
 from agentworks.vms.initializer.mise import MISE_ACTIVATE_LINES
 from agentworks.vms.initializer.shell_env import (
@@ -302,6 +303,7 @@ def create_agent_on_vm(
             install_cmd=agent_cfg.dotfiles_install_cmd,
             shell=agent_shell,
             home=home,
+            managed=MANAGED,
             log=logger,
         )
 

@@ -17,11 +17,20 @@ if TYPE_CHECKING:
 
 
 def sync_dotfiles(
-    files: Files, *, source: str, destination: str, install_cmd: str, shell: str, home: str, log: InitLog
+    files: Files,
+    *,
+    source: str,
+    destination: str,
+    install_cmd: str,
+    shell: str,
+    home: str,
+    managed: tuple[str, ...],
+    log: InitLog,
 ) -> None:
     """Sync the dotfiles ``source`` names to ``destination``, then run ``install_cmd`` in the checkout.
 
-    Everything runs as the account ``files`` acts as, whose home is ``home``.
+    Everything runs as the account ``files`` acts as, whose home is ``home``
+    and whose managed paths (``vms.home_layout``) are ``managed``.
     The sync is ``sources.fetch_dir``. The install runs as ``{shell} -lc``
     with the checkout as its working directory, so it sees the account's
     login environment (its profile fragment, written earlier) and no
@@ -33,7 +42,7 @@ def sync_dotfiles(
     log.step("Dotfiles")
     dest = destination
     try:
-        dest = expand_destination(destination, home)
+        dest = expand_destination(destination, home, managed=managed)
         ref = parse_source_ref(source)
         output.info(f"Syncing dotfiles from {source}...")
         fetch_dir(ref, files, dest, log=log)

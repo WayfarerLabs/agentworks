@@ -30,6 +30,7 @@ from agentworks.execution.access import Admin
 from agentworks.execution.requests import Command
 from agentworks.git_config import ensure_safe_directory_wildcard
 from agentworks.git_credentials import configure_user_git_credentials
+from agentworks.vms.home_layout import ADMIN_MANAGED
 
 from . import phase_a
 from .dotfiles import sync_dotfiles
@@ -553,6 +554,7 @@ def _phase_b_setup(
                 install_cmd=admin.dotfiles_install_cmd,
                 shell=admin_shell,
                 home=home,
+                managed=ADMIN_MANAGED,
                 log=logger,
             )
 

@@ -34,7 +34,6 @@ from agentworks.execution.errors import CommandFailed, PathRefusal, PathRefused
 from agentworks.execution.files import guest_path
 from agentworks.execution.requests import Bytes, Command, Script, Shell
 from agentworks.path_rendering import format_host_path
-from agentworks.vms.home_layout import MANAGED
 
 if TYPE_CHECKING:
     from agentworks.execution.files import Files
@@ -194,7 +193,7 @@ _DESTINATION_FORMS = (
 )
 
 
-def normalize_destination(value: str) -> str:
+def normalize_destination(value: str, *, managed: tuple[str, ...]) -> str:
     """``value`` as a dotfiles destination: ``~/`` and a path in the home, or an absolute path.
 
     Boundary: the templates' ``dotfiles_destination``, operator
@@ -203,7 +202,8 @@ def normalize_destination(value: str) -> str:
     ``dots`` becomes ``~/dots``. No component may be empty, ``.`` or ``..``
     and ``~user`` is refused; a trailing ``/`` is dropped. The home
     itself (``~`` or ``~/``), and a path in it that is, holds or lies inside
-    one Agentworks manages there (:data:`agentworks.vms.home_layout.MANAGED`), are refused,
+    one of ``managed``, the account's set in :mod:`agentworks.vms.home_layout`
+    (``MANAGED`` for an agent, ``ADMIN_MANAGED`` for the admin), are refused,
     since replacing the checkout would replace them. Refusals are
     :class:`DestinationError`, whose message holds no part of ``value``.
     """
@@ -220,36 +220,33 @@ def normalize_destination(value: str) -> str:
     ):
         raise DestinationError(_DESTINATION_FORMS)
     if prefix == "~/":
-        _refuse_managed(rest)
+        _refuse_managed(rest, managed)
     return prefix + rest
 
 
-def _refuse_managed(relative: str) -> None:
-    """Refuse the path ``relative`` to a home when it is, holds, or lies inside a path Agentworks manages there."""
-    if any(
-        managed == relative or managed.startswith(relative + "/") or relative.startswith(managed + "/")
-        for managed in MANAGED
-    ):
+def _refuse_managed(relative: str, managed: tuple[str, ...]) -> None:
+    """Refuse the path ``relative`` to a home when it is, holds, or lies inside a path in ``managed``."""
+    if any(path == relative or path.startswith(relative + "/") or relative.startswith(path + "/") for path in managed):
         raise DestinationError(
             "dotfiles_destination may not be, hold, or lie inside a path Agentworks manages in the home: "
-            + ", ".join(f"~/{managed}" for managed in MANAGED)
+            + ", ".join(f"~/{path}" for path in managed)
         )
 
 
-def expand_destination(value: str, home: str) -> str:
+def expand_destination(value: str, home: str, *, managed: tuple[str, ...]) -> str:
     """The guest path of the normalized destination ``value`` for an account whose home is ``home``.
 
     Only a leading ``~`` is replaced. An absolute destination that is the
     home or one of its ancestors, or a path in the home that
-    :func:`normalize_destination` would refuse, is refused before anything
-    is sent.
+    :func:`normalize_destination` would refuse for the same ``managed``, is
+    refused before anything is sent.
     """
     path = home + value[1:] if value.startswith("~/") else value
     if path == home or home.startswith(path.rstrip("/") + "/"):
         raise SourceRefError(f"dotfiles destination {path} is the home {home} or one of its parents")
     if path.startswith(home + "/"):
         try:
-            _refuse_managed(path[len(home) + 1 :])
+            _refuse_managed(path[len(home) + 1 :], managed)
         except DestinationError as refused:
             raise SourceRefError(str(refused)) from None
     return path

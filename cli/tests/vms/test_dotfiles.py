@@ -5,6 +5,7 @@ from __future__ import annotations
 from agentworks.execution.errors import CommandFailed
 from agentworks.execution.requests import Command
 from agentworks.execution.results import Completed, Result
+from agentworks.vms.home_layout import ADMIN_MANAGED
 from agentworks.vms.initializer.dotfiles import sync_dotfiles
 from tests.phase_b_support import StepGuest
 
@@ -21,6 +22,7 @@ def _sync(guest: StepGuest) -> None:
         install_cmd="./install.sh",
         shell="zsh",
         home=HOME,
+        managed=ADMIN_MANAGED,
         log=guest.log,
     )
 

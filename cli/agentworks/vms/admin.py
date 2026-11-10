@@ -131,16 +131,17 @@ class AdminConfig(DeclaredResource):
     """Where the fetched dotfiles are checked out: a path in the admin's home
     (`dots` or `~/dots`), or an absolute path. It may not be the home itself or one
     of its parents, be, hold or lie inside a path Agentworks manages in the home
-    (`~/.ssh`, `~/.agentworks`, `~/.agentworks-artifacts`, `~/.config/tmuxinator`
-    and the `~/.agentworks-*.sh` fragments), or have an empty, `.` or `..`
-    component; a trailing `/` is dropped."""
+    (`~/.ssh`, `~/.agentworks`, `~/.agentworks-artifacts`, the workspaces'
+    `~/.config/tmuxinator` and the `~/.agentworks-*.sh` fragments), or have an
+    empty, `.` or `..` component; a trailing `/` is dropped."""
 
     @field_validator("dotfiles_destination")
     @classmethod
     def _normalize_destination(cls, value: str) -> str:
         from agentworks.sources import normalize_destination
+        from agentworks.vms.home_layout import ADMIN_MANAGED
 
-        return normalize_destination(value)
+        return normalize_destination(value, managed=ADMIN_MANAGED)
 
     dotfiles_install_cmd: str = "./install.sh"
     """The command run inside the checkout to install the dotfiles."""
