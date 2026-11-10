@@ -98,7 +98,7 @@ def _apply_apt_sources(files: Files, resolved_sources: Mapping[str, tuple[AptSou
 
     newly_configured = False
     for name, (src, source_line) in resolved_sources.items():
-        key_exists = status(files, Command(("test", "-f", src.key_path), deadline=files.deadline)) == 0
+        key_exists = status(files.access, Command(("test", "-f", src.key_path), deadline=files.deadline)) == 0
 
         if not key_exists:
             output.info(f"Configuring apt source '{name}'...")
@@ -303,7 +303,7 @@ def _run_install_commands(
         test_cmd = _build_test_command(entry, shell, home)
         if test_cmd:
             try:
-                if status(files, Script(test_cmd, Shell.SH, deadline=INSTALL_CHECK_DEADLINE)) == 0:
+                if status(files.access, Script(test_cmd, Shell.SH, deadline=INSTALL_CHECK_DEADLINE)) == 0:
                     output.info(f"{label} {i}/{total} ({name}): already installed, skipping")
                     log.output(f"{name}: already installed ({test_cmd}), skipping")
                     path_additions.extend(entry.path)

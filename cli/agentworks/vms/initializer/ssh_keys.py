@@ -177,11 +177,13 @@ def _apply_sve_mask(files: Files, log: InitLog) -> None:
         # Gate: an Apple Virtualization guest still advertising SVE. Both greps
         # read /sys and /proc unelevated; either one failing (non-Apple host, or
         # a VM already masked and rebooted) makes this a silent no-op.
-        if status(files, Script(f"{SVE_APPLE_VZ_GREP} && {SVE_CPUINFO_GREP}", Shell.SH, deadline=files.deadline)):
+        if status(
+            files.access, Script(f"{SVE_APPLE_VZ_GREP} && {SVE_CPUINFO_GREP}", Shell.SH, deadline=files.deadline)
+        ):
             return
         output.info("Masking unusable SVE (arm64.nosve)...")
         files.write(SVE_NOSVE_GRUB_PATH, SVE_NOSVE_GRUB_CONTENT.encode(), mode=0o644, parent_mode=0o755, elevated=True)
-        if status(files, Command(("update-grub",), elevated=True, deadline=files.deadline)):
+        if status(files.access, Command(("update-grub",), elevated=True, deadline=files.deadline)):
             msg = "SVE mask: update-grub failed; VM may crash on SVE (SIGILL)."
             warn(log, msg)
             return
@@ -189,7 +191,7 @@ def _apply_sve_mask(files: Files, log: InitLog) -> None:
         # arm64.nosve is already on the cmdline (i.e. the VM was rebooted since).
         # We cannot reboot from here without dropping the tailnet mid-init, so tell
         # the operator; a restart plus one more reinit converges the VM.
-        active = status(files, Command(("grep", "-qw", "arm64.nosve", "/proc/cmdline"), deadline=files.deadline))
+        active = status(files.access, Command(("grep", "-qw", "arm64.nosve", "/proc/cmdline"), deadline=files.deadline))
     except STEP_FAILURES as error:
         warn_step(log, "SVE mask failed", error)
         return

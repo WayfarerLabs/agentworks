@@ -309,7 +309,7 @@ RECONCILE_DEADLINE = 90
 """Seconds the reconcile script may take, its two lock waits of 30 seconds included."""
 
 
-def reconcile_request(state: UserCredentialState) -> Script:
+def _reconcile_request(state: UserCredentialState) -> Script:
     """The one request that converges ``state``: the script under bash, the material as its stdin.
 
     Bash whatever the account's shell, with no startup file, since the script
@@ -332,7 +332,7 @@ def reconcile_user_git_credentials(access: VMAccess, state: UserCredentialState)
     exit status is the whole answer, mapped to a message that holds no value.
     An outcome that is not a completion raises its typed error.
     """
-    result = access.run(reconcile_request(state), stdout=DiscardOutput(), stderr=DiscardOutput())
+    result = access.run(_reconcile_request(state), stdout=DiscardOutput(), stderr=DiscardOutput())
     status = result.require_completed(access.vm_name)
     if status != 0:
         raise ExternalError(_RECONCILE_FAILURES.get(status, _RECONCILE_UNEXPECTED))

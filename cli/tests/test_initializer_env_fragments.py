@@ -24,7 +24,7 @@ from agentworks.vms.initializer import (
     _write_agentworks_profile,
     _write_agentworks_rc,
 )
-from agentworks.vms.initializer.shell_env import SourceLine, ensure_source_line, source_files
+from agentworks.vms.initializer.shell_env import ensure_source_line, source_files
 from tests.phase_b_support import StepGuest, requires_file_program
 
 pytestmark = requires_file_program
@@ -83,9 +83,10 @@ def test_an_existing_rc_file_keeps_its_content_and_mode_and_gets_the_line_on_its
     rc.write_text("alias ll='ls -l'")  # no final newline
     rc.chmod(0o600)
 
-    outcome = ensure_source_line(StepGuest().files, str(rc), AGENTWORKS_RC, f". {home}/{AGENTWORKS_RC}")
+    guest = StepGuest()
 
-    assert outcome is SourceLine.ADDED
+    ensure_source_line(guest.files, str(rc), AGENTWORKS_RC, f". {home}/{AGENTWORKS_RC}", guest.log)
+
     assert _lines(rc) == ["alias ll='ls -l'", f". {home}/{AGENTWORKS_RC}"]
     assert stat.S_IMODE(rc.stat().st_mode) == 0o600
 
@@ -95,7 +96,8 @@ def test_a_file_that_names_the_fragment_is_left_alone(home: Path) -> None:
     rc.write_text(f'[ -f "$HOME/{AGENTWORKS_RC}" ] && . "$HOME/{AGENTWORKS_RC}"\n')
     guest = StepGuest()
 
-    assert ensure_source_line(guest.files, str(rc), AGENTWORKS_RC, f". {home}/{AGENTWORKS_RC}") is SourceLine.PRESENT
+    ensure_source_line(guest.files, str(rc), AGENTWORKS_RC, f". {home}/{AGENTWORKS_RC}", guest.log)
+
     assert guest.writes() == []
 
 

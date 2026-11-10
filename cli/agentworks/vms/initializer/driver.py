@@ -20,7 +20,7 @@ owns only the per-phase step sequences and status/event bookkeeping.
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 
 import agentworks.execution as execution
 from agentworks import output
@@ -49,7 +49,6 @@ from .packages import (
     _run_install_commands,
 )
 from .shell_env import (
-    _ensure_agentworks_files_sourced,
     _harden_admin_home,
     _set_login_shell,
     _write_agentworks_identity_profile,
@@ -71,7 +70,7 @@ from .steps import STEP_DEADLINE, STEP_FAILURES, InitLog, status, warn_step
 from .workspaces_dir import _setup_workspaces_directory
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Mapping
 
     from agentworks.capabilities.base import RunContext
     from agentworks.capabilities.vm_platform import VMPlatform
@@ -90,24 +89,6 @@ if TYPE_CHECKING:
     from agentworks.vms.templates import ResolvedVMTemplate
 
 
-class PhaseBLog(InitLog, Protocol):
-    """The operation log initialization writes (``SSHLogger`` satisfies it).
-
-    Phase B's steps write it (``InitLog``), native setup reads its
-    redactions (``harness_setup.lifecycle.SetupLog``), and the outcome
-    counts its warnings.
-    """
-
-    @property
-    def redactions(self) -> tuple[str, ...]: ...
-
-    @property
-    def has_warnings(self) -> bool: ...
-
-    @property
-    def warnings(self) -> Sequence[str]: ...
-
-
 class VMInitializationOperation(StrEnum):
     """Closed lifecycle operations that can establish VM applied state."""
 
@@ -121,7 +102,7 @@ def bootstrap_vm(
     vm_name: str,
     platform: VMPlatform,
     ctx: RunContext,
-    logger: PhaseBLog,
+    logger: InitLog,
     *,
     admin_username: str,
     tailnet_address: str,
@@ -175,7 +156,7 @@ def run_initialization(
     credential_requests: tuple[CredentialRequest, ...],
     home: str,
     admin_username: str,
-    logger: PhaseBLog,
+    logger: InitLog,
     *,
     debian_release: DebianRelease,
     operation: VMInitializationOperation,
@@ -320,7 +301,7 @@ def _phase_b_setup(
     credential_requests: tuple[CredentialRequest, ...],
     home: str,
     admin_username: str,
-    logger: PhaseBLog,
+    logger: InitLog,
     *,
     debian_release: DebianRelease,
     operation: VMInitializationOperation,
@@ -595,24 +576,20 @@ def _phase_b_setup(
             label="User install command",
         )
 
-        # Non-fatal: shell profile (PATH exports sourced at login)
+        # Non-fatal: shell profile (PATH exports sourced at login) and shell rc
+        # (interactive shell hooks like mise activate). They come last, after the
+        # dotfiles install and every install command, so the source lines each
+        # writer ensures survive an installer that replaced an rc file.
         all_paths = system_path + mise_path + user_path
         _write_agentworks_profile(files, all_paths, logger, home=home, shell=admin_shell)
-
-        # Non-fatal: shell rc (interactive shell hooks like mise activate)
         rc_snippets = [MISE_ACTIVATE_LINES] if admin.mise_activate else ["# mise activation disabled"]
         _write_agentworks_rc(files, rc_snippets, logger, home=home, shell=admin_shell)
-
-        # Defensive final step: re-ensure source lines in case any earlier
-        # step (dotfiles install in particular) overwrote a shell rc file
-        # in place. A file that already names a fragment is left alone.
-        _ensure_agentworks_files_sourced(files, logger, home=home, shell=admin_shell)
 
 
 def _has_mise_config(files: Files, home: str) -> bool:
     """Whether the admin's home has a mise config (dotfiles may supply one); a probe that cannot run means no."""
     try:
         probe = Command(("test", "-f", f"{home}/{MISE_CONFIG_DIR}/config.toml"), deadline=files.deadline)
-        return status(files, probe) == 0
+        return status(files.access, probe) == 0
     except STEP_FAILURES:
         return False

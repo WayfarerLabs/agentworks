@@ -31,8 +31,9 @@ from agentworks.interrupts import interrupts_deferred
 from .phase_a import OperationLog
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
+    from agentworks.execution.access import VMAccess
     from agentworks.execution.files import Files
     from agentworks.execution.requests import RunRequest
 
@@ -54,11 +55,25 @@ WARNING_TAIL_LINES = 3
 
 
 class InitLog(OperationLog, Protocol):
-    """What Phase B writes to the operation log (``SSHLogger`` satisfies it)."""
+    """The operation log initialization writes, Phase B's and an agent's (``SSHLogger`` satisfies it).
+
+    Steps write it; native setup reads its redactions
+    (``harness_setup.lifecycle.SetupLog``), and the outcome counts its
+    warnings.
+    """
 
     def warning(self, msg: str) -> None: ...
 
     def sanitize(self, text: str) -> str: ...
+
+    @property
+    def redactions(self) -> tuple[str, ...]: ...
+
+    @property
+    def has_warnings(self) -> bool: ...
+
+    @property
+    def warnings(self) -> Sequence[str]: ...
 
 
 def _suspect(path: str) -> str:
@@ -85,13 +100,14 @@ def describe_failure(error: Exception, sanitize: Callable[[str], str]) -> str:
     return f"{message}\n{tail}" if tail else message
 
 
-def status(files: Files, request: RunRequest) -> int:
-    """Run ``request`` on ``files.access`` and return the guest's exit status.
+def status(access: VMAccess, request: RunRequest) -> int:
+    """Run ``request`` on ``access`` and return the guest's exit status.
 
     For a request whose status is the answer (a probe, a validation); an
-    outcome that is not a completion raises its typed error.
+    outcome that is not a completion raises its typed error. A request that
+    need only complete is ``access.run(request).require_completed(...)``.
     """
-    return files.access.run(request).require_completed(files.access.vm_name)
+    return access.run(request).require_completed(access.vm_name)
 
 
 def update_and_apply(

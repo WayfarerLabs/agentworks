@@ -167,7 +167,7 @@ def _run_mise_install(
     has_lockfile = False
     try:
         lockfile = Command(("test", "-f", f"{home}/{MISE_CONFIG_DIR}/mise.lock"), deadline=files.deadline)
-        has_lockfile = status(files, lockfile) == 0
+        has_lockfile = status(files.access, lockfile) == 0
     except STEP_FAILURES:
         pass
 

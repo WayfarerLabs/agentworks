@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from agentworks.execution.access import VMAccess
     from agentworks.git_credentials.nodes import GitCredentialNode
     from agentworks.resources import Registry
+    from agentworks.vms.initializer.steps import InitLog
 
 
 class _WarnLogger(Protocol):
@@ -146,7 +147,7 @@ def configure_user_git_credentials(
     access: VMAccess,
     requests: Iterable[CredentialRequest],
     config: Config,
-    logger: _WarnLogger,
+    logger: InitLog,
     *,
     target_role: Literal["admin", "agent"],
 ) -> None:
@@ -155,7 +156,7 @@ def configure_user_git_credentials(
     The providers' runup and the reconcile both run on ``access``. A step
     failure warns; the initializers are the only callers.
     """
-    from agentworks.vms.initializer.steps import STEP_FAILURES
+    from agentworks.vms.initializer.steps import STEP_FAILURES, warn_step
 
     logger.step("Git credentials")
     output.info("Reconciling git credentials...")
@@ -163,9 +164,7 @@ def configure_user_git_credentials(
     try:
         reconcile_user_git_credentials(access, state)
     except STEP_FAILURES as exc:
-        msg = f"git credential reconciliation failed: {exc}"
-        logger.warning(msg)
-        output.warn(msg)
+        warn_step(logger, "git credential reconciliation failed", exc)
         return
     output.detail("Git credentials reconciled")
 

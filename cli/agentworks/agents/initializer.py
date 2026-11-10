@@ -24,15 +24,14 @@ from agentworks.vms.initializer.shell_env import (
     _write_agentworks_profile,
     _write_agentworks_rc,
 )
-from agentworks.vms.initializer.steps import STEP_FAILURES, describe_failure
+from agentworks.vms.initializer.steps import STEP_FAILURES, describe_failure, status
 
 if TYPE_CHECKING:
     from agentworks.agents.templates import ResolvedAgentTemplate
     from agentworks.config import Config
     from agentworks.db import VMRow
-    from agentworks.execution.access import VMAccess
     from agentworks.execution.files import Files
-    from agentworks.execution.requests import AccountShell, RunRequest
+    from agentworks.execution.requests import AccountShell
     from agentworks.git_credentials import CredentialRequest
     from agentworks.resources import Registry
     from agentworks.vms.initializer.steps import InitLog
@@ -60,7 +59,7 @@ def create_new_agent_user(
     home = f"/home/{linux_user}"
     account = Command(("getent", "passwd", linux_user), elevated=True)
     home_entry = Script(f"test -e {shlex.quote(home)} || test -L {shlex.quote(home)}", Shell.SH, elevated=True)
-    if _status(admin, account) == 0 or _status(admin, home_entry) == 0:
+    if status(admin, account) == 0 or status(admin, home_entry) == 0:
         raise StateError(
             f"cannot create agent: unowned user or home already exists for '{linux_user}'",
             entity_kind="agent",
@@ -68,11 +67,6 @@ def create_new_agent_user(
             hint="Choose another agent name or remove the unowned native account and home first.",
         )
     admin.run(Command(("useradd", "-m", "-U", "-s", f"/bin/{shell}", linux_user), elevated=True), check=True)
-
-
-def _status(access: VMAccess, request: RunRequest) -> int:
-    """Run ``request`` and return the guest's exit status; an outcome that is not a completion raises."""
-    return access.run(request).require_completed(access.vm_name)
 
 
 def create_agent_on_vm(
@@ -341,7 +335,7 @@ def delete_agent_on_vm(
     try:
         # Kill any running processes for the user. This also frees any live
         # tmux sockets under the per-agent socket dir removed next.
-        _status(admin, Command(("pkill", "-u", linux_user), elevated=True))
+        admin.run(Command(("pkill", "-u", linux_user), elevated=True)).require_completed(vm.name)
         # Remove the per-agent tmux socket directory (created by
         # ``ensure_agent_socket_dir`` at create time). It lives on tmpfs
         # under /run, is owned by the agent uid, and would otherwise linger
@@ -351,7 +345,7 @@ def delete_agent_on_vm(
         # freed uid. The dir is separate from the home directory userdel
         # removes, and the sockets are already dead from the pkill above, so
         # this ordering is safe.
-        _status(admin, Command(("rm", "-rf", "--", agent_socket_dir(linux_user)), elevated=True))
+        admin.run(Command(("rm", "-rf", "--", agent_socket_dir(linux_user)), elevated=True)).require_completed(vm.name)
         # Remove the user and their home directory
         admin.run(Command(("userdel", "-r", linux_user), elevated=True), check=True)
     except STEP_FAILURES as error:

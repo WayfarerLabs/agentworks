@@ -61,6 +61,14 @@ class StepLog:
             text = text.replace(secret, "[REDACTED]")
         return text
 
+    @property
+    def warnings(self) -> list[str]:
+        return self.warned
+
+    @property
+    def has_warnings(self) -> bool:
+        return bool(self.warned)
+
 
 def is_file_operation(request: object) -> bool:
     # Read through the module: the suite's conftest sends the program with a private lock.

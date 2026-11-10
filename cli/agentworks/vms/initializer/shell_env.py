@@ -18,7 +18,6 @@ already sources the fragment, and otherwise warned about with the line to add.
 from __future__ import annotations
 
 import shlex
-from enum import Enum
 from typing import TYPE_CHECKING
 
 from agentworks import output
@@ -56,17 +55,6 @@ def source_files(home: str, shell: str) -> dict[str, tuple[str, ...]]:
     }
 
 
-class SourceLine(Enum):
-    """What :func:`ensure_source_line` found."""
-
-    PRESENT = "present"
-    """The rc file already names the fragment."""
-    ADDED = "added"
-    """The line was appended."""
-    LINKED = "linked"
-    """The rc file is a link, and the file it links to already names the fragment; nothing was written."""
-
-
 class LinkedRcFile(ExternalError):
     """An rc file is a symbolic link whose target does not source the fragment; it is never written through."""
 
@@ -77,26 +65,29 @@ class LinkedRcFile(ExternalError):
         )
 
 
-def ensure_source_line(files: Files, rc: str, marker: str, line: str) -> SourceLine:
+def ensure_source_line(files: Files, rc: str, marker: str, line: str, log: InitLog) -> None:
     """Make ``rc`` source a fragment: append ``line`` unless ``marker`` already occurs in it.
 
     The file is read and published with ``Files.update``, keeping its owner,
     mode and attributes; a missing one is created 0644, and a last line with
     no newline gets one first. A link at ``rc`` is never written through:
-    when the file it links to already holds ``marker`` the result is
-    :attr:`SourceLine.LINKED`, and otherwise :class:`LinkedRcFile` names the
-    line to add there. Any other file type is the read's own refusal.
+    when the file it links to already holds ``marker``, ``log`` says so and
+    nothing is written; otherwise :class:`LinkedRcFile` names the line to add
+    there. Any other file type is the read's own refusal.
     """
+    access = files.access
     try:
         observed = files.read(rc)
     except PathRefused as refused:
-        if refused.reason is not PathRefusal.UNSUITABLE or status(files, _request(("test", "-L", rc), files)) != 0:
+        linked = Command(("test", "-L", rc), deadline=files.deadline)
+        if refused.reason is not PathRefusal.UNSUITABLE or status(access, linked) != 0:
             raise
-        if status(files, _request(("grep", "-qsF", "--", marker, rc), files)) == 0:
-            return SourceLine.LINKED
-        raise LinkedRcFile(rc, line) from None
+        if status(access, Command(("grep", "-qsF", "--", marker, rc), deadline=files.deadline)) != 0:
+            raise LinkedRcFile(rc, line) from None
+        log.output(f"{rc} is a link whose target already sources {marker}")
+        return
     if observed is not None and marker.encode() in observed:
-        return SourceLine.PRESENT
+        return
     current = observed or b""
     if current and not current.endswith(b"\n"):
         current += b"\n"
@@ -108,11 +99,6 @@ def ensure_source_line(files: Files, rc: str, marker: str, line: str) -> SourceL
         parent_mode=0o755,
         preserve_metadata=True,
     )
-    return SourceLine.ADDED
-
-
-def _request(argv: tuple[str, ...], files: Files) -> Command:
-    return Command(argv, deadline=files.deadline)
 
 
 def _ensure_fragment_sourced(files: Files, log: InitLog, *, home: str, shell: str, fragment: str) -> None:
@@ -120,22 +106,22 @@ def _ensure_fragment_sourced(files: Files, log: InitLog, *, home: str, shell: st
     line = f". {home}/{fragment}"
     for rc in source_files(home, shell)[fragment]:
         try:
-            if ensure_source_line(files, rc, fragment, line) is SourceLine.LINKED:
-                log.output(f"{rc} is a link whose target already sources {fragment}")
+            ensure_source_line(files, rc, fragment, line, log)
         except STEP_FAILURES as error:
             warn_step(log, f"sourcing {fragment} from {rc} failed", error)
 
 
 def _ensure_agentworks_files_sourced(files: Files, log: InitLog, *, home: str, shell: str) -> None:
-    """Defensive final step: make the account's rc files source both Agentworks fragments.
+    """Make the account's rc files source both Agentworks fragments, as a step of its own.
 
     The fragment writers ensure their own source lines when they run, but a
     dotfiles install, or any later step that replaces a shell rc file, can
-    remove them. This runs LAST in setup so the lines survive a dotfiles
-    installer that ships its own ``.zprofile`` or ``.bashrc``. A file that
-    already names a fragment is left alone, so this is a no-op in the common
-    case. ``home`` is the account's literal home directory and ``shell`` its
-    login shell, which selects the zsh files (:func:`source_files`).
+    remove them. Agent setup writes its fragments before its dotfiles and
+    mise, so it ends with this; the admin's writers run after every such
+    step and need no final pass. A file that already names a fragment is
+    left alone, so this is a no-op in the common case. ``home`` is the
+    account's literal home directory and ``shell`` its login shell, which
+    selects the zsh files (:func:`source_files`).
     """
     log.step("Ensure agentworks files sourced")
     for fragment in (AGENTWORKS_PROFILE, AGENTWORKS_RC):

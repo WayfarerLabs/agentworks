@@ -216,7 +216,7 @@ def _diagnose_dns(files: Files, log: InitLog) -> bool:
     # can take a few seconds and the operator should know what we're
     # waiting on.
     output.info(f"Checking DNS resolution ({_DNS_PROBE_NAME})...")
-    if status(files, Command(("getent", "hosts", _DNS_PROBE_NAME), deadline=files.deadline)) == 0:
+    if status(files.access, Command(("getent", "hosts", _DNS_PROBE_NAME), deadline=files.deadline)) == 0:
         # No "VM DNS is healthy." line on the happy path: phase B's
         # convention is "say what we're doing, stay silent on success,
         # warn or raise on failure."
@@ -257,7 +257,9 @@ def _diagnose_dns(files: Files, log: InitLog) -> bool:
     # only correct when resolved IS the active resolver. For other
     # resolver setups we don't yet have a tested heal implementation,
     # so warn rather than raise with a hint we know would be wrong.
-    if status(files, Command(("systemctl", "is-active", "--quiet", "systemd-resolved"), deadline=files.deadline)):
+    if status(
+        files.access, Command(("systemctl", "is-active", "--quiet", "systemd-resolved"), deadline=files.deadline)
+    ):
         msg = (
             f"VM DNS appears latched (issue #117): /etc/resolv.conf is "
             f"tailscaled-managed and libc lookup of '{_DNS_PROBE_NAME}' "
