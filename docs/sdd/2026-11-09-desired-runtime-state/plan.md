@@ -16,7 +16,7 @@ its checkpoint and green. The PR remains draft until the complete implementation
 | ----------------------- | ------------------------------------------- | ------------------------------------- | ----------------------------------------- |
 | FRD                     | Draft plus `review-requested`               | Up to two rounds                      | Converged at `c6337609d`, two rounds used |
 | Complete design         | Draft plus `review-requested`               | Up to two rounds                      | Converged at `32a176600`; two rounds used |
-| Complete implementation | Ready                                       | Up to two rounds                      | Implemented; initial handoff pending      |
+| Complete implementation | Ready                                       | Up to two rounds                      | Round one validation; one round used      |
 | Closeout                | Final lock in the same PR after convergence | No new feature/fix allowance inferred | Not started                               |
 
 The FRD convergence reading is PR comment 6762771633. The final report accepted prior corrections;
@@ -219,11 +219,11 @@ supply the required live evidence below. An owner-run campaign may precede that 
 inventory is available. If live evidence is pending at ready, disclose it, leave those items open,
 and require actual evidence or an authorized disposition before claiming convergence or locking.
 
-- [ ] Obtain the separate integration tester's report identifying its approved inventory, fixture
+- [x] Obtain the separate integration tester's report identifying its approved inventory, fixture
       prefix, platform/workstation lanes, resource budget, and required state snapshot. The tester
       owns its environment under `agw-test-env` and `integration-testing`; the development session
       does not invent inventory or mutate live resources.
-- [ ] Publish the ready handoff to trigger the separate tester and verify its report uses this
+- [x] Publish the ready handoff to trigger the separate tester and verify its report uses this
       commit's CLI in an isolated checkout, rather than a release stand-in. Confirm that the new
       commands exist on every reported test bed.
 - [ ] Drive real VM restart or external shutdown with two shell sessions and a named console,
@@ -236,7 +236,7 @@ and require actual evidence or an authorized disposition before claiming converg
 - [ ] Record the full command surface reached, each observed pass/failure, unreachable lanes, and
       both workstation and platform coverage. Unit evidence supplements, not replaces, live
       recovery.
-- [ ] Delete owned fixtures and independently verify native, provider, local-file, and tailnet
+- [x] Delete owned fixtures and independently verify native, provider, local-file, and tailnet
       cleanup. Preserve operator resources and restore any altered operator state.
 - [ ] Publish the complete implementation as ready in this same PR with exact-head evidence, then
       monitor all published review and validation reports. Apply at most the two authorized
@@ -245,6 +245,33 @@ and require actual evidence or an authorized disposition before claiming converg
 - [ ] Record implementation convergence with all material items resolved and required live evidence
       present. An unavailable live bed must remain an explicit gap until an authorized disposition
       or actual evidence resolves it; it cannot silently become a pass.
+
+The initial ready handoff was `9b864f743` (PR comment 6769651812), with green CI run 42830730004.
+The separate tester's completed report, PR comment 6771656760, ran that candidate's CLI against real
+remote Lima guests and native Windows/WSL, passed all twelve required gates (11,654 tests passed, 11
+skipped), and independently audited fixture cleanup. It established real migration/adoption,
+non-mutating preview, secret-barrier failure and recovery, retained intent after session exit and
+parent stop, healthy identity preservation, and native WSL keeper/guard behavior. The WSL race
+delayed acknowledgement consumption, not guest boot. Provider authentication isolation, model
+conversations, all cancellation timings, and a live healthy secret-backed no-op with its input
+absent were not established by that campaign; source and unit evidence retain their stated scope.
+
+The report found no new runtime defect in reached scenarios, but main had advanced to `1dd5a06dd`
+and introduced three merge conflicts. After the integration result and minimum collection window,
+implementation fix round one began in PR comment 6771937129. The feature branch now incorporates
+that main commit, preserving selected rekey credentials and forced prompting together with UUID
+checks, family guards, cached repair, and Resolver failure memoization. Combined regression tests
+cover their composition. This round also removes the retired session stop executor and unused VM
+secret bridge, and requires caller-owned console preparation dependencies. The optional VM facade,
+rollback/prefix-guard, and WSL wording suggestions were declined on their merits in PR
+comment 6770779631. Later feedback belongs to the next batch.
+
+The combined head requires its own green gates, three private review lanes, ready handoff, and
+completed integration report. The initial live report does not validate these later changes. The
+next campaign must explicitly establish one VM-scope recovery of two desired-running shell sessions
+and a named console after a new boot, followed by stable repeated reconciliation; the initial
+report's summary did not spell out that exact acceptance scenario. Implementation convergence and
+the final lock remain open. Any fixtures created by the next campaign require a fresh cleanup audit.
 
 Definition of done: complete implementation, truthful exact-head validation, verified cleanup, green
 CI, and converged authorized published review. No merge occurs under this plan.
