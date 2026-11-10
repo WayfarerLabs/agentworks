@@ -22,15 +22,19 @@ from agentworks.errors import StateError
 from agentworks.execution.errors import (
     CommandFailed,
     ExecutionIncomplete,
+    FileConflict,
+    FileLockTimeout,
     PathRefusal,
     PathRefused,
+    RequestRefused,
     TrustMismatch,
     TrustMissing,
     VMNotReady,
 )
-from agentworks.execution.requests import PythonProgram
-from agentworks.execution.results import Completed, NotDeliveredReason, Result, Unknown, UnknownReason
+from agentworks.execution.requests import Command, PythonProgram
+from agentworks.execution.results import Completed, NotDelivered, NotDeliveredReason, Result, Unknown, UnknownReason
 from agentworks.install_commands import SystemInstallCommandEntry, UserInstallCommandEntry
+from agentworks.sessions.tmux import AGENT_SOCKET_ROOT
 from agentworks.vms.admin import AdminConfig
 from agentworks.vms.hardening import HARDENING_FSTAB_NEW_LINE, HARDENING_FSTAB_PATH
 from agentworks.vms.initializer import driver
@@ -145,7 +149,8 @@ def test_a_steady_section_runs_every_step_without_a_warning(run_section: Callabl
     run_section(guest)
 
     assert guest.log.warned == []
-    assert "Agent tmux socket directories" in guest.log.steps
+    # The section's last step, the agent socket root, ran (on this guest's empty probe it is rebuilt).
+    assert Command(("chmod", "2771", "--", AGENT_SOCKET_ROOT), elevated=True, deadline=60) in guest.commands()
 
 
 def test_skel_seeds_and_the_zprofile_block_are_written_after_apt_installs(
@@ -190,8 +195,11 @@ def test_no_request_carries_an_environment_but_apts(run_section: Callable[[Guest
         CommandFailed("box", 1, Result(Completed(1)), streams_logged=True),
         ExecutionIncomplete("box", Result(Unknown(UnknownReason.CONNECTION))),
         PathRefused("box", "write", SSH_PRESERVE_KEYS_PATH, PathRefusal.UNSUITABLE),
+        RequestRefused("box", "cwd", Result(NotDelivered(NotDeliveredReason.REFUSED, "cwd"))),
+        FileConflict("box", "write", SSH_PRESERVE_KEYS_PATH),
+        FileLockTimeout("box", "write", SSH_PRESERVE_KEYS_PATH),
     ],
-    ids=["CommandFailed", "ExecutionIncomplete", "PathRefused"],
+    ids=["CommandFailed", "ExecutionIncomplete", "PathRefused", "RequestRefused", "FileConflict", "FileLockTimeout"],
 )
 def test_a_failed_step_warns_and_every_later_step_still_runs(
     run_section: Callable[[Guest], None], error: BaseException
