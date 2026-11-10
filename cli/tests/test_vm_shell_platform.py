@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.capabilities.base import RunContext
-from agentworks.db import Database
+from agentworks.db import Database, InitStatus, ProvisioningStatus
 from agentworks.errors import StateError
 from agentworks.secrets.policy import TtyInteractionPolicy
 from tests.conftest import empty_secret_target, stub_build_registry, stub_vm_gates
@@ -40,27 +40,20 @@ def _seed_db(
     *,
     platform: str = "lima",
     tailscale_host: str | None = "100.64.0.5",
-    init_status: str | None = None,
-    provisioning_status: str | None = None,
+    init_status: InitStatus | None = None,
+    provisioning_status: ProvisioningStatus | None = None,
 ) -> Database:
     """VM row in a fresh sqlite db. Defaults paint a healthy Lima VM;
     override individual fields to exercise other-platform branches or
     the failed-init / failed-provisioning guard paths."""
     db = Database(tmp_path / "test.db")
-    cols = ["name", "site", "hostname", "admin_username", "tailscale_host"]
-    vals: list[object] = ["vm1", platform, f"{platform}--vm1", "admin", tailscale_host]
+    db.insert_vm("vm1", site=platform, hostname=f"{platform}--vm1", admin_username="admin")
+    if tailscale_host is not None:
+        db.update_vm_tailscale("vm1", tailscale_host)
     if init_status is not None:
-        cols.append("init_status")
-        vals.append(init_status)
+        db.update_vm_init_status("vm1", init_status)
     if provisioning_status is not None:
-        cols.append("provisioning_status")
-        vals.append(provisioning_status)
-    placeholders = ", ".join(["?"] * len(cols))
-    db._conn.execute(
-        f"INSERT INTO vms ({', '.join(cols)}) VALUES ({placeholders})",
-        vals,
-    )
-    db._conn.commit()
+        db.update_vm_provisioning_status("vm1", provisioning_status)
     return db
 
 
@@ -613,7 +606,7 @@ def test_shell_vm_warns_but_continues_on_failed_init(
     'vm reinit' so the operator knows the recovery flow."""
     from agentworks.vms import manager as vm_manager
 
-    db = _seed_db(tmp_path, init_status="failed")
+    db = _seed_db(tmp_path, init_status=InitStatus.FAILED)
     interactive_log: list[bool] = []
     _patch_common(monkeypatch, vm_manager, interactive_log=interactive_log)
 
@@ -638,7 +631,7 @@ def test_shell_vm_still_raises_on_failed_provisioning(
     softening doesn't accidentally also soften provisioning failures."""
     from agentworks.vms import manager as vm_manager
 
-    db = _seed_db(tmp_path, provisioning_status="failed")
+    db = _seed_db(tmp_path, provisioning_status=ProvisioningStatus.FAILED)
 
     with pytest.raises(StateError) as exc_info:
         vm_manager.shell_vm(db, _make_config(), "vm1", interaction=TtyInteractionPolicy.REFUSE)  # type: ignore[arg-type]
@@ -661,7 +654,7 @@ def test_exec_vm_warns_but_continues_on_failed_init(
     failed initialization."""
     from agentworks.vms import manager as vm_manager
 
-    db = _seed_db(tmp_path, init_status="failed")
+    db = _seed_db(tmp_path, init_status=InitStatus.FAILED)
 
     # Stub out everything below the guard so we can confirm the guard
     # warns rather than raises without actually invoking SSH. exec_vm
