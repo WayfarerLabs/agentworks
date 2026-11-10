@@ -347,3 +347,23 @@ def test_source_free_vm_preflight_still_rejects_dangling_declared_secret(db, mak
             resolve_secret=lambda name: pytest.fail("dangling declaration reached a source"),
             held_native_guard=guard,
         )
+
+
+@pytest.mark.parametrize("malformed", [None, "running", "provider-payload-sensitive"])
+@pytest.mark.parametrize("operation", ["activate", "stop"])
+def test_invalid_provider_power_result_refuses_runtime_mutation(db, make_config, platform, malformed, operation):
+    config = make_config()
+    events, state = platform
+    vm = _seed(db)
+    with _prepared(db, config, vm) as (context, resolver):
+        assert context.observed_status is VMStatus.STOPPED
+        state[0] = malformed
+        with pytest.raises(StateError) as caught:
+            if operation == "activate":
+                activate_vm_runtime(context, resolve_secret=resolver.resolve_gate)
+            else:
+                execute_vm_stop(context)
+        assert "provider-payload-sensitive" not in repr((caught.value.args, vars(caught.value)))
+        assert not context.started and not context.repaired
+    assert "start" not in events and "stop" not in events and "hold-enter" not in events
+    assert db.get_vm("box") == vm

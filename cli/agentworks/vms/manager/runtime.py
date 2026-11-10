@@ -89,7 +89,11 @@ def _current_vm(context: VMRuntimeContext) -> VMRow:
 
 def observe_vm_runtime(context: VMRuntimeContext) -> VMStatus:
     """Observe only through the prepared provider context; never resolve or activate."""
-    return context.node.site.platform.status(_current_vm(context), context.ops_ctx)
+    row = _current_vm(context)
+    status = context.node.site.platform.status(row, context.ops_ctx)
+    if not isinstance(status, VMStatus):
+        raise StateError("VM provider returned an invalid power observation", entity_kind="vm", entity_name=row.name)
+    return status
 
 
 def activate_vm_runtime(context: VMRuntimeContext, *, resolve_secret: Callable[[str], str]) -> bool:
