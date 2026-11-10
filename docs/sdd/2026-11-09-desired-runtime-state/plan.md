@@ -273,6 +273,15 @@ and a named console after a new boot, followed by stable repeated reconciliation
 report's summary did not spell out that exact acceptance scenario. Implementation convergence and
 the final lock remain open. Any fixtures created by the next campaign require a fresh cleanup audit.
 
+Round-one private verification at `55d14026e` passed 11,678 tests with 11 skips, all Python static
+checks, typer isolation, file-quality, rulesync and locked-SDD checks, the isolated local CLI
+checks, 160 Python and 103 Node website tests, and deterministic double builds at both site bases.
+Project, complexity, and generic correctness/security reviews were clean at that same head. The
+reviewers passed 213, 231, and 146 focused tests respectively; the correctness lane additionally
+verified 21 isolated checks, including cleanup after rekey failures and both cancellation signals.
+No live operation was performed by those private lanes. Exact final-head CI remains a prerequisite
+for the round-one ready handoff.
+
 Definition of done: complete implementation, truthful exact-head validation, verified cleanup, green
 CI, and converged authorized published review. No merge occurs under this plan.
 
