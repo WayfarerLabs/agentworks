@@ -25,16 +25,14 @@ from agentworks import output
 from agentworks.capabilities.vm_platform.skel import BASHRC, ZSHRC
 from agentworks.errors import ExternalError
 from agentworks.execution.errors import PathRefusal, PathRefused
-from agentworks.execution.requests import Command
-from agentworks.ssh import SSHError, SSHLogger
+from agentworks.execution.requests import Command, Script, Shell
 
-from .steps import STEP_FAILURES, status, update_and_apply, warn_step
+from .steps import STEP_FAILURES, status, update_and_apply, warn, warn_step
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from agentworks.execution.files import Files
-    from agentworks.transports import Transport
 
     from .steps import InitLog
 
@@ -216,13 +214,7 @@ def _write_agentworks_profile(
     _ensure_fragment_sourced(files, log, home=home, shell=shell, fragment=AGENTWORKS_PROFILE)
 
 
-def _harden_admin_home(
-    target: Transport,
-    *,
-    home: str,
-    admin_username: str,
-    logger: SSHLogger,
-) -> None:
+def _harden_admin_home(files: Files, *, home: str, admin_username: str, log: InitLog) -> None:
     """Tighten the admin's home to mode 0750 and verify the primary group is
     private. The admin counterpart of the agent-home hardening in
     ``agentworks.agents.initializer.create_agent_on_vm``.
@@ -234,9 +226,9 @@ def _harden_admin_home(
     ``config.validation.validate_vm_workspaces``), not under the admin home, so
     nothing an agent must reach lives here and 0750 breaks no cross-user access.
 
-    The admin owns its own home, so the ``chmod`` needs no sudo (contrast the
-    agent path, where the admin transport chmods a DIFFERENT user's home). The
-    chmod is idempotent, so this is safe on both initial provision and reinit.
+    The admin owns its own home, so the ``chmod`` runs unelevated (contrast the
+    agent path, where root chmods a DIFFERENT user's home). The chmod is
+    idempotent, so this is safe on both initial provision and reinit.
 
     Post-condition guard: the bootstrap forces a private primary group on the
     create path (``groupadd -f`` + ``useradd -g``), but reinit, VMs provisioned
@@ -246,26 +238,38 @@ def _harden_admin_home(
     silently defeating isolation; a hard fail could block a legitimately custom
     setup, and the bootstrap already covers fresh creates.
     """
-    logger.step("Admin home permissions")
+    log.step("Admin home permissions")
     try:
-        target.run(f"chmod 0750 {shlex.quote(home)}")
-
-        primary_group = target.run(f"id -gn {shlex.quote(admin_username)}", check=False)
-        if primary_group.ok and primary_group.stdout.strip() != admin_username:
-            msg = (
+        files.access.run(Command(("chmod", "0750", home), deadline=files.deadline), check=True)
+        primary_group = files.access.run(Command(("id", "-gn", admin_username), deadline=files.deadline))
+        group = primary_group.stdout.decode("utf-8", "replace").strip()
+        if primary_group.require_completed(files.access.vm_name) == 0 and group != admin_username:
+            warn(
+                log,
                 f"admin '{admin_username}' primary group is "
-                f"'{primary_group.stdout.strip()}', not a private per-user group; "
+                f"'{group}', not a private per-user group; "
                 f"its home ({home}) cannot be made private and may be readable by "
                 f"other members of that group. Fix on the VM with "
                 f"'sudo groupadd {admin_username} && sudo usermod -g {admin_username} {admin_username}' "
-                f"and reinit, or check the image's group model."
+                f"and reinit, or check the image's group model.",
             )
-            logger.warning(msg)
-            output.warn(msg)
-    except SSHError as e:
-        msg = f"admin home permissions setup failed: {e}"
-        logger.warning(msg)
-        output.warn(msg)
+    except STEP_FAILURES as error:
+        warn_step(log, "admin home permissions setup failed", error)
+
+
+def _set_login_shell(files: Files, *, shell: str, admin_username: str, log: InitLog) -> None:
+    """Set the admin's login shell to ``shell``, found on the guest's ``PATH``, as root.
+
+    A shell that is not installed fails the step with a warning, before
+    ``usermod`` runs.
+    """
+    log.step("Shell configuration")
+    output.info(f"Setting shell to {shell}...")
+    script = f'path=$(command -v {shlex.quote(shell)}) && usermod -s "$path" {shlex.quote(admin_username)}'
+    try:
+        files.access.run(Script(script, Shell.SH, elevated=True, deadline=files.deadline), check=True)
+    except STEP_FAILURES as error:
+        warn_step(log, "shell configuration failed", error)
 
 
 # -- VM-side identity / sshd / sudoers fragments -----------------------------

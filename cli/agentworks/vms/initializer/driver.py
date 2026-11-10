@@ -21,7 +21,6 @@ owns only the per-phase step sequences and status/event bookkeeping.
 
 from __future__ import annotations
 
-import shlex
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
@@ -34,7 +33,6 @@ from agentworks.execution.access import Admin
 from agentworks.execution.requests import Command
 from agentworks.git_config import ensure_safe_directory_wildcard
 from agentworks.git_credentials import configure_user_git_credentials
-from agentworks.ssh import SSHError, SSHLogger
 from agentworks.transports import SSHTransport, Transport
 
 from . import phase_a
@@ -55,6 +53,7 @@ from .packages import (
 from .shell_env import (
     _ensure_agentworks_files_sourced,
     _harden_admin_home,
+    _set_login_shell,
     _write_agentworks_identity_profile,
     _write_agentworks_profile,
     _write_agentworks_rc,
@@ -89,6 +88,7 @@ if TYPE_CHECKING:
     from agentworks.harness_setup.locking import NativeMutationGuard
     from agentworks.harness_setup.outcomes import SetupFailure
     from agentworks.resources.registry import Registry
+    from agentworks.ssh import SSHLogger
     from agentworks.vms.admin import AdminConfig
     from agentworks.vms.templates import ResolvedVMTemplate
 
@@ -527,23 +527,13 @@ def _phase_b_setup(
         # Non-fatal: set default shell (before the USER install commands so
         # those installers write to the correct rc file). The zsh
         # ``zsh-newuser-install`` first-run wizard is pre-empted by the skel seed.
-        logger.step("Shell configuration")
-        output.info(f"Setting shell to {admin_shell}...")
-        try:
-            legacy_target.run(
-                f"usermod -s $(which {shlex.quote(admin_shell)}) {shlex.quote(admin_username)}",
-                sudo=True,
-            )
-        except SSHError as e:
-            msg = f"shell configuration failed: {e}"
-            logger.warning(msg)
-            output.warn(msg)
+        _set_login_shell(files, shell=admin_shell, admin_username=admin_username, log=logger)
 
         # Non-fatal: tighten the admin's home to 0750 (mirrors the agent-home
         # hardening in agents/initializer.py). Runs on both initial provision
         # and reinit (both reach _phase_b_setup), so a pre-existing
         # world-readable admin home is repaired on the next reinit.
-        _harden_admin_home(legacy_target, home=home, admin_username=admin_username, logger=logger)
+        _harden_admin_home(files, home=home, admin_username=admin_username, log=logger)
 
         # Non-fatal: the shared workspaces parent directory and its canonical
         # ACL (recursive over all workspaces). The ACL apply and the

@@ -15,63 +15,42 @@ Three enforcement points, mirroring the agent side:
 3. ``useradd -m -U`` in the create-time bootstrap script so the admin's primary
    group is a private per-user group.
 
-The transports are ``Transport``-shaped fakes that record every ``run`` /
-``write_file``; the bootstrap check is a pure string assertion on the generated
-script.
+The steps run over a recording admin access (``tests/phase_b_support.py``);
+the bootstrap check is a pure string assertion on the generated script.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import subprocess
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+import pytest
 
 from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script
+from agentworks.execution.errors import CommandFailed, ExecutionIncomplete
+from agentworks.execution.requests import Command, Script, Shell
+from agentworks.execution.results import Completed, Result, Unknown, UnknownReason
 from agentworks.vms.initializer import _harden_admin_home
+from agentworks.vms.initializer.shell_env import _set_login_shell
+from tests.conftest import requires_posix_shell
+from tests.phase_b_support import StepGuest
+
+if TYPE_CHECKING:
+    from tests.vm_access_support import Call
 
 ADMIN = "agentworks"
 HOME = f"/home/{ADMIN}"
 
 
-@dataclass
-class _SpyResult:
-    ok: bool = True
-    returncode: int = 0
-    stdout: str = ""
-    stderr: str = ""
+CHMOD = Command(("chmod", "0750", HOME), deadline=60)
+GROUP = Command(("id", "-gn", ADMIN), deadline=60)
 
 
-class _SpyTarget:
-    """Records ``run`` / ``write_file`` calls and returns benign results.
-
-    ``primary_group`` is what ``id -gn <admin>`` reports; it defaults to the
-    admin username (a private per-user group, the healthy case). A test
-    overrides it to a shared group to exercise the post-condition guard.
-    """
-
-    def __init__(self, *, primary_group: str | None = None) -> None:
-        self.runs: list[str] = []
-        self.writes: list[tuple[str, str]] = []
-        self._primary_group = primary_group or ADMIN
-
-    def run(self, command: str, **kwargs: object) -> _SpyResult:  # noqa: ARG002
-        self.runs.append(command)
-        if command.startswith(f"id -gn {ADMIN}"):
-            return _SpyResult(stdout=self._primary_group)
-        return _SpyResult()
-
-    def write_file(self, path: str, content: str, mode: str = "0644") -> None:  # noqa: ARG002
-        self.writes.append((path, content))
-
-
-class _SpyLogger:
-    def __init__(self) -> None:
-        self.steps: list[str] = []
-        self.warnings: list[str] = []
-
-    def step(self, name: str) -> None:
-        self.steps.append(name)
-
-    def warning(self, msg: str) -> None:
-        self.warnings.append(msg)
+def _guest(primary_group: str = ADMIN) -> StepGuest:
+    guest = StepGuest(local_files=False)
+    guest.respond(GROUP, Result(Completed(0), f"{primary_group}\n".encode()))
+    return guest
 
 
 # ---------------------------------------------------------------------------
@@ -79,62 +58,86 @@ class _SpyLogger:
 # ---------------------------------------------------------------------------
 
 
-def test_harden_admin_home_chmods_0750() -> None:
-    """The helper runs ``chmod 0750`` on the admin home. No sudo prefix: the
-    admin owns its own home (contrast the agent path, where the admin transport
-    chmods a different user's home and needs sudo)."""
-    target = _SpyTarget()
-    _harden_admin_home(target, home=HOME, admin_username=ADMIN, logger=_SpyLogger())
+def test_harden_admin_home_chmods_0750_as_the_admin_and_then_checks_the_group() -> None:
+    """The admin owns its own home, so the chmod is not elevated (contrast the
+    agent path, where root chmods a different user's home)."""
+    guest = _guest()
 
-    assert f"chmod 0750 {HOME}" in target.runs
-    assert not any(cmd.startswith("sudo") and "chmod 0750" in cmd for cmd in target.runs)
+    _harden_admin_home(guest.files, home=HOME, admin_username=ADMIN, log=guest.log)
 
-
-def test_harden_admin_home_chmod_precedes_group_check() -> None:
-    """The ``chmod`` lands before the ``id -gn`` guard: the guard only reports
-    drift, it does not gate the tightening."""
-    target = _SpyTarget()
-    _harden_admin_home(target, home=HOME, admin_username=ADMIN, logger=_SpyLogger())
-
-    chmod_idx = next(i for i, c in enumerate(target.runs) if c.startswith(f"chmod 0750 {HOME}"))
-    guard_idx = next(i for i, c in enumerate(target.runs) if c.startswith(f"id -gn {ADMIN}"))
-    assert chmod_idx < guard_idx
+    assert guest.commands() == [CHMOD, GROUP]
+    assert guest.log.warned == []
 
 
 def test_harden_admin_home_shared_primary_group_warns() -> None:
-    """When the admin's primary group is shared (``id -gn`` != username), the
-    guard surfaces a warning rather than silently leaving a 0750 home that other
-    group members can read."""
-    target = _SpyTarget(primary_group="users")
-    logger = _SpyLogger()
-    _harden_admin_home(target, home=HOME, admin_username=ADMIN, logger=logger)
+    guest = _guest(primary_group="users")
 
-    assert any("primary group is 'users'" in w for w in logger.warnings)
-    assert any("cannot be made private" in w for w in logger.warnings)
+    _harden_admin_home(guest.files, home=HOME, admin_username=ADMIN, log=guest.log)
+
+    (warning,) = guest.log.warned
+    assert "'users'" in warning
 
 
-def test_harden_admin_home_private_primary_group_is_quiet() -> None:
-    """The healthy case (``id -gn`` == username) raises no group warning."""
-    target = _SpyTarget()
-    logger = _SpyLogger()
-    _harden_admin_home(target, home=HOME, admin_username=ADMIN, logger=logger)
+@pytest.mark.parametrize(
+    "error",
+    [
+        CommandFailed("box", 1, Result(Completed(1)), streams_logged=True),
+        ExecutionIncomplete("box", Result(Unknown(UnknownReason.CONNECTION))),
+    ],
+)
+def test_harden_admin_home_failure_warns_not_raises(error: Exception) -> None:
+    guest = _guest()
+    guest.respond(CHMOD, error)
 
-    assert not any("primary group" in w for w in logger.warnings)
+    _harden_admin_home(guest.files, home=HOME, admin_username=ADMIN, log=guest.log)
+
+    assert len(guest.log.warned) == 1
+    assert GROUP not in guest.commands()
 
 
-def test_harden_admin_home_ssh_error_warns_not_raises() -> None:
-    """A transport failure during the chmod is non-fatal: the helper warns and
-    returns rather than propagating, so admin home hardening cannot abort init."""
-    from agentworks.ssh import SSHError
+# ---------------------------------------------------------------------------
+# Login shell
+# ---------------------------------------------------------------------------
 
-    class _FailingTarget(_SpyTarget):
-        def run(self, command: str, **kwargs: object) -> _SpyResult:
-            raise SSHError("boom")
 
-    logger = _SpyLogger()
-    _harden_admin_home(_FailingTarget(), home=HOME, admin_username=ADMIN, logger=logger)
+@requires_posix_shell
+@pytest.mark.parametrize("installed", [True, False])
+def test_the_login_shell_is_set_to_the_shell_found_on_path_and_a_missing_one_warns(
+    tmp_path: Path, installed: bool
+) -> None:
+    """The script runs under ``sh`` with a recording ``usermod``; a missing shell never reaches it."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    usermod = bin_dir / "usermod"
+    usermod.write_text(f'#!/bin/sh\nprintf "%s\\n" "$@" > {tmp_path}/usermod-args\n')
+    usermod.chmod(0o755)
+    if installed:
+        (bin_dir / "fakeshell").write_text("#!/bin/sh\n")
+        (bin_dir / "fakeshell").chmod(0o755)
+    guest = StepGuest(local_files=False)
 
-    assert any("admin home permissions setup failed" in w for w in logger.warnings)
+    def run_script(call: Call) -> Result | BaseException | None:
+        if not isinstance(call.request, Script):
+            return None
+        assert call.request.elevated and call.request.shell is Shell.SH
+        completed = subprocess.run(
+            ["/bin/sh", "-c", call.request.source], env={"PATH": f"{bin_dir}:/usr/bin:/bin"}, check=False
+        )
+        result = Result(Completed(completed.returncode))
+        return (
+            CommandFailed("box", completed.returncode, result, streams_logged=True) if completed.returncode else result
+        )
+
+    guest.access.answer = run_script
+
+    _set_login_shell(guest.files, shell="fakeshell", admin_username=ADMIN, log=guest.log)
+
+    if installed:
+        assert (tmp_path / "usermod-args").read_text().splitlines() == ["-s", f"{bin_dir}/fakeshell", ADMIN]
+        assert guest.log.warned == []
+    else:
+        assert not (tmp_path / "usermod-args").exists()
+        assert len(guest.log.warned) == 1
 
 
 # ---------------------------------------------------------------------------
