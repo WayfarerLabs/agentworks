@@ -7,7 +7,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Literal
 
 from agentworks import output
-from agentworks.errors import ExternalError
+from agentworks.errors import StateError
 from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
 
 if TYPE_CHECKING:
@@ -52,6 +52,7 @@ class RuntimeResult:
     vm_uuid: str | None = field(default=None, repr=False)
     session_uuid: str | None = field(default=None, repr=False)
     proposed: bool = False
+    target_known: bool = True
 
 
 @dataclass(frozen=True)
@@ -150,7 +151,7 @@ def render_results(results: tuple[RuntimeResult, ...], *, dry_run: bool = False)
     if dry_run:
         output.info("Runtime reconciliation preview")
     for result in results:
-        target = result.desired_runtime_state or "adoption required"
+        target = result.desired_runtime_state or ("adoption required" if result.target_known else "unavailable")
         observed = result.observation.value if result.observation is not None else "unavailable"
         outcome = f"would {result.outcome}" if result.proposed and result.outcome is Outcome.CHANGED else result.outcome
         reason = f": {result.reason}" if result.reason else ""
@@ -160,6 +161,13 @@ def render_results(results: tuple[RuntimeResult, ...], *, dry_run: bool = False)
 
 
 def require_success(results: tuple[RuntimeResult, ...]) -> None:
-    failed = sum(result.outcome in {Outcome.FAILED, Outcome.BLOCKED} for result in results)
-    if failed:
-        raise ExternalError(f"{failed} resource(s) could not reach their requested runtime state")
+    failures = [result for result in results if result.outcome in {Outcome.FAILED, Outcome.BLOCKED}]
+    if len(failures) == 1:
+        result = failures[0]
+        raise StateError(
+            result.reason or "requested runtime state is not satisfied",
+            entity_kind=result.kind,
+            entity_name=result.name,
+        )
+    if failures:
+        raise StateError(f"{len(failures)} resource(s) could not reach their requested runtime state")

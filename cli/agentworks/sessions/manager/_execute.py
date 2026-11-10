@@ -56,6 +56,18 @@ def execute_session_start(
         raise StateError("session runtime became unknown before execution", entity_kind="session", entity_name=name)
     if observed_now is SessionStatus.RUNNING and prepared.observed_status is not SessionStatus.RUNNING:
         raise StateError("session became running after preparation", entity_kind="session", entity_name=name)
+    if prepared.recovered_startup and not prepared.requires_launch and observed_now is not SessionStatus.RUNNING:
+        raise StateError(
+            "session startup recovery observation changed; retry preparation", entity_kind="session", entity_name=name
+        )
+    _mgr.validate_session_observed_policy(
+        session,
+        observed_now,
+        replace_running=replace_running,
+        force=force,
+        intent=intent,
+        running_restart_authorized=running_restart_authorized,
+    )
     if prepared.noop and observed_now is not SessionStatus.RUNNING:
         raise StateError("session stopped after no-op preparation", entity_kind="session", entity_name=name)
     if prepared.noop:
@@ -69,6 +81,20 @@ def execute_session_start(
         raise StateError("session runtime became unknown before execution", entity_kind="session", entity_name=name)
     if status is SessionStatus.RUNNING and prepared.observed_status is not SessionStatus.RUNNING:
         raise StateError("session became running after preparation", entity_kind="session", entity_name=name)
+    if prepared.recovered_startup and not prepared.requires_launch and status is not SessionStatus.RUNNING:
+        raise StateError(
+            "session startup recovery observation changed after evidence repair",
+            entity_kind="session",
+            entity_name=name,
+        )
+    _mgr.validate_session_observed_policy(
+        session,
+        status,
+        replace_running=replace_running,
+        force=force,
+        intent=intent,
+        running_restart_authorized=running_restart_authorized,
+    )
     recovered_startup = prepared.recovered_startup
     session_run_command: RunCommand = session_target.run
     run_command: RunCommand = admin_target.run

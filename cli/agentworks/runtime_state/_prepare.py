@@ -121,10 +121,10 @@ def prepare_local_workloads(invocation: RuntimeInvocation) -> None:
 
 
 def infrastructure_reader(invocation: RuntimeInvocation, node: LiveVMNode) -> Callable[[str], str]:
-    allowed = frozenset((*node.gate_secret_refs(), *node.repair_secret_refs()))
+    gate_names = frozenset(node.gate_secret_refs())
 
     def resolve(name: str) -> str:
-        if name not in allowed:
+        if name not in gate_names and name not in node.repair_secret_refs():
             raise StateError(
                 "infrastructure requested an undeclared credential", entity_kind="vm", entity_name=node.row.name
             )
@@ -183,7 +183,6 @@ def prepare_infrastructure(invocation: RuntimeInvocation) -> None:
                 invocation.registry,
                 vm,
                 resolve_secret=infrastructure_reader(invocation, invocation.nodes[name]),
-                interaction=invocation.interaction,
                 held_native_guard=invocation.guards[name],
                 vm_node=invocation.nodes[name],
             )
@@ -264,9 +263,7 @@ def prepare_guest_workloads(invocation: RuntimeInvocation) -> None:
         vm, context = invocation.vms[vm_name], invocation.contexts[vm_name]
         try:
             if session.desired_runtime_state is DesiredRuntimeState.RUNNING:
-                prepared = sessions.prepare_session_launch(
-                    invocation.definitions[name], interaction=invocation.interaction
-                )
+                prepared = sessions.prepare_session_launch(invocation.definitions[name])
                 invocation.launches[name] = prepared
                 invocation.record(
                     "session",

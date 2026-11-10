@@ -88,7 +88,7 @@ def test_running_noop_preparation_never_repairs_or_uses_env_targets(tmp_path, mo
     db, _ = _restart_fixture(tmp_path, monkeypatch)
     definition = _definition(db, monkeypatch, status=SessionStatus.RUNNING)
     monkeypatch.setattr(manager, "_build_session_target", lambda *a, **k: pytest.fail("owning transport probed"))
-    prepared = prepare_session_launch(definition, interaction=TtyInteractionPolicy.REFUSE)
+    prepared = prepare_session_launch(definition)
     assert prepared.noop and prepared.secret_targets == ()
     db.close()
 
@@ -98,7 +98,7 @@ def test_ineligible_preparation_never_repairs_or_collects_values(tmp_path, monke
     db, _ = _restart_fixture(tmp_path, monkeypatch)
     definition = _definition(db, monkeypatch, status=status)
     with pytest.raises(StateError):
-        prepare_session_launch(definition, interaction=TtyInteractionPolicy.REFUSE)
+        prepare_session_launch(definition)
     db.close()
 
 
@@ -145,7 +145,7 @@ def _prepare_launch(db, monkeypatch, *, status=SessionStatus.STOPPED, replace_ru
         running_restart_authorized=replace_running,
         force=force,
     )
-    return prepare_session_launch(definition, interaction=TtyInteractionPolicy.REFUSE)
+    return prepare_session_launch(definition)
 
 
 @pytest.mark.parametrize("status", [SessionStatus.STOPPED, SessionStatus.RESIDUAL])
@@ -251,7 +251,7 @@ def test_stopped_parent_refuses_launch_before_transport_creation(tmp_path, monke
     db.set_vm_desired_runtime_state("vm1", DesiredRuntimeState.STOPPED, expected_vm_uuid=vm.vm_uuid)
     monkeypatch.setattr(manager, "transport", lambda *a, **k: pytest.fail("guest transport created"))
     with pytest.raises(StateError):
-        prepare_session_launch(definition, interaction=TtyInteractionPolicy.REFUSE)
+        prepare_session_launch(definition)
     assert db.get_session("s1").desired_runtime_state is DesiredRuntimeState.RUNNING
     db.close()
 
@@ -438,4 +438,46 @@ def test_delete_consent_cannot_adopt_same_name_replacement(tmp_path, monkeypatch
     with pytest.raises(StateError):
         manager.delete_session(db, SimpleNamespace(), name="s1", interaction=TtyInteractionPolicy.ALLOW)
     assert db.get_session("s1").session_uuid != selected.session_uuid
+    db.close()
+
+
+@pytest.mark.parametrize("status", [SessionStatus.STOPPED, SessionStatus.RESIDUAL, SessionStatus.BROKEN])
+@pytest.mark.parametrize("force", [False, True])
+@pytest.mark.parametrize("after_repair", [False, True])
+def test_recovery_only_action_never_widens_after_preparation(tmp_path, monkeypatch, status, force, after_repair):
+    from agentworks.sessions import tmux
+    from agentworks.sessions.manager._execute import execute_session_start
+
+    db, _ = _restart_fixture(tmp_path, monkeypatch, status=SessionStatus.RUNNING)
+    monkeypatch.setattr(tmux, "startup_protection_enabled", lambda *a, **k: True)
+    monkeypatch.setattr(
+        "agentworks.harness_setup.readiness.require_setup_ready",
+        lambda *a, **k: pytest.fail("recovery performed launch setup"),
+    )
+    prepared = _prepare_launch(db, monkeypatch, status=SessionStatus.RUNNING, force=force)
+    assert prepared.recovered_startup and not prepared.requires_launch
+    monkeypatch.setattr("agentworks.secrets.resolve.active_sources", lambda *a, **k: pytest.fail("source reopened"))
+    before = db.get_session("s1")
+    if after_repair:
+        monkeypatch.setattr(manager, "check_session_status", lambda *a, **k: SessionStatus.RUNNING)
+
+        def repair(session, **kwargs):
+            monkeypatch.setattr(manager, "check_session_status", lambda *a, **k: status)
+            return session
+
+        monkeypatch.setattr(manager, "_ensure_pid", repair)
+    else:
+        monkeypatch.setattr(manager, "check_session_status", lambda *a, **k: status)
+        monkeypatch.setattr(manager, "_ensure_pid", lambda *a, **k: pytest.fail("invalid recovery wrote evidence"))
+    monkeypatch.setattr(
+        "agentworks.artifacts.session.prepare_session_artifacts", lambda *a, **k: pytest.fail("compiled launch")
+    )
+    monkeypatch.setattr(
+        "agentworks.artifacts.session.stage_session_artifacts", lambda *a, **k: pytest.fail("staged launch")
+    )
+    monkeypatch.setattr(manager, "_teardown_session", lambda *a, **k: pytest.fail("killed runtime"))
+    monkeypatch.setattr(tmux, "create_session", lambda *a, **k: pytest.fail("spawned without launch preparation"))
+    with pytest.raises(StateError):
+        execute_session_start(prepared, secret_values={}, graph_secret_values={})
+    assert db.get_session("s1") == before
     db.close()

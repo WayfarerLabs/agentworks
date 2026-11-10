@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import ExitStack
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from agentworks.capabilities.harness_integration import HarnessLaunchIntent
@@ -60,7 +61,29 @@ def preview_selected(
                     raise StateError("VM changed during preview selection", entity_kind="vm", entity_name=selected.name)
                 invocation.vms[current.name] = current
                 invocation.nodes[current.name] = live_vm_node(db, config, registry, current, site_nodes=site_nodes)
-            invocation.sessions.update((row.name, row) for row in selection.sessions)
+            for selected_session in selection.sessions:
+                session = db.get_session(selected_session.name)
+                workspace = db.get_workspace(session.workspace_name) if session is not None else None
+                if (
+                    session is None
+                    or session.session_uuid != selected_session.session_uuid
+                    or workspace is None
+                    or session.workspace_name != selected_session.workspace_name
+                    or workspace.vm_name != dict(selection.session_routes)[selected_session.name]
+                ):
+                    invocation.fail(
+                        "session",
+                        selected_session.name,
+                        "session identity or parent changed during preview",
+                        blocked=True,
+                    )
+                    continue
+                invocation.sessions[session.name] = session
+                invocation.results[("session", session.name)] = replace(
+                    invocation.results[("session", session.name)],
+                    desired_runtime_state=session.desired_runtime_state,
+                    proposed=True,
+                )
             routes = list(selection.console_routes)
             if selection.expand_consoles:
                 routes.extend(
@@ -91,7 +114,6 @@ def preview_selected(
 
 
 def _observe_providers(invocation: RuntimeInvocation) -> None:
-    from dataclasses import replace
 
     import agentworks.vms.manager as vms
 
@@ -103,7 +125,6 @@ def _observe_providers(invocation: RuntimeInvocation) -> None:
                 invocation.registry,
                 vm,
                 resolve_secret=infrastructure_reader(invocation, invocation.nodes[name]),
-                interaction=invocation.interaction,
                 vm_node=invocation.nodes[name],
             )
             invocation.contexts[name] = context
@@ -137,7 +158,6 @@ def _observe_providers(invocation: RuntimeInvocation) -> None:
 
 
 def _preview_sessions(invocation: RuntimeInvocation) -> None:
-    from dataclasses import replace
 
     import agentworks.sessions.manager as sessions
 
@@ -195,7 +215,6 @@ def _preview_sessions(invocation: RuntimeInvocation) -> None:
 
 
 def _preview_consoles(invocation: RuntimeInvocation) -> None:
-    from dataclasses import replace
 
     import agentworks.sessions.multi_console as consoles
     from agentworks.sessions.multi_console._status import classify_console_status

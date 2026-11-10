@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from agentworks.errors import AgentworksError, NotFoundError, StateError, UserAbort, ValidationError
@@ -102,6 +103,10 @@ def acquire_families(invocation: RuntimeInvocation) -> None:
                 raise StateError("VM was replaced during selection", entity_kind="vm", entity_name=selected.name)
             invocation.guards[current.name] = guard
             invocation.vms[current.name] = current
+            if ("vm", current.name) in invocation.results:
+                invocation.results[("vm", current.name)] = replace(
+                    invocation.results[("vm", current.name)], desired_runtime_state=current.desired_runtime_state
+                )
             invocation.nodes[current.name] = live_vm_node(
                 invocation.db,
                 invocation.config,
@@ -143,6 +148,10 @@ def acquire_families(invocation: RuntimeInvocation) -> None:
             selected_workspace = invocation.db.get_workspace(selected_session.workspace_name)
             assert selected_workspace is not None
             invocation.sessions[current_session.name] = current_session
+            invocation.results[("session", current_session.name)] = replace(
+                invocation.results[("session", current_session.name)],
+                desired_runtime_state=current_session.desired_runtime_state,
+            )
         except UserAbort:
             raise
         except AgentworksError as error:
@@ -157,13 +166,15 @@ def acquire_families(invocation: RuntimeInvocation) -> None:
     for name, parent in routes:
         current_console = invocation.db.get_console(name)
         if current_console is None or current_console.vm_name != parent or parent not in invocation.guards:
-            invocation.results[("console", name)] = RuntimeResult(kind="console", name=name, desired_runtime_state=None)
+            invocation.results[("console", name)] = RuntimeResult(
+                kind="console", name=name, desired_runtime_state=None, target_known=False
+            )
             invocation.fail("console", name, "console parent changed or its VM family is unavailable", blocked=True)
             continue
         invocation.consoles[name] = current_console
         invocation.results[("console", name)] = RuntimeResult(
             kind="console",
             name=name,
-            desired_runtime_state=current.desired_runtime_state,
+            desired_runtime_state=current_console.desired_runtime_state,
             vm_uuid=invocation.vms[parent].vm_uuid,
         )

@@ -21,7 +21,6 @@ if TYPE_CHECKING:
     from agentworks.orchestration.node import Node
     from agentworks.resources import Registry
     from agentworks.secrets import SecretTarget
-    from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.sessions.nodes import LiveSessionNode
     from agentworks.sessions.template import SessionTemplate
     from agentworks.sessions.templates import ResolvedSessionTemplate
@@ -254,11 +253,7 @@ def require_session_launch_identity(definition: SessionLaunchDefinition) -> Sess
     return session
 
 
-def prepare_session_launch(
-    definition: SessionLaunchDefinition,
-    *,
-    interaction: TtyInteractionPolicy,
-) -> PreparedSessionLaunch:
+def prepare_session_launch(definition: SessionLaunchDefinition) -> PreparedSessionLaunch:
     """Classify eligibility and preflight this session without writing evidence."""
     from agentworks.capabilities.base import RunContext
     from agentworks.harness_setup.readiness import require_setup_ready

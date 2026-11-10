@@ -141,8 +141,9 @@ def final_observations(invocation: RuntimeInvocation) -> None:
             invocation.ensure_vm_result(name)
             invocation.fail("vm", name, error, blocked=True)
     for name, selected in invocation.sessions.items():
-        if invocation.unavailable("session", name):
+        if invocation.results[("session", name)].outcome is Outcome.BLOCKED:
             continue
+        was_failed = invocation.results[("session", name)].outcome is Outcome.FAILED
         try:
             current = invocation.db.get_session(name)
             if (
@@ -174,6 +175,8 @@ def final_observations(invocation: RuntimeInvocation) -> None:
             else:
                 observed = SessionStatus.UNKNOWN
             invocation.record("session", name, observation=observed)
+            if was_failed:
+                continue
             expected = (
                 SessionStatus.RUNNING
                 if current.desired_runtime_state is DesiredRuntimeState.RUNNING
@@ -196,10 +199,14 @@ def final_observations(invocation: RuntimeInvocation) -> None:
         except UserAbort:
             raise
         except Exception as error:
-            invocation.fail("session", name, error, blocked=True)
+            if was_failed:
+                invocation.record("session", name, observation=SessionStatus.UNKNOWN)
+            else:
+                invocation.fail("session", name, error, blocked=True)
     for name, console in invocation.consoles.items():
-        if invocation.unavailable("console", name):
+        if invocation.results[("console", name)].outcome is Outcome.BLOCKED:
             continue
+        was_failed = invocation.results[("console", name)].outcome is Outcome.FAILED
         try:
             power = powers.get(console.vm_name, VMStatus.UNKNOWN)
             if power in OFF:
@@ -212,6 +219,8 @@ def final_observations(invocation: RuntimeInvocation) -> None:
             else:
                 observed_console = ConsoleStatus.UNKNOWN
             invocation.record("console", name, observation=observed_console)
+            if was_failed:
+                continue
             expected_console = (
                 ConsoleStatus.RUNNING
                 if console.desired_runtime_state is DesiredRuntimeState.RUNNING
@@ -229,4 +238,7 @@ def final_observations(invocation: RuntimeInvocation) -> None:
         except UserAbort:
             raise
         except Exception as error:
-            invocation.fail("console", name, error, blocked=True)
+            if was_failed:
+                invocation.record("console", name, observation=ConsoleStatus.UNKNOWN)
+            else:
+                invocation.fail("console", name, error, blocked=True)
