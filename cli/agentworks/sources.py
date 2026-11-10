@@ -9,8 +9,12 @@ Supports Terraform-style source references:
 Two fetch modes, each run on a managed VM as one identity through its ``Files``:
   - fetch_file: fetches a single file (e.g., mise lockfile)
   - fetch_dir:  fetches a directory (e.g., dotfiles repo); a git source is
-    cloned to the destination and brought to its ref on reinit, and a local
-    directory replaces the destination whole (``upload_tree``)
+    cloned to the destination if absent, then its ref fetched and checked
+    out detached every time, and a local directory replaces the destination
+    whole (``upload_tree``)
+
+A git file source is fetched the same way, at depth 1, into a temporary
+repository on the guest.
 """
 
 from __future__ import annotations
@@ -272,8 +276,9 @@ def snapshot_workstation_file(source: str) -> bytes:
 def fetch_file(source: SourceRef, files: Files, dest: str, *, log: _Output | None = None) -> None:
     """Publish the file ``source`` names at ``dest`` on the guest, 0644, as ``files``' identity.
 
-    A local source is read on the workstation; a git source is cloned shallow
-    into a temporary directory on the guest, and its file read back. Either
+    A local source is read on the workstation; a git source's ref is fetched
+    at depth 1 into a temporary repository on the guest, and its file read
+    back. Either
     way the file program writes it, so a link at ``dest`` is refused.
     """
     if source.kind == "file":
@@ -304,8 +309,8 @@ GIT_FILE_LIMIT = 16 * 1024 * 1024
 DOTFILES_DEADLINE = 120
 """Seconds each git command that syncs a dotfiles checkout, and the dotfiles install, may take."""
 
-SHALLOW_CLONE_DEADLINE = 60
-"""Seconds each step of the shallow fetch a git file source is read from may take."""
+SHALLOW_FETCH_DEADLINE = 60
+"""Seconds the depth-1 fetch a git file source is read from may take, and so may its checkout."""
 
 _STAGING_PREFIX = "/var/tmp/agentworks-source-ref-"
 
@@ -332,9 +337,9 @@ def _read_git_file(source: SourceRef, files: Files, *, log: _Output | None) -> b
             Command(("git", "-C", tmp_dir, "remote", "add", "origin", "--", source.path), deadline=files.deadline),
             check=True,
         )
-        _check_out(files, tmp_dir, "origin", source.ref, deadline=SHALLOW_CLONE_DEADLINE, depth=1)
+        _fetch_and_detach(files, tmp_dir, source.ref, deadline=SHALLOW_FETCH_DEADLINE, depth=1)
         if log:
-            log.output(f"Cloned {source.path} (ref: {source.ref or 'default'})")
+            log.output(f"Fetched {source.path} (ref: {source.ref or 'default'})")
         data = files.read(f"{tmp_dir}/{source.subpath}", limit=GIT_FILE_LIMIT)
         if data is None:
             raise SourceRefError(f"{source.subpath} is not in {source.path}")
@@ -381,7 +386,7 @@ def _fetch_git_dir(source: SourceRef, files: Files, dest: str, *, log: _Output |
     """Clone ``source`` to ``dest``, or bring an existing clone of the same repository to its ref.
 
     Either way the ref, or the remote's ``HEAD`` without one, is fetched and
-    checked out detached (:func:`_check_out`), so a changed or dropped ref
+    checked out detached (:func:`_fetch_and_detach`), so a changed or dropped ref
     takes effect, a branch advances, and a tag or a full commit hash works
     alike. Every git command must succeed: a failure is ``CommandFailed``, so
     the caller can tell a sync that did not happen from one that did.
@@ -411,20 +416,22 @@ def _fetch_git_dir(source: SourceRef, files: Files, dest: str, *, log: _Output |
     elif succeeds(("test", "-d", dest)):
         raise SourceRefError(f"{dest} exists but is not a git repo")
     else:
-        access.run(Command(("git", "clone", "--", source.path, dest), deadline=DOTFILES_DEADLINE), check=True)
+        clone = ("git", "clone", "--no-checkout", "--", source.path, dest)
+        access.run(Command(clone, deadline=DOTFILES_DEADLINE), check=True)
         if log:
             log.output(f"Cloned {source.path} to {dest}")
-    _check_out(files, dest, "origin", source.ref, deadline=DOTFILES_DEADLINE)
+    _fetch_and_detach(files, dest, source.ref, deadline=DOTFILES_DEADLINE)
 
 
-def _check_out(files: Files, repo: str, remote: str, ref: str, *, deadline: float, depth: int | None = None) -> None:
-    """Fetch ``ref`` (the remote's ``HEAD`` when empty) from ``remote`` into ``repo`` and check it out detached.
+def _fetch_and_detach(files: Files, repo: str, ref: str, *, deadline: float, depth: int | None = None) -> None:
+    """Fetch ``ref`` (the remote's ``HEAD`` when empty) from ``repo``'s origin and check it out detached.
 
-    A branch, a tag and a full commit hash are fetched alike; a short hash
-    is not, since a remote serves only names and whole object ids.
+    A branch, a tag (annotated or not) and a full commit hash are fetched
+    alike; a short hash is not, since a remote serves only names and whole
+    object ids.
     """
     shallow = ("--depth", str(depth)) if depth is not None else ()
-    for argv in (("fetch", *shallow, remote, ref or "HEAD"), ("checkout", "--detach", "FETCH_HEAD")):
+    for argv in (("fetch", *shallow, "--", "origin", ref or "HEAD"), ("checkout", "--detach", "FETCH_HEAD")):
         files.access.run(Command(("git", "-C", repo, *argv), deadline=deadline), check=True)
 
 

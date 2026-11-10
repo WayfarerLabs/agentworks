@@ -30,7 +30,7 @@ def test_a_failed_dotfiles_sync_skips_the_install_and_says_the_destination_is_un
     guest.respond(Command(("test", "-d", f"{DOTFILES}/.git"), deadline=60), Result(Completed(1)))
     guest.respond(Command(("test", "-d", DOTFILES), deadline=60), Result(Completed(1)))
     guest.respond(
-        Command(("git", "clone", "--", DOTFILES_URL, DOTFILES), deadline=120),
+        Command(("git", "clone", "--no-checkout", "--", DOTFILES_URL, DOTFILES), deadline=120),
         CommandFailed("box", 128, Result(Completed(128), stderr=b"fatal: repository not found\n"), streams_logged=True),
     )
 

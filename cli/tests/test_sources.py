@@ -167,7 +167,7 @@ def _shallow_fetch(staging: str, url: str, ref: str) -> list[Command]:
     return [
         Command(("git", "init", "-q", "--", staging), deadline=60),
         Command(("git", "-C", staging, "remote", "add", "origin", "--", url), deadline=60),
-        Command(("git", "-C", staging, "fetch", "--depth", "1", "origin", ref), deadline=60),
+        Command(("git", "-C", staging, "fetch", "--depth", "1", "--", "origin", ref), deadline=60),
         Command(("git", "-C", staging, "checkout", "--detach", "FETCH_HEAD"), deadline=60),
     ]
 
@@ -278,9 +278,9 @@ EXISTS = Command(("test", "-d", DEST), deadline=60)
 ORIGIN = Command(("git", "-C", DEST, "config", "--get", "remote.origin.url"), deadline=60, log_streams=False)
 
 
-def _check_out(ref: str) -> list[Command]:
+def _fetch_and_detach(ref: str) -> list[Command]:
     return [
-        Command(("git", "-C", DEST, "fetch", "origin", ref), deadline=120),
+        Command(("git", "-C", DEST, "fetch", "--", "origin", ref), deadline=120),
         Command(("git", "-C", DEST, "checkout", "--detach", "FETCH_HEAD"), deadline=120),
     ]
 
@@ -296,8 +296,8 @@ def test_fetch_dir_clones_an_absent_destination_then_checks_out_its_ref(query: s
     assert guest.commands() == [
         IS_CLONE,
         EXISTS,
-        Command(("git", "clone", "--", URL, DEST), deadline=120),
-        *_check_out(ref),
+        Command(("git", "clone", "--no-checkout", "--", URL, DEST), deadline=120),
+        *_fetch_and_detach(ref),
     ]
 
 
@@ -308,14 +308,14 @@ def test_fetch_dir_checks_out_the_ref_of_a_clone_of_the_same_repository(query: s
 
     fetch_dir(parse_source_ref(f"git::{URL}{query}"), guest.files, DEST)
 
-    assert guest.commands() == [IS_CLONE, ORIGIN, *_check_out(ref)]
+    assert guest.commands() == [IS_CLONE, ORIGIN, *_fetch_and_detach(ref)]
 
 
 @pytest.mark.parametrize("failing", [0, 1], ids=["fetch", "checkout"])
 def test_a_failed_fetch_or_checkout_of_the_ref_fails_the_sync(failing: int) -> None:
     guest = StepGuest(local_files=False)
     guest.respond(ORIGIN, Result(Completed(0), f"{URL}\n".encode()))
-    failed = _check_out("v2")[failing]
+    failed = _fetch_and_detach("v2")[failing]
     guest.respond(failed, CommandFailed("box", 1, Result(Completed(1)), streams_logged=True))
 
     with pytest.raises(CommandFailed):
@@ -387,7 +387,7 @@ def origin(tmp_path: Path) -> Path:
     repo.mkdir()
     _git(repo, "init", "-q", "-b", "main")
     _commit(repo, "one")
-    _git(repo, "tag", "v1")
+    _git(repo, "tag", "-a", "v1", "-m", "v1")
     return repo
 
 
@@ -396,12 +396,12 @@ def test_a_changed_tag_ref_takes_effect_on_an_existing_clone(lane: Files, tmp_pa
     dest = tmp_path / "home" / ".dotfiles"
     fetch_dir(SourceRef("git", str(origin), "", "v1"), lane, str(dest))
     _commit(origin, "two")
-    _git(origin, "tag", "v2")
+    _git(origin, "tag", "-a", "v2", "-m", "v2")
 
     fetch_dir(SourceRef("git", str(origin), "", "v2"), lane, str(dest))
 
     assert (dest / "rc").read_text() == "two"
-    assert _git(dest, "rev-parse", "HEAD") == _git(origin, "rev-parse", "v2")
+    assert _git(dest, "rev-parse", "HEAD") == _git(origin, "rev-parse", "v2^{commit}")
 
 
 @requires_git
@@ -555,6 +555,22 @@ def test_upload_tree_sends_the_local_tree_as_one_unelevated_script_with_its_two_
             "./rc": b"new",
             "./nested/file": b"kept",
         }
+
+
+def test_a_source_tree_with_a_read_only_directory_is_replaced_on_every_upload(lane: Files, tmp_path: Path) -> None:
+    """A read-only directory the local tree itself holds arrives read-only, and the next upload still replaces it."""
+    dest = tmp_path / "home" / ".dotfiles"
+    try:
+        for generation in range(3):
+            local = _tree(tmp_path / f"local-{generation}", {"locked/rc": f"{generation}".encode(), "top": b"t"})
+            (local / "locked").chmod(0o555)
+
+            upload_tree(lane, local, str(dest))
+
+            assert _contents(dest) == {"locked/rc": f"{generation}".encode(), "top": b"t"}
+            assert _siblings(dest) == []
+    finally:
+        subprocess.run(["chmod", "-R", "u+rwx", "--", str(tmp_path)], check=False)
 
 
 @pytest.mark.parametrize("mode", [0o555, 0o444], ids=["read-only", "unsearchable"])
