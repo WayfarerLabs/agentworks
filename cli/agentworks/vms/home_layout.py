@@ -22,7 +22,12 @@ writes the mise config after the dotfiles sync, so the order settles it.
 """
 
 GIT_CREDENTIAL_STATE_DIR = ".agentworks"
-"""The directory of the git credential state; ``git_credentials``' scripts name it as ``$HOME/.agentworks``."""
+"""The directory of the git credential state (``git_credentials``), rendered into its scripts and config.
+
+Its include path is deployed into every account's ``~/.gitconfig``, so
+changing it means retiring the old include as well, as
+``git_credentials.reconcile`` retires the paths of earlier layouts.
+"""
 
 AGENTWORKS_ARTIFACTS = ".agentworks-artifacts"
 """The directory of user and session artifacts (``artifacts.session``, ``harness_integration.shell``)."""

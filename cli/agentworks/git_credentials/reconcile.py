@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from agentworks.errors import ExternalError
 from agentworks.execution.requests import Bytes, DiscardOutput, NoInput, Script, Shell
+from agentworks.vms.home_layout import GIT_CREDENTIAL_STATE_DIR
 
 if TYPE_CHECKING:
     from agentworks.execution.access import VMAccess
@@ -17,8 +18,8 @@ if TYPE_CHECKING:
 
 _LAUNCHER = """#!/bin/sh
 # Managed by Agentworks. Holds one credential generation for this request.
-parent="$HOME/.agentworks"
-root="$HOME/.agentworks/git-credentials"
+parent="$HOME/@STATE_DIR@"
+root="$HOME/@STATE_DIR@/git-credentials"
 if [ -L "$parent" ] || [ ! -d "$parent" ]; then
     echo "agentworks: Git credential state is unavailable; reinitialize this user" >&2
     exit 1
@@ -73,7 +74,7 @@ if [ ! -x "$root/current/dispatch" ]; then
 fi
 exec env -u BASH_ENV -u ENV -u SHELLOPTS -u BASH_XTRACEFD -u PS4 \
     "$root/current/dispatch" "$@"
-"""
+""".replace("@STATE_DIR@", GIT_CREDENTIAL_STATE_DIR)
 
 
 def _add_tar_directory(archive: tarfile.TarFile, name: str) -> None:
@@ -120,8 +121,8 @@ def _state_archive(state: UserCredentialState) -> bytes:
 
 _RECONCILE_SCRIPT = r"""set -Eeu
 trap 'exit 29' ERR
-parent="$HOME/.agentworks"
-root="$HOME/.agentworks/git-credentials"
+parent="$HOME/@STATE_DIR@"
+root="$HOME/@STATE_DIR@/git-credentials"
 stage="$root/.stage"
 current_tmp="$root/.current.new"
 desired='@DESIRED@'
@@ -215,7 +216,7 @@ remove_owned_path "$HOME/.agentworks-git-scopes.gitconfig"
 remove_owned_path "$HOME/.agentworks-git-cred-warn.sh"
 remove_config_value credential.helper '!~/.agentworks-git-cred-helper.sh'
 remove_config_value include.path '~/.agentworks-git-scopes.gitconfig'
-remove_config_value include.path '~/.agentworks/git-credentials/current/config.gitconfig'
+remove_config_value include.path '~/@STATE_DIR@/git-credentials/current/config.gitconfig'
 
 if [ "$desired" = "empty" ]; then
     rm -rf "$root/launch" "$root/current"
@@ -280,18 +281,21 @@ else
 fi
 rm -rf "$stage"
 
-git config --global --add include.path '~/.agentworks/git-credentials/current/config.gitconfig' || exit 25
+git config --global --add include.path '~/@STATE_DIR@/git-credentials/current/config.gitconfig' || exit 25
 
 active=$(readlink -f "$root/current")
 for candidate in "$root/generations"/*; do
     [ -d "$candidate" ] || continue
     [ "$candidate" = "$active" ] || rm -rf "$candidate"
 done
-"""
+""".replace("@STATE_DIR@", GIT_CREDENTIAL_STATE_DIR)
 
 
 _RECONCILE_FAILURES = {
-    20: "Git credential state could not be established safely; reinitialize this user after repairing ~/.agentworks",
+    20: (
+        "Git credential state could not be established safely; "
+        f"reinitialize this user after repairing ~/{GIT_CREDENTIAL_STATE_DIR}"
+    ),
     21: "timed out establishing Git credential state; retry user initialization",
     22: "timed out reconciling Git credential state; retry user initialization",
     23: "Git credential lock identity changed; retry user initialization",
