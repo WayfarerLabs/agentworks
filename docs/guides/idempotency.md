@@ -77,7 +77,7 @@ links as before. The same holds for agent reinit.
 | Shell source lines     | Appended to an rc file only when it does not already source the fragment; a linked rc file is never written through                                                                                                                              |
 | SSH authorized keys    | Overwritten from config                                                                                                                                                                                                                          |
 | Git credentials        | Complete desired list rebuilt; empty removes Agentworks-owned credential/routing state                                                                                                                                                           |
-| Dotfiles (git source)  | With a `ref`, fetched and checked out at it if already cloned; with none, fast-forwarded (`git pull --ff-only`); fresh clone if not. A failed sync skips the install                                                                             |
+| Dotfiles (git source)  | Cloned if absent; then the `ref` (the remote's default branch without one) is fetched and checked out, so a changed or dropped `ref` takes effect. A failed sync skips the install                                                               |
 | Mise packages          | Installed if missing, pruned if removed (when `mise_prune_on_reinit = true`)                                                                                                                                                                     |
 | Mise activation        | Overwritten from config (disabled comment written when off)                                                                                                                                                                                      |
 | PATH additions         | Overwritten from config                                                                                                                                                                                                                          |
@@ -131,18 +131,18 @@ access was restored.
 
 ### Fully idempotent
 
-| Step                       | Notes                                                                                                                                                                    |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| User creation              | Detection-based: created if absent, shell corrected if diverged, else no-op                                                                                              |
-| Workspace group            | Skipped if exists                                                                                                                                                        |
-| Workspace grant membership | Reconciled from the agent's recorded grants: idempotent group add per granted workspace, no-op if already a member. Repairs a recreated user whose memberships were lost |
-| Shell rc (prompt)          | Overwritten from template                                                                                                                                                |
-| Git credentials            | Complete desired list rebuilt; empty removes Agentworks-owned credential/routing state                                                                                   |
-| Dotfiles (git source)      | With a `ref`, fetched and checked out at it if already cloned; with none, fast-forwarded (`git pull --ff-only`); fresh clone if not. A failed sync skips the install     |
-| Mise packages              | Installed if missing, pruned if removed (when `mise_prune_on_reinit = true`)                                                                                             |
-| Mise activation            | Overwritten from template                                                                                                                                                |
-| PATH additions             | Overwritten from template                                                                                                                                                |
-| Shell source lines         | Appended to an rc file only when it does not already source the fragment; a linked rc file is never written through                                                      |
+| Step                       | Notes                                                                                                                                                                              |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| User creation              | Detection-based: created if absent, shell corrected if diverged, else no-op                                                                                                        |
+| Workspace group            | Skipped if exists                                                                                                                                                                  |
+| Workspace grant membership | Reconciled from the agent's recorded grants: idempotent group add per granted workspace, no-op if already a member. Repairs a recreated user whose memberships were lost           |
+| Shell rc (prompt)          | Overwritten from template                                                                                                                                                          |
+| Git credentials            | Complete desired list rebuilt; empty removes Agentworks-owned credential/routing state                                                                                             |
+| Dotfiles (git source)      | Cloned if absent; then the `ref` (the remote's default branch without one) is fetched and checked out, so a changed or dropped `ref` takes effect. A failed sync skips the install |
+| Mise packages              | Installed if missing, pruned if removed (when `mise_prune_on_reinit = true`)                                                                                                       |
+| Mise activation            | Overwritten from template                                                                                                                                                          |
+| PATH additions             | Overwritten from template                                                                                                                                                          |
+| Shell source lines         | Appended to an rc file only when it does not already source the fragment; a linked rc file is never written through                                                                |
 
 ### Additive only
 

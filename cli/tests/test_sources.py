@@ -148,6 +148,16 @@ def clone() -> Iterator[Path]:
 MKTEMP = Command(("mktemp", "-d", "/var/tmp/agentworks-source-ref-XXXXXX"), deadline=60)
 
 
+def _shallow_fetch(staging: str, url: str, ref: str) -> list[Command]:
+    """The requests that fetch ``ref`` of ``url`` at depth 1 into ``staging`` and check it out."""
+    return [
+        Command(("git", "init", "-q", "--", staging), deadline=60),
+        Command(("git", "-C", staging, "remote", "add", "origin", "--", url), deadline=60),
+        Command(("git", "-C", staging, "fetch", "--depth", "1", "origin", ref), deadline=60),
+        Command(("git", "-C", staging, "checkout", "--detach", "FETCH_HEAD"), deadline=60),
+    ]
+
+
 @requires_file_program
 def test_fetch_file_publishes_a_local_source_at_0644(tmp_path: Path) -> None:
     source = tmp_path / "mise.lock"
@@ -174,7 +184,7 @@ def test_fetch_file_refuses_a_local_source_it_cannot_read(tmp_path: Path) -> Non
 
 
 @requires_file_program
-def test_fetch_file_reads_a_git_source_back_from_a_shallow_clone_and_removes_it(tmp_path: Path, clone: Path) -> None:
+def test_fetch_file_reads_a_git_source_back_from_a_shallow_fetch_and_removes_it(tmp_path: Path, clone: Path) -> None:
     (clone / "locks").mkdir(parents=True)
     (clone / "locks" / "mise.lock").write_bytes(b"pinned")
     destination = tmp_path / "home" / "mise.lock"
@@ -187,10 +197,7 @@ def test_fetch_file_reads_a_git_source_back_from_a_shallow_clone_and_removes_it(
     assert stat.S_IMODE(destination.stat().st_mode) == 0o644
     assert guest.commands() == [
         MKTEMP,
-        Command(
-            ("git", "clone", "--depth", "1", "--branch", "v1", "--", "https://example.com/repo.git", str(clone)),
-            deadline=60,
-        ),
+        *_shallow_fetch(str(clone), "https://example.com/repo.git", "v1"),
         Command(("rm", "-rf", "--", str(clone)), deadline=60),
     ]
     assert [operation for operation, _ in guest.file_operations()] == ["read", "write"]
@@ -227,7 +234,7 @@ def test_a_staging_removal_that_does_not_succeed_warns_and_keeps_the_fetch_error
 ) -> None:
     guest = _staging_guest()
     primary = CommandFailed("box", 128, Result(Completed(128)), streams_logged=True)
-    guest.respond(Command(("git", "clone", "--depth", "1", "--", URL, STAGING), deadline=60), primary)
+    guest.respond(_shallow_fetch(STAGING, URL, "HEAD")[2], primary)
     guest.respond(Command(("rm", "-rf", "--", STAGING), deadline=60), removal)
     ref = parse_source_ref(f"git::{URL}//locks/mise.lock")
 
@@ -254,40 +261,47 @@ def test_a_mktemp_that_names_no_staging_directory_clones_nothing(named: str) -> 
 DEST = "/home/a/.dotfiles"
 IS_CLONE = Command(("test", "-d", f"{DEST}/.git"), deadline=60)
 EXISTS = Command(("test", "-d", DEST), deadline=60)
-ORIGIN = Command(("git", "-C", DEST, "remote", "get-url", "origin"), deadline=60)
-PULL = Command(("git", "-C", DEST, "pull", "--ff-only"), deadline=120)
+ORIGIN = Command(("git", "-C", DEST, "remote", "get-url", "origin"), deadline=60, log_streams=False)
 
 
-def test_fetch_dir_clones_into_an_absent_destination() -> None:
+def _check_out(ref: str) -> list[Command]:
+    return [
+        Command(("git", "-C", DEST, "fetch", "origin", ref), deadline=120),
+        Command(("git", "-C", DEST, "checkout", "--detach", "FETCH_HEAD"), deadline=120),
+    ]
+
+
+@pytest.mark.parametrize(("query", "ref"), [("?ref=main", "main"), ("", "HEAD")])
+def test_fetch_dir_clones_an_absent_destination_then_checks_out_its_ref(query: str, ref: str) -> None:
     guest = StepGuest(local_files=False)
     guest.respond(IS_CLONE, Result(Completed(1)))
     guest.respond(EXISTS, Result(Completed(1)))
 
-    fetch_dir(parse_source_ref(f"git::{URL}?ref=main"), guest.files, DEST)
+    fetch_dir(parse_source_ref(f"git::{URL}{query}"), guest.files, DEST)
 
     assert guest.commands() == [
         IS_CLONE,
         EXISTS,
-        Command(("git", "clone", "--branch", "main", "--", URL, DEST), deadline=120),
+        Command(("git", "clone", "--", URL, DEST), deadline=120),
+        *_check_out(ref),
     ]
 
 
-def test_fetch_dir_fast_forwards_a_clone_of_the_same_repository_with_no_ref() -> None:
+@pytest.mark.parametrize(("query", "ref"), [("?ref=v2", "v2"), ("", "HEAD")])
+def test_fetch_dir_checks_out_the_ref_of_a_clone_of_the_same_repository(query: str, ref: str) -> None:
     guest = StepGuest(local_files=False)
     guest.respond(ORIGIN, Result(Completed(0), f"{URL}\n".encode()))
 
-    fetch_dir(parse_source_ref(f"git::{URL}"), guest.files, DEST)
+    fetch_dir(parse_source_ref(f"git::{URL}{query}"), guest.files, DEST)
 
-    assert guest.commands() == [IS_CLONE, ORIGIN, PULL]
+    assert guest.commands() == [IS_CLONE, ORIGIN, *_check_out(ref)]
 
 
-@pytest.mark.parametrize("failing", ["fetch", "checkout"])
-def test_a_failed_fetch_or_checkout_of_the_ref_fails_the_sync(failing: str) -> None:
+@pytest.mark.parametrize("failing", [0, 1], ids=["fetch", "checkout"])
+def test_a_failed_fetch_or_checkout_of_the_ref_fails_the_sync(failing: int) -> None:
     guest = StepGuest(local_files=False)
     guest.respond(ORIGIN, Result(Completed(0), f"{URL}\n".encode()))
-    fetch = Command(("git", "-C", DEST, "fetch", "origin", "v2"), deadline=120)
-    checkout = Command(("git", "-C", DEST, "checkout", "--detach", "FETCH_HEAD"), deadline=120)
-    failed = fetch if failing == "fetch" else checkout
+    failed = _check_out("v2")[failing]
     guest.respond(failed, CommandFailed("box", 1, Result(Completed(1)), streams_logged=True))
 
     with pytest.raises(CommandFailed):
@@ -307,8 +321,34 @@ def test_fetch_dir_refuses_a_destination_it_did_not_clone(found: str) -> None:
     with pytest.raises(SourceRefError):
         fetch_dir(parse_source_ref(f"git::{URL}"), guest.files, DEST)
 
-    assert PULL not in guest.commands()
-    assert not any(isinstance(request, Command) and request.argv[1] == "clone" for request in guest.commands())
+    assert not any(
+        isinstance(request, Command) and {"clone", "fetch"} & set(request.argv) for request in guest.commands()
+    )
+
+
+def test_a_credential_in_an_existing_clone_s_origin_reaches_neither_the_warning_nor_the_log() -> None:
+    from agentworks.execution.oplog import format_record
+    from agentworks.vms.initializer.dotfiles import sync_dotfiles
+
+    guest = StepGuest(local_files=False)
+    secret = "ghp-origin-secret"
+    answer = Result(Completed(0), f"https://u:{secret}@example.com/dots.git\n".encode())
+    guest.access.answer = lambda call: answer if call.request.argv[-2:] == ("get-url", "origin") else None
+
+    sync_dotfiles(
+        guest.files,
+        source=f"git::{URL}",
+        destination="~/.dotfiles",
+        install_cmd="./install.sh",
+        shell="bash",
+        home="/home/a",
+        log=guest.log,
+    )
+
+    (warning,) = guest.log.warned
+    assert secret not in warning
+    (probe,) = [r for r in guest.commands() if isinstance(r, Command) and r.argv[-2:] == ("get-url", "origin")]
+    assert secret not in format_record(probe, answer, label="Dotfiles")
 
 
 requires_git = pytest.mark.skipif(shutil.which("git") is None, reason="the checkout tests run git")
@@ -359,6 +399,46 @@ def test_a_branch_ref_advances_on_an_existing_clone(lane: Files, tmp_path: Path,
     fetch_dir(SourceRef("git", str(origin), "", "main"), lane, str(dest))
 
     assert _git(dest, "rev-parse", "HEAD") == advanced
+
+
+@requires_git
+def test_dropping_the_ref_converges_on_the_remote_s_default_branch(lane: Files, tmp_path: Path, origin: Path) -> None:
+    dest = tmp_path / "home" / ".dotfiles"
+    fetch_dir(SourceRef("git", str(origin), "", "v1"), lane, str(dest))
+    advanced = _commit(origin, "two")
+
+    fetch_dir(SourceRef("git", str(origin), "", ""), lane, str(dest))
+
+    assert _git(dest, "rev-parse", "HEAD") == advanced
+
+
+@requires_git
+@pytest.mark.parametrize("existing", [False, True], ids=["fresh", "existing"])
+def test_a_full_commit_hash_ref_is_checked_out(lane: Files, tmp_path: Path, origin: Path, existing: bool) -> None:
+    dest = tmp_path / "home" / ".dotfiles"
+    pinned = _git(origin, "rev-parse", "HEAD")
+    _commit(origin, "two")
+    if existing:
+        fetch_dir(SourceRef("git", str(origin), "", ""), lane, str(dest))
+
+    fetch_dir(SourceRef("git", str(origin), "", pinned), lane, str(dest))
+
+    assert _git(dest, "rev-parse", "HEAD") == pinned
+    assert (dest / "rc").read_text() == "one"
+
+
+@requires_git
+@pytest.mark.parametrize("by", ["tag", "hash"])
+def test_a_git_file_source_reads_the_file_at_a_tag_or_a_full_commit_hash(
+    lane: Files, tmp_path: Path, origin: Path, by: str
+) -> None:
+    pinned = _git(origin, "rev-parse", "HEAD")
+    _commit(origin, "two")
+    destination = tmp_path / "home" / "rc"
+
+    fetch_file(SourceRef("git", str(origin), "rc", "v1" if by == "tag" else pinned), lane, str(destination))
+
+    assert destination.read_text() == "one"
 
 
 # -- The tree upload ----------------------------------------------------------

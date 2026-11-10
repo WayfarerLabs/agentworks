@@ -316,11 +316,18 @@ place its `authorized_keys`; every later step runs as the agent, which cannot ru
   name or token, such as `https://user:token@github.com/...`, is refused when the template loads,
   without echoing it; declare a `git-credential` resource for the host instead. A subpath with an
   empty or `.` component is refused too, as one with `..` was.
-- **A git dotfiles checkout follows its `ref`.** On reinit an existing clone fetches the template's
-  `ref` and checks it out, so a changed `ref` takes effect and a branch or tag alike advances; with
-  no `ref` the clone is fast-forwarded (`git pull --ff-only`). The admin used to pull whatever
-  branch the clone was on. A failed sync now skips the dotfiles install for agents too, as it does
-  for the admin, instead of running it over the previous checkout.
+- **A git dotfiles checkout follows its `ref`.** Every sync, fresh clone or reinit, fetches the
+  template's `ref` (the remote's default branch when there is none) and checks it out detached, so a
+  changed or dropped `ref` takes effect, a branch advances and a tag is checked out. A commit `ref`
+  must be the full hash. The admin used to pull whatever branch the clone was on, so a local branch
+  in the checkout is no longer advanced; commit your dotfiles changes upstream. A failed sync now
+  skips the dotfiles install for agents too, as it does for the admin, instead of running it over
+  the previous checkout.
+- **A dotfiles clone whose origin holds a credential is refused.** An existing checkout must be a
+  clone of the `dotfiles_source` URL itself; one cloned from a URL with a user name or token in it
+  is refused, without echoing either URL. Point it at the plain URL with
+  `git -C <dotfiles_destination> remote set-url origin <url>` and declare a `git-credential`
+  resource for the host.
 - **The admin's dotfiles install runs in a login shell,** in the checkout, as the agent's always
   has, with the new layer's environment and fixed `PATH` underneath it.
 - **Git credentials reconcile under bash** for every account, so an admin or agent whose login shell

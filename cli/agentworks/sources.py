@@ -274,13 +274,13 @@ DOTFILES_DEADLINE = 120
 """Seconds each git command that syncs a dotfiles checkout, and the dotfiles install, may take."""
 
 SHALLOW_CLONE_DEADLINE = 60
-"""Seconds the shallow clone a git file source is read from may take."""
+"""Seconds each step of the shallow fetch a git file source is read from may take."""
 
 _STAGING_PREFIX = "/var/tmp/agentworks-source-ref-"
 
 
 def _read_git_file(source: SourceRef, files: Files, *, log: _Output | None) -> bytes:
-    """Clone ``source`` shallow into a temporary directory on the guest and read its file back.
+    """Fetch ``source``'s ref at depth 1 into a temporary repository on the guest and read its file back.
 
     The directory is removed afterwards whatever happened; a removal that
     fails or does not complete warns and leaves the fetch's own outcome.
@@ -296,9 +296,12 @@ def _read_git_file(source: SourceRef, files: Files, *, log: _Output | None) -> b
     if not tmp_dir.startswith(_STAGING_PREFIX):
         raise SourceRefError(f"mktemp on VM '{access.vm_name}' did not name a staging directory")
     try:
-        branch = ("--branch", source.ref) if source.ref else ()
-        clone = ("git", "clone", "--depth", "1", *branch, "--", source.path, tmp_dir)
-        access.run(Command(clone, deadline=SHALLOW_CLONE_DEADLINE), check=True)
+        access.run(Command(("git", "init", "-q", "--", tmp_dir), deadline=files.deadline), check=True)
+        access.run(
+            Command(("git", "-C", tmp_dir, "remote", "add", "origin", "--", source.path), deadline=files.deadline),
+            check=True,
+        )
+        _check_out(files, tmp_dir, "origin", source.ref, deadline=SHALLOW_CLONE_DEADLINE, depth=1)
         if log:
             log.output(f"Cloned {source.path} (ref: {source.ref or 'default'})")
         data = files.read(f"{tmp_dir}/{source.subpath}", limit=GIT_FILE_LIMIT)
@@ -346,39 +349,49 @@ def fetch_dir(source: SourceRef, files: Files, dest: str, *, log: _Output | None
 def _fetch_git_dir(source: SourceRef, files: Files, dest: str, *, log: _Output | None) -> None:
     """Clone ``source`` to ``dest``, or bring an existing clone of the same repository to its ref.
 
-    An existing clone with a ref fetches that ref and checks it out detached,
-    so a changed ref takes effect, a branch advances and a tag works alike;
-    one with no ref fast-forwards its branch. Every git command must succeed:
-    a failure is ``CommandFailed``, so the caller can tell a sync that did not
-    happen from one that did.
+    Either way the ref, or the remote's ``HEAD`` without one, is fetched and
+    checked out detached (:func:`_check_out`), so a changed or dropped ref
+    takes effect, a branch advances, and a tag or a full commit hash works
+    alike. Every git command must succeed: a failure is ``CommandFailed``, so
+    the caller can tell a sync that did not happen from one that did.
+
+    The existing clone's origin is read with its streams kept out of the
+    log, and a refusal names neither URL, since a clone made from a URL
+    with credentials in it holds them there.
     """
     access = files.access
-
-    def git(*argv: str) -> None:
-        access.run(Command(("git", "-C", dest, *argv), deadline=DOTFILES_DEADLINE), check=True)
 
     def succeeds(argv: tuple[str, ...]) -> bool:
         return access.run(Command(argv, deadline=files.deadline)).require_completed(access.vm_name) == 0
 
     if succeeds(("test", "-d", f"{dest}/.git")):
-        remote = access.run(Command(("git", "-C", dest, "remote", "get-url", "origin"), deadline=files.deadline))
-        origin = remote.stdout.decode("utf-8", "replace").strip()
-        if remote.require_completed(access.vm_name) != 0 or origin != source.path:
-            raise SourceRefError(f"{dest} exists but is a clone of {origin}, not {source.path}")
+        probe = Command(("git", "-C", dest, "remote", "get-url", "origin"), deadline=files.deadline, log_streams=False)
+        remote = access.run(probe)
+        if (
+            remote.require_completed(access.vm_name) != 0
+            or remote.stdout.decode("utf-8", "replace").strip() != source.path
+        ):
+            raise SourceRefError(f"{dest} exists but is a clone of a different repository")
         if log:
             log.output(f"Updating {source.path} in {dest} (ref: {source.ref or 'default'})")
-        if source.ref:
-            git("fetch", "origin", source.ref)
-            git("checkout", "--detach", "FETCH_HEAD")
-        else:
-            git("pull", "--ff-only")
-        return
-    if succeeds(("test", "-d", dest)):
+    elif succeeds(("test", "-d", dest)):
         raise SourceRefError(f"{dest} exists but is not a git repo")
-    branch = ("--branch", source.ref) if source.ref else ()
-    access.run(Command(("git", "clone", *branch, "--", source.path, dest), deadline=DOTFILES_DEADLINE), check=True)
-    if log:
-        log.output(f"Cloned {source.path} to {dest}")
+    else:
+        access.run(Command(("git", "clone", "--", source.path, dest), deadline=DOTFILES_DEADLINE), check=True)
+        if log:
+            log.output(f"Cloned {source.path} to {dest}")
+    _check_out(files, dest, "origin", source.ref, deadline=DOTFILES_DEADLINE)
+
+
+def _check_out(files: Files, repo: str, remote: str, ref: str, *, deadline: float, depth: int | None = None) -> None:
+    """Fetch ``ref`` (the remote's ``HEAD`` when empty) from ``remote`` into ``repo`` and check it out detached.
+
+    A branch, a tag and a full commit hash are fetched alike; a short hash
+    is not, since a remote serves only names and whole object ids.
+    """
+    shallow = ("--depth", str(depth)) if depth is not None else ()
+    for argv in (("fetch", *shallow, remote, ref or "HEAD"), ("checkout", "--detach", "FETCH_HEAD")):
+        files.access.run(Command(("git", "-C", repo, *argv), deadline=deadline), check=True)
 
 
 UPLOAD_TREE_SCRIPT = r"""set -eu

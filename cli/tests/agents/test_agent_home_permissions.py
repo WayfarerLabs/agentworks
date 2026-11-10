@@ -339,28 +339,28 @@ def test_the_source_lines_are_ensured_after_the_dotfiles_install(
 def test_a_failed_git_dotfiles_sync_skips_the_agent_install(
     db: Database, config: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The agent's dotfiles take the admin's sync: a pull that fails warns and the install never runs."""
+    """The agent's dotfiles take the admin's sync: a fetch that fails warns and the install never runs."""
     url = "https://example.com/dots.git"
     dest = f"{HOME}/.dotfiles"
 
-    def fail_the_pull(recorder: AccessRecorder) -> None:
+    def fail_the_fetch(recorder: AccessRecorder) -> None:
         answer = recorder.answer
 
         def scripted(call: Call) -> Result | BaseException | None:
             argv = call.request.argv if isinstance(call.request, Command) else ()
             if argv == ("git", "-C", dest, "remote", "get-url", "origin"):
                 return Result(Completed(0), f"{url}\n".encode())
-            if argv[:4] == ("git", "-C", dest, "pull"):
-                failed = Result(Completed(1), stderr=b"fatal: Not possible to fast-forward\n")
+            if argv[:4] == ("git", "-C", dest, "fetch"):
+                failed = Result(Completed(1), stderr=b"fatal: couldn't find remote ref\n")
                 return CommandFailed("box", 1, failed, streams_logged=True) if call.options["check"] else failed
             return answer(call) if answer is not None else None
 
         recorder.answer = scripted
 
     recorder = _run_create_on_vm(
-        db, config, monkeypatch, user_exists=False, dotfiles=f"git::{url}", before_create=fail_the_pull
+        db, config, monkeypatch, user_exists=False, dotfiles=f"git::{url}", before_create=fail_the_fetch
     )
 
     commands = _commands(recorder)
-    assert any(argv[:4] == ("git", "-C", dest, "pull") for argv in commands)
+    assert any(argv[:4] == ("git", "-C", dest, "fetch") for argv in commands)
     assert ("bash", "-lc", "./install.sh") not in commands
