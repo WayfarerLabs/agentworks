@@ -1,6 +1,6 @@
 # Implementation Plan: Session Batch Stop Parallelism
 
-- Status: Published implementation feedback round 1 of 2
+- Status: Final implementation feedback round 2 of 2
 - Date: 2026-09-06
 - Requirements: [frd.md](./frd.md)
 - Architecture: [hla.md](./hla.md)
@@ -257,7 +257,7 @@ rerun. The incomplete Windows private-key scan remains an explicit cleanup-evide
 - [x] Simplify worker evidence and coordinator drain branches without weakening submission
       ownership, primary-error propagation, or interrupted-persistence retry.
 - [x] Resolve retry-factory feedback against the independent one-attempt requirement in R6.
-- [ ] Run the full gates and fresh private project, complexity, and cold correctness reviews on the
+- [x] Run the full gates and fresh private project, complexity, and cold correctness reviews on the
       round's exact result, then publish a new ready handoff for the separate tester.
 
 The retry-factory deletion suggestion was assessed against R6 rather than today's equal defaults.
@@ -279,6 +279,41 @@ the lock, and CLI sources match main and are not changed by this teardown effort
 diagnostic wrote a standard error log in the ambient profile; no database or runtime command ran.
 The local empty-batch CLI smoke was refused by automatic approval review before execution, so it
 remains not executed rather than being described as a pass.
+
+#### Final feedback round
+
+The first fix round was handed off at `13974fb19`, with main still at `438c4546c`. Its executable
+tree matched development checkpoint `d63a1ec61`: 11,472 tests passed with 11 skipped, all required
+local gates and hosted checks passed, and the three private review lanes were clean. The permanent
+guide and plan also received project and complexity review.
+
+The separate integration report on `13974fb19` independently passed all twelve gates on their first
+run, again with 11,472 tests passed and 11 skipped. Linux-to-remote-Lima named stop, supported
+restart, and filtered three-session stop passed with native process/socket and database checks and
+an unchanged sentinel. This is current-head evidence, not a new Windows, full-concurrency, live
+replacement-race, or interruption claim. Its original VZ-driver birth was not captured; bounded
+cleanup and private-form scans retain their stated scope.
+
+The report and published complexity review both reproduce a remaining inherited defect in the
+touched compatibility path: by-name stopped persistence can overwrite a replacement after remote
+absence proof. The lead independently reproduced partial, already-stopped, and legacy branches
+against changed runs, rows, and runtimes with two SQLite connections and mocked remote operations.
+All nine cases corrupted the replacement. This is database/controller evidence, not a live race
+pass. The final round fixes that persistence boundary without widening native cleanup authority or
+worker eligibility.
+
+- [x] Receive and critically assess the current-head integration report after the one-hour feedback
+      window before beginning the second and final authorized round.
+- [ ] Fence all teardown stopped writes, including incomplete recovery, stopped-row cleanup, and
+      legacy exact-session teardown, against the original nullable persisted identity.
+- [ ] Share the actual conditional-update predicate and raw completeness classification without
+      nullable worker plans, a generic lifecycle framework, or weakened validation/idempotence.
+- [ ] Prove replacement preservation and successful stopped persistence across all compatibility
+      branches, including independent SQLite connections and interrupted complete reconciliation.
+- [ ] Run full gates and fresh private project, complexity, and cold correctness reviews, then
+      publish the final fix round's exact-head ready handoff for the separate tester.
+- [ ] Assess the final integration report and any remaining feedback before SDD closeout. Further
+      material fixes after this second round require operator disposition.
 
 - [x] Update active command reference and session lifecycle/status guidance.
 - [ ] Add `locked.md` from the implemented exact head and run locked-SDD validation.
