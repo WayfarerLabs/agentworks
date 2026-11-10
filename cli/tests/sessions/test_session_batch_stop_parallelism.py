@@ -12,7 +12,7 @@ from uuid import uuid4
 import pytest
 
 from agentworks import output as output_mod
-from agentworks.db import PID_STOPPED, SessionMode, SessionStatus
+from agentworks.db import PID_STOPPED, SessionMode, SessionRuntimeSnapshot, SessionStatus
 from agentworks.errors import ExternalError, StateError
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import manager as session_manager
@@ -48,8 +48,8 @@ class _RecordingDB:
     def __init__(self) -> None:
         self.calls: list[tuple[int, str]] = []
 
-    def compare_and_set_session_stopped(self, name: str, **kwargs: object) -> None:
-        self.calls.append((threading.get_ident(), name))
+    def compare_and_set_session_stopped(self, expected: SessionRuntimeSnapshot) -> None:
+        self.calls.append((threading.get_ident(), expected.name))
 
 
 def _plan(
@@ -175,27 +175,12 @@ def test_database_compare_and_set_is_atomic_conflict_safe_and_retry_safe(db: Dat
     session = db.get_session("session")
     assert session is not None
 
-    db.compare_and_set_session_stopped(
-        "session",
-        expected_session_uuid=session.session_uuid,
-        expected_run_id=session.run_id,
-        expected_socket_path=socket_path,
-        expected_pid=101,
-        expected_boot_id=BOOT_ID,
-        expected_tmux_server_start_ticks=201,
-    )
+    expected = SessionRuntimeSnapshot.from_session(session)
+    db.compare_and_set_session_stopped(expected)
     stopped = db.get_session("session")
     assert stopped is not None and stopped.pid == PID_STOPPED
 
-    db.compare_and_set_session_stopped(
-        "session",
-        expected_session_uuid=session.session_uuid,
-        expected_run_id=session.run_id,
-        expected_socket_path=socket_path,
-        expected_pid=101,
-        expected_boot_id=BOOT_ID,
-        expected_tmux_server_start_ticks=201,
-    )
+    db.compare_and_set_session_stopped(expected)
 
     db.update_session_runtime(
         "session",
@@ -205,15 +190,7 @@ def test_database_compare_and_set_is_atomic_conflict_safe_and_retry_safe(db: Dat
         tmux_server_start_ticks=202,
     )
     with pytest.raises(StateError):
-        db.compare_and_set_session_stopped(
-            "session",
-            expected_session_uuid=session.session_uuid,
-            expected_run_id=session.run_id,
-            expected_socket_path=socket_path,
-            expected_pid=101,
-            expected_boot_id=BOOT_ID,
-            expected_tmux_server_start_ticks=201,
-        )
+        db.compare_and_set_session_stopped(expected)
     current = db.get_session("session")
     assert current is not None and current.pid == 102
 
@@ -224,15 +201,7 @@ def test_database_compare_and_set_rejects_advanced_run(db: Database) -> None:
 
     db.set_session_run_id("session", str(uuid4()))
     with pytest.raises(StateError):
-        db.compare_and_set_session_stopped(
-            "session",
-            expected_session_uuid=original.session_uuid,
-            expected_run_id=original.run_id,
-            expected_socket_path=socket_path,
-            expected_pid=101,
-            expected_boot_id=BOOT_ID,
-            expected_tmux_server_start_ticks=201,
-        )
+        db.compare_and_set_session_stopped(SessionRuntimeSnapshot.from_session(original))
 
 
 def test_database_compare_and_set_rejects_reused_name(db: Database) -> None:
@@ -256,15 +225,7 @@ def test_database_compare_and_set_rejects_reused_name(db: Database) -> None:
     )
     assert replacement.session_uuid != original.session_uuid
     with pytest.raises(StateError):
-        db.compare_and_set_session_stopped(
-            "session",
-            expected_session_uuid=original.session_uuid,
-            expected_run_id=original.run_id,
-            expected_socket_path=socket_path,
-            expected_pid=101,
-            expected_boot_id=BOOT_ID,
-            expected_tmux_server_start_ticks=201,
-        )
+        db.compare_and_set_session_stopped(SessionRuntimeSnapshot.from_session(original))
 
 
 @pytest.mark.parametrize("last_presence", list(ProbeStatus))
@@ -666,8 +627,8 @@ def test_interrupt_after_persistence_attempt_retries_reconciliation_idempotently
     )
 
     class _InterruptedDB(_RecordingDB):
-        def compare_and_set_session_stopped(self, name: str, **kwargs: object) -> None:
-            super().compare_and_set_session_stopped(name, **kwargs)
+        def compare_and_set_session_stopped(self, expected: SessionRuntimeSnapshot) -> None:
+            super().compare_and_set_session_stopped(expected)
             if len(self.calls) == 1:
                 raise KeyboardInterrupt
 
@@ -692,9 +653,9 @@ def test_persistent_base_exception_during_reconciliation_drains_siblings_once(
     )
 
     class _ExitingDB(_RecordingDB):
-        def compare_and_set_session_stopped(self, name: str, **kwargs: object) -> None:
-            super().compare_and_set_session_stopped(name, **kwargs)
-            if name == "exit-1":
+        def compare_and_set_session_stopped(self, expected: SessionRuntimeSnapshot) -> None:
+            super().compare_and_set_session_stopped(expected)
+            if expected.name == "exit-1":
                 raise SystemExit(7)
 
     db = _ExitingDB()

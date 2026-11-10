@@ -90,9 +90,12 @@ thread retains database and output ownership, persists verified results before a
 and runs incomplete dedicated or shared-server compatibility work serially after the concurrent
 lane. A failure in one session does not cancel its siblings.
 
-Named and batch teardown share the same remote protocol and conditional stopped-state reconciliation
-for complete-fingerprint runtimes. A changed session, run, or runtime fingerprint causes a conflict
-instead of overwriting the newer state.
+Named and batch teardown share the same remote protocol for complete-fingerprint runtimes. Every
+teardown stopped-state update, including incomplete-runtime recovery, stopped-row socket cleanup,
+and legacy exact-session teardown, compares the original session, run, and nullable runtime fields
+copied before remote observations. A changed identity causes a conflict instead of overwriting the
+newer state. Recording incomplete or absent identity for persistence does not authorize native
+cleanup or make a row eligible for parallel teardown.
 
 An interrupt cancels teardown that has not started but cannot terminate a running worker safely.
 Agentworks visibly drains bounded in-flight work, persists every verified result, and then exits as

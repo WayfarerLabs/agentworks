@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import agentworks.sessions.manager as _mgr
 from agentworks import output
 from agentworks.capabilities.harness_integration import HarnessLaunchIntent, require_implemented_start
-from agentworks.db import PID_STOPPED, SessionMode, SessionStatus
+from agentworks.db import PID_STOPPED, SessionMode, SessionRuntimeSnapshot, SessionStatus
 from agentworks.errors import (
     AgentworksError,
     BrokenStateError,
@@ -18,7 +18,7 @@ from agentworks.errors import (
     UserAbort,
     ValidationError,
 )
-from agentworks.sessions.manager._teardown import _mark_stopped, _validated_socket_path
+from agentworks.sessions.manager._teardown import _validated_socket_path, has_complete_runtime_fields
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
@@ -133,6 +133,7 @@ def _teardown_legacy_session(
     def run_runtime(command: str, *, check: bool = True, env: dict[str, str] | None = None) -> object:
         return target.run(command, sudo=not target_owns_session, check=check, env=env)
 
+    expected = SessionRuntimeSnapshot.from_session(session)
     presence = probe_tmux_session(session.name, run_command=run_runtime, socket_path=None)
     if presence is ProbeStatus.UNKNOWN:
         raise ExternalError(
@@ -156,7 +157,7 @@ def _teardown_legacy_session(
             entity_kind="session",
             entity_name=session.name,
         )
-    _mark_stopped(db, session)
+    db.compare_and_set_session_stopped(expected)
 
 
 def _teardown_session(
@@ -1038,13 +1039,7 @@ def stop_all_sessions(
                         entity_name=session.name,
                         hint="Inspect and repair the persisted session runtime before retrying.",
                     )
-                complete_dedicated = (
-                    session.socket_path is not None
-                    and session.pid is not None
-                    and session.boot_id is not None
-                    and session.tmux_server_start_ticks is not None
-                )
-                if complete_dedicated:
+                if has_complete_runtime_fields(session):
                     plan_target = _mgr.transport(
                         vm,
                         config,

@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 import agentworks.sessions.manager as _mgr
 from agentworks import output
-from agentworks.db import PID_STOPPED, SessionMode
+from agentworks.db import PID_STOPPED, SessionMode, SessionRuntimeSnapshot
 from agentworks.errors import BrokenStateError, ConnectivityError, ExternalError, StateError
 from agentworks.sessions.tmux import ADMIN_SOCKET_ROOT, AGENT_SOCKET_ROOT, ProbeStatus
 
@@ -349,6 +349,17 @@ def execute_dedicated_teardown(plan: DedicatedTeardownPlan) -> None:
     )
 
 
+def has_complete_runtime_fields(session: SessionRow) -> bool:
+    """Classify field presence only; preparation still validates persisted identity."""
+    return (
+        session.socket_path is not None
+        and session.pid is not None
+        and session.pid != PID_STOPPED
+        and session.boot_id is not None
+        and session.tmux_server_start_ticks is not None
+    )
+
+
 def teardown_dedicated_session(
     session: SessionRow,
     *,
@@ -360,20 +371,15 @@ def teardown_dedicated_session(
     """Prepare compatibility state, then use the shared complete-plan engine."""
     from agentworks.sessions.tmux import _matches_launch_attempt, capture_tmux_server_fingerprint, require_socket_path
 
-    complete = (
-        session.pid is not None
-        and session.pid > 0
-        and session.boot_id is not None
-        and session.tmux_server_start_ticks is not None
-    )
-    if not complete:
+    expected = SessionRuntimeSnapshot.from_session(session)
+    if not has_complete_runtime_fields(session):
         socket_path = _validated_socket_path(db, session)
         sudo = not target_owns_session
         require_socket_path(socket_path, run_command=partial(target.run, sudo=sudo))
         probe = capture_tmux_server_fingerprint(target=target, socket_path=socket_path, sudo=sudo)
         if session.pid == PID_STOPPED and probe.status is ProbeStatus.ABSENT:
             _remove_stale_socket(session_name=session.name, socket_path=socket_path, target=target, sudo=sudo)
-            _mark_stopped(db, session)
+            db.compare_and_set_session_stopped(expected)
             return
         if probe.status is not ProbeStatus.PRESENT:
             _recover_unreachable_dedicated_runtime(
@@ -384,7 +390,7 @@ def teardown_dedicated_session(
                 force=force,
                 prove_absent=partial(_mgr._prove_stored_runtime_absent, session, target=target, sudo=sudo),
             )
-            _mark_stopped(db, session)
+            db.compare_and_set_session_stopped(expected)
             return
 
         observed = probe.fingerprint
@@ -422,7 +428,7 @@ def teardown_dedicated_session(
             )
         original_identity = (session.session_uuid, session.run_id)
         db.complete_session_runtime_identity(
-            session,
+            expected,
             boot_id=observed_boot_id,
             tmux_server_start_ticks=observed.start_ticks,
         )
@@ -454,26 +460,18 @@ def teardown_dedicated_session(
     reconcile_dedicated_teardown(db, plan)
 
 
-def _mark_stopped(db: Database, session: SessionRow) -> None:
-    db.update_session_runtime(
-        session.name,
-        socket_path=session.socket_path,
-        pid=PID_STOPPED,
-        boot_id=None,
-        tmux_server_start_ticks=None,
-    )
-
-
 def reconcile_dedicated_teardown(db: Database, plan: DedicatedTeardownPlan) -> None:
     """Persist verified stopped evidence on the invoking thread."""
     db.compare_and_set_session_stopped(
-        plan.session_name,
-        expected_session_uuid=plan.session_uuid,
-        expected_run_id=plan.run_id,
-        expected_socket_path=plan.socket_path,
-        expected_pid=plan.stored_pid,
-        expected_boot_id=plan.stored_boot_id,
-        expected_tmux_server_start_ticks=plan.stored_start_ticks,
+        SessionRuntimeSnapshot(
+            name=plan.session_name,
+            session_uuid=plan.session_uuid,
+            run_id=plan.run_id,
+            socket_path=plan.socket_path,
+            pid=plan.stored_pid,
+            boot_id=plan.stored_boot_id,
+            tmux_server_start_ticks=plan.stored_start_ticks,
+        )
     )
 
 

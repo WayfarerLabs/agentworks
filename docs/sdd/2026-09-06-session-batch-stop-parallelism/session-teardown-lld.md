@@ -36,9 +36,11 @@ After preparation, batch stop indexes only the selected plans eligible for concu
 - `(vm_name, canonical_boot_id, positive_pid)` for every complete process identity.
 
 Any key claimed by more than one concurrent plan produces a typed whole-batch failure listing the
-conflicting sessions. Rows with missing or invalid fingerprint fields never enter these indexes or
-the pool; they stay on the synchronous compatibility path. Unselected rows and serial rows cannot
-create two overlapping workers and therefore do not add a new batch refusal.
+conflicting sessions. Rows with missing fingerprint fields stay on the synchronous compatibility
+path. One shared raw-field-presence classifier excludes the stopped sentinel but does not validate
+identity. Malformed non-null identities reach preparation and fail closed, never entering these
+indexes or the pool and never gaining cleanup authority from classification. Unselected rows and
+serial rows cannot create two overlapping workers and therefore do not add a new batch refusal.
 
 Start ticks remain part of each plan and the worker's exact process-incarnation comparison. They are
 not part of the collision key because two plans that claim the same live PID on one VM boot are not
@@ -174,7 +176,7 @@ The existing legacy function stays on the invoking thread:
 2. fail if presence is unknown;
 3. when present, invoke `kill-session -t =NAME`;
 4. probe until the exact session is absent; and
-5. mark the row stopped through its existing main-thread database call.
+5. conditionally mark the row stopped against the original snapshot copied before probing.
 
 Incomplete dedicated and legacy rows run one at a time after all concurrent futures are reconciled.
 Ordinary failure is accumulated and the next serial row proceeds. Compatibility code does not learn
@@ -262,13 +264,19 @@ attempt already committed.
 
 ## Atomic Reconciliation
 
-Add a database operation that updates session runtime only when the row still matches all prepared
-identity fields. Its single conditional `UPDATE` predicates on the reusable name, durable session
-UUID, nullable managed-run ID, socket path, PID, boot ID, and start ticks. It checks `rowcount == 1`
-and commits through the existing transaction policy. After zero affected rows, it reads the row
-once: an exact durable-identity and desired-runtime-state match means an earlier interrupted
+`SessionRuntimeSnapshot` is a frozen persistence-only value containing the reusable name, durable
+session UUID, nullable managed-run ID, socket path, PID, boot ID, and start ticks. Serial
+compatibility paths copy these primitives from the mutable row before their first native
+observation. Complete plan reconciliation constructs the same snapshot on the invoking thread.
+Nullable persistence evidence never enters `DedicatedTeardownPlan` or authorizes remote mutation.
+
+One concrete database primitive updates the four runtime fields only when all seven original
+identity fields still match in one conditional `UPDATE`, using null-safe predicates. It commits
+through the existing transaction policy and returns whether one row matched. Identity acquisition
+raises a typed conflict on no match. Stopped reconciliation instead reads the row once after no
+match: an exact durable-identity and desired-runtime-state match means an earlier interrupted
 reconciliation already committed and is idempotent success; any other or missing row is a typed
-conflict and remains untouched.
+conflict and remains untouched. These are operation-specific policies, not flags on the primitive.
 
 `reconcile_dedicated_teardown(db, plan)` runs on the invoking thread after a normally returned
 future. It compare-and-sets from the plan's complete expected identity to the persisted socket,
@@ -325,8 +333,9 @@ use the same preparation, database-free execution, and UUID/run/runtime compare-
 workers. The incomplete dedicated branch retains its pre-kill launch proof and fingerprint
 persistence, then reads the row again and joins that complete path. Named stop does not use an
 executor or gain the batch timeout. Stopped-row and uncertain-launch special cases remain serial and
-cannot turn a partial identity into a worker plan. One stopped-state helper serves those
-compatibility cases and legacy teardown.
+cannot turn a partial identity into a worker plan. Those compatibility cases and legacy teardown use
+the same snapshot-fenced stopped-state database operation. A replacement during absence proof,
+stale-socket cleanup, or exact legacy-session teardown cannot be overwritten by a by-name write.
 
 Both complete paths share unreachable-runtime recovery: explicit absence proof permits exact socket
 cleanup, an unforced identity or connectivity failure becomes actionable broken state, and forced
@@ -362,6 +371,8 @@ invoke continues through the one dispatcher and never enters the concurrent coor
 - empty concurrent-plan handling for serial-only and preparation-failure selections;
 - serial incomplete-dedicated and legacy execution without the plan model;
 - atomic and retry-safe compare-and-set, persistence-before-output, and persistence failure;
+- positive completion and two-connection row/run/runtime replacement during all three serial
+  compatibility branches, with nullable expected fields and exact replacement preservation;
 - sibling success under worker failure;
 - five-second heartbeat behavior;
 - first-interrupt queued cancellation and running reconciliation;

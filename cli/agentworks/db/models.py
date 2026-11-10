@@ -180,6 +180,31 @@ class SessionRow:
     run_id: str | None = None
 
 
+@dataclass(frozen=True)
+class SessionRuntimeSnapshot:
+    """Immutable persisted identity for a conditional runtime update, not native authority."""
+
+    name: str
+    session_uuid: str
+    run_id: str | None
+    socket_path: str | None
+    pid: int | None
+    boot_id: str | None
+    tmux_server_start_ticks: int | None
+
+    @classmethod
+    def from_session(cls, session: SessionRow) -> SessionRuntimeSnapshot:
+        return cls(
+            name=session.name,
+            session_uuid=session.session_uuid,
+            run_id=session.run_id,
+            socket_path=session.socket_path,
+            pid=session.pid,
+            boot_id=session.boot_id,
+            tmux_server_start_ticks=session.tmux_server_start_ticks,
+        )
+
+
 class ShellEntry(TypedDict):
     """One shell pane in a console window. cwd None = workspace root."""
 

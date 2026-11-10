@@ -43,6 +43,10 @@ boundaries. It partitions actionable work by persisted identity completeness. De
 complete valid fingerprint become immutable concurrent plans. Incomplete dedicated and legacy rows
 stay on the existing synchronous dispatcher.
 
+Synchronous and batch routing use one raw-field-presence classifier, excluding the stopped sentinel.
+The classifier grants no authority: non-null malformed identities fail preparation rather than
+entering either remote execution or safe-recovery cleanup through routing alone.
+
 For dedicated work, the coordinator creates one transport per task with an initially 10-second
 finite default timeout and submits one future per plan with at most eight active. If submission is
 interrupted or fails partway, a batch-local start gate makes every submitted callable exit without
@@ -112,9 +116,12 @@ fingerprint using the existing stopped sentinel through an atomic compare-and-se
 complete prepared identity. A missing or changed row is a conflict and remains untouched. No worker
 owns a transaction or a connection.
 
-Complete synchronous teardowns use this same conditional write. Incomplete compatibility recovery
-and legacy teardown retain the single invoking-thread stopped-state helper; they do not invent a
-complete fingerprint merely to enter reconciliation.
+Every teardown stopped-state write uses the same conditional database operation. Incomplete
+compatibility recovery, stopped-row cleanup, and legacy teardown copy the original nullable runtime
+fields and durable session/run identities before remote observations. Their persistence snapshot
+does not authorize native work or make them concurrent plans. Acquisition and stopped-state
+reconciliation share one concrete conditional update primitive, with separate conflict and
+interrupted-commit policies in their operation wrappers.
 
 Persistence precedes success output. A persistence error converts that session to failure. Remote
 success cannot be rolled back, so the failure tells the truth rather than pretending the runtime

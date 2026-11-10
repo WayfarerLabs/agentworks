@@ -39,7 +39,8 @@ adds no second lock.
 ### 1. Add state fencing and eligibility
 
 Add atomic stopped-state compare-and-set for the durable session UUID, nullable managed-run
-identity, and complete prepared runtime fingerprint. Partition selected rows after the current
+identity, and original nullable runtime snapshot. Capture it before remote observations for serial
+compatibility work as well as complete-plan execution. Partition selected rows after the current
 gates: only validated dedicated rows with complete fingerprints are eligible for concurrency.
 Missing-fingerprint dedicated rows and legacy rows remain serial. Refuse duplicate socket or
 VM/boot/PID process keys among concurrent plans before submission, regardless of whether duplicate
@@ -53,7 +54,9 @@ batch complete rows use the same engine and conditional stopped-state reconcilia
 incomplete dedicated branch's pre-kill recorded-launch proof and start-ticks persistence, make the
 acquisition conditional on its original row snapshot, refetch its identity, then use the complete
 plan with a fresh runtime capture. Stopped-row, uncertain-launch, and legacy special cases retain
-serial preparation and a single stopped-state helper.
+serial preparation and use the same snapshot-fenced stopped-state operation without acquiring
+concurrent eligibility. Both stopped reconciliation and identity acquisition use one concrete
+conditional runtime update; their conflict and retry policies remain separate.
 
 At this point behavior remains serial. Existing teardown regression tests must be green.
 
@@ -148,9 +151,11 @@ enter the pool. Incomplete dedicated and legacy work remains serial.
 
 Control: the worker repeats the current immediate capture, complete identity comparison, and
 destructive use without a database or queueing boundary between them. Final persistence
-compare-and-sets the complete prepared identity and recognizes an already-committed desired state
-after an interrupted attempt. PR #764's database-use lock prevents live-file replacement while the
-writable command remains open.
+compare-and-sets the original identity, including nullable compatibility fields, and recognizes an
+already-committed desired state after an interrupted attempt. Serial partial recovery, stopped-row
+cleanup, and legacy exact-session teardown copy that snapshot before native calls. A changed row,
+run, or runtime remains untouched and produces a typed conflict. PR #764's database-use lock
+prevents live-file replacement while the writable command remains open.
 
 ### Interrupt loses successful work
 

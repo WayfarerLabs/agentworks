@@ -41,6 +41,7 @@ if TYPE_CHECKING:
         ProvisioningStatus,
         SessionMode,
         SessionRow,
+        SessionRuntimeSnapshot,
         ShellEntry,
         VMEventRow,
         VMRow,
@@ -956,20 +957,24 @@ class Database:
         )
         self._commit_unless_in_tx()
 
-    def complete_session_runtime_identity(
+    def _update_session_runtime_if_unchanged(
         self,
-        expected: SessionRow,
+        expected: SessionRuntimeSnapshot,
         *,
-        boot_id: str,
-        tmux_server_start_ticks: int,
-    ) -> None:
-        """Persist observed identity only while its original runtime snapshot still holds."""
+        socket_path: str | None,
+        pid: int | None,
+        boot_id: str | None,
+        tmux_server_start_ticks: int | None,
+    ) -> bool:
+        """Replace runtime fields only while all original persisted identity fields match."""
         result = self._conn.execute(
-            "UPDATE sessions SET boot_id = ?, tmux_server_start_ticks = ?, "
+            "UPDATE sessions SET socket_path = ?, pid = ?, boot_id = ?, tmux_server_start_ticks = ?, "
             "updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') "
             "WHERE name = ? AND session_uuid = ? AND run_id IS ? AND socket_path IS ? "
             "AND pid IS ? AND boot_id IS ? AND tmux_server_start_ticks IS ?",
             (
+                socket_path,
+                pid,
                 boot_id,
                 tmux_server_start_ticks,
                 expected.name,
@@ -982,7 +987,23 @@ class Database:
             ),
         )
         self._commit_unless_in_tx()
-        if result.rowcount != 1:
+        return result.rowcount == 1
+
+    def complete_session_runtime_identity(
+        self,
+        expected: SessionRuntimeSnapshot,
+        *,
+        boot_id: str,
+        tmux_server_start_ticks: int,
+    ) -> None:
+        """Persist observed identity only while its original runtime snapshot still holds."""
+        if not self._update_session_runtime_if_unchanged(
+            expected,
+            socket_path=expected.socket_path,
+            pid=expected.pid,
+            boot_id=boot_id,
+            tmux_server_start_ticks=tmux_server_start_ticks,
+        ):
             from agentworks.errors import StateError
 
             raise StateError(
@@ -994,16 +1015,9 @@ class Database:
 
     def compare_and_set_session_stopped(
         self,
-        name: str,
-        *,
-        expected_session_uuid: str,
-        expected_run_id: str | None,
-        expected_socket_path: str,
-        expected_pid: int,
-        expected_boot_id: str,
-        expected_tmux_server_start_ticks: int,
+        expected: SessionRuntimeSnapshot,
     ) -> None:
-        """Clear one runtime only when its complete prepared identity matches.
+        """Clear one runtime only when its original persisted identity matches.
 
         Durable session, managed-run, and runtime identities are a
         cross-process boundary. A zero-row update is accepted only when an
@@ -1011,33 +1025,21 @@ class Database:
         state for all three; every other mismatch stays untouched and fails
         closed.
         """
-        result = self._conn.execute(
-            "UPDATE sessions SET socket_path = ?, pid = ?, boot_id = NULL, tmux_server_start_ticks = NULL, "
-            "updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') "
-            "WHERE name = ? AND session_uuid = ? AND run_id IS ? AND socket_path IS ? "
-            "AND pid IS ? AND boot_id IS ? AND tmux_server_start_ticks IS ?",
-            (
-                expected_socket_path,
-                _db.PID_STOPPED,
-                name,
-                expected_session_uuid,
-                expected_run_id,
-                expected_socket_path,
-                expected_pid,
-                expected_boot_id,
-                expected_tmux_server_start_ticks,
-            ),
-        )
-        self._commit_unless_in_tx()
-        if result.rowcount == 1:
+        if self._update_session_runtime_if_unchanged(
+            expected,
+            socket_path=expected.socket_path,
+            pid=_db.PID_STOPPED,
+            boot_id=None,
+            tmux_server_start_ticks=None,
+        ):
             return
 
-        session = self.get_session(name)
+        session = self.get_session(expected.name)
         if (
             session is not None
-            and session.session_uuid == expected_session_uuid
-            and session.run_id == expected_run_id
-            and session.socket_path == expected_socket_path
+            and session.session_uuid == expected.session_uuid
+            and session.run_id == expected.run_id
+            and session.socket_path == expected.socket_path
             and session.pid == _db.PID_STOPPED
             and session.boot_id is None
             and session.tmux_server_start_ticks is None
@@ -1047,9 +1049,9 @@ class Database:
         from agentworks.errors import StateError
 
         raise StateError(
-            f"session '{name}' runtime identity changed before stopped state could be persisted",
+            f"session '{expected.name}' runtime identity changed before stopped state could be persisted",
             entity_kind="session",
-            entity_name=name,
+            entity_name=expected.name,
             hint="Inspect the current session runtime before retrying.",
         )
 
