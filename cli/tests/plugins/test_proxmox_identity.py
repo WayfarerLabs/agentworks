@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import contextlib
 import math
+import time
 from functools import partial
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
@@ -23,7 +24,7 @@ from agentworks.execution.root_script import ChannelUnreachable, RawRun
 from agentworks.plugins.proxmox import guest_agent
 from agentworks.plugins.proxmox import platform as proxmox_platform
 from agentworks.plugins.proxmox.api import ProxmoxAPIError
-from agentworks.plugins.proxmox.platform import ProxmoxPlatform
+from agentworks.plugins.proxmox.platform import STATUS_DEADLINE_SECONDS, ProxmoxPlatform
 from tests._proxmox_fakes import NEWID, PROXMOX_CONFIG, FakeProxmoxAPI
 
 if TYPE_CHECKING:
@@ -141,7 +142,7 @@ def test_the_identity_check_spends_the_root_scripts_deadline(monkeypatch: pytest
     now = [1000.0]
     passed: list[float] = []
 
-    def slow_check(self: ProxmoxPlatform, vm: VMRow, ctx: RunContext) -> dict[str, object]:
+    def slow_check(self: ProxmoxPlatform, vm: VMRow, ctx: RunContext, *, expires: float) -> dict[str, object]:
         now[0] += 20
         return {}
 
@@ -160,3 +161,59 @@ def test_the_identity_check_spends_the_root_scripts_deadline(monkeypatch: pytest
     with pytest.raises(ChannelUnreachable):
         _platform().run_as_root(ROW, RunContext(), b"true", 20)
     assert passed == [10]
+
+
+SLOW_READ_SECONDS = 16.0
+
+
+class SlowIdentityReads(FakeProxmoxAPI):
+    """An API whose identity reads each answer after ``SLOW_READ_SECONDS`` on ``clock``, about a guest the token
+    cannot audit; a read given a shorter timeout fails when it runs out, as a socket does."""
+
+    def __init__(self, clock: list[float]) -> None:
+        super().__init__()
+        self.clock = clock
+        self.holder = "outside-the-pool"
+        self.auditable = False
+        self.timeouts: list[float | None] = []
+
+    def _wait(self, timeout: float | None) -> None:
+        self.timeouts.append(timeout)
+        assert timeout is not None
+        self.clock[0] += min(timeout, SLOW_READ_SECONDS)
+        if timeout < SLOW_READ_SECONDS:
+            raise ProxmoxAPIError("Proxmox API GET failed: timed out")
+
+    def vm_status(self, node: str, vmid: int, *, timeout: float | None = None) -> dict[str, object]:
+        self._wait(timeout)
+        return super().vm_status(node, vmid, timeout=timeout)
+
+    def vmid_in_use(self, vmid: int, *, timeout: float | None = None) -> bool:
+        self._wait(timeout)
+        return super().vmid_in_use(vmid, timeout=timeout)
+
+
+@pytest.fixture
+def slow(monkeypatch: pytest.MonkeyPatch) -> SlowIdentityReads:
+    api = SlowIdentityReads([1000.0])
+    monkeypatch.setattr(time, "monotonic", lambda: api.clock[0])
+    monkeypatch.setattr(ProxmoxPlatform, "_api", lambda self, ctx: api)
+    return api
+
+
+def test_the_identity_check_and_its_fallback_share_the_root_scripts_deadline(slow: SlowIdentityReads) -> None:
+    """Two slow identity reads cannot outlast a deadline shorter than both: the second gets what remains."""
+    with pytest.raises(ChannelUnreachable):
+        _platform().run_as_root(ROW, RunContext(), b"true", 20)
+
+    assert slow.clock[0] - 1000.0 <= 20
+    assert slow.timeouts == [20, 4]
+    assert "guest_agent_exec" not in slow.ops()
+
+
+def test_status_bounds_the_whole_identity_check(slow: SlowIdentityReads) -> None:
+    """A status read that spends the budget leaves no time for the fallback, so the state is unknown at once."""
+    assert _platform().status(ROW, RunContext()) is VMStatus.UNKNOWN
+
+    assert slow.clock[0] - 1000.0 <= STATUS_DEADLINE_SECONDS
+    assert slow.timeouts == [STATUS_DEADLINE_SECONDS]

@@ -173,7 +173,7 @@ def test_proxmox_power_ops_skip_when_already_in_state(
 
 
 def test_proxmox_status_uses_bounded_provider_call(monkeypatch: pytest.MonkeyPatch) -> None:
-    from agentworks.plugins.proxmox.platform import ProxmoxPlatform
+    from agentworks.plugins.proxmox.platform import STATUS_DEADLINE_SECONDS, ProxmoxPlatform
 
     platform = ProxmoxPlatform(
         "px",
@@ -189,7 +189,10 @@ def test_proxmox_status_uses_bounded_provider_call(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(platform, "_api", lambda _ctx: _API())
 
     assert platform.status(_proxmox_row(), RunContext()) is VMStatus.RUNNING  # type: ignore[arg-type]
-    assert calls == [("pve1", 100, 10)]
+    [(node, vmid, timeout)] = calls
+    assert (node, vmid) == ("pve1", 100)
+    assert timeout is not None
+    assert 0 < timeout <= STATUS_DEADLINE_SECONDS
 
 
 def test_wsl2_status_uses_bounded_provider_call(monkeypatch: pytest.MonkeyPatch) -> None:

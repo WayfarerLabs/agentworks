@@ -17,6 +17,7 @@ unknown and refused, never read as gone.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -62,7 +63,7 @@ def find_guest(
     *,
     vm_name: str,
     names: Collection[str],
-    timeout: float = REQUEST_TIMEOUT_SECONDS,
+    expires: float | None = None,
 ) -> dict[str, Any] | Gone:
     """Our guest's ``status/current`` answer, or :class:`Gone` when the guest is provably gone.
 
@@ -70,10 +71,18 @@ def find_guest(
     cannot audit holding the VMID raises ``StateError``, and a VMID neither
     call can place raises the status read's ``ProxmoxAPIError``: both mean
     the guest's identity is unknown, which no caller may treat as gone.
+
+    ``expires`` is when the caller's budget ends, on ``time.monotonic()``'s
+    clock: each request gets what remains of it, at most
+    ``REQUEST_TIMEOUT_SECONDS``, and a budget the status read spends leaves
+    the VMID unplaced. With none, each request gets the whole request timeout.
     """
     try:
-        current = api.vm_status(node, vmid, timeout=timeout)
+        current = api.vm_status(node, vmid, timeout=_request_timeout(expires))
     except ProxmoxAPIError as status_error:
+        timeout = _request_timeout(expires)
+        if timeout <= 0:
+            raise
         try:
             held = api.vmid_in_use(vmid, timeout=timeout)
         except ProxmoxAPIError:
@@ -98,3 +107,10 @@ def find_guest(
     if holder in names:
         return current
     return Gone(vm_name, node, vmid, holder)
+
+
+def _request_timeout(expires: float | None) -> float:
+    """The timeout of the lookup's next request: what remains before ``expires``, if that is the shorter."""
+    if expires is None:
+        return REQUEST_TIMEOUT_SECONDS
+    return min(REQUEST_TIMEOUT_SECONDS, expires - time.monotonic())
