@@ -72,7 +72,7 @@ rewiring).
 
 ## The Command Execution Model
 
-A command's stages run in a fixed order, and that order is the contract: **preflight-all, then
+A composition's stages run in a fixed order, and that order is the contract: **preflight-all, then
 resolve-once at the preflight boundary, then per phase runup-then-ops**. The single resolve pass is
 the one hard split in the whole model; everything else about where a check lives is the author's
 judgment, but the resolve boundary is fixed.
@@ -125,6 +125,56 @@ duration, resolving its narrow gate secrets just-in-time and seeding them into t
 nothing resolves twice; and **unwind** (`unwind.py`), the command-local `RealizationLog` that
 records each pending node as its realizing mutation completes and, on failure, tears them down in
 reverse order, best-effort.
+
+## Prepared runtime operations
+
+Desired runtime reconciliation and session lifecycle batches compose infrastructure preparation with
+one shared workload boundary. The VM, session, and console managers retain their concrete domain
+operations; `runtime_state` coordinates them without a runnable base class or lifecycle registry.
+The operator-facing contract is in the
+[desired runtime guide](../../../docs/guides/desired-runtime-state.md).
+
+Infrastructure preparation first checks local definitions and source-free node readiness, resolves
+declared provider credentials, and observes each affected VM. Required activation and conditional
+connection repair then prepare guest access. Every selected running-intent VM is prepared even if it
+has no running workloads. Stop-only work observes its parent without activating it or opening a hold
+that could boot it. Prepared provider contexts support later observations and stops without further
+resolution.
+
+One invocation-owned `Resolver` spans these phases. `resolve_gate` already resolves and seeds a
+successful singleton; it also remembers failed names without retaining exceptions or partial values.
+Failed gate names register as requirements only if an eligible workload actually needs them. At the
+workload boundary, `resolve()` checks required names against those failures before any new source
+call. An unrelated infrastructure credential failure stays local to its dependent VM family, while a
+required workload-secret failure prevents every deferred runtime action.
+
+Each prepared session retains its own graph, SESSION scope, admin transport, and owning user
+transport. A SYSTEM sweep would skip real harness command checks, and one session's context cannot
+stand in for another's. Prepared runtime helpers call each node's source-free `preflight` with the
+right context; they do not predict workload secrets separately for each candidate. Per-candidate
+prediction could turn a missing workload secret into an isolated eligibility failure and let the
+rest of a batch mutate. The shared complete resolution pass instead owns secret availability and
+fail-before-prompt behavior. Ordinary single-composition callers retain `preflight_all` and its
+central prediction described above.
+
+Register only eligible session graph declarations and effective session/console-pane environment
+targets. Healthy no-ops, non-replacing startup recovery, and console staging-only cleanup do not
+request unused launch inputs. After complete resolution, validate every composed environment and
+consumer before the first deferred action. Then execute sessions, console actions, and finally
+provider stops. PID repair, artifact staging, teardown, and staging cleanup also wait behind that
+boundary. Executors and final observers receive supplied values, never a resolution callback.
+
+Public lifecycle acceptance records intent separately from these runtime helpers; reconciliation
+does not rewrite it. VM-family guards serialize mutations and hold definition snapshots stable.
+Nested compositions pass the actual held token rather than acquiring another handle. VM node
+auto-start and hold admission use that same guard; a potentially booting hold is skipped under
+stopped intent. Hold admission releases an admission-only guard before interactive access.
+
+Cancellation propagates after reporting completed infrastructure effects. Every exit disposes
+provider and workload value copies, closes the Resolver, and releases holds and guards. `close()`
+clears owned values and refuses later reads or source calls, including when preparation never
+reached the workload boundary. Final observations are bounded checks of the current domain states,
+not an automatic retry loop or an uptime guarantee.
 
 ## The Readiness Fold and Enablement
 
