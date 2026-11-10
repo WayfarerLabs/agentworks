@@ -10,6 +10,7 @@ import stat
 import subprocess
 import sys
 import tarfile
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -17,7 +18,7 @@ import pytest
 from pydantic import ValidationError
 
 from agentworks.agents.template import AgentTemplate
-from agentworks.execution.errors import CommandFailed, ExecutionIncomplete, PathRefused
+from agentworks.execution.errors import CommandFailed, PathRefused
 from agentworks.execution.requests import Bytes, Command
 from agentworks.execution.results import Completed, Result, Unknown, UnknownReason
 from agentworks.sources import (
@@ -38,6 +39,8 @@ from tests.phase_b_support import StepGuest, requires_file_program
 from tests.vm_access_support import account_shell, local_vm_access
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from agentworks.execution.files import Files
 
 requires_posix_tree = pytest.mark.skipif(
@@ -64,6 +67,9 @@ def test_parse_git_source_with_subpath_and_ref() -> None:
         "s3::bucket/key",
         "git::http://example.com/repo.git",
         "git::https://x/y//../lock",
+        "git::https://x/y//a/./lock",
+        "git::https://x/y//a//lock",
+        "git::https://x/y//lock/",
         "git::https://x/y?depth=1",
         "git::https://x/y?ref",
         "git::https://x/y?ref=",
@@ -75,6 +81,26 @@ def test_parse_git_source_with_subpath_and_ref() -> None:
 def test_parse_source_ref_rejects_malformed_inputs(source: str) -> None:
     with pytest.raises(SourceRefError):
         parse_source_ref(source)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://ghp-abc123@example.com/r.git",
+        "https://alice:sekrit-value@example.com/r.git",
+        "https://u9:p9@example.com",
+    ],
+)
+def test_a_git_url_that_carries_a_credential_is_refused_without_echoing_it(url: str) -> None:
+    with pytest.raises(SourceRefError) as refused:
+        parse_source_ref(f"git::{url}//mise.lock?ref=main")
+
+    assert url.split("@")[0].removeprefix("https://") not in str(refused.value)
+
+
+def test_an_at_sign_after_the_host_is_not_a_credential() -> None:
+    ref = parse_source_ref("git::https://example.com/team/@scope.git")
+    assert ref.path == "https://example.com/team/@scope.git"
 
 
 @pytest.mark.parametrize(
@@ -111,6 +137,14 @@ def _staging_guest(clone: Path | None = None) -> StepGuest:
     return guest
 
 
+@pytest.fixture
+def clone() -> Iterator[Path]:
+    """A real staging directory where ``mktemp`` would make one, standing in for the shallow clone."""
+    staging = Path(tempfile.mkdtemp(dir="/var/tmp", prefix="agentworks-source-ref-"))
+    yield staging
+    shutil.rmtree(staging, ignore_errors=True)
+
+
 MKTEMP = Command(("mktemp", "-d", "/var/tmp/agentworks-source-ref-XXXXXX"), deadline=60)
 
 
@@ -139,8 +173,7 @@ def test_fetch_file_refuses_a_local_source_it_cannot_read(tmp_path: Path) -> Non
 
 
 @requires_file_program
-def test_fetch_file_reads_a_git_source_back_from_a_shallow_clone_and_removes_it(tmp_path: Path) -> None:
-    clone = tmp_path / "clone"
+def test_fetch_file_reads_a_git_source_back_from_a_shallow_clone_and_removes_it(tmp_path: Path, clone: Path) -> None:
     (clone / "locks").mkdir(parents=True)
     (clone / "locks" / "mise.lock").write_bytes(b"pinned")
     destination = tmp_path / "home" / "mise.lock"
@@ -154,7 +187,8 @@ def test_fetch_file_reads_a_git_source_back_from_a_shallow_clone_and_removes_it(
     assert guest.commands() == [
         MKTEMP,
         Command(
-            ("git", "clone", "--depth", "1", "--branch", "v1", "https://example.com/repo.git", str(clone)), deadline=60
+            ("git", "clone", "--depth", "1", "--branch", "v1", "--", "https://example.com/repo.git", str(clone)),
+            deadline=60,
         ),
         Command(("rm", "-rf", "--", str(clone)), deadline=60),
     ]
@@ -163,9 +197,7 @@ def test_fetch_file_reads_a_git_source_back_from_a_shallow_clone_and_removes_it(
 
 @requires_file_program
 @pytest.mark.parametrize("planted", ["absent", "link"])
-def test_a_git_source_without_a_regular_file_publishes_nothing(tmp_path: Path, planted: str) -> None:
-    clone = tmp_path / "clone"
-    clone.mkdir()
+def test_a_git_source_without_a_regular_file_publishes_nothing(tmp_path: Path, clone: Path, planted: str) -> None:
     if planted == "link":
         (tmp_path / "elsewhere").write_bytes(b"not in the repository")
         (clone / "mise.lock").symlink_to(tmp_path / "elsewhere")
@@ -183,21 +215,37 @@ def test_a_git_source_without_a_regular_file_publishes_nothing(tmp_path: Path, p
     assert guest.commands()[-1] == Command(("rm", "-rf", "--", str(clone)), deadline=60)
 
 
-def test_fetch_file_cleanup_failure_preserves_fetch_error(captured_output) -> None:  # noqa: ANN001
+@pytest.mark.parametrize(
+    "removal",
+    [Result(Unknown(UnknownReason.CONNECTION)), Result(Completed(1))],
+    ids=["incomplete", "failed"],
+)
+def test_a_staging_removal_that_does_not_succeed_warns_and_keeps_the_fetch_error(
+    captured_output,  # noqa: ANN001
+    removal: Result,
+) -> None:
     guest = _staging_guest()
     primary = CommandFailed("box", 128, Result(Completed(128)), streams_logged=True)
-    guest.respond(Command(("git", "clone", "--depth", "1", URL, STAGING), deadline=60), primary)
-    guest.respond(
-        Command(("rm", "-rf", "--", STAGING), deadline=60),
-        ExecutionIncomplete("box", Result(Unknown(UnknownReason.CONNECTION))),
-    )
+    guest.respond(Command(("git", "clone", "--depth", "1", "--", URL, STAGING), deadline=60), primary)
+    guest.respond(Command(("rm", "-rf", "--", STAGING), deadline=60), removal)
     ref = parse_source_ref(f"git::{URL}//locks/mise.lock")
 
     with pytest.raises(CommandFailed) as caught:
         fetch_file(ref, guest.files, "/remote/mise.lock")
 
     assert caught.value is primary
-    assert captured_output.warnings
+    assert len(captured_output.warnings) == 1
+
+
+@pytest.mark.parametrize("named", ["/tmp/elsewhere", "relative", ""])
+def test_a_mktemp_that_names_no_staging_directory_clones_nothing(named: str) -> None:
+    guest = StepGuest(local_files=False)
+    guest.respond(MKTEMP, Result(Completed(0), f"{named}\n".encode()))
+
+    with pytest.raises(SourceRefError):
+        fetch_file(parse_source_ref(f"git::{URL}//mise.lock"), guest.files, "/remote/mise.lock")
+
+    assert guest.commands() == [MKTEMP]
 
 
 # -- Git directories ----------------------------------------------------------

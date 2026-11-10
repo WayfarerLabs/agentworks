@@ -115,12 +115,16 @@ def _parse_git_source(url_str: str, default_filename: str) -> SourceRef:
         url_str, query = url_str.rsplit("?", 1)
         ref = _extract_ref(query)
 
-    # Validate
+    # Validate. A URL that may carry a credential is never echoed.
     if not (url_str.startswith("https://") or url_str.startswith("git@")):
-        raise SourceRefError(f"git source URL must start with https:// or git@, got: {url_str}")
+        raise SourceRefError("git source URL must start with https:// or git@")
+    if url_str.startswith("https://") and "@" in url_str[len("https://") :].split("/", 1)[0]:
+        raise SourceRefError(
+            "git source URL must not carry a user name or token; configure git credentials for the host instead"
+        )
 
-    if ".." in subpath:
-        raise SourceRefError(f"git source subpath must not contain '..': {subpath}")
+    if subpath and any(part in ("", ".", "..") for part in subpath.split("/")):
+        raise SourceRefError(f"git source subpath must not have an empty, '.' or '..' component: {subpath}")
 
     if ref and not _SAFE_REF_RE.match(ref):
         raise SourceRefError(f"git source ref contains unsafe characters: {ref}")
@@ -276,18 +280,24 @@ _STAGING_PREFIX = "/var/tmp/agentworks-source-ref-"
 
 
 def _read_git_file(source: SourceRef, files: Files, *, log: _Output | None) -> bytes:
-    """Clone ``source`` shallow into a temporary directory on the guest and read its file back."""
-    if not source.subpath or any(part in ("", ".", "..") for part in source.subpath.split("/")):
+    """Clone ``source`` shallow into a temporary directory on the guest and read its file back.
+
+    The directory is removed afterwards whatever happened; a removal that
+    fails or does not complete warns and leaves the fetch's own outcome.
+    """
+    if not source.subpath:
         raise SourceRefError(f"git source must name a file in the repository: {source.path!r}")
     access = files.access
     created = access.run(Command(("mktemp", "-d", f"{_STAGING_PREFIX}XXXXXX"), deadline=files.deadline), check=True)
     try:
         tmp_dir = guest_path(created.stdout.decode("utf-8", "replace").strip())
     except StateError:
-        raise SourceRefError(f"mktemp on VM '{access.vm_name}' did not name a staging directory") from None
+        tmp_dir = ""
+    if not tmp_dir.startswith(_STAGING_PREFIX):
+        raise SourceRefError(f"mktemp on VM '{access.vm_name}' did not name a staging directory")
     try:
         branch = ("--branch", source.ref) if source.ref else ()
-        clone = ("git", "clone", "--depth", "1", *branch, source.path, tmp_dir)
+        clone = ("git", "clone", "--depth", "1", *branch, "--", source.path, tmp_dir)
         access.run(Command(clone, deadline=SHALLOW_CLONE_DEADLINE), check=True)
         if log:
             log.output(f"Cloned {source.path} (ref: {source.ref or 'default'})")
@@ -296,10 +306,20 @@ def _read_git_file(source: SourceRef, files: Files, *, log: _Output | None) -> b
             raise SourceRefError(f"{source.subpath} is not in {source.path}")
         return data
     finally:
-        try:
-            access.run(Command(("rm", "-rf", "--", tmp_dir), deadline=files.deadline))
-        except Exception as error:
-            output.warn(f"Could not remove remote source staging directory: {error}")
+        _remove_staging(files, tmp_dir)
+
+
+def _remove_staging(files: Files, tmp_dir: str) -> None:
+    """Remove the staging directory ``tmp_dir``; a removal that fails or does not complete only warns."""
+    from agentworks.vms.initializer.steps import STEP_FAILURES
+
+    access = files.access
+    try:
+        removed = access.run(Command(("rm", "-rf", "--", tmp_dir), deadline=files.deadline))
+        if removed.require_completed(access.vm_name) != 0:
+            output.warn(f"Could not remove remote source staging directory {tmp_dir} on VM '{access.vm_name}'")
+    except STEP_FAILURES as error:
+        output.warn(f"Could not remove remote source staging directory {tmp_dir}: {error}")
 
 
 def fetch_dir(source: SourceRef, files: Files, dest: str, *, log: _Output | None = None) -> None:

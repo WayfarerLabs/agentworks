@@ -312,6 +312,10 @@ place its `authorized_keys`; every later step runs as the agent, which cannot ru
   `~/.agentworks-*.sh` fragments), and may not contain an empty, `.` or `..` component; a trailing
   `/` is dropped, and only its leading `~` is expanded. A stored destination such as `dots` keeps
   meaning `~/dots`.
+- **Git source URLs may not carry credentials.** A `git::https://` source whose URL holds a user
+  name or token, such as `https://user:token@github.com/...`, is refused when the template loads,
+  without echoing it; declare a `git-credential` resource for the host instead. A subpath with an
+  empty or `.` component is refused too, as one with `..` was.
 - **A git dotfiles checkout follows its `ref`.** On reinit an existing clone fetches the template's
   `ref` and checks it out, so a changed `ref` takes effect and a branch or tag alike advances; with
   no `ref` the clone is fast-forwarded (`git pull --ff-only`). The admin used to pull whatever

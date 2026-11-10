@@ -50,8 +50,10 @@ git::https://github.com/user/infra.git?ref=abc123def
 ```
 
 - **Scheme**: `file::` (default if omitted) or `git::`.
-- **URL**: For git sources, must start with `https://` or `git@`.
-- **Subpath**: Path to a file within the repository. Must not contain `..`.
+- **URL**: For git sources, must start with `https://` or `git@`. An `https://` URL may not carry a
+  user name or token (`https://user:token@host/...`); declare a `git-credential` resource for the
+  host instead (see [Private repositories](#private-repositories)).
+- **Subpath**: Path to a file within the repository. Must not have an empty, `.` or `..` component.
 - **Ref**: Branch name, tag, or commit hash. Must be alphanumeric with hyphens, dots, underscores,
   and slashes.
 
