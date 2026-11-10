@@ -21,8 +21,8 @@
 - The November resumption supersedes the remaining implementation allowance with two feedback/fix
   rounds. Each new round waits for the separate integration-test session's report, which can take
   several hours. Round 1 began after the report on `daa4559a1` arrived.
-- On November 10 the operator replied, "Authorize an additional round to include PID repair".
-  This supersedes the two-round limit with three rounds total and includes issue #884. The
+- On November 10 the operator replied, "Authorize an additional round to include PID repair". This
+  supersedes the two-round limit with three rounds total and includes issue #884. The
   report-before-next-round condition remains in force.
 - Before changing a ready head, remove `review-requested` and return the PR to draft. Reapply the
   signal only after the coherent new head passes the required gates and reviews.
@@ -325,21 +325,21 @@ completed work above. The third round includes all four PID-repair writes tracke
 not authorize unrelated startup changes, a global lifecycle lock, or a transport rewrite.
 
 Head `59f9f41ae` was handed off ready on November 10. All local gates passed with 11,509 tests
-passed and 11 skipped, the three private lanes were clean on its implementation checkpoint, and
-all hosted checks passed. The separate integration report arrived at 14:43 UTC, after the
-one-hour window. It independently passed all twelve gates with the same test totals, 81 focused
-tests, and 16 database/controller probes. Fresh Linux-to-remote-Lima named stop, supported start,
-and three-session batch stop passed with native identities, socket absence, and an unchanged
-sentinel. The first workload observation expired and was inconclusive; supported restarts after
-extending its lifetime produced the passing baselines.
+passed and 11 skipped, the three private lanes were clean on its implementation checkpoint, and all
+hosted checks passed. The separate integration report arrived at 14:43 UTC, after the one-hour
+window. It independently passed all twelve gates with the same test totals, 81 focused tests, and 16
+database/controller probes. Fresh Linux-to-remote-Lima named stop, supported start, and
+three-session batch stop passed with native identities, socket absence, and an unchanged sentinel.
+The first workload observation expired and was inconclusive; supported restarts after extending its
+lifetime produced the passing baselines.
 
 The attempted native persistence race returned through earlier PID repair before its intended
-conditional-write boundary. No competing restart was dispatched, so it is not a live race pass.
-The independent SQLite/controller checks establish the prepared persistence fence. Live
-replacement overlap, queued/repeated Ctrl-C, current-head Windows, continuous worker-bound
-measurements, and request counts remain gaps. Earlier evidence keeps its original head and cleanup
-qualifications. The report's independent cleanup audit and bounded secret-form scan passed; neither
-that evidence nor its merge recommendation is a claim of universal coverage or authority to merge.
+conditional-write boundary. No competing restart was dispatched, so it is not a live race pass. The
+independent SQLite/controller checks establish the prepared persistence fence. Live replacement
+overlap, queued/repeated Ctrl-C, current-head Windows, continuous worker-bound measurements, and
+request counts remain gaps. Earlier evidence keeps its original head and cleanup qualifications. The
+report's independent cleanup audit and bounded secret-form scan passed; neither that evidence nor
+its merge recommendation is a claim of universal coverage or authority to merge.
 
 - [x] Receive and critically assess the report on `59f9f41ae` before starting the additional round.
 - [x] Record the operator's exact ruling in the FRD and append this phase without rewriting
@@ -352,10 +352,10 @@ that evidence nor its merge recommendation is a claim of universal coverage or a
       replacements, including nullable fields and relevant named/batch caller behavior.
 - [ ] Update response design and permanent guidance to describe the implemented repair boundary
       without promising whole-command cross-process atomicity.
-- [ ] Run full gates, installed-wheel checks, three fresh private review lanes, and hosted CI on
-      the coherent result, then publish the third-round ready handoff for the separate tester.
-- [ ] Assess the new exact-head integration report and remaining feedback before final SDD
-      closeout. A further material fix requires new authenticated direction.
+- [ ] Run full gates, installed-wheel checks, three fresh private review lanes, and hosted CI on the
+      coherent result, then publish the third-round ready handoff for the separate tester.
+- [ ] Assess the new exact-head integration report and remaining feedback before final SDD closeout.
+      A further material fix requires new authenticated direction.
 
 - [x] Update active command reference and session lifecycle/status guidance.
 - [ ] Add `locked.md` from the implemented exact head and run locked-SDD validation.
@@ -365,7 +365,7 @@ that evidence nor its merge recommendation is a claim of universal coverage or a
 - [x] Run an isolated shipped-CLI drive with no ambient operator state.
 - [x] Run operator-approved live validation against disposable dedicated sessions on one and
       multiple VMs when the environment permits.
-- [ ] Complete the November two-round feedback allowance, waiting for each separate integration
+- [ ] Complete the November three-round feedback allowance, waiting for each separate integration
       report before any next round and stopping on convergence.
 
 ### Phase 4 Definition of Done

@@ -282,7 +282,6 @@ Tests MUST assert behavior and state, not authored prose.
 
 ### 2026-11-10: Additional PID-repair round
 
-Authenticated operator reply to the scope question about including PID repair from issue #884 in
-PR #776:
+Authenticated operator reply about including issue #884's PID repair in PR #776:
 
 > Authorize an additional round to include PID repair
