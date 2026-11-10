@@ -124,3 +124,59 @@ def test_stop_executor_propagates_cancellation(tmp_path, monkeypatch):
         manager._execute_stop([(db.get_session("s1"), object(), True)], db=db)
     assert caught.value is failure
     db.close()
+
+
+def _prepare_launch(db, monkeypatch, *, status=SessionStatus.STOPPED, replace_running=False, force=False):
+    from agentworks.bootstrap import load_request_registry
+    from agentworks.sessions.manager._runtime import prepare_session_definition
+    from agentworks.vms.nodes import live_vm_node
+
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=1))
+    registry = load_request_registry(config, live_database=db)
+    session = db.get_session("s1")
+    vm = db.get_vm("vm1")
+    definition = prepare_session_definition(
+        db,
+        config,
+        registry,
+        session,
+        vm_node=live_vm_node(db, config, registry, vm),
+        replace_running=replace_running,
+        running_restart_authorized=replace_running,
+        force=force,
+    )
+    return prepare_session_launch(definition, interaction=TtyInteractionPolicy.REFUSE)
+
+
+@pytest.mark.parametrize("status", [SessionStatus.STOPPED, SessionStatus.RESIDUAL])
+def test_eligible_preparation_defers_pid_writes_and_keeps_session_scope(tmp_path, monkeypatch, status):
+    db, events = _restart_fixture(tmp_path, monkeypatch, status=status)
+    before = db.get_session("s1")
+    monkeypatch.setattr(manager, "_ensure_pid", lambda *a, **k: pytest.fail("PID repair during preparation"))
+    prepared = _prepare_launch(db, monkeypatch, status=status)
+    assert prepared.observed_status is status and not prepared.noop
+    assert len(prepared.secret_targets) == 1
+    assert prepared.definition.scope.session == "s1"
+    assert prepared.definition.scope.agent == "a1" and not prepared.definition.scope.admin
+    assert db.get_session("s1") == before
+    assert "kill" not in events and "tmux_create" not in events
+    db.close()
+
+
+def test_executor_uses_supplied_values_and_preserves_target(tmp_path, monkeypatch):
+    from agentworks.sessions.manager._execute import execute_session_start
+
+    db, events = _restart_fixture(tmp_path, monkeypatch, status=SessionStatus.STOPPED)
+    manager.set_session_desired_runtime_state(db, name="s1", state="stopped")
+    selected = db.get_session("s1")
+    prepared = _prepare_launch(db, monkeypatch)
+    monkeypatch.setattr(
+        "agentworks.secrets.resolve_for_command", lambda *a, **k: pytest.fail("source reached executor")
+    )
+    assert execute_session_start(prepared, secret_values={}, graph_secret_values={})
+    after = db.get_session("s1")
+    assert after.session_uuid == selected.session_uuid
+    assert after.desired_runtime_state is DesiredRuntimeState.STOPPED
+    assert after.pid == 4243 and after.tmux_server_start_ticks == 1
+    assert events.count("tmux_create") == 1
+    db.close()

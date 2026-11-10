@@ -12,6 +12,8 @@ from agentworks.db import SessionMode, SessionStatus
 from agentworks.errors import BrokenStateError, NotFoundError, StateError
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from agentworks.agents.nodes import LiveAgentNode
     from agentworks.capabilities.base import OperationScope
     from agentworks.config import Config
@@ -21,6 +23,7 @@ if TYPE_CHECKING:
     from agentworks.secrets import SecretTarget
     from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.sessions.nodes import LiveSessionNode
+    from agentworks.sessions.template import SessionTemplate
     from agentworks.sessions.templates import ResolvedSessionTemplate
     from agentworks.transports import Transport
     from agentworks.vms.nodes import LiveVMNode
@@ -110,6 +113,25 @@ def prepare_session_definition(
     if vm.vm_uuid != vm_node.row.vm_uuid:
         raise StateError("session parent changed during selection", entity_kind="session", entity_name=session.name)
     template = _mgr._resolve_template(registry, session.template, db=db, instance_name=session.name)
+    from typing import cast
+
+    from agentworks.instance_specs import ensure_effective_references_enabled, get_instance_overlay
+    from agentworks.sessions.template import effective_references, validate_effective_harness
+    from agentworks.sessions.templates import resolve_template_with_provenance
+
+    stored_overlay = get_instance_overlay(db, "session", session.name)
+    if stored_overlay is not None:
+        layered = resolve_template_with_provenance(
+            registry,
+            session.template,
+            overlay=cast("SessionTemplate", stored_overlay.declaration),
+            instance_name=session.name,
+        )
+        template = layered.value
+        ensure_effective_references_enabled(
+            registry, effective_references(template, ("session", session.name), layered.provenance)
+        )
+        validate_effective_harness(template, ("session", session.name), layered.provenance)
     ensure_harness_integration_enabled(registry, template.harness_integration)
     ensure_recipe_enabled(registry, "session-template", template.name)
     workspace_node = live_workspace_node(workspace, vm_node)
@@ -358,3 +380,22 @@ def execute_session_stop(prepared: PreparedSessionStop) -> bool:
         legacy_running_authorized=True,
     )
     return True
+
+
+def validate_session_values(prepared: PreparedSessionLaunch, values: Mapping[str, str]) -> None:
+    """Validate the complete rendered environment before any deferred mutation."""
+    if prepared.noop:
+        return
+    definition = prepared.definition
+    _mgr._resolve_session_env(
+        definition.registry,
+        values=values,
+        db=definition.db,
+        vm=definition.vm,
+        ws=definition.workspace,
+        session_name=definition.session.name,
+        session_template=definition.template,
+        mode=SessionMode(definition.session.mode),
+        agent_name=definition.session.agent_name,
+        linux_user=_mgr._resolve_session_linux_user(definition.db, definition.session, definition.vm),
+    )

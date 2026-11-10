@@ -15,7 +15,6 @@ from agentworks.sessions.manager._lifecycle import (
     _mark_runtime_unknown,
     _redacted_launch_errors,
     _require_selected_session,
-    _teardown_session,
     _validated_socket_path,
 )
 from agentworks.ssh import SSHLogger
@@ -204,7 +203,7 @@ def execute_session_start(
             output.info(f"{operation.title()}ing session '{name}'...")
 
             if is_legacy or status in {SessionStatus.RUNNING, SessionStatus.RESIDUAL, SessionStatus.BROKEN}:
-                _teardown_session(
+                _mgr._teardown_session(
                     session,
                     target=session_target,
                     target_owns_session=True,
