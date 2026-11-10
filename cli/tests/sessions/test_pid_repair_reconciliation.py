@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import contextlib
+import sqlite3
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
 from uuid import uuid4
 
 import pytest
 
-from agentworks.db import PID_STOPPED, Database, SessionMode, SessionRuntimeSnapshot
+from agentworks.db import PID_STOPPED, Database, DatabaseDriverError, SessionMode, SessionRuntimeSnapshot
 from agentworks.errors import StateConflictError, StateError
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import manager, tmux
@@ -158,8 +159,9 @@ def test_repair_writes_respect_enclosing_transaction_rollback(
 
 @pytest.mark.parametrize("branch", BRANCHES)
 @pytest.mark.parametrize("caller", ["named", "batch"])
+@pytest.mark.parametrize("enclosing_transaction", [False, True])
 def test_repair_conflict_refuses_callers_before_status_or_destructive_dispatch(
-    db: Database, monkeypatch: pytest.MonkeyPatch, branch: str, caller: str
+    db: Database, monkeypatch: pytest.MonkeyPatch, branch: str, caller: str, enclosing_transaction: bool
 ) -> None:
     session = _session(db, branch)
     with contextlib.closing(Database(db.path)) as other:
@@ -185,7 +187,10 @@ def test_repair_conflict_refuses_callers_before_status_or_destructive_dispatch(
         monkeypatch.setattr(
             _teardown, "execute_dedicated_teardown", lambda *args: pytest.fail("stale destructive dispatch")
         )
-        with pytest.raises(StateConflictError):
+        with (
+            pytest.raises(DatabaseDriverError if enclosing_transaction else StateConflictError) as caught,
+            db.transaction() if enclosing_transaction else contextlib.nullcontext(),
+        ):
             if caller == "named":
                 _lifecycle.stop_session(
                     db, cast("Config", SimpleNamespace()), name=session.name, interaction=TtyInteractionPolicy.REFUSE
@@ -194,6 +199,8 @@ def test_repair_conflict_refuses_callers_before_status_or_destructive_dispatch(
                 _lifecycle.stop_all_sessions(
                     db, cast("Config", SimpleNamespace()), interaction=TtyInteractionPolicy.REFUSE
                 )
+        if enclosing_transaction:
+            assert getattr(caught.value, "sqlite_errorcode", None) == sqlite3.SQLITE_BUSY_SNAPSHOT
         assert len(changed) == 1
         assert db.get_session(session.name) == changed[0]
         assert other.get_session(session.name) == changed[0]

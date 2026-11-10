@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 import agentworks.sessions.manager as _mgr
 from agentworks import output
-from agentworks.db import PID_STOPPED, SessionMode, SessionRuntimeSnapshot
+from agentworks.db import PID_STOPPED, DatabaseDriverError, SessionMode, SessionRuntimeSnapshot
 from agentworks.errors import (
     ConnectivityError,
     NotFoundError,
@@ -452,7 +452,7 @@ def ensure_pids_batch(
             try:
                 if _repair_session_pid(session, target=target, db=db, announce=announce):
                     repaired_names.add(session.name)
-            except StateConflictError:
+            except (StateConflictError, DatabaseDriverError):
                 raise
             except (ConnectivityError, StateError) as exc:
                 if announce:

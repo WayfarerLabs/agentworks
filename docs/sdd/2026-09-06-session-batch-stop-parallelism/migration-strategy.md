@@ -52,6 +52,10 @@ validation and explicit socket selection, including legacy/admin stopped repair 
 dedicated address. Propagate repair snapshot conflicts out of best-effort batch preparation before
 any later status or destructive dispatch. Ordinary repair refusals retain their existing behavior.
 
+Also propagate database repair-write failures unchanged, including SQLite stale-snapshot errors when
+an enclosing transaction overlaps another writer. A failed conditional update must stop preparation
+even if the driver raises before a match count is available; do not retry the write.
+
 ### 2. Extract value-based dedicated teardown
 
 Introduce one immutable complete-fingerprint dedicated plan. Extract the database-free remote phase

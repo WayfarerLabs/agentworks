@@ -57,10 +57,11 @@ Mutating PID repair likewise copies the original session, run, and nullable runt
 native observations. Learning a boot, recovering a fingerprint, and recording absence use
 conditional writes with the existing runtime-shape validation. A changed or removed row produces a
 conflict without overwriting it or announcing successful repair. Batch preparation stops on that
-conflict before status or teardown proceeds; ordinary unrecoverable or unreachable repairs retain
-their existing refusal behavior. This is a persistence fence, not whole-command serialization:
-another command can still change a row after a successful repair and before the next refetch or
-phase.
+conflict before status or teardown proceeds. A failed repair database write also stops preparation
+and preserves its original driver error, including a stale SQLite snapshot inside an enclosing
+transaction; ordinary unrecoverable or unreachable repairs retain their existing refusal behavior.
+This is a persistence fence, not whole-command serialization: another command can still change a row
+after a successful repair and before the next refetch or phase.
 
 A provably absent runtime can be recorded as stopped. Older failed admin rows with no socket address
 can recover after exact-session absence, dedicated-server absence and evidence that the old runtime

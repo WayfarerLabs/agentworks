@@ -43,6 +43,12 @@ conflict before its existing best-effort catches, preventing stop, cascading del
 callers from continuing on the failed selection. `_ensure_pid` already propagates repair failures.
 Ordinary ownership, absence, and connectivity refusals retain their existing caller handling.
 
+The same propagation applies to `DatabaseDriverError`, preserving the original error. For example,
+an enclosing `Database.transaction()` can hold a read snapshot while a second connection advances
+the run, causing `SQLITE_BUSY_SNAPSHOT` before the conditional update reaches row-count handling.
+Batch repair must not treat that failed write as a best-effort native refusal and continue with its
+stale selection. No database write retry or error translation is added.
+
 The fence covers the repair write, not the whole command. A successful repair still has a separate
 subsequent refetch that can see later changes; this round does not introduce post-success command
 serialization or migrate unrelated startup writes.

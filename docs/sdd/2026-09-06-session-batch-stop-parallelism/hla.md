@@ -52,6 +52,10 @@ best-effort repair failure. No stale selection proceeds into status or destructi
 that conflict. Existing native ownership, absence proof, and ordinary refusal handling remain
 intact.
 
+Database repair-write failures also escape batch preparation unchanged. In an enclosing transaction,
+a stale SQLite read snapshot can reject the conditional update before it returns a match count; that
+driver failure must not be swallowed and followed by stale status or mutation dispatch.
+
 Synchronous and batch routing use one raw-field-presence classifier, excluding the stopped sentinel.
 The classifier grants no authority: non-null malformed identities fail preparation rather than
 entering either remote execution or safe-recovery cleanup through routing alone.
