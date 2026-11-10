@@ -252,6 +252,8 @@ rerun. The incomplete Windows private-key scan remains an explicit cleanup-evide
 - [x] Receive and critically assess the integration report before beginning a feedback/fix round.
 - [ ] Consolidate complete dedicated execution and fenced synchronous reconciliation while
       preserving stopped, uncertain-launch, and incomplete-fingerprint compatibility preparation.
+- [ ] Fence incomplete fingerprint acquisition against the original row, run, and nullable runtime
+      snapshot before writing; prove replacements during remote launch checks remain unchanged.
 - [ ] Simplify worker evidence and coordinator drain branches without weakening submission
       ownership, primary-error propagation, or interrupted-persistence retry.
 - [x] Resolve retry-factory feedback against the independent one-attempt requirement in R6.
@@ -263,6 +265,20 @@ The independently named attempt constant and explicit factory forwarding remain:
 feed the existing SSH retry setting. Removing them couples destructive work to the shared default;
 per-helper overrides or a transport wrapper add more machinery. Independent complexity review
 confirmed this is the smallest shape that enforces the accepted policy.
+
+Cold review of the first round checkpoint reproduced an acquisition race in the touched incomplete
+path. Its by-name fingerprint write could overwrite replacement state before the later refetch
+check, and a runtime-only replacement could be erased without a conflict. The correction makes the
+pre-kill identity upgrade conditional too, retaining serial launch proof, persistence, refetch, and
+fresh capture rather than adding partial worker plans or a lifecycle lock.
+
+Fresh-wheel startup also exposed an incidental dependency compatibility failure: resolving Typer
+0.29.0 removes the `click_type` option parameter used by unchanged CLI code. The same wheel's
+version and help commands pass with the repository's locked Typer 0.27.3. Dependency declarations,
+the lock, and CLI sources match main and are not changed by this teardown effort. The failed
+diagnostic wrote a standard error log in the ambient profile; no database or runtime command ran.
+The local empty-batch CLI smoke was refused by automatic approval review before execution, so it
+remains unrun rather than being described as a pass.
 
 - [x] Update active command reference and session lifecycle/status guidance.
 - [ ] Add `locked.md` from the implemented exact head and run locked-SDD validation.
