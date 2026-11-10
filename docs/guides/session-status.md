@@ -48,6 +48,11 @@ fingerprints retain their authority without requiring that metadata. A row missi
 time cannot gain destructive authority merely by observing a live PID on the same boot.
 Indeterminate or mismatched live identity fails closed without adopting or killing the server.
 
+During teardown, completing an incomplete fingerprint writes only if the original session, run,
+socket, and runtime fields still match. Preparation then rereads that identity and captures the
+native fingerprint afresh before destruction. A concurrent replacement cannot be adopted or
+overwritten by that upgrade.
+
 A provably absent runtime can be recorded as stopped. Older failed admin rows with no socket address
 can recover after exact-session absence, dedicated-server absence and evidence that the old runtime
 cannot survive; unrelated sessions on the default server do not prevent that repair. Recovery uses
@@ -84,6 +89,10 @@ remote identity validation, tmux teardown, absence proof, and exact socket clean
 thread retains database and output ownership, persists verified results before announcing success,
 and runs incomplete dedicated or shared-server compatibility work serially after the concurrent
 lane. A failure in one session does not cancel its siblings.
+
+Named and batch teardown share the same remote protocol and conditional stopped-state reconciliation
+for complete-fingerprint runtimes. A changed session, run, or runtime fingerprint causes a conflict
+instead of overwriting the newer state.
 
 An interrupt cancels teardown that has not started but cannot terminate a running worker safely.
 Agentworks visibly drains bounded in-flight work, persists every verified result, and then exits as

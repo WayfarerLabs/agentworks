@@ -250,11 +250,11 @@ fixture failures; all affected tests passed after fixture correction, without a 
 rerun. The incomplete Windows private-key scan remains an explicit cleanup-evidence limit.
 
 - [x] Receive and critically assess the integration report before beginning a feedback/fix round.
-- [ ] Consolidate complete dedicated execution and fenced synchronous reconciliation while
+- [x] Consolidate complete dedicated execution and fenced synchronous reconciliation while
       preserving stopped, uncertain-launch, and incomplete-fingerprint compatibility preparation.
-- [ ] Fence incomplete fingerprint acquisition against the original row, run, and nullable runtime
+- [x] Fence incomplete fingerprint acquisition against the original row, run, and nullable runtime
       snapshot before writing; prove replacements during remote launch checks remain unchanged.
-- [ ] Simplify worker evidence and coordinator drain branches without weakening submission
+- [x] Simplify worker evidence and coordinator drain branches without weakening submission
       ownership, primary-error propagation, or interrupted-persistence retry.
 - [x] Resolve retry-factory feedback against the independent one-attempt requirement in R6.
 - [ ] Run the full gates and fresh private project, complexity, and cold correctness reviews on the
@@ -278,7 +278,7 @@ version and help commands pass with the repository's locked Typer 0.27.3. Depend
 the lock, and CLI sources match main and are not changed by this teardown effort. The failed
 diagnostic wrote a standard error log in the ambient profile; no database or runtime command ran.
 The local empty-batch CLI smoke was refused by automatic approval review before execution, so it
-remains unrun rather than being described as a pass.
+remains not executed rather than being described as a pass.
 
 - [x] Update active command reference and session lifecycle/status guidance.
 - [ ] Add `locked.md` from the implemented exact head and run locked-SDD validation.
