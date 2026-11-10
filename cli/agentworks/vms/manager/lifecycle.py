@@ -577,8 +577,7 @@ def create_vm(
             except (AuthorizationError, ConfigError, StateError, TokenRejectedError, ValidationError):
                 # These failures are already typed with their owning
                 # platform's remediation (a ValidationError is a request the
-                # platform refuses before it mutates anything, such as a
-                # hostname WSL2 would rename).
+                # platform refuses before it mutates anything).
                 # A compliant platform has not mutated, or has rolled back,
                 # so only the provisional row remains to unwind.
                 log.unwind()

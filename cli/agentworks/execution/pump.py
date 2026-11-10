@@ -338,7 +338,8 @@ class PipeSession:
         except OSError as error:
             if not consumer_left(error):
                 raise
-            # Closed only when the guest writes again, so the closing line never meets a closed read end.
+            # Closed only when the guest writes again, so a quiet payload's closing line does not meet a
+            # closed read end.
             self._abandoned.add(which)
 
     def _close_unread(self, which: str) -> None:

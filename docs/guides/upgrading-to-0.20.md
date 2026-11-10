@@ -317,8 +317,10 @@ before they resolve the auth key.
   (the hostname is in `agw vm describe NAME --output json`) and restart the distro with
   `wsl --terminate`, or recreate the VM. WSL still renames a VM whose hostname has an underscore,
   since it keeps only letters, digits and single hyphens, so such a VM keeps drifting until it is
-  recreated under another name. `vm create` on WSL2 now refuses such a hostname before it does
-  anything: one with an underscore, or with consecutive hyphens from the system slug.
+  recreated under a name without underscores. `vm create` on WSL2 now refuses such a hostname before
+  it does anything: one with an underscore, or with consecutive hyphens from the system slug. A slug
+  cannot be changed, so an install whose slug has consecutive hyphens cannot create WSL2 VMs, and
+  its existing ones keep drifting.
 - **Output nobody reads no longer fails a command.** When the reader of `agw`'s output has gone (a
   pipe into `head` that has exited, `2>&1 | tee create.log` in a closed window, or the closed
   terminal itself), the rest of that output is dropped and the command carries on to the end, a
