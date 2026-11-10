@@ -56,7 +56,7 @@ agw session attach my-session
 # Use tmux's 'detach' command (default Ctrl-b unless overridden by config) to disconnect while
 # leaving everything running on the VM.
 agw session attach my-session    # You'll pick up right where you left off
-agw session stop my-session      # Sessions can be stopped (or can exit on their own)
+agw session stop my-session      # Records stopped intent; an external exit would retain running intent
 agw session list                 # Fast local inventory
 agw session list --status        # Add bounded, non-activating live status
 agw session start my-session
@@ -179,6 +179,36 @@ time bounds, recovery behavior, and JSON v1 limit.
 List commands default to alphabetical order. Use `--sort KEY[,KEY...]` for the additional
 command-specific orderings documented in the
 [list-ordering reference](command-reference.md#list-ordering).
+
+## Recover intended runtimes
+
+VMs, sessions, and named consoles retain desired runtime state across an external shutdown or
+runtime exit. Creation/start/restart selects running; explicit stop selects stopped. VMs also
+support on-demand, which permits activation without requiring an idle VM to run. Targets live in the
+instance database, not templates or configuration. Legacy session and console targets require
+adoption from known operator intent.
+
+```console
+agw session set-desired-state my-session running
+agw console set-desired-state my-console running
+agw vm reconcile my-vm --dry-run
+agw vm reconcile my-vm
+```
+
+A VM name selects its stored workload family; `agw vm reconcile --all` explicitly selects the fleet.
+Focused `session reconcile NAME` or `console reconcile NAME` retries only that workload's existing
+target. Console recovery does not start its member sessions. `vm start` selects running and restores
+the VM connection, then a separate reconcile can restore its children. Stopped parent intent blocks
+running children without clearing their targets. There is no background controller.
+
+Batch session start/restart and reconciliation collect eligible workload secrets before any deferred
+runtime changes. A required workload secret failure prevents that complete deferred batch; VM
+activation and conditional repair may already have completed. An infrastructure credential failure
+blocks only dependent families unless an eligible workload also requires that name. Accepted targets
+survive later execution failure or cancellation. Dry run changes no targets or runtimes and does not
+preview or resolve workload secrets, though provider observation may require credentials. Read
+[Desired runtime state and recovery](../docs/guides/desired-runtime-state.md) for adoption, failure
+boundaries, WSL2 access limits, and rollback.
 
 ## Configuration
 
@@ -631,6 +661,13 @@ Completions include dynamic VM, vm-site, workspace, session, secret, and templat
 `agw secret verify` completes registered secret names at every positional argument.
 
 ## State
+
+Schema 39 maps the old VM manual-stop flag to stopped intent and its false value to on-demand.
+Legacy session/console targets remain null until explicit adoption; new creates record running.
+Explicit VM start now selects running even for an already-live VM; use
+`agw vm set-desired-state NAME on-demand` to return to permission-only activation. Missing required
+workload secrets now prevent the entire deferred batch session start/restart instead of allowing
+partially launched batches. These targets require no new config or sample setting.
 
 All state is stored in `~/.config/agentworks/agentworks.db` (SQLite). Schema migrations are
 forward-only and run automatically when a normal Agentworks command opens stale state. Before the

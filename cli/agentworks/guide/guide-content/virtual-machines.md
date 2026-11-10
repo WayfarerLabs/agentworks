@@ -44,3 +44,22 @@ current-spec provenance.
 `agw vm verify-connection NAME` performs an active SSH check without starting the VM. Creating,
 starting, stopping, backing up, or rekeying a VM belongs to the corresponding `agw vm` command; use
 `agw vm --help` for the current surface.
+
+## Runtime intent and access
+
+VM creation and explicit start select running intent. On-demand permits automatic activation without
+requiring an idle VM to run; stopped intent blocks automatic power-on and running child workloads
+while retaining their targets. The pure `agw vm set-desired-state NAME STATE` command records a
+selected policy without runtime changes. Inspect its help for valid states.
+
+After a VM start, recovery of its stored sessions and named consoles is a separate
+`agw vm reconcile NAME` operation. Preview with `--dry-run` when reviewing the scope. Execute only
+when that recovery is within the operator's request; otherwise report the preview or blocker. A
+focused console reconciliation restores its view, not its member session runtimes.
+
+On WSL2, an already-live guest with stopped intent receives no idle protection during access or
+management work and may stop mid-command. This includes shells, workspace creation, and agent
+reinitialization. Selecting `agw vm set-desired-state NAME on-demand` or `running` permits normal
+holds and future activation; it is not only a per-command keepalive switch. Change the policy only
+when those effects are intended, or retain stopped intent and report the access limitation. Even
+live diagnostic access may report busy briefly while another operation holds the VM family.
