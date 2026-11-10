@@ -344,13 +344,13 @@ its merge recommendation is a claim of universal coverage or authority to merge.
 - [x] Receive and critically assess the report on `59f9f41ae` before starting the additional round.
 - [x] Record the operator's exact ruling in the FRD and append this phase without rewriting
       completed implementation history.
-- [ ] Fence all four PID-repair runtime writes against an immutable snapshot captured before the
+- [x] Fence all four PID-repair runtime writes against an immutable snapshot captured before the
       first remote observation, reusing the shared conditional SQL predicate.
-- [ ] Preserve runtime-field validation, launch proof, absence checks, changed-boot recovery, and
+- [x] Preserve runtime-field validation, launch proof, absence checks, changed-boot recovery, and
       serial preparation; a replacement conflict must not report recovery or stopped success.
-- [ ] Exercise all four writes with independent-connection durable-row, run, and runtime
+- [x] Exercise all four writes with independent-connection durable-row, run, and runtime
       replacements, including nullable fields and relevant named/batch caller behavior.
-- [ ] Update response design and permanent guidance to describe the implemented repair boundary
+- [x] Update response design and permanent guidance to describe the implemented repair boundary
       without promising whole-command cross-process atomicity.
 - [ ] Run full gates, installed-wheel checks, three fresh private review lanes, and hosted CI on the
       coherent result, then publish the third-round ready handoff for the separate tester.
