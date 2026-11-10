@@ -37,9 +37,6 @@ instead asks for the replacement key through the terminal, bypassing configured 
 key. It requires usable terminal input and cannot be combined with `--secret` or global
 `--non-interactive`.
 
-The `--ignore-env` option has been removed. Replace it with `--prompt` for interactive entry, or
-`--secret SECRET` to select a stored replacement credential.
-
 An advanced use case moves a VM to another tailnet. This is useful when workloads need access to
 private infrastructure on another tailnet but the operator does not want the entire Agentworks
 system there. After initial provisioning, `rekey` can move the VM to that tailnet. The old

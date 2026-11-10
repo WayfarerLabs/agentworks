@@ -649,9 +649,9 @@ just a vm-site.
 
 `vm rekey <name>` resolves the template's auth-key secret by default. Use `--secret <name>` to
 select another declared secret for this operation, or `--prompt` to enter the replacement key
-interactively. These options are mutually exclusive. `--prompt` requires usable terminal input and
-replaces the removed `--ignore-env` flag. Add `--wait-for-share` when moving the VM to a different
-tailnet and sharing it back before verification.
+interactively. These options are mutually exclusive. `--prompt` requires usable terminal input. Add
+`--wait-for-share` when moving the VM to a different tailnet and sharing it back before
+verification.
 
 **Power-state semantics:** a VM that stopped on its own (idle timeout, host reboot) is started
 automatically, on demand, by any command that needs it live. A VM stopped with `agw vm stop` is
