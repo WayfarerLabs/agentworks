@@ -410,3 +410,32 @@ def test_local_definition_rejects_canonical_identity_before_guest_or_secret_work
     assert caught.value is failure
     assert db.get_session("s1") == selected
     db.close()
+
+
+def test_delete_consent_cannot_adopt_same_name_replacement(tmp_path, monkeypatch):
+    from agentworks.db import SessionMode
+
+    db, _ = _restart_fixture(tmp_path, monkeypatch, status=SessionStatus.STOPPED)
+    selected = db.get_session("s1")
+
+    def replace_while_confirming(*args, **kwargs):
+        db.delete_session("s1")
+        db.insert_session(
+            "s1",
+            "ws1",
+            "claude",
+            SessionMode.AGENT,
+            agent_name="a1",
+            socket_path="/run/agentworks/agent-tmux-sockets/agt-a1/s1.sock",
+        )
+        return True
+
+    monkeypatch.setattr("agentworks.sessions.manager._queries.output.confirm", replace_while_confirming)
+    monkeypatch.setattr(
+        "agentworks.artifacts.session.cleanup_session_artifacts",
+        lambda *a, **k: pytest.fail("replacement artifacts removed"),
+    )
+    with pytest.raises(StateError):
+        manager.delete_session(db, SimpleNamespace(), name="s1", interaction=TtyInteractionPolicy.ALLOW)
+    assert db.get_session("s1").session_uuid != selected.session_uuid
+    db.close()

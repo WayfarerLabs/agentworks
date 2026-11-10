@@ -8,9 +8,8 @@ that resource with one consistent shape:
 - ``--yes`` and this command CREATED the resource: auto-delete it, no prompt.
 - ``--yes`` otherwise: REPORT it is now empty and name the manual delete
   command, but leave it in place.
-- if the delete itself raises :class:`AgentworksError`: warn and continue
-  rather than aborting a command whose primary work already succeeded (the
-  session / member is already gone).
+- ordinary delete failures warn and continue after the primary work succeeded.
+  Cancellation always propagates.
 
 :func:`cleanup_now_empty_resource` is the single home for that shape. It was
 extracted from three near-identical copies in the sessions manager (the

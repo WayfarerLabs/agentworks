@@ -170,6 +170,9 @@ def _delete_session_runtime(
 ) -> None:
     """Delete one selected definition and its runtime under a held family guard."""
     name = session.name
+    selected_session_uuid = session.session_uuid
+    from agentworks.sessions.manager._lifecycle import _require_selected_session
+
     with _mgr._prepare_vm(
         db,
         config,
@@ -187,7 +190,7 @@ def _delete_session_runtime(
         from agentworks.harness_setup.locking import native_mutation_guard
 
         with native_mutation_guard(db.path, vm.name, held=held_native_guard):
-            session = _mgr._require_session(db, name)
+            session = _require_selected_session(db, name, selected_session_uuid)
             legacy = session.socket_path is None and session.pid is not None and session.pid > 0
             if legacy:
                 status = SessionStatus.RUNNING
@@ -222,6 +225,7 @@ def _delete_session_runtime(
             if not yes and not output.confirm(f"Delete session '{name}'?"):
                 raise UserAbort("delete cancelled")
 
+            session = _require_selected_session(db, name, selected_session_uuid)
             if status != SessionStatus.STOPPED:
                 _mgr._teardown_session(
                     session,
@@ -232,6 +236,8 @@ def _delete_session_runtime(
                     legacy_running_authorized=True,
                 )
 
+            session = _require_selected_session(db, name, selected_session_uuid)
+
             # Capture console memberships before delete; the FK cascade on
             # console_sessions zeroes the join table the moment the session row goes.
             member_consoles = [c.name for c in db.list_consoles_for_session(name)]
@@ -239,6 +245,7 @@ def _delete_session_runtime(
             from agentworks.artifacts.session import cleanup_session_artifacts
 
             cleanup_session_artifacts(db, session, session_target)
+            _require_selected_session(db, name, selected_session_uuid)
             db.delete_session(name)
 
             # Clean up implicit grant for this session
