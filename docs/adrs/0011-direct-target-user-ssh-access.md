@@ -25,7 +25,7 @@ the operation itself didn't need root.
 
 Operations whose target user is the agent open SSH directly as the agent's Linux user. Admin SSH
 stays in scope only for operations that fundamentally need root or that the agent cannot do for
-itself: `useradd`, the agent's tmux socket directory under `/var/lib/`, the initial
+itself: `useradd`, the agent's tmux socket directory under `/run/agentworks/`, the initial
 `authorized_keys` install, and bulk maintenance ops (`stop_all_sessions`, `delete_agent` killing the
 agent's sessions) where iterating per-agent SSH probes would penalize performance for no benefit.
 

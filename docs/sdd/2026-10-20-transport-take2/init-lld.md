@@ -262,12 +262,11 @@ since no conditional writer works beneath a dotfiles checkout.
   pass it. A request that keeps its streams out of the log keeps them out of a warning too.
 - **The log protocol.** `steps.InitLog(OperationLog, Protocol)` adds Phase B's members (`warning`
   and `sanitize`) to Phase A's `OperationLog` (`phase_a.py`), which already has `record`, and which
-  stays as it is. `driver.PhaseBLog(InitLog, Protocol)` adds what `run_initialization` reads besides
-  (`has_warnings`, `warnings`) and the `redactions` native setup reads, and
-  `harness_setup.lifecycle.SetupLog` names what the apply functions read (`redactions`, `warning`,
-  `record`). `SSHLogger` satisfies all of them, and the migrated files import nothing from
-  `agentworks.ssh`, so they join the static check; `agents/initializer.py` types its log as
-  `InitLog`.
+  stays as it is, and what `run_initialization` reads besides (`has_warnings`, `warnings`) and the
+  `redactions` native setup reads; `harness_setup.lifecycle.SetupLog` names what the apply functions
+  read (`redactions`, `warning`, `record`), so `harness_setup` does not depend on `vms`. `SSHLogger`
+  satisfies both, and the migrated files import nothing from `agentworks.ssh`, so they join the
+  static check; `agents/initializer.py` types its log as `InitLog`.
 
 ### Shapes
 
@@ -287,9 +286,10 @@ Today's `run(cmd)` runs `$SHELL -c cmd` through sshd as the admin, and `sudo=Tru
   records the command line; install commands are operator configuration that carries no secret
   (provisioning is hermetic, I77).
 - `check=False` stays `check=False`, with the status read from `Result.require_completed`
-  (`steps.status(files, request)` runs a request on `files.access` and returns that status); a
-  completion that is not `Completed` raises its typed error, as a transport failure raised
-  `SSHError` under `check=False` today.
+  (`steps.status(access, request)` runs a request on `access` and returns that status, and a request
+  that need only complete is `access.run(request).require_completed(...)`); a completion that is not
+  `Completed` raises its typed error, as a transport failure raised `SSHError` under `check=False`
+  today.
 - An unelevated request sees agw-launch's rebuilt environment and fixed `PATH`
   (`execution/agw_launch.py:59`, `:115-130`) and runs no account startup (I11), where sshd's
   `$SHELL -c` let bash read `~/.bashrc` under `SSH_CLIENT` and zsh `~/.zshenv`. The commands Phase B
@@ -442,7 +442,7 @@ like every `/etc` path here, can be changed only by root and the admin, who hold
 | User install commands    | `packages.py:284`, `:297-300`                                          | as system install commands                                                                                                                                                                                                                                                                                         | admin | none                  | yes       | 10; 120  |
 | Profile fragment         | `write_file`, `shell_env.py:142`                                       | `write(f"{home}/.agentworks-profile.sh", content, mode=0o644, parent_mode=0o755)`                                                                                                                                                                                                                                  | admin | content               | yes       | 60       |
 | Rc fragment              | `write_file`, `shell_env.py:603`                                       | `write(f"{home}/.agentworks-rc.sh", content, mode=0o644, parent_mode=0o755)`                                                                                                                                                                                                                                       | admin | content               | yes       | 60       |
-| Source lines             | grep-or-append, `shell_env.py:146-149`, `:607-610`, `:61-79`           | `ensure_source_line(files, rc, marker, line)` for each file `source_files` names (below)                                                                                                                                                                                                                           | admin | content               | no (read) | 60       |
+| Source lines             | grep-or-append, `shell_env.py:146-149`, `:607-610`, `:61-79`           | `ensure_source_line(files, rc, marker, line, log)` for each file `source_files` names (below)                                                                                                                                                                                                                      | admin | content               | no (read) | 60       |
 | `authorized_keys` (last) | `write_file(mode="600")`, `ssh_keys.py:101`, called at `driver.py:223` | `write(f"{home}/.ssh/authorized_keys", content, mode=0o600, parent_mode=0o700)`                                                                                                                                                                                                                                    | admin | content (public keys) | yes       | 60       |
 
 Harness setup runs between the source lines and `authorized_keys` (`driver.py:205-223`), on the same
@@ -492,15 +492,16 @@ absolute value that is the home or one of its ancestors, or that lands on a mana
 
 ### Source lines
 
-`ensure_source_line(files, rc, marker, line)` replaces the seven grep-or-append strings
+`ensure_source_line(files, rc, marker, line, log)` replaces the seven grep-or-append strings
 (`shell_env.py:66-69`, `:76-79`, `:147-149`, `:608-610`; `agents/initializer.py:579-581`,
 `:612-614`, `:660-663`). It reads `rc`; when `marker` occurs in it (today's `grep -q`) it is done;
 otherwise it calls `update` with `line` appended, first adding a newline when the file does not end
 with one (today's `printf >>` joins the line to a final unterminated one), `observed` the read,
 `mode=0o644`, `parent_mode=0o755` and `preserve_metadata=True`. A missing file is created 0644, as
-`>>` under the default umask creates it. It returns what it found (`SourceLine.PRESENT`, `ADDED` or
-`LINKED`). Every writer appends the same line, `. <home>/<fragment>`, with the fragment's file name
-as the marker, so a line written by any earlier version still satisfies it.
+`>>` under the default umask creates it. It returns nothing; the one outcome worth noting, a linked
+file whose target already sources the fragment, it logs itself (below). Every writer appends the
+same line, `. <home>/<fragment>`, with the fragment's file name as the marker, so a line written by
+any earlier version still satisfies it.
 
 `source_files(home, shell)`, a mapping from each fragment's file name to its rc files, names the
 files once for every writer: the profile line goes to `.profile` and `.bashrc`, and `.zprofile` for
@@ -1003,7 +1004,7 @@ a shared helper moves every caller of it**, so no helper exists in two forms bet
     `configure_user_git_credentials` (`driver.py:553`, `agents/initializer.py:285`); `fetch_dir`
     (`driver.py:575`, `agents/initializer.py:360`); `fetch_file` (`mise.py:94`,
     `agents/initializer.py:701`); `_ensure_agentworks_files_sourced` (`driver.py:648`,
-    `agents/initializer.py:384`).
+    `agents/initializer.py:384`; as built, the agent's only).
   - The rest of `agents/initializer.py`, with the shims fold, and `agents/grants.py`;
     `git_credentials/` with the archive as bytes.
   - The legacy target gone from `bootstrap_vm`, reinit and agent create; every migrated file on the
@@ -1021,12 +1022,26 @@ no longer use them. The departures from the tables above, each recorded where it
   operation log.
 - `ensure_directory` converges with `owner` or `group`, either one.
 - `UPLOAD_TREE_SCRIPT` moves an `old` sibling back only when it is a directory and not a link, and
-  removes anything else there; the git file source validates `mktemp`'s output as a guest path
-  before using it.
+  removes anything else there; it makes each sibling writable (never through a link) before removing
+  it, and every removal is best effort, so a tree with read-only directories is replaced on every
+  upload and `restore` always reaches its rename. The git file source requires `mktemp`'s output to
+  be a guest path under its staging prefix before using it, and reads its staging removal's
+  completion and status, warning when it fails.
+- One dotfiles sync for both accounts (above, "One dotfiles sync"): a ref is fetched and checked out
+  detached, and a failed sync skips the install for the agent too.
+- A bare relative `dotfiles_destination` is a path in the home, and one that is or holds a managed
+  path is refused (above, "Dotfiles destinations").
+- A `git::https://` URL carrying a user name or token is refused without being echoed, `--` precedes
+  the URL in every `git clone`, and the subpath's component check is the parser's.
+- A directory at a write's fixed temporary name is `PathRefused(UNSUITABLE)` and left alone.
+- The admin's final `_ensure_agentworks_files_sourced` pass is gone: its fragment writers run after
+  the dotfiles install and every install command and ensure their own lines. Agent setup keeps it.
+- The admin's `authorized_keys` warning carries the error's message only, since `write` logs its
+  streams.
 - `remove_from_workspace_group` and agent delete's first two requests read no status but require a
   completion, so an unreachable VM still raises, as `SSHError` did.
 - Native setup's apply functions type their log as `harness_setup.lifecycle.SetupLog`, and the
-  driver as `PhaseBLog` (above), so neither file names `SSHLogger`.
+  driver and agent initialization as `steps.InitLog` (above), so none of them names `SSHLogger`.
 - Three tests that asserted on the source text of `_phase_b_setup` and `create_agent_on_vm`
   (`cli/tests/test_secrets_eager_resolve_vm_agent.py`) gave way to recording tests of the same order
   and hermeticity (I59, I77, I78).

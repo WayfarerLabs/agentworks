@@ -59,10 +59,13 @@ If the VM was created with `--spec` or `--admin-spec`, reinit consumes both stor
 after their selected VM and admin templates. It does not accept a flag to change or clear either
 layer.
 
-Reinit never writes through a symbolic link in a home. A linked rc file (`~/.profile`, `~/.bashrc`,
-`~/.zprofile`, `~/.zshrc`) whose target already sources the Agentworks fragment is accepted as it
-is; one whose target does not is left alone with a warning naming the line to add, and every reinit
-stays partial until the line is there. The same holds for agent reinit.
+Reinit never writes Agentworks' own files in a home through a symbolic link: the profile and rc
+fragments, the rc files' source lines, the mise config and lockfile, and `~/.ssh` and its
+`authorized_keys`. A linked rc file (`~/.profile`, `~/.bashrc`, `~/.zprofile`, `~/.zshrc`) whose
+target already sources the Agentworks fragment is accepted as it is; one whose target does not is
+left alone with a warning naming the line to add, and every reinit stays partial until the line is
+there. Git checkouts of dotfiles, and what your install commands and dotfiles installer do, follow
+links as before. The same holds for agent reinit.
 
 ### Fully idempotent
 
