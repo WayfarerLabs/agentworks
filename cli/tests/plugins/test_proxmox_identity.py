@@ -24,6 +24,7 @@ from agentworks.execution.root_script import ChannelUnreachable, RawRun
 from agentworks.plugins.proxmox import guest_agent
 from agentworks.plugins.proxmox import platform as proxmox_platform
 from agentworks.plugins.proxmox.api import ProxmoxAPIError
+from agentworks.plugins.proxmox.identity import find_guest
 from agentworks.plugins.proxmox.platform import STATUS_DEADLINE_SECONDS, ProxmoxPlatform
 from tests._proxmox_fakes import NEWID, PROXMOX_CONFIG, FakeProxmoxAPI
 
@@ -223,3 +224,13 @@ def test_status_bounds_the_whole_identity_check(slow: SlowIdentityReads) -> None
 
     assert slow.clock[0] - 1000.0 <= STATUS_DEADLINE_SECONDS
     assert slow.timeouts == [STATUS_DEADLINE_SECONDS]
+
+
+def test_a_spent_budget_asks_the_api_nothing(fake: FakeProxmoxAPI) -> None:
+    """The identity is unknown, as when the fallback has no time left, and no request gets a timeout it cannot use."""
+    fake.holder = "vm1"
+
+    with pytest.raises(ProxmoxAPIError):
+        find_guest(fake, "pve1", NEWID, vm_name="vm1", names=("vm1",), expires=time.monotonic())  # type: ignore[arg-type]
+
+    assert fake.identity_timeouts == []

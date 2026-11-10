@@ -540,10 +540,11 @@ deletes a confirmed guest and returns once a destroy task completes; a failed de
 only when `/cluster/nextid` says the VMID is free. A rollback whose clone lost its VMID to another
 create finds the winner's name there and leaves it untouched. A caller with a budget passes
 `find_guest` its expiry: each read gets what remains of it, at most `REQUEST_TIMEOUT_SECONDS`, and a
-status read whose failure spends it asks nothing more and re-raises. `status` gives the whole check
-10 s and reads an API failure as unknown. The root channel's check spends the script's own deadline,
-and the guest agent gets only what is left; a check the deadline runs out on, an API failure it cut
-short included, raises `ChannelUnreachable` with nothing dispatched.
+budget spent before a read asks nothing more and leaves the identity unknown (`ProxmoxAPIError`).
+`status` gives the whole check 10 s and reads an API failure as unknown. The root channel's check
+spends the script's own deadline, and the guest agent gets only what is left; a check the deadline
+runs out on, an API failure it cut short included, raises `ChannelUnreachable` with nothing
+dispatched.
 
 ### AWS, Azure and GCP
 

@@ -74,11 +74,14 @@ def find_guest(
 
     ``expires`` is when the caller's budget ends, on ``time.monotonic()``'s
     clock: each request gets what remains of it, at most
-    ``REQUEST_TIMEOUT_SECONDS``, and a budget the status read spends leaves
+    ``REQUEST_TIMEOUT_SECONDS``, and a budget spent before a request leaves
     the VMID unplaced. With none, each request gets the whole request timeout.
     """
+    timeout = _request_timeout(expires)
+    if timeout <= 0:
+        raise ProxmoxAPIError(f"no time remained to read the status of Proxmox VMID {vmid} on node '{node}'")
     try:
-        current = api.vm_status(node, vmid, timeout=_request_timeout(expires))
+        current = api.vm_status(node, vmid, timeout=timeout)
     except ProxmoxAPIError as status_error:
         timeout = _request_timeout(expires)
         if timeout <= 0:

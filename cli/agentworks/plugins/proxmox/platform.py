@@ -536,7 +536,7 @@ class ProxmoxPlatform(VMPlatform):
         """Run ``script`` as root through the QEMU Guest Agent, which needs no guest sshd, once the guest is ours.
 
         The identity check spends the same ``deadline`` the script runs under,
-        no request of it outlasting what remains. A check that spends all of it,
+        no wait of it outlasting what remains. A check that spends all of it,
         including one whose API failure the deadline cut short, raises
         ``ChannelUnreachable`` with nothing dispatched, as the guest agent's
         own wait does.
@@ -552,7 +552,7 @@ class ProxmoxPlatform(VMPlatform):
         if remaining <= 0:
             raise ChannelUnreachable(
                 f"confirming that Proxmox VMID {self._vmid(vm)} is VM '{vm.name}' took the whole "
-                f"{deadline:.0f}-second deadline, so no script was dispatched",
+                f"{deadline:g}-second deadline, so no script was dispatched",
                 hint="Check that the Proxmox API is answering promptly, then run the command again.",
             )
         return guest_agent.run_as_root(self._api(ctx), self._vm_node(vm), self._vmid(vm), script, remaining)
