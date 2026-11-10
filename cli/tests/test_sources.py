@@ -377,6 +377,21 @@ def test_a_truncated_archive_leaves_the_destination_byte_identical(
     assert _siblings(dest) == []
 
 
+def test_a_tree_with_a_read_only_directory_is_replaced_on_every_upload(lane: Files, tmp_path: Path) -> None:
+    """The previous tree's read-only directory is made writable to remove it, upload after upload."""
+    dest = tmp_path / "home" / ".dotfiles"
+    for generation in range(3):
+        local = _tree(tmp_path / f"local-{generation}", {"locked/rc": f"{generation}".encode(), "top": b"t"})
+        (local / "locked").chmod(0o555)
+
+        upload_tree(lane, local, str(dest))
+
+        assert _contents(dest) == {"locked/rc": f"{generation}".encode(), "top": b"t"}
+        assert _siblings(dest) == []
+    for directory in (path for path in tmp_path.rglob("*") if path.is_dir()):
+        directory.chmod(0o755)
+
+
 @pytest.mark.parametrize("planted", ["link", "file"])
 def test_upload_tree_refuses_a_link_or_file_at_the_destination(lane: Files, tmp_path: Path, planted: str) -> None:
     target = _tree(tmp_path / "target", {"rc": b"theirs"})

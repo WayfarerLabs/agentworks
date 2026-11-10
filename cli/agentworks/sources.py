@@ -370,16 +370,24 @@ if [ -L "$dest" ] || { [ -e "$dest" ] && [ ! -d "$dest" ]; }; then
     exit 4
 fi
 mkdir -p -- "${parent:-/}"
+# A tree may hold directories its owner cannot write, which rm cannot empty until they are made writable
+# (never through a link). Removing what an upload left is best effort: the next upload removes the rest.
+remove() {
+    for path in "$@"; do
+        [ -L "$path" ] || chmod -R u+w -- "$path" 2>/dev/null || :
+    done
+    rm -rf -- "$@" || :
+}
 # A run killed between its two renames left the previous tree at old and nothing at dest.
 if [ -d "$old" ] && [ ! -L "$old" ] && [ ! -e "$dest" ] && [ ! -L "$dest" ]; then
     mv -T -- "$old" "$dest"
 fi
-rm -rf -- "$old" "$new"
+remove "$old" "$new"
 restore() {
-    rm -rf -- "$new"
+    remove "$new"
     if [ -e "$old" ] || [ -L "$old" ]; then
         if [ -e "$dest" ] || [ -L "$dest" ]; then
-            rm -rf -- "$old"
+            remove "$old"
         else
             mv -T -- "$old" "$dest"
         fi
@@ -396,7 +404,7 @@ if [ -e "$dest" ]; then
 fi
 mv -T -- "$new" "$dest"
 trap - EXIT HUP INT TERM
-rm -rf -- "$old" || :
+remove "$old"
 """
 """Replace the directory ``$AGW_TREE_DEST`` with the gzip tar archive on stdin, as one ``sh`` script.
 
@@ -405,8 +413,10 @@ and only then is the previous tree moved aside to ``.agentworks-old-<tag>``
 and the new one moved in. Any failure or signal from the extraction on puts
 the previous tree back; a run killed outright between the two renames leaves
 it at the ``old`` sibling, which the next upload to the same destination
-moves back before it does anything else. A link or anything but a directory
-at the destination is status 4.
+moves back before it does anything else. A sibling is made writable before it
+is removed, so a tree with read-only directories is replaced like any other,
+and a sibling that cannot be removed never stops the previous tree coming
+back. A link or anything but a directory at the destination is status 4.
 """
 
 UNSUITABLE_TREE = 4
