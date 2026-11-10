@@ -368,3 +368,83 @@ def test_stopped_workload_preview_does_not_propose_starting_off_running_intent_p
     assert not any(row.kind == "vm" and row.outcome is Outcome.CHANGED for row in rendered)
     assert all(row.outcome is Outcome.UNCHANGED for row in rendered)
     assert not runtime[2]
+
+
+def test_preview_binding_failure_isolated_from_healthy_family(db, make_config, runtime, monkeypatch):
+    seed_vm(db, "bad", site="missing-site")
+    seed_session(db, "bad-child", "bad")
+    seed_vm(db, "good")
+    runtime[0]["good"] = VMStatus.STOPPED
+    rendered = []
+    monkeypatch.setattr("agentworks.runtime_state._preview.render_results", lambda rows, **k: rendered.extend(rows))
+    monkeypatch.setattr(
+        "agentworks.harness_setup.locking.native_mutation_guard",
+        lambda *a, **k: pytest.fail("dry run acquired mutation guard"),
+    )
+    with pytest.raises(StateError):
+        reconcile_vm(db, make_config(), all_vms=True, dry_run=True, interaction=REFUSE)
+    results = {(row.kind, row.name): row for row in rendered}
+    assert results[("vm", "bad")].outcome is Outcome.BLOCKED
+    assert results[("session", "bad-child")].outcome is Outcome.BLOCKED
+    assert results[("vm", "good")].outcome is Outcome.CHANGED
+    assert results[("vm", "good")].action == "start"
+    assert not runtime[2]
+
+
+def test_public_batch_groups_policy_observation_and_reuses_unchanged_definition(db, make_config, runtime, monkeypatch):
+    from agentworks.capabilities.harness_integration import HarnessLaunchIntent
+    from agentworks.runtime_state import run_session_batch
+
+    seed_vm(db, "box")
+    seed_session(db, "kept", "box")
+    seed_session(db, "adopted", "box", target=DesiredRuntimeState.STOPPED)
+    observed = []
+    original_observe = manager.observe_session_statuses
+    definitions = []
+    original_prepare = manager.prepare_session_definition
+
+    def observe(rows, **kwargs):
+        observed.append(tuple(row.name for row in rows))
+        return original_observe(rows, **kwargs)
+
+    def prepare(*args, **kwargs):
+        definition = original_prepare(*args, **kwargs)
+        definitions.append(definition.session.name)
+        return definition
+
+    monkeypatch.setattr(manager, "observe_session_statuses", observe)
+    monkeypatch.setattr(manager, "prepare_session_definition", prepare)
+    run_session_batch(
+        db,
+        make_config(),
+        db.list_sessions(),
+        operation="start",
+        force=False,
+        intent=HarnessLaunchIntent.RESUME_OR_NEW,
+        running_restart_authorized=frozenset(),
+        interaction=REFUSE,
+    )
+    assert len(observed) == 1 and set(observed[0]) == {"kept", "adopted"}
+    assert definitions.count("kept") == 1
+    assert definitions.count("adopted") == 2
+    assert {name for action, name in runtime[2] if action == "session-start"} == {"kept", "adopted"}
+
+
+def test_preview_groups_live_guests_and_excludes_powered_off_family(db, make_config, runtime, monkeypatch):
+    seed_vm(db, "live")
+    seed_session(db, "a", "live")
+    seed_session(db, "b", "live")
+    seed_vm(db, "off")
+    seed_session(db, "c", "off")
+    runtime[0]["off"] = VMStatus.STOPPED
+    observed = []
+    original = manager.observe_session_statuses
+
+    def observe(rows, **kwargs):
+        observed.append(tuple(row.name for row in rows))
+        return original(rows, **kwargs)
+
+    monkeypatch.setattr(manager, "observe_session_statuses", observe)
+    reconcile_vm(db, make_config(), all_vms=True, dry_run=True, interaction=REFUSE)
+    assert len(observed) == 1 and set(observed[0]) == {"a", "b"}
+    assert not runtime[2]

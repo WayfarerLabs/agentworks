@@ -32,10 +32,11 @@ def prepare_local_workloads(invocation: RuntimeInvocation) -> None:
     import agentworks.sessions.manager as sessions
     from agentworks.sessions.multi_console.runtime import validate_console_definition
 
-    for name, session in tuple(invocation.sessions.items()):
+    for name, session in invocation.sessions.items():
+        if invocation.unavailable("session", name):
+            continue
         try:
             vm_name = session_vm_name(invocation, session)
-            vm = invocation.vms[vm_name]
             target = (
                 DesiredRuntimeState.STOPPED
                 if invocation.operation == "stop"
@@ -45,9 +46,8 @@ def prepare_local_workloads(invocation: RuntimeInvocation) -> None:
             )
             if target is None:
                 invocation.fail("session", name, "desired state requires adoption", blocked=True)
-                continue
-            if target is DesiredRuntimeState.RUNNING:
-                definition = sessions.prepare_session_definition(
+            elif target is DesiredRuntimeState.RUNNING:
+                invocation.definitions[name] = sessions.prepare_session_definition(
                     invocation.db,
                     invocation.config,
                     invocation.registry,
@@ -58,25 +58,58 @@ def prepare_local_workloads(invocation: RuntimeInvocation) -> None:
                     intent=invocation.intent,
                     running_restart_authorized=name in invocation.authorized_running,
                 )
-                if invocation.operation is not None and vm.desired_runtime_state is not DesiredRuntimeState.STOPPED:
-                    try:
-                        observed = sessions.observe_session_statuses(
-                            [session], db=invocation.db, config=invocation.config, include_legacy=True
-                        ).get(name, SessionStatus.UNKNOWN)
-                    except UserAbort:
-                        raise
-                    except Exception:
-                        observed = SessionStatus.UNKNOWN
+        except UserAbort:
+            raise
+        except Exception as error:
+            invocation.fail("session", name, error, blocked=True)
+
+    observations: dict[str, SessionStatus] = {}
+    if invocation.operation in {"start", "restart"}:
+        candidates = [
+            session
+            for name, session in invocation.sessions.items()
+            if not invocation.unavailable("session", name)
+            and name in invocation.definitions
+            and invocation.vms[session_vm_name(invocation, session)].desired_runtime_state
+            is not DesiredRuntimeState.STOPPED
+        ]
+        if candidates:
+            try:
+                observations = sessions.observe_session_statuses(
+                    candidates, db=invocation.db, config=invocation.config, include_legacy=True
+                )
+            except UserAbort:
+                raise
+            except Exception:
+                # Failed guest observation is operational uncertainty, not a local policy refusal.
+                observations = {}
+
+    for name, selected in tuple(invocation.sessions.items()):
+        if invocation.unavailable("session", name):
+            continue
+        try:
+            session = selected
+            vm_name = session_vm_name(invocation, session)
+            vm = invocation.vms[vm_name]
+            target = (
+                DesiredRuntimeState.STOPPED
+                if invocation.operation == "stop"
+                else DesiredRuntimeState.RUNNING
+                if invocation.operation is not None
+                else session.desired_runtime_state
+            )
+            assert target is not None
+            if invocation.operation is not None:
+                if target is DesiredRuntimeState.RUNNING:
+                    definition = invocation.definitions[name]
                     sessions.validate_session_observed_policy(
                         session,
-                        observed,
+                        observations.get(name, SessionStatus.UNKNOWN),
                         replace_running=definition.replace_running,
                         force=definition.force,
                         intent=definition.intent,
                         running_restart_authorized=definition.running_restart_authorized,
                     )
-                invocation.definitions[name] = definition
-            if invocation.operation is not None:
                 previous = session.desired_runtime_state
                 session = sessions.accept_session_runtime_state(
                     invocation.db, session, state=target, held_native_guard=invocation.guards[vm_name]
@@ -85,28 +118,27 @@ def prepare_local_workloads(invocation: RuntimeInvocation) -> None:
                 invocation.record("session", name, desired_runtime_state=target)
                 if previous != target:
                     invocation.accepted_changes.add(name)
-                if target is DesiredRuntimeState.RUNNING:
-                    invocation.definitions[name] = sessions.prepare_session_definition(
-                        invocation.db,
-                        invocation.config,
-                        invocation.registry,
-                        session,
-                        vm_node=invocation.nodes[vm_name],
-                        replace_running=invocation.operation == "restart",
-                        force=invocation.force,
-                        intent=invocation.intent,
-                        running_restart_authorized=name in invocation.authorized_running,
-                    )
+                    if target is DesiredRuntimeState.RUNNING:
+                        invocation.definitions[name] = sessions.prepare_session_definition(
+                            invocation.db,
+                            invocation.config,
+                            invocation.registry,
+                            session,
+                            vm_node=invocation.nodes[vm_name],
+                            replace_running=invocation.operation == "restart",
+                            force=invocation.force,
+                            intent=invocation.intent,
+                            running_restart_authorized=name in invocation.authorized_running,
+                        )
             if target is DesiredRuntimeState.RUNNING and vm.desired_runtime_state is DesiredRuntimeState.STOPPED:
                 invocation.fail("session", name, "parent VM has stopped desired state", blocked=True)
         except UserAbort:
             raise
         except Exception as error:
             invocation.fail("session", name, error, blocked=True)
-            current = invocation.db.get_session(name)
-            if current is not None:
-                invocation.record("session", name, desired_runtime_state=current.desired_runtime_state)
     for name, console in invocation.consoles.items():
+        if invocation.unavailable("console", name):
+            continue
         if console.desired_runtime_state is None:
             invocation.fail("console", name, "desired state requires adoption", blocked=True)
         elif console.desired_runtime_state is DesiredRuntimeState.RUNNING:
@@ -163,6 +195,8 @@ def prepare_infrastructure(invocation: RuntimeInvocation) -> None:
     import agentworks.vms.manager as vms
 
     for name, vm in invocation.vms.items():
+        if name in invocation.failed_families:
+            continue
         eligible = (
             name in invocation.selection.explicit_vms
             or any(

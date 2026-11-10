@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from agentworks.capabilities.harness_integration import HarnessLaunchIntent
 from agentworks.db import DesiredRuntimeState, SessionStatus, VMStatus
-from agentworks.errors import StateError, UserAbort
+from agentworks.errors import AgentworksError, StateError, UserAbort
 from agentworks.sessions.tmux import ProbeStatus
 
 from ._models import Outcome, RuntimeInvocation, RuntimeResult, render_results, require_success
@@ -56,16 +56,36 @@ def preview_selected(
         try:
             site_nodes: dict[str, VMSiteNode] = {}
             for selected in selection.vms:
-                current = db.get_vm(selected.name)
-                if current is None or current.vm_uuid != selected.vm_uuid:
-                    raise StateError("VM changed during preview selection", entity_kind="vm", entity_name=selected.name)
-                invocation.vms[current.name] = current
-                if ("vm", current.name) in invocation.results:
-                    invocation.results[("vm", current.name)] = replace(
-                        invocation.results[("vm", current.name)], desired_runtime_state=current.desired_runtime_state
+                try:
+                    current = db.get_vm(selected.name)
+                    if current is None or current.vm_uuid != selected.vm_uuid:
+                        raise StateError(
+                            "VM changed during preview selection", entity_kind="vm", entity_name=selected.name
+                        )
+                    invocation.vms[current.name] = current
+                    if ("vm", current.name) in invocation.results:
+                        invocation.results[("vm", current.name)] = replace(
+                            invocation.results[("vm", current.name)],
+                            desired_runtime_state=current.desired_runtime_state,
+                        )
+                    invocation.nodes[current.name] = live_vm_node(db, config, registry, current, site_nodes=site_nodes)
+                except UserAbort:
+                    raise
+                except AgentworksError as error:
+                    invocation.failed_families.add(selected.name)
+                    invocation.results.setdefault(
+                        ("vm", selected.name),
+                        RuntimeResult(
+                            kind="vm", name=selected.name, desired_runtime_state=selected.desired_runtime_state
+                        ),
                     )
-                invocation.nodes[current.name] = live_vm_node(db, config, registry, current, site_nodes=site_nodes)
+                    invocation.fail("vm", selected.name, error, blocked=True)
+                    for name, parent in selection.session_routes:
+                        if parent == selected.name:
+                            invocation.fail("session", name, "parent VM definition is unavailable", blocked=True)
             for selected_session in selection.sessions:
+                if invocation.unavailable("session", selected_session.name):
+                    continue
                 session = db.get_session(selected_session.name)
                 workspace = db.get_workspace(session.workspace_name) if session is not None else None
                 if (
@@ -102,6 +122,8 @@ def preview_selected(
                 invocation.results[("console", name)] = RuntimeResult(
                     kind="console", name=name, desired_runtime_state=console.desired_runtime_state
                 )
+                if parent in invocation.failed_families:
+                    invocation.fail("console", name, "parent VM definition is unavailable", blocked=True)
             prepare_local_workloads(invocation)
             _observe_providers(invocation)
             _preview_sessions(invocation)
@@ -121,6 +143,8 @@ def _observe_providers(invocation: RuntimeInvocation) -> None:
     import agentworks.vms.manager as vms
 
     for name, vm in invocation.vms.items():
+        if name in invocation.failed_families:
+            continue
         try:
             context = vms.prepare_vm_runtime(
                 invocation.db,
@@ -166,6 +190,17 @@ def _preview_sessions(invocation: RuntimeInvocation) -> None:
 
     import agentworks.sessions.manager as sessions
 
+    candidates = [
+        session
+        for name, session in invocation.sessions.items()
+        if not invocation.unavailable("session", name)
+        and invocation.contexts[session_vm_name(invocation, session)].observed_status is VMStatus.RUNNING
+    ]
+    observations = (
+        sessions.observe_session_statuses(candidates, db=invocation.db, config=invocation.config, include_legacy=True)
+        if candidates
+        else {}
+    )
     for name, session in invocation.sessions.items():
         if invocation.unavailable("session", name):
             continue
@@ -183,9 +218,7 @@ def _preview_sessions(invocation: RuntimeInvocation) -> None:
                 )
                 changed = target is DesiredRuntimeState.RUNNING
             elif power is VMStatus.RUNNING:
-                status = sessions.observe_session_statuses(
-                    [session], db=invocation.db, config=invocation.config, include_legacy=True
-                ).get(name, SessionStatus.UNKNOWN)
+                status = observations.get(name, SessionStatus.UNKNOWN)
                 if status is SessionStatus.UNKNOWN:
                     raise StateError("guest session observation is unknown")
                 if status is SessionStatus.BROKEN:

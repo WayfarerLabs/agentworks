@@ -145,8 +145,6 @@ def acquire_families(invocation: RuntimeInvocation) -> None:
                     entity_kind="session",
                     entity_name=selected_session.name,
                 )
-            selected_workspace = invocation.db.get_workspace(selected_session.workspace_name)
-            assert selected_workspace is not None
             invocation.sessions[current_session.name] = current_session
             invocation.results[("session", current_session.name)] = replace(
                 invocation.results[("session", current_session.name)],

@@ -151,7 +151,7 @@ def render_results(results: tuple[RuntimeResult, ...], *, dry_run: bool = False)
     for result in results:
         target = result.desired_runtime_state or ("adoption required" if result.target_known else "unavailable")
         observed = result.observation.value if result.observation is not None else "unavailable"
-        outcome = f"would {result.outcome}" if dry_run and result.outcome is Outcome.CHANGED else result.outcome
+        outcome = "would change" if dry_run and result.outcome is Outcome.CHANGED else result.outcome
         reason = f": {result.reason}" if result.reason else ""
         output.result(
             f"{result.kind} '{result.name}': {outcome} ({result.action}; desired {target}; observed {observed}){reason}"
