@@ -126,12 +126,12 @@ Statuses: 0, 1, 4, 5, 6, 7, `128 + n`.
 ### `ensure_directory` with an owner
 
 Today `ensure_directory` creates a missing directory and leaves an existing one as it is
-(`file_program.py:360-366`, `files-lld.md:390-391`), which native settings needs. With `owner` (and
-`group`), and elevated, it also converges the directory, new or existing: under the lock it walks
-the parent without following links, creates the directory if missing, opens it with
-`O_RDONLY | O_DIRECTORY | O_NOFOLLOW`, and applies `fchown(uid, gid)` then `fchmod(mode)` to that
-descriptor. A link at the directory or any parent is status 4. Its first owner caller is the agent's
-`.ssh`, which it places through a no-follow walk with the agent as owner, in place of
+(`file_program.py:360-366`, `files-lld.md:390-391`), which native settings needs. With `owner` or
+`group` (elevated for another account's owner), it also converges the directory, new or existing:
+under the lock it walks the parent without following links, creates the directory if missing, opens
+it with `O_RDONLY | O_DIRECTORY | O_NOFOLLOW`, and applies `fchown(uid, gid)` then `fchmod(mode)` to
+that descriptor. A link at the directory or any parent is status 4. Its first owner caller is the
+agent's `.ssh`, which it places through a no-follow walk with the agent as owner, in place of
 `install -d -o -g -m`.
 
 ## The workstation API
@@ -217,11 +217,10 @@ since no conditional writer works beneath a dotfiles checkout.
 
 - **One access.** `bootstrap_vm` builds the admin's access from the row it re-reads after Phase A
   recorded the address
-  (`execution.vm_access(db.get_vm(vm_name), config, Admin(), log=logger.record)`) and returns it in
-  place of `ts_target` (`driver.py:139-147`); until batch B it returns
-  `(access, legacy_target, home, release)`. Reinit passes the access it already built for the
-  contract (`reinit.py:282`) and drops `ts_target` (`:269`). Phase B uses that one access for
-  everything, the git credentials' runup included (`driver.py:555`).
+  (`execution.vm_access(db.get_vm(vm_name), config, Admin(), log=logger.record)`) and returns
+  `(access, home, release)` in place of `ts_target` (`driver.py:139-147`). Reinit passes the access
+  it already built for the contract (`reinit.py:282`) and drops `ts_target` (`:269`). Phase B uses
+  that one access for everything, the git credentials' runup included (`driver.py:555`).
 - **One bound.** `vms/initializer/steps.py` defines `STEP_DEADLINE = 60`, today's
   `default_timeout=60` (`driver.py:144`, `reinit.py:269`). Phase B builds
   `files = access.files(deadline=STEP_DEADLINE)` once, and every helper takes that `files`, running
@@ -254,15 +253,21 @@ since no conditional writer works beneath a dotfiles checkout.
   `tailscale_join` takes its reason's tail (`capabilities/vm_platform/tailscale_join.py:109`).
   Today's `SSHError` message carried the whole command and stderr (`transports/ssh.py:360`), and
   `output.warn` printed it without redaction; the operation log still holds the full streams,
-  redacted (HLA D13). The agent initializer, which warns on the console only
-  (`agents/initializer.py:499`, `:583`, and so on), uses `describe_failure` with `output.warn`.
+  redacted (HLA D13). The agent initializer's own steps, which warn on the console only
+  (`agents/initializer.py:499`, `:583`, and so on), use `describe_failure` with `output.warn`; the
+  helpers it shares with Phase B (the profile and rc fragments and their source lines, the install
+  commands, mise) warn through `steps.warn`, into the agent's operation log as well.
 - **`streams_logged`.** `CommandFailed` takes the failed request's `log_streams` as a required
   constructor argument; its three raisers, `VMAccess.run(check=True)`, `Files` and `upload_tree`,
   pass it. A request that keeps its streams out of the log keeps them out of a warning too.
 - **The log protocol.** `steps.InitLog(OperationLog, Protocol)` adds Phase B's members (`warning`
   and `sanitize`) to Phase A's `OperationLog` (`phase_a.py`), which already has `record`, and which
-  stays as it is. `SSHLogger` satisfies both, and the migrated files import nothing from
-  `agentworks.ssh`, so they join the static check.
+  stays as it is. `driver.PhaseBLog(InitLog, Protocol)` adds what `run_initialization` reads besides
+  (`has_warnings`, `warnings`) and the `redactions` native setup reads, and
+  `harness_setup.lifecycle.SetupLog` names what the apply functions read (`redactions`, `warning`,
+  `record`). `SSHLogger` satisfies all of them, and the migrated files import nothing from
+  `agentworks.ssh`, so they join the static check; `agents/initializer.py` types its log as
+  `InitLog`.
 
 ### Shapes
 
@@ -480,15 +485,18 @@ absolute value that is the home or one of its ancestors.
 otherwise it calls `update` with `line` appended, first adding a newline when the file does not end
 with one (today's `printf >>` joins the line to a final unterminated one), `observed` the read,
 `mode=0o644`, `parent_mode=0o755` and `preserve_metadata=True`. A missing file is created 0644, as
-`>>` under the default umask creates it.
+`>>` under the default umask creates it. It returns what it found (`SourceLine.PRESENT`, `ADDED` or
+`LINKED`). Every writer appends the same line, `. <home>/<fragment>`, with the fragment's file name
+as the marker, so a line written by any earlier version still satisfies it.
 
-`source_files(home, shell)` names the files once for every writer: the profile line goes to
-`.profile` and `.bashrc`, and `.zprofile` for a zsh account; the rc line to `.bashrc`, and `.zshrc`
-for a zsh account. These are `_ensure_agentworks_files_sourced`'s lists (`shell_env.py:61-79`).
-Today `_write_agentworks_profile` writes `.profile` and `.zprofile` whatever the shell
-(`shell_env.py:146-149`) and both rc writers write `.bashrc` and `.zshrc` whatever the shell
-(`shell_env.py:607-610`, `agents/initializer.py:611-614`), so a bash account no longer gets a
-`.zprofile` or `.zshrc` created for it.
+`source_files(home, shell)`, a mapping from each fragment's file name to its rc files, names the
+files once for every writer: the profile line goes to `.profile` and `.bashrc`, and `.zprofile` for
+a zsh account; the rc line to `.bashrc`, and `.zshrc` for a zsh account. These are
+`_ensure_agentworks_files_sourced`'s lists (`shell_env.py:61-79`). Today `_write_agentworks_profile`
+writes `.profile` and `.zprofile` whatever the shell (`shell_env.py:146-149`) and both rc writers
+write `.bashrc` and `.zshrc` whatever the shell (`shell_env.py:607-610`,
+`agents/initializer.py:611-614`), so a bash account no longer gets a `.zprofile` or `.zshrc` created
+for it.
 
 **A linked rc file** is never written through (decision 3). `read` refuses a link, or any other type
 that is not a regular file, with `PathRefused(UNSUITABLE)`; `ensure_source_line` then asks which it
@@ -574,10 +582,17 @@ request before dispatch (D12), so the self-configure phase cannot regress into r
 | mise shims `PATH`               | `printf >> profile`, `:652-665`                                     | folded into the profile fragment's content (below); no request                                                                                                                              | n/a         | n/a                   | n/a       |
 | mise config, lockfile           | `mkdir -p`, `write_file`, `fetch_file`, `:685-701`                  | `write(config.toml, mode=0o644, parent_mode=0o755)`; `fetch_file` as the admin's                                                                                                            | agent       | content               | none      |
 | mise install, prune             | `:708`, `:716-719`, `:726-729`, `:746-749`                          | as the admin's                                                                                                                                                                              | agent       | none                  | 300; 60   |
-| Delete                          | `pkill -u`, `rm -rf` socket dir, `userdel -r`, `:413-425`           | three `Command`s, `elevated=True`; the first two `check=False`; the socket directory still goes before `userdel` (I74)                                                                      | root        | none                  | none      |
+| Delete                          | `pkill -u`, `rm -rf` socket dir, `userdel -r`, `:413-425`           | three `Command`s, `elevated=True`; the first two read no status; the socket directory still goes before `userdel` (I74)                                                                     | root        | none                  | none      |
 | Grant: add                      | `grants.py:256-257`                                                 | `Script(f"getent group {q(g)} >/dev/null 2>&1 \|\| /usr/sbin/groupadd {q(g)}", Shell.SH, elevated=True)`; `Command(("usermod", "-aG", g, user), elevated=True)`; both run with `check=True` | root        | none                  | none      |
-| Grant: remove                   | `grants.py:272`                                                     | `Command(("gpasswd", "-d", user, g), elevated=True)`, `check=False`                                                                                                                         | root        | none                  | none      |
+| Grant: remove                   | `grants.py:272`                                                     | `Command(("gpasswd", "-d", user, g), elevated=True)`, status not read, a completion required                                                                                                | root        | none                  | none      |
 
+- **Shared with the admin.** The agent writes its profile and rc fragments with Phase B's
+  `_write_agentworks_profile` and `_write_agentworks_rc` (passing its identity exports), runs its
+  user install commands through Phase B's `_run_install_commands`, whose completion test runs
+  `test_exec` as `{shell} -lic` where the agent's used `-lc`, and sets up mise with Phase B's
+  `_write_mise_config`, `_fetch_mise_lockfile` and `_run_mise_install`, so a failed config write no
+  longer skips the install. One `profile_fragment` builds both accounts' profile, keeping the last
+  of interleaved `PATH` entries (I70) for the admin too.
 - **The mise shims line.** Today `_run_agent_mise_setup` appends
   `export PATH="<home>/.local/share/mise/shims:$PATH"` to the profile fragment after
   `_run_agent_install_commands` rewrote it (`agents/initializer.py:652-658`), and adds source lines
@@ -883,6 +898,10 @@ already observe whole, so they have tests and no live cell.
 - **`docs/guides/upgrading-to-0.20.md`:** `:137-138` drops "VM and agent initialization" from the
   commands still on the old path; `:237-240` drops "Commands still on the old path log as before"
   for initialization; a section on initialization lists the behavior changes above.
+- **`docs/guides/mise.md`:** the sequencing notes say the config and lockfile are never written
+  through a link.
+- **READMEs:** the git-credential README's reconciler (bash, the archive on stdin, the user's
+  access) and the vm-platform README's initialization stage.
 - **`docs/guides/idempotency.md`:** the agent's "PATH additions" row (`:134`) becomes "Overwritten
   from template"; the local dotfiles rows (`:96`, `:147`) say the tree is replaced whole; the sshd
   row (`:76`) says it is rewritten and reloaded only on a change; a note says a linked rc file is
@@ -977,6 +996,26 @@ a shared helper moves every caller of it**, so no helper exists in two forms bet
     static check; the inventory rows; ADR 0011, the guides and the docstrings.
 
 Each batch carries the collateral it makes true.
+
+**Batch B as built.** The bridges batch A left are gone from production code: `bootstrap_vm`, reinit
+and agent create build no legacy target, and no initialization step takes one. The test bridges
+`route_vm_access_to_target` and `files_over_target` stay for slice 7's callers; agent create's tests
+no longer use them. The departures from the tables above, each recorded where it applies:
+
+- The agent shares Phase B's profile, rc, install-command and mise helpers (above, "Shared with the
+  admin"), so its install-command completion test is `-lic` and those helpers' warnings reach its
+  operation log.
+- `ensure_directory` converges with `owner` or `group`, either one.
+- `UPLOAD_TREE_SCRIPT` moves an `old` sibling back only when it is a directory and not a link, and
+  removes anything else there; the git file source validates `mktemp`'s output as a guest path
+  before using it.
+- `remove_from_workspace_group` and agent delete's first two requests read no status but require a
+  completion, so an unreachable VM still raises, as `SSHError` did.
+- Native setup's apply functions type their log as `harness_setup.lifecycle.SetupLog`, and the
+  driver as `PhaseBLog` (above), so neither file names `SSHLogger`.
+- Three tests that asserted on the source text of `_phase_b_setup` and `create_agent_on_vm`
+  (`cli/tests/test_secrets_eager_resolve_vm_agent.py`) gave way to recording tests of the same order
+  and hermeticity (I59, I77, I78).
 
 ## Decisions
 

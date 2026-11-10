@@ -59,6 +59,11 @@ If the VM was created with `--spec` or `--admin-spec`, reinit consumes both stor
 after their selected VM and admin templates. It does not accept a flag to change or clear either
 layer.
 
+Reinit never writes through a symbolic link in a home. A linked rc file (`~/.profile`, `~/.bashrc`,
+`~/.zprofile`, `~/.zshrc`) whose target already sources the Agentworks fragment is accepted as it
+is; one whose target does not is left alone with a warning naming the line to add, and every reinit
+stays partial until the line is there. The same holds for agent reinit.
+
 ### Fully idempotent
 
 | Step                   | Notes                                                                                                                                                                                                                                            |
@@ -66,6 +71,7 @@ layer.
 | Apt sources            | Key downloaded if missing; source list rewritten, and apt refreshed, only on a change                                                                                                                                                            |
 | SSH host key preserve  | cloud-init drop-in written so host keys survive stop/start                                                                                                                                                                                       |
 | Shell                  | Overwritten from config                                                                                                                                                                                                                          |
+| Shell source lines     | Appended to an rc file only when it does not already source the fragment; a linked rc file is never written through                                                                                                                              |
 | SSH authorized keys    | Overwritten from config                                                                                                                                                                                                                          |
 | Git credentials        | Complete desired list rebuilt; empty removes Agentworks-owned credential/routing state                                                                                                                                                           |
 | Dotfiles (git source)  | `git pull` if already cloned, fresh clone if not                                                                                                                                                                                                 |
@@ -92,9 +98,9 @@ These add things on reinit but do not remove them when removed from config:
 
 ### Other
 
-| Step                    | Notes                                                                    |
-| ----------------------- | ------------------------------------------------------------------------ |
-| Dotfiles (local source) | Overwritten, not merged. Side effects from previous installs may linger. |
+| Step                    | Notes                                                                                                                                                     |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Dotfiles (local source) | Replaced whole through a temporary sibling, not merged; the previous tree comes back if the upload fails. Side effects from previous installs may linger. |
 
 ## Agent reinit
 
@@ -132,7 +138,8 @@ access was restored.
 | Dotfiles (git source)      | `git pull` if already cloned                                                                                                                                             |
 | Mise packages              | Installed if missing, pruned if removed (when `mise_prune_on_reinit = true`)                                                                                             |
 | Mise activation            | Overwritten from template                                                                                                                                                |
-| PATH additions             | Appended idempotently                                                                                                                                                    |
+| PATH additions             | Overwritten from template                                                                                                                                                |
+| Shell source lines         | Appended to an rc file only when it does not already source the fragment; a linked rc file is never written through                                                      |
 
 ### Additive only
 
@@ -143,9 +150,9 @@ access was restored.
 
 ### Other
 
-| Step                    | Notes                                                                    |
-| ----------------------- | ------------------------------------------------------------------------ |
-| Dotfiles (local source) | Overwritten, not merged. Side effects from previous installs may linger. |
+| Step                    | Notes                                                                                                                                                     |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Dotfiles (local source) | Replaced whole through a temporary sibling, not merged; the previous tree comes back if the upload fails. Side effects from previous installs may linger. |
 
 ## Workspace creation and interruption
 

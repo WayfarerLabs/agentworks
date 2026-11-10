@@ -107,16 +107,17 @@ the VM through a new connection layer that sends each request over the OpenSSH c
 input instead of on the `ssh` command line. For `vm create` that is the checks of the VM after the
 platform has created it and joined it to the tailnet; for `vm reinit`, its checks of the VM (see
 [Create, reinit and the VM contract](#create-reinit-and-the-vm-contract)). For both it is also every
-step of the VM Initialization section, and in Admin Initialization the workspaces directory and the
-user install commands (see [Initialization steps](#initialization-steps)). `workspace create`,
+step of initialization, and `agent create` and `agent reinit` run all of agent initialization, as
+the admin and then as the agent, through it (see [Initialization steps](#initialization-steps)).
+`agent delete` and the workspace group grants run through it. `workspace create`,
 `workspace repair`, `workspace rehome` and `workspace copy` apply the workspace ACLs through it, and
-`agent create`, `session create` and the session launches set up the tmux socket directories through
-it. `vm start`, and the automatic start of a VM that stopped on its own, use it to wait for the VM
-to answer; `vm rekey` and `vm recover` use it for the same wait after their scripts, which run
-through the platform's own channel (see
-[Start, recover, rekey and delete](#start-recover-rekey-and-delete)). `vm shell --platform` uses the
-platform's own channel instead and needs no `python3`; on a cloud VM that channel is SSH to its
-public address under the same rules. Everything else keeps its current path for now.
+`session create` and the session launches set up the tmux socket directories through it. `vm start`,
+and the automatic start of a VM that stopped on its own, use it to wait for the VM to answer;
+`vm rekey` and `vm recover` use it for the same wait after their scripts, which run through the
+platform's own channel (see [Start, recover, rekey and delete](#start-recover-rekey-and-delete)).
+`vm shell --platform` uses the platform's own channel instead and needs no `python3`; on a cloud VM
+that channel is SSH to its public address under the same rules. Everything else keeps its current
+path for now.
 
 ### What these commands need
 
@@ -139,12 +140,12 @@ has started.
   directory. Agentworks now starts every workstation program by its path in an absolute `PATH`
   directory: `tailscale`, PowerShell, the 1Password CLI `op`, `git`, `taskkill`, local Lima's
   `limactl`, VS Code's `code`, your `EDITOR`, and the `ssh` and `scp` of the requests that still use
-  the older SSH path (the rest of Admin Initialization, agent initialization, sessions, workspaces
-  and backups). A program found only in the current directory counts as not installed, so
-  `agw doctor` and the 1Password backend's readiness no longer vouch for one. An `EDITOR` given as a
-  path is run as given. On Windows, `workspace create --open-vscode` does not start VS Code: its
-  `code` command is a batch file, which only `cmd.exe` can run, and `cmd.exe` parses the workspace
-  path by its own rules. The warning names the workspace file to open in VS Code yourself.
+  the older SSH path (sessions, workspaces and backups). A program found only in the current
+  directory counts as not installed, so `agw doctor` and the 1Password backend's readiness no longer
+  vouch for one. An `EDITOR` given as a path is run as given. On Windows,
+  `workspace create --open-vscode` does not start VS Code: its `code` command is a batch file, which
+  only `cmd.exe` can run, and `cmd.exe` parses the workspace path by its own rules. The warning
+  names the workspace file to open in VS Code yourself.
 - **`python3` on the VM.** Every request starts a small Python program on the VM. A VM without
   `python3`, or with one that lacks its standard library, is reported as unable to run Agentworks
   requests. New VMs get it at provisioning. `vm reinit` and `vm confirm-release` now connect the
@@ -240,13 +241,14 @@ has started.
   names recreation. The pam_env settings and an unsupported login shell only warn.
 - **The operation log** records each of these requests by its shape: the command's arguments, or a
   script's shell, with the working directory, the names of its environment variables and its
-  deadline. A script's text and an environment variable's value are not written. Commands still on
-  the old path log as before.
+  deadline. A script's text and an environment variable's value are not written. Requests still on
+  the older SSH path (sessions, workspaces and backups) log as before.
 
 ### Initialization steps
 
-The VM Initialization steps of `vm create` and `vm reinit` run through the new layer, as do the
-workspaces directory and the user install commands of Admin Initialization.
+Every step of `vm create` and `vm reinit` initialization, and of `agent create` and `agent reinit`,
+runs through the new layer. Agent initialization runs as the admin only to create the account and
+place its `authorized_keys`; every later step runs as the agent, which cannot run anything as root.
 
 - **System files are written without following links.** The files initialization owns under `/etc`
   (the cloud-init host-key drop-in, the sysctl baseline, `/etc/fstab`'s `/proc` line, the tailscaled
@@ -272,11 +274,52 @@ workspaces directory and the user install commands of Admin Initialization.
 - **Step warnings show what failed.** A failed step's warning ends with the last three lines of the
   command's error output, with secrets removed.
 - **The DNS check warns when it cannot run.** A DNS probe that fails to run or times out warns and
-  initialization goes on. The issue #117 latch still stops it.
+  initialization goes on. The issue #117 latch still stops it. A mise lockfile step that cannot
+  create its directory warns too.
 - **Some failures stop initialization instead of warning.** A host key that does not match the VM's
   record, a VM with no record, and a VM that cannot run Agentworks requests fail initialization at
   the first request, with that error, instead of turning every later step into a warning. A failed
   install of the required system packages stops it, as before.
+- **Linked rc files are not written through.** The source lines that make `~/.profile`, `~/.bashrc`,
+  `~/.zprofile` and `~/.zshrc` load the Agentworks fragments are never appended through a symbolic
+  link. When one of those files is a link (for example into a dotfiles checkout) and the file it
+  links to already sources the fragment, initialization accepts it. When it does not, initialization
+  warns, naming the line to add, and stays partial: until that line is in your dotfiles, that
+  account's login shells lack `AGENTWORKS_AGENT` and the `PATH` entries of its install commands and
+  mise. Add the line from the warning, such as `. /home/agentworks/.agentworks-profile.sh`, to the
+  file the link points to, then reinit. The old behavior edited the checkout through the link, which
+  then blocked its next `git pull`.
+- **Other links in a home are refused too.** The profile and rc fragments, the mise config and
+  lockfile, `authorized_keys` and the agent's `.ssh` are written by the file program, which refuses
+  a link at the file or any parent. A mise config that is a link (or sits in a linked directory) is
+  not written, with its own warning, so `mise_packages` does not reach it until the template drops
+  `mise_packages` or the dotfiles drop the link. A local dotfiles destination that is a link is
+  refused, and a git-sourced `mise.lock` that is a link in its repository is refused with a warning.
+  Git checkouts and the apt key downloads follow links, as before.
+- **A source line that cannot be added warns.** A failed source-line append used to be silent; it
+  now warns and leaves initialization partial. A bash account no longer gets a `~/.zprofile` or
+  `~/.zshrc` created for it.
+- **Files in the home get a fixed mode.** The admin's profile and rc fragments and mise config, and
+  the mise lockfile from either source, are written 0644. A `PATH` entry contributed twice keeps the
+  precedence of its last occurrence for the admin too, as it already did for agents.
+- **Local dotfiles are replaced through a temporary copy.** A local `dotfiles_source` directory is
+  unpacked beside the destination first, and the previous tree is put back if the upload fails or is
+  interrupted; a run killed outright leaves the previous tree beside the destination, and the next
+  reinit moves it back. The replacement no longer leaves the reinit partial.
+- **`dotfiles_destination` is checked when the template loads.** It must start with `~/` or `/`, may
+  not name the home itself or one of its parents, and may not contain a `.` or `..` component; a
+  trailing `/` is dropped, and only its leading `~` is expanded.
+- **The admin's dotfiles install runs in a login shell,** in the checkout, as the agent's always
+  has, with the new layer's environment and fixed `PATH` underneath it.
+- **Git credentials reconcile under bash** for every account, so an admin or agent whose login shell
+  is `sh` or `dash` gets its credentials.
+- **Agent install commands check completion as the admin's do.** An agent's `test_exec` check runs
+  in an interactive login shell (`-lic`), as the admin's always has, and the agent's mise config,
+  lockfile and install follow the admin's steps; its profile, rc and mise warnings now also reach
+  the agent's operation log.
+- **A missing login shell warns.** Setting the admin's login shell to one that is not installed
+  fails the shell configuration step with a warning, instead of running `usermod` with an empty
+  shell.
 
 ## Start, recover, rekey and delete
 

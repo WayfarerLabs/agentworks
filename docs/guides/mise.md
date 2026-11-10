@@ -142,6 +142,11 @@ This means:
 - If you set `mise_lockfile` explicitly, it always wins over a dotfiles-provided lockfile. This is
   intentional: an explicit lockfile in the agentworks config is a deliberate policy decision that
   should not be silently overridden by dotfiles.
+- Agentworks never writes the config or the lockfile through a symbolic link. If your dotfiles
+  install links `~/.config/mise/config.toml` (or the directory) into the checkout, the next reinit
+  leaves it alone and warns while `mise_packages` is set: let the dotfiles own the config and drop
+  `mise_packages`, or stop linking it. The same holds for an explicit `mise_lockfile` over a linked
+  `mise.lock`.
 
 ## Release age filtering
 

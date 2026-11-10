@@ -610,7 +610,7 @@ and the operator-facing command banners that the rest of the codebase calls "pha
   the address itself. A failure before the contract passes leaves the VM failed, and an interrupt
   leaves it incomplete; every ordinary command refuses either, and the guidance names delete.
 - **Initialization** is `run_initialization` (`agentworks.vms.initializer`) plus VM hardening
-  (`agentworks.vms.hardening`), run over a `Transport` against the created VM. It is
+  (`agentworks.vms.hardening`), run on the admin's `VMAccess` to the created VM. It is
   platform-agnostic. **It is re-runnable and is exactly what `agw vm reinit` re-runs.** The Phase A
   record-and-verify driver `bootstrap_vm` is provisioning, not this stage, and runs only at create.
 

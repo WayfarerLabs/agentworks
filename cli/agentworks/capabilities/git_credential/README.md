@@ -188,8 +188,10 @@ Delimiters such as `:`, `@`, `/`, `%`, `?`, `#`, `=`, and backslash therefore re
 ## Reconciliation and managed state
 
 Every admin and agent initialization prepares selected providers, later materializes them, and
-invokes the same reconciler, including when the desired set is empty. The reconciler uses one
-bounded shared/exclusive lock and a private generation under:
+invokes the same reconciler, including when the desired set is empty. The reconciler is one script
+run under bash on the user's own access, whatever the account's login shell, with the state as a
+gzip archive on its standard input and both of its output streams discarded; its exit status is the
+whole answer. It uses one bounded shared/exclusive lock and a private generation under:
 
 ```text
 ~/.agentworks/git-credentials/
@@ -222,7 +224,7 @@ CLI output do not appear in generated scripts, process arguments, logs, errors, 
 - `github.py` and `plugins/azure/azdo.py` own the shipped schemas, scope translations, runup, and
   final material.
 - `git_credentials/state.py` validates material and builds generic per-user state.
-- `git_credentials/reconcile.py` installs or removes that state over a transport.
+- `git_credentials/reconcile.py` installs or removes that state on the user's `VMAccess`.
 - `tests/test_git_credential_contexts.py` covers graph edges and scoped delivery.
 - `tests/test_git_token_verification.py` covers provider runup and input/output independence.
 - `tests/test_git_credential_scoping.py` covers schema shape, translation parity, Git protocol,
