@@ -650,6 +650,12 @@ just a vm-site.
 | `agw vm logs <name>`                                | Show SSH logs for a VM                                         |
 | `agw vm import-host-keys (--all \| <name>...)`      | Import VM host keys from `known_hosts` into the host-key store |
 
+`vm rekey <name>` resolves the template's auth-key secret by default. Use `--secret <name>` to
+select another declared secret for this operation, or `--prompt` to enter the replacement key
+interactively. These options are mutually exclusive. `--prompt` requires usable terminal input. Add
+`--wait-for-share` when moving the VM to a different tailnet and sharing it back before
+verification.
+
 **Power-state semantics:** a VM that stopped on its own (idle timeout, host reboot) is started
 automatically, on demand, by any command that needs it live. A VM stopped with `agw vm stop` is
 different: that records your intent, so it stays down and commands that would need it refuse with a

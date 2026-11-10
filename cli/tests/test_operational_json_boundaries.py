@@ -103,6 +103,7 @@ def _resolution_spy(monkeypatch: pytest.MonkeyPatch) -> list[tuple[tuple[str, ..
         *,
         tty_access: TtyInteractionAccess,
         interaction_broker: InteractionBroker | None,
+        prompt_names: frozenset[str] = frozenset(),
     ) -> ResolutionBatch:
         calls.append(
             (
@@ -117,6 +118,7 @@ def _resolution_spy(monkeypatch: pytest.MonkeyPatch) -> list[tuple[tuple[str, ..
             sources,
             tty_access=tty_access,
             interaction_broker=interaction_broker,
+            prompt_names=prompt_names,
         )
 
     monkeypatch.setattr(resolve, "resolve_batch", resolve_batch)

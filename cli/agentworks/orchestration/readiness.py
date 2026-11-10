@@ -36,6 +36,7 @@ def preflight_all(
     *,
     registry: Registry,
     interaction: TtyInteractionPolicy,
+    prompt_names: frozenset[str] = frozenset(),
 ) -> None:
     """The preflight-all sweep: every participating node, against the
     one command-start context, before any prompt or mutation (the
@@ -92,6 +93,7 @@ def preflight_all(
             tty_access=tty_access,
             preview_memo=preview_memo,
             sources=sources,
+            prompt_names=prompt_names,
         )
         node.preflight(ctx)
 

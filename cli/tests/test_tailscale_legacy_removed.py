@@ -71,9 +71,7 @@ def test_vm_manager_module_does_not_reference_legacy_tailscale_env_var() -> None
     src = _read_module_source("agentworks.vms.manager")
     assert "AW_TAILSCALE_AUTH_KEY" not in src, (
         "found legacy env var name AW_TAILSCALE_AUTH_KEY in "
-        "agentworks.vms.manager; ``--ignore-env`` must mask the "
-        "framework's AW_SECRET_<NAME> convention, not the removed "
-        "legacy name"
+        "agentworks.vms.manager; Tailscale must resolve via the framework"
     )
 
 
