@@ -27,9 +27,10 @@ It bounds the connection and each wait for the answer, as ssh's
 ``ConnectTimeout`` (``ssh_process.CONNECT_TIMEOUT_SECONDS``) bounds a host
 connection. The calls that wait on long work (clone, start, stop, delete)
 return a task UPID at once and ``wait_for_task`` polls it, so no single
-request needs longer. Callers with a budget of their own pass what remains
-of it instead: the identity check (``identity.find_guest``), when ``status``
-or a root script bounds it, and the guest agent.
+request needs longer. A call with a budget of its own gives each request
+what remains of it when that is less: the identity check
+(``identity.find_guest``) when ``status`` or a root script bounds it, and
+the guest agent.
 """
 
 
