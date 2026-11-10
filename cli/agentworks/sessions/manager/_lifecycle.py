@@ -10,13 +10,12 @@ from typing import TYPE_CHECKING
 
 import agentworks.sessions.manager as _mgr
 from agentworks import output
-from agentworks.capabilities.harness_integration import HarnessLaunchIntent, require_implemented_start
+from agentworks.capabilities.harness_integration import HarnessLaunchIntent
 from agentworks.db import PID_STOPPED, SessionMode, SessionStatus
 from agentworks.errors import (
     AgentworksError,
     BrokenStateError,
     ExternalError,
-    NotFoundError,
     StateError,
     UserAbort,
     ValidationError,
@@ -26,15 +25,9 @@ from agentworks.sessions.tmux import ADMIN_SOCKET_ROOT, AGENT_SOCKET_ROOT
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
 
-    from agentworks.agents.nodes import (
-        LiveAgentNode,
-    )
     from agentworks.config import Config
     from agentworks.db import Database, SessionRow
-    from agentworks.harness_setup.locking import NativeMutationGuard
     from agentworks.secrets.policy import TtyInteractionPolicy
-    from agentworks.sessions.template import SessionTemplate
-    from agentworks.sessions.tmux import RunCommand
     from agentworks.transports import Transport
 
 
@@ -432,6 +425,8 @@ def _execute_stop(
             )
             if announce_stopped:
                 output.info(f"Session '{session.name}' stopped")
+        except UserAbort:
+            raise
         except Exception as exc:
             failed.append((session.name, str(exc)))
 
@@ -446,691 +441,19 @@ def stop_session(
     force: bool = False,
     interaction: TtyInteractionPolicy,
 ) -> None:
-    """Stop a session through its exact tmux ownership boundary."""
+    """Accept stopped intent and stop through non-activating preparation."""
+    from agentworks.runtime_state import run_session_batch
 
-    session = _mgr._require_session(db, name)
-    with _mgr._prepare_vm(
+    run_session_batch(
         db,
         config,
-        session,
-        operation="session-stop",
+        [_mgr._require_session(db, name)],
+        operation="stop",
+        force=force,
+        intent=HarnessLaunchIntent.RESUME_OR_NEW,
+        running_restart_authorized=frozenset(),
         interaction=interaction,
-    ) as (
-        _ws,
-        vm,
-        _run_command,
-        _run_as_root,
-        admin_target,
-    ):
-        legacy = session.socket_path is None and session.pid is not None and session.pid > 0
-        if legacy:
-            status = SessionStatus.RUNNING
-        else:
-            session = _mgr._ensure_pid(session, target=admin_target, db=db)
-            status = _mgr.check_session_status(session, target=admin_target)
-
-        if status == SessionStatus.STOPPED:
-            output.info(f"Session '{name}' is already stopped")
-            return
-        if status == SessionStatus.UNKNOWN:
-            raise StateError(
-                f"session '{name}' runtime state is unknown",
-                entity_kind="session",
-                entity_name=name,
-                hint="Retry after transport access is reliable; no runtime was changed.",
-            )
-
-        # Pick the destructive-op transport BEFORE doing anything destructive.
-        # For agent sessions this also probes the agent's direct SSH so a
-        # pre-rollout agent surfaces as an actionable StateError up front
-        # rather than mid-kill. _build_session_target
-        # always returns a same-uid target, so no sudo is needed for the
-        # destructive ops below.
-        target = _mgr._build_session_target(session, vm=vm, config=config, db=db, admin_target=admin_target)
-        if status == SessionStatus.BROKEN and not force:
-            raise BrokenStateError(
-                f"session '{name}' is broken (tmux unreachable).",
-                entity_kind="session",
-                entity_name=name,
-                hint="Use --force only after the prior server has exited.",
-            )
-
-        # Running: delegate to shared stop logic. target_owns_session=True
-        # because _build_session_target returned a same-uid target. The
-        # anchor gives _execute_stop's internal detail lines a parent (the
-        # batch caller emits its own "Stopping N session(s)..." anchor).
-        # announce_stopped=False: this single-stop path owns the terminal
-        # (the column-0 result() below), so the shared helper must not also
-        # emit its per-session "stopped" body line and double it up.
-        output.info(f"Stopping session '{name}'...")
-        failed = _execute_stop([(session, target, True)], db=db, force=force, announce_stopped=False)
-        if failed:
-            raise ExternalError(
-                f"failed to stop session '{name}': {failed[0][1]}",
-                entity_kind="session",
-                entity_name=name,
-            )
-        output.result(f"Session '{name}' stopped")
-
-
-def _launch_existing_session(
-    db: Database,
-    config: Config,
-    *,
-    name: str,
-    replace_running: bool,
-    running_restart_authorized: bool,
-    force: bool = False,
-    intent: HarnessLaunchIntent = HarnessLaunchIntent.RESUME_OR_NEW,
-    selected_session_uuid: str | None = None,
-    held_native_guard: NativeMutationGuard | None = None,
-    interaction: TtyInteractionPolicy,
-) -> None:
-    """Start a stopped session, optionally replacing a running runtime.
-
-    Orchestrated: the live graph derives from the session's rows, the
-    activation gate replaces the imperative ensure_active + hold, and
-    the preflight sweep fires the required-commands probe BEFORE the
-    kill (a missing binary aborts with the old session still running).
-    Nothing here is created, so no realization log exists; the window
-    after the kill is deliberately non-rollbackable (no unwind is
-    consulted there), exactly the imperative shape.
-    """
-    from agentworks.bootstrap import load_request_registry
-    from agentworks.sessions.tmux import (
-        create_session as create_tmux_session,
     )
-    from agentworks.sessions.tmux import (
-        deploy_restricted_config,
-    )
-
-    session = _mgr._require_session(db, name)
-    if selected_session_uuid is None:
-        selected_session_uuid = session.session_uuid
-
-    registry = load_request_registry(config, live_database=db)
-
-    ws = _mgr._require_workspace(db, session.workspace_name)
-    vm = _mgr._require_vm_for_workspace(db, ws)
-    template = _mgr._resolve_template(
-        registry,
-        session.template,
-        db=db,
-        instance_name=session.name,
-    )
-    from typing import cast
-
-    from agentworks.instance_specs import ensure_effective_references_enabled, get_instance_overlay
-    from agentworks.sessions.template import effective_references, validate_effective_harness
-    from agentworks.sessions.templates import resolve_template_with_provenance
-
-    stored_overlay = get_instance_overlay(db, "session", session.name)
-    if stored_overlay is not None:
-        layered_template = resolve_template_with_provenance(
-            registry,
-            session.template,
-            overlay=cast("SessionTemplate", stored_overlay.declaration),
-            instance_name=session.name,
-        )
-        template = layered_template.value
-        ensure_effective_references_enabled(
-            registry,
-            effective_references(template, ("session", session.name), layered_template.provenance),
-        )
-        validate_effective_harness(
-            template,
-            ("session", session.name),
-            layered_template.provenance,
-        )
-
-    # ===== Build: the live node graph from the rows =========================
-    #
-    # Everything exists, so every node is live and nothing is realized
-    # or unwound: the session row names its agent, workspace, and VM,
-    # and the domain factories construct one node per row (the VM row's
-    # site field is its edge to the vm-site node, which holds the
-    # platform instance). Construction registers the site's declared
-    # secrets on the resolver; nothing resolves yet.
-    from agentworks.agents.nodes import live_agent_node
-    from agentworks.capabilities.base import (
-        OperationScope,
-        RunContext,
-        ScopeLevel,
-    )
-    from agentworks.db import SYSTEM_SLUG_KEY
-    from agentworks.orchestration.activation import (
-        activation_gate,
-        gate_secret_resolver,
-    )
-    from agentworks.orchestration.readiness import preflight_all
-    from agentworks.orchestration.secrets import ScopedSecrets, secret_union
-    from agentworks.orchestration.walk import walk
-    from agentworks.secrets.resolver import Resolver
-    from agentworks.sessions.nodes import live_session_node
-    from agentworks.vms.nodes import live_vm_node
-    from agentworks.workspaces.nodes import live_workspace_node
-
-    resolver = Resolver(config, registry, interaction=interaction)
-
-    vm_node = live_vm_node(db, config, registry, vm)
-    workspace_node = live_workspace_node(ws, vm_node)
-    agent_node: LiveAgentNode | None = None
-    if session.agent_name is not None:
-        agent_row = db.get_agent(session.agent_name)
-        if agent_row is None:
-            raise NotFoundError(
-                f"agent '{session.agent_name}' (referenced by session '{session.name}') not found",
-                entity_kind="agent",
-                entity_name=session.agent_name,
-            )
-        agent_node = live_agent_node(agent_row, vm_node)
-    # Gate a disabled plugin harness_integration at USE (R14, the secret model): a live
-    # session on a disabled harness_integration refuses to start or restart with the
-    # enable-plugin error. The gate lives at this call site (not inside
-    # ``live_session_node``, which threads no registry); a drift guard pins that
-    # every caller of the node factory gates.
-    from agentworks.capabilities.harness_integration import ensure_harness_integration_enabled
-    from agentworks.resources.access import ensure_recipe_enabled
-
-    ensure_harness_integration_enabled(registry, template.harness_integration)
-    # Refuse a session-template recipe drawing on a disabled plugin's declarable
-    # resource before start or restart (Phase 7, LLD b). Drift guard:
-    # tests/agents/test_recipe_gate_drift.py.
-    ensure_recipe_enabled(registry, "session-template", template.name)
-    env_target = _mgr._session_secret_target(
-        registry,
-        db=db,
-        vm=vm,
-        ws=ws,
-        session_name=name,
-        session_template=template,
-        mode=SessionMode(session.mode),
-        agent_name=session.agent_name,
-    )
-    session_node = live_session_node(
-        session,
-        template,
-        agent=agent_node,
-        workspace=workspace_node,
-        vm=vm_node,
-    )
-    template_values = _mgr._session_context_values(db, vm, ws, name, SessionMode(session.mode), session.agent_name)
-    session_node.harness_integration.prepare_context(template_values, intent=intent)
-    nodes = walk(session_node)
-    # The walk supplies the boundary union (the site's config secrets;
-    # live nodes declare nothing else). The session's env chain is
-    # deliberately NOT part of this boundary: it resolves after the
-    # status and operation-policy gates below, the recorded bail-before-prompt
-    # exception.
-    for secret_name in secret_union(nodes):
-        resolver.register_name(secret_name)
-
-    scope = OperationScope(
-        level=ScopeLevel.SESSION,
-        system_slug=db.get_setting(SYSTEM_SLUG_KEY) or None,
-        vm=vm.name,
-        workspace=ws.name,
-        session=name,
-        agent=session.agent_name,
-        admin=session.agent_name is None,
-    )
-
-    # The activation gate replaces this command's imperative
-    # ensure_active + vm_active hold: opened once, before the preflight
-    # sweep, held through the whole command, its just-in-time values
-    # seeding the boundary resolver.
-    from agentworks.vms.manager import require_vm_ssh_boundary
-
-    require_vm_ssh_boundary(db, config, vm)
-    from agentworks.harness_setup.locking import native_mutation_guard
-
-    with (
-        activation_gate(vm_node, gate_secret_resolver(config, registry, resolver)),
-        native_mutation_guard(db.path, vm.name, held=held_native_guard),
-    ):
-        session = _require_selected_session(db, name, selected_session_uuid)
-
-        if vm.tailscale_host is None:
-            raise StateError(
-                f"VM '{vm.name}' has no Tailscale address",
-                entity_kind="vm",
-                entity_name=vm.name,
-            )
-
-        from agentworks.ssh import SSHLogger
-
-        operation = "restart" if replace_running else "start"
-        admin_target = _mgr.transport(vm, config)
-        run_command: RunCommand = admin_target.run
-
-        with output.section("Preflight"):
-            is_legacy = session.socket_path is None and session.pid is not None and session.pid > 0
-            session_target: Transport | None = None
-            recovered_startup = not is_legacy and _mgr._needs_repair(session)
-            if not is_legacy:
-                session = _mgr._ensure_pid(session, target=admin_target, db=db)
-
-            # Legacy migration: sessions predating the per-session-socket model
-            # have ``socket_path=None`` (they lived on the admin's default tmux
-            # server, where session.pid identifies the server, not this
-            # session). ``check_session_status`` would raise a typed StateError
-            # for these; instead restart rechecks exact legacy presence before
-            # preflight, then the migration runs a surgical
-            # ``tmux kill-session -t <name>`` on the default server (no socket
-            # path), and fall through to the create step. The downstream
-            # ``create_tmux_session`` produces a per-session socket and the
-            # subsequent atomic runtime update lands the migration.
-            if is_legacy:
-                output.info(
-                    f"Session '{name}' uses the legacy default-tmux-server model; migrating to per-session socket."
-                )
-                if replace_running:
-                    from agentworks.sessions.tmux import ProbeStatus, probe_tmux_session
-
-                    session_target = _mgr._build_session_target(
-                        session,
-                        vm=vm,
-                        config=config,
-                        db=db,
-                        admin_target=admin_target,
-                    )
-                    presence = probe_tmux_session(
-                        name,
-                        run_command=session_target.run,
-                        socket_path=None,
-                    )
-                    status = {
-                        ProbeStatus.PRESENT: SessionStatus.RUNNING,
-                        ProbeStatus.ABSENT: SessionStatus.STOPPED,
-                        ProbeStatus.UNKNOWN: SessionStatus.UNKNOWN,
-                    }[presence]
-                else:
-                    status = SessionStatus.STOPPED
-            else:
-                status = _mgr.check_session_status(session, target=admin_target)
-
-            is_admin = session.mode == SessionMode.ADMIN.value
-            if status == SessionStatus.UNKNOWN:
-                raise StateError(
-                    f"session '{name}' runtime state is unknown",
-                    entity_kind="session",
-                    entity_name=name,
-                    hint="Retry after transport access is reliable; no runtime was changed.",
-                )
-            if status == SessionStatus.RUNNING and not replace_running:
-                if intent is HarnessLaunchIntent.FORCE_NEW:
-                    raise StateError(
-                        f"session '{name}' is already running",
-                        entity_kind="session",
-                        entity_name=name,
-                        hint=f"Run `agw session restart {name} --force-new` to replace it.",
-                    )
-                if not recovered_startup:
-                    from agentworks.sessions.tmux import startup_protection_enabled
-
-                    def inspect_run(command: str, *, check: bool = True, env: dict[str, str] | None = None) -> object:
-                        return admin_target.run(command, sudo=not is_admin, check=check, env=env)
-
-                    protection = startup_protection_enabled(
-                        name, run_command=inspect_run, socket_path=_validated_socket_path(db, session)
-                    )
-                    if protection is None:
-                        raise StateError(
-                            f"could not verify startup completion for session '{name}'",
-                            entity_kind="session",
-                            entity_name=name,
-                            hint="Inspect the session runtime; retry or restart only after its state is understood.",
-                        )
-                    recovered_startup = protection
-                if not recovered_startup:
-                    output.result(f"Session '{name}' is already running")
-                    return
-            if status == SessionStatus.RUNNING and replace_running and running_restart_authorized is False:
-                raise StateError(
-                    f"session '{name}' was not observed running before lifecycle preparation",
-                    entity_kind="session",
-                    entity_name=name,
-                    hint="Retry the restart to confirm its current running state.",
-                )
-
-            # Dedicated rows defer their owning transport until the status gates
-            # above; legacy restart already built it for the exact live recheck.
-            # This keeps ordinary running-start no-ops and --force-new refusals
-            # from probing direct agent SSH.
-            if session_target is None:
-                session_target = _mgr._build_session_target(
-                    session,
-                    vm=vm,
-                    config=config,
-                    db=db,
-                    admin_target=admin_target,
-                )
-            session_run_command: RunCommand = session_target.run
-
-            if status == SessionStatus.BROKEN and not force:
-                raise BrokenStateError(
-                    f"session '{name}' is broken (PID alive but tmux unreachable).",
-                    entity_kind="session",
-                    entity_name=name,
-                    hint=f"Use `agw session {operation} {name} --force` to recover it.",
-                )
-
-            # PREFLIGHT-ALL over the walk rooted at the live session node,
-            # against the one command-start context: the required-commands
-            # check's target (an existing agent, or the admin) is realized,
-            # so it probes NOW, pre-resolve and PRE-KILL, and a missing
-            # binary aborts the launch with the old session still running.
-            # Preflight is read-only (no prompt), so it stays ahead of the
-            # gates below; both secret-resolving passes run AFTER them.
-            preflight_all(
-                nodes,
-                RunContext(
-                    config=config,
-                    operation_scope=scope,
-                    admin_target=admin_target,
-                    agent_target=None if is_admin else session_target,
-                ),
-                registry=registry,
-                interaction=interaction,
-            )
-
-            from agentworks.harness_setup.readiness import require_setup_ready
-
-            require_setup_ready(
-                db,
-                registry,
-                session_node.harness_integration,
-                vm=vm,
-                workspace=ws,
-                agent_name=session.agent_name,
-                runner=session_target,
-            )
-
-        with output.section("Resolving Secrets"):
-            # The graph-union boundary resolve (pass 1). Placed AFTER the
-            # gates above, symmetric with the env-chain pass below, so a
-            # refused launch never prompts. Gate-resolved values
-            # are already seeded, so nothing resolves twice.
-            resolver.resolve()
-            # Capture the graph boundary union for the harness_integration's op-start
-            # context (matching the create path, which captures
-            # ``resolver.values`` at its boundary). Inert for the built-in
-            # shell harness_integration (empty ``config_secret_refs()``), but keeps the start
-            # context shape-correct for a future secret-declaring harness integration; the
-            # env-chain resolve (``resolve_for_command`` below) is a SEPARATE
-            # pass, not this graph union.
-            graph_secret_values = resolver.values
-
-            # Eager-prompting orchestration (pass 2): resolve every secret
-            # referenced by this session's env chain BEFORE any kill /
-            # destructive step. Non-interactive failures surface as
-            # SecretUnavailableError with no partial state to clean up. This
-            # is the recorded bail-before-prompt exception to the
-            # one-boundary-resolve contract: the graph's union (the site's
-            # config secrets) and this env chain BOTH resolve here, after the
-            # BROKEN/--force refusal, so a refused launch never prompts for
-            # secrets it was about to discard.
-            # Folding the env chain into the boundary would trade that
-            # operator protection for one fewer prompt session on proxmox
-            # only.
-
-            from agentworks.secrets import resolve_for_command
-
-            secret_values = resolve_for_command(
-                [
-                    env_target,
-                ],
-                config,
-                registry,
-                allow_transient_auto_declare=True,
-                interaction=interaction,
-            )
-
-        redactions = tuple(dict.fromkeys((*graph_secret_values.values(), *secret_values.values())))
-        with _redacted_launch_errors(redactions):
-            logger = SSHLogger(
-                vm.name,
-                f"session-{operation}",
-                redactions=redactions,
-            )
-            admin_target = _mgr.transport(vm, config, logger=logger)
-            run_command = admin_target.run
-            if is_admin:
-                session_target = admin_target
-                session_run_command = admin_target.run
-
-            if recovered_startup and status is SessionStatus.RUNNING and not replace_running:
-                from agentworks.sessions.tmux import (
-                    ProbeStatus,
-                    capture_tmux_server_fingerprint,
-                    finalize_session_start,
-                    require_socket_path,
-                )
-
-                socket_path = _validated_socket_path(db, session)
-                require_socket_path(socket_path, run_command=session_run_command)
-                probe = capture_tmux_server_fingerprint(target=session_target, socket_path=socket_path)
-                observed = probe.fingerprint
-                if (
-                    probe.status is not ProbeStatus.PRESENT
-                    or observed is None
-                    or (observed.pid, observed.boot_id, observed.start_ticks)
-                    != (session.pid, session.boot_id, session.tmux_server_start_ticks)
-                ):
-                    raise StateError(
-                        f"session '{name}' runtime identity changed before startup recovery",
-                        entity_kind="session",
-                        entity_name=name,
-                        hint="Inspect the current runtime; no startup settings were changed.",
-                    )
-
-                finalize_session_start(
-                    name,
-                    run_command=session_run_command,
-                    socket_path=socket_path,
-                    is_admin=is_admin,
-                    redactions=redactions,
-                )
-                output.result(f"Session '{name}' startup recovered")
-                return
-
-            from agentworks.artifacts.session import (
-                commit_session_artifacts,
-                prepare_session_artifacts,
-                stage_session_artifacts,
-                validate_session_application,
-            )
-
-            linux_user = _mgr._resolve_session_linux_user(db, session, vm)
-            session_env = _mgr._resolve_session_env(
-                registry,
-                values=secret_values,
-                db=db,
-                vm=vm,
-                ws=ws,
-                session_name=name,
-                session_template=template,
-                mode=SessionMode(session.mode),
-                agent_name=session.agent_name,
-                linux_user=linux_user,
-            )
-
-            prepared_artifacts = prepare_session_artifacts(
-                db,
-                registry,
-                name=name,
-                template=template,
-                vm=vm,
-                workspace=ws,
-                agent_name=session.agent_name,
-                runner=session_target,
-                environment=session_env,
-                redactions=redactions,
-                session_uuid=session.session_uuid,
-                linux_user=linux_user,
-                secret_target=_mgr._session_secret_target(
-                    registry,
-                    db=db,
-                    vm=vm,
-                    ws=ws,
-                    session_name=name,
-                    session_template=template,
-                    mode=SessionMode(session.mode),
-                    agent_name=session.agent_name,
-                ),
-            )
-            session_node.harness_integration.prepare_artifacts(prepared_artifacts.context)
-            # Ask the harness for its launch decision before any teardown. A
-            # strict resume failure or an unsupported intent therefore leaves an
-            # existing runtime intact. Stateful integrations decide from their
-            # durable target state, not from whether the old tmux process is live.
-            start_ctx = RunContext(
-                config=config,
-                operation_scope=scope,
-                admin_target=admin_target,
-                agent_target=None if is_admin else session_target,
-                secrets=ScopedSecrets(graph_secret_values, session_node.secret_refs()),
-            )
-            template_values = _mgr._session_context_values(
-                db, vm, ws, name, SessionMode(session.mode), session.agent_name
-            )
-            session_node.harness_integration.prepare_context(template_values, intent=intent)
-            harness_start = require_implemented_start(
-                session_node.harness_integration.start(start_ctx, intent=intent),
-                intent=intent,
-                harness_integration_name=template.harness_integration,
-                session_name=name,
-            )
-            artifact_application = validate_session_application(
-                harness_start.artifacts, prepared_artifacts.context, integration=template.harness_integration
-            )
-            if artifact_application.artifacts_dir is not None:
-                session_env["AGENTWORKS_ARTIFACTS_DIR"] = artifact_application.artifacts_dir
-            stage_session_artifacts(
-                db, name, template.harness_integration, session_target, prepared_artifacts, artifact_application
-            )
-            command = harness_start.command
-
-            with output.section("Starting Session"):
-                output.info(f"{operation.title()}ing session '{name}'...")
-
-                if is_legacy or status in {SessionStatus.RUNNING, SessionStatus.RESIDUAL, SessionStatus.BROKEN}:
-                    _teardown_session(
-                        session,
-                        target=session_target,
-                        target_owns_session=True,
-                        db=db,
-                        force=force,
-                        legacy_running_authorized=(not replace_running or running_restart_authorized),
-                    )
-
-                commit_session_artifacts(db, name, template.harness_integration, session_target, prepared_artifacts)
-                deploy_restricted_config(run_command, history_limit=config.session.history_limit)
-
-                if harness_start.note is not None:
-                    output.detail(harness_start.note)
-                # Persist the node's FULL namespaced harness_integration_state blob after the
-                # op (mirrors the create-path insert): the harness_integration mutated its own
-                # namespace in place, and persisting the full blob keeps foreign
-                # harness integrations' namespaces intact across a template's
-                # harness_integration switch.
-                # Usually a no-op (the value was stored on create), but a session
-                # predating the harness_integration_state column (backfilled to {}) mints its
-                # id on this first launch. Persisting BEFORE create_tmux_session
-                # is intentional: a stable id that survives a tmux-recreate retry
-                # beats re-minting a new one each attempt (the id is the
-                # session's, whether or not the pane came up).
-                db.update_session_harness_integration_state(name, session_node.harness_integration_state)
-
-                launch_boot = _mgr._get_boot_id(session_target)
-                if launch_boot is None:
-                    raise ExternalError(
-                        f"could not read the VM boot identity before launching session '{name}'",
-                        entity_kind="session",
-                        entity_name=name,
-                    )
-                from agentworks.sessions.tmux import admin_socket_path, agent_socket_path
-
-                expected_socket = (
-                    admin_socket_path(linux_user, name) if is_admin else agent_socket_path(linux_user, name)
-                )
-
-                def before_spawn() -> None:
-                    _mark_runtime_unknown(db, session, socket_path=expected_socket, boot_id=launch_boot)
-
-                try:
-                    new_sock, pid = create_tmux_session(
-                        name,
-                        ws.workspace_path,
-                        command,
-                        linux_user,
-                        run_command=session_run_command,
-                        target=admin_target,
-                        admin_username=vm.admin_username,
-                        is_admin=is_admin,
-                        env=session_env,
-                        before_spawn=before_spawn,
-                        session_uuid=prepared_artifacts.context.session_uuid,
-                        run_id=prepared_artifacts.context.run_id,
-                    )
-                except RuntimeError as exc:
-                    if "already has an active tmux server" in str(exc):
-                        raise StateError(
-                            f"session '{name}' has an active tmux server that was not detected by the status check.",
-                            entity_kind="session",
-                            entity_name=name,
-                            hint="Inspect the conflicting server manually; its runtime was preserved.",
-                        ) from exc
-                    raise
-                from agentworks.sessions.tmux import (
-                    ProbeStatus,
-                    capture_tmux_server_fingerprint,
-                    finalize_session_start,
-                )
-
-                db.record_session_started(name)
-
-                fingerprint_probe = capture_tmux_server_fingerprint(
-                    target=session_target,
-                    socket_path=new_sock,
-                )
-                fingerprint = fingerprint_probe.fingerprint
-                if (
-                    fingerprint_probe.status is not ProbeStatus.PRESENT
-                    or fingerprint is None
-                    or (pid is not None and fingerprint.pid != pid)
-                ):
-                    raise ExternalError(
-                        f"could not capture a stable tmux server fingerprint for session '{name}'",
-                        entity_kind="session",
-                        entity_name=name,
-                        hint=(
-                            f"The session row and socket {new_sock} were retained because "
-                            "runtime absence could not be proved."
-                        ),
-                    )
-                db.update_session_runtime(
-                    name,
-                    socket_path=new_sock,
-                    pid=fingerprint.pid,
-                    boot_id=fingerprint.boot_id,
-                    tmux_server_start_ticks=fingerprint.start_ticks,
-                )
-                finalize_session_start(
-                    name,
-                    run_command=session_run_command,
-                    socket_path=new_sock,
-                    is_admin=is_admin,
-                    redactions=redactions,
-                )
-
-            from agentworks.harness_setup.outcomes import setup_completion_suffix
-            from agentworks.harness_setup.state import read_native_setup
-
-            suffix = setup_completion_suffix(read_native_setup(db, "session", name))
-            output.result(f"Session '{name}' {operation}ed{suffix}")
-
-            _mgr._regenerate_tmuxinator(db, config, vm, ws)
 
 
 def stop_all_sessions(
@@ -1167,78 +490,18 @@ def stop_all_sessions(
         output.info("No running sessions to stop.")
         return
 
-    # Resolve distinct VMs from the filtered session set and open the
-    # batch boundary + per-VM gates BEFORE the SSH probes. The probes
-    # (ensure_pids_batch, observe_session_statuses) issue per-VM
-    # round-trips; on WSL2 they would race the idle timer without the
-    # held-active anchor (a no-op hold on other platforms).
-    distinct_vms = _mgr._distinct_vms_for_sessions(db, sessions)
-    with _mgr._batch_vm_boundary(db, config, distinct_vms, interaction=interaction):
-        # Recover runtime identity before batch teardown needs its ownership proof.
-        sessions = _mgr.ensure_pids_batch(sessions, db=db, config=config)
-        status_map = _mgr.observe_session_statuses(sessions, db=db, config=config)
+    from agentworks.runtime_state import run_session_batch
 
-        # Refuse unknown observed runtimes before preparing individual launches.
-        # The observer reports PID_STOPPED rows too; lifecycle omits them from
-        # this refusal set because it does not need to act on them.
-        legacy_names = {
-            session.name
-            for session in sessions
-            if session.socket_path is None and session.pid is not None and session.pid > 0
-        }
-        unknown = [
-            s
-            for s in sessions
-            if s.pid != PID_STOPPED
-            and s.name not in legacy_names
-            and (status_map.get(s.name, SessionStatus.UNKNOWN) is SessionStatus.UNKNOWN)
-        ]
-        if unknown:
-            names = ", ".join(s.name for s in unknown)
-            raise StateError(
-                f"{len(unknown)} session(s) have unknown runtime status ({names}).",
-                hint=f"Run 'agw session start {unknown[0].name}' for its specific recovery requirements.",
-            )
-
-        broken = [s for s in sessions if status_map.get(s.name) == SessionStatus.BROKEN]
-        if broken and not force:
-            names = ", ".join(s.name for s in broken)
-            output.warn(f"Skipping {len(broken)} broken session(s) ({names}). Use --force to kill.")
-
-        active_statuses = {SessionStatus.RUNNING, SessionStatus.RESIDUAL}
-        if force:
-            active_statuses.add(SessionStatus.BROKEN)
-        alive_sessions = [s for s in sessions if s.name in legacy_names or status_map.get(s.name) in active_statuses]
-
-        if not alive_sessions:
-            output.info("No running sessions to stop.")
-            return
-
-        output.info(f"Stopping {len(alive_sessions)} session(s)...")
-
-        # Resolve VM targets (reuse across sessions on the same VM)
-        vm_targets: dict[str, Transport] = {}
-        for s in alive_sessions:
-            ws = db.get_workspace(s.workspace_name)
-            if ws and ws.vm_name not in vm_targets:
-                vm = db.get_vm(ws.vm_name)
-                if vm and vm.tailscale_host:
-                    vm_targets[ws.vm_name] = _mgr.transport(vm, config)
-
-        # Build (session, target, target_owns_session) tuples for _execute_stop.
-        # Batch ops keep admin's target across all sessions for efficiency
-        # (carve-out): admin's path into agent tmux servers requires
-        # sudo. target_owns_session is True only for admin's own sessions.
-        stop_targets: list[tuple[SessionRow, Transport, bool]] = []
-        for s in alive_sessions:
-            ws = db.get_workspace(s.workspace_name)
-            if ws and ws.vm_name in vm_targets:
-                target_owns_session = s.mode == SessionMode.ADMIN.value
-                stop_targets.append((s, vm_targets[ws.vm_name], target_owns_session))
-
-        failed = _execute_stop(stop_targets, db=db, force=force)
-        if failed:
-            raise ExternalError(f"{len(failed)} session(s) failed to stop.")
+    run_session_batch(
+        db,
+        config,
+        sessions,
+        operation="stop",
+        force=force,
+        intent=HarnessLaunchIntent.RESUME_OR_NEW,
+        running_restart_authorized=frozenset(),
+        interaction=interaction,
+    )
 
 
 def _launch_all_sessions(
@@ -1283,7 +546,6 @@ def _launch_all_sessions(
         output.info("No matching sessions to start.")
         return
 
-    selected_session_uuids = {session.name: session.session_uuid for session in sessions}
     authorized_running_names: set[str] = set()
     if replace_running:
         consent_status_map = _mgr.observe_session_statuses(
@@ -1298,120 +560,18 @@ def _launch_all_sessions(
         _confirm_running_restart(running_names, yes=yes, interaction=interaction)
         authorized_running_names.update(running_names)
 
-    # Resolve distinct VMs from the filtered set and anchor them BEFORE the
-    # SSH probes. Each singular launch also opens its own gate span;
-    # the redundant inner gate is a no-op on already-active VMs and a cheap
-    # extra subprocess on WSL2 (accepted, see PR description).
-    distinct_vms = _mgr._distinct_vms_for_sessions(db, sessions)
+    from agentworks.runtime_state import run_session_batch
 
-    failed: list[tuple[str, str]] = []
-    from contextlib import ExitStack
-
-    from agentworks.harness_setup.locking import native_mutation_guard
-
-    with ExitStack() as restart_guards:
-        held_native_guards: dict[str, NativeMutationGuard] = {}
-        selected_session_vm_names: dict[str, str] = {}
-        if replace_running:
-            # Authenticated requirement: one batch consent decision binds these
-            # exact identities. A replacement aborts the whole batch before its
-            # shared preparation while retaining all-or-nothing UNKNOWN refusal.
-            selected_session_vm_names = {
-                session.name: _mgr._require_workspace(db, session.workspace_name).vm_name for session in sessions
-            }
-            for vm in sorted(distinct_vms, key=lambda candidate: candidate.name):
-                held_native_guards[vm.name] = restart_guards.enter_context(native_mutation_guard(db.path, vm.name))
-            sessions = [
-                _require_selected_session(
-                    db,
-                    session.name,
-                    selected_session_uuids[session.name],
-                )
-                for session in sessions
-            ]
-
-        restart_guards.enter_context(_mgr._batch_vm_boundary(db, config, distinct_vms, interaction=interaction))
-        # Observe first; the singular launch repairs identity and completes startup
-        # after resolving the secrets needed to sanitize recovered diagnostics.
-        status_map = _mgr.observe_session_statuses(sessions, db=db, config=config)
-
-        # Refuse unknown observed runtimes before preparing individual launches.
-        # The observer reports PID_STOPPED rows too; lifecycle omits them from
-        # this refusal set because it does not need to act on them.
-        # Legacy sessions remain UNKNOWN in batch observation. Exclude them
-        # from this refusal so unfiltered batch restart can migrate them in the
-        # singular launcher. Named start also migrates directly; batch start's
-        # observed-status selection below omits them.
-        unknown = [
-            s
-            for s in sessions
-            if s.pid != PID_STOPPED
-            and s.socket_path is not None
-            and (status_map.get(s.name, SessionStatus.UNKNOWN) is SessionStatus.UNKNOWN)
-        ]
-        if unknown:
-            names = ", ".join(s.name for s in unknown)
-            raise StateError(
-                f"{len(unknown)} session(s) have unknown runtime status ({names}).",
-                hint=f"Run 'agw session start {unknown[0].name}' for its specific recovery requirements.",
-            )
-
-        if not replace_running:
-            start_statuses = {SessionStatus.STOPPED}
-            if force:
-                start_statuses.add(SessionStatus.BROKEN)
-            if force_new:
-                start_statuses.add(SessionStatus.RUNNING)
-            sessions = [
-                s
-                for s in sessions
-                if status_map.get(s.name) in start_statuses
-                or (status_map.get(s.name) is SessionStatus.RUNNING and _mgr._needs_repair(s))
-            ]
-
-        if not sessions:
-            output.info("No matching sessions to start.")
-            return
-
-        operation = "restarting" if replace_running else "starting"
-        output.info(f"{operation.title()} {len(sessions)} session(s)...")
-
-        for session in sessions:
-            try:
-                _launch_existing_session(
-                    db,
-                    config,
-                    name=session.name,
-                    replace_running=replace_running,
-                    running_restart_authorized=(session.name in authorized_running_names) if replace_running else False,
-                    force=force,
-                    intent=intent,
-                    selected_session_uuid=selected_session_uuids[session.name],
-                    held_native_guard=held_native_guards.get(selected_session_vm_names[session.name])
-                    if replace_running
-                    else None,
-                    interaction=interaction,
-                )
-            except UserAbort:
-                # An interaction cancellation aborts the whole batch operation, not
-                # just this one session. Propagate so the outer wrapper renders
-                # "Aborted." once and exits.
-                raise
-            except BrokenStateError as exc:
-                if not force:
-                    output.warn(f"Skipping '{session.name}': {exc}")
-                else:
-                    failed.append((session.name, str(exc)))
-                    output.warn(f"Error {operation} '{session.name}': {exc}")
-            except StateError as exc:
-                failed.append((session.name, str(exc)))
-                output.warn(f"Error {operation} '{session.name}': {exc}")
-            except Exception as exc:
-                failed.append((session.name, str(exc)))
-                output.warn(f"Error {operation} '{session.name}': {exc}")
-
-    if failed:
-        raise ExternalError(f"{len(failed)} session(s) failed while {operation}.")
+    run_session_batch(
+        db,
+        config,
+        sessions,
+        operation="restart" if replace_running else "start",
+        force=force,
+        intent=intent,
+        running_restart_authorized=frozenset(authorized_running_names),
+        interaction=interaction,
+    )
 
 
 def start_session(
@@ -1424,14 +584,16 @@ def start_session(
     resume_only: bool = False,
     interaction: TtyInteractionPolicy,
 ) -> None:
-    _launch_existing_session(
+    from agentworks.runtime_state import run_session_batch
+
+    run_session_batch(
         db,
         config,
-        name=name,
-        replace_running=False,
-        running_restart_authorized=False,
+        [_mgr._require_session(db, name)],
+        operation="start",
         force=force,
         intent=_requested_launch_intent(force_new=force_new, resume_only=resume_only),
+        running_restart_authorized=frozenset(),
         interaction=interaction,
     )
 
@@ -1450,7 +612,6 @@ def restart_session(
     """Restart a session, confirming first when its runtime is live."""
     intent = _requested_launch_intent(force_new=force_new, resume_only=resume_only)
     session = _mgr._require_session(db, name)
-    selected_session_uuid = session.session_uuid
     consent_status = _mgr.observe_session_statuses(
         [session],
         db=db,
@@ -1463,15 +624,16 @@ def restart_session(
         yes=yes,
         interaction=interaction,
     )
-    _launch_existing_session(
+    from agentworks.runtime_state import run_session_batch
+
+    run_session_batch(
         db,
         config,
-        name=name,
-        replace_running=True,
-        running_restart_authorized=running_restart_authorized,
+        [session],
+        operation="restart",
         force=force,
         intent=intent,
-        selected_session_uuid=selected_session_uuid,
+        running_restart_authorized=frozenset({name}) if running_restart_authorized else frozenset(),
         interaction=interaction,
     )
 

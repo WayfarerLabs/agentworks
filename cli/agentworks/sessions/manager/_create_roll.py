@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 import agentworks.sessions.manager as _mgr
 from agentworks import output
 from agentworks.capabilities.harness_integration import HarnessLaunchIntent, require_implemented_start
-from agentworks.db import SessionMode
+from agentworks.db import DesiredRuntimeState, SessionMode
 from agentworks.errors import AgentworksError, ExternalError, NotFoundError, ValidationError
 from agentworks.harness_setup.outcomes import describe_setup_failures
 from agentworks.harness_setup.readiness import RequiredSetupMissingError
@@ -368,6 +368,7 @@ def _start_session_slice(
                     created_agent=pending_agent is not None,
                     socket_path=expected_socket,
                     harness_integration_state=session_node.harness_integration_state,
+                    desired_runtime_state=DesiredRuntimeState.RUNNING,
                     session_uuid=prepared_artifacts.context.session_uuid,
                     run_id=prepared_artifacts.context.run_id,
                 )

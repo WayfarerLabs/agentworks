@@ -26,6 +26,7 @@ from agentworks.sessions.tmux import exact_tmux_target
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, InstanceStateInspection, SessionRow
+    from agentworks.harness_setup.locking import NativeMutationGuard
     from agentworks.instance_description import InstanceStateDescription
     from agentworks.machine_output import JsonObject, JsonValue
     from agentworks.resources.registry import Registry
@@ -45,6 +46,7 @@ class SessionListRow:
     agent_name: str | None
     status: str
     uptime_seconds: int | None = None
+    desired_runtime_state: str | None = None
 
 
 @dataclass(frozen=True)
@@ -75,6 +77,7 @@ class SessionDescription:
     instance_state: InstanceStateDescription
     last_started_at: str | None = None
     uptime_seconds: int | None = None
+    desired_runtime_state: str | None = None
 
 
 def session_listing_data(listing: SessionListing) -> JsonObject:
@@ -93,6 +96,7 @@ def session_listing_data(listing: SessionListing) -> JsonObject:
                 "mode": session.mode,
                 "agent_name": session.agent_name,
                 "status": session.status,
+                "desired_runtime_state": session.desired_runtime_state,
             }
         )
     return {
@@ -112,6 +116,7 @@ def session_description_data(description: SessionDescription) -> JsonObject:
             "mode": description.mode,
             "agent_name": description.agent_name,
             "status": description.status,
+            "desired_runtime_state": description.desired_runtime_state,
             "pid": description.pid,
             "created_at": description.created_at,
             "last_started_at": description.last_started_at,
@@ -139,12 +144,38 @@ def delete_session(
     interaction: TtyInteractionPolicy,
 ) -> None:
     """Delete a session. Prompts if running/unknown (--yes to skip). --force for BROKEN."""
+    from agentworks.harness_setup.locking import native_mutation_guard
+    from agentworks.sessions.manager._lifecycle import _require_selected_session
+
     session = _mgr._require_session(db, name)
+    workspace = _mgr._require_workspace(db, session.workspace_name)
+    with native_mutation_guard(db.path, workspace.vm_name) as guard:
+        session = _require_selected_session(db, name, session.session_uuid)
+        _delete_session_runtime(
+            db, config, session=session, force=force, yes=yes, interaction=interaction, held_native_guard=guard
+        )
+    _cleanup_now_empty_workspace(db, config, session, yes=yes, interaction=interaction)
+    _cleanup_now_empty_agent(db, config, session, yes=yes, interaction=interaction)
+
+
+def _delete_session_runtime(
+    db: Database,
+    config: Config,
+    *,
+    session: SessionRow,
+    force: bool,
+    yes: bool,
+    interaction: TtyInteractionPolicy,
+    held_native_guard: NativeMutationGuard,
+) -> None:
+    """Delete one selected definition and its runtime under a held family guard."""
+    name = session.name
     with _mgr._prepare_vm(
         db,
         config,
         session,
         operation="session-delete",
+        held_native_guard=held_native_guard,
         interaction=interaction,
     ) as (
         ws,
@@ -155,7 +186,7 @@ def delete_session(
     ):
         from agentworks.harness_setup.locking import native_mutation_guard
 
-        with native_mutation_guard(db.path, vm.name):
+        with native_mutation_guard(db.path, vm.name, held=held_native_guard):
             session = _mgr._require_session(db, name)
             legacy = session.socket_path is None and session.pid is not None and session.pid > 0
             if legacy:
@@ -254,7 +285,9 @@ def delete_session(
                 # paths stay byte-identical.
                 from agentworks.sessions.multi_console import offer_delete_if_empty_consoles
 
-                offer_delete_if_empty_consoles(db, config, member_consoles, yes=yes)
+                offer_delete_if_empty_consoles(
+                    db, config, member_consoles, yes=yes, held_native_guard=held_native_guard
+                )
 
             # Generalized workspace/agent cleanup (issue #266). The session row is
             # already gone, so the "now has no sessions" checks below reflect the
@@ -282,20 +315,6 @@ def delete_session(
             # deleted" line has already printed. ``session`` was snapshotted before
             # ``db.delete_session``, so its workspace_name / agent_name / created_*
             # fields are still readable here.
-        _cleanup_now_empty_workspace(
-            db,
-            config,
-            session,
-            yes=yes,
-            interaction=interaction,
-        )
-        _cleanup_now_empty_agent(
-            db,
-            config,
-            session,
-            yes=yes,
-            interaction=interaction,
-        )
 
 
 def _cleanup_now_empty_workspace(
@@ -499,6 +518,7 @@ def _session_structural_description(
         harness_integration = _session_harness_integration(instance_state)
         return SessionDescription(
             name=session.name,
+            desired_runtime_state=session.desired_runtime_state,
             workspace_name=session.workspace_name,
             vm_name=workspace.vm_name,
             template=session.template,
@@ -584,6 +604,7 @@ def render_session_description(description: SessionDescription) -> None:
     output.info(f"Template:       {description.template}")
     output.info(f"Harness integration: {description.harness_integration or '-'}")
     output.info(f"Mode:           {mode_label}")
+    output.info(f"Desired state:  {description.desired_runtime_state or 'adoption required'}")
     output.info(f"Status:         {status_label}")
     output.info(f"Created:        {description.created_at}")
     output.info(f"Last Started:   {description.last_started_at or 'unknown'}")
@@ -762,6 +783,7 @@ def session_listing(
         facts.append(
             SessionListRow(
                 name=session.name,
+                desired_runtime_state=session.desired_runtime_state,
                 workspace_name=session.workspace_name,
                 vm_name=vm_names[session.name],
                 template=session.template,
@@ -858,6 +880,7 @@ def render_session_listing(listing: SessionListing, *, include_status: bool = Fa
             session.template,
             session.harness_integration or "-",
             user_label,
+            session.desired_runtime_state or "adoption required",
         )
         rows.append((*row, status_label) if include_status else row)
         if include_status and status == "broken":
@@ -868,7 +891,7 @@ def render_session_listing(listing: SessionListing, *, include_status: bool = Fa
             else:
                 unknown_by_vm.setdefault(session.vm_name, []).append(session.name)
 
-    headers = ["NAME", "WORKSPACE", "VM", "TEMPLATE", "HARNESS INT.", "USER"]
+    headers = ["NAME", "WORKSPACE", "VM", "TEMPLATE", "HARNESS INT.", "USER", "DESIRED STATE"]
     if include_status:
         headers.append("STATUS")
     for line in output.render_table(headers, rows, max_col_widths={headers.index("USER"): 40}):
