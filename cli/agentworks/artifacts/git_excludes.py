@@ -52,6 +52,23 @@ def _pair(claim: NativeClaim, integration: str) -> bytes:
     return f"# agentworks artifact {marker}\n{claim.identifier}\n".encode()
 
 
+def _relative(claim: NativeClaim, workspace: str, prefix: str) -> str | None:
+    """Decode only a persisted current-owner claim's canonical literal path."""
+    decoded = re.sub(r"\\(.)", r"\1", claim.identifier.removeprefix("/"))
+    relative = decoded.removeprefix(prefix)
+    try:
+        if (
+            claim.source == workspace
+            and decoded.startswith(prefix)
+            and claim.identifier == _pattern(relative, prefix)
+            and native_path(workspace + "/" + relative).startswith(workspace + "/")
+        ):
+            return relative
+    except StateError:
+        pass
+    return None
+
+
 def _metadata(
     runner: Transport,
     workspace: str,
@@ -72,7 +89,7 @@ def _metadata(
                 raise ValueError()
             unavailable_reason = reason
         else:
-            if not isinstance(prefix, str) or (prefix and not prefix.endswith("/")):
+            if not isinstance(destination, str) or not isinstance(prefix, str) or (prefix and not prefix.endswith("/")):
                 raise ValueError()
             if prefix:
                 native_path("/" + prefix.removesuffix("/"))
@@ -118,36 +135,41 @@ def reconcile_workspace_excludes(
     if any(not path.startswith(workspace + "/") for path in paths):
         raise StateError("workspace artifact exclusion is outside its workspace")
     relative_paths = tuple(path.removeprefix(workspace + "/") for path in paths)
-    metadata = _metadata(runner, workspace, relative_paths, report_incomplete if prior else output.warn)
-    if metadata is None:
-        return
-    prefix, destination, tracked = metadata
-    source_workspace, source_prefix = workspace, prefix
+    source_workspace = workspace
+    source_prefix = None
     if prior_workspace is not None and prior:
         source_workspace = native_path(prior_workspace)
         source_metadata = _metadata(runner, source_workspace, (), report_incomplete)
         if source_metadata is None:
             return
         source_prefix = source_metadata[0]
+        # Repeated moves retain the initial file inventory. Current verified
+        # exclusion claims carry the relative paths needed for later moves.
+        relative_paths = tuple(
+            dict.fromkeys(
+                (
+                    *relative_paths,
+                    *(
+                        relative
+                        for claim in prior
+                        if (relative := _relative(claim, source_workspace, source_prefix)) is not None
+                    ),
+                )
+            )
+        )
+    metadata = _metadata(runner, workspace, relative_paths, report_incomplete if prior else output.warn)
+    if metadata is None:
+        return
+    prefix, destination, tracked = metadata
+    if source_prefix is None:
+        source_prefix = prefix
 
     remaining = list(claims)
     rebound = []
     for claim in prior:
-        # Decode only our canonical literal spelling under the source's current Git prefix.
-        decoded = re.sub(r"\\(.)", r"\1", claim.identifier.removeprefix("/"))
-        relative = decoded.removeprefix(source_prefix)
-        try:
-            valid = (
-                claim.source == source_workspace
-                and decoded.startswith(source_prefix)
-                and claim.identifier == _pattern(relative, source_prefix)
-                and native_path(source_workspace + "/" + relative).startswith(source_workspace + "/")
-            )
-        except StateError:
-            valid = False
         index = remaining.index(claim)
         remaining.pop(index)
-        if not valid:
+        if _relative(claim, source_workspace, source_prefix) is None:
             output.warn("Stored artifact exclusion no longer matches this workspace; its association was released.")
             continue
         current_claim = NativeClaim(
@@ -175,6 +197,17 @@ def reconcile_workspace_excludes(
     with NativeFiles(runner) as native:
         current = native.read(destination)
         for claim in (*prior, *(claim for claim in desired if claim not in prior)):
+            if claim in desired and any(
+                previous != claim
+                and (previous.role, previous.identifier, previous.destination)
+                == (claim.role, claim.identifier, claim.destination)
+                for previous in remaining
+            ):
+                report_incomplete(
+                    f"Artifact exclusion '{claim.identifier}' in '{destination}' retains unresolved prior ownership; "
+                    "the replacement was skipped."
+                )
+                continue
             pair = _pair(claim, integration)
             existing = current or b""
             marker = pair.split(b"\n", 1)[0]

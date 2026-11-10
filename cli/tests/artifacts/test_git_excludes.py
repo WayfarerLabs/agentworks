@@ -11,7 +11,7 @@ import pytest
 
 from agentworks.artifacts.application import ArtifactFile, OwnedArtifactFile
 from agentworks.artifacts.git_excludes import reconcile_workspace_excludes
-from agentworks.errors import StateError
+from agentworks.errors import ExternalError, StateError
 from agentworks.harness_setup.model import NativeClaim
 from tests.artifacts.test_native_delivery import owned
 from tests.native_setup_fixtures import LocalFixtureTransport
@@ -57,6 +57,17 @@ def file(path: Path) -> OwnedArtifactFile:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(b"fixture artifact")
     return owned(ArtifactFile(str(path), path.read_bytes(), ("a" * 64,)))
+
+
+def metadata_destination(target: LocalFixtureTransport, value: object) -> None:
+    """An owned responder supplies malformed external metadata, not actual Git output."""
+    import json
+
+    binary = target.root / "bin/python3"
+    binary.parent.mkdir(exist_ok=True)
+    response = json.dumps({"prefix": "", "exclude": value, "tracked": []})
+    binary.write_text("#!/usr/bin/python3\n" + f"print({response!r})\n")
+    binary.chmod(0o700)
 
 
 def test_exact_literal_exclusions_are_idempotent_and_retire_only_owned_pairs(repository):
@@ -428,3 +439,16 @@ def test_git_failure_diagnostic_uses_existing_secret_control_and_size_boundary(r
         assert len(incomplete[0].encode()) <= 2048
     finally:
         logger.close()
+
+
+@pytest.mark.parametrize("destination", [None, 17, [], {}, True, "relative", "/path/../escape", "/path/"])
+def test_external_metadata_destination_is_validated_before_native_paths(repository, destination):
+    target, workspace = repository
+    record = file(workspace / ".agents/skills/policy/SKILL.md")
+    claims, _, _ = apply(target, workspace, (record,))
+    exclude = Path(claims[0].destination)
+    before = exclude.read_bytes()
+    metadata_destination(target, destination)
+    with pytest.raises(ExternalError):
+        apply(target, workspace, (), claims)
+    assert exclude.read_bytes() == before

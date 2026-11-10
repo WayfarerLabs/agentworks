@@ -225,3 +225,28 @@ def test_shared_persistence_failure_during_git_refusal_is_not_wrapped_or_swallow
         delete_workspace(db, deletion.config, "project", yes=True, interaction=TtyInteractionPolicy.REFUSE)
     assert caught.value is failure and calls == 2
     assert not removed and db.get_workspace("project") is not None
+
+
+@pytest.mark.parametrize("destination", [None, 17, [], {}, True, "relative"])
+def test_malformed_metadata_destination_warns_without_blocking_actual_parent_deletion(
+    db, deletion, shared_workspace, monkeypatch, captured_output, destination
+):
+    from tests.artifacts.test_git_excludes import metadata_destination
+
+    target, first, second, exclude, _, first_claims, _, removed = shared_workspace
+    before = exclude.read_bytes()
+    metadata_destination(target, destination)
+    observed = []
+
+    def remove(vm, config, name, path, linux_group, **kwargs):
+        current = read_native_setup(db, "workspace", name).records[0]
+        observed.append(current)
+        assert current.claims[0] == first_claims[0] and current.incomplete_reasons
+        shutil.rmtree(path)
+        removed.append(name)
+
+    monkeypatch.setattr("agentworks.workspaces.backends.vm.delete_vm_workspace", remove)
+    delete_workspace(db, deletion.config, "project", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+    assert observed and removed == ["project"] and captured_output.warnings
+    assert db.get_workspace("project") is None and not first.exists() and second.exists()
+    assert exclude.read_bytes() == before
