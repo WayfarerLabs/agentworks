@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -10,6 +11,7 @@ import pytest
 from agentworks.db import DesiredOverlayRecord, VersionedPayload
 from agentworks.doctor import InstanceStateHealthFactType, Status
 from agentworks.doctor_state import check_database
+from agentworks.instance_description import InstanceStateIssueCode
 from agentworks.instance_specs import (
     VM_ADMIN_REPLACEMENT_REMEDY,
     ExplicitReplacementRequired,
@@ -124,3 +126,47 @@ def test_agent_show_reports_a_refused_stored_source_value_free(
     description = agent_description(db, make_config(), name="a1")
 
     assert SECRET not in str(agent_description_data(description))
+
+
+EXPLICIT_REPLACEMENT: list[JsonObject] = [REFUSED[0], {"harness_integrations": ["codex"]}]
+EXPLICIT_IDS = ["refused-source", "activation-list"]
+
+
+@pytest.mark.parametrize("value", EXPLICIT_REPLACEMENT, ids=EXPLICIT_IDS)
+def test_agent_show_reports_a_stored_spec_needing_replacement_as_its_own_reason(
+    db: Database,
+    make_config,  # noqa: ANN001
+    value: JsonObject,
+) -> None:
+    from agentworks.agents.manager import agent_description
+
+    _stored_agent(db, value)
+
+    state = agent_description(db, make_config(), name="a1").instance_state
+
+    (slot,) = state.declarations
+    assert (slot.instance_spec.status, slot.instance_spec.reason) == ("unavailable", "replacement-required")
+    assert [issue.code for issue in state.issues] == [InstanceStateIssueCode.INSTANCE_SPEC_REPLACEMENT_REQUIRED]
+
+
+@pytest.mark.parametrize("value", EXPLICIT_REPLACEMENT, ids=EXPLICIT_IDS)
+def test_vm_show_reports_a_stored_admin_spec_needing_replacement_as_its_own_reason(
+    db: Database,
+    make_config,  # noqa: ANN001
+    value: JsonObject,
+) -> None:
+    from agentworks.instance_description import instance_state_data, load_instance_description_registry
+    from agentworks.vms.manager.inspect import _vm_instance_state
+
+    db.insert_vm("vm", site="local", hostname="vm")
+    db.instance_state.put_desired_overlay("vm", "vm", VersionedPayload(2, {"vm": {"cpus": 4}, "admin": value}))
+
+    with db.snapshot():
+        row = db.get_vm("vm")
+        assert row is not None
+        registry = load_instance_description_registry(db, make_config(), "vm", "vm")
+        state, _ = _vm_instance_state(registry, row, db.instance_state.inspect_owner_state("vm", "vm"))
+
+    assert [slot.instance_spec.reason for slot in state.declarations] == ["replacement-required"] * 2
+    assert InstanceStateIssueCode.INSTANCE_SPEC_REPLACEMENT_REQUIRED in [issue.code for issue in state.issues]
+    assert SECRET not in json.dumps(instance_state_data(state))

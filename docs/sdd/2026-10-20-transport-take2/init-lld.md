@@ -1063,7 +1063,10 @@ no longer use them. The departures from the tables above, each recorded where it
   `instance_specs.StoredSourceReferenceRefused`, which names the fields and never a value. It and
   `ActivationMapMigrationRequired` share the base `ExplicitReplacementRequired`, which
   `replace_agent_overlay` lets an explicit `--spec` replace or clear; a retain still refuses. Doctor
-  shows its hint.
+  shows its hint, and the describe commands' `instance_state` reports any
+  `ExplicitReplacementRequired` as reason `replacement-required` with issue
+  `instance-spec-replacement-required` (`instance_description.InstanceSpecUnavailableReason`), where
+  an activation list read `unsupported-version` through v0.19.0.
 - `vm reinit --admin-template NAME` and `--admin-spec JSON` (operator ruling 2026-11-10) follow
   `agent reinit`'s `--update-template` and `--spec`. Omitted, both are retained; a supplied admin
   spec replaces the stored admin layer, and `''` or `{}` clears it. `--admin-template` must name a

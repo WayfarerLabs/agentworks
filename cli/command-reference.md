@@ -299,9 +299,12 @@ object. Current producers always include it; older JSON v1 producers may omit th
 ```
 
 `instance_spec` is tagged `absent`; `present` with `recorded_at` and the canonical partial `spec`;
-or `unavailable` with reason `malformed` or `unsupported-version`. `current` is the resolved shape
-documented for `resource show`, or `{status: "unresolved", selection: {kind, name}, reason}` where
-reason is `missing-selection`, `instance-spec-unavailable`, or `registry-unavailable`. A fact is
+or `unavailable` with reason `malformed`, `unsupported-version`, `migration-pending`, or
+`replacement-required`, the last for a stored spec this release uses only once it is explicitly
+replaced or cleared (see [Instance specs](#instance-specs)), such as one holding a refused source
+reference or a retired harness activation list. `current` is the resolved shape documented for
+`resource show`, or `{status: "unresolved", selection: {kind, name}, reason}` where reason is
+`missing-selection`, `instance-spec-unavailable`, or `registry-unavailable`. A fact is
 `{key, status}` with status `not-recorded` or `unavailable`, or status `recorded` plus
 `recorded_at`, `operation`, and a typed `value` object. Each entry is a successful lifecycle
 operation's configuration-snapshot slice and may include evidence that its corresponding work
