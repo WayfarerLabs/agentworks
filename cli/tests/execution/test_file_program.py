@@ -376,6 +376,24 @@ def test_write_refuses_a_directory_at_the_destination(guest: Guest) -> None:
     assert temporaries(guest.tree) == []
 
 
+@pytest.mark.parametrize("operation", ["write", "write_if"])
+def test_a_directory_at_the_temporary_name_makes_the_write_unsuitable_and_is_left_alone(
+    guest: Guest, operation: str
+) -> None:
+    destination = guest.tree / "file"
+    destination.write_bytes(b"before")
+    planted = guest.tree / file_program._temporary_name("file")
+    planted.mkdir()
+    (planted / "inside").write_bytes(b"kept")
+
+    write = guest.write if operation == "write" else guest.write_if
+    result = write(destination, b"after", **({} if operation == "write" else {"expected": digest(b"before")}))
+
+    assert result.returncode == file_program.EXIT_UNSUITABLE, result.stderr
+    assert destination.read_bytes() == b"before"
+    assert (planted / "inside").read_bytes() == b"kept"
+
+
 @pytest.mark.parametrize("damage", ["short", "different"])
 def test_a_write_whose_content_did_not_arrive_as_sent_creates_nothing(guest: Guest, damage: str) -> None:
     sent = b"the whole content"

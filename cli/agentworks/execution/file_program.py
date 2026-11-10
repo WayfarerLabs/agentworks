@@ -253,7 +253,8 @@ def _temporary_name(name: str) -> str:
     """The one temporary name beside the destination ``name``, whatever its length.
 
     It is fixed, so the next write to the same destination replaces what a
-    write killed before its rename left behind.
+    write killed before its rename left behind. A directory at it makes the
+    write unsuitable, since no write leaves one.
     """
     return _TEMPORARY_PREFIX + hashlib.sha256(name.encode("utf-8", "surrogateescape")).hexdigest()[:24]
 
@@ -291,9 +292,14 @@ def _replace(params: Params, *, uid: int, expected: str | None, compare: bool, p
     parent = walk.parent
     temporary = _temporary_name(walk.name)
     try:
-        # Under the lock no live write owns this name: anything there is a killed write's.
-        with contextlib.suppress(FileNotFoundError):
+        # Under the lock no live write owns this name: a file there is a killed write's. A directory
+        # is no write's, so the name is unsuitable and is left alone, as the cleanup below leaves it.
+        try:
             os.unlink(temporary, dir_fd=parent)
+        except FileNotFoundError:
+            pass
+        except IsADirectoryError:
+            return EXIT_UNSUITABLE
         output = os.open(
             temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=parent
         )
@@ -328,7 +334,7 @@ def _replace(params: Params, *, uid: int, expected: str | None, compare: bool, p
                 os.close(directory)
         return 0
     finally:
-        with contextlib.suppress(FileNotFoundError):
+        with contextlib.suppress(FileNotFoundError, IsADirectoryError):
             os.unlink(temporary, dir_fd=parent)
         walk.close()
 
