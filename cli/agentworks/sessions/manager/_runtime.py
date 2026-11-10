@@ -120,6 +120,9 @@ def prepare_session_definition(
     vm = _mgr._require_vm_for_workspace(db, workspace)
     if vm.vm_uuid != vm_node.row.vm_uuid:
         raise StateError("session parent changed during selection", entity_kind="session", entity_name=session.name)
+    from agentworks.vms.manager import require_vm_ssh_boundary
+
+    require_vm_ssh_boundary(db, config, vm)
     template = _mgr._resolve_template(registry, session.template, db=db, instance_name=session.name)
     from typing import cast
 
@@ -269,6 +272,9 @@ def prepare_session_launch(
         raise StateError(
             "session workspace changed during preparation", entity_kind="session", entity_name=session.name
         )
+    from agentworks.vms.manager import require_vm_ssh_boundary
+
+    require_vm_ssh_boundary(db, config, definition.vm)
     admin_target = _mgr.transport(definition.vm, config)
     status = observe_session_runtime(current, admin_target=admin_target)
     if status is SessionStatus.UNKNOWN:
@@ -353,6 +359,10 @@ def prepare_session_stop(
     """Prepare direct teardown, never activating or holding the parent VM."""
     workspace = _mgr._require_workspace(db, session.workspace_name)
     vm = _mgr._require_vm_for_workspace(db, workspace)
+    if not parent_off:
+        from agentworks.vms.manager import require_vm_ssh_boundary
+
+        require_vm_ssh_boundary(db, config, vm)
     admin_target = None if parent_off else _mgr.transport(vm, config)
     status = SessionStatus.STOPPED if parent_off else observe_session_runtime(session, admin_target=admin_target)  # type: ignore[arg-type]
     if status is SessionStatus.UNKNOWN:

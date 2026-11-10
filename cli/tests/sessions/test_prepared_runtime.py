@@ -393,3 +393,20 @@ def test_create_below_stopped_parent_refuses_before_activation(tmp_path, monkeyp
     assert db.get_session("new-session") is None
     assert db.get_session("s1").desired_runtime_state is DesiredRuntimeState.RUNNING
     db.close()
+
+
+def test_local_definition_rejects_canonical_identity_before_guest_or_secret_work(tmp_path, monkeypatch):
+    db, _ = _restart_fixture(tmp_path, monkeypatch, status=SessionStatus.STOPPED)
+    selected = db.get_session("s1")
+    failure = StateError("configured SSH identity is unavailable")
+
+    def refuse(*args, **kwargs):
+        raise failure
+
+    monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", refuse)
+    monkeypatch.setattr(manager, "transport", lambda *a, **k: pytest.fail("guest transport created"))
+    with pytest.raises(StateError) as caught:
+        _prepare_launch(db, monkeypatch)
+    assert caught.value is failure
+    assert db.get_session("s1") == selected
+    db.close()
