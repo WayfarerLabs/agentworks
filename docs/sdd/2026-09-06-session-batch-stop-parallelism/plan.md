@@ -341,6 +341,15 @@ request counts remain gaps. Earlier evidence keeps its original head and cleanup
 report's independent cleanup audit and bounded secret-form scan passed; neither that evidence nor
 its merge recommendation is a claim of universal coverage or authority to merge.
 
+Private review of the third-round checkpoint `cbb9a61e2` found a failed-write case distinct from the
+successful-write/refetch interval. Inside a supported enclosing database transaction, a second
+connection's replacement can make SQLite reject the repair write with `SQLITE_BUSY_SNAPSHOT` before
+the conditional update returns a row count. Named stop propagates that failure, but batch repair's
+broad catch continued into stale status observation. The lead and independent complexity reviewer
+reproduced the controller behavior with two real SQLite connections and stubbed native boundaries.
+The correction propagates the existing database-driver error family alongside the
+replacement-conflict kind; it adds no retry or command-wide serialization.
+
 - [x] Receive and critically assess the report on `59f9f41ae` before starting the additional round.
 - [x] Record the operator's exact ruling in the FRD and append this phase without rewriting
       completed implementation history.
@@ -352,6 +361,8 @@ its merge recommendation is a claim of universal coverage or authority to merge.
       replacements, including nullable fields and relevant named/batch caller behavior.
 - [x] Update response design and permanent guidance to describe the implemented repair boundary
       without promising whole-command cross-process atomicity.
+- [ ] Propagate database-driver repair failures before batch preparation continues, and prove named
+      and batch refusal with real enclosing-transaction replacement regressions.
 - [ ] Run full gates, installed-wheel checks, three fresh private review lanes, and hosted CI on the
       coherent result, then publish the third-round ready handoff for the separate tester.
 - [ ] Assess the new exact-head integration report and remaining feedback before final SDD closeout.
