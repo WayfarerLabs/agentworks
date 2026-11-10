@@ -1043,9 +1043,11 @@ no longer use them. The departures from the tables above, each recorded where it
   install commands' paths (`_write_agent_mise_config`, `_install_agent_mise`). Through v0.19.0 the
   agent ran its install commands, then dotfiles, then mise, so its template's config overwrote the
   dotfiles', and its shims took precedence over its install commands' paths. On a first create
-  neither account's profile carries the shims yet when its install commands run; they still find
-  mise's tools, because they run in an interactive login shell (`-lic`) whose rc fragment activates
-  mise.
+  neither account's profile carries the shims yet when its install commands run, and the commands
+  run as `{shell} -lc`, a non-interactive login shell that reads no rc file (the seeded `.bashrc`
+  returns early when not interactive), so the rc fragment's mise activation does not reach them
+  either; only the `test_exec` check runs interactively (`-lic`). They reach mise's tools on a first
+  create only through `mise` itself (`mise exec`), and through the shims from the next reinit on.
 - A stored overlay that fails only on source reference fields this release refuses (every
   `errors.RefusedSourceReference`: `dotfiles_source`, `mise_lockfile` and a harness settings
   `source`, all through `sources.check_source_ref`) decodes to
