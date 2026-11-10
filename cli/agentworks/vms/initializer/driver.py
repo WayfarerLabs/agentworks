@@ -92,6 +92,8 @@ if TYPE_CHECKING:
     from agentworks.vms.admin import AdminConfig
     from agentworks.vms.templates import ResolvedVMTemplate
 
+    from .steps import InitLog
+
 
 class VMInitializationOperation(StrEnum):
     """Closed lifecycle operations that can establish VM applied state."""
@@ -580,39 +582,11 @@ def _phase_b_setup(
         # the install entirely. Saying so is the difference between a warning an
         # operator can act on and a later failure that looks unrelated to it.
         if admin.dotfiles_source:
-            logger.step("Dotfiles")
-            dest = admin.dotfiles_destination
-            synced = False
-            try:
-                from agentworks.sources import expand_destination, fetch_dir, parse_source_ref
-
-                dest = expand_destination(dest, home)
-                ref = parse_source_ref(admin.dotfiles_source)
-                output.info(f"Syncing dotfiles from {admin.dotfiles_source}...")
-                fetch_dir(ref, legacy_target, dest, logger=logger)
-                synced = True
-            except Exception as e:
-                msg = (
-                    f"dotfiles sync failed, so '{admin.dotfiles_install_cmd}' did not run and {dest} "
-                    f"still holds its previous contents: {e}"
-                )
-                logger.warning(msg)
-                output.warn(msg)
-            if synced:
-                try:
-                    output.info(f"Running dotfiles install: {admin.dotfiles_install_cmd}")
-                    legacy_target.run(
-                        f"cd {dest} && {admin.dotfiles_install_cmd}",
-                        timeout=120,
-                    )
-                except Exception as e:
-                    msg = f"dotfiles install '{admin.dotfiles_install_cmd}' failed in {dest}: {e}"
-                    logger.warning(msg)
-                    output.warn(msg)
+            _sync_dotfiles(files, admin, admin_shell, home, logger)
 
         # Non-fatal: mise lockfile (after git creds and dotfiles; overrides dotfiles lockfile)
         if admin.mise_lockfile:
-            _fetch_mise_lockfile(legacy_target, admin.mise_lockfile, home, logger)
+            _fetch_mise_lockfile(files, admin.mise_lockfile, home, logger)
 
         # Non-fatal: mise install (after config + dotfiles + lockfile are all settled)
         prune = admin.mise_prune_on_reinit
@@ -668,3 +642,42 @@ def _phase_b_setup(
             shell=admin_shell,
             logger=logger,
         )
+
+
+DOTFILES_INSTALL_DEADLINE = 120
+"""Seconds the dotfiles install command may take."""
+
+
+def _sync_dotfiles(files: Files, admin: AdminConfig, shell: str, home: str, log: InitLog) -> None:
+    """Sync the admin's dotfiles, then run their install command in a login shell in the checkout.
+
+    Sync and install warn separately, because a failed sync skips the install
+    entirely; saying so is the difference between a warning an operator can
+    act on and a later failure that looks unrelated to it.
+    """
+    from agentworks.sources import expand_destination, fetch_dir, parse_source_ref
+
+    assert admin.dotfiles_source is not None
+    log.step("Dotfiles")
+    dest = admin.dotfiles_destination
+    try:
+        dest = expand_destination(dest, home)
+        ref = parse_source_ref(admin.dotfiles_source)
+        output.info(f"Syncing dotfiles from {admin.dotfiles_source}...")
+        fetch_dir(ref, files, dest, log=log)
+    except STEP_FAILURES as error:
+        warn_step(
+            log,
+            f"dotfiles sync failed, so '{admin.dotfiles_install_cmd}' did not run and {dest} still holds its "
+            "previous contents",
+            error,
+        )
+        return
+    output.info(f"Running dotfiles install: {admin.dotfiles_install_cmd}")
+    try:
+        files.access.run(
+            Command((shell, "-lc", admin.dotfiles_install_cmd), cwd=dest, deadline=DOTFILES_INSTALL_DEADLINE),
+            check=True,
+        )
+    except STEP_FAILURES as error:
+        warn_step(log, f"dotfiles install '{admin.dotfiles_install_cmd}' failed in {dest}", error)

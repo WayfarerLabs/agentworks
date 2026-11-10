@@ -10,8 +10,13 @@ from typing import TYPE_CHECKING
 from agentworks import output
 from agentworks.ssh import SSHError, SSHLogger
 
+from .steps import STEP_FAILURES, warn_step
+
 if TYPE_CHECKING:
+    from agentworks.execution.files import Files
     from agentworks.transports import Transport
+
+    from .steps import InitLog
 
 MISE_GPG_KEY_URL = "https://mise.jdx.dev/gpg-key.pub"
 MISE_GPG_KEY_PATH = "/etc/apt/keyrings/mise-archive-keyring.asc"
@@ -75,27 +80,18 @@ def _write_mise_config(
         output.warn(msg)
 
 
-def _fetch_mise_lockfile(
-    target: Transport,
-    lockfile_source: str,
-    home: str,
-    logger: SSHLogger,
-) -> None:
-    """Fetch a mise lockfile from a source reference to ~/.config/mise/mise.lock."""
-    from agentworks.sources import SourceRefError, fetch_file, parse_source_ref
+def _fetch_mise_lockfile(files: Files, lockfile_source: str, home: str, log: InitLog) -> None:
+    """Publish a mise lockfile from a source reference at ``~/.config/mise/mise.lock``, 0644."""
+    from agentworks.sources import fetch_file, parse_source_ref
 
-    logger.step("Mise lockfile")
+    log.step("Mise lockfile")
     output.info(f"Fetching mise lockfile from {lockfile_source}...")
 
     try:
         ref = parse_source_ref(lockfile_source, default_filename="mise.lock")
-        dest = f"{home}/.config/mise/mise.lock"
-        target.run(f"mkdir -p {home}/.config/mise")
-        fetch_file(ref, target, dest, logger=logger)
-    except SourceRefError as e:
-        msg = f"mise lockfile fetch failed: {e}"
-        logger.warning(msg)
-        output.warn(msg)
+        fetch_file(ref, files, f"{home}/.config/mise/mise.lock", log=log)
+    except STEP_FAILURES as error:
+        warn_step(log, "mise lockfile fetch failed", error)
 
 
 def _parse_mise_failures(error: SSHError) -> list[str]:

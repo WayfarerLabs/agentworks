@@ -18,11 +18,13 @@ from agentworks import output
 from agentworks.execution.access import Admin, Agent
 from agentworks.git_config import ensure_safe_directory_wildcard
 from agentworks.transports import transport
+from agentworks.vms.initializer.steps import STEP_FAILURES
 
 if TYPE_CHECKING:
     from agentworks.agents.templates import ResolvedAgentTemplate
     from agentworks.config import Config
     from agentworks.db import VMRow
+    from agentworks.execution.files import Files
     from agentworks.execution.requests import AccountShell
     from agentworks.git_credentials import CredentialRequest
     from agentworks.install_commands import UserInstallCommandEntry
@@ -223,6 +225,8 @@ def create_agent_on_vm(
     # -- Phase 2: self-configure (agent) ----------------------------------
 
     agent_target = transport_for_user(vm, config, user=linux_user, logger=logger)
+    agent_access = execution.vm_access(vm, config, Agent(agent_name, linux_user), log=logger.record)
+    agent_files = agent_access.files()
 
     # Provisioning is hermetic: no operator env from [agent_templates.*.env]
     # or [vm_templates.*.env] is injected into the agent's install runners.
@@ -285,7 +289,7 @@ def create_agent_on_vm(
 
     configure_user_git_credentials(
         agent_target,
-        execution.vm_access(vm, config, Agent(agent_name, linux_user), log=logger.record),
+        agent_access,
         credential_requests,
         config,
         logger,
@@ -358,7 +362,7 @@ def create_agent_on_vm(
                 # Local source: fetch directly into the agent's home over
                 # agent SSH. The agent owns dest, so no sudo / chown
                 # dance. fetch_dir handles existing-dest overwrite.
-                fetch_dir(ref, agent_target, dest)
+                fetch_dir(ref, agent_files, dest)
 
             output.info(f"Running agent dotfiles install: {agent_cfg.dotfiles_install_cmd}")
             # Wrap in a login shell so the dotfiles install command sees
@@ -375,7 +379,7 @@ def create_agent_on_vm(
             output.warn(f"agent dotfiles failed: {e}")
 
     # Mise.
-    _run_agent_mise_setup(agent_target=agent_target, agent_tmpl=agent_tmpl, home=home)
+    _run_agent_mise_setup(agent_target=agent_target, agent_files=agent_files, agent_tmpl=agent_tmpl, home=home)
 
     # Defensive final step: re-ensure source lines in case dotfiles
     # install (or any other later step) overwrote a shell rc file in
@@ -620,6 +624,7 @@ def _write_agent_shell_rc(
 def _run_agent_mise_setup(
     *,
     agent_target: Transport,
+    agent_files: Files,
     agent_tmpl: ResolvedAgentTemplate,
     home: str,
 ) -> None:
@@ -693,15 +698,13 @@ def _run_agent_mise_setup(
     if has_lockfile and agent_cfg.mise_lockfile:
         output.info(f"Fetching agent mise lockfile from {agent_cfg.mise_lockfile}...")
         try:
-            from agentworks.sources import SourceRefError, fetch_file, parse_source_ref
+            from agentworks.sources import fetch_file, parse_source_ref
 
             ref = parse_source_ref(agent_cfg.mise_lockfile, default_filename="mise.lock")
-            agent_target.run(f"mkdir -p {mise_config_dir}")
-            # Fetch directly into the agent's config dir over agent SSH;
-            # the agent owns the destination so no sudo / chown needed.
-            fetch_file(ref, agent_target, f"{mise_config_dir}/mise.lock")
-        except (SourceRefError, SSHError) as e:
-            output.warn(f"agent mise lockfile fetch failed: {e}")
+            # Published as the agent, which owns the destination.
+            fetch_file(ref, agent_files, f"{mise_config_dir}/mise.lock")
+        except STEP_FAILURES as error:
+            output.warn(f"agent mise lockfile fetch failed: {error}")
 
     # Run mise install as the agent user
     lockfile_exists = False

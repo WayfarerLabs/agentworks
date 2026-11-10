@@ -82,7 +82,7 @@ def test_agent_mise_setup_writes_config_and_installs_unlocked() -> None:
     target.run.return_value = _result(ok=False)
     template = ResolvedAgentTemplate(name="default", mise_packages=["terraform@1.14.5"])
 
-    _run_agent_mise_setup(agent_target=target, agent_tmpl=template, home="/home/agt-dev")
+    _run_agent_mise_setup(agent_target=target, agent_files=MagicMock(), agent_tmpl=template, home="/home/agt-dev")
 
     config_call = next(call for call in target.write_file.call_args_list if call.args[0].endswith("config.toml"))
     assert '"terraform" = "1.14.5"' in config_call.args[1]
