@@ -265,17 +265,6 @@ class Resolver:
                 hint="Correct the earlier secret failure and retry the operation.",
             ) from None
 
-    def resolve_late_repair(self, decl: SecretDecl) -> str:
-        """Resolve one authorized repair secret without widening the cache."""
-        self._require_open()
-        if self._values is None:
-            raise StateError("a late repair secret requires the operation boundary")
-        batch = self._resolve_declarations([decl])
-        projected = batch.complete_or_raise()
-        if tuple(projected) != (decl.name,):
-            raise StateError("late repair resolution returned an invalid singleton result")
-        return projected[decl.name]
-
     def _resolve_declarations(self, decls: Sequence[SecretDecl]) -> ResolutionBatch:
         """Drive one authorized actual-resolution batch under current TTY facts."""
         import sys
