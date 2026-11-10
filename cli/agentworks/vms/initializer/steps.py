@@ -52,15 +52,6 @@ class InitLog(OperationLog, Protocol):
 
     def sanitize(self, text: str) -> str: ...
 
-    @property
-    def redactions(self) -> tuple[str, ...]: ...
-
-    @property
-    def warnings(self) -> list[str]: ...
-
-    @property
-    def has_warnings(self) -> bool: ...
-
 
 class NotRestored(ExternalError):
     """A written file's follow-up action failed, and putting its prior content back failed too.

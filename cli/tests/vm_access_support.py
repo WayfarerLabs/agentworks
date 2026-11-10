@@ -421,7 +421,6 @@ __all__ = [
     "account_shell",
     "answer_command_checks",
     "answer_destination_identity",
-    "answer_from_target",
     "check_result",
     "command_check_access",
     "files_over_target",
