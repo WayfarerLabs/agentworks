@@ -30,6 +30,12 @@ then publish one exact head and scoped summary. Later findings belong to the nex
 scope/requirements changes, unsafe fixes, or an exhausted allowance return to the operator; authored
 GitHub feedback does not extend authority. Optional wording does not independently gate.
 
+The operator confirmed on 2026-11-10 that a separate integration tester automatically picks up the
+published implementation PR. Its report may take up to four hours. Wait for that handoff's
+integration result before starting another implementation iteration, even if other review feedback
+has arrived and the minimum one-hour collection window has elapsed. Continue monitoring all lanes;
+elapsed time alone is not a test result or permission to proceed.
+
 ## Phase 0: requirements and factual survey
 
 - [x] Author and publish the FRD covering all three runnable kinds, non-terminal exit semantics,
@@ -92,32 +98,32 @@ with the new model while provider contracts remain unchanged.
 
 ## Phase 3: prepared session and console operations
 
-- [ ] Separate session acceptance, read-only eligibility, shared-secret collection, and execution.
+- [x] Separate session acceptance, read-only eligibility, shared-secret collection, and execution.
       Retain UUID-bound confirmation, per-session scope/transport, command checks, setup readiness,
       continuation, artifact publication, and fingerprinted teardown semantics.
-- [ ] Record accepted session intent before execution, including batch running no-ops and blocked
+- [x] Record accepted session intent before execution, including batch running no-ops and blocked
       child starts; keep evidence-only stop/recovery and failed-create cleanup independent of
       intent.
-- [ ] Replace the existing per-session full-service batch launch loop with shared preparation and
+- [x] Replace the existing per-session full-service batch launch loop with shared preparation and
       one complete eligible workload resolution. Include safe residual starts and ordinary no-ops.
-- [ ] Route batch stop through non-activating parent observation and prepared stops, including
+- [x] Route batch stop through non-activating parent observation and prepared stops, including
       accepted absent no-ops and existing filters/force. Retire all old batch boundary helpers,
       unused best-effort exports, and the sole Resolver late-repair method. Update the obsolete
       activation late-repair docstring and replace tests patching retired helpers with coverage of
       the new composition.
-- [ ] Separate console observation/target collection from staging cleanup and realization. Add
+- [x] Separate console observation/target collection from staging cleanup and realization. Add
       intent handling and selection under guards, preserve membership independence, and guard
       definition/member/cascade mutations. Put console delete selection and consent under the same
       guard and reuse held tokens for nested cleanup.
-- [ ] Retain canonical view identity for healthy and staging-cleanup-only cases; build missing views
+- [x] Retain canonical view identity for healthy and staging-cleanup-only cases; build missing views
       from stored member order, shell panes, and admin-shell configuration with supplied values.
-- [ ] Align the existing admin-shell collector and delivery: the baseline collects VM/admin env but
+- [x] Align the existing admin-shell collector and delivery: the baseline collects VM/admin env but
       the builder omits it. Use existing literal env composition/delivery for that shell so
       preparation does not request values it then ignores. Keep the existing env scope and transport
       contract; do not expand into a transport rewrite.
-- [ ] Make explicit child stop and reconciliation below an already-off VM avoid pointless VM
+- [x] Make explicit child stop and reconciliation below an already-off VM avoid pointless VM
       activation. Unknown/broken state keeps existing refusal and explicit-force boundaries.
-- [ ] Demonstrate no runtime mutation before shared secret success, no source calls in executors, no
+- [x] Demonstrate no runtime mutation before shared secret success, no source calls in executors, no
       target changes during internal cleanup, and preservation of healthy runtime identities.
 
 Definition of done: singular and batch lifecycle use the same concrete domain helpers, every
@@ -126,24 +132,24 @@ existing intended scopes. Refused/no-op paths do not resolve unused workload sec
 
 ## Phase 4: reconciliation, preview, and operator commands
 
-- [ ] Implement explicit VM/fleet/session/console scopes, strict name-or-all validation, retained
+- [x] Implement explicit VM/fleet/session/console scopes, strict name-or-all validation, retained
       VM/session UUID checks, guarded console selection, adoption blockers, and stopped-parent
       precedence.
 - [x] Extend the existing Resolver gate path with invocation-only value-free failure memoization;
       register gate names only after success. Share seeded successes and conditional repair values
       while isolating failed families. Add no parallel cache or secret backend API.
-- [ ] Activate all selected running-intent VMs, including both childless VMs and VMs with only
+- [x] Activate all selected running-intent VMs, including both childless VMs and VMs with only
       stopped children, before the workload boundary. Leave idle on-demand VMs off when not needed.
-- [ ] Register eligible workload graph/env/pane requirements on that same Resolver. Check required
+- [x] Register eligible workload graph/env/pane requirements on that same Resolver. Check required
       declarations against gate failures inside resolve before any source call, reuse seeded
       successes, and validate every consumer. Failed boundaries terminate and dispose the
       invocation; execution and final observation receive no resolution callback.
-- [ ] Execute sessions before console builds and all provider stops after shared secret success;
+- [x] Execute sessions before console builds and all provider stops after shared secret success;
       isolate independent failures, preserve targets, propagate cancellation, and report partial
       effects.
-- [ ] Implement bounded final observations and typed changed/unchanged/failed/blocked results,
+- [x] Implement bounded final observations and typed changed/unchanged/failed/blocked results,
       including a nonzero aggregate result when selected targets remain incomplete.
-- [ ] Implement dry run with no activation, repair, workload source preview/resolution, staging,
+- [x] Implement dry run with no activation, repair, workload source preview/resolution, staging,
       target write, or execution; explain conditional guest checks when a VM is off.
 - [x] Add thin `set-desired-state` and `reconcile` CLI verbs under all three resource groups,
       existing name completions, static state choices, additive inspection target fields, and the
@@ -164,7 +170,7 @@ existing domain authorities, with no generic runnable lifecycle framework.
 - [x] Update retained management teaching and completions with the same commands and safe scope
       guidance. Verify sample config/schema need no new target option; update any outdated
       collateral.
-- [ ] Document explicit adoption, accepted intent on failure/cancellation, VM on-demand versus
+- [x] Document explicit adoption, accepted intent on failure/cancellation, VM on-demand versus
       running behavior, parent precedence, console independence, preview limits, and batch-secret
       failure changes, per-family preparation isolation, and contention during secret prompts,
       console consent, and hold admission. Add the implementing commit's breaking-change footer.
@@ -179,19 +185,20 @@ existing domain authorities, with no generic runnable lifecycle framework.
       locked-SDD and rulesync checks, website Python/Node tests, and deterministic double builds on
       real exit codes. Add meaningful Windows-marked coverage for host-sensitive changes.
 
-Implementation checkpoint, 2026-11-10: the schema and VM cutover, shared Resolver changes, six CLI
-verbs, and permanent guidance are present in this PR. Independent whole-feature project and
-complexity reviews at `3b4a5fe5a` found bounded-observation, preview, and repeated-preparation
-issues; the fixes are being integrated before handoff. The generic correctness re-review at
-`43c6c0443` passed 130 focused tests and ten scratch checks, including evidence-only checkpoint
-recovery after the shared secret barrier and exact cancellation propagation. A legacy-agent
-transport report was refuted against the persisted socket constraint and prompted no change.
+Implementation checkpoint, 2026-11-10: the full feature and permanent guidance are present in this
+PR. Independent project, complexity, and generic correctness reviews found and verified corrections
+for cancellation, recovery, observation bounds, preview isolation, and repeated preparation. Those
+corrections are integrated. A legacy-agent transport report was refuted against the persisted socket
+constraint and prompted no change. Evidence-only checkpoint recovery remains behind the shared
+secret barrier and never falls through to a launch.
 
-The second full-suite triage had 11,563 passes, 63 failures, and 11 skips. Remaining session and
-artifact tests are being checked for actual regressions and adapted to accepted intent, aggregate
-results, the shared Resolver boundary, and fresh final observations. Full implementation validation,
-the final common-head private reviews, publication, and live evidence remain open. Local CLI process
-checks used isolated state and exercised setters and inspection; they did not exercise a provider.
+The full suite at `0830ee49b` passed 11,647 tests with 11 skips. The subsequent
+preview-disappearance fixes have focused regression coverage using normal public deletion services
+through a second database connection. They preserve independent results without acquiring a preview
+guard. Final required gates and private reviews at the final head are running before publication.
+Local CLI process checks used isolated state and exercised setters and inspection; they did not
+exercise a provider. Actual recovery and Windows/WSL live evidence await the separate integration
+tester.
 
 Definition of done: no material private finding remains; permanent docs describe shipped behavior
 without relying on SDD paths; required gates are green and evidence names the exact tested head.
@@ -203,12 +210,13 @@ supply the required live evidence below. An owner-run campaign may precede that 
 inventory is available. If live evidence is pending at ready, disclose it, leave those items open,
 and require actual evidence or an authorized disposition before claiming convergence or locking.
 
-- [ ] Establish the operator-approved inventory, fixture prefix, platform/workstation lanes, and
-      resource budget before live mutation. Use the `agw-test-env` and `integration-testing` skills;
-      snapshot operator state first when touched. Missing inventory is not permission to invent one.
-- [ ] Invoke a scoped tester in its own pinned worktree with the relevant inventory/naming/budget
-      sections and authorization for owned scratch resources. Use this commit's CLI, not a release
-      stand-in; confirm the new commands actually exist on every test bed.
+- [ ] Obtain the separate integration tester's report identifying its approved inventory, fixture
+      prefix, platform/workstation lanes, resource budget, and required state snapshot. The tester
+      owns its environment under `agw-test-env` and `integration-testing`; the development session
+      does not invent inventory or mutate live resources.
+- [ ] Publish the ready handoff to trigger the separate tester and verify its report uses this
+      commit's CLI in an isolated checkout, rather than a release stand-in. Confirm that the new
+      commands exist on every reported test bed.
 - [ ] Drive real VM restart or external shutdown with two shell sessions and a named console,
       restore their intended states, then repeat reconciliation and prove healthy identities remain.
 - [ ] Drive pure adoption and dry run; explicit child/console stop; explicit parent stop retaining
