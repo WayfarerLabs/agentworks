@@ -2,29 +2,37 @@
 
 These write the on-VM shell and system files that make agentworks-managed
 env vars, PATH entries, and identity visible to login shells, interactive
-shells, sshd, and sudo. All idempotent (grep-or-append / stage-validate-
-promote / full overwrite), so every function here is safe to re-run on
+shells, sshd, and sudo. All idempotent (append-if-missing, stage-validate-
+promote, full overwrite), so every function here is safe to re-run on
 ``vm reinit``.
 
-The system fragments (identity profile, zprofile block, sshd, sudoers,
-skel) are written as root through the file program: ``Files.write`` for a
-file Agentworks owns whole, ``Files.update`` over what was read for one it
-edits. Neither writes through a link.
+Every file is written through the file program: ``Files.write`` for a file
+Agentworks owns whole, ``Files.update`` over what was read for one it edits.
+The system fragments (identity profile, zprofile block, sshd, sudoers, skel)
+are written as root; the per-user profile and rc fragments and the rc files'
+source lines as the account itself, admin or agent. Nothing is written
+through a link: a linked rc file is accepted only when the file it links to
+already sources the fragment, and otherwise warned about with the line to add.
 """
 
 from __future__ import annotations
 
 import shlex
+from enum import Enum
 from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.capabilities.vm_platform.skel import BASHRC, ZSHRC
+from agentworks.errors import ExternalError
+from agentworks.execution.errors import PathRefusal, PathRefused
 from agentworks.execution.requests import Command
 from agentworks.ssh import SSHError, SSHLogger
 
-from .steps import STEP_FAILURES, update_and_apply, warn_step
+from .steps import STEP_FAILURES, status, update_and_apply, warn_step
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from agentworks.execution.files import Files
     from agentworks.transports import Transport
 
@@ -37,131 +45,175 @@ SKEL_BASHRC_PATH = "/etc/skel/.bashrc"
 SKEL_ZSHRC_PATH = "/etc/skel/.zshrc"
 
 
-def _ensure_agentworks_files_sourced(
-    target: Transport,
-    *,
-    home: str,
-    shell: str,
-    logger: SSHLogger,
-) -> None:
-    """Defensive final step: idempotently re-append `. ~/.agentworks-*`
-    source lines to the user's shell rc files.
+def source_files(home: str, shell: str) -> dict[str, tuple[str, ...]]:
+    """The rc files that source each Agentworks fragment, keyed by the fragment's file name.
 
-    Earlier steps in setup (``_write_agentworks_profile``,
-    ``_write_agent_profile``, ``_write_agentworks_rc``, the mise rc-write
-    in ``_run_agent_mise_setup``) each append their source line via
-    grep-or-append when they run. Dotfiles install -- and any other
-    later step that overwrites a shell rc file in place -- can clobber
-    those lines. This helper runs LAST in setup so the source lines
-    survive a dotfiles installer that ships its own ``.zprofile`` /
-    ``.bashrc`` / etc.
-
-    grep-or-append shape means this is a no-op when the source line is
-    already present (the common case where nothing clobbered).
-
-    ``home`` is the literal home directory path (e.g.
-    ``/home/agentworks``). Admin and agent setup pass their respective
-    values; the helper does not assume ``$HOME`` shell expansion.
-
-    ``shell`` selects which zsh-specific files to ensure (``.zprofile``,
-    ``.zshrc``). bash rc files are always checked because we always
-    write source lines to them.
+    The profile fragment is sourced from ``~/.profile`` and ``~/.bashrc``,
+    and ``~/.zprofile`` for a zsh account; the rc fragment from ``~/.bashrc``,
+    and ``~/.zshrc`` for a zsh account. Every writer of a source line reads
+    its files from here.
     """
-    logger.step("Ensure agentworks files sourced")
+    zsh = shell == "zsh"
+    return {
+        AGENTWORKS_PROFILE: (f"{home}/.profile", f"{home}/.bashrc", *((f"{home}/.zprofile",) if zsh else ())),
+        AGENTWORKS_RC: (f"{home}/.bashrc", *((f"{home}/.zshrc",) if zsh else ())),
+    }
 
-    profile_source = f". {home}/{AGENTWORKS_PROFILE}"
-    profile_rcs = [f"{home}/.profile", f"{home}/.bashrc"]
-    if shell == "zsh":
-        profile_rcs.append(f"{home}/.zprofile")
-    for rc in profile_rcs:
-        target.run(
-            f"grep -q {AGENTWORKS_PROFILE} {rc} 2>/dev/null || printf '%s\\n' '{profile_source}' >> {rc}",
-            check=False,
+
+class SourceLine(Enum):
+    """What :func:`ensure_source_line` found."""
+
+    PRESENT = "present"
+    """The rc file already names the fragment."""
+    ADDED = "added"
+    """The line was appended."""
+    LINKED = "linked"
+    """The rc file is a link, and the file it links to already names the fragment; nothing was written."""
+
+
+class LinkedRcFile(ExternalError):
+    """An rc file is a symbolic link whose target does not source the fragment; it is never written through."""
+
+    def __init__(self, rc: str, line: str) -> None:
+        super().__init__(
+            f"{rc} is a symbolic link, so its source line was not added; "
+            f"add '{line}' to the file it links to (usually in your dotfiles)"
         )
 
-    rc_source = f". {home}/{AGENTWORKS_RC}"
-    rc_files = [f"{home}/.bashrc"]
-    if shell == "zsh":
-        rc_files.append(f"{home}/.zshrc")
-    for rc in rc_files:
-        target.run(
-            f"grep -q {AGENTWORKS_RC} {rc} 2>/dev/null || printf '%s\\n' '{rc_source}' >> {rc}",
-            check=False,
-        )
+
+def ensure_source_line(files: Files, rc: str, marker: str, line: str) -> SourceLine:
+    """Make ``rc`` source a fragment: append ``line`` unless ``marker`` already occurs in it.
+
+    The file is read and published with ``Files.update``, keeping its owner,
+    mode and attributes; a missing one is created 0644, and a last line with
+    no newline gets one first. A link at ``rc`` is never written through:
+    when the file it links to already holds ``marker`` the result is
+    :attr:`SourceLine.LINKED`, and otherwise :class:`LinkedRcFile` names the
+    line to add there. Any other file type is the read's own refusal.
+    """
+    try:
+        observed = files.read(rc)
+    except PathRefused as refused:
+        if refused.reason is not PathRefusal.UNSUITABLE or status(files, _request(("test", "-L", rc), files)) != 0:
+            raise
+        if status(files, _request(("grep", "-qsF", "--", marker, rc), files)) == 0:
+            return SourceLine.LINKED
+        raise LinkedRcFile(rc, line) from None
+    if observed is not None and marker.encode() in observed:
+        return SourceLine.PRESENT
+    current = observed or b""
+    if current and not current.endswith(b"\n"):
+        current += b"\n"
+    files.update(
+        rc,
+        current + line.encode() + b"\n",
+        observed=observed,
+        mode=0o644,
+        parent_mode=0o755,
+        preserve_metadata=True,
+    )
+    return SourceLine.ADDED
+
+
+def _request(argv: tuple[str, ...], files: Files) -> Command:
+    return Command(argv, deadline=files.deadline)
+
+
+def _ensure_fragment_sourced(files: Files, log: InitLog, *, home: str, shell: str, fragment: str) -> None:
+    """Ensure each rc file :func:`source_files` names for ``fragment`` sources it; each failure warns on its own."""
+    line = f". {home}/{fragment}"
+    for rc in source_files(home, shell)[fragment]:
+        try:
+            if ensure_source_line(files, rc, fragment, line) is SourceLine.LINKED:
+                log.output(f"{rc} is a link whose target already sources {fragment}")
+        except STEP_FAILURES as error:
+            warn_step(log, f"sourcing {fragment} from {rc} failed", error)
+
+
+def _ensure_agentworks_files_sourced(files: Files, log: InitLog, *, home: str, shell: str) -> None:
+    """Defensive final step: make the account's rc files source both Agentworks fragments.
+
+    The fragment writers ensure their own source lines when they run, but a
+    dotfiles install, or any later step that replaces a shell rc file, can
+    remove them. This runs LAST in setup so the lines survive a dotfiles
+    installer that ships its own ``.zprofile`` or ``.bashrc``. A file that
+    already names a fragment is left alone, so this is a no-op in the common
+    case. ``home`` is the account's literal home directory and ``shell`` its
+    login shell, which selects the zsh files (:func:`source_files`).
+    """
+    log.step("Ensure agentworks files sourced")
+    for fragment in (AGENTWORKS_PROFILE, AGENTWORKS_RC):
+        _ensure_fragment_sourced(files, log, home=home, shell=shell, fragment=fragment)
+
+
+def profile_fragment(path_additions: list[str], identity_env: Mapping[str, str] | None = None) -> str:
+    """The content of ``~/.agentworks-profile.sh``: the umask, identity exports, then one PATH export per entry.
+
+    A leading ``~`` in an entry becomes ``$HOME``. Each export prepends, so
+    of an entry listed twice only the last is kept, which keeps its lookup
+    precedence when commands contribute interleaved entries such as A, B, A.
+    """
+    lines = ["# Managed by agentworks -- do not edit"]
+    # Cross-account isolation of a home is enforced by its 0750 mode and its
+    # private primary group (the "Admin home permissions" step and agent
+    # create): once other accounts cannot search the home, files inside it
+    # are unreachable regardless of their own mode, so the umask adds nothing
+    # there. Its real value is defense-in-depth for artifacts written OUTSIDE
+    # the home: /tmp, $TMPDIR, and any world-traversable shared directory,
+    # where the file's own mode is what protects it. 027 is portable across
+    # sh/bash/zsh. It does NOT reduce group access inside a workspace:
+    # workspace dirs carry a POSIX default ACL (setfacl -d, see
+    # workspaces/acls.py) that makes new files inherit group rwx regardless of
+    # the process umask, so collaboration is preserved. Coverage is partial by
+    # design: this rides the login-shell profile chain, so non-login `sh -c`,
+    # cron, systemd user units, and sftp/scp keep the default umask 022. The
+    # 0750 home is the boundary; the umask is a supplement. Emitted here (not
+    # appended separately) so it survives every rewrite of this file.
+    lines.append("umask 027")
+    for key, value in (identity_env or {}).items():
+        lines.append(f"export {key}={shlex.quote(value)}")
+    expanded = [p.replace("~", "$HOME", 1) if p.startswith("~") else p for p in path_additions]
+    unique = list(dict.fromkeys(reversed(expanded)))
+    unique.reverse()
+    lines.extend(f'export PATH="{p}:$PATH"' for p in unique)
+    return "\n".join(lines) + "\n"
 
 
 def _write_agentworks_profile(
-    target: Transport,
+    files: Files,
     path_additions: list[str],
-    logger: SSHLogger,
+    log: InitLog,
     *,
-    identity_env: dict[str, str] | None = None,
+    home: str,
+    shell: str,
+    identity_env: Mapping[str, str] | None = None,
 ) -> None:
-    """Write the agentworks-managed login profile fragment.
+    """Write the account's login profile fragment and make its rc files source it.
 
-    Writes $HOME/.agentworks-profile.sh with per-user static identity
-    exports (e.g. ``AGENTWORKS_AGENT`` for agent users) followed by PATH
-    exports. Sourced from ~/.profile (bash/sh) and ~/.zprofile (zsh) --
-    runs once per login shell, inherited by child processes.
+    Writes ``~/.agentworks-profile.sh`` (:func:`profile_fragment`), 0644, as
+    the account ``files`` acts as: per-user static identity exports (e.g.
+    ``AGENTWORKS_AGENT`` for agent users) followed by PATH exports. Sourced
+    from the files :func:`source_files` names, so it runs once per login
+    shell and is inherited by child processes.
 
     System-wide identity vars (VM / VM_HOST / PLATFORM) live in
     ``/etc/profile.d/agentworks-identity.sh``, written by
     ``_write_agentworks_identity_profile``. The on-VM Linux user is
     already exposed by the standard ``$USER`` / ``$LOGNAME`` env vars,
-    so admin users pass an empty ``identity_env``.
+    so admin users pass no ``identity_env``.
 
-    Always written (even when both ``identity_env`` is empty and
-    ``path_additions`` is empty) so that reinit can clear previously set
-    paths or identity.
+    Always written (even when both ``identity_env`` and ``path_additions``
+    are empty) so that reinit can clear previously set paths or identity.
     """
-    # Deduplicate paths while preserving order
-    seen: set[str] = set()
-    unique_paths: list[str] = []
-    for p in path_additions:
-        if p not in seen:
-            seen.add(p)
-            unique_paths.append(p)
-
-    logger.step("Shell profile")
-    output.info(f"Writing agentworks profile ({output.count(len(unique_paths), 'PATH entry', 'PATH entries')})...")
-
+    log.step("Shell profile")
+    output.info(f"Writing agentworks profile ({output.count(len(path_additions), 'PATH entry', 'PATH entries')})...")
+    content = profile_fragment(path_additions, identity_env).encode()
     try:
-        lines = ["# Managed by agentworks -- do not edit"]
-        # Cross-agent isolation of the admin's files is enforced by the 0750
-        # admin home + private primary group (see the "Admin home permissions"
-        # step in driver._phase_b_setup): once agent users cannot search the
-        # home, files inside it are unreachable regardless of their own mode,
-        # so the umask adds nothing there. Its real value is defense-in-depth
-        # for artifacts the admin writes OUTSIDE its home: /tmp, $TMPDIR, and
-        # any world-traversable shared directory, where the file's own mode is
-        # what protects it. 027 is portable across sh/bash/zsh. It does NOT
-        # reduce group access inside a workspace: workspace dirs carry a POSIX
-        # default ACL (setfacl -d, see workspaces/backends/vm.py) that makes new
-        # files inherit group rwx regardless of the process umask, so
-        # collaboration is preserved. Coverage is partial by design: this rides
-        # the login-shell profile chain, so non-login `sh -c`, cron, systemd
-        # user units, and sftp/scp keep the default umask 022. The 0750 home is
-        # the boundary; the umask is a supplement. Emitted here (not appended
-        # separately) so it survives every rewrite of this file on reinit.
-        lines.append("umask 027")
-        if identity_env:
-            for key, value in identity_env.items():
-                lines.append(f"export {key}={shlex.quote(value)}")
-        for p in unique_paths:
-            expanded = p.replace("~", "$HOME", 1) if p.startswith("~") else p
-            lines.append(f'export PATH="{expanded}:$PATH"')
-        target.write_file(f"~/{AGENTWORKS_PROFILE}", "\n".join(lines) + "\n")
-
-        # Source from ~/.profile (bash/sh) and ~/.zprofile (zsh)
-        source_line = f". $HOME/{AGENTWORKS_PROFILE}"
-        for rc in ("$HOME/.profile", "$HOME/.zprofile"):
-            target.run(
-                f"grep -q {AGENTWORKS_PROFILE} {rc} 2>/dev/null || printf '%s\\n' '{source_line}' >> {rc}",
-            )
-    except SSHError as e:
-        msg = f"shell profile write failed: {e}"
-        logger.warning(msg)
-        output.warn(msg)
+        files.write(f"{home}/{AGENTWORKS_PROFILE}", content, mode=0o644, parent_mode=0o755)
+    except STEP_FAILURES as error:
+        warn_step(log, "shell profile write failed", error)
+        return
+    _ensure_fragment_sourced(files, log, home=home, shell=shell, fragment=AGENTWORKS_PROFILE)
 
 
 def _harden_admin_home(
@@ -283,11 +335,9 @@ def _write_skel_seeds(files: Files, log: InitLog) -> None:
     Operators install their own dotfiles directly into a user's home
     AFTER user creation. The seed only ever lands in user homes ONCE
     (at provision / useradd time); agentworks never refreshes the
-    user-home copies (see issue #121). The grep-or-append source-line
-    machinery in ``_write_agentworks_rc`` /
-    ``_ensure_agentworks_files_sourced`` continues to no-op cleanly
-    on a seeded user because the seed already contains the
-    ``.agentworks-rc.sh`` substring the grep matches against.
+    user-home copies (see issue #121). ``ensure_source_line`` leaves a
+    seeded user's rc file alone, because the seed already contains the
+    ``.agentworks-rc.sh`` name it looks for.
     """
     log.step("Shell rc skel")
     output.info(f"Writing {SKEL_BASHRC_PATH} and {SKEL_ZSHRC_PATH}...")
@@ -536,32 +586,20 @@ def _write_sudoers_console_setenv(files: Files, log: InitLog, admin_user: str) -
         warn_step(log, "sudoers console setenv install failed; re-run 'agw vm reinit' to retry", error)
 
 
-def _write_agentworks_rc(
-    target: Transport,
-    shell_snippets: list[str],
-    logger: SSHLogger,
-) -> None:
-    """Write the agentworks-managed rc fragment for interactive shells.
+def _write_agentworks_rc(files: Files, shell_snippets: list[str], log: InitLog, *, home: str, shell: str) -> None:
+    """Write the account's rc fragment for interactive shells and make its rc files source it.
 
-    Writes $HOME/.agentworks-rc.sh with shell hooks (e.g., mise activate).
-    Sourced from ~/.bashrc and ~/.zshrc -- runs per interactive shell instance.
-    Always written (even if empty) so that reinit can clear previously set hooks.
+    Writes ``~/.agentworks-rc.sh``, 0644, with shell hooks (e.g. mise
+    activate), sourced from the files :func:`source_files` names, so it runs
+    per interactive shell. Always written (even if empty) so that reinit can
+    clear previously set hooks.
     """
-    logger.step("Shell rc")
+    log.step("Shell rc")
     output.info("Writing agentworks rc...")
-
+    content = "\n".join(["# Managed by agentworks -- do not edit", *shell_snippets]) + "\n"
     try:
-        lines = ["# Managed by agentworks -- do not edit"]
-        lines.extend(shell_snippets)
-        target.write_file(f"~/{AGENTWORKS_RC}", "\n".join(lines) + "\n")
-
-        # Source from ~/.bashrc and ~/.zshrc
-        source_line = f". $HOME/{AGENTWORKS_RC}"
-        for rc in ("$HOME/.bashrc", "$HOME/.zshrc"):
-            target.run(
-                f"grep -q {AGENTWORKS_RC} {rc} 2>/dev/null || printf '%s\\n' '{source_line}' >> {rc}",
-            )
-    except SSHError as e:
-        msg = f"shell rc write failed: {e}"
-        logger.warning(msg)
-        output.warn(msg)
+        files.write(f"{home}/{AGENTWORKS_RC}", content.encode(), mode=0o644, parent_mode=0o755)
+    except STEP_FAILURES as error:
+        warn_step(log, "shell rc write failed", error)
+        return
+    _ensure_fragment_sourced(files, log, home=home, shell=shell, fragment=AGENTWORKS_RC)

@@ -3,9 +3,8 @@
 Pins:
 
 - The bash and zsh seeds end with a source-line that references
-  ``.agentworks-rc.sh`` literally, so ``_write_agentworks_rc``'s
-  idempotent grep-or-append no-ops cleanly on a seeded user (no
-  duplicate source-line on next reinit).
+  ``.agentworks-rc.sh`` literally, so ``ensure_source_line`` leaves a
+  seeded user's file alone (no duplicate source-line on next reinit).
 - The seeds contain the identity-aware prompt expression with
   fallbacks (``${AGENTWORKS_AGENT:-admin}`` / ``${AGENTWORKS_VM:-...}``)
   so a user who opens a shell before init populates the identity
@@ -44,13 +43,9 @@ def test_seeds_open_with_managed_by_agentworks_marker() -> None:
 
 def test_seeds_reference_agentworks_rc_filename() -> None:
     """The seed's source-line must reference the same filename
-    (``.agentworks-rc.sh``) that ``_write_agentworks_rc`` greps for
-    when deciding whether to append. Filename match means the existing
-    grep-or-append correctly no-ops once the seed is present, so reinit
-    doesn't duplicate the source-line."""
-    # The grep in _write_agentworks_rc is `grep -q .agentworks-rc.sh <rc>`.
-    # The seeds need that substring present somewhere for the grep to
-    # match. (Substring match, not full-line match.)
+    (``.agentworks-rc.sh``) that ``ensure_source_line`` looks for when
+    deciding whether to append, so reinit doesn't duplicate the
+    source-line. (Substring match, not full-line match.)"""
     assert AGENTWORKS_RC in BASHRC
     assert AGENTWORKS_RC in ZSHRC
 

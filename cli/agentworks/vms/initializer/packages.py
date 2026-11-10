@@ -269,7 +269,10 @@ def _run_install_commands(
     *,
     label: str = "Install command",
 ) -> list[str]:
-    """Run install commands from an install-command entry dict as the admin. Returns PATH additions.
+    """Run install commands from an install-command entry dict as ``files``' identity. Returns PATH additions.
+
+    Phase B runs the system and user install commands as the admin, and agent
+    initialization runs the agent's user install commands as the agent.
 
     Runs without env injection: provisioning is hermetic. Install commands
     see static identity via the on-disk profile fragments (login-shell
@@ -278,7 +281,8 @@ def _run_install_commands(
     """
     # DRIFT GUARD (Phase 7, recipe use-gate): this runner consumes
     # install-command rows by name and must never run a disabled plugin's row.
-    # It is reached only via ``_phase_b_setup`` (vm create / reinit); the recipe
+    # It is reached only via ``_phase_b_setup`` (vm create / reinit) and
+    # ``_run_agent_install_commands`` (agent create / reinit); the recipe
     # gate lives at each command entry that reaches it (see
     # tests/agents/test_recipe_gate_drift.py's entry table).
     if not command_names:

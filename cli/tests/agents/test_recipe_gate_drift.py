@@ -51,7 +51,7 @@ _EXPECTED_CALLERS: dict[str, set[str]] = {
     "_realize_ephemerals": {"_roll_forward"},
     "_roll_forward": {"create_session"},
     # vm-install runner chain -> create_vm / reinit_vm
-    "_run_install_commands": {"_phase_b_setup"},
+    "_run_install_commands": {"_phase_b_setup", "_run_agent_install_commands"},
     "_phase_b_setup": {"run_initialization"},
     "run_initialization": {"create_vm", "reinit_vm"},
 }

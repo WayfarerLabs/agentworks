@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from agentworks.agents import initializer as agent_initializer
-from agentworks.execution.requests import Command, PythonProgram
+from agentworks.execution.requests import Bytes, Command, PythonProgram
 from tests.orchestrated_fixtures import proxmox_site, write_operator_config
 from tests.vm_access_support import AccessRecorder, route_vm_access_to_target
 
@@ -148,9 +148,15 @@ def _run_create_on_vm(
     return admin, agent
 
 
-def _profile_writes(agent: _RecordingTransport) -> list[str]:
-    """Contents of every write to the managed profile fragment."""
-    return [content for path, content, _mode in agent.writes if path.endswith(PROFILE_BASENAME)]
+def _profile_writes(admin: _RecordingTransport) -> list[str]:
+    """Contents of every write to the managed profile fragment, through any access."""
+    assert admin.recorder is not None
+    contents = []
+    for request in admin.recorder.requests("run"):
+        if isinstance(request, PythonProgram) and request.args[0] == "write" and PROFILE_BASENAME in request.args[1]:
+            assert isinstance(request.stdin, Bytes)
+            contents.append(request.stdin.data.partition(b"\n")[2].decode())
+    return contents
 
 
 @pytest.fixture
@@ -235,9 +241,9 @@ def test_create_writes_umask_027_into_profile(db: Database, config: Any, monkeyp
     agent writes outside a workspace default to owner-only. Written by
     ``_write_agent_profile`` itself, so both of its writes (identity-only,
     then with PATH) keep the line."""
-    _admin, agent = _run_create_on_vm(db, config, monkeypatch, user_exists=False)
+    admin, _agent = _run_create_on_vm(db, config, monkeypatch, user_exists=False)
 
-    writes = _profile_writes(agent)
+    writes = _profile_writes(admin)
     assert writes, "expected at least one write to the managed profile fragment"
     assert all("umask 027" in content for content in writes)
 
@@ -253,7 +259,7 @@ def test_reinit_reapplies_both_enforcements(db: Database, config: Any, monkeypat
     assert not any(cmd.startswith("useradd") for cmd, _ in admin.runs)
     assert (f"chmod 0750 {HOME}", True) in admin.runs
 
-    writes = _profile_writes(agent)
+    writes = _profile_writes(admin)
     assert writes and all("umask 027" in content for content in writes)
 
 

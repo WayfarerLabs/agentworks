@@ -1,181 +1,233 @@
-"""Tests for the per-user profile fragment and its source lines.
+"""The per-user profile and rc fragments and the rc files' source lines, over the file program.
 
-The system fragments (identity profile, sshd, sudoers) are covered over the
-file program in ``test_initializer_system_fragments.py``.
+Each test publishes to its own home on this machine (``tests/phase_b_support.py``).
+The system fragments (identity profile, sshd, sudoers) are covered in
+``test_initializer_system_fragments.py``.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import os
+import shutil
+import stat
+import subprocess
+from pathlib import Path
 
 import pytest
 
+from agentworks.execution.requests import Command
+from agentworks.execution.results import Completed, Result
 from agentworks.vms.initializer import (
     AGENTWORKS_PROFILE,
     AGENTWORKS_RC,
     _ensure_agentworks_files_sourced,
     _write_agentworks_profile,
+    _write_agentworks_rc,
 )
+from agentworks.vms.initializer.shell_env import SourceLine, ensure_source_line, source_files
+from tests.phase_b_support import StepGuest, requires_file_program
+
+pytestmark = requires_file_program
 
 
-@dataclass
-class _SpyResult:
-    ok: bool = True
-    returncode: int = 0
-    stdout: str = ""
-    stderr: str = ""
+@pytest.fixture
+def home(tmp_path: Path) -> Path:
+    home = tmp_path / "home"
+    home.mkdir()
+    return home
 
 
-class _SpyTarget:
-    """``Transport``-shaped stub that records run + write_file calls.
-
-    ``validate_ok`` controls the return of ``visudo -cf`` AND ``sshd -t``
-    so tests can simulate validation failure for either helper.
-    ``prior_file_present`` controls the ``test -f`` probe used by the sshd
-    helper to detect existing config (so the backup-restore branch can be
-    exercised).
-    """
-
-    def __init__(
-        self,
-        *,
-        validate_ok: bool = True,
-        prior_file_present: bool = False,
-    ) -> None:
-        self.runs: list[tuple[str, dict[str, object]]] = []
-        self.writes: list[tuple[str, str]] = []
-        self._validate_ok = validate_ok
-        self._prior_file_present = prior_file_present
-
-    def run(self, command: str, **kwargs: object) -> _SpyResult:
-        self.runs.append((command, kwargs))
-        if "visudo -cf" in command or "sshd -t" in command:
-            return _SpyResult(ok=self._validate_ok, returncode=0 if self._validate_ok else 1)
-        if command.startswith("sudo test -f "):
-            return _SpyResult(
-                ok=self._prior_file_present,
-                returncode=0 if self._prior_file_present else 1,
-            )
-        return _SpyResult(ok=True)
-
-    def write_file(self, path: str, content: str, mode: str = "0644") -> None:  # noqa: ARG002
-        self.writes.append((path, content))
+def _lines(path: Path) -> list[str]:
+    return path.read_text().splitlines()
 
 
-class _SpyLogger:
-    def __init__(self) -> None:
-        self.steps: list[str] = []
-        self.warnings: list[str] = []
-
-    def step(self, name: str) -> None:
-        self.steps.append(name)
-
-    def warning(self, msg: str) -> None:
-        self.warnings.append(msg)
-
-
-# ---------------------------------------------------------------------------
-# Per-user profile fragment (PATH additions)
-# ---------------------------------------------------------------------------
+def test_source_files_name_the_zsh_files_only_for_a_zsh_account() -> None:
+    assert source_files("/h", "bash") == {
+        AGENTWORKS_PROFILE: ("/h/.profile", "/h/.bashrc"),
+        AGENTWORKS_RC: ("/h/.bashrc",),
+    }
+    assert source_files("/h", "zsh") == {
+        AGENTWORKS_PROFILE: ("/h/.profile", "/h/.bashrc", "/h/.zprofile"),
+        AGENTWORKS_RC: ("/h/.bashrc", "/h/.zshrc"),
+    }
 
 
-def test_per_user_profile_writes_path_exports() -> None:
-    target = _SpyTarget()
+@pytest.mark.parametrize("shell", ["bash", "zsh"])
+def test_a_bash_account_gets_no_zsh_files_and_every_named_file_sources_its_fragment(home: Path, shell: str) -> None:
+    guest = StepGuest()
+
+    _ensure_agentworks_files_sourced(guest.files, guest.log, home=str(home), shell=shell)
+
+    assert (home / ".zprofile").exists() == (shell == "zsh")
+    assert (home / ".zshrc").exists() == (shell == "zsh")
+    for fragment, rcs in source_files(str(home), shell).items():
+        for rc in rcs:
+            assert f". {home}/{fragment}" in _lines(Path(rc))
+            assert stat.S_IMODE(Path(rc).stat().st_mode) == 0o644
+    assert guest.log.warned == []
+
+
+def test_a_second_run_writes_nothing(home: Path) -> None:
+    _ensure_agentworks_files_sourced(StepGuest().files, StepGuest().log, home=str(home), shell="zsh")
+    before = {path.name: path.stat().st_ino for path in home.iterdir()}
+    guest = StepGuest()
+
+    _ensure_agentworks_files_sourced(guest.files, guest.log, home=str(home), shell="zsh")
+
+    assert guest.writes() == []
+    assert {path.name: path.stat().st_ino for path in home.iterdir()} == before
+
+
+def test_an_existing_rc_file_keeps_its_content_and_mode_and_gets_the_line_on_its_own(home: Path) -> None:
+    rc = home / ".bashrc"
+    rc.write_text("alias ll='ls -l'")  # no final newline
+    rc.chmod(0o600)
+
+    outcome = ensure_source_line(StepGuest().files, str(rc), AGENTWORKS_RC, f". {home}/{AGENTWORKS_RC}")
+
+    assert outcome is SourceLine.ADDED
+    assert _lines(rc) == ["alias ll='ls -l'", f". {home}/{AGENTWORKS_RC}"]
+    assert stat.S_IMODE(rc.stat().st_mode) == 0o600
+
+
+def test_a_file_that_names_the_fragment_is_left_alone(home: Path) -> None:
+    rc = home / ".bashrc"
+    rc.write_text(f'[ -f "$HOME/{AGENTWORKS_RC}" ] && . "$HOME/{AGENTWORKS_RC}"\n')
+    guest = StepGuest()
+
+    assert ensure_source_line(guest.files, str(rc), AGENTWORKS_RC, f". {home}/{AGENTWORKS_RC}") is SourceLine.PRESENT
+    assert guest.writes() == []
+
+
+def _linked_rc(home: Path, target_content: str) -> tuple[Path, Path]:
+    target = home / ".dotfiles" / "bashrc"
+    target.parent.mkdir()
+    target.write_text(target_content)
+    rc = home / ".bashrc"
+    rc.symlink_to(target)
+    return rc, target
+
+
+class LinkedGuest(StepGuest):
+    """Runs the linked-file probes, ``test -L`` and ``grep``, on this machine, as the guest would."""
+
+    def _answer(self, call):  # noqa: ANN001, ANN202
+        request = call.request
+        if isinstance(request, Command) and request.argv[0] in ("test", "grep"):
+            completed = subprocess.run(list(request.argv), capture_output=True, check=False)
+            return Result(Completed(completed.returncode))
+        return super()._answer(call)
+
+
+def test_a_linked_rc_file_whose_target_sources_the_fragment_is_accepted_without_a_write(home: Path) -> None:
+    lines = f". ~/{AGENTWORKS_PROFILE}\n. ~/{AGENTWORKS_RC}\n"
+    rc, target = _linked_rc(home, lines)
+    guest = LinkedGuest()
+
+    _ensure_agentworks_files_sourced(guest.files, guest.log, home=str(home), shell="bash")
+
+    assert rc.is_symlink() and target.read_text() == lines
+    assert guest.log.warned == []
+    assert str(rc) not in guest.writes()
+    assert len(guest.log.outputs) == 2
+
+
+def test_a_linked_rc_file_without_the_line_is_never_written_through_and_warns_with_the_line(home: Path) -> None:
+    rc, target = _linked_rc(home, "export EDITOR=vi\n")
+    guest = LinkedGuest()
+
+    _ensure_agentworks_files_sourced(guest.files, guest.log, home=str(home), shell="bash")
+
+    assert rc.is_symlink() and target.read_text() == "export EDITOR=vi\n"
+    assert str(rc) not in guest.writes()
+    # One warning for each fragment .bashrc should source, each naming the line to add.
+    assert len(guest.log.warned) == 2
+    assert all(f". {home}/" in warning for warning in guest.log.warned)
+    assert f". {home}/{AGENTWORKS_PROFILE}" in _lines(home / ".profile")
+
+
+def test_another_file_type_at_an_rc_file_warns_and_the_other_files_are_still_written(home: Path) -> None:
+    (home / ".bashrc").mkdir()
+    guest = LinkedGuest()
+
+    _ensure_agentworks_files_sourced(guest.files, guest.log, home=str(home), shell="bash")
+
+    assert (home / ".bashrc").is_dir()
+    assert len(guest.log.warned) == 2
+    assert f". {home}/{AGENTWORKS_PROFILE}" in _lines(home / ".profile")
+
+
+@pytest.mark.parametrize("shell", ["sh", "bash", "zsh"])
+def test_the_profile_keeps_the_last_of_interleaved_path_entries_so_their_precedence_holds(
+    home: Path, shell: str
+) -> None:
+    shell_path = shutil.which(shell)
+    if shell_path is None:
+        pytest.skip(f"{shell} is unavailable")
+    guest = StepGuest()
+
     _write_agentworks_profile(
-        target,
-        path_additions=["/opt/bin", "~/.local/bin"],
-        logger=_SpyLogger(),
-    )
-    profile_writes = [c for p, c in target.writes if AGENTWORKS_PROFILE in p]
-    assert len(profile_writes) == 1
-    body = profile_writes[0]
-    assert 'export PATH="/opt/bin:$PATH"' in body
-    assert 'export PATH="$HOME/.local/bin:$PATH"' in body
-
-
-def test_per_user_profile_writes_empty_body_when_no_paths() -> None:
-    """Reinit safety: an operator who removes their install commands gets
-    a clean fragment (just the managed-by header) on the next reinit."""
-    target = _SpyTarget()
-    _write_agentworks_profile(
-        target,
-        path_additions=[],
-        logger=_SpyLogger(),
-    )
-    profile_writes = [c for p, c in target.writes if AGENTWORKS_PROFILE in p]
-    assert len(profile_writes) == 1
-    body = profile_writes[0]
-    assert "PATH=" not in body
-    assert "Managed by agentworks" in body
-
-
-# ---------------------------------------------------------------------------
-# Defensive end-of-setup ensure step
-# ---------------------------------------------------------------------------
-
-
-def test_ensure_files_sourced_appends_profile_to_bash_rcs() -> None:
-    """For shell=bash, the ensure step appends the profile source line to
-    ~/.profile and ~/.bashrc (not ~/.zprofile). Idempotent grep-or-append
-    shape."""
-    target = _SpyTarget()
-    _ensure_agentworks_files_sourced(
-        target,
-        home="/home/me",
+        guest.files,
+        ["~/.local/bin", "/opt/tools", "$HOME/.local/bin", "/opt/tools"],
+        guest.log,
+        home=str(home),
         shell="bash",
-        logger=_SpyLogger(),
+        identity_env={"AGENTWORKS_AGENT": "dev"},
     )
-    commands = [c for c, _ in target.runs]
-    profile_appends = [c for c in commands if AGENTWORKS_PROFILE in c and "grep -q" in c]
-    assert any("/home/me/.profile" in c for c in profile_appends)
-    assert any("/home/me/.bashrc" in c for c in profile_appends)
-    assert not any(".zprofile" in c for c in profile_appends), "bash shell should not touch .zprofile"
 
-
-def test_ensure_files_sourced_adds_zprofile_when_shell_is_zsh() -> None:
-    target = _SpyTarget()
-    _ensure_agentworks_files_sourced(
-        target,
-        home="/home/me",
-        shell="zsh",
-        logger=_SpyLogger(),
+    result = subprocess.run(
+        [shell_path, "-c", f'. "$HOME/{AGENTWORKS_PROFILE}"; printf "%s\\n" "$PATH" "$AGENTWORKS_AGENT"; umask'],
+        env={"HOME": str(home), "PATH": "/usr/bin:/bin"},
+        check=True,
+        capture_output=True,
+        text=True,
     )
-    commands = [c for c, _ in target.runs]
-    profile_appends = [c for c in commands if AGENTWORKS_PROFILE in c and "grep -q" in c]
-    assert any("/home/me/.zprofile" in c for c in profile_appends)
+    path, agent, umask = result.stdout.splitlines()
+    assert (path, agent, int(umask, 8)) == (f"/opt/tools:{home}/.local/bin:/usr/bin:/bin", "dev", 0o027)
+    assert stat.S_IMODE((home / AGENTWORKS_PROFILE).stat().st_mode) == 0o644
 
 
-def test_ensure_files_sourced_appends_rc_to_interactive_rcs() -> None:
-    """Similar check for AGENTWORKS_RC (mise activation) -- always
-    .bashrc, plus .zshrc when shell=zsh."""
-    target = _SpyTarget()
-    _ensure_agentworks_files_sourced(
-        target,
-        home="/home/me",
-        shell="zsh",
-        logger=_SpyLogger(),
+def test_a_rewritten_profile_drops_paths_no_longer_configured(home: Path) -> None:
+    guest = StepGuest()
+    _write_agentworks_profile(guest.files, ["/opt/old"], guest.log, home=str(home), shell="bash")
+
+    _write_agentworks_profile(guest.files, [], guest.log, home=str(home), shell="bash")
+
+    result = subprocess.run(
+        ["/bin/sh", "-c", f'. "$HOME/{AGENTWORKS_PROFILE}"; printf "%s" "$PATH"'],
+        env={"HOME": str(home), "PATH": "/usr/bin:/bin"},
+        check=True,
+        capture_output=True,
+        text=True,
     )
-    commands = [c for c, _ in target.runs]
-    rc_appends = [c for c in commands if AGENTWORKS_RC in c and "grep -q" in c]
-    assert any("/home/me/.bashrc" in c for c in rc_appends)
-    assert any("/home/me/.zshrc" in c for c in rc_appends)
+    assert result.stdout == "/usr/bin:/bin"
 
 
-def test_ensure_files_sourced_uses_grep_or_append_shape() -> None:
-    """The source-line append is idempotent: ``grep -q ... || printf ... >> rc``.
-    A future contributor swapping for an unconditional append would
-    introduce duplicate source lines on every reinit."""
-    target = _SpyTarget()
-    _ensure_agentworks_files_sourced(
-        target,
-        home="/home/me",
-        shell="bash",
-        logger=_SpyLogger(),
+def test_the_rc_fragment_is_written_0644_and_sourced_from_the_interactive_rc_files(home: Path) -> None:
+    guest = StepGuest()
+
+    _write_agentworks_rc(guest.files, ["export HOOKED=1"], guest.log, home=str(home), shell="zsh")
+
+    assert stat.S_IMODE((home / AGENTWORKS_RC).stat().st_mode) == 0o644
+    result = subprocess.run(
+        ["/bin/sh", "-c", f'. "$HOME/{AGENTWORKS_RC}"; printf "%s" "$HOOKED"'],
+        env={"HOME": str(home), "PATH": "/usr/bin:/bin"},
+        check=True,
+        capture_output=True,
+        text=True,
     )
-    for command, _ in target.runs:
-        assert command.startswith("grep -q "), f"expected grep-or-append shape; got: {command}"
-        assert " || printf " in command
+    assert result.stdout == "1"
+    assert sorted(path.name for path in home.iterdir() if path.name != AGENTWORKS_RC) == [".bashrc", ".zshrc"]
 
 
-if __name__ == "__main__":  # pragma: no cover
-    pytest.main([__file__])
+def test_a_linked_fragment_is_refused_and_warned_about(home: Path) -> None:
+    elsewhere = home.parent / "elsewhere"
+    elsewhere.write_text("not ours\n")
+    os.symlink(elsewhere, home / AGENTWORKS_RC)
+    guest = StepGuest()
+
+    _write_agentworks_rc(guest.files, [], guest.log, home=str(home), shell="bash")
+
+    assert elsewhere.read_text() == "not ours\n"
+    assert len(guest.log.warned) == 1
+    assert not (home / ".bashrc").exists()

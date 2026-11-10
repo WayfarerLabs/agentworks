@@ -1,170 +1,137 @@
-"""Focused tests for user install commands run over an agent transport."""
+"""User install commands run as the agent, on its own access, and the profile fragment they leave."""
 
 from __future__ import annotations
 
-import re
 import shutil
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import pytest
 
 from agentworks.agents.initializer import _run_agent_install_commands
+from agentworks.execution.requests import Script
+from agentworks.execution.results import Completed, Result
 from agentworks.install_commands import UserInstallCommandEntry
-from tests.conftest import CapturedOutput, requires_posix_shell
+from agentworks.vms.initializer.packages import install_run
+from tests.phase_b_support import StepGuest, requires_file_program
+from tests.vm_access_support import Agent, RecordingVMAccess
+
+if TYPE_CHECKING:
+    from tests.vm_access_support import Call
 
 
-def _run_commands(
-    *entries: UserInstallCommandEntry,
-    test_returncode: int,
-    target: MagicMock | None = None,
-    home: str = "/home/agt-dev",
-    shell: str = "bash",
-) -> MagicMock:
-    if target is None:
-        target = MagicMock()
+class AgentGuest(StepGuest):
+    """The agent's access, its file operations run on this machine, its completion tests answering ``status``."""
 
-    def run_side_effect(command: str, **kwargs: object) -> MagicMock:
-        is_test = "command -v" in command or "test -f" in command or "test -d" in command
-        returncode = test_returncode if is_test else 0
-        return MagicMock(returncode=returncode, ok=returncode == 0, stdout="", stderr="")
+    def __init__(self, status: int) -> None:
+        super().__init__()
+        self.access = RecordingVMAccess([], Agent("dev", "agt-dev"))
+        self.access.answer = self._answer
+        self.files = self.access.files()
+        self.status = status
 
-    if target.run.side_effect is None:
-        target.run.side_effect = run_side_effect
+    def _answer(self, call: Call) -> Result | BaseException | None:
+        if isinstance(call.request, Script):
+            return Result(Completed(self.status))
+        return super()._answer(call)
+
+    def checks(self) -> list[Script]:
+        return [request for request in self.access.requests() if isinstance(request, Script)]
+
+
+def _run(
+    guest: AgentGuest, home: Path, *entries: UserInstallCommandEntry, shell: str = "bash", mise: bool = False
+) -> None:
     registry = MagicMock()
     registry.iter_kind_items.return_value = [(entry.name, entry) for entry in entries]
-    template = SimpleNamespace(shell=shell, user_install_commands=[entry.name for entry in entries])
+    template = SimpleNamespace(
+        shell=shell,
+        user_install_commands=[entry.name for entry in entries],
+        mise_packages=["jq@1"] if mise else [],
+        mise_lockfile=None,
+    )
     _run_agent_install_commands(
-        agent_target=target,
+        agent_files=guest.files,
+        logger=guest.log,
         registry=registry,
-        agent_tmpl=template,
-        home=home,
+        agent_tmpl=template,  # type: ignore[arg-type]
+        home=str(home),
         identity_env={"AGENTWORKS_AGENT": "dev"},
     )
-    return target
 
 
-def test_agent_install_skips_when_all_declared_tests_pass() -> None:
+@pytest.fixture
+def home(tmp_path: Path) -> Path:
+    home = tmp_path / "home"
+    home.mkdir()
+    return home
+
+
+@requires_file_program
+def test_an_install_is_skipped_only_when_every_declared_test_passes(home: Path) -> None:
     entry = UserInstallCommandEntry(
-        name="my-tool",
-        command="run-agent-install",
-        test_exec="my-tool",
-        test_file="~/.my-tool/installed",
-        test_dir="~/.my-tool",
+        name="my-tool", command="run-agent-install", test_exec="my-tool", test_file="~/.my-tool/installed"
     )
+    passing, failing = AgentGuest(status=0), AgentGuest(status=1)
 
-    target = _run_commands(entry, test_returncode=0)
+    _run(passing, home, entry)
+    _run(failing, home, entry)
 
-    commands = [call.args[0] for call in target.run.call_args_list]
-    test_command = next(command for command in commands if "command -v" in command)
-    assert "test -f /home/agt-dev/.my-tool/installed" in test_command
-    assert "test -d /home/agt-dev/.my-tool" in test_command
-    assert " && " in test_command
-    assert not any("run-agent-install" in command for command in commands)
-
-
-def test_agent_install_runs_when_any_declared_test_fails() -> None:
-    entry = UserInstallCommandEntry(
-        name="my-tool",
-        command="run-agent-install",
-        test_exec="my-tool",
-        test_file="~/.my-tool/installed",
-    )
-
-    target = _run_commands(entry, test_returncode=1)
-
-    commands = [call.args[0] for call in target.run.call_args_list]
-    assert any("command -v" in command and "test -f" in command for command in commands)
-    assert any("run-agent-install" in command for command in commands)
+    for guest in (passing, failing):
+        (check,) = guest.checks()
+        assert f"test -f {home}/.my-tool/installed" in check.source and " && " in check.source
+    assert install_run("bash", "run-agent-install") not in passing.access.requests()
+    assert install_run("bash", "run-agent-install") in failing.access.requests()
+    assert not any(request.elevated or request.env for request in failing.access.requests())
 
 
-@requires_posix_shell
+@requires_file_program
+def test_an_install_with_no_declared_test_always_runs(home: Path) -> None:
+    guest = AgentGuest(status=0)
+
+    _run(guest, home, UserInstallCommandEntry(name="my-tool", command="run-agent-install"))
+
+    assert guest.checks() == []
+    assert install_run("bash", "run-agent-install") in guest.access.requests()
+
+
+@requires_file_program
 @pytest.mark.parametrize("shell", ["sh", "bash", "zsh"])
-@pytest.mark.parametrize("test_returncode", [0, 1])
-def test_agent_profile_deduplicates_without_changing_path_precedence(
-    tmp_path: Path,
-    captured_output: CapturedOutput,
-    shell: str,
-    test_returncode: int,
-) -> None:
+def test_the_profile_keeps_install_paths_in_precedence_with_mise_s_shims_first(home: Path, shell: str) -> None:
     shell_path = shutil.which(shell)
     if shell_path is None:
         pytest.skip(f"{shell} is unavailable")
     entries = [
-        UserInstallCommandEntry(
-            name="first",
-            command="install-first",
-            test_exec="first",
-            path=["~/.local/bin", "~/.local/bin", "/opt/tools"],
-        ),
-        UserInstallCommandEntry(
-            name="second",
-            command="install-second",
-            test_exec="second",
-            path=["$HOME/.local/bin"],
-        ),
+        UserInstallCommandEntry(name="first", command="install-first", path=["~/.local/bin", "/opt/tools"]),
+        UserInstallCommandEntry(name="second", command="install-second", path=["$HOME/.local/bin"]),
     ]
-    target = MagicMock()
 
-    def write_file(path: str, content: str, **kwargs: object) -> None:
-        Path(path).write_text(content)
-
-    def run(command: str, **kwargs: object) -> MagicMock:
-        if "grep -q" in command:
-            subprocess.run(["/bin/sh", "-c", command], check=True, capture_output=True)
-        return MagicMock(returncode=test_returncode)
-
-    target.write_file.side_effect = write_file
-    target.run.side_effect = run
-    profile = tmp_path / ".agentworks-profile.sh"
-    original_content = ""
     for _ in range(2):
-        _run_commands(*entries, test_returncode=test_returncode, target=target, home=str(tmp_path), shell=shell)
-        content = profile.read_text()
-        if original_content:
-            assert content == original_content
-        original_content = content
-        # Only the numeric observation is a contract; surrounding prose is free to change.
-        assert re.findall(r"\d+", captured_output.info[-1]) == ["2"]
-        result = subprocess.run(
-            [shell_path, "-c", '. "$HOME/.agentworks-profile.sh"; printf "%s\\n" "$PATH" "$AGENTWORKS_AGENT"'],
-            env={"HOME": str(tmp_path), "PATH": "/usr/bin:/bin"},
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        assert result.stdout.splitlines() == [f"{tmp_path}/.local/bin:/opt/tools:/usr/bin:/bin", "dev"]
-    rc_files = [".profile", ".bashrc"] + ([".zprofile"] if shell == "zsh" else [])
-    for name in rc_files:
-        assert (tmp_path / name).read_text().splitlines() == [f". {profile}"]
-    installs = [call.args[0] for call in target.run.call_args_list if "install-" in call.args[0]]
-    assert len(installs) == (0 if test_returncode == 0 else 4)
+        _run(AgentGuest(status=1), home, *entries, shell=shell, mise=True)
 
-    # Removing the install commands on reinit also removes their managed paths.
-    _run_commands(test_returncode=test_returncode, target=target, home=str(tmp_path), shell=shell)
+    result = subprocess.run(
+        [shell_path, "-c", '. "$HOME/.agentworks-profile.sh"; printf "%s\\n" "$PATH" "$AGENTWORKS_AGENT"'],
+        env={"HOME": str(home), "PATH": "/usr/bin:/bin"},
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    shims = f"{home}/.local/share/mise/shims"
+    assert result.stdout.splitlines() == [f"{shims}:{home}/.local/bin:/opt/tools:/usr/bin:/bin", "dev"]
+    profile_line = f". {home}/.agentworks-profile.sh"
+    for name in [".profile", ".bashrc"] + ([".zprofile"] if shell == "zsh" else []):
+        assert (home / name).read_text().splitlines() == [profile_line]
+
+    # Removing the install commands and mise on reinit also removes their managed paths.
+    _run(AgentGuest(status=1), home, shell=shell)
     result = subprocess.run(
         [shell_path, "-c", '. "$HOME/.agentworks-profile.sh"; printf "%s" "$PATH"'],
-        env={"HOME": str(tmp_path), "PATH": "/usr/bin:/bin"},
+        env={"HOME": str(home), "PATH": "/usr/bin:/bin"},
         check=True,
         capture_output=True,
         text=True,
     )
     assert result.stdout == "/usr/bin:/bin"
-
-
-def test_agent_install_runs_with_zero_non_empty_tests() -> None:
-    entry = UserInstallCommandEntry(
-        name="my-tool",
-        command="run-agent-install",
-        test_exec="",
-        test_file="",
-        test_dir="",
-    )
-
-    target = _run_commands(entry, test_returncode=0)
-
-    commands = [call.args[0] for call in target.run.call_args_list]
-    assert not any("command -v" in command or "test -f" in command or "test -d" in command for command in commands)
-    assert any("run-agent-install" in command for command in commands)

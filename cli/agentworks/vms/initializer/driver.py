@@ -624,21 +624,16 @@ def _phase_b_setup(
 
         # Non-fatal: shell profile (PATH exports sourced at login)
         all_paths = system_path + mise_path + user_path
-        _write_agentworks_profile(legacy_target, all_paths, logger)
+        _write_agentworks_profile(files, all_paths, logger, home=home, shell=admin_shell)
 
         # Non-fatal: shell rc (interactive shell hooks like mise activate)
         rc_snippets = [MISE_ACTIVATE_LINES] if admin.mise_activate else ["# mise activation disabled"]
-        _write_agentworks_rc(legacy_target, rc_snippets, logger)
+        _write_agentworks_rc(files, rc_snippets, logger, home=home, shell=admin_shell)
 
         # Defensive final step: re-ensure source lines in case any earlier
         # step (dotfiles install in particular) overwrote a shell rc file
-        # in place. Idempotent grep-or-append.
-        _ensure_agentworks_files_sourced(
-            legacy_target,
-            home=home,
-            shell=admin_shell,
-            logger=logger,
-        )
+        # in place. A file that already names a fragment is left alone.
+        _ensure_agentworks_files_sourced(files, logger, home=home, shell=admin_shell)
 
 
 DOTFILES_INSTALL_DEADLINE = 120

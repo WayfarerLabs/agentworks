@@ -10,8 +10,8 @@ Three enforcement points, mirroring the agent side:
    reinit), with an ``id -gn`` post-condition guard that warns on a shared
    primary group;
 2. a ``umask 027`` line in the admin's managed ``~/.agentworks-profile.sh``,
-   emitted by ``_write_agentworks_profile`` itself so it survives reinit
-   rewrites; and
+   emitted by ``profile_fragment`` itself so it survives reinit rewrites
+   (``test_initializer_env_fragments.py`` sources it and reads the umask); and
 3. ``useradd -m -U`` in the create-time bootstrap script so the admin's primary
    group is a private per-user group.
 
@@ -25,11 +25,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script
-from agentworks.vms.initializer import (
-    AGENTWORKS_PROFILE,
-    _harden_admin_home,
-    _write_agentworks_profile,
-)
+from agentworks.vms.initializer import _harden_admin_home
 
 ADMIN = "agentworks"
 HOME = f"/home/{ADMIN}"
@@ -139,34 +135,6 @@ def test_harden_admin_home_ssh_error_warns_not_raises() -> None:
     _harden_admin_home(_FailingTarget(), home=HOME, admin_username=ADMIN, logger=logger)
 
     assert any("admin home permissions setup failed" in w for w in logger.warnings)
-
-
-# ---------------------------------------------------------------------------
-# umask 027 in the admin profile fragment
-# ---------------------------------------------------------------------------
-
-
-def test_admin_profile_carries_umask_027() -> None:
-    """The managed profile fragment carries ``umask 027`` so files the admin
-    writes outside a workspace default to owner-only. Emitted by
-    ``_write_agentworks_profile`` itself, so it survives the reinit rewrite that
-    clears/rebuilds the PATH exports."""
-    target = _SpyTarget()
-    _write_agentworks_profile(target, path_additions=["/opt/bin"], logger=_SpyLogger())
-
-    bodies = [content for path, content in target.writes if AGENTWORKS_PROFILE in path]
-    assert bodies, "expected a write to the managed profile fragment"
-    assert all("umask 027" in body for body in bodies)
-
-
-def test_admin_profile_umask_present_even_with_no_paths() -> None:
-    """Reinit safety: the umask line is present even when there are no PATH
-    additions (an operator who removed all install commands still gets it)."""
-    target = _SpyTarget()
-    _write_agentworks_profile(target, path_additions=[], logger=_SpyLogger())
-
-    bodies = [content for path, content in target.writes if AGENTWORKS_PROFILE in path]
-    assert bodies and all("umask 027" in body for body in bodies)
 
 
 # ---------------------------------------------------------------------------
