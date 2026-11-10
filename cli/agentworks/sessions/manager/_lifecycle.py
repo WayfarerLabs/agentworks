@@ -18,7 +18,7 @@ from agentworks.errors import (
     UserAbort,
     ValidationError,
 )
-from agentworks.sessions.manager._teardown import _validated_socket_path
+from agentworks.sessions.manager._teardown import _mark_stopped, _validated_socket_path
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
@@ -101,16 +101,6 @@ def _require_selected_session(db: Database, name: str, session_uuid: str) -> Ses
             hint="Retry the operation against the current session.",
         )
     return session
-
-
-def _mark_stopped(db: Database, session: SessionRow) -> None:
-    db.update_session_runtime(
-        session.name,
-        socket_path=session.socket_path,
-        pid=PID_STOPPED,
-        boot_id=None,
-        tmux_server_start_ticks=None,
-    )
 
 
 def _mark_runtime_unknown(db: Database, session: SessionRow, *, socket_path: str, boot_id: str) -> None:
@@ -1029,7 +1019,7 @@ def stop_all_sessions(
             DEDICATED_TEARDOWN_TIMEOUT_SECONDS,
             DedicatedTeardownPlan,
             execute_concurrent_dedicated_teardowns,
-            prepare_concurrent_dedicated_teardown,
+            prepare_dedicated_teardown,
         )
 
         concurrent_plans: list[DedicatedTeardownPlan] = []
@@ -1061,7 +1051,7 @@ def stop_all_sessions(
                         default_timeout=DEDICATED_TEARDOWN_TIMEOUT_SECONDS,
                         retries=DEDICATED_TEARDOWN_ATTEMPTS,
                     )
-                    plan = prepare_concurrent_dedicated_teardown(
+                    plan = prepare_dedicated_teardown(
                         db,
                         session,
                         vm_name=vm.name,

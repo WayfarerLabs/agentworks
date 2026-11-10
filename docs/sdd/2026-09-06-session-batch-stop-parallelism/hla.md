@@ -79,6 +79,12 @@ The transport is a per-task object. No connection cache or control master is int
 preserves ADR 0015's fresh-authentication behavior and avoids relying on undocumented transport
 thread safety.
 
+Synchronous callers use the same complete-plan preparation, remote execution, and conditional
+reconciliation. Stopped, incomplete, and uncertain rows retain invoking-thread compatibility
+preparation. An incomplete identity can become a complete plan only after recorded launch-attempt
+proof, persistence, and a refetch confirming the same session, run, and observed fingerprint. The
+common engine then captures the runtime afresh before destructive use.
+
 ### Remote teardown engine
 
 The worker performs the current complete-fingerprint protocol without database access: capture the
@@ -86,7 +92,8 @@ exact socket's fingerprint, compare every identity field, invoke `kill-server`, 
 incarnation absent, remove the exact socket, and verify socket absence. There is no database call or
 queueing boundary between capture and destructive use.
 
-The future distinguishes:
+Normal return means the complete protocol verified stopped state; an exception means failure. The
+future distinguishes:
 
 - verified stopped;
 - an ordinary per-session exception; and
@@ -102,6 +109,10 @@ The coordinator applies one successful future at a time. Verified stopped state 
 fingerprint using the existing stopped sentinel through an atomic compare-and-set against the plan's
 complete prepared identity. A missing or changed row is a conflict and remains untouched. No worker
 owns a transaction or a connection.
+
+Complete synchronous teardowns use this same conditional write. Incomplete compatibility recovery
+and legacy teardown retain the single invoking-thread stopped-state helper; they do not invent a
+complete fingerprint merely to enter reconciliation.
 
 Persistence precedes success output. A persistence error converts that session to failure. Remote
 success cannot be rolled back, so the failure tells the truth rather than pretending the runtime
@@ -121,8 +132,9 @@ propagates. At or after the complete-map boundary, the gate resolves to execute 
 cancellation and reconciliation state applies.
 
 The coordinator reconciles every normally completed future that becomes available, then propagates
-the original interrupt. Later interrupts repeat the reconciliation notice and do not abandon running
-work. A five-second wait loop also preserves ordinary and interrupted progress heartbeats.
+the original interrupt. Later interrupts repeat idempotent queued cancellation and the
+reconciliation notice without abandoning running work. A five-second wait loop also preserves
+ordinary and interrupted progress heartbeats.
 
 ### Database replacement boundary
 

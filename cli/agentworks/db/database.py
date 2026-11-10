@@ -975,13 +975,6 @@ class Database:
         state for all three; every other mismatch stays untouched and fails
         closed.
         """
-        if (
-            isinstance(expected_pid, bool)
-            or expected_pid <= 0
-            or isinstance(expected_tmux_server_start_ticks, bool)
-            or expected_tmux_server_start_ticks <= 0
-        ):
-            raise ValueError("a prepared runtime requires positive process identity fields")
         result = self._conn.execute(
             "UPDATE sessions SET socket_path = ?, pid = ?, boot_id = NULL, tmux_server_start_ticks = NULL, "
             "updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') "

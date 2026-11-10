@@ -13,7 +13,7 @@ import pytest
 
 from agentworks import output as output_mod
 from agentworks.db import PID_STOPPED, SessionMode, SessionStatus
-from agentworks.errors import ExternalError, StateError
+from agentworks.errors import BrokenStateError, ConnectivityError, ExternalError, StateError
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import manager as session_manager
 from agentworks.sessions.manager import _lifecycle as lifecycle_mod
@@ -21,7 +21,6 @@ from agentworks.sessions.manager import _teardown as teardown_mod
 from agentworks.sessions.manager._teardown import (
     DEDICATED_TEARDOWN_ATTEMPTS,
     DEDICATED_TEARDOWN_TIMEOUT_SECONDS,
-    DedicatedTeardownEvidence,
     DedicatedTeardownPlan,
 )
 from agentworks.sessions.tmux import ProbeStatus
@@ -112,7 +111,7 @@ def test_concurrent_teardowns_overlap_under_fixed_bound_and_reconcile_on_main_th
     worker_threads: set[int] = set()
     output_threads: list[int] = []
 
-    def execute(plan: DedicatedTeardownPlan) -> DedicatedTeardownEvidence:
+    def execute(plan: DedicatedTeardownPlan) -> None:
         nonlocal active, maximum_active
         with active_lock:
             active += 1
@@ -123,7 +122,6 @@ def test_concurrent_teardowns_overlap_under_fixed_bound_and_reconcile_on_main_th
         assert first_wave_ready.wait(timeout=2)
         with active_lock:
             active -= 1
-        return DedicatedTeardownEvidence.VERIFIED_STOPPED
 
     monkeypatch.setattr(teardown_mod, "execute_dedicated_teardown", execute)
     monkeypatch.setattr(output_mod, "info", lambda message: output_threads.append(threading.get_ident()))
@@ -337,7 +335,7 @@ def test_post_kill_observation_grace_never_repeats_mutation(
     monkeypatch.setattr(tmux_mod, "kill_server", lambda **kwargs: events.append("kill"))
     monkeypatch.setattr(teardown_mod, "_remove_stale_socket", lambda **kwargs: events.append("cleanup"))
 
-    def execute() -> DedicatedTeardownEvidence:
+    def execute() -> None:
         return teardown_mod._execute_reachable_dedicated_teardown(
             plan,
             observed_pid=plan.stored_pid,
@@ -346,7 +344,7 @@ def test_post_kill_observation_grace_never_repeats_mutation(
         )
 
     if observation == "exits":
-        assert execute() is DedicatedTeardownEvidence.VERIFIED_STOPPED
+        assert execute() is None
         assert events == ["kill", "observe", "sleep", "observe", "cleanup"]
     elif observation == "survives":
         with pytest.raises(ExternalError):
@@ -365,7 +363,7 @@ def test_invalid_complete_fingerprint_fails_preparation_closed(db: Database) -> 
     session = _seed_session(db, "session", socket_path=socket_path, pid=-2, start_ticks=201)
 
     with pytest.raises(StateError):
-        teardown_mod.prepare_concurrent_dedicated_teardown(
+        teardown_mod.prepare_dedicated_teardown(
             db,
             session,
             vm_name="box",
@@ -385,13 +383,6 @@ def test_incomplete_synchronous_teardown_persists_fingerprint_before_kill(
     socket_path = "/run/agentworks/admin-tmux-sockets/agentworks/session.sock"
     session = _seed_session(db, "session", socket_path=socket_path, pid=101, start_ticks=None)
     events: list[str] = []
-    real_update = db.update_session_runtime
-
-    def update(name: str, **kwargs: object) -> None:
-        events.append("fingerprint" if kwargs["pid"] == 101 else "stopped")
-        real_update(name, **kwargs)  # type: ignore[arg-type]
-
-    monkeypatch.setattr(db, "update_session_runtime", update)
     monkeypatch.setattr(tmux_mod, "require_socket_path", lambda *args, **kwargs: None)
     monkeypatch.setattr(tmux_mod, "_matches_launch_attempt", lambda **kwargs: True)
     monkeypatch.setattr(
@@ -403,10 +394,12 @@ def test_incomplete_synchronous_teardown_persists_fingerprint_before_kill(
         ),
     )
 
-    def execute(plan: DedicatedTeardownPlan, **kwargs: object) -> DedicatedTeardownEvidence:
+    def execute(plan: DedicatedTeardownPlan, **kwargs: object) -> None:
         assert plan.vm_name == "box"
+        persisted = db.get_session(session.name)
+        assert persisted is not None
+        assert (persisted.pid, persisted.boot_id, persisted.tmux_server_start_ticks) == (101, BOOT_ID, 201)
         events.append("kill")
-        return DedicatedTeardownEvidence.VERIFIED_STOPPED
 
     monkeypatch.setattr(teardown_mod, "_execute_reachable_dedicated_teardown", execute)
 
@@ -419,7 +412,138 @@ def test_incomplete_synchronous_teardown_persists_fingerprint_before_kill(
         legacy_running_authorized=True,
     )
 
-    assert events == ["fingerprint", "kill", "stopped"]
+    assert events == ["kill"]
+    stopped = db.get_session(session.name)
+    assert stopped is not None
+    assert (stopped.pid, stopped.boot_id, stopped.tmux_server_start_ticks) == (PID_STOPPED, None, None)
+
+
+@pytest.mark.parametrize("upgraded", [False, True])
+@pytest.mark.parametrize("change", ["run", "row", "runtime"])
+def test_synchronous_completion_preserves_replaced_prepared_identity(
+    db: Database, monkeypatch: pytest.MonkeyPatch, upgraded: bool, change: str
+) -> None:
+    from agentworks.sessions import tmux as tmux_mod
+
+    socket_path = "/run/agentworks/admin-tmux-sockets/agentworks/session.sock"
+    session = _seed_session(db, "session", socket_path=socket_path, pid=101, start_ticks=None if upgraded else 201)
+    monkeypatch.setattr(tmux_mod, "require_socket_path", lambda *args, **kwargs: None)
+    monkeypatch.setattr(tmux_mod, "_matches_launch_attempt", lambda **kwargs: True)
+    monkeypatch.setattr(
+        tmux_mod,
+        "capture_tmux_server_fingerprint",
+        lambda **kwargs: tmux_mod.FingerprintProbe(
+            ProbeStatus.PRESENT, tmux_mod.TmuxServerFingerprint(pid=101, boot_id=BOOT_ID, start_ticks=201)
+        ),
+    )
+    changed_rows: list[SessionRow] = []
+
+    def remote_success(plan: DedicatedTeardownPlan) -> None:
+        before = db.get_session(session.name)
+        assert before is not None and before.tmux_server_start_ticks == 201
+        if change == "run":
+            db.set_session_run_id(session.name, str(uuid4()))
+        elif change == "row":
+            db.delete_session(session.name)
+            db.insert_session(session.name, "work", "default", SessionMode.ADMIN, socket_path=socket_path)
+        else:
+            db.update_session_runtime(
+                session.name, socket_path=socket_path, pid=102, boot_id=BOOT_ID, tmux_server_start_ticks=202
+            )
+        changed = db.get_session(session.name)
+        assert changed is not None
+        changed_rows.append(changed)
+
+    monkeypatch.setattr(teardown_mod, "execute_dedicated_teardown", remote_success)
+    with pytest.raises(StateError):
+        teardown_mod.teardown_dedicated_session(
+            session, target=cast("Transport", _Target("serial")), target_owns_session=True, db=db, force=False
+        )
+    assert db.get_session(session.name) == changed_rows[0]
+
+
+@pytest.mark.parametrize("change", ["run", "row", "runtime"])
+def test_incomplete_upgrade_refuses_replaced_identity_before_remote_execution(
+    db: Database, monkeypatch: pytest.MonkeyPatch, change: str
+) -> None:
+    from agentworks.sessions import tmux as tmux_mod
+
+    socket_path = "/run/agentworks/admin-tmux-sockets/agentworks/session.sock"
+    session = _seed_session(db, "session", socket_path=socket_path, pid=101, start_ticks=None)
+    monkeypatch.setattr(tmux_mod, "require_socket_path", lambda *args, **kwargs: None)
+    monkeypatch.setattr(tmux_mod, "_matches_launch_attempt", lambda **kwargs: True)
+    monkeypatch.setattr(
+        tmux_mod,
+        "capture_tmux_server_fingerprint",
+        lambda **kwargs: tmux_mod.FingerprintProbe(
+            ProbeStatus.PRESENT, tmux_mod.TmuxServerFingerprint(pid=101, boot_id=BOOT_ID, start_ticks=201)
+        ),
+    )
+    read = db.get_session
+    changed_rows: list[SessionRow] = []
+    replacement_started = False
+
+    def replace_on_refetch(name: str) -> SessionRow | None:
+        nonlocal replacement_started
+        if not replacement_started:
+            replacement_started = True
+            if change == "run":
+                db.set_session_run_id(name, str(uuid4()))
+            elif change == "row":
+                db.delete_session(name)
+                db.insert_session(name, "work", "default", SessionMode.ADMIN, socket_path=socket_path)
+            else:
+                db.update_session_runtime(
+                    name, socket_path=socket_path, pid=102, boot_id=BOOT_ID, tmux_server_start_ticks=202
+                )
+            changed = read(name)
+            assert changed is not None
+            changed_rows.append(changed)
+        return read(name)
+
+    monkeypatch.setattr(db, "get_session", replace_on_refetch)
+    monkeypatch.setattr(
+        teardown_mod, "execute_dedicated_teardown", lambda plan: pytest.fail("replacement authorized teardown")
+    )
+    with pytest.raises(StateError):
+        teardown_mod.teardown_dedicated_session(
+            session, target=cast("Transport", _Target("serial")), target_owns_session=True, db=db, force=False
+        )
+    assert read(session.name) == changed_rows[0]
+
+
+@pytest.mark.parametrize("force", [False, True])
+@pytest.mark.parametrize("mode", ["serial", "batch"])
+def test_unreadable_runtime_recovery_preserves_state_in_both_lanes(
+    db: Database, monkeypatch: pytest.MonkeyPatch, force: bool, mode: str
+) -> None:
+    from agentworks.sessions import tmux as tmux_mod
+
+    socket_path = "/run/agentworks/admin-tmux-sockets/agentworks/session.sock"
+    session = _seed_session(db, "session", socket_path=socket_path, pid=101, start_ticks=201)
+    target = cast("Transport", _Target("recovery"))
+    monkeypatch.setattr(tmux_mod, "require_socket_path", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        tmux_mod, "capture_tmux_server_fingerprint", lambda **kwargs: tmux_mod.FingerprintProbe(ProbeStatus.ABSENT)
+    )
+
+    def unknown(plan: DedicatedTeardownPlan) -> bool:
+        raise ConnectivityError("presence unavailable")
+
+    monkeypatch.setattr(teardown_mod, "_prove_plan_runtime_absent", unknown)
+    monkeypatch.setattr(teardown_mod, "_remove_stale_socket", lambda **kwargs: pytest.fail("unproven cleanup"))
+    if mode == "serial":
+        with pytest.raises(ConnectivityError if force else BrokenStateError):
+            teardown_mod.teardown_dedicated_session(
+                session, target=target, target_owns_session=True, db=db, force=force
+            )
+    else:
+        plan = teardown_mod.prepare_dedicated_teardown(
+            db, session, vm_name="box", target=target, target_owns_session=True, force=force
+        )
+        failures = teardown_mod.execute_concurrent_dedicated_teardowns([plan], db=db)
+        assert len(failures) == 1 and failures[0][0] == session.name
+    assert db.get_session(session.name) == session
 
 
 def test_batch_partitions_complete_work_before_serial_compatibility_and_uses_distinct_targets(
@@ -541,10 +665,9 @@ def test_worker_failure_does_not_suppress_sibling_persistence_or_labeled_warning
 ) -> None:
     plans = [_plan("good-1"), _plan("bad-2"), _plan("good-3")]
 
-    def execute(plan: DedicatedTeardownPlan) -> DedicatedTeardownEvidence:
+    def execute(plan: DedicatedTeardownPlan) -> None:
         if plan.session_name == "bad-2":
             raise ExternalError("remote failure")
-        return DedicatedTeardownEvidence.VERIFIED_STOPPED
 
     monkeypatch.setattr(teardown_mod, "execute_dedicated_teardown", execute)
     db = _RecordingDB()
@@ -561,10 +684,9 @@ def test_quiet_wait_invokes_heartbeat_before_completion(monkeypatch: pytest.Monk
     started = threading.Event()
     release = threading.Event()
 
-    def execute(plan: DedicatedTeardownPlan) -> DedicatedTeardownEvidence:
+    def execute(plan: DedicatedTeardownPlan) -> None:
         started.set()
         assert release.wait(timeout=2)
-        return DedicatedTeardownEvidence.VERIFIED_STOPPED
 
     monkeypatch.setattr(teardown_mod, "execute_dedicated_teardown", execute)
     real_wait = teardown_mod._wait_for_futures  # type: ignore[attr-defined]
@@ -600,11 +722,10 @@ def test_repeated_interrupts_cancel_queued_work_drain_running_work_and_reconcile
     release = threading.Event()
     executed: list[str] = []
 
-    def execute(plan: DedicatedTeardownPlan) -> DedicatedTeardownEvidence:
+    def execute(plan: DedicatedTeardownPlan) -> None:
         executed.append(plan.session_name)
         started.set()
         assert release.wait(timeout=2)
-        return DedicatedTeardownEvidence.VERIFIED_STOPPED
 
     monkeypatch.setattr(teardown_mod, "DEDICATED_TEARDOWN_MAX_WORKERS", 1)
     monkeypatch.setattr(teardown_mod, "execute_dedicated_teardown", execute)
@@ -657,7 +778,7 @@ def test_reconciliation_transition_retries_interrupts_during_cancel_and_notice(
     monkeypatch.setattr(teardown_mod, "_cancel_queued", interrupt_cancel)
     monkeypatch.setattr(teardown_mod, "_announce_reconciliation", interrupt_notice)
 
-    teardown_mod._enter_reconciliation((), KeyboardInterrupt(), cancel_queued=True)
+    teardown_mod._enter_reconciliation((), KeyboardInterrupt())
 
     assert cancel_calls == 3
     assert notice_calls == 2
@@ -669,7 +790,7 @@ def test_interrupt_after_persistence_attempt_retries_reconciliation_idempotently
     monkeypatch.setattr(
         teardown_mod,
         "execute_dedicated_teardown",
-        lambda plan: DedicatedTeardownEvidence.VERIFIED_STOPPED,
+        lambda plan: None,
     )
 
     class _InterruptedDB(_RecordingDB):
@@ -695,7 +816,7 @@ def test_persistent_base_exception_during_reconciliation_drains_siblings_once(
     monkeypatch.setattr(
         teardown_mod,
         "execute_dedicated_teardown",
-        lambda plan: DedicatedTeardownEvidence.VERIFIED_STOPPED,
+        lambda plan: None,
     )
 
     class _ExitingDB(_RecordingDB):
@@ -721,7 +842,7 @@ def test_interrupt_at_complete_map_release_drains_and_reconciles(
     monkeypatch.setattr(
         teardown_mod,
         "execute_dedicated_teardown",
-        lambda plan: DedicatedTeardownEvidence.VERIFIED_STOPPED,
+        lambda plan: None,
     )
     real_release = teardown_mod._SubmissionGate.release
     releases = 0
@@ -751,11 +872,10 @@ def test_worker_base_exception_drains_and_persists_successful_sibling(
 ) -> None:
     ready = threading.Barrier(2)
 
-    def execute(plan: DedicatedTeardownPlan) -> DedicatedTeardownEvidence:
+    def execute(plan: DedicatedTeardownPlan) -> None:
         ready.wait(timeout=2)
         if plan.session_name == "escape-1":
             raise SystemExit(7)
-        return DedicatedTeardownEvidence.VERIFIED_STOPPED
 
     monkeypatch.setattr(teardown_mod, "execute_dedicated_teardown", execute)
     db = _RecordingDB()
@@ -777,12 +897,11 @@ def test_completed_future_is_not_reconsumed_when_outcome_rendering_fails(
 ) -> None:
     executions = 0
 
-    def execute(plan: DedicatedTeardownPlan) -> DedicatedTeardownEvidence:
+    def execute(plan: DedicatedTeardownPlan) -> None:
         nonlocal executions
         executions += 1
         if worker_fails:
             raise ExternalError("remote failure")
-        return DedicatedTeardownEvidence.VERIFIED_STOPPED
 
     def fail_output(_message: str) -> None:
         raise BrokenPipeError
@@ -817,7 +936,7 @@ def test_submission_interrupt_after_enqueue_never_reaches_remote_mutation(
     monkeypatch.setattr(
         teardown_mod,
         "execute_dedicated_teardown",
-        lambda plan: calls.append(plan.session_name) or DedicatedTeardownEvidence.VERIFIED_STOPPED,
+        lambda plan: calls.append(plan.session_name),
     )
     real_abort = teardown_mod._SubmissionGate.abort
     abort_calls = 0
@@ -865,7 +984,7 @@ def test_submission_interrupt_after_unregistered_thread_start_never_reaches_remo
     monkeypatch.setattr(
         teardown_mod,
         "execute_dedicated_teardown",
-        lambda plan: calls.append(plan.session_name) or DedicatedTeardownEvidence.VERIFIED_STOPPED,
+        lambda plan: calls.append(plan.session_name),
     )
 
     with pytest.raises(KeyboardInterrupt):

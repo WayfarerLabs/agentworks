@@ -251,12 +251,12 @@ def test_admin_transport_elevates_agent_runtime_absence_proof(
     target = _Target("admin", [])
     observed_sudo: list[bool] = []
 
-    def _still_live(_session, *, target, sudo=False):  # type: ignore[no-untyped-def]
-        observed_sudo.append(sudo)
+    def _still_live_plan(plan):  # type: ignore[no-untyped-def]
+        observed_sudo.append(plan.sudo)
         return False
 
+    monkeypatch.setattr(teardown_mod, "_prove_plan_runtime_absent", _still_live_plan)
     if operation == "recover":
-        monkeypatch.setattr(session_manager, "_prove_stored_runtime_absent", _still_live)
         monkeypatch.setattr(
             tmux_mod,
             "capture_tmux_server_fingerprint",
@@ -272,12 +272,6 @@ def test_admin_transport_elevates_agent_runtime_absence_proof(
                 legacy_running_authorized=True,
             )
     else:
-
-        def _still_live_plan(plan):  # type: ignore[no-untyped-def]
-            observed_sudo.append(plan.sudo)
-            return False
-
-        monkeypatch.setattr(teardown_mod, "_prove_plan_runtime_absent", _still_live_plan)
         monkeypatch.setattr(
             tmux_mod,
             "capture_tmux_server_fingerprint",

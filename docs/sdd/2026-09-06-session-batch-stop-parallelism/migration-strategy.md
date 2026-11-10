@@ -48,8 +48,11 @@ process keys carry different stored start ticks.
 ### 2. Extract value-based dedicated teardown
 
 Introduce one immutable complete-fingerprint dedicated plan. Extract the database-free remote phase
-from the current dispatcher and keep SQLite reconciliation on the invoking thread. Preserve the
-incomplete dedicated branch's current pre-kill start-ticks persistence and the untouched legacy
+from the current dispatcher and keep SQLite reconciliation on the invoking thread. Synchronous and
+batch complete rows use the same engine and conditional stopped-state reconciliation. Preserve the
+incomplete dedicated branch's pre-kill recorded-launch proof and start-ticks persistence, refetch
+its identity, then use the complete plan with a fresh runtime capture. Stopped-row,
+uncertain-launch, and legacy special cases retain serial preparation and a single stopped-state
 helper.
 
 At this point behavior remains serial. Existing teardown regression tests must be green.

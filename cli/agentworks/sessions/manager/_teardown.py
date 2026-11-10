@@ -6,7 +6,6 @@ import shlex
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor
 from concurrent.futures import wait as _wait_for_futures
 from dataclasses import dataclass
-from enum import Enum
 from functools import partial
 from pathlib import PurePosixPath
 from threading import Event
@@ -20,7 +19,7 @@ from agentworks.errors import BrokenStateError, ConnectivityError, ExternalError
 from agentworks.sessions.tmux import ADMIN_SOCKET_ROOT, AGENT_SOCKET_ROOT, ProbeStatus
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from agentworks.db import Database, SessionRow
     from agentworks.transports import Transport
@@ -49,12 +48,6 @@ class DedicatedTeardownPlan:
     target: Transport
     sudo: bool
     force: bool
-
-
-class DedicatedTeardownEvidence(Enum):
-    """Evidence returned only after the exact runtime is verified absent."""
-
-    VERIFIED_STOPPED = "verified-stopped"
 
 
 class _SubmissionGate:
@@ -116,7 +109,7 @@ def _validated_pid(session: SessionRow) -> int:
     return pid
 
 
-def prepare_concurrent_dedicated_teardown(
+def prepare_dedicated_teardown(
     db: Database,
     session: SessionRow,
     *,
@@ -127,8 +120,8 @@ def prepare_concurrent_dedicated_teardown(
 ) -> DedicatedTeardownPlan:
     """Prepare complete dedicated work on the invoking thread.
 
-    Persisted rows are a process boundary. The coordinator selects only
-    complete-fingerprint rows for this function; any contract violation fails
+    Persisted rows are a process boundary. Both synchronous callers and the
+    batch coordinator supply complete-fingerprint rows; invalid state fails
     closed instead of inventing work.
     """
     socket_path = _validated_socket_path(db, session)
@@ -239,7 +232,7 @@ def _execute_reachable_dedicated_teardown(
     observed_pid: int,
     observed_boot_id: str,
     observed_start_ticks: int,
-) -> DedicatedTeardownEvidence:
+) -> None:
     """Destroy one already-captured exact process incarnation."""
     from agentworks.sessions.tmux import kill_server
 
@@ -282,10 +275,40 @@ def _execute_reachable_dedicated_teardown(
         target=plan.target,
         sudo=plan.sudo,
     )
-    return DedicatedTeardownEvidence.VERIFIED_STOPPED
+    return
 
 
-def execute_dedicated_teardown(plan: DedicatedTeardownPlan) -> DedicatedTeardownEvidence:
+def _recover_unreachable_dedicated_runtime(
+    *,
+    session_name: str,
+    socket_path: str,
+    target: Transport,
+    sudo: bool,
+    force: bool,
+    prove_absent: Callable[[], bool],
+) -> None:
+    """Remove stale socket state only after the caller's runtime proof."""
+    try:
+        if not prove_absent():
+            raise BrokenStateError(
+                f"session '{session_name}' may still own a live tmux server; refusing stale cleanup",
+                entity_kind="session",
+                entity_name=session_name,
+                hint="Recover the tmux runtime manually before retrying.",
+            )
+    except (BrokenStateError, ConnectivityError, StateError):
+        if not force:
+            raise BrokenStateError(
+                f"session '{session_name}' tmux server is unreachable or indeterminate",
+                entity_kind="session",
+                entity_name=session_name,
+                hint="Use --force only after the prior server has exited.",
+            ) from None
+        raise
+    _remove_stale_socket(session_name=session_name, socket_path=socket_path, target=target, sudo=sudo)
+
+
+def execute_dedicated_teardown(plan: DedicatedTeardownPlan) -> None:
     """Run one complete dedicated remote teardown without SQLite or output."""
     from agentworks.sessions.tmux import capture_tmux_server_fingerprint, require_socket_path
 
@@ -297,30 +320,15 @@ def execute_dedicated_teardown(plan: DedicatedTeardownPlan) -> DedicatedTeardown
         sudo=plan.sudo,
     )
     if probe.status is not ProbeStatus.PRESENT:
-        try:
-            if not _prove_plan_runtime_absent(plan):
-                raise BrokenStateError(
-                    f"session '{plan.session_name}' may still own a live tmux server; refusing stale cleanup",
-                    entity_kind="session",
-                    entity_name=plan.session_name,
-                    hint="Recover the tmux runtime manually before retrying.",
-                )
-        except (BrokenStateError, ConnectivityError, StateError):
-            if not plan.force:
-                raise BrokenStateError(
-                    f"session '{plan.session_name}' tmux server is unreachable or indeterminate",
-                    entity_kind="session",
-                    entity_name=plan.session_name,
-                    hint="Use --force only after the prior server has exited.",
-                ) from None
-            raise
-        _remove_stale_socket(
+        _recover_unreachable_dedicated_runtime(
             session_name=plan.session_name,
             socket_path=plan.socket_path,
             target=plan.target,
             sudo=plan.sudo,
+            force=plan.force,
+            prove_absent=partial(_prove_plan_runtime_absent, plan),
         )
-        return DedicatedTeardownEvidence.VERIFIED_STOPPED
+        return
 
     observed = probe.fingerprint
     assert observed is not None
@@ -349,63 +357,54 @@ def teardown_dedicated_session(
     db: Database,
     force: bool,
 ) -> None:
-    """Run the synchronous dedicated compatibility path."""
+    """Prepare compatibility state, then use the shared complete-plan engine."""
     from agentworks.sessions.tmux import _matches_launch_attempt, capture_tmux_server_fingerprint, require_socket_path
 
-    socket_path = _validated_socket_path(db, session)
-    sudo = not target_owns_session
-    require_socket_path(socket_path, run_command=partial(target.run, sudo=sudo))
-    probe = capture_tmux_server_fingerprint(target=target, socket_path=socket_path, sudo=sudo)
-    if session.pid == PID_STOPPED and probe.status is ProbeStatus.ABSENT:
-        _remove_stale_socket(session_name=session.name, socket_path=socket_path, target=target, sudo=sudo)
-        _mark_stopped(db, session)
-        return
-    if probe.status is not ProbeStatus.PRESENT:
-        try:
-            if not _mgr._prove_stored_runtime_absent(session, target=target, sudo=sudo):
-                raise BrokenStateError(
-                    f"session '{session.name}' may still own a live tmux server; refusing stale cleanup",
-                    entity_kind="session",
-                    entity_name=session.name,
-                    hint="Recover the tmux runtime manually before retrying.",
-                )
-        except (BrokenStateError, StateError):
-            if not force:
-                raise BrokenStateError(
-                    f"session '{session.name}' tmux server is unreachable or indeterminate",
-                    entity_kind="session",
-                    entity_name=session.name,
-                    hint="Use --force only after the prior server has exited.",
-                ) from None
-            raise
-        _remove_stale_socket(
-            session_name=session.name,
-            socket_path=socket_path,
-            target=target,
-            sudo=sudo,
-        )
-        _mark_stopped(db, session)
-        return
+    complete = (
+        session.pid is not None
+        and session.pid > 0
+        and session.boot_id is not None
+        and session.tmux_server_start_ticks is not None
+    )
+    if not complete:
+        socket_path = _validated_socket_path(db, session)
+        sudo = not target_owns_session
+        require_socket_path(socket_path, run_command=partial(target.run, sudo=sudo))
+        probe = capture_tmux_server_fingerprint(target=target, socket_path=socket_path, sudo=sudo)
+        if session.pid == PID_STOPPED and probe.status is ProbeStatus.ABSENT:
+            _remove_stale_socket(session_name=session.name, socket_path=socket_path, target=target, sudo=sudo)
+            _mark_stopped(db, session)
+            return
+        if probe.status is not ProbeStatus.PRESENT:
+            _recover_unreachable_dedicated_runtime(
+                session_name=session.name,
+                socket_path=socket_path,
+                target=target,
+                sudo=sudo,
+                force=force,
+                prove_absent=partial(_mgr._prove_stored_runtime_absent, session, target=target, sudo=sudo),
+            )
+            _mark_stopped(db, session)
+            return
 
-    observed = probe.fingerprint
-    assert observed is not None
-    observed_boot_id = _mgr._validated_observed_boot_id(observed.boot_id, session=session)
-    if session.pid == PID_STOPPED:
-        raise StateError(
-            f"session '{session.name}' has an unrecorded server at its managed socket",
-            entity_kind="session",
-            entity_name=session.name,
-            hint="Inspect the conflicting server manually; its runtime was preserved.",
-        )
-    stored_boot_id = _mgr._validated_stored_boot_id(session)
-    if observed.pid != session.pid or observed_boot_id != stored_boot_id:
-        raise BrokenStateError(
-            f"session '{session.name}' tmux server identity does not match persisted state",
-            entity_kind="session",
-            entity_name=session.name,
-        )
-    stored_ticks = _mgr._validated_stored_start_ticks(session)
-    if stored_ticks is None:
+        observed = probe.fingerprint
+        assert observed is not None
+        observed_boot_id = _mgr._validated_observed_boot_id(observed.boot_id, session=session)
+        if session.pid == PID_STOPPED:
+            raise StateError(
+                f"session '{session.name}' has an unrecorded server at its managed socket",
+                entity_kind="session",
+                entity_name=session.name,
+                hint="Inspect the conflicting server manually; its runtime was preserved.",
+            )
+        stored_boot_id = _mgr._validated_stored_boot_id(session)
+        if observed.pid != session.pid or observed_boot_id != stored_boot_id:
+            raise BrokenStateError(
+                f"session '{session.name}' tmux server identity does not match persisted state",
+                entity_kind="session",
+                entity_name=session.name,
+            )
+        _mgr._validated_stored_start_ticks(session)
         if not _matches_launch_attempt(
             target=target,
             socket_path=socket_path,
@@ -421,6 +420,7 @@ def teardown_dedicated_session(
                 entity_name=session.name,
                 hint="Stop the native workload manually, or stop and start its VM, then retry.",
             )
+        original_identity = (session.session_uuid, session.run_id)
         db.update_session_runtime(
             session.name,
             socket_path=socket_path,
@@ -429,36 +429,31 @@ def teardown_dedicated_session(
             tmux_server_start_ticks=observed.start_ticks,
         )
         refreshed = db.get_session(session.name)
-        assert refreshed is not None
+        if (
+            refreshed is None
+            or (refreshed.session_uuid, refreshed.run_id) != original_identity
+            or refreshed.socket_path != socket_path
+            or refreshed.pid != observed.pid
+            or refreshed.boot_id != observed_boot_id
+            or refreshed.tmux_server_start_ticks != observed.start_ticks
+        ):
+            raise StateError(
+                f"session '{session.name}' identity changed while preparing teardown",
+                entity_kind="session",
+                entity_name=session.name,
+            )
         session = refreshed
-        stored_ticks = observed.start_ticks
-    elif observed.start_ticks != stored_ticks:
-        raise BrokenStateError(
-            f"session '{session.name}' tmux server process was replaced",
-            entity_kind="session",
-            entity_name=session.name,
-        )
 
-    plan = DedicatedTeardownPlan(
-        session_name=session.name,
-        session_uuid=session.session_uuid,
-        run_id=session.run_id,
+    plan = prepare_dedicated_teardown(
+        db,
+        session,
         vm_name=_mgr._require_workspace(db, session.workspace_name).vm_name,
-        socket_path=socket_path,
-        stored_pid=observed.pid,
-        stored_boot_id=observed_boot_id,
-        stored_start_ticks=stored_ticks,
         target=target,
-        sudo=sudo,
+        target_owns_session=target_owns_session,
         force=force,
     )
-    _execute_reachable_dedicated_teardown(
-        plan,
-        observed_pid=observed.pid,
-        observed_boot_id=observed_boot_id,
-        observed_start_ticks=observed.start_ticks,
-    )
-    _mark_stopped(db, session)
+    execute_dedicated_teardown(plan)
+    reconcile_dedicated_teardown(db, plan)
 
 
 def _mark_stopped(db: Database, session: SessionRow) -> None:
@@ -487,7 +482,7 @@ def reconcile_dedicated_teardown(db: Database, plan: DedicatedTeardownPlan) -> N
 def _execute_gated(
     gate: _SubmissionGate,
     plan: DedicatedTeardownPlan,
-) -> DedicatedTeardownEvidence | None:
+) -> None:
     if not gate.permits_mutation():
         return None
     return execute_dedicated_teardown(plan)
@@ -512,22 +507,17 @@ def _announce_reconciliation(error: BaseException) -> None:
 
 
 def _enter_reconciliation(
-    futures: Sequence[Future[DedicatedTeardownEvidence | None]],
+    futures: Sequence[Future[None]],
     error: BaseException,
-    *,
-    cancel_queued: bool,
 ) -> None:
     """Enter or report drain mode without letting later interrupts escape."""
     while True:
         try:
-            if cancel_queued:
-                _cancel_queued(futures)
-                cancel_queued = False
+            _cancel_queued(futures)
             _announce_reconciliation(error)
             return
         except KeyboardInterrupt as later_interrupt:
             error = later_interrupt
-            cancel_queued = True
         except BaseException:
             # The primary failure is already recorded. A broken output sink
             # cannot be allowed to bypass executor draining.
@@ -544,14 +534,14 @@ def _release_gate_after_escape(gate: _SubmissionGate) -> None:
             continue
 
 
-def _cancel_queued(futures: Sequence[Future[DedicatedTeardownEvidence | None]]) -> None:
+def _cancel_queued(futures: Sequence[Future[None]]) -> None:
     for future in futures:
         if not future.done():
             future.cancel()
 
 
 def _heartbeat(
-    futures: Sequence[Future[DedicatedTeardownEvidence | None]],
+    futures: Sequence[Future[None]],
 ) -> None:
     completed = sum(future.done() for future in futures)
     active = sum(future.running() for future in futures)
@@ -571,11 +561,10 @@ def execute_concurrent_dedicated_teardowns(
 
     gate = _SubmissionGate()
     failures: list[tuple[str, str]] = []
-    pending: set[Future[DedicatedTeardownEvidence | None]] = set()
+    pending: set[Future[None]] = set()
     primary_error: BaseException | None = None
-    reconciling = False
     executor = ThreadPoolExecutor(max_workers=min(DEDICATED_TEARDOWN_MAX_WORKERS, len(plans)))
-    future_plans: dict[Future[DedicatedTeardownEvidence | None], DedicatedTeardownPlan] = {}
+    future_plans: dict[Future[None], DedicatedTeardownPlan] = {}
     future_map_complete = False
     try:
         for plan in plans:
@@ -590,8 +579,7 @@ def execute_concurrent_dedicated_teardowns(
             raise
         primary_error = exc
         _release_gate_after_escape(gate)
-        reconciling = True
-        _enter_reconciliation(tuple(pending), exc, cancel_queued=True)
+        _enter_reconciliation(tuple(pending), exc)
 
     while pending:
         try:
@@ -610,7 +598,7 @@ def execute_concurrent_dedicated_teardowns(
                     continue
                 plan = future_plans[future]
                 try:
-                    evidence = future.result()
+                    future.result()
                 except Exception as exc:
                     failures.append((plan.session_name, str(exc)))
                     pending.remove(future)
@@ -621,22 +609,7 @@ def execute_concurrent_dedicated_teardowns(
                         primary_error = exc
                     pending.remove(future)
                     output.warn(f"Session '{plan.session_name}' teardown aborted: {exc}")
-                    if not reconciling:
-                        reconciling = True
-                        _enter_reconciliation(tuple(pending), exc, cancel_queued=True)
-                    else:
-                        _enter_reconciliation(tuple(pending), exc, cancel_queued=False)
-                    continue
-
-                if evidence is not DedicatedTeardownEvidence.VERIFIED_STOPPED:
-                    invalid_evidence = StateError(
-                        f"session '{plan.session_name}' teardown returned no verified stopped evidence",
-                        entity_kind="session",
-                        entity_name=plan.session_name,
-                    )
-                    failures.append((plan.session_name, str(invalid_evidence)))
-                    pending.remove(future)
-                    output.warn(f"Session '{plan.session_name}' failed to stop: {invalid_evidence}")
+                    _enter_reconciliation(tuple(pending), exc)
                     continue
 
                 try:
@@ -649,33 +622,21 @@ def execute_concurrent_dedicated_teardowns(
                 except KeyboardInterrupt as exc:
                     if primary_error is None:
                         primary_error = exc
-                    if not reconciling:
-                        reconciling = True
-                        _enter_reconciliation(tuple(pending), exc, cancel_queued=True)
-                    else:
-                        _enter_reconciliation(tuple(pending), exc, cancel_queued=False)
+                    _enter_reconciliation(tuple(pending), exc)
                     break
                 except BaseException as exc:
                     if primary_error is None:
                         primary_error = exc
                     pending.remove(future)
                     output.warn(f"Session '{plan.session_name}' stopped-state persistence aborted: {exc}")
-                    if not reconciling:
-                        reconciling = True
-                        _enter_reconciliation(tuple(pending), exc, cancel_queued=True)
-                    else:
-                        _enter_reconciliation(tuple(pending), exc, cancel_queued=False)
+                    _enter_reconciliation(tuple(pending), exc)
                     continue
                 pending.remove(future)
                 output.info(f"Session '{plan.session_name}' stopped")
         except BaseException as exc:
             if primary_error is None:
                 primary_error = exc
-            if not reconciling:
-                reconciling = True
-                _enter_reconciliation(tuple(pending), exc, cancel_queued=True)
-            else:
-                _enter_reconciliation(tuple(pending), exc, cancel_queued=False)
+            _enter_reconciliation(tuple(pending), exc)
 
     while True:
         try:
@@ -684,7 +645,7 @@ def execute_concurrent_dedicated_teardowns(
         except KeyboardInterrupt as exc:
             if primary_error is None:
                 primary_error = exc
-            _enter_reconciliation((), exc, cancel_queued=False)
+            _enter_reconciliation((), exc)
 
     if primary_error is not None:
         raise primary_error

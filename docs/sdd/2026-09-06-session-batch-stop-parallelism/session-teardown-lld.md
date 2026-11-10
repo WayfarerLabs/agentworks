@@ -82,10 +82,10 @@ instance. No two concurrently running plans share it.
 
 ## Preparation
 
-`prepare_concurrent_dedicated_teardown(db, session, *, vm_name, target, target_owns_session, force)`
-runs only on the invoking thread.
+`prepare_dedicated_teardown(db, session, *, vm_name, target, target_owns_session, force)` runs only
+on the invoking thread.
 
-1. Accept only a row the coordinator already classified as complete and concurrency-eligible.
+1. Accept only a complete-fingerprint row from the coordinator or synchronous preparation.
 2. Require a dedicated socket and validate it as an exact managed path through the current database
    graph.
 3. Require a positive persisted PID, canonical boot ID, and positive start ticks.
@@ -151,7 +151,11 @@ Dedicated rows with a missing persisted fingerprint field remain on the current 
 path. In particular, when start ticks are missing, that path captures and validates a complete
 fingerprint and verifies the recorded launch attempt before filling the missing identity. It
 persists the result, rereads the session, and only then invokes `kill-server`. This preserves the
-current persistence-failure and crash boundary without adding a staged concurrent protocol.
+current persistence-failure and crash boundary without adding a staged concurrent protocol. The
+reread row must retain the same session UUID, run ID, socket, and newly observed fingerprint. It
+then enters the same complete-plan preparation as an originally complete row. The shared engine
+captures the runtime again after preparation; the compatibility capture is not retained as
+destructive authority across the persistence checkpoint.
 
 The compatibility path also preserves current-main recovery for uncertain launches: a positively
 observed VM boot change proves the previous workload gone even without a known PID; an uncertain
@@ -310,15 +314,17 @@ machine, and five-second heartbeats make the mandatory reconciliation wait visib
 
 ### Named stop
 
-Named stop keeps its synchronous dispatcher, output, and transport policy. The complete dedicated
-branch calls the extracted database-free remote helper synchronously, then uses its existing
-unconditional stopped persistence. The incomplete dedicated branch retains its current pre-kill
-fingerprint persistence. Named stop does not use an executor or gain the batch timeout.
+Named stop keeps its synchronous dispatcher, output, and transport policy. Complete dedicated rows
+use the same preparation, database-free execution, and UUID/run/runtime compare-and-set as batch
+workers. The incomplete dedicated branch retains its pre-kill launch proof and fingerprint
+persistence, then reads the row again and joins that complete path. Named stop does not use an
+executor or gain the batch timeout. Stopped-row and uncertain-launch special cases remain serial and
+cannot turn a partial identity into a worker plan. One stopped-state helper serves those
+compatibility cases and legacy teardown.
 
-Only the concurrent coordinator uses compare-and-set because this effort creates a new gap between
-worker completion and coordinator persistence. Named stop has no new scheduling boundary; widening
-cross-process fencing for existing singular lifecycle calls would change its contract outside this
-batch-performance effort.
+Both complete paths share unreachable-runtime recovery: explicit absence proof permits exact socket
+cleanup, an unforced identity or connectivity failure becomes actionable broken state, and forced
+failure retains the original specific error. No error path guesses absence from unreadable state.
 
 ### Batch stop
 
