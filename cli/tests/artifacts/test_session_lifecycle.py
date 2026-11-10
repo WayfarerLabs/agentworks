@@ -75,6 +75,28 @@ def lifecycle(tmp_path, monkeypatch):
     db.close()
 
 
+def _stopped_until_launch(lifecycle: Lifecycle, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Model a stopped runtime that becomes running only after an acknowledged spawn."""
+    from agentworks.sessions import tmux
+
+    status = SessionStatus.STOPPED
+    launch = tmux.create_session
+
+    def acknowledged_launch(*args, **kwargs):
+        nonlocal status
+        result = launch(*args, **kwargs)
+        status = SessionStatus.RUNNING
+        return result
+
+    monkeypatch.setattr(manager, "check_session_status", lambda *a, **k: status)
+    monkeypatch.setattr(
+        manager,
+        "observe_session_statuses",
+        lambda sessions, **kwargs: {session.name: status for session in sessions},
+    )
+    monkeypatch.setattr(tmux, "create_session", acknowledged_launch)
+
+
 def test_shell_restart_publishes_under_actual_home_and_records_run(lifecycle):
     previous = lifecycle.db.get_session("s1")
     assert previous is not None
@@ -190,7 +212,7 @@ def test_restart_stages_new_files_before_kill_and_cleans_old_after(lifecycle, mo
         assert row is not None and row.run_id == previous.run_id
         observed.append("kill")
 
-    monkeypatch.setattr("agentworks.sessions.manager._lifecycle._teardown_session", teardown)
+    monkeypatch.setattr("agentworks.sessions.manager._teardown_session", teardown)
     lifecycle.restart()
     current = lifecycle.db.get_session("s1")
     assert current is not None and current.run_id != previous.run_id
@@ -319,7 +341,7 @@ def test_unhandled_session_inputs_warn_without_files_or_discovery_env(
             interaction=TtyInteractionPolicy.REFUSE,
         )
     else:
-        monkeypatch.setattr(manager, "check_session_status", lambda *a, **k: SessionStatus.STOPPED)
+        _stopped_until_launch(lifecycle, monkeypatch)
         manager.start_session(lifecycle.db, lifecycle.config, name="s1", interaction=TtyInteractionPolicy.REFUSE)
     name = "s2" if operation == "create" else "s1"
     record = read_native_setup(lifecycle.db, "session", name).records[0]
@@ -430,19 +452,24 @@ def test_create_and_delete_keep_same_user_sessions_separate(lifecycle, monkeypat
 
 
 def test_unconfirmed_new_runtime_keeps_its_run_and_artifacts(lifecycle, monkeypatch):
-    from agentworks.errors import ExternalError
     from agentworks.sessions import tmux
     from agentworks.sessions.tmux import FingerprintProbe, ProbeStatus
 
     lifecycle.restart()
     previous = lifecycle.db.get_session("s1")
     assert previous is not None
+    old_files = lifecycle.files()
     monkeypatch.setattr(tmux, "capture_tmux_server_fingerprint", lambda **kwargs: FingerprintProbe(ProbeStatus.UNKNOWN))
-    with pytest.raises(ExternalError):
+    with pytest.raises(StateError) as failure:
         lifecycle.restart()
+    assert (failure.value.entity_kind, failure.value.entity_name) == ("session", "s1")
     current = lifecycle.db.get_session("s1")
     assert current is not None and current.run_id != previous.run_id
+    assert current.session_uuid == previous.session_uuid
     assert current.pid is None and current.socket_path is not None
+    assert current.boot_id == previous.boot_id and current.boot_id is not None
+    assert current.tmux_server_start_ticks is None
+    assert all(not path.exists() for path in old_files)
     assert lifecycle.files() and all(path.exists() for path in lifecycle.files())
     assert all(current.run_id in str(path) for path in lifecycle.files())
 
@@ -527,7 +554,7 @@ def test_uncaptured_ancestor_does_not_block_session_operations(lifecycle, monkey
         lambda *a, **k: ResolvedVMTemplate("default", artifacts=ArtifactsConfig(bundles=["team"])),
     )
     if operation == "start":
-        monkeypatch.setattr(manager, "check_session_status", lambda *a, **k: SessionStatus.STOPPED)
+        _stopped_until_launch(lifecycle, monkeypatch)
     if operation == "create":
         lifecycle.db.insert_agent_grant("a1", "ws1", "explicit")
         monkeypatch.setattr("agentworks.agents.manager._assert_agent_ssh_works", lambda *a, **k: None)
@@ -616,7 +643,6 @@ def test_real_native_probe_failure_preserves_existing_runtime_before_teardown(
     from unittest.mock import Mock
 
     from agentworks.artifacts.native import probe as native
-    from agentworks.errors import ExternalError
 
     lifecycle.restart()
     previous = lifecycle.db.get_session("s1")
@@ -631,8 +657,9 @@ def test_real_native_probe_failure_preserves_existing_runtime_before_teardown(
 
     # The isolated transport's login shell rejects -lic, producing a real failed
     # guest discovery process rather than a fabricated exception or inventory.
-    with pytest.raises(ExternalError):
+    with pytest.raises(StateError) as failure:
         lifecycle.restart()
+    assert (failure.value.entity_kind, failure.value.entity_name) == ("session", "s1")
     assert observed.called
     current = lifecycle.db.get_session("s1")
     assert current is not None and previous is not None
@@ -701,7 +728,7 @@ def test_unknown_passthrough_restart_records_missing_delivery_and_retires_old_fi
         teardowns.append(True)
         lifecycle.events.append("kill")
 
-    monkeypatch.setattr("agentworks.sessions.manager._lifecycle._teardown_session", teardown)
+    monkeypatch.setattr("agentworks.sessions.manager._teardown_session", teardown)
     lifecycle.restart()
     current = lifecycle.db.get_session("s1")
     assert current is not None and current.run_id != first.run_id
@@ -733,7 +760,7 @@ def test_unknown_passthrough_restart_records_missing_delivery_and_retires_old_fi
     )
     write_native_setup(lifecycle.db, "vm", "vm1", NativeSetupState(records=(healed,)), operation="fixture")
     monkeypatch.setattr(
-        "agentworks.sessions.manager._lifecycle._teardown_session", lambda *a, **k: lifecycle.events.append("kill")
+        "agentworks.sessions.manager._teardown_session", lambda *a, **k: lifecycle.events.append("kill")
     )
     lifecycle.restart()
     state = read_native_setup(lifecycle.db, "session", "s1").records[0]
