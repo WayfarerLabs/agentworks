@@ -279,3 +279,15 @@ def test_explicit_unknown_power_policy_is_preserved(db, make_config, platform, a
     assert ("start" if action is manager.start_vm else "stop") in events
     if action is manager.start_vm:
         assert db.get_vm("box").last_started_at is None
+
+
+@pytest.mark.parametrize("action", [manager.start_vm, manager.stop_vm])
+def test_known_local_site_refusal_leaves_target_unaccepted(db, make_config, resolve_counter, action):
+    from agentworks.errors import AgentworksError
+
+    config = make_config()
+    vm = db.insert_vm("box", "missing-site", "box", desired_runtime_state=Target.ON_DEMAND)
+    with pytest.raises(AgentworksError):
+        action(db, config, "box", interaction=Policy.REFUSE)
+    assert db.get_vm("box") == vm
+    assert resolve_counter == []

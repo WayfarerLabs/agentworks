@@ -51,6 +51,7 @@ def start_vm(
     from agentworks.bootstrap import load_request_registry
     from agentworks.harness_setup.locking import native_mutation_guard
     from agentworks.secrets.resolver import Resolver
+    from agentworks.vms.nodes import live_vm_node
 
     from .runtime import prepare_vm_runtime, start_vm_runtime
 
@@ -59,6 +60,8 @@ def start_vm(
     _guard_failed_vm(selected)
     with native_mutation_guard(db.path, name) as guard:
         registry = load_request_registry(config, live_database=db)
+        vm_node = live_vm_node(db, config, registry, selected, held_native_guard=guard)
+        _guard_failed_vm(vm_node.reload_row())
         db.set_vm_desired_runtime_state(name, DesiredRuntimeState.RUNNING, expected_vm_uuid=selected.vm_uuid)
         vm = _require_vm(db, name)
         resolver = Resolver(config, registry, interaction=interaction)
@@ -72,6 +75,7 @@ def start_vm(
                 resolve_secret=resolver.resolve_gate,
                 interaction=interaction,
                 held_native_guard=guard,
+                vm_node=vm_node,
             )
             start_vm_runtime(context, resolve_secret=resolver.resolve_gate)
         finally:
@@ -95,6 +99,7 @@ def stop_vm(
     from agentworks.bootstrap import load_request_registry
     from agentworks.harness_setup.locking import native_mutation_guard
     from agentworks.secrets.resolver import Resolver
+    from agentworks.vms.nodes import live_vm_node
 
     from .runtime import prepare_vm_runtime, stop_vm_runtime
 
@@ -103,6 +108,8 @@ def stop_vm(
     _guard_failed_vm(selected)
     with native_mutation_guard(db.path, name) as guard:
         registry = load_request_registry(config, live_database=db)
+        vm_node = live_vm_node(db, config, registry, selected, held_native_guard=guard)
+        _guard_failed_vm(vm_node.reload_row())
         db.set_vm_desired_runtime_state(name, DesiredRuntimeState.STOPPED, expected_vm_uuid=selected.vm_uuid)
         vm = _require_vm(db, name)
         resolver = Resolver(config, registry, interaction=interaction)
@@ -116,6 +123,7 @@ def stop_vm(
                 resolve_secret=resolver.resolve_gate,
                 interaction=interaction,
                 held_native_guard=guard,
+                vm_node=vm_node,
             )
             changed = stop_vm_runtime(context)
         finally:

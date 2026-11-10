@@ -452,14 +452,24 @@ def test_windows_allows_backup_with_only_nonsecret_applied_state(
 
 
 def test_native_setup_export_and_database_restore_preserve_owner_tree(db, tmp_path, monkeypatch):
-    from agentworks.db import AppliedStateSlice, Database, create_manual_backup, restore_backup
+    from agentworks.db import (
+        AppliedStateSlice,
+        Database,
+        DesiredRuntimeState,
+        SessionMode,
+        create_manual_backup,
+        restore_backup,
+    )
     from agentworks.harness_setup.model import NativeClaim, NativeSetupState, SetupRecord
     from agentworks.harness_setup.state import decode_native_setup, read_native_setup, write_native_setup
 
-    db.insert_vm("bvm", site="lima-local", hostname="bvm")
+    vm_row = db.insert_vm("bvm", site="lima-local", hostname="bvm", desired_runtime_state=DesiredRuntimeState.ON_DEMAND)
     db.update_vm_tailscale("bvm", "100.64.0.8")
     db.insert_agent("a", "bvm", "agt-a")
     db.insert_workspace("w", "/work/w", "bvm", "aw-w")
+    session_row = db.insert_session(
+        "run", "w", "default", SessionMode.ADMIN, desired_runtime_state=DesiredRuntimeState.STOPPED
+    )
     db.insert_vm("other", site="lima-local", hostname="other")
     expected = {}
     for kind, name, components in (
@@ -500,6 +510,13 @@ def test_native_setup_export_and_database_restore_preserve_owner_tree(db, tmp_pa
         "bvm",
         interaction=TtyInteractionPolicy.REFUSE,
     )
+    exported_vm = loads((destination / "vm.json").read_text())
+    assert exported_vm["desired_runtime_state"] == "on-demand"
+    assert exported_vm["vm_uuid"] == vm_row.vm_uuid
+    assert "operator_stopped" not in exported_vm
+    exported_sessions = loads((destination / "sessions.json").read_text())
+    assert exported_sessions[0]["desired_runtime_state"] == "stopped"
+    assert exported_sessions[0]["session_uuid"] == session_row.session_uuid
     exported = loads((destination / "instance-applied-state.json").read_text())
     decoded = {}
     for value in exported:
