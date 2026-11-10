@@ -257,9 +257,15 @@ workspaces directory and the user install commands of Admin Initialization.
   target is left as it is.
 - **sshd is reloaded only when its fragment changes.** The sshd fragment is written, checked with
   `sshd -t` and sshd reloaded only when its content differs, where every initialization used to
-  reload sshd. It leaves no `.bak` file: a fragment `sshd -t` rejects is replaced by what was there
-  before, or removed.
-- **`/etc/fstab` keeps its owner, group and mode** when its `/proc` line changes.
+  reload sshd. It leaves no `.bak` file.
+- **A file whose reload fails is put back.** When `sshd -t` or the sshd reload, `sysctl --system`
+  after the sysctl baseline, or `systemctl daemon-reload` after the tailscaled drop-in fails, times
+  out or is interrupted, the file gets its previous content back (or is removed if it is new), with
+  a warning, so the next `vm reinit` tries again. If putting it back fails too, the warning names
+  the file.
+- **`/etc/fstab` keeps its owner, group and mode** when its `/proc` line changes, and a `hidepid`
+  value already on that line is kept, a name such as `hidepid=invisible` included; only a missing
+  `hidepid`, `hidepid=0` or `hidepid=off` becomes `hidepid=1`.
 - **Step warnings show what failed.** A failed step's warning ends with the last three lines of the
   command's error output, with secrets removed.
 - **The DNS check warns when it cannot run.** A DNS probe that fails to run or times out warns and
