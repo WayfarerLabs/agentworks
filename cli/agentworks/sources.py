@@ -50,8 +50,8 @@ class SourceRefError(ExternalError):
     """Raised when a source reference or a destination is invalid, or a fetch from it fails."""
 
 
-_SCP_REMOTE_RE = re.compile(r"^[^/~:@]+@[^/:]+:")
-"""An scp-style remote, ``user@host:path``: what ``git`` reads as one, but no local path."""
+_DRIVE_RE = re.compile(r"^[A-Za-z]:")
+"""A Windows drive letter, which ``git`` exempts from its scp-style remote rule."""
 
 # Ref must be safe for shell and git: alphanumeric, hyphens, dots, underscores, slashes
 _SAFE_REF_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._/-]*$")
@@ -75,9 +75,11 @@ def parse_source_ref(source: str, *, default_filename: str = "") -> SourceRef:
         default_filename: Default filename when git source has no subpath.
             If empty and no subpath is provided, the subpath will be empty.
 
-    A local path, plain or after ``file::``, may not hold ``::`` or ``://``
-    or have the scp-style ``user@host:`` shape, so a remote written without
-    ``git::`` is refused instead of read as a local file.
+    A local path, plain or after ``file::``, may not hold ``::`` or ``://``,
+    nor a colon in its first ``/``-delimited component unless that is a
+    Windows drive letter: git's own rule for an scp-style remote
+    (``user@host:path``). So a remote written without ``git::`` is refused
+    instead of read as a local file.
 
     Raises:
         SourceRefError: If the source reference is malformed.
@@ -94,11 +96,13 @@ def parse_source_ref(source: str, *, default_filename: str = "") -> SourceRef:
         raise SourceRefError("file source path cannot be empty")
     if "::" in path:
         raise SourceRefError("source reference scheme must be file:: or git::")
-    # A URL or an scp-style remote written without git:: is not a local path, and may hold a
-    # credential, so it is refused without being echoed.
-    if "://" in path or _SCP_REMOTE_RE.match(path):
+    # A URL, or what git reads as an scp-style remote (a colon in the first path component,
+    # a drive letter aside), is not a local path and may hold a credential, so it is refused
+    # without being echoed.
+    if "://" in path or (":" in path.split("/", 1)[0] and not _DRIVE_RE.match(path)):
         raise SourceRefError(
-            "a remote source reference must start with git::; a local path holds no '://' or user@host:"
+            "a remote source reference must start with git::; a local path holds no '://' and no ':' before "
+            "its first '/', a drive letter aside"
         )
     return SourceRef(kind="file", path=path, subpath="", ref="")
 

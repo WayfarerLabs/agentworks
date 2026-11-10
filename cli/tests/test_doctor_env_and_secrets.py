@@ -146,7 +146,7 @@ def test_focused_admin_dotfiles_matches_bulk_and_empty_source_has_no_check(
     configured_path.mkdir()
     config_path = _write_config(
         configured_path,
-        admin_fields={"dotfiles_source": "github:operator/dotfiles"},
+        admin_fields={"dotfiles_source": "git::git@github.com:operator/dotfiles.git"},
     )
     monkeypatch.setattr(config_module, "CONFIG_PATH", config_path)
     bulk_group, config, registry = _check_config()

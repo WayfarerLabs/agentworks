@@ -1049,8 +1049,9 @@ no longer use them. The departures from the tables above, each recorded where it
   doctor and `resource show` never meet an unparsable stored source.
 - A `git::https://` URL carrying a user name or token is refused without being echoed, `--` precedes
   the URL in `git clone` and `git remote add`, and the subpath's component check is the parser's. A
-  local path holding `::` or `://`, or shaped `user@host:`, is refused, so a remote written without
-  `git::` is never read as a local file. An existing clone's origin is read with
+  local path holding `::` or `://`, or a colon in its first `/`-delimited component other than a
+  Windows drive letter (git's scp-style rule), is refused, so a remote written without `git::` is
+  never read as a local file. An existing clone's origin is read with
   `git config --get remote.origin.url`, as configured, since `remote get-url` applies `insteadOf`.
 - A directory at a write's fixed temporary name is `PathRefused(UNSUITABLE)` and left alone.
 - The admin's final `_ensure_agentworks_files_sourced` pass is gone: its fragment writers run after

@@ -8,8 +8,9 @@ They are used in agentworks config fields that accept file sources (e.g., `mise_
 ### Local file
 
 A plain path or a `file::` prefixed path. Tilde expansion is supported. A remote is never a local
-path: a value holding `://`, or written as `user@host:path`, is refused, so write a git remote as
-`git::<url>`.
+path: a value holding `://` or `::`, or whose first path component holds a colon that is not a
+Windows drive letter (as in `user@host:path`, git's own rule for an scp-style remote), is refused,
+so write a git remote with the `git::` prefix.
 
 ```text
 ~/.config/agentworks/mise.lock
@@ -18,11 +19,12 @@ file::~/.config/agentworks/mise.lock
 
 ### Git repository
 
-A `git::` prefix followed by a git URL. The file is cloned from the repository during VM
-initialization.
+A `git::` prefix followed by a git URL: `git::https://host/path` or the scp-style
+`git::git@host:path`. The file is fetched from the repository during VM initialization.
 
 ```text
 git::https://github.com/user/repo.git
+git::git@github.com:user/repo.git
 ```
 
 ### Git with subpath

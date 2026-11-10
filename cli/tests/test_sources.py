@@ -104,7 +104,17 @@ def test_an_at_sign_after_the_host_is_not_a_credential() -> None:
 
 
 @pytest.mark.parametrize(
-    "source", ["https://example.com/d.git", "file::ssh://example.com/d", "git@example.com:me/d.git", "me@host:dots"]
+    "source",
+    [
+        "https://example.com/d.git",
+        "file::ssh://example.com/d",
+        "git@example.com:me/d.git",
+        "me@host:dots",
+        "user:tok@host:path",
+        "github:me/dotfiles",
+        "github.com:me/d.git",
+        "file::a::b",
+    ],
 )
 def test_a_remote_written_without_git_is_not_read_as_a_local_path(source: str) -> None:
     with pytest.raises(SourceRefError) as refused:
@@ -112,7 +122,20 @@ def test_a_remote_written_without_git_is_not_read_as_a_local_path(source: str) -
     assert source not in str(refused.value)
 
 
-@pytest.mark.parametrize("source", ["~/dots", "./dots", "/srv/a@b:c", "file::~/m.lock", "github:me/dotfiles"])
+@pytest.mark.parametrize(
+    "source",
+    [
+        "~/dots",
+        "./dots",
+        "/srv/a@b:c",
+        "./a@b:c",
+        "~/me@x:y",
+        "me@host",
+        "file::~/m.lock",
+        "C:/Users/me/dots",
+        "C:\\Users\\me@corp.com\\dots",
+    ],
+)
 def test_a_local_path_is_still_a_local_path(source: str) -> None:
     assert parse_source_ref(source).kind == "file"
 
@@ -802,6 +825,7 @@ def test_both_templates_refuse_an_unsuitable_destination_at_load(model: type) ->
         "https://u:ghp-load-secret@example.com/d.git",
         "file::https://ghp-load-secret@example.com/d.git",
         "git@ghp-load-secret.example.com:me/d.git",
+        "user:ghp-load-secret@example.com:me/d.git",
     ],
 )
 def test_both_templates_refuse_an_unparsable_dotfiles_source_at_load_without_echoing_it(
