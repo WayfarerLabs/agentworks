@@ -25,11 +25,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 from agentworks import output
-from agentworks.errors import ExternalError, StateError
+from agentworks.errors import ExternalError, StateError, ValueFreeError
 from agentworks.execution.errors import CommandFailed, PathRefusal, PathRefused
 from agentworks.execution.files import guest_path
 from agentworks.execution.requests import Bytes, Command, Script, Shell
 from agentworks.path_rendering import format_host_path
+from agentworks.vms.home_layout import MANAGED
 
 if TYPE_CHECKING:
     from agentworks.execution.files import Files
@@ -143,38 +144,71 @@ def _extract_ref(query: str) -> str:
     return refs[0]
 
 
+class DestinationError(ValueFreeError):
+    """A ``dotfiles_destination`` that is not one; the message names the accepted forms, never the value."""
+
+
+_DESTINATION_FORMS = (
+    "dotfiles_destination must be a directory below the home (written 'dir' or '~/dir') or an absolute path, "
+    "with no empty, '.' or '..' component and no other user's '~'"
+)
+
+
 def normalize_destination(value: str) -> str:
     """``value`` as a dotfiles destination: ``~/`` and a path in the home, or an absolute path.
 
-    Boundary: the templates' ``dotfiles_destination``, operator configuration,
-    is validated here at load. No component may be empty, ``.`` or ``..``,
-    a trailing ``/`` is dropped, and the home itself (``~`` or ``~/``) is
-    refused, since replacing the checkout would move the home aside.
+    Boundary: the templates' ``dotfiles_destination``, operator
+    configuration, validated here at load, stored overlays included. A path
+    with no leading ``~/`` or ``/`` is in the home, as it always meant, so
+    ``dots`` becomes ``~/dots``. No component may be empty, ``.`` or ``..``
+    and ``~user`` is refused; a trailing ``/`` is dropped. The home
+    itself (``~`` or ``~/``), and a path in it that is or holds one Agentworks
+    manages there (:data:`agentworks.vms.home_layout.MANAGED`), are refused,
+    since replacing the checkout would replace them. Refusals are
+    :class:`DestinationError`, whose message holds no part of ``value``.
     """
-    if value.startswith("~/"):
-        prefix, rest = "~/", value[2:]
-    elif value.startswith("/"):
+    if value.startswith("/"):
         prefix, rest = "/", value[1:]
     else:
-        raise ValueError(f"dotfiles_destination must start with '~/' or '/': {value!r}")
+        prefix, rest = "~/", value.removeprefix("~/") if value != "~" else ""
     rest = rest.removesuffix("/")
-    if not value.isprintable() or not rest or any(part in ("", ".", "..") for part in rest.split("/")):
-        raise ValueError(
-            f"dotfiles_destination must name a directory below '~/' or '/' with no empty, '.' or '..' "
-            f"component: {value!r}"
-        )
+    if (
+        not value.isprintable()
+        or not rest
+        or rest.startswith("~")
+        or any(part in ("", ".", "..") for part in rest.split("/"))
+    ):
+        raise DestinationError(_DESTINATION_FORMS)
+    if prefix == "~/":
+        _refuse_managed(rest)
     return prefix + rest
+
+
+def _refuse_managed(relative: str) -> None:
+    """Refuse the path ``relative`` to a home when it is, or is a parent of, a path Agentworks manages there."""
+    if any(managed == relative or managed.startswith(relative + "/") for managed in MANAGED):
+        raise DestinationError(
+            "dotfiles_destination may not be, or hold, a path Agentworks manages in the home: "
+            + ", ".join(f"~/{managed}" for managed in MANAGED)
+        )
 
 
 def expand_destination(value: str, home: str) -> str:
     """The guest path of the normalized destination ``value`` for an account whose home is ``home``.
 
     Only a leading ``~`` is replaced. An absolute destination that is the
-    home or one of its ancestors is refused before anything is sent.
+    home or one of its ancestors, or a path in the home that
+    :func:`normalize_destination` would refuse, is refused before anything
+    is sent.
     """
     path = home + value[1:] if value.startswith("~/") else value
     if path == home or home.startswith(path.rstrip("/") + "/"):
         raise SourceRefError(f"dotfiles destination {path} is the home {home} or one of its parents")
+    if path.startswith(home + "/"):
+        try:
+            _refuse_managed(path[len(home) + 1 :])
+        except DestinationError as refused:
+            raise SourceRefError(str(refused)) from None
     return path
 
 

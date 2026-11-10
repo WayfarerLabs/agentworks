@@ -26,6 +26,7 @@ from agentworks.capabilities.vm_platform.skel import BASHRC, ZSHRC
 from agentworks.errors import ExternalError
 from agentworks.execution.errors import PathRefusal, PathRefused
 from agentworks.execution.requests import Command, Script, Shell
+from agentworks.vms.home_layout import AGENTWORKS_PROFILE, AGENTWORKS_RC
 
 from .steps import STEP_FAILURES, status, update_and_apply, warn, warn_step
 
@@ -35,9 +36,6 @@ if TYPE_CHECKING:
     from agentworks.execution.files import Files
 
     from .steps import InitLog
-
-AGENTWORKS_PROFILE = ".agentworks-profile.sh"
-AGENTWORKS_RC = ".agentworks-rc.sh"
 
 SKEL_BASHRC_PATH = "/etc/skel/.bashrc"
 SKEL_ZSHRC_PATH = "/etc/skel/.zshrc"

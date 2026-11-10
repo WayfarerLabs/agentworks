@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from agentworks import output
 from agentworks.execution.errors import CommandFailed, PathRefusal, PathRefused
 from agentworks.execution.requests import Command
+from agentworks.vms.home_layout import MISE_CONFIG_DIR
 
 from .steps import STEP_FAILURES, describe_failure, status, warn, warn_step
 
@@ -75,7 +76,7 @@ def _write_mise_config(
             tools_lines.append(f'"{pkg}" = "latest"')
 
     mise_config = "\n".join(settings_lines + tools_lines) + "\n"
-    path = f"{home}/.config/mise/config.toml"
+    path = f"{home}/{MISE_CONFIG_DIR}/config.toml"
     try:
         files.write(path, mise_config.encode(), mode=0o644, parent_mode=0o755)
     except PathRefused as refused:
@@ -101,7 +102,7 @@ def _fetch_mise_lockfile(files: Files, lockfile_source: str, home: str, log: Ini
 
     try:
         ref = parse_source_ref(lockfile_source, default_filename="mise.lock")
-        fetch_file(ref, files, f"{home}/.config/mise/mise.lock", log=log)
+        fetch_file(ref, files, f"{home}/{MISE_CONFIG_DIR}/mise.lock", log=log)
     except STEP_FAILURES as error:
         warn_step(log, "mise lockfile fetch failed", error)
 
@@ -165,7 +166,7 @@ def _run_mise_install(
 
     has_lockfile = False
     try:
-        lockfile = Command(("test", "-f", f"{home}/.config/mise/mise.lock"), deadline=files.deadline)
+        lockfile = Command(("test", "-f", f"{home}/{MISE_CONFIG_DIR}/mise.lock"), deadline=files.deadline)
         has_lockfile = status(files, lockfile) == 0
     except STEP_FAILURES:
         pass

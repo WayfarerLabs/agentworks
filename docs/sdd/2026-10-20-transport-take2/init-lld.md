@@ -478,11 +478,17 @@ access and bound since slice 5.
 `dotfiles_destination` is operator configuration expanded today with `.replace("~", home)`, which
 rewrites every `~` in it (`driver.py:568`, `agents/initializer.py:312`).
 `sources.normalize_destination` becomes its validator on both templates (`vms/admin.py:122`,
-`agents/template.py:122`), at template load: the value is `~/` followed by a relative path, or an
-absolute path; it has no empty, `.` or `..` component; a trailing `/` is dropped; and `~` or `~/`
-alone, the home itself, is refused, since replacing it would move the home aside.
+`agents/template.py:122`), at template load, stored overlays included: the value is `~/` followed by
+a relative path, a bare relative path (normalized to `~/` and the path, which is what it always
+meant, so a stored `dots` keeps working), or an absolute path; it has no empty, `.` or `..`
+component and no other user's `~`; a trailing `/` is dropped; and `~` or `~/` alone, the home
+itself, is refused, since replacing it would move the home aside. A path in the home that is, or is
+a parent of, one Agentworks manages there (`vms/home_layout.py`'s `MANAGED`: the two fragments,
+`.ssh`, `.config/mise` and the credential state's `.agentworks`) is refused too. Refusals are
+`DestinationError`, an `errors.ValueFreeError` whose message names the accepted forms and no part of
+the value, which `instance_overlay_codec` shows in place of its generic message.
 `expand_destination(value, home)` replaces only the leading `~` and refuses, before any request, an
-absolute value that is the home or one of its ancestors.
+absolute value that is the home or one of its ancestors, or that lands on a managed path.
 
 ### Source lines
 
@@ -750,8 +756,9 @@ from either source it is now 0644. `/etc/fstab` was reset to 0644 `root:root` by
   agw-launch's environment and fixed `PATH` underneath it instead of sshd's non-login shell.
 - A local dotfiles directory is replaced through a temporary sibling; the previous tree comes back
   if the upload fails or is interrupted, and the replacement no longer marks the reinit partial.
-- `dotfiles_destination` must start with `~/` or `/`, may not name the home itself or use `..`, and
-  loses a trailing `/`; only its leading `~` is expanded.
+- `dotfiles_destination` is a path in the home (`dots` or `~/dots`) or an absolute path; it may not
+  name the home itself, be or hold a path Agentworks manages there, or use `..`, and loses a
+  trailing `/`; only its leading `~` is expanded.
 - Git credentials reconcile under bash for every account, so an `sh` or `dash` admin or agent gets
   its credentials.
 - A bash account no longer gets a `~/.zprofile` or `~/.zshrc` created for it.

@@ -22,6 +22,7 @@ from agentworks.execution.requests import Bytes, Command
 from agentworks.execution.results import Completed, Result, Unknown, UnknownReason
 from agentworks.sources import (
     UPLOAD_TREE_SCRIPT,
+    DestinationError,
     SourceRef,
     SourceRefError,
     expand_destination,
@@ -32,6 +33,7 @@ from agentworks.sources import (
     upload_tree,
 )
 from agentworks.vms.admin import AdminConfig
+from agentworks.vms.home_layout import MANAGED
 from tests.phase_b_support import StepGuest, requires_file_program
 from tests.vm_access_support import account_shell, local_vm_access
 
@@ -501,23 +503,72 @@ def test_workstation_snapshot_error_identifies_declared_source_without_io_cause(
 
 @pytest.mark.parametrize(
     ("value", "normalized"),
-    [("~/x", "~/x"), ("~/a/b/", "~/a/b"), ("/x/y", "/x/y"), ("/x/y/", "/x/y")],
+    [
+        ("~/x", "~/x"),
+        ("~/a/b/", "~/a/b"),
+        ("x", "~/x"),
+        ("a/b/", "~/a/b"),
+        ("/x/y", "/x/y"),
+        ("/x/y/", "/x/y"),
+        ("~/.config/mise/dots", "~/.config/mise/dots"),
+    ],
 )
-def test_normalize_destination_accepts_a_home_relative_or_absolute_path(value: str, normalized: str) -> None:
+def test_normalize_destination_accepts_a_path_in_the_home_or_an_absolute_path(value: str, normalized: str) -> None:
     assert normalize_destination(value) == normalized
 
 
-@pytest.mark.parametrize("value", ["~", "~/", "/", "x", "./x", "~x", "~/../x", "~/a//b", "/a/./b", "/a/../b", "~/a\nb"])
-def test_normalize_destination_refuses_the_home_a_relative_path_and_unnormalized_components(value: str) -> None:
-    with pytest.raises(ValueError, match="dotfiles_destination"):
+@pytest.mark.parametrize(
+    "value", ["~", "~/", "/", "", "./x", "~x", "~/~x", "~/../x", "~/a//b", "/a/./b", "/a/../b", "~/a\nb"]
+)
+def test_normalize_destination_refuses_the_home_another_users_home_and_unnormalized_components(value: str) -> None:
+    with pytest.raises(DestinationError):
         normalize_destination(value)
+
+
+@pytest.mark.parametrize("managed", MANAGED)
+def test_a_destination_that_is_or_holds_a_path_agentworks_manages_in_the_home_is_refused(managed: str) -> None:
+    parts = managed.split("/")
+    for depth in range(1, len(parts) + 1):
+        relative = "/".join(parts[:depth])
+        for value in (f"~/{relative}", relative):
+            with pytest.raises(DestinationError):
+                normalize_destination(value)
+        with pytest.raises(SourceRefError):
+            expand_destination(f"/home/agent/{relative}", "/home/agent")
+
+
+def test_a_refused_destination_names_no_part_of_the_value() -> None:
+    for value in ("~/secret-name/../x", "secret-name//x", "~secret-name"):
+        with pytest.raises(DestinationError) as refused:
+            normalize_destination(value)
+        assert "secret-name" not in str(refused.value)
+        assert value not in str(refused.value)
 
 
 @pytest.mark.parametrize("model", [AdminConfig, AgentTemplate])
 def test_both_templates_refuse_an_unsuitable_destination_at_load(model: type) -> None:
-    with pytest.raises(ValidationError, match="dotfiles_destination"):
+    with pytest.raises(ValidationError) as refused:
         model(name="t", dotfiles_destination="~/")
-    assert model(name="t", dotfiles_destination="~/dots/").dotfiles_destination == "~/dots"
+    assert [error["loc"] for error in refused.value.errors()] == [("dotfiles_destination",)]
+    assert model(name="t", dotfiles_destination="dots/").dotfiles_destination == "~/dots"
+
+
+def test_a_stored_relative_destination_decodes_into_the_home_and_a_refusal_names_the_accepted_forms() -> None:
+    from agentworks.agents.instance_overlay import decode_overlay
+    from agentworks.errors import ValidationError as OverlayError
+    from agentworks.vms.instance_overlay import decode_admin_overlay
+
+    for decode in (decode_overlay, decode_admin_overlay):
+        stored = decode({"dotfiles_destination": "dotfiles"})
+        assert stored.dotfiles_destination is not None
+        assert expand_destination(stored.dotfiles_destination, "/home/agent") == "/home/agent/dotfiles"
+
+        with pytest.raises(DestinationError) as direct:
+            normalize_destination("~/secret/../x")
+        with pytest.raises(OverlayError) as decoded:
+            decode({"dotfiles_destination": "~/secret/../x"})
+        assert str(direct.value) in str(decoded.value)
+        assert "secret" not in str(decoded.value)
 
 
 def test_expand_destination_replaces_only_the_leading_tilde() -> None:

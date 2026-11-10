@@ -68,6 +68,15 @@ class ValidationError(AgentworksError):
     """Invalid user input (bad name, bad spec, value out of range, etc.)."""
 
 
+class ValueFreeError(ValueError):
+    """A model validator's ``ValueError`` whose message holds no operator-supplied value.
+
+    A value-safe report of a model's validation failures
+    (``instance_overlay_codec.value_safe_model_validation_error``) shows its
+    message where it shows a generic one for any other ``ValueError``.
+    """
+
+
 class StateError(AgentworksError):
     """Entity exists but is not in a state that supports this operation.
 

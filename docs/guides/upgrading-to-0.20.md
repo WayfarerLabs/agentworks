@@ -306,9 +306,12 @@ place its `authorized_keys`; every later step runs as the agent, which cannot ru
   unpacked beside the destination first, and the previous tree is put back if the upload fails or is
   interrupted; a run killed outright leaves the previous tree beside the destination, and the next
   reinit moves it back. The replacement no longer leaves the reinit partial.
-- **`dotfiles_destination` is checked when the template loads.** It must start with `~/` or `/`, may
-  not name the home itself or one of its parents, and may not contain a `.` or `..` component; a
-  trailing `/` is dropped, and only its leading `~` is expanded.
+- **`dotfiles_destination` is checked when the template loads.** It is a path in the home (`dots` or
+  `~/dots`) or an absolute path. It may not name the home itself or one of its parents, may not be
+  or hold a path Agentworks manages in the home (`~/.ssh`, `~/.config/mise`, `~/.agentworks` and the
+  `~/.agentworks-*.sh` fragments), and may not contain an empty, `.` or `..` component; a trailing
+  `/` is dropped, and only its leading `~` is expanded. A stored destination such as `dots` keeps
+  meaning `~/dots`.
 - **A git dotfiles checkout follows its `ref`.** On reinit an existing clone fetches the template's
   `ref` and checks it out, so a changed `ref` takes effect and a branch or tag alike advances; with
   no `ref` the clone is fast-forwarded (`git pull --ff-only`). The admin used to pull whatever

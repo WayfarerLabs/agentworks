@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, cast
 from pydantic import ValidationError as PydanticValidationError
 
 from agentworks.declared_resource import DeclaredResource
-from agentworks.errors import ValidationError
+from agentworks.errors import ValidationError, ValueFreeError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -78,8 +78,11 @@ def value_safe_model_validation_error(
         if item["type"] in {"value_error", "assertion_error"}:
             context = item.get("ctx")
             cause = context.get("error") if isinstance(context, dict) else None
-            sanitized = None if custom_error_sanitizer is None else custom_error_sanitizer(cause)
-            message = sanitized or "Value failed domain validation"
+            if isinstance(cause, ValueFreeError):
+                message = str(cause)
+            else:
+                sanitized = None if custom_error_sanitizer is None else custom_error_sanitizer(cause)
+                message = sanitized or "Value failed domain validation"
         if item["type"] == "extra_forbidden" and item["loc"] in (("claude_marketplaces",), ("claude_plugins",)):
             message += "; move Claude setup into harness_integrations under the claude-code map key"
         details.append(f"{location}: {message}")

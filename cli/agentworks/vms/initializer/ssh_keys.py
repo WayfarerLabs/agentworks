@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.execution.requests import Command, Script, Shell
+from agentworks.vms.home_layout import SSH_DIR
 
 from .steps import STEP_FAILURES, status, warn, warn_step
 
@@ -97,7 +98,7 @@ def _reconcile_authorized_keys(
         label = f"{label} for {owner}"
     output.info(f"Reconciling authorized_keys ({label})...")
 
-    path = f"{home}/.ssh/authorized_keys"
+    path = f"{home}/{SSH_DIR}/authorized_keys"
     if owner is None:
         try:
             files.write(path, content, mode=0o600, parent_mode=0o700)
@@ -107,7 +108,7 @@ def _reconcile_authorized_keys(
         return AuthorizedKeysApplied(prepared.identity, prepared.private_key_ref)
 
     # `useradd -m` creates no .ssh (it is not in /etc/skel).
-    files.ensure_directory(f"{home}/.ssh", mode=0o700, owner=owner, group=owner, elevated=True)
+    files.ensure_directory(f"{home}/{SSH_DIR}", mode=0o700, owner=owner, group=owner, elevated=True)
     files.write(path, content, mode=0o600, parent_mode=0o700, owner=owner, group=owner, elevated=True)
     return AuthorizedKeysApplied(prepared.identity, prepared.private_key_ref)
 

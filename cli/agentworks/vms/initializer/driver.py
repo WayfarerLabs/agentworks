@@ -30,6 +30,7 @@ from agentworks.execution.access import Admin
 from agentworks.execution.requests import Command
 from agentworks.git_config import ensure_safe_directory_wildcard
 from agentworks.git_credentials import configure_user_git_credentials
+from agentworks.vms.home_layout import MISE_CONFIG_DIR
 
 from . import phase_a
 from .dotfiles import sync_dotfiles
@@ -611,6 +612,7 @@ def _phase_b_setup(
 def _has_mise_config(files: Files, home: str) -> bool:
     """Whether the admin's home has a mise config (dotfiles may supply one); a probe that cannot run means no."""
     try:
-        return status(files, Command(("test", "-f", f"{home}/.config/mise/config.toml"), deadline=files.deadline)) == 0
+        probe = Command(("test", "-f", f"{home}/{MISE_CONFIG_DIR}/config.toml"), deadline=files.deadline)
+        return status(files, probe) == 0
     except STEP_FAILURES:
         return False

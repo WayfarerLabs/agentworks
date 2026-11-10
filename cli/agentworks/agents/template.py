@@ -120,9 +120,11 @@ class AgentTemplate(DeclaredResource):
     """Where to fetch the agent user's dotfiles from."""
 
     dotfiles_destination: str | None = None
-    """Where the fetched dotfiles are checked out: `~/` followed by a path in the
-    agent's home, or an absolute path. It may not be the home itself or one of its
-    parents, or have an empty, `.` or `..` component; a trailing `/` is dropped."""
+    """Where the fetched dotfiles are checked out: a path in the agent's home
+    (`dots` or `~/dots`), or an absolute path. It may not be the home itself or one
+    of its parents, be or hold a path Agentworks manages in the home (`~/.ssh`,
+    `~/.config/mise`, `~/.agentworks` and the `~/.agentworks-*.sh` fragments), or
+    have an empty, `.` or `..` component; a trailing `/` is dropped."""
 
     @field_validator("dotfiles_destination")
     @classmethod
