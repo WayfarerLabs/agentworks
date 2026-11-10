@@ -288,7 +288,6 @@ def create_agent_on_vm(
     from agentworks.git_credentials import configure_user_git_credentials
 
     configure_user_git_credentials(
-        agent_target,
         agent_access,
         credential_requests,
         config,

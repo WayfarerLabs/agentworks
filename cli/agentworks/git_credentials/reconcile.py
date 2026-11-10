@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
-import base64
 import gzip
 import io
 import tarfile
 from typing import TYPE_CHECKING
 
+from agentworks.errors import ExternalError
+from agentworks.execution.requests import Bytes, DiscardOutput, NoInput, Script, Shell
+
 if TYPE_CHECKING:
+    from agentworks.execution.access import VMAccess
     from agentworks.git_credentials.state import UserCredentialState
-    from agentworks.transports import Transport
 
 
 _LAUNCHER = """#!/bin/sh
@@ -94,8 +96,8 @@ def _add_tar_file(archive: tarfile.TarFile, name: str, content: bytes, mode: int
     archive.addfile(info, io.BytesIO(content))
 
 
-def _state_archive(state: UserCredentialState) -> str:
-    """Return a deterministic base64 tarball for one private staged state."""
+def _state_archive(state: UserCredentialState) -> bytes:
+    """Return a deterministic gzip tarball for one private staged state."""
     raw = io.BytesIO()
     with (
         gzip.GzipFile(fileobj=raw, mode="wb", mtime=0) as compressed,
@@ -113,7 +115,7 @@ def _state_archive(state: UserCredentialState) -> str:
             _add_tar_directory(archive, "generation/helpers")
             for relative, content in state.managed_helper_files:
                 _add_tar_file(archive, f"generation/{relative}", content, 0o700)
-    return base64.b64encode(raw.getvalue()).decode("ascii")
+    return raw.getvalue()
 
 
 _RECONCILE_SCRIPT = r"""set -Eeu
@@ -250,7 +252,7 @@ fi
 
 mkdir -p "$stage" "$root/generations"
 chmod 700 "$stage" "$root/generations"
-if ! base64 -d | tar -xzf - -C "$stage"; then
+if ! tar -xzf - -C "$stage"; then
     rm -rf "$stage"
     exit 24
 fi
@@ -300,26 +302,37 @@ _RECONCILE_FAILURES = {
     ),
     29: "Git credential state could not be reconciled; retry user initialization",
 }
+_RECONCILE_UNEXPECTED = "Git credential reconciliation failed unexpectedly; retry user initialization"
 
 
-def reconcile_user_git_credentials(target: Transport, state: UserCredentialState) -> None:
-    """Converge all Agentworks-owned Git credential state for one user."""
-    from agentworks.ssh import SSHError
+RECONCILE_DEADLINE = 90
+"""Seconds the reconcile script may take, its two lock waits of 30 seconds included."""
 
+
+def reconcile_request(state: UserCredentialState) -> Script:
+    """The one request that converges ``state``: the script under bash, the material as its stdin.
+
+    Bash whatever the account's shell, with no startup file, since the script
+    traps ``ERR``. The archive holds credential material, so it travels only
+    as the request's input, which no log record, error or ``repr`` holds.
+    """
     desired = "present" if state.has_credentials else "empty"
-    payload = _state_archive(state) if state.has_credentials else ""
-    try:
-        result = target.run(
-            _RECONCILE_SCRIPT.replace("@DESIRED@", desired),
-            input_text=payload,
-            timeout=90,
-            check=False,
-        )
-    except SSHError:
-        raise SSHError("Git credential reconciliation transport failed; retry user initialization") from None
-    if not result.ok:
-        message = _RECONCILE_FAILURES.get(
-            result.returncode,
-            "Git credential reconciliation failed unexpectedly; retry user initialization",
-        )
-        raise SSHError(message) from None
+    return Script(
+        _RECONCILE_SCRIPT.replace("@DESIRED@", desired),
+        Shell.BASH,
+        stdin=Bytes(_state_archive(state)) if state.has_credentials else NoInput(),
+        deadline=RECONCILE_DEADLINE,
+    )
+
+
+def reconcile_user_git_credentials(access: VMAccess, state: UserCredentialState) -> None:
+    """Converge all Agentworks-owned Git credential state for ``access``'s identity.
+
+    Both streams are discarded, since a command can reflect its stdin; the
+    exit status is the whole answer, mapped to a message that holds no value.
+    An outcome that is not a completion raises its typed error.
+    """
+    result = access.run(reconcile_request(state), stdout=DiscardOutput(), stderr=DiscardOutput())
+    status = result.require_completed(access.vm_name)
+    if status != 0:
+        raise ExternalError(_RECONCILE_FAILURES.get(status, _RECONCILE_UNEXPECTED))

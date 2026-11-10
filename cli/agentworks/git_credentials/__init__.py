@@ -27,7 +27,6 @@ if TYPE_CHECKING:
     from agentworks.execution.access import VMAccess
     from agentworks.git_credentials.nodes import GitCredentialNode
     from agentworks.resources import Registry
-    from agentworks.transports import Transport
 
 
 class _WarnLogger(Protocol):
@@ -144,7 +143,6 @@ def materialize_credential_state(
 
 
 def configure_user_git_credentials(
-    target: Transport,
     access: VMAccess,
     requests: Iterable[CredentialRequest],
     config: Config,
@@ -152,19 +150,19 @@ def configure_user_git_credentials(
     *,
     target_role: Literal["admin", "agent"],
 ) -> None:
-    """Materialize and unconditionally reconcile one target user's full state.
+    """Materialize and unconditionally reconcile one target user's full state, as that user on ``access``.
 
-    ``access`` is the same user's, for the providers' runup; ``target`` is
-    what the reconcile still writes through.
+    The providers' runup and the reconcile both run on ``access``. A step
+    failure warns; the initializers are the only callers.
     """
-    from agentworks.ssh import SSHError
+    from agentworks.vms.initializer.steps import STEP_FAILURES
 
     logger.step("Git credentials")
     output.info("Reconciling git credentials...")
     state = materialize_credential_state(requests, access, target_role, config, logger)
     try:
-        reconcile_user_git_credentials(target, state)
-    except SSHError as exc:
+        reconcile_user_git_credentials(access, state)
+    except STEP_FAILURES as exc:
         msg = f"git credential reconciliation failed: {exc}"
         logger.warning(msg)
         output.warn(msg)

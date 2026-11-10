@@ -567,7 +567,6 @@ def _phase_b_setup(
 
         # Non-fatal: git credentials (before dotfiles and mise lockfile for private repos)
         configure_user_git_credentials(
-            legacy_target,
             files.access,
             credential_requests,
             config,
