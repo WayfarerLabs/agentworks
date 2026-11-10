@@ -1,6 +1,6 @@
 # Desired runtime state and reconciliation
 
-Status: requirements draft under the operator's authorized single-PR SDD effort.
+Status: requirements checkpoint converged under the operator's authorized single-PR SDD effort.
 
 ## Purpose
 
