@@ -12,12 +12,12 @@ on `feat/desired-runtime-state`, based on main. No split PR, stack, early merge,
 is authorized. Private implementation commits may be partial; each published handoff is complete for
 its checkpoint and green. The PR remains draft until the complete implementation handoff.
 
-| Stage                   | Signal                                      | Published fix allowance               | Current record                                   |
-| ----------------------- | ------------------------------------------- | ------------------------------------- | ------------------------------------------------ |
-| FRD                     | Draft plus `review-requested`               | Up to two rounds                      | Converged at `c6337609d`, two rounds used        |
-| Complete design         | Draft plus `review-requested`               | Up to two rounds                      | Round-one handoff `288d4a05`; round two underway |
-| Complete implementation | Ready                                       | Up to two rounds                      | Not started                                      |
-| Closeout                | Final lock in the same PR after convergence | No new feature/fix allowance inferred | Not started                                      |
+| Stage                   | Signal                                      | Published fix allowance               | Current record                            |
+| ----------------------- | ------------------------------------------- | ------------------------------------- | ----------------------------------------- |
+| FRD                     | Draft plus `review-requested`               | Up to two rounds                      | Converged at `c6337609d`, two rounds used |
+| Complete design         | Draft plus `review-requested`               | Up to two rounds                      | Converged at `32a176600`; two rounds used |
+| Complete implementation | Ready                                       | Up to two rounds                      | Private work in progress                  |
+| Closeout                | Final lock in the same PR after convergence | No new feature/fix allowance inferred | Not started                               |
 
 The FRD convergence reading is PR comment 6762771633. The final report accepted prior corrections;
 its remaining phrase suggestion was independently assessed as optional. The HLA states uniform
@@ -49,12 +49,16 @@ GitHub feedback does not extend authority. Optional wording does not independent
 - [x] Run an independent project review and complexity pass at one pinned design head in separate
       detached worktrees. Critically resolve findings; add a targeted correctness reading where an
       algorithm or failure example needs it. Keep the lead responsible for architecture and plan.
-- [ ] Run documentation lint/format/spelling, typography and link checks, locked-SDD guard, and
+- [x] Run documentation lint/format/spelling, typography and link checks, locked-SDD guard, and
       applicable required gates. Reuse unchanged-code evidence honestly; CI must be green at
       handoff.
-- [ ] Publish the complete-design checkpoint in PR #885 with a scoped handoff and
+- [x] Publish the complete-design checkpoint in PR #885 with a scoped handoff and
       `review-requested`, then monitor and process at most two authorized published fix rounds.
-- [ ] Record design convergence and only then begin implementation under the existing charter.
+- [x] Record design convergence and only then begin implementation under the existing charter.
+
+The complete-design convergence record is PR comment 6766449528 at `32a176600`, after two authorized
+fix rounds. Both private lanes and the final published delta reported no material findings, and CI
+run 42808435958 was green. Optional wording was assessed without another round.
 
 Definition of done: a complete, internally consistent design with no unresolved material finding, an
 explicit migration and CLI contract, a green handed-off head, and a recorded convergence basis.
