@@ -359,12 +359,11 @@ def _prepare_vm_target(
     *,
     registry: Registry,
     interaction: TtyInteractionPolicy,
-    held_native_guard: NativeMutationGuard | None = None,
-    resolver: Resolver | None = None,
+    held_native_guard: NativeMutationGuard,
+    resolver: Resolver,
 ) -> Iterator[tuple[VMRow, Transport]]:
     """Prepare canonical guest access using the invocation's secret resolver."""
     from agentworks.harness_setup.locking import native_mutation_guard
-    from agentworks.secrets.resolver import Resolver
     from agentworks.transports import transport
     from agentworks.vms.manager.runtime import activate_vm_runtime, prepare_vm_runtime
 
@@ -375,8 +374,6 @@ def _prepare_vm_target(
         raise NotFoundError(f"VM '{vm_name}' not found", entity_kind="vm", entity_name=vm_name)
     if vm.tailscale_host is None:
         raise StateError(f"VM '{vm.name}' has no Tailscale address", entity_kind="vm", entity_name=vm.name)
-    owns_resolver = resolver is None
-    resolver = resolver if resolver is not None else Resolver(config, registry, interaction=interaction)
     context = None
     try:
         with native_mutation_guard(db.path, vm_name, held=held_native_guard) as guard:
@@ -403,8 +400,6 @@ def _prepare_vm_target(
     finally:
         if context is not None:
             context.clear_values()
-        if owns_resolver:
-            resolver.close()
 
 
 def _live_target(db: Database, config: Config, vm_name: str) -> tuple[VMRow, Transport] | None:
