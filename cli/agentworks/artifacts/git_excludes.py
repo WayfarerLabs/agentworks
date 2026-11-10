@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 from agentworks import output
 from agentworks.errors import ExternalError, StateError
 from agentworks.harness_setup.model import NativeClaim
+from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
 from agentworks.native_files import NativeFiles, native_path
 
 if TYPE_CHECKING:
@@ -26,7 +27,7 @@ r = json.load(sys.stdin)
 p = subprocess.run(['git', '-C', r['workspace'], 'rev-parse', '--path-format=absolute',
                     '--show-prefix', '--git-path', 'info/exclude'], capture_output=True, text=True)
 if p.returncode:
-    print(json.dumps({'prefix': None, 'exclude': None, 'tracked': []}))
+    print(json.dumps({'prefix': None, 'exclude': None, 'tracked': [], 'error': p.stderr.strip()}))
     raise SystemExit(0)
 prefix, exclude = p.stdout.splitlines()
 tracked = set()
@@ -51,6 +52,44 @@ def _pair(claim: NativeClaim, integration: str) -> bytes:
     return f"# agentworks artifact {marker}\n{claim.identifier}\n".encode()
 
 
+def _metadata(
+    runner: Transport,
+    workspace: str,
+    paths: Sequence[str],
+    unavailable: Callable[[str], None],
+) -> tuple[str, str, list[str]] | None:
+    request = json.dumps({"workspace": workspace, "paths": paths})
+    result = runner.run(shlex.join(["python3", "-c", _METADATA]), input_data=request, check=False, tty=False)
+    unavailable_reason = ""
+    try:
+        observed = json.loads(result.stdout)
+        prefix, destination, tracked = observed["prefix"], observed["exclude"], observed["tracked"]
+        if result.returncode or not isinstance(tracked, list) or any(not isinstance(path, str) for path in tracked):
+            raise ValueError()
+        if prefix is None and destination is None:
+            reason = observed.get("error")
+            if not isinstance(reason, str) or not reason:
+                raise ValueError()
+            unavailable_reason = reason
+        else:
+            if not isinstance(prefix, str) or (prefix and not prefix.endswith("/")):
+                raise ValueError()
+            if prefix:
+                native_path("/" + prefix.removesuffix("/"))
+            for path in tracked:
+                native_path("/" + path)
+            return prefix, native_path(destination), tracked
+    except (ValueError, KeyError, TypeError, StateError):
+        raise ExternalError(f"Git metadata for workspace artifact exclusions is unavailable at '{workspace}'") from None
+    unavailable(
+        sanitize_setup_diagnostic(
+            f"Git could not resolve artifact exclusion metadata for '{workspace}': {unavailable_reason}",
+            logger=runner.logger,
+        )
+    )
+    return None
+
+
 def reconcile_workspace_excludes(
     runner: Transport,
     workspace: str,
@@ -61,12 +100,15 @@ def reconcile_workspace_excludes(
     *,
     group: str,
     report_incomplete: Callable[[str], None],
+    prior_workspace: str | None = None,
 ) -> None:
     """Own only our exact marker/pattern pairs, preserving all unrelated lines.
 
     Claims cross persisted state, Git metadata crosses the guest boundary, and
     native file writes use a compare-and-publish guard against concurrent edits.
     Only Git's current destination authorizes I/O, never a stored destination.
+    Rehome alone supplies its verified old row path as prior_workspace; saved
+    claims never select another source or authorize a migration by themselves.
     """
     prior = tuple(claim for claim in claims if claim.role == GIT_EXCLUDE_ROLE)
     workspace = native_path(workspace)
@@ -76,39 +118,30 @@ def reconcile_workspace_excludes(
     if any(not path.startswith(workspace + "/") for path in paths):
         raise StateError("workspace artifact exclusion is outside its workspace")
     relative_paths = tuple(path.removeprefix(workspace + "/") for path in paths)
-    request = json.dumps({"workspace": workspace, "paths": relative_paths})
-    result = runner.run(shlex.join(["python3", "-c", _METADATA]), input_data=request, check=False, tty=False)
-    try:
-        observed = json.loads(result.stdout)
-        prefix, destination, tracked = observed["prefix"], observed["exclude"], observed["tracked"]
-        if result.returncode or not isinstance(tracked, list) or any(not isinstance(path, str) for path in tracked):
-            raise ValueError()
-        if prefix is None and destination is None:
-            if prior:
-                report_incomplete("Workspace no longer resolves Git metadata; prior artifact exclusions were retained.")
+    metadata = _metadata(runner, workspace, relative_paths, report_incomplete if prior else output.warn)
+    if metadata is None:
+        return
+    prefix, destination, tracked = metadata
+    source_workspace, source_prefix = workspace, prefix
+    if prior_workspace is not None and prior:
+        source_workspace = native_path(prior_workspace)
+        source_metadata = _metadata(runner, source_workspace, (), report_incomplete)
+        if source_metadata is None:
             return
-        if not isinstance(prefix, str) or (prefix and not prefix.endswith("/")):
-            raise ValueError()
-        if prefix:
-            native_path("/" + prefix.removesuffix("/"))
-        for path in tracked:
-            native_path("/" + path)
-        destination = native_path(destination)
-    except (ValueError, KeyError, TypeError, StateError):
-        raise ExternalError("Git metadata for workspace artifact exclusions is unavailable") from None
+        source_prefix = source_metadata[0]
 
     remaining = list(claims)
     rebound = []
     for claim in prior:
-        # Decode only our canonical literal spelling under the current Git prefix.
+        # Decode only our canonical literal spelling under the source's current Git prefix.
         decoded = re.sub(r"\\(.)", r"\1", claim.identifier.removeprefix("/"))
-        relative = decoded.removeprefix(prefix)
+        relative = decoded.removeprefix(source_prefix)
         try:
             valid = (
-                claim.source == workspace
-                and decoded.startswith(prefix)
-                and claim.identifier == _pattern(relative, prefix)
-                and native_path(workspace + "/" + relative).startswith(workspace + "/")
+                claim.source == source_workspace
+                and decoded.startswith(source_prefix)
+                and claim.identifier == _pattern(relative, source_prefix)
+                and native_path(source_workspace + "/" + relative).startswith(source_workspace + "/")
             )
         except StateError:
             valid = False
@@ -118,7 +151,7 @@ def reconcile_workspace_excludes(
             output.warn("Stored artifact exclusion no longer matches this workspace; its association was released.")
             continue
         current_claim = NativeClaim(
-            role=GIT_EXCLUDE_ROLE, identifier=claim.identifier, destination=destination, source=workspace
+            role=GIT_EXCLUDE_ROLE, identifier=claim.identifier, destination=destination, source=source_workspace
         )
         if claim.destination != destination:
             output.warn("Git metadata moved; artifact exclusion ownership now uses Git's current destination.")
@@ -150,10 +183,13 @@ def reconcile_workspace_excludes(
                 (start != 0 and existing[start - 1 : start] != b"\n") or not existing.startswith(pair, start)
                 for start in positions
             ):
-                report_incomplete("An owned artifact exclusion was modified; its bytes and ownership were retained.")
+                report_incomplete(
+                    f"An owned artifact exclusion in '{destination}' was modified; "
+                    "its bytes and ownership were retained."
+                )
                 continue
             if len(positions) > 1:
-                raise StateError("workspace artifact exclusion ownership markers are duplicated")
+                raise StateError(f"workspace artifact exclusion ownership markers are duplicated in '{destination}'")
             if claim in desired:
                 replacement = (
                     existing

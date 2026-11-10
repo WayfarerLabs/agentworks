@@ -108,8 +108,11 @@ def test_workspace_delete_retires_only_its_shared_exclusions(db, deletion, share
     )
 
 
-@pytest.mark.parametrize("problem", ["modified", "duplicate", "unavailable"])
-def test_incomplete_shared_cleanup_keeps_workspace_and_evidence_for_retry(db, deletion, shared_workspace, problem):
+@pytest.mark.parametrize("force", [False, True])
+@pytest.mark.parametrize("problem", ["modified", "duplicate", "unavailable", "missing-workspace", "transport", "trust"])
+def test_incomplete_shared_cleanup_warns_and_keeps_parent_deletion_best_effort(
+    db, deletion, shared_workspace, problem, force, monkeypatch, captured_output
+):
     target, first, second, exclude, prefix, first_claims, second_claims, removed = shared_workspace
     original = exclude.read_bytes()
     git_dir = exclude.parent.parent
@@ -120,28 +123,56 @@ def test_incomplete_shared_cleanup_keeps_workspace_and_evidence_for_retry(db, de
         from agentworks.artifacts.git_excludes import _pair
 
         exclude.write_bytes(original + _pair(first_claims[0], "codex"))
-    else:
+    elif problem == "unavailable":
         git_dir.rename(displaced)
-    try:
-        with pytest.raises(StateError) as error:
-            delete_workspace(db, deletion.config, "project", yes=True, interaction=TtyInteractionPolicy.REFUSE)
-        assert error.value.entity_kind == "workspace" and error.value.entity_name == "project"
-        assert db.get_workspace("project") is not None and first.exists() and not removed
-        record = read_native_setup(db, "workspace", "project").records[0]
+    elif problem == "missing-workspace":
+        shutil.rmtree(first)
+    elif problem == "transport":
+        from agentworks.ssh import SSHError
+
+        monkeypatch.setattr(target, "run", lambda *args, **kwargs: (_ for _ in ()).throw(SSHError("fixture transport")))
+    elif problem == "trust":
+        target.environment["GIT_TEST_ASSUME_DIFFERENT_OWNER"] = "1"
+    before = exclude.read_bytes() if exclude.exists() else None
+    observed = []
+
+    def remove(vm, config, name, path, linux_group, **kwargs):
+        record = read_native_setup(db, "workspace", name).records[0]
+        observed.append(record)
         assert record.pending_cleanup and not record.complete and record.incomplete_reasons
-        assert first_claims[0] in record.claims
-        if problem != "unavailable":
-            assert exclude.read_bytes() != original
+        shutil.rmtree(path, ignore_errors=True)
+        removed.append(name)
+
+    monkeypatch.setattr("agentworks.workspaces.backends.vm.delete_vm_workspace", remove)
+    try:
+        delete_workspace(db, deletion.config, "project", force=force, yes=True, interaction=TtyInteractionPolicy.REFUSE)
+        assert removed == ["project"] and observed and captured_output.warnings
+        assert db.get_workspace("project") is None and not first.exists()
+        assert db.instance_state.get_applied_slices("workspace", "project") == ()
+        assert first_claims[0] in observed[0].claims
+        if before is not None:
+            assert exclude.read_bytes() == before
         assert db.get_workspace("survivor") is not None and second.exists()
     finally:
         if problem == "unavailable":
             displaced.rename(git_dir)
-        else:
-            exclude.write_bytes(original)
-    delete_workspace(db, deletion.config, "project", yes=True, interaction=TtyInteractionPolicy.REFUSE)
-    assert removed == ["project"] and db.get_workspace("project") is None
-    assert first_claims[0].identifier.encode() not in exclude.read_bytes()
-    assert second_claims[0].identifier.encode() in exclude.read_bytes()
+        target.environment.pop("GIT_TEST_ASSUME_DIFFERENT_OWNER", None)
+
+
+@pytest.mark.parametrize("failure", [RuntimeError("internal"), KeyboardInterrupt(), StateError("shared persistence")])
+def test_cleanup_does_not_swallow_shared_failures_or_cancellation(db, deletion, shared_workspace, monkeypatch, failure):
+    target, _, _, _, _, _, _, removed = shared_workspace
+
+    def fail(*args, **kwargs):
+        raise failure
+
+    if isinstance(failure, StateError):
+        monkeypatch.setattr("agentworks.harness_setup.cleanup.write_native_setup", fail)
+    else:
+        monkeypatch.setattr(target, "run", fail)
+    with pytest.raises(type(failure)) as caught:
+        delete_workspace(db, deletion.config, "project", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+    assert caught.value is failure and not removed and db.get_workspace("project") is not None
 
 
 def test_vm_deletion_does_not_require_child_workspace_git_cleanup(db, deletion, shared_workspace, monkeypatch):
@@ -170,3 +201,27 @@ def test_vm_deletion_does_not_require_child_workspace_git_cleanup(db, deletion, 
     assert removed == ["box"]
     assert db.get_vm("box") is None and db.get_workspace("project") is None and db.get_workspace("survivor") is None
     assert exclude.read_bytes() == before
+
+
+def test_shared_persistence_failure_during_git_refusal_is_not_wrapped_or_swallowed(
+    db, deletion, shared_workspace, monkeypatch
+):
+    from agentworks.harness_setup.state import write_native_setup
+
+    target, _, _, _, _, _, _, removed = shared_workspace
+    target.environment["GIT_TEST_ASSUME_DIFFERENT_OWNER"] = "1"
+    failure = StateError("shared persistence")
+    calls = 0
+
+    def persist(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise failure
+        return write_native_setup(*args, **kwargs)
+
+    monkeypatch.setattr("agentworks.harness_setup.cleanup.write_native_setup", persist)
+    with pytest.raises(StateError) as caught:
+        delete_workspace(db, deletion.config, "project", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+    assert caught.value is failure and calls == 2
+    assert not removed and db.get_workspace("project") is not None

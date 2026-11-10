@@ -367,3 +367,64 @@ def test_modified_marker_line_preserves_exclusions_and_evidence_until_repaired(r
     assert not retired and not incomplete
     assert exclude.read_bytes() == b"# operator\nprivate.env\n"
     assert git("-C", workspace, "check-ignore", "--no-index", "--", independent).returncode == 0
+
+
+def test_git_trust_refusal_preserves_its_actual_diagnostic_and_claims(repository):
+    from agentworks.harness_setup.outcomes import normalize_setup_diagnostic
+
+    target, workspace = repository
+    record = file(workspace / ".agents/skills/policy/SKILL.md")
+    claims, _, _ = apply(target, workspace, (record,))
+    target.environment["GIT_TEST_ASSUME_DIFFERENT_OWNER"] = "1"
+    result = subprocess.run(
+        ["git", "-C", str(workspace), "rev-parse", "--show-prefix"],
+        capture_output=True,
+        text=True,
+        env=target.environment,
+    )
+    assert result.returncode == 128 and result.stderr
+    remaining, checkpoints, incomplete = apply(target, workspace, (), claims)
+    assert remaining == claims and not checkpoints and len(incomplete) == 1
+    assert normalize_setup_diagnostic(result.stderr) in incomplete[0]
+
+
+def test_git_failure_diagnostic_uses_existing_secret_control_and_size_boundary(repository, monkeypatch, tmp_path):
+    import json
+    from uuid import uuid4
+
+    from agentworks.ssh import SSHLogger, SSHResult
+
+    target, workspace = repository
+    record = file(workspace / ".agents/skills/policy/SKILL.md")
+    claims, _, _ = apply(target, workspace, (record,))
+    secret, cause = uuid4().hex, uuid4().hex
+    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path / "logs")
+    logger = SSHLogger("fixture", "metadata", redactions=(secret,))
+    target.logger = logger
+    original = target.run
+
+    def run(command, **kwargs):
+        if "rev-parse" in command:
+            return SSHResult(
+                0,
+                json.dumps(
+                    {
+                        "prefix": None,
+                        "exclude": None,
+                        "tracked": [],
+                        "error": f"\x1b[31m{cause}\x1b[0m {secret}\x07 " + "x" * 5000,
+                    }
+                ),
+                "",
+            )
+        return original(command, **kwargs)
+
+    monkeypatch.setattr(target, "run", run)
+    try:
+        remaining, checkpoints, incomplete = apply(target, workspace, (), claims)
+        assert remaining == claims and not checkpoints and len(incomplete) == 1
+        assert cause in incomplete[0] and secret not in incomplete[0]
+        assert "\x1b" not in incomplete[0] and "\x07" not in incomplete[0]
+        assert len(incomplete[0].encode()) <= 2048
+    finally:
+        logger.close()
