@@ -719,6 +719,12 @@ just a vm-site.
 | `agw vm port-forward <name> <ports...>`             | Forward local port(s) to a VM (like kubectl port-forward)     |
 | `agw vm logs <name>`                                | Show SSH logs for a VM                                        |
 
+`vm rekey <name>` resolves the template's auth-key secret by default. Use `--secret <name>` to
+select another declared secret for this operation, or `--prompt` to enter the replacement key
+interactively. These options are mutually exclusive. `--prompt` requires usable terminal input. Add
+`--wait-for-share` when moving the VM to a different tailnet and sharing it back before
+verification.
+
 **Power-state semantics:** running and on-demand targets permit automatic activation for commands
 that need a live VM. Reconciliation also restores an idle running-intent VM; on-demand alone does
 not require that. Stopped intent prevents automatic power-on. Ordinary diagnostics and cleanup may

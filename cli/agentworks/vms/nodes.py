@@ -129,6 +129,7 @@ class LiveVMNode:
         site: VMSiteNode,
         *,
         held_native_guard: NativeMutationGuard | None = None,
+        repair_auth_key_name: str | None = None,
     ) -> None:
         self._db = db
         self._config = config
@@ -137,7 +138,9 @@ class LiveVMNode:
         self._site = site
         self._held_native_guard = held_native_guard
         self._observed: VMStatus | None = None
-        self._repair_refs: tuple[str, ...] | None = None
+        self._repair_refs: tuple[str, ...] | None = (
+            (repair_auth_key_name,) if repair_auth_key_name is not None else None
+        )
 
     @property
     def key(self) -> str:
@@ -479,6 +482,7 @@ def live_vm_node(
     *,
     site_nodes: dict[str, VMSiteNode] | None = None,
     held_native_guard: NativeMutationGuard | None = None,
+    repair_auth_key_name: str | None = None,
 ) -> LiveVMNode:
     """Build the ``vm/<name>`` node from its DB row. The row's ``site``
     field translates to the live edge (row fields become edges): the
@@ -494,6 +498,9 @@ def live_vm_node(
     instance per site (the by-site dedup the imperative batch bind
     performed). ``None`` builds a fresh site node, the single-VM
     composition's shape.
+
+    ``repair_auth_key_name`` selects an operation-local rejoin key, as when
+    rekey supplies a replacement instead of the VM template's usual key.
     """
     if site_nodes is None:
         site = vm_site_node(registry, row.site)
@@ -503,7 +510,15 @@ def live_vm_node(
             memoized = vm_site_node(registry, row.site)
             site_nodes[row.site] = memoized
         site = memoized
-    return LiveVMNode(db, config, registry, row, site, held_native_guard=held_native_guard)
+    return LiveVMNode(
+        db,
+        config,
+        registry,
+        row,
+        site,
+        held_native_guard=held_native_guard,
+        repair_auth_key_name=repair_auth_key_name,
+    )
 
 
 def vm_template_node(tmpl: ResolvedVMTemplate) -> VMTemplateNode:

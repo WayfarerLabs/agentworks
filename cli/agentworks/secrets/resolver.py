@@ -59,11 +59,13 @@ class Resolver:
         registry: Registry,
         *,
         interaction: TtyInteractionPolicy,
+        prompt_names: frozenset[str] = frozenset(),
     ) -> None:
         require_exact_tty_interaction_policy(interaction)
         self._config = config
         self._registry = registry
         self._interaction = interaction
+        self._prompt_names = prompt_names
         self._decls: dict[str, SecretDecl] = {}
         self._targets: list[SecretTarget] = []
         self._seeded: dict[str, str] = {}
@@ -280,6 +282,7 @@ class Resolver:
             active_sources(self._config, self._registry),
             tty_access=tty_access,
             interaction_broker=broker,
+            prompt_names=self._prompt_names,
         )
 
     def get(self, name: str) -> str:
