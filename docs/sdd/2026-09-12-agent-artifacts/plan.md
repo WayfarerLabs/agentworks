@@ -83,7 +83,7 @@ and skips a conflicting replacement before writing while retaining old evidence 
 independent pairs/core rehome. No state schema, ledger, general native relocation or broad internal
 exception handler was added.
 
-The frozen focused selection passed 165 tests. Three consecutive actual public rehomes, both
+The frozen focused selection passed 165 tests. Three consecutive actual public workspace moves, both
 old-copy modes, full/nested/linked repositories, later tracked files, modified-pair preservation and
 malformed-response deletion are covered. The before-control returned 20 failures and four
 already-correct malformed-string passes; both tracked-query removal controls failed. Original source
@@ -98,6 +98,41 @@ diffs passed. That temporary root was removed and independently checked absent. 
 was changed or independent Chromium root cause claimed. Node's 103 tests, Rulesync and locked-SDD
 checks passed. CI on `e797b380` passed Python/Windows and website jobs but failed file lint on one
 authored word; ordinary wording corrected it and local file lint passed.
+
+### Final local validation for round 2
+
+At frozen `9d17d365`, the complete non-integration suite passed **11,560 tests with 11 skips**, exit
+0 in 244.04 seconds. Ruff lint/format, full mypy over 943 files and CI's exact Typer-isolation check
+passed. All 943 tracked Python source/test files had identical aggregate hashes before and after the
+run. Project, Muntz and generic correctness lanes independently cleared that exact correction,
+including their original counterexample replays and meaningful removal controls. Their 41-, 165- and
+84-case selections overlap the full suite and are not additional full-suite totals.
+
+The first full run returned 23 failures, 11,537 passes and 11 skips. Twenty-one failures were Unix
+socket paths exceeding the native length limit under the lead's deep temporary directory; two
+maintained launchers required the conventional CLI `.venv` layout instead of the worker-root
+environment. Preparing the standard frozen environment and using a short owned external temporary
+root made all 32 affected module cases pass, followed by the full passing run above. Product bytes
+did not change. The original receipts remain. The external temporary root was removed and
+independently checked absent after the terminal gate.
+
+Website validation passed 160 Python tests, 103 Node tests and four builds/two deterministic diffs.
+File lint, Rulesync and locked-SDD checks passed locally. The `9d17d365` CI code, Windows and
+website jobs passed; file lint found two occurrences of a plural term, corrected with ordinary
+wording. Final-head CI remains the delivery gate.
+
+A fresh wheel and source archive built, the wheel installed with repository-locked runtime
+dependencies, and both artifact/integration guides rendered for human and agent audiences. Installed
+artifact help and bundle sample passed. All 475 package files matched source, wheel and installed
+bytes, including generated guide sources. The first parity observer used the wrong source location
+for the explicitly included changelog; correcting that observer mapping passed against the same
+wheel and installed files. Its original failure remains recorded. This does not clear separate issue
+880's unconstrained Typer install.
+
+These gates and private reviews establish the correction's local handoff evidence. They do not
+replace the next independent integration report, final requirement reconciliation or either lock.
+Final bookkeeping changes only spec records and spelling; its review and exact-head CI are checked
+before the ready signal.
 
 ## Native delivery feedback, round 1 of 3, 2026-11-09
 

@@ -397,12 +397,12 @@ worktree is then ignored too. This native repository-level effect is explicitly 
 presented as per-worktree isolation. Do not introduce another Git settings or reference-count engine
 to hide that limitation.
 
-Verified current-owner exclusion claims also supply bounded relative paths for successive rehomes;
-the original general artifact-file inventory need not move. Include every derived path in current
-Git's tracked-file check. A retained ambiguous old association prevents publication of a replacement
-with its conflicting native ownership key; warn and continue independent pairs before any such write
-or checkpoint. Validate helper response field types before native path operations so malformed
-external metadata remains a typed native failure.
+Verified current-owner exclusion claims also supply bounded relative paths for successive workspace
+moves; the original general artifact-file inventory need not move. Include every derived path in
+current Git's tracked-file check. A retained ambiguous old association prevents publication of a
+replacement with its conflicting native ownership key; warn and continue independent pairs before
+any such write or checkpoint. Validate helper response field types before native path operations so
+malformed external metadata remains a typed native failure.
 
 ## Evidence and acceptance
 

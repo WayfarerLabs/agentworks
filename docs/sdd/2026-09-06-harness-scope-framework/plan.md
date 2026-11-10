@@ -11,7 +11,7 @@ main remains `438c4546`.
 
 - [x] Assess the exact-head report and retained evidence without inventing model, native-version or
       provider coverage requirements.
-- [ ] Restore framework R9's no-deletion-prerequisite contract while safely retiring known shared
+- [x] Restore framework R9's no-deletion-prerequisite contract while safely retiring known shared
       exclusions where possible. Correct supported rehome through the verified owning lifecycle;
       preserve native association and file-safety boundaries.
 - [ ] Complete the companion's effective-argument guards and permanent author-contract correction,
@@ -26,6 +26,14 @@ prerequisite. This round corrects behavior against the retained contract rather 
 new refusal exception. The author-contract inconsistencies belong to the companion's current
 native-file carriers. Neither discovery reopens the merged PR 862 correction or transfers closeout
 ownership.
+
+The companion's frozen `9d17d365` correction passed 11,560 non-integration tests with 11 skips, full
+mypy over 943 files and the other local gates. All three independent private lanes cleared the
+corrected source. Successive rehome, ambiguous retained associations, typed malformed metadata and
+current-owner preservation were rechecked without new native state or a broader lifecycle engine.
+Original failed fixtures and their corrected replays remain in the companion's validation record.
+Final-head CI, the exact ready handoff and subsequent independent acceptance remain necessary;
+neither lock is created here.
 
 ## Native delivery feedback, round 1 of 3, 2026-11-09
 
