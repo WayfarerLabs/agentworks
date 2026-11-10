@@ -7,14 +7,13 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.capabilities.base import RunContext
-from agentworks.db import VMStatus
+from agentworks.db import DesiredRuntimeState, VMStatus
 from agentworks.errors import StateError, UserAbort
 from agentworks.naming import NAME_RE
 from agentworks.secrets.policy import require_exact_tty_interaction_policy
 
 from ._helpers import (
     _guard_failed_vm,
-    _lookup_or_synthesize_secret,
     _mask_env_var_backend_for,
     _require_vm,
     _vm_scope,
@@ -27,6 +26,20 @@ if TYPE_CHECKING:
     from agentworks.secrets.policy import TtyInteractionPolicy
 
 
+def set_vm_desired_runtime_state(db: Database, *, name: str, state: str | DesiredRuntimeState) -> None:
+    """Record VM intent without registry, credentials, or runtime work."""
+    from agentworks.errors import ValidationError
+    from agentworks.harness_setup.locking import native_mutation_guard
+
+    try:
+        target = DesiredRuntimeState(state)
+    except (ValueError, TypeError):
+        raise ValidationError("invalid VM desired runtime state", entity_kind="vm", entity_name=name) from None
+    selected = _require_vm(db, name)
+    with native_mutation_guard(db.path, name):
+        db.set_vm_desired_runtime_state(name, target, expected_vm_uuid=selected.vm_uuid)
+
+
 def start_vm(
     db: Database,
     config: Config,
@@ -34,90 +47,41 @@ def start_vm(
     *,
     interaction: TtyInteractionPolicy,
 ) -> None:
-    """Start a stopped VM. Clears the operator-stopped flag so the
-    activation gate resumes auto-starting on demand.
-
-    Orchestrated, composition only: the graph derives from the VM's
-    row and the power ops drive through the node's held platform
-    (:func:`_live_vm_boundary`). No activation gate opens here: the
-    start IS this command's operation, and the operator-stopped flag
-    is CLEARED by it, never consulted.
-    """
-    import agentworks.vms.manager as _mgr
+    """Accept running intent, then start and repair the retained VM."""
     from agentworks.bootstrap import load_request_registry
+    from agentworks.harness_setup.locking import native_mutation_guard
+    from agentworks.secrets.resolver import Resolver
 
-    vm = _require_vm(db, name)
-    _guard_failed_vm(vm)
-    registry = load_request_registry(config, live_database=db)
-    vm_node, ops_ctx = _live_vm_boundary(
-        db,
-        config,
-        vm,
-        registry=registry,
-        interaction=interaction,
-    )
-    platform = vm_node.site.platform
-    # An explicit start is operator intent, whatever the observed state:
-    # clear the flag first so a crashed start doesn't leave the gate
-    # refusing to auto-resume a VM the operator asked to run.
-    db.set_operator_stopped(name, False)
-    # Probe status and issue the start BEFORE entering the hold: the
-    # WSL2 keepalive subprocess boots a stopped distro as a side effect,
-    # which would make status() report RUNNING and mislabel the VM as
-    # "already running". The keepalive then anchors the (now running) VM
-    # through the Tailscale verification.
-    status = platform.status(vm, ops_ctx)
-    if status == VMStatus.RUNNING:
-        output.info(f"VM '{name}' is already running")
-    else:
-        platform.start(vm, ops_ctx)
-        if status in (VMStatus.STOPPED, VMStatus.DEALLOCATED):
-            db.record_vm_started(name)
-        else:
-            db.clear_vm_start_observation(name)
+    from .runtime import prepare_vm_runtime, start_vm_runtime
 
-    # Probe and conditionally acquire the standalone repair credential inside
-    # the same hold that protects the reconnect/rejoin lifecycle.
-    with vm_node.hold_active():
-        if _mgr._tailscale_rejoin_required(
-            db,
-            config,
-            vm,
-            already_running=status == VMStatus.RUNNING,
-        ):
-            from agentworks.orchestration.secrets import ScopedSecrets
-            from agentworks.secrets import resolve_for_command
-            from agentworks.vms.templates import resolve_live_template
-
-            template = resolve_live_template(db, registry, vm.name, vm.template)
-            auth_key_name = template.tailscale_auth_key
-            declaration = _lookup_or_synthesize_secret(registry, auth_key_name)
-            values = resolve_for_command(
-                [],
+    require_exact_tty_interaction_policy(interaction)
+    selected = _require_vm(db, name)
+    _guard_failed_vm(selected)
+    with native_mutation_guard(db.path, name) as guard:
+        registry = load_request_registry(config, live_database=db)
+        db.set_vm_desired_runtime_state(name, DesiredRuntimeState.RUNNING, expected_vm_uuid=selected.vm_uuid)
+        vm = _require_vm(db, name)
+        resolver = Resolver(config, registry, interaction=interaction)
+        context = None
+        try:
+            context = prepare_vm_runtime(
+                db,
                 config,
                 registry,
-                extra_decls=[declaration],
+                vm,
+                resolve_secret=resolver.resolve_gate,
                 interaction=interaction,
+                held_native_guard=guard,
             )
-            try:
-                auth_keys = ScopedSecrets(values, (auth_key_name,))
-                _mgr._ensure_tailscale(
-                    db,
-                    config,
-                    vm,
-                    platform,
-                    ops_ctx,
-                    auth_keys=auth_keys,
-                    auth_key_name=auth_key_name,
-                )
-            finally:
-                values.clear()
-    # Confirm a start only on the path that actually started the VM. When
-    # status was already RUNNING we already said so above, and Tailscale
-    # verification is usually a no-op (handshake already valid), so an
-    # extra line is just noise. Starting does not reconcile native setup.
-    if status != VMStatus.RUNNING:
-        output.info(f"VM '{name}' started")
+            start_vm_runtime(context, resolve_secret=resolver.resolve_gate)
+        finally:
+            if context is not None:
+                context.clear_values()
+            del resolver
+        if context.started:
+            output.info(f"VM '{name}' started")
+        else:
+            output.info(f"VM '{name}' is already running")
 
 
 def stop_vm(
@@ -127,39 +91,41 @@ def stop_vm(
     *,
     interaction: TtyInteractionPolicy,
 ) -> None:
-    """Stop a running VM and record the operator's intent.
+    """Accept stopped intent before provider work, preserving it on failure."""
+    from agentworks.bootstrap import load_request_registry
+    from agentworks.harness_setup.locking import native_mutation_guard
+    from agentworks.secrets.resolver import Resolver
 
-    Orchestrated, composition only, mirroring :func:`start_vm`: no
-    activation gate (the stop IS the operation), power ops through the
-    node's held platform.
-    """
-    vm = _require_vm(db, name)
-    _guard_failed_vm(vm)
-    vm_node, ops_ctx = _live_vm_boundary(db, config, vm, interaction=interaction)
-    platform = vm_node.site.platform
-    # Record intent BEFORE the already-stopped short-circuit: an
-    # operator stopping an already-stopped VM still means "keep it
-    # stopped" (e.g. the VM idled out and they don't want the next op
-    # to auto-resume it).
-    db.set_operator_stopped(name, True)
-    status = platform.status(vm, ops_ctx)
-    if status in (VMStatus.STOPPED, VMStatus.DEALLOCATED):
-        # Never conflate an auto-stop with an explicit one: when the VM
-        # stopped on its own, this command still CHANGED something (the
-        # intent flag above) and the message says what.
-        if vm.operator_stopped:
-            output.info(f"VM '{name}' is already manually stopped")
-        else:
-            output.info(
-                f"VM '{name}' had already stopped on its own; it is now "
-                f"marked manually stopped and will not be auto-started"
+    from .runtime import prepare_vm_runtime, stop_vm_runtime
+
+    require_exact_tty_interaction_policy(interaction)
+    selected = _require_vm(db, name)
+    _guard_failed_vm(selected)
+    with native_mutation_guard(db.path, name) as guard:
+        registry = load_request_registry(config, live_database=db)
+        db.set_vm_desired_runtime_state(name, DesiredRuntimeState.STOPPED, expected_vm_uuid=selected.vm_uuid)
+        vm = _require_vm(db, name)
+        resolver = Resolver(config, registry, interaction=interaction)
+        context = None
+        try:
+            context = prepare_vm_runtime(
+                db,
+                config,
+                registry,
+                vm,
+                resolve_secret=resolver.resolve_gate,
+                interaction=interaction,
+                held_native_guard=guard,
             )
-        return
-    # No hold here: stop is the inverse of what the keepalive is for.
-    # The platform stop call doesn't need SSH to the VM, and holding a
-    # wsl.exe sleep subprocess open would fight `wsl --terminate`.
-    platform.stop(vm, ops_ctx)
-    output.result(f"VM '{name}' stopped")
+            changed = stop_vm_runtime(context)
+        finally:
+            if context is not None:
+                context.clear_values()
+            del resolver
+        if changed:
+            output.result(f"VM '{name}' stopped")
+        else:
+            output.info(f"VM '{name}' is already stopped")
 
 
 def delete_vm(
@@ -214,9 +180,13 @@ def delete_vm(
 
     from agentworks.harness_setup.locking import native_mutation_guard
 
-    with native_mutation_guard(db.path, vm.name):
+    with native_mutation_guard(db.path, vm.name) as guard:
+        selected = _require_vm(db, name)
+        if selected.vm_uuid != vm.vm_uuid:
+            raise StateError("selected VM was replaced", entity_kind="vm", entity_name=name)
+        vm = selected
         try:
-            vm_node, ops_ctx = _live_vm_boundary(db, config, vm, interaction=interaction)
+            vm_node, ops_ctx = _live_vm_boundary(db, config, vm, interaction=interaction, held_native_guard=guard)
         except UserAbort:
             raise
         except Exception:
@@ -308,155 +278,162 @@ def rekey_vm(
     from agentworks.vms.templates import resolve_live_template
 
     vm = _require_vm(db, name)
-    _guard_failed_vm(vm)
-    _warn_legacy_release(vm)
+    from agentworks.harness_setup.locking import native_mutation_guard
 
-    # The composition root: construct (registers the site's config
-    # secrets), preflight both participating resources (the sweep
-    # predicts the new auth key can resolve over the vm-template's
-    # declaration; the platform checks its world), then the operation's
-    # one resolve pass: the new auth key
-    # and any site secret (proxmox's API token) in a single prompt
-    # session. The template node roots FIRST so the sweep keeps HEAD's
-    # precedence (template readiness before the platform preflight).
-    # ``ignore_env`` is honored by temporarily masking the env-var
-    # backend for the auth-key secret (the env-var source reads
-    # ``os.environ`` during preview and resolution, so removing the var
-    # skips it cleanly across BOTH preflight and the
-    # resolve, and the prompt backend takes over).
-    registry = load_request_registry(config, live_database=db)
-    resolver = Resolver(config, registry, interaction=interaction)
-    vm_node = live_vm_node(db, config, registry, vm)
-    rekey_vm_tmpl = resolve_live_template(db, registry, vm.name, vm.template)
-    tmpl_node = vm_template_node(rekey_vm_tmpl)
-    nodes = walk(tmpl_node, vm_node)
-    for secret_name in secret_union(nodes):
-        resolver.register_name(secret_name)
-    # Cache hit by design: the auth key is already in the union (the
-    # template node's secret_refs); this call only fetches the DECL,
-    # which the --ignore-env env-var mask below needs.
-    ts_decl = resolver.register_name(rekey_vm_tmpl.tailscale_auth_key)
-    scope = _vm_scope(db, name)
-    with _mask_env_var_backend_for(ts_decl, masked=ignore_env):
-        preflight_all(
-            nodes,
-            RunContext(config=config, operation_scope=scope),
-            registry=registry,
-            interaction=interaction,
-        )
-        resolver.resolve()
-    from agentworks.secrets.line_safety import (
-        LineOrientedSecretUse,
-        require_line_safe_secret,
-    )
+    with native_mutation_guard(db.path, name) as guard:
+        selected = _require_vm(db, name)
+        if selected.vm_uuid != vm.vm_uuid:
+            raise StateError("selected VM was replaced", entity_kind="vm", entity_name=name)
+        vm = selected
+        _guard_failed_vm(vm)
+        _warn_legacy_release(vm)
 
-    ts_auth_key = require_line_safe_secret(
-        resolver.get(rekey_vm_tmpl.tailscale_auth_key),
-        use=LineOrientedSecretUse.TAILSCALE,
-        secret_name=rekey_vm_tmpl.tailscale_auth_key,
-    )
-
-    # The running check is an op (a backend status read), so it sits
-    # past the boundary: on proxmox it needs the API token, delivered
-    # scoped to the site's declared names.
-    ops_ctx = _platform_ops_ctx(config, scope, vm_node, resolver)
-    platform = vm_node.site.platform
-    status = platform.status(vm, ops_ctx)
-    if status != VMStatus.RUNNING:
-        raise StateError(
-            f"VM '{name}' is not running (status: {status.value})",
-            entity_kind="vm",
-            entity_name=name,
-        )
-
-    with output.section(f"Rekeying '{name}'"), contextlib.ExitStack() as _stack:
-        # The activation gate, opened AFTER the boundary at exactly the
-        # point HEAD held ``keep_active``: converge power state (a race
-        # from the running check above, as at HEAD), then hold for the
-        # rekey's duration (no-op for Lima/Azure/Proxmox; WSL2 anchors
-        # the distro against vmIdleTimeout so per-step `time.sleep`s
-        # can't let it idle out). Boundary-then-gate means the gate
-        # callback must SERVE the boundary's cached values, never
-        # resolve or seed (the batch-ops precedent): the union already
-        # covers the gate secrets AND the repair path's rejoin key (the
-        # auth key is this command's op secret), and ``Resolver.get``
-        # refuses anything outside it loudly.
-        _stack.enter_context(activation_gate(vm_node, resolver.get))
-
-        # native_transport() composes transient_route (Azure pokes a
-        # scoped ephemeral SSH allow on enter and deletes it on exit)
-        # with the platform-native transport builder and the 6-attempt
-        # reachability probe. The caller-supplied ExitStack scopes the
-        # transient state to the duration of the rekey; ``ops_ctx``
-        # delivers the SP credential to those NSG calls with no ambient
-        # fallback.
-        exec_target = native_transport(vm, platform, config, ctx=ops_ctx, stack=_stack)
-
-        # Restart, logout, login, restart. The initial restart clears any
-        # stale daemon state (a previous interrupted rekey can leave the
-        # daemon in a state where `tailscale logout` hangs waiting for a
-        # control plane response that never comes). The final restart
-        # fixes a Tailscale bug where the node registers but peers can't
-        # reach it after rekeying to a different tailnet.
-        # All platforms run systemd (WSL2 enables it via /etc/wsl.conf during
-        # provisioning); tailscaled is always a systemd unit. Daemon-side
-        # flags like --tun=userspace-networking live in /etc/default/tailscaled,
-        # not on `tailscale up`.
-        restart_cmd = "systemctl restart tailscaled"
-        stabilize_secs = 15  # pause between steps for daemon/network stability
-
-        output.info("Restarting Tailscale daemon...")
-        exec_target.run(restart_cmd, sudo=True, timeout=15)
-        time.sleep(stabilize_secs)
-
-        output.info("Logging out of current tailnet...")
-        exec_target.run("tailscale logout", sudo=True, timeout=30)
-        time.sleep(stabilize_secs)
-
-        output.info("Joining new tailnet...")
-        from agentworks.capabilities.vm_platform.tailscale_join import join_tailscale_ephemerally
-
-        join_tailscale_ephemerally(exec_target, ts_auth_key, timeout=30)
-        time.sleep(stabilize_secs)
-
-        output.info("Restarting Tailscale daemon...")
-        exec_target.run(restart_cmd, sudo=True, timeout=15)
-        time.sleep(stabilize_secs)
-
-        output.info("Reading new Tailscale IP...")
-        result = exec_target.run("tailscale ip -4", sudo=True, timeout=15)
-        raw_ip = result.stdout.strip()
-        new_ip = raw_ip.splitlines()[0].strip() if raw_ip else ""
-        try:
-            ipaddress.IPv4Address(new_ip)
-        except ValueError:
-            raise SSHError(f"tailscale ip -4 returned invalid address: {new_ip!r}\nfull output: {raw_ip}") from None
-        output.detail(f"Tailscale IP: {new_ip}")
-
-        # Update DB and SSH config with the new IP (correct regardless of
-        # reachability: the old IP is definitely dead after logout)
-        db.update_vm_tailscale(name, new_ip)
-        sync_ssh_config(config, db)
-        db.insert_vm_event(name, "rekey", f"new_ip={new_ip}")
-
-        # If the operator needs to share the VM back, pause before connectivity check
-        if wait_for_share:
-            output.pause("Share the VM back to your tailnet, then press Enter to verify connectivity...")
-
-        # Always verify Tailscale SSH connectivity to the new IP
-        output.info(f"Verifying SSH to {new_ip}...")
-        from agentworks.transports import SSHTransport
-
-        ts_target = transport(vm, config)
-        # ``transport()`` returns an SSHTransport for Tailscale-backed VMs.
-        # Retarget the host in place instead of rebuilding the whole
-        # transport; the other fields (user, identity, etc.) are unchanged.
-        assert isinstance(ts_target, SSHTransport)
-        ts_target.host = new_ip
-        if wait_for_reconnect(ts_target):
-            output.result(f"VM '{name}' rekeyed successfully. Tailscale IP: {new_ip}")
-        else:
-            output.warn(
-                f"VM '{name}' rekeyed but {new_ip} is not reachable via SSH. "
-                "Check tailnet sharing/ACLs. Run 'vm rekey' again to retry."
+        # The composition root: construct (registers the site's config
+        # secrets), preflight both participating resources (the sweep
+        # predicts the new auth key can resolve over the vm-template's
+        # declaration; the platform checks its world), then the operation's
+        # one resolve pass: the new auth key
+        # and any site secret (proxmox's API token) in a single prompt
+        # session. The template node roots FIRST so the sweep keeps HEAD's
+        # precedence (template readiness before the platform preflight).
+        # ``ignore_env`` is honored by temporarily masking the env-var
+        # backend for the auth-key secret (the env-var source reads
+        # ``os.environ`` during preview and resolution, so removing the var
+        # skips it cleanly across BOTH preflight and the
+        # resolve, and the prompt backend takes over).
+        registry = load_request_registry(config, live_database=db)
+        resolver = Resolver(config, registry, interaction=interaction)
+        vm_node = live_vm_node(db, config, registry, vm, held_native_guard=guard)
+        rekey_vm_tmpl = resolve_live_template(db, registry, vm.name, vm.template)
+        tmpl_node = vm_template_node(rekey_vm_tmpl)
+        nodes = walk(tmpl_node, vm_node)
+        for secret_name in secret_union(nodes):
+            resolver.register_name(secret_name)
+        # Cache hit by design: the auth key is already in the union (the
+        # template node's secret_refs); this call only fetches the DECL,
+        # which the --ignore-env env-var mask below needs.
+        ts_decl = resolver.register_name(rekey_vm_tmpl.tailscale_auth_key)
+        scope = _vm_scope(db, name)
+        with _mask_env_var_backend_for(ts_decl, masked=ignore_env):
+            preflight_all(
+                nodes,
+                RunContext(config=config, operation_scope=scope),
+                registry=registry,
+                interaction=interaction,
             )
+            resolver.resolve()
+        from agentworks.secrets.line_safety import (
+            LineOrientedSecretUse,
+            require_line_safe_secret,
+        )
+
+        ts_auth_key = require_line_safe_secret(
+            resolver.get(rekey_vm_tmpl.tailscale_auth_key),
+            use=LineOrientedSecretUse.TAILSCALE,
+            secret_name=rekey_vm_tmpl.tailscale_auth_key,
+        )
+
+        # The running check is an op (a backend status read), so it sits
+        # past the boundary: on proxmox it needs the API token, delivered
+        # scoped to the site's declared names.
+        ops_ctx = _platform_ops_ctx(config, scope, vm_node, resolver)
+        platform = vm_node.site.platform
+        status = platform.status(vm, ops_ctx)
+        if status != VMStatus.RUNNING:
+            raise StateError(
+                f"VM '{name}' is not running (status: {status.value})",
+                entity_kind="vm",
+                entity_name=name,
+            )
+
+        with output.section(f"Rekeying '{name}'"), contextlib.ExitStack() as _stack:
+            # The activation gate, opened AFTER the boundary at exactly the
+            # point HEAD held ``keep_active``: converge power state (a race
+            # from the running check above, as at HEAD), then hold for the
+            # rekey's duration (no-op for Lima/Azure/Proxmox; WSL2 anchors
+            # the distro against vmIdleTimeout so per-step `time.sleep`s
+            # can't let it idle out). Boundary-then-gate means the gate
+            # callback must SERVE the boundary's cached values, never
+            # resolve or seed (the batch-ops precedent): the union already
+            # covers the gate secrets AND the repair path's rejoin key (the
+            # auth key is this command's op secret), and ``Resolver.get``
+            # refuses anything outside it loudly.
+            _stack.enter_context(activation_gate(vm_node, resolver.get))
+
+            # native_transport() composes transient_route (Azure pokes a
+            # scoped ephemeral SSH allow on enter and deletes it on exit)
+            # with the platform-native transport builder and the 6-attempt
+            # reachability probe. The caller-supplied ExitStack scopes the
+            # transient state to the duration of the rekey; ``ops_ctx``
+            # delivers the SP credential to those NSG calls with no ambient
+            # fallback.
+            exec_target = native_transport(vm, platform, config, ctx=ops_ctx, stack=_stack)
+
+            # Restart, logout, login, restart. The initial restart clears any
+            # stale daemon state (a previous interrupted rekey can leave the
+            # daemon in a state where `tailscale logout` hangs waiting for a
+            # control plane response that never comes). The final restart
+            # fixes a Tailscale bug where the node registers but peers can't
+            # reach it after rekeying to a different tailnet.
+            # All platforms run systemd (WSL2 enables it via /etc/wsl.conf during
+            # provisioning); tailscaled is always a systemd unit. Daemon-side
+            # flags like --tun=userspace-networking live in /etc/default/tailscaled,
+            # not on `tailscale up`.
+            restart_cmd = "systemctl restart tailscaled"
+            stabilize_secs = 15  # pause between steps for daemon/network stability
+
+            output.info("Restarting Tailscale daemon...")
+            exec_target.run(restart_cmd, sudo=True, timeout=15)
+            time.sleep(stabilize_secs)
+
+            output.info("Logging out of current tailnet...")
+            exec_target.run("tailscale logout", sudo=True, timeout=30)
+            time.sleep(stabilize_secs)
+
+            output.info("Joining new tailnet...")
+            from agentworks.capabilities.vm_platform.tailscale_join import join_tailscale_ephemerally
+
+            join_tailscale_ephemerally(exec_target, ts_auth_key, timeout=30)
+            time.sleep(stabilize_secs)
+
+            output.info("Restarting Tailscale daemon...")
+            exec_target.run(restart_cmd, sudo=True, timeout=15)
+            time.sleep(stabilize_secs)
+
+            output.info("Reading new Tailscale IP...")
+            result = exec_target.run("tailscale ip -4", sudo=True, timeout=15)
+            raw_ip = result.stdout.strip()
+            new_ip = raw_ip.splitlines()[0].strip() if raw_ip else ""
+            try:
+                ipaddress.IPv4Address(new_ip)
+            except ValueError:
+                raise SSHError(f"tailscale ip -4 returned invalid address: {new_ip!r}\nfull output: {raw_ip}") from None
+            output.detail(f"Tailscale IP: {new_ip}")
+
+            # Update DB and SSH config with the new IP (correct regardless of
+            # reachability: the old IP is definitely dead after logout)
+            db.update_vm_tailscale(name, new_ip)
+            sync_ssh_config(config, db)
+            db.insert_vm_event(name, "rekey", f"new_ip={new_ip}")
+
+            # If the operator needs to share the VM back, pause before connectivity check
+            if wait_for_share:
+                output.pause("Share the VM back to your tailnet, then press Enter to verify connectivity...")
+
+            # Always verify Tailscale SSH connectivity to the new IP
+            output.info(f"Verifying SSH to {new_ip}...")
+            from agentworks.transports import SSHTransport
+
+            ts_target = transport(vm, config)
+            # ``transport()`` returns an SSHTransport for Tailscale-backed VMs.
+            # Retarget the host in place instead of rebuilding the whole
+            # transport; the other fields (user, identity, etc.) are unchanged.
+            assert isinstance(ts_target, SSHTransport)
+            ts_target.host = new_ip
+            if wait_for_reconnect(ts_target):
+                output.result(f"VM '{name}' rekeyed successfully. Tailscale IP: {new_ip}")
+            else:
+                output.warn(
+                    f"VM '{name}' rekeyed but {new_ip} is not reachable via SSH. "
+                    "Check tailnet sharing/ACLs. Run 'vm rekey' again to retry."
+                )

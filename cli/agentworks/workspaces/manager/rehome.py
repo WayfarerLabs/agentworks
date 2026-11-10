@@ -23,6 +23,7 @@ from agentworks.workspaces.manager.repair import _rehome_partial_state_hint
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, WorkspaceRow
+    from agentworks.harness_setup.locking import NativeMutationGuard
     from agentworks.secrets.policy import TtyInteractionPolicy
 
 
@@ -75,7 +76,7 @@ def rehome_workspace(
 
     from agentworks.harness_setup.locking import native_mutation_guard
 
-    with native_mutation_guard(db.path, ws.vm_name):
+    with native_mutation_guard(db.path, ws.vm_name) as guard:
         # Block unless all sessions are STOPPED
         from agentworks.db import PID_STOPPED, SessionStatus
         from agentworks.sessions.manager import ensure_pids_batch, observe_session_statuses
@@ -113,6 +114,7 @@ def rehome_workspace(
             remove_old=remove_old,
             yes=yes,
             interaction=interaction,
+            held_native_guard=guard,
         )
 
 
@@ -125,6 +127,7 @@ def _rehome_vm(
     remove_old: bool,
     yes: bool,
     interaction: TtyInteractionPolicy,
+    held_native_guard: NativeMutationGuard,
 ) -> None:
     """Rehome a VM workspace.
 
@@ -169,6 +172,7 @@ def _rehome_vm(
         vm,
         scope=_workspace_scope(db, vm, ws_name),
         interaction=interaction,
+        held_native_guard=held_native_guard,
     ):
         target = transport(vm, config)
 

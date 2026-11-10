@@ -60,7 +60,7 @@ from .inspect import (
     vm_listing,
 )
 from .lifecycle import create_vm, reinit_vm
-from .power import delete_vm, rekey_vm, start_vm, stop_vm
+from .power import delete_vm, rekey_vm, set_vm_desired_runtime_state, start_vm, stop_vm
 from .release import confirm_vm_release, verified_vm_release
 from .tailscale import (
     _ensure_tailscale,
@@ -111,6 +111,7 @@ __all__ = [
     "run_initialization",
     "shell_vm",
     "start_vm",
+    "set_vm_desired_runtime_state",
     "stop_vm",
     "validate_slug",
     "verify_vm_connection",

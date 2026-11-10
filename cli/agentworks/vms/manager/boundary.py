@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from agentworks.capabilities.base import OperationScope
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
+    from agentworks.harness_setup.locking import NativeMutationGuard
     from agentworks.resources import Registry
     from agentworks.secrets import SecretTarget
     from agentworks.secrets.policy import TtyInteractionPolicy
@@ -88,6 +89,7 @@ def _gated_vm_boundary(
     targets: Sequence[SecretTarget] = (),
     scope: OperationScope | None = None,
     interaction: TtyInteractionPolicy,
+    held_native_guard: NativeMutationGuard | None = None,
 ) -> Iterator[tuple[LiveVMNode, Resolver, RunContext]]:
     """Compose a gated VM span after its caller selects SSH policy.
 
@@ -141,7 +143,7 @@ def _gated_vm_boundary(
     from agentworks.vms.nodes import live_vm_node
 
     resolver = Resolver(config, registry, interaction=interaction)
-    vm_node = live_vm_node(db, config, registry, vm)
+    vm_node = live_vm_node(db, config, registry, vm, held_native_guard=held_native_guard)
     nodes = walk(vm_node)
     for secret_name in secret_union(nodes):
         resolver.register_name(secret_name)
@@ -170,6 +172,7 @@ def gated_vm_boundary(
     targets: Sequence[SecretTarget] = (),
     scope: OperationScope | None = None,
     interaction: TtyInteractionPolicy,
+    held_native_guard: NativeMutationGuard | None = None,
 ) -> Iterator[tuple[LiveVMNode, Resolver, RunContext]]:
     """Compose an ordinary VM gate after proving its canonical SSH identity."""
     require_vm_ssh_boundary(db, config, vm)
@@ -181,6 +184,7 @@ def gated_vm_boundary(
         targets=targets,
         scope=scope,
         interaction=interaction,
+        held_native_guard=held_native_guard,
     ) as boundary:
         yield boundary
 
@@ -195,6 +199,7 @@ def gated_vm_platform_recovery_boundary(
     targets: Sequence[SecretTarget] = (),
     scope: OperationScope | None = None,
     interaction: TtyInteractionPolicy,
+    held_native_guard: NativeMutationGuard | None = None,
 ) -> Iterator[tuple[LiveVMNode, Resolver, RunContext]]:
     """Compose the explicit platform-native recovery gate without SSH proof."""
     with _gated_vm_boundary(
@@ -205,6 +210,7 @@ def gated_vm_platform_recovery_boundary(
         targets=targets,
         scope=scope,
         interaction=interaction,
+        held_native_guard=held_native_guard,
     ) as boundary:
         yield boundary
 
@@ -216,6 +222,7 @@ def _live_vm_boundary(
     *,
     registry: Registry | None = None,
     interaction: TtyInteractionPolicy,
+    held_native_guard: NativeMutationGuard | None = None,
 ) -> tuple[LiveVMNode, RunContext]:
     """The no-gate commands' shared composition root (``start_vm`` /
     ``stop_vm`` / ``delete_vm`` / ``describe_vm``, whose graphs are
@@ -249,7 +256,7 @@ def _live_vm_boundary(
     if registry is None:
         registry = load_request_registry(config, live_database=db)
     resolver = Resolver(config, registry, interaction=interaction)
-    vm_node = live_vm_node(db, config, registry, vm)
+    vm_node = live_vm_node(db, config, registry, vm, held_native_guard=held_native_guard)
     nodes = walk(vm_node)
     for secret_name in secret_union(nodes):
         resolver.register_name(secret_name)
