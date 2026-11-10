@@ -213,6 +213,8 @@ def _pending_launch_is_owned(session: SessionRow, *, target: Transport) -> bool:
                 sudo=sudo,
             )
         )
+    except UserAbort:
+        raise
     except (AgentworksError, OSError):
         return False
 

@@ -29,7 +29,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from agentworks import output
-from agentworks.errors import AgentworksError
+from agentworks.errors import AgentworksError, UserAbort
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -64,7 +64,7 @@ def cleanup_now_empty_resource(
             under ``--yes`` without a special case.
         delete: Performs the delete (already bound with ``yes=True`` and the
             real deleter). Any :class:`AgentworksError` it raises is caught and
-            downgraded to a warning; other exceptions propagate as bugs.
+            downgraded to a warning; cancellation and other exceptions propagate.
         manual_command: The command to name in report / failure messages, e.g.
             ``"agw workspace delete ws-1"``.
         yes: The command's ``--yes`` flag.
@@ -81,6 +81,8 @@ def cleanup_now_empty_resource(
     def _run_delete() -> None:
         try:
             delete()
+        except UserAbort:
+            raise
         except AgentworksError as exc:
             output.warn(f"Could not delete empty {kind} '{name}': {exc}. Remove it with '{manual_command}'.")
 

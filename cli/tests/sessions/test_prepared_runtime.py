@@ -304,3 +304,71 @@ def test_guest_preparation_does_not_predict_missing_graph_credentials(tmp_path, 
     assert secret_union(prepared.secret_nodes) == ("unavailable-workload-credential",)
     assert len(prepared.secret_targets) == 1
     db.close()
+
+
+def test_empty_resource_cleanup_propagates_cancellation(monkeypatch):
+    from agentworks.sessions._resource_cleanup import cleanup_now_empty_resource
+
+    failure = UserAbort("cancelled")
+
+    def cancel():
+        raise failure
+
+    with pytest.raises(UserAbort) as caught:
+        cleanup_now_empty_resource(
+            kind="workspace",
+            name="empty",
+            created=True,
+            delete=cancel,
+            manual_command="agw workspace delete empty",
+            yes=True,
+            empty_clause="empty",
+            report_clause="empty",
+        )
+    assert caught.value is failure
+
+
+def test_batch_pid_repair_propagates_cancellation(tmp_path, monkeypatch):
+    from agentworks.sessions.manager import _pids
+
+    db, _ = _restart_fixture(tmp_path, monkeypatch)
+    db.update_session_runtime(
+        "s1",
+        socket_path="/run/agentworks/agent-tmux-sockets/agt-a1/s1.sock",
+        pid=None,
+        boot_id=None,
+        tmux_server_start_ticks=None,
+    )
+    failure = UserAbort("cancelled")
+
+    def cancel(*args, **kwargs):
+        raise failure
+
+    monkeypatch.setattr(_pids, "_repair_session_pid", cancel)
+    with pytest.raises(UserAbort) as caught:
+        manager.ensure_pids_batch([db.get_session("s1")], db=db, config=SimpleNamespace())
+    assert caught.value is failure
+    db.close()
+
+
+def test_pending_runtime_ownership_probe_propagates_cancellation(tmp_path, monkeypatch):
+    from uuid import uuid4
+
+    from agentworks.sessions import tmux
+    from agentworks.sessions.manager import _status
+
+    db, _ = _restart_fixture(tmp_path, monkeypatch)
+    db.set_session_run_id("s1", str(uuid4()))
+    session = db.get_session("s1")
+    pending = replace(session, pid=None)
+    failure = UserAbort("cancelled")
+
+    def cancel(**kwargs):
+        raise failure
+
+    monkeypatch.setattr(tmux, "capture_tmux_server_fingerprint", cancel)
+    target = manager.transport(db.get_vm("vm1"), SimpleNamespace())
+    with pytest.raises(UserAbort) as caught:
+        _status._pending_launch_is_owned(pending, target=target)
+    assert caught.value is failure
+    db.close()
