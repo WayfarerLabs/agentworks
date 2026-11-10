@@ -173,7 +173,7 @@ def test_restart_resolves_inputs_before_destroying_running_runtime(
     def _unavailable(*args: object, **kwargs: object) -> dict[str, str]:
         raise SecretUnavailableError("missing")
 
-    monkeypatch.setattr("agentworks.secrets.resolve_for_command", _unavailable)
+    monkeypatch.setattr("agentworks.secrets.resolver.Resolver.resolve", _unavailable)
     with pytest.raises(SecretUnavailableError):
         restart_console(db, _StubConfig(), name="con", interaction=_refuse())
     assert model.has_session("aw-console-con")

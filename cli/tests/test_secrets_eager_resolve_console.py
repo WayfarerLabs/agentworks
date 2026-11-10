@@ -161,6 +161,11 @@ def test_start_console_eager_resolves_before_tmux(
     db._conn.commit()
 
     stub_vm_gates(monkeypatch)
+    monkeypatch.setattr("agentworks.vms.manager._tailscale_rejoin_required", lambda *a, **kw: False)
+    monkeypatch.setattr(
+        "agentworks.transports.transport",
+        lambda *a, **kw: SimpleNamespace(run=lambda *a, **kw: None, interactive=lambda *a, **kw: 0),
+    )
 
     @contextlib.contextmanager
     def _fake_prepare(*a: object, **k: object):  # noqa: ANN202
@@ -173,13 +178,13 @@ def test_start_console_eager_resolves_before_tmux(
 
     monkeypatch.setattr(multi_console, "_prepare_vm_target", _fake_prepare)
     monkeypatch.setattr(
-        "agentworks.sessions.multi_console.attach._console_runtime_presence",
+        "agentworks.sessions.multi_console._console_runtime_presence",
         lambda *a, **k: (ProbeStatus.ABSENT, ProbeStatus.ABSENT),
     )
     monkeypatch.setattr(
         multi_console,
         "_console_build_secret_targets",
-        lambda *a, **k: [object()],
+        lambda *a, **k: [],
     )
 
     build_called: list[bool] = []
@@ -195,7 +200,7 @@ def test_start_console_eager_resolves_before_tmux(
             hint="api-key: tried env-var",
         )
 
-    monkeypatch.setattr("agentworks.secrets.resolve_for_command", _explode)
+    monkeypatch.setattr("agentworks.secrets.resolver.Resolver.resolve", _explode)
 
     config = SimpleNamespace(
         named_console=SimpleNamespace(tmux_layout="aw-session-vertical"),
@@ -288,6 +293,11 @@ def test_attach_console_existing_tmux_session_skips_eager_resolve(
     db._conn.commit()
 
     stub_vm_gates(monkeypatch)
+    monkeypatch.setattr("agentworks.vms.manager._tailscale_rejoin_required", lambda *a, **kw: False)
+    monkeypatch.setattr(
+        "agentworks.transports.transport",
+        lambda *a, **kw: SimpleNamespace(run=lambda *a, **kw: None, interactive=lambda *a, **kw: 0),
+    )
 
     @contextlib.contextmanager
     def _fake_prepare(*a: object, **k: object):  # noqa: ANN202
@@ -301,7 +311,7 @@ def test_attach_console_existing_tmux_session_skips_eager_resolve(
 
     monkeypatch.setattr(multi_console, "_prepare_vm_target", _fake_prepare)
     monkeypatch.setattr(
-        "agentworks.sessions.multi_console.attach._console_runtime_presence",
+        "agentworks.sessions.multi_console._console_runtime_presence",
         lambda *a, **k: (ProbeStatus.PRESENT, ProbeStatus.ABSENT),
     )
 
@@ -557,7 +567,7 @@ def test_restore_session_window_missing_branch_eager_resolves(
     monkeypatch.setattr(
         multi_console,
         "_restore_session_secret_targets",
-        lambda *a, **k: [object(), object()],
+        lambda *a, **k: [],
     )
 
     add_called: list[bool] = []
@@ -573,7 +583,7 @@ def test_restore_session_window_missing_branch_eager_resolves(
             hint="api-key: tried env-var",
         )
 
-    monkeypatch.setattr("agentworks.secrets.resolve_for_command", _explode)
+    monkeypatch.setattr("agentworks.secrets.resolver.Resolver.resolve", _explode)
 
     config = SimpleNamespace(
         named_console=SimpleNamespace(tmux_layout="aw-session-vertical"),

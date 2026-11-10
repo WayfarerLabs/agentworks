@@ -18,6 +18,8 @@ outgrew a single 500-line file. The submodules are organized by concern:
   building a console from scratch).
 - ``restore``: reconciling a session window's live tmux state against its
   configured shell list.
+- ``runtime``: guarded preparation and value-only runtime actions.
+- ``lifecycle``: explicit intent acceptance and VM/resolver composition.
 - ``attach``: live-tmux probing, VM target preparation, and the high-level
   lifecycle/list/describe entrypoints.
 

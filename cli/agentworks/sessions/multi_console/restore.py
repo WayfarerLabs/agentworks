@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import shlex
 from collections import Counter
+from contextlib import closing
 from typing import TYPE_CHECKING
 
 import agentworks.sessions.multi_console as _mc
@@ -109,13 +110,20 @@ def restore_session(
         # base.VMPlatform.vm_active's docstring). The gate's held-active span
         # wraps the SSH-heavy body so a freshly booted WSL2 distro doesn't
         # idle out between the window probe and the pane reconciliation.
-        with _mc._prepare_vm_target(
-            db,
-            config,
-            console.vm_name,
-            registry=registry,
-            interaction=interaction,
-        ) as (vm, target):
+        from agentworks.secrets.resolver import Resolver
+
+        with (
+            closing(Resolver(config, registry, interaction=interaction)) as resolver,
+            _mc._prepare_vm_target(
+                db,
+                config,
+                console.vm_name,
+                registry=registry,
+                interaction=interaction,
+                resolver=resolver,
+                held_native_guard=held_native_guard,
+            ) as (vm, target),
+        ):
             presence = _mc._console_tmux_presence(target, console_name)
             if presence is ProbeStatus.UNKNOWN:
                 raise StateError(
@@ -187,12 +195,11 @@ def restore_session(
                 # contract: whether the window is missing is only knowable
                 # from live tmux state, post-bind (same class as the
                 # Tailscale rejoin).
-                from agentworks.secrets import resolve_for_command
 
                 all_indices = list(range(configured_count))
                 secret_values: dict[str, str] = {}
                 if all_indices:
-                    secret_values = resolve_for_command(
+                    resolver.register_targets(
                         _mc._restore_session_secret_targets(
                             db,
                             registry,
@@ -200,11 +207,10 @@ def restore_session(
                             member=member,
                             indices=all_indices,
                         ),
-                        config,
-                        registry,
                         allow_transient_auto_declare=True,
-                        interaction=interaction,
                     )
+                resolver.resolve()
+                secret_values = resolver.values
                 result = _mc._add_session_window(
                     target,
                     db,
@@ -340,6 +346,7 @@ def restore_session(
             # tag_values is now a subset of 0..configured_count-1 with no duplicates,
             # so len(tag_values) <= configured_count.
             if len(tag_values) == configured_count:
+                resolver.resolve()
                 window_order_changed = _reconcile_configured_window_order(db, target, console_name)
                 if window_order_changed:
                     output.result(f"Restored configured window order in console '{console_name}'.")
@@ -386,9 +393,8 @@ def restore_session(
             # missing config indices (not all configured shells) so non-
             # interactive runs only fail on secrets that actually would be
             # consumed.
-            from agentworks.secrets import resolve_for_command
 
-            secret_values = resolve_for_command(
+            resolver.register_targets(
                 _mc._restore_session_secret_targets(
                     db,
                     registry,
@@ -396,11 +402,10 @@ def restore_session(
                     member=member,
                     indices=missing,
                 ),
-                config,
-                registry,
                 allow_transient_auto_declare=True,
-                interaction=interaction,
             )
+            resolver.resolve()
+            secret_values = resolver.values
 
             output.info(f"Restoring {len(missing)} shell pane(s) in '{session_name}': config indices {missing}.")
             # Collect each split's outcome so a partial failure becomes a loud error

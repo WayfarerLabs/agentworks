@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from typing import TYPE_CHECKING
 
@@ -94,7 +94,7 @@ def set_console_desired_runtime_state(
     """Set local console intent without loading configuration or touching a VM."""
     try:
         target = DesiredRuntimeState(state)
-    except ValueError:
+    except (ValueError, TypeError):
         raise ValidationError("invalid console runtime target", entity_kind="console", entity_name=name) from None
     if target is DesiredRuntimeState.ON_DEMAND:
         raise ValidationError("consoles require a running or stopped target", entity_kind="console", entity_name=name)
@@ -198,7 +198,10 @@ def prepare_console_stop(
 
 def _verify_prepared(prepared: PreparedConsoleReconcile | PreparedConsoleStop) -> None:
     current = _require_console(prepared.db, prepared.console.name)
-    if current != prepared.console or tuple(prepared.db.list_console_sessions(current.name)) != prepared.members:
+    if (
+        replace(current, last_started_at=prepared.console.last_started_at) != prepared.console
+        or tuple(prepared.db.list_console_sessions(current.name)) != prepared.members
+    ):
         raise StateError("console definition or membership changed after preparation")
     vm = prepared.db.get_vm(prepared.vm.name)
     if vm is None or vm.vm_uuid != prepared.vm.vm_uuid:

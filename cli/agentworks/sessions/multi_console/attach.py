@@ -32,10 +32,9 @@ from agentworks.list_sorting import nullable_sort_value, sort_rows
 from agentworks.name_filters import validate_name_filters
 from agentworks.runtime_time import derive_uptime_seconds, format_uptime
 from agentworks.sessions.tmux import ProbeStatus, exact_tmux_target, tmux_cmd
-from agentworks.vms.manager import gated_vm_boundary
 
 from ._helpers import _require_console, _shell_summary, tmux_session_name, tmux_staging_name
-from ._status import ConsoleStatus, classify_console_status
+from ._status import ConsoleStatus
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
@@ -46,6 +45,7 @@ if TYPE_CHECKING:
     from agentworks.machine_output import JsonObject
     from agentworks.resources.registry import Registry
     from agentworks.secrets.policy import TtyInteractionPolicy
+    from agentworks.secrets.resolver import Resolver
     from agentworks.transports import Transport
 
 # NAME-column truncation cap for ``console list``. Console names are freeform
@@ -204,23 +204,30 @@ done
 def _tmux_session_presence(target: Transport, tmux_name: str) -> ProbeStatus:
     """Probe an exact console tmux name without conflating failure and absence."""
     from agentworks.sessions.tmux import _tmux_presence_from_result
+    from agentworks.status_observation import GUEST_OBSERVATION_ATTEMPTS, GUEST_OBSERVATION_TIMEOUT_SECONDS
 
     q = exact_tmux_target(tmux_name)
     return _tmux_presence_from_result(
-        target.run(f"tmux has-session -t {q}", check=False),
+        target.run(
+            f"tmux has-session -t {q}",
+            check=False,
+            tty=False,
+            timeout=GUEST_OBSERVATION_TIMEOUT_SECONDS,
+            retries=GUEST_OBSERVATION_ATTEMPTS,
+        ),
         missing_target_is_absent=True,
     )
 
 
 def _console_tmux_presence(target: Transport, console_name: str) -> ProbeStatus:
-    return _tmux_session_presence(target, tmux_session_name(console_name))
+    return _mc._tmux_session_presence(target, tmux_session_name(console_name))
 
 
 def _console_runtime_presence(target: Transport, console_name: str) -> tuple[ProbeStatus, ProbeStatus]:
     """Return canonical and staging presence, refusing no state implicitly."""
     return (
-        _console_tmux_presence(target, console_name),
-        _tmux_session_presence(target, tmux_staging_name(console_name)),
+        _mc._console_tmux_presence(target, console_name),
+        _mc._tmux_session_presence(target, tmux_staging_name(console_name)),
     )
 
 
@@ -352,48 +359,53 @@ def _prepare_vm_target(
     *,
     registry: Registry,
     interaction: TtyInteractionPolicy,
+    held_native_guard: NativeMutationGuard | None = None,
+    resolver: Resolver | None = None,
 ) -> Iterator[tuple[VMRow, Transport]]:
-    """Ensure the VM is running (starting it if needed) and yield
-    ``(vm, target)`` inside the activation gate's held-active span.
-
-    Use this for explicit user-driven console operations where booting a
-    stopped VM is acceptable. Raises on failure. Orchestrated
-    (``vms.manager.gated_vm_boundary``): the gate replaces the
-    imperative ``bind_platform`` + ``ensure_active`` pair (opening
-    BEFORE the preflight sweep), and the span it yields within is the
-    ``vm_active`` hold the callers used to open themselves, covering
-    their SSH-heavy bodies and interactive attaches. The console is
-    not a node: these operations provision nothing, so the graph is the live
-    VM alone, and no env-chain target registers (console build panes
-    resolve their own targets on the documented conditional-need
-    path).
-    """
+    """Prepare canonical guest access using the invocation's secret resolver."""
+    from agentworks.harness_setup.locking import native_mutation_guard
+    from agentworks.secrets.resolver import Resolver
     from agentworks.transports import transport
+    from agentworks.vms.manager.runtime import activate_vm_runtime, prepare_vm_runtime
+
+    from .lifecycle import preflight_console_vm
 
     vm = db.get_vm(vm_name)
     if vm is None:
-        raise NotFoundError(
-            f"VM '{vm_name}' not found",
-            entity_kind="vm",
-            entity_name=vm_name,
-        )
-    # Cheap row validation stays pre-gate: a VM with no Tailscale
-    # address can never be attached to, so it must fail with zero
-    # prompts and zero VM starts. (The imperative body checked this
-    # after its gate; the gate cannot populate the address on the
-    # already-loaded row, so this command's outcome is identical. The
-    # hoist does forgo one accidental heal: the post-gate order could
-    # start a stopped VM whose rejoin repopulated the row's address,
-    # letting a RETRY succeed; now the retry keeps failing until an
-    # explicit vm start or reinit.)
+        raise NotFoundError(f"VM '{vm_name}' not found", entity_kind="vm", entity_name=vm_name)
     if vm.tailscale_host is None:
-        raise StateError(
-            f"VM '{vm.name}' has no Tailscale address",
-            entity_kind="vm",
-            entity_name=vm.name,
-        )
-    with gated_vm_boundary(db, config, registry, vm, interaction=interaction):
-        yield vm, transport(vm, config)
+        raise StateError(f"VM '{vm.name}' has no Tailscale address", entity_kind="vm", entity_name=vm.name)
+    owns_resolver = resolver is None
+    resolver = resolver if resolver is not None else Resolver(config, registry, interaction=interaction)
+    context = None
+    try:
+        with native_mutation_guard(db.path, vm_name, held=held_native_guard) as guard:
+            node = preflight_console_vm(
+                db,
+                config,
+                registry,
+                vm,
+                held_native_guard=guard,
+                interaction=interaction,
+            )
+            context = prepare_vm_runtime(
+                db,
+                config,
+                registry,
+                vm,
+                resolve_secret=resolver.resolve_gate,
+                interaction=interaction,
+                held_native_guard=guard,
+                vm_node=node,
+            )
+            activate_vm_runtime(context, resolve_secret=resolver.resolve_gate)
+            with context.node.hold_active():
+                yield vm, transport(vm, config)
+    finally:
+        if context is not None:
+            context.clear_values()
+        if owns_resolver:
+            resolver.close()
 
 
 def _live_target(db: Database, config: Config, vm_name: str) -> tuple[VMRow, Transport] | None:
@@ -673,60 +685,9 @@ def _realize_console(
     interaction: TtyInteractionPolicy,
 ) -> None:
     """Start a console, replacing its runtime only when requested."""
-    from agentworks.bootstrap import load_request_registry
-    from agentworks.db import DesiredRuntimeState
-    from agentworks.secrets import resolve_for_command
+    from .lifecycle import realize_console
 
-    from ._helpers import guarded_console_selection
-    from .runtime import accept_console_running
-
-    with guarded_console_selection(db, name) as (console, guard):
-        registry = load_request_registry(config, live_database=db)
-        # Local refusal precedes the durable acceptance point.
-        from .runtime import validate_console_definition
-
-        validate_console_definition(db, console)
-        vm = db.get_vm(console.vm_name)
-        if vm is None:
-            raise NotFoundError(f"VM '{console.vm_name}' not found", entity_kind="vm", entity_name=console.vm_name)
-        from agentworks.vms.manager import require_vm_ssh_boundary
-
-        require_vm_ssh_boundary(db, config, vm)
-        accept_console_running(db, console=console, held_native_guard=guard)
-        console = _require_console(db, name)
-        if vm.desired_runtime_state is DesiredRuntimeState.STOPPED:
-            raise StateError(
-                "console start is blocked by its stopped parent VM", entity_kind="console", entity_name=name
-            )
-        output.info(f"Checking console '{name}' runtime...")
-        with _mc._prepare_vm_target(
-            db,
-            config,
-            console.vm_name,
-            registry=registry,
-            interaction=interaction,
-        ) as (vm, target):
-            prepared = _mc.prepare_console_reconcile(
-                db,
-                registry,
-                console=console,
-                vm=vm,
-                target=target,
-                held_native_guard=guard,
-                replace_running=replace_running,
-            )
-            secret_values = resolve_for_command(
-                prepared.pane_targets,
-                config,
-                registry,
-                allow_transient_auto_declare=True,
-                interaction=interaction,
-            )
-            changed = _mc.execute_console_reconcile(prepared, values=secret_values)
-        if changed:
-            output.result(f"Console '{name}' {'restarted' if replace_running else 'started'}")
-        else:
-            output.result(f"Console '{name}' is already running")
+    realize_console(db, config, name=name, replace_running=replace_running, interaction=interaction)
 
 
 def start_console(
@@ -756,20 +717,9 @@ def stop_console(
     name: str,
     interaction: TtyInteractionPolicy,
 ) -> None:
-    from agentworks.bootstrap import load_request_registry
+    from .lifecycle import stop_console_runtime
 
-    console = _require_console(db, name)
-    registry = load_request_registry(config, live_database=db)
-    output.info(f"Checking console '{name}' runtime...")
-    with _mc._prepare_vm_target(
-        db,
-        config,
-        console.vm_name,
-        registry=registry,
-        interaction=interaction,
-    ) as (_vm, target):
-        _teardown_console_tmux(target, name)
-    output.result(f"Console '{name}' stopped")
+    stop_console_runtime(db, config, name=name, interaction=interaction)
 
 
 def refuse_console_nesting(*, allow_nesting: bool) -> None:
@@ -797,49 +747,9 @@ def attach_console(
     """
     refuse_console_nesting(allow_nesting=allow_nesting)
 
-    from agentworks.bootstrap import load_request_registry
+    from .lifecycle import attach_running_console
 
-    console = _require_console(db, name)
-    registry = load_request_registry(config, live_database=db)
-    output.info(f"Checking console '{name}' runtime...")
-    # The gate's held-active span covers the build and the interactive
-    # attach (the hold this caller used to open itself).
-    with _mc._prepare_vm_target(
-        db,
-        config,
-        console.vm_name,
-        registry=registry,
-        interaction=interaction,
-    ) as (_vm, target):
-        canonical, staging = _console_runtime_presence(target, name)
-        if ProbeStatus.UNKNOWN in {canonical, staging}:
-            raise StateError(
-                f"could not determine console '{name}' tmux state",
-                entity_kind="console",
-                entity_name=name,
-                hint="Retry after transport access is reliable.",
-            )
-        runtime_status = classify_console_status(
-            canonical_present=canonical is ProbeStatus.PRESENT,
-            staging_present=staging is ProbeStatus.PRESENT,
-        )
-        if runtime_status is not ConsoleStatus.RUNNING:
-            raise StateError(
-                f"console '{name}' is not ready to attach",
-                entity_kind="console",
-                entity_name=name,
-                hint=f"Run `agw console start {name}`.",
-            )
-
-        from agentworks.terminal import clear_screen_on_detach
-
-        tmux_name = tmux_session_name(name)
-        # A console attach is a full-screen tmux; clear the local screen on
-        # detach where we don't trust the terminal to restore cleanly.
-        return target.interactive(
-            f"tmux attach -t {exact_tmux_target(tmux_name)}",
-            clear_screen_on_exit=clear_screen_on_detach(config.terminal.clear_on_detach),
-        )
+    return attach_running_console(db, config, name=name, interaction=interaction)
 
 
 def delete_console(

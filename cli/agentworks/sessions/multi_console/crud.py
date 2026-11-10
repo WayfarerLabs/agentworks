@@ -87,7 +87,7 @@ def create_console(
     """
     from agentworks.harness_setup.locking import native_mutation_guard
 
-    with native_mutation_guard(db.path, vm_name) as _held_native_guard:
+    with native_mutation_guard(db.path, vm_name) as held_native_guard:
         validate_name(name, max_length=MAX_FREEFORM_NAME_LENGTH)
 
         if db.get_console(name) is not None:
@@ -133,7 +133,7 @@ def create_console(
 
         from agentworks.bootstrap import load_request_registry
         from agentworks.db import ConsoleSessionRow
-        from agentworks.secrets import resolve_for_command
+        from agentworks.secrets.resolver import Resolver
 
         definition = ConsoleDefinition(
             name=name,
@@ -151,14 +151,21 @@ def create_console(
         )
         registry = load_request_registry(config, live_database=db)
         output.info(f"Checking console '{name}' runtime...")
-        with _mc._prepare_vm_target(
-            db,
-            config,
-            vm_name,
-            registry=registry,
-            interaction=interaction,
-        ) as (vm, target):
-            secret_values = resolve_for_command(
+        from contextlib import closing
+
+        with (
+            closing(Resolver(config, registry, interaction=interaction)) as resolver,
+            _mc._prepare_vm_target(
+                db,
+                config,
+                vm_name,
+                registry=registry,
+                interaction=interaction,
+                resolver=resolver,
+                held_native_guard=held_native_guard,
+            ) as (vm, target),
+        ):
+            resolver.register_targets(
                 _mc._console_build_secret_targets(
                     db,
                     registry,
@@ -166,51 +173,59 @@ def create_console(
                     vm=vm,
                     members=definition.members,
                 ),
-                config,
-                registry,
                 allow_transient_auto_declare=True,
-                interaction=interaction,
             )
-            _mc._teardown_console_tmux(target, name)
-            with db.transaction():
-                db.insert_console(name, vm_name, admin_shell=add_admin_shell)
-                for spec in specs:
-                    db.add_console_session(name, spec.name, default_shells(spec.shells))
-            console = _require_console(db, name)
-            from .tmux_build import _build_console_tmux
-
+            resolver.resolve()
+            secret_values = resolver.values
             try:
-                _build_console_tmux(
-                    target,
-                    db,
-                    registry,
-                    console,
-                    vm,
-                    values=secret_values,
-                    layout=named_console_template(registry).tmux_layout,
-                )
-            except UserAbort:
-                raise
-            except Exception as exc:
-                canonical, staging = _mc._console_runtime_presence(target, name)
-                if canonical is ProbeStatus.ABSENT and staging is ProbeStatus.ABSENT:
-                    from agentworks.errors import ExternalError
+                _mc._teardown_console_tmux(target, name)
+                with db.transaction():
+                    db.insert_console(name, vm_name, admin_shell=add_admin_shell)
+                    for spec in specs:
+                        db.add_console_session(name, spec.name, default_shells(spec.shells))
+                console = _require_console(db, name)
+                from .tmux_build import _build_console_tmux
 
-                    raise ExternalError(
-                        f"console '{name}' was saved, but its runtime did not start",
+                try:
+                    _build_console_tmux(
+                        target,
+                        db,
+                        registry,
+                        console,
+                        vm,
+                        values=secret_values,
+                        layout=named_console_template(registry).tmux_layout,
+                    )
+                except UserAbort:
+                    raise
+                except Exception as exc:
+                    try:
+                        canonical, staging = _mc._console_runtime_presence(target, name)
+                    except UserAbort:
+                        raise
+                    except Exception:
+                        canonical, staging = ProbeStatus.UNKNOWN, ProbeStatus.UNKNOWN
+                    if canonical is ProbeStatus.ABSENT and staging is ProbeStatus.ABSENT:
+                        from agentworks.errors import ExternalError
+
+                        raise ExternalError(
+                            f"console '{name}' was saved, but its runtime did not start",
+                            entity_kind="console",
+                            entity_name=name,
+                            hint=f"The stopped definition was retained; retry with `agw console start {name}`.",
+                        ) from exc
+                    raise StateError(
+                        f"console '{name}' was saved, but its runtime state could not be determined",
                         entity_kind="console",
                         entity_name=name,
-                        hint=f"The stopped definition was retained; retry with `agw console start {name}`.",
+                        hint=(
+                            f"The definition was retained. Recover with `agw console start {name}`, "
+                            f"`agw console restart {name}`, or `agw console stop {name}` once transport is reliable."
+                        ),
                     ) from exc
-                raise StateError(
-                    f"console '{name}' was saved, but its runtime state could not be determined",
-                    entity_kind="console",
-                    entity_name=name,
-                    hint=(
-                        f"The definition was retained. Recover with `agw console start {name}`, "
-                        f"`agw console restart {name}`, or `agw console stop {name}` once transport is reliable."
-                    ),
-                ) from exc
+
+            finally:
+                secret_values.clear()
 
         extras_note = " + admin shell" if add_admin_shell else ""
         output.result(f"Console '{name}' created with {len(specs)} session(s){extras_note}.")

@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING
 
 import agentworks.sessions.multi_console as _mc
 from agentworks import output
-from agentworks.errors import ExternalError
+from agentworks.errors import AgentworksError, ExternalError
 from agentworks.sessions.tmux import exact_tmux_target
 
 from ._helpers import ADMIN_SHELL_WINDOW, tmux_session_name, tmux_staging_name
@@ -210,6 +210,7 @@ def _split_shell_pane(
     config indices came back None in its `SessionWindowBuild.failed_shells`, and
     `restore_session` checks each return so a partial restore is loud rather
     than a silent exit-0."""
+    from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic, sanitize_setup_error
     from agentworks.sessions.multi_console_layout import SHELL_INDEX_OPTION
     from agentworks.sessions.tmux import _tmux_env_flags
 
@@ -280,9 +281,14 @@ def _split_shell_pane(
             f"tmux split-window -t {q_con}:{q_win} -P -F '#{{pane_id}}'{env_flags} -c {q_full} {shlex.quote(pane_cmd)}"
         )
 
-    res = target.run(cmd, check=False, env=pane_env)
+    try:
+        res = target.run(cmd, check=False, env=pane_env)
+    except AgentworksError as error:
+        sanitize_setup_error(error, redactions=values.values())
+        raise
     if not res.ok:
-        output.warn(f"failed to add shell pane in '{window_name}': {res.stderr.strip()}")
+        diagnostic = sanitize_setup_diagnostic(res.stderr.strip(), redactions=values.values())
+        output.warn(f"failed to add shell pane in '{window_name}': {diagnostic}")
         return None
 
     q_console = shlex.quote(console_name)
@@ -309,9 +315,10 @@ def _split_shell_pane(
         # as a failure: callers like restore_session must know the pane is
         # untagged so the operator gets a loud signal rather than a future
         # untagged-pane error on the next restore-session.
+        diagnostic = sanitize_setup_diagnostic(tag_res.stderr.strip(), redactions=values.values())
         output.warn(
             f"added shell pane in '{window_name}' but tagging failed "
-            f"({tag_res.stderr.strip() or 'tmux refused set-option'}); "
+            f"({diagnostic or 'tmux refused set-option'}); "
             f"the pane is untagged. Use `agw console restart "
             f"{q_console}` to rebuild and retag from scratch."
         )
@@ -483,7 +490,7 @@ def _add_session_window(
     return SessionWindowBuild(built=True, failed_shells=failed_shells)
 
 
-def _build_console_tmux(
+def _build_console_tmux_unlogged(
     target: Transport,
     db: Database,
     registry: Registry,
@@ -604,3 +611,44 @@ def _build_console_tmux(
         with contextlib.suppress(KeyboardInterrupt, Exception):
             _teardown_console_tmux(target, console.name)
         raise
+
+
+def _build_console_tmux(
+    target: Transport,
+    db: Database,
+    registry: Registry,
+    console: ConsoleRow,
+    vm: VMRow,
+    *,
+    values: Mapping[str, str],
+    layout: str,
+    members: Sequence[ConsoleSessionRow] | None = None,
+) -> None:
+    """Build with redacted diagnostics and a value-scoped SSH transcript."""
+    from agentworks.harness_setup.outcomes import sanitize_setup_error
+    from agentworks.ssh import SSHLogger
+
+    previous_logger = target.logger
+    logger = SSHLogger(vm.name, "console-build", redactions=tuple(values.values()))
+    target.logger = logger
+    try:
+        _build_console_tmux_unlogged(
+            target,
+            db,
+            registry,
+            console,
+            vm,
+            values=values,
+            layout=layout,
+            members=members,
+        )
+    except BaseException as error:
+        if isinstance(error, AgentworksError):
+            sanitize_setup_error(error, redactions=values.values())
+        with contextlib.suppress(KeyboardInterrupt, Exception):
+            logger.close()
+        raise
+    else:
+        logger.close()
+    finally:
+        target.logger = previous_logger
