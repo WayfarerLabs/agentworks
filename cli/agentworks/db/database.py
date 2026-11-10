@@ -21,7 +21,12 @@ from agentworks.db.converters import (
     _to_workspace,
 )
 from agentworks.db.migrations import LATEST_VERSION, MIGRATIONS, MigrationContext
-from agentworks.db.models import _canonical_session_identity
+from agentworks.db.models import (
+    DesiredRuntimeState,
+    _canonical_session_identity,
+    _canonical_vm_identity,
+    _runtime_state,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -354,6 +359,9 @@ class Database:
                     )
                 self._conn.execute("INSERT INTO schema_version (version) VALUES (?)", (version,))
                 self._conn.commit()
+        except BaseException:
+            self._conn.rollback()
+            raise
         finally:
             self._conn.execute("PRAGMA foreign_keys = ON")
 
@@ -371,12 +379,17 @@ class Database:
         disk_gib: int | None = None,
         swap_gib: int | None = None,
         admin_username: str = "agentworks",
+        *,
+        vm_uuid: str | None = None,
+        desired_runtime_state: DesiredRuntimeState = DesiredRuntimeState.RUNNING,
     ) -> VMRow:
+        vm_uuid = str(uuid4()) if vm_uuid is None else _canonical_vm_identity(vm_uuid)
+        target = _runtime_state(desired_runtime_state, "vm")
         self._conn.execute(
             "INSERT INTO vms "
             "(name, site, hostname, template, admin_template, cpus, "
-            "memory_gib, disk_gib, swap_gib, admin_username) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "memory_gib, disk_gib, swap_gib, admin_username, vm_uuid, desired_runtime_state) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 name,
                 site,
@@ -388,6 +401,8 @@ class Database:
                 disk_gib,
                 swap_gib,
                 admin_username,
+                vm_uuid,
+                target,
             ),
         )
         self._commit_unless_in_tx()
@@ -442,12 +457,52 @@ class Database:
         )
         self._commit_unless_in_tx()
 
-    def set_operator_stopped(self, name: str, stopped: bool) -> None:
-        """Record operator stop/start intent (gates the activation gate's auto-start)."""
-        self._conn.execute(
-            "UPDATE vms SET operator_stopped = ? WHERE name = ?",
-            (1 if stopped else 0, name),
+    def set_vm_desired_runtime_state(self, name: str, state: DesiredRuntimeState, *, expected_vm_uuid: str) -> None:
+        """Write intent only for the retained VM identity."""
+        target = _runtime_state(state, "vm")
+        identity = _canonical_vm_identity(expected_vm_uuid)
+        result = self._conn.execute(
+            "UPDATE vms SET desired_runtime_state = ? WHERE name = ? AND vm_uuid = ?",
+            (target, name, identity),
         )
+        self._require_target_match(result, "vm", name)
+
+    def set_session_desired_runtime_state(
+        self, name: str, state: DesiredRuntimeState, *, expected_session_uuid: str
+    ) -> None:
+        """Write intent only for the retained session, preserving runtime evidence."""
+        target = _runtime_state(state, "session")
+        try:
+            identity = _canonical_session_identity(expected_session_uuid)
+        except ValueError:
+            from agentworks.errors import StateError
+
+            raise StateError("session identity is malformed", entity_kind="session") from None
+        result = self._conn.execute(
+            "UPDATE sessions SET updated_at = CASE WHEN desired_runtime_state IS ? THEN updated_at "
+            "ELSE strftime('%Y-%m-%dT%H:%M:%SZ', 'now') END, desired_runtime_state = ? "
+            "WHERE name = ? AND session_uuid = ?",
+            (target, target, name, identity),
+        )
+        self._require_target_match(result, "session", name)
+
+    def set_console_desired_runtime_state(self, name: str, state: DesiredRuntimeState) -> None:
+        """Write a console selected by the manager under its family guard."""
+        target = _runtime_state(state, "console")
+        result = self._conn.execute(
+            "UPDATE consoles SET updated_at = CASE WHEN desired_runtime_state IS ? THEN updated_at "
+            "ELSE strftime('%Y-%m-%dT%H:%M:%SZ', 'now') END, desired_runtime_state = ? WHERE name = ?",
+            (target, target, name),
+        )
+        self._require_target_match(result, "console", name)
+
+    def _require_target_match(self, result: sqlite3.Cursor, kind: str, name: str) -> None:
+        if result.rowcount != 1:
+            if self._tx_depth == 0:
+                self._conn.rollback()
+            from agentworks.errors import StateError
+
+            raise StateError("selected resource no longer exists or was replaced", entity_kind=kind, entity_name=name)
         self._commit_unless_in_tx()
 
     def update_vm_last_seen(self, name: str) -> None:
@@ -819,14 +874,16 @@ class Database:
         *,
         session_uuid: str | None = None,
         run_id: str | None = None,
+        desired_runtime_state: DesiredRuntimeState = DesiredRuntimeState.RUNNING,
     ) -> SessionRow:
+        target = _runtime_state(desired_runtime_state, "session")
         session_uuid = str(uuid4()) if session_uuid is None else _canonical_session_identity(session_uuid)
         run_id = None if run_id is None else _canonical_session_identity(run_id)
         self._conn.execute(
             "INSERT INTO sessions "
             "(name, workspace_name, template, mode, agent_name, created_workspace, "
-            "created_agent, socket_path, harness_integration_state, session_uuid, run_id)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "created_agent, socket_path, harness_integration_state, session_uuid, run_id, desired_runtime_state)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 name,
                 workspace_name,
@@ -839,6 +896,7 @@ class Database:
                 json.dumps(harness_integration_state or {}),
                 session_uuid,
                 run_id,
+                target,
             ),
         )
         self._commit_unless_in_tx()
@@ -1014,10 +1072,13 @@ class Database:
         name: str,
         vm_name: str,
         admin_shell: bool = False,
+        *,
+        desired_runtime_state: DesiredRuntimeState = DesiredRuntimeState.RUNNING,
     ) -> ConsoleRow:
+        target = _runtime_state(desired_runtime_state, "console")
         self._conn.execute(
-            "INSERT INTO consoles (name, vm_name, admin_shell) VALUES (?, ?, ?)",
-            (name, vm_name, int(admin_shell)),
+            "INSERT INTO consoles (name, vm_name, admin_shell, desired_runtime_state) VALUES (?, ?, ?, ?)",
+            (name, vm_name, int(admin_shell), target),
         )
         self._commit_unless_in_tx()
         result = self.get_console(name)
