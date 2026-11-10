@@ -18,7 +18,6 @@ pattern used across the rest of the package for patched names.
 
 from __future__ import annotations
 
-import contextlib
 import posixpath
 import shlex
 from dataclasses import dataclass, field
@@ -26,7 +25,7 @@ from typing import TYPE_CHECKING
 
 import agentworks.sessions.multi_console as _mc
 from agentworks import output
-from agentworks.errors import AgentworksError, ExternalError
+from agentworks.errors import AgentworksError, ExternalError, UserAbort
 from agentworks.sessions.tmux import exact_tmux_target
 
 from ._helpers import ADMIN_SHELL_WINDOW, tmux_session_name, tmux_staging_name
@@ -607,9 +606,13 @@ def _build_console_tmux_unlogged(
             )
         db.record_console_started(console.name)
     except (KeyboardInterrupt, Exception):
-        # Cleanup must preserve the original failure, including cancellation.
-        with contextlib.suppress(KeyboardInterrupt, Exception):
+        # Ordinary cleanup failures preserve the primary error; new cancellation wins.
+        try:
             _teardown_console_tmux(target, console.name)
+        except UserAbort:
+            raise
+        except Exception:
+            pass
         raise
 
 
@@ -645,8 +648,12 @@ def _build_console_tmux(
     except BaseException as error:
         if isinstance(error, AgentworksError):
             sanitize_setup_error(error, redactions=values.values())
-        with contextlib.suppress(KeyboardInterrupt, Exception):
+        try:
             logger.close()
+        except UserAbort:
+            raise
+        except Exception:
+            pass
         raise
     else:
         logger.close()
