@@ -304,11 +304,11 @@ worker eligibility.
 
 - [x] Receive and critically assess the current-head integration report after the one-hour feedback
       window before beginning the second and final authorized round.
-- [ ] Fence all teardown stopped writes, including incomplete recovery, stopped-row cleanup, and
+- [x] Fence all teardown stopped writes, including incomplete recovery, stopped-row cleanup, and
       legacy exact-session teardown, against the original nullable persisted identity.
-- [ ] Share the actual conditional-update predicate and raw completeness classification without
+- [x] Share the actual conditional-update predicate and raw completeness classification without
       nullable worker plans, a generic lifecycle framework, or weakened validation/idempotence.
-- [ ] Prove replacement preservation and successful stopped persistence across all compatibility
+- [x] Prove replacement preservation and successful stopped persistence across all compatibility
       branches, including independent SQLite connections and interrupted complete reconciliation.
 - [ ] Run full gates and fresh private project, complexity, and cold correctness reviews, then
       publish the final fix round's exact-head ready handoff for the separate tester.
