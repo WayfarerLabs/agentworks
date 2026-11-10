@@ -1,6 +1,6 @@
 # Implementation Plan: Session Batch Stop Parallelism
 
-- Status: Integrating current main; live and published closeout pending
+- Status: Published implementation feedback round 1 of 2
 - Date: 2026-09-06
 - Requirements: [frd.md](./frd.md)
 - Architecture: [hla.md](./hla.md)
@@ -18,6 +18,9 @@
 - The operator authorized up to three published feedback/fix cycles for the design and up to three
   for the final implementation under the standard process. Each published handoff receives the
   standard minimum feedback window. A no-change round ends its loop.
+- The November resumption supersedes the remaining implementation allowance with two feedback/fix
+  rounds. Each new round waits for the separate integration-test session's report, which can take
+  several hours. Round 1 began after the report on `daa4559a1` arrived.
 - Before changing a ready head, remove `review-requested` and return the PR to draft. Reapply the
   signal only after the coherent new head passes the required gates and reviews.
 - Every material finding receives an explicit accept, modify, decline, or defer disposition. A
@@ -215,8 +218,8 @@ published head; the earlier local evidence above remains evidence for its record
 - [x] Integrate `438c4546c`, preserving its launch-attempt ownership and native-socket checks in
       both synchronous and concurrent dedicated teardown.
 - [x] Revalidate changed-boot recovery for uncertain launches and stopped-row socket conflicts.
-- [ ] Repeat full gates and private review on the integrated implementation, then publish it.
-- [ ] Recheck hosted CI and record the remaining live coverage before the final handoff.
+- [x] Repeat full gates and private review on the integrated implementation, then publish it.
+- [x] Recheck hosted CI and record the remaining live coverage before the final handoff.
 
 The installed-wheel retest at `315c1cc64` reproduced a conservative shutdown-timing failure:
 `kill-server` returned successfully while the exact process remained briefly alive, then the process
@@ -224,8 +227,36 @@ exited before coordinator return. The follow-up correction adds bounded read-onl
 observation grace, never another destructive attempt. Private correctness and complexity review
 judged this part of the shared teardown completion contract rather than transport migration.
 
-- [ ] Validate delayed exit, persistent liveness, and unknown observation during post-kill grace,
+- [x] Validate delayed exit, persistent liveness, and unknown observation during post-kill grace,
       including one mutation only and no cleanup before proven absence.
+
+#### November implementation handoff and first feedback round
+
+Head `daa4559a1`, incorporating main `438c4546c`, was published ready on November 9 with all hosted
+checks green. The integrated baseline had 11,448 local full-suite passes and 11 skips, plus one
+unchanged credential-helper process-group cleanup failure that passed on isolated rerun. The grace
+correction passed 72 focused tests and all three private review lanes. An installed wheel stopped 36
+real local tmux servers, verifying one kill each, process/socket absence, stopped SQLite state, and
+preservation of mismatched runtimes in mixed batches.
+
+The separate integration-test session reported on that exact head. PowerShell 5.1 and 7.6.9 each
+stopped 12 selected sessions across two real Debian guests while preserving an unselected sentinel.
+A real ten-second read-only worker timeout preserved its failed runtime and database identity while
+nine siblings stopped. That supports the current ten-second, one-attempt policy. Sampled peak SSH
+concurrency was eight, with attribution gaps, not a continuous upper-bound proof. A Linux multi-VM
+drive stopped ten sessions but did not send its planned Ctrl-C; interruption, replacement races, and
+legacy/incomplete compatibility remain source/unit coverage. The tester's initial full gates had
+fixture failures; all affected tests passed after fixture correction, without a full corrected suite
+rerun. The incomplete Windows private-key scan remains an explicit cleanup-evidence limit.
+
+- [x] Receive and critically assess the integration report before beginning a feedback/fix round.
+- [ ] Consolidate complete dedicated execution and fenced synchronous reconciliation while
+      preserving stopped, uncertain-launch, and incomplete-fingerprint compatibility preparation.
+- [ ] Simplify worker evidence and coordinator drain branches without weakening submission
+      ownership, primary-error propagation, or interrupted-persistence retry.
+- [ ] Resolve retry-factory feedback against the independent one-attempt requirement in R6.
+- [ ] Run the full gates and fresh private project, complexity, and cold correctness reviews on the
+      round's exact result, then publish a new ready handoff for the separate tester.
 
 - [x] Update active command reference and session lifecycle/status guidance.
 - [ ] Add `locked.md` from the implemented exact head and run locked-SDD validation.
@@ -233,10 +264,10 @@ judged this part of the shared teardown completion contract rather than transpor
 - [x] Obtain fresh private project-values, Muntz, and cold correctness/security reviews on the exact
       implementation head.
 - [x] Run an isolated shipped-CLI drive with no ambient operator state.
-- [ ] Run operator-approved live validation against disposable dedicated sessions on one and
+- [x] Run operator-approved live validation against disposable dedicated sessions on one and
       multiple VMs when the environment permits.
-- [ ] Publish exact-head evidence, mark the PR ready, and complete up to three authorized final
-      feedback/fix cycles.
+- [ ] Complete the November two-round feedback allowance, waiting for each separate integration
+      report before any next round and stopping on convergence.
 
 ### Phase 4 Definition of Done
 
