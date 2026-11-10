@@ -105,11 +105,19 @@ running; report the provider observation and lack of guest inspection instead of
 
 ## Infrastructure preparation
 
-Build and preflight each required VM/site operation before requesting credentials that it cannot
-use. Use one site instance where several prepared VM graphs share it. All selected running-intent
-VMs enter this phase, including those whose children are absent, stopped, or awaiting adoption.
-Permitted on-demand parents enter only for selected running workload candidates needing checks or
+Build and preflight VM/site observation contexts for every affected family before requesting
+credentials that it cannot use. Use one site instance where several prepared VM graphs share it.
+Binding/observation is distinct from activation: every selected running-intent VM is activated as
+needed, including those whose children are absent, stopped, or awaiting adoption. Permitted
+on-demand parents are activated only for selected running workload candidates needing checks or
 execution. Stopped parents block those candidates without contributing their workload targets.
+
+A parent needed only for child-stop work still receives non-activating observation. If already off,
+its children need no guest stop. If running, prepare direct canonical guest teardown without an
+activation gate. Do not open a keepalive whose acquisition itself starts a VM, as WSL's hold can;
+stop-only work can use the already-live guest without that hold. If it goes off before teardown,
+re-observe provider power and report the stopped target satisfied only when absence is proved.
+Unknown observation still blocks. A hold justified by another selected running target may be reused.
 
 Use one invocation-owned infrastructure secret cache with success and failure entries keyed by
 declared secret name. Each first request calls the existing authorized complete-resolution path for
@@ -145,11 +153,15 @@ After every eligible target's pre-secret checks:
 1. Create one workload `Resolver` with the invocation's existing interaction policy.
 2. Register the union of eligible graphs' secret declarations and all effective session/pane
    `SecretTarget`s, including transient declarations where current env consumers permit them.
-3. Seed successful infrastructure values before resolution. Preserve the resolver's refusal to seed
-   or add unresolved requirements after its boundary.
-4. Resolve once and validate every target's use of the values. Winning-scope env merging and
+3. Read the resolver's value-free `registered_names` tuple and intersect it with cached failed
+   infrastructure names. An overlap fails the complete workload barrier from the cached error,
+   without resolving that name again or prompting for other names in a known-doomed batch. An
+   unrelated cached failure has no effect on this union.
+4. Seed applicable successful infrastructure values before resolution. Preserve the resolver's
+   refusal to seed or add unresolved requirements after its boundary.
+5. Resolve once and validate every target's use of the values. Winning-scope env merging and
    `${agw:...}` context validation retain the current shared renderer and literal-secret rules.
-5. Supply only declared graph values through `ScopedSecrets` and only the relevant composed env to
+6. Supply only declared graph values through `ScopedSecrets` and only the relevant composed env to
    each session or pane. Never deliver the entire credential set as a process environment.
 
 A required workload secret failure prevents every deferred action, including stops and staging
@@ -212,11 +224,12 @@ inside infrastructure, per-item execution, best-effort cleanup, or result render
 ## Dry run
 
 Use the same local selection, target interpretation, and domain action classification, but no
-activation/execution helpers. Direct status observers and prepared provider status contexts are
-allowed; workload source preview/resolution, PID repair, artifact staging, and tmux cleanup are not.
-An off prerequisite makes future guest eligibility conditional. A failed attempted observation is
-unknown and blocks action; an intentionally unattempted off-guest probe is not proof that a
-replacement is safe. Execution rebuilds and revalidates its plan rather than consuming preview text.
+activation/execution helpers or native mutation guards. Dry run must not create guard directories or
+files. Direct status observers and prepared provider status contexts are allowed; workload source
+preview/resolution, PID repair, artifact staging, and tmux cleanup are not. An off prerequisite
+makes future guest eligibility conditional. A failed attempted observation is unknown and blocks
+action; an intentionally unattempted off-guest probe is not proof that a replacement is safe.
+Execution rebuilds and revalidates its plan rather than consuming preview text.
 
 ## Required behavioral cases
 
@@ -224,6 +237,9 @@ replacement is safe. Execution rebuilds and revalidates its plan rather than con
   infrastructure preparation, before an unrelated workload's missing secret aborts deferred work.
 - One site's unavailable credential leaves another site's infrastructure preparation usable; shared
   successful and failed credential names are each attempted once per invocation.
+- A failed infrastructure name also required by an eligible workload fails the shared workload
+  barrier without a second source call. The same failure does not block an unrelated workload union.
+  A stop-only parent receives observation without activation or an implicitly booting hold.
 - Two repair paths share one conditional key; a healthy VM never requests it.
 - Mixed session launches and console builds share one workload union; an invalid value for any
   consumer prevents all tmux changes and every deferred provider stop.

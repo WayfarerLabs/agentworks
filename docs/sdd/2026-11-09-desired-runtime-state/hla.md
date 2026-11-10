@@ -68,17 +68,19 @@ start/stop services that would rewrite intent. Dependency activation preserves o
 
 ## Reconciliation phases
 
-Each invocation constructs an in-memory plan from current rows and executes it once. It does not
-save an executable plan or retry automatically.
+Execution constructs an in-memory plan from current rows and applies it once. It does not save an
+executable plan or retry automatically. Dry run follows the separate observation path below and does
+not acquire or create mutation guards.
 
 1. Validate scope and select resource identities. Acquire VM-family guards in deterministic order,
    retaining successful families and reporting busy ones as blocked. Reload and validate selected
    identities and targets under those guards. Structural database-open or registry failures before
    selection remain command errors; ordinary per-VM preparation failures remain isolated.
-2. Build the required infrastructure operations and their readiness graphs. Prepare every selected
-   VM with running intent, regardless of its child count or its children's targets. Also prepare
-   permitted parent VMs needed by selected running workload candidates. A stopped parent blocks
-   those candidates; an idle on-demand VM with no candidates is not activated.
+2. Build observation/provider contexts for every affected VM, including parents needed only to
+   inspect or stop children. Activation is a separate decision: activate every selected VM with
+   running intent, regardless of child count or child targets, plus permitted parents needed by
+   selected running workload candidates. A stopped parent blocks those running candidates; an
+   on-demand parent used only for child stop does not receive an activation request.
 3. Resolve distinct required infrastructure credentials, observe power state, activate required VMs,
    complete conditional Tailscale repair, and retain their active holds. A failed VM blocks its own
    dependent operations while other families continue. VM stops are planned here but deferred.
@@ -87,9 +89,11 @@ save an executable plan or retry automatically.
    run before workload secret collection. Healthy running targets and refused operations add no
    workload-only secrets. A console may still build a waiting view for an absent member session.
 5. Register eligible graph declarations and effective environment/pane targets on one workload
-   resolver, seed already-resolved infrastructure values, resolve once, and validate every target's
-   use of those values. Failure prevents every remaining runtime change, including every VM stop.
-   Already-activated infrastructure may remain running and is reported.
+   resolver. If any required name already failed infrastructure resolution, fail this shared
+   boundary from the cached error without retrying the source. Otherwise seed applicable successful
+   infrastructure values, resolve once, and validate every target's use of those values. Failure
+   prevents every remaining runtime change, including every VM stop. Already-activated
+   infrastructure may remain running and is reported.
 6. Execute concrete domain operations with supplied values: session actions before console builds
    within each VM, then deferred provider stops. Do not individually tear down children merely to
    stop their VM. A failed action does not prevent independent actions. Abort stops further work.
@@ -123,7 +127,10 @@ conditional repair names join the same cache only when a VM proves they are need
 The workload composition uses the existing `Resolver.register_targets`, declaration registration,
 `seed`, `resolve`, and `ScopedSecrets`. It resolves the complete eligible workload union together,
 so a missing value is an operation-wide barrier rather than a partial restart. It does not reuse the
-old batch's completed VM resolver by registering new names after its boundary.
+old batch's completed VM resolver by registering new names after its boundary. Add a value-free
+`registered_names` query to Resolver for the cached-failure intersection before resolution. Only
+failures required by this eligible union block it; an unrelated failed site key does not poison
+healthy workloads.
 
 After phase 5, domain execution can read supplied values but cannot resolve more. The infrastructure
 cache is closed to new resolution before workload execution. Any newly discovered requirement is a

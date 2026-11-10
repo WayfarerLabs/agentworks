@@ -34,10 +34,10 @@ one resource across multiple reads must retain its identity rather than construc
 
 Add a callable migration after version 38. Leave historical migrations unchanged.
 
-1. Validate the legacy VM flag values before changing tables. Refuse malformed values rather than
-   silently guessing an intent.
-2. Open `BEGIN IMMEDIATE` inside the callable so validation, data conversion, table reconstruction,
+1. Open `BEGIN IMMEDIATE` inside the callable so validation, data conversion, table reconstruction,
    foreign-key verification, and the runner's version checkpoint share one transaction.
+2. Validate the legacy VM flag values before changing tables. Refuse malformed values rather than
+   silently guessing an intent.
 3. Rebuild the VM table with its current complete shape, replacing `operator_stopped` with
    `desired_runtime_state` and adding `vm_uuid`. Copy all existing metadata, initialization facts,
    release evidence, timestamps, site references, and platform metadata without reinterpretation.

@@ -119,8 +119,8 @@ existing intended scopes. Refused/no-op paths do not resolve unused workload sec
 - [ ] Activate all selected running-intent VMs, including both childless VMs and VMs with only
       stopped children, before the workload boundary. Leave idle on-demand VMs off when not needed.
 - [ ] Union eligible workload graph/env/pane requirements on the existing Resolver, seed successful
-      infrastructure values, validate all consumers, and prohibit further source resolution
-      afterward.
+      infrastructure values, fail on any required cached infrastructure error without retrying,
+      validate all consumers, and prohibit further source resolution afterward.
 - [ ] Execute sessions before console builds and all provider stops after shared secret success;
       isolate independent failures, preserve targets, propagate cancellation, and report partial
       effects.
