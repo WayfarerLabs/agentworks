@@ -46,6 +46,9 @@ class SourceRefError(ExternalError):
     """Raised when a source reference or a destination is invalid, or a fetch from it fails."""
 
 
+_SCP_REMOTE_RE = re.compile(r"^[^/~:@]+@[^/:]+:")
+"""An scp-style remote, ``user@host:path``: what ``git`` reads as one, but no local path."""
+
 # Ref must be safe for shell and git: alphanumeric, hyphens, dots, underscores, slashes
 _SAFE_REF_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._/-]*$")
 
@@ -68,28 +71,32 @@ def parse_source_ref(source: str, *, default_filename: str = "") -> SourceRef:
         default_filename: Default filename when git source has no subpath.
             If empty and no subpath is provided, the subpath will be empty.
 
+    A local path, plain or after ``file::``, may not hold ``::`` or ``://``
+    or have the scp-style ``user@host:`` shape, so a remote written without
+    ``git::`` is refused instead of read as a local file.
+
     Raises:
         SourceRefError: If the source reference is malformed.
     """
     if not source:
         raise SourceRefError("source reference cannot be empty")
 
-    # Strip file:: prefix
-    if source.startswith("file::"):
-        path = source[6:]
-        if not path:
-            raise SourceRefError("file source path cannot be empty")
-        return SourceRef(kind="file", path=path, subpath="", ref="")
-
     # Git source
     if source.startswith("git::"):
         return _parse_git_source(source[5:], default_filename)
 
-    if "::" in source:
+    path = source.removeprefix("file::")
+    if not path:
+        raise SourceRefError("file source path cannot be empty")
+    if "::" in path:
         raise SourceRefError("source reference scheme must be file:: or git::")
-
-    # Default: local file
-    return SourceRef(kind="file", path=source, subpath="", ref="")
+    # A URL or an scp-style remote written without git:: is not a local path, and may hold a
+    # credential, so it is refused without being echoed.
+    if "://" in path or _SCP_REMOTE_RE.match(path):
+        raise SourceRefError(
+            "a remote source reference must start with git::; a local path holds no '://' or user@host:"
+        )
+    return SourceRef(kind="file", path=path, subpath="", ref="")
 
 
 def _parse_git_source(url_str: str, default_filename: str) -> SourceRef:
@@ -379,9 +386,11 @@ def _fetch_git_dir(source: SourceRef, files: Files, dest: str, *, log: _Output |
     alike. Every git command must succeed: a failure is ``CommandFailed``, so
     the caller can tell a sync that did not happen from one that did.
 
-    The existing clone's origin is read with its streams kept out of the
-    log, and a refusal names neither URL, since a clone made from a URL
-    with credentials in it holds them there.
+    The existing clone's origin is its configured URL, read as written
+    (``insteadOf`` rewrites apply to what git fetches, not to what the
+    clone is of), with its streams kept out of the log; a refusal names
+    neither URL, since a clone made from a URL with credentials in it holds
+    them there.
     """
     access = files.access
 
@@ -389,7 +398,8 @@ def _fetch_git_dir(source: SourceRef, files: Files, dest: str, *, log: _Output |
         return access.run(Command(argv, deadline=files.deadline)).require_completed(access.vm_name) == 0
 
     if succeeds(("test", "-d", f"{dest}/.git")):
-        probe = Command(("git", "-C", dest, "remote", "get-url", "origin"), deadline=files.deadline, log_streams=False)
+        url = ("git", "-C", dest, "config", "--get", "remote.origin.url")
+        probe = Command(url, deadline=files.deadline, log_streams=False)
         remote = access.run(probe)
         if (
             remote.require_completed(access.vm_name) != 0

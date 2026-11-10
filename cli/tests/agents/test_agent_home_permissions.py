@@ -351,7 +351,7 @@ def test_a_failed_git_dotfiles_sync_skips_the_agent_install(
 
         def scripted(call: Call) -> Result | BaseException | None:
             argv = call.request.argv if isinstance(call.request, Command) else ()
-            if argv == ("git", "-C", dest, "remote", "get-url", "origin"):
+            if argv == ("git", "-C", dest, "config", "--get", "remote.origin.url"):
                 return Result(Completed(0), f"{url}\n".encode())
             if argv[:4] == ("git", "-C", dest, "fetch"):
                 failed = Result(Completed(1), stderr=b"fatal: couldn't find remote ref\n")

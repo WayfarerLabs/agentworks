@@ -7,7 +7,9 @@ They are used in agentworks config fields that accept file sources (e.g., `mise_
 
 ### Local file
 
-A plain path or a `file::` prefixed path. Tilde expansion is supported.
+A plain path or a `file::` prefixed path. Tilde expansion is supported. A remote is never a local
+path: a value holding `://`, or written as `user@host:path`, is refused, so write a git remote as
+`git::<url>`.
 
 ```text
 ~/.config/agentworks/mise.lock

@@ -44,7 +44,7 @@ def test_a_failed_dotfiles_sync_skips_the_install_and_says_the_destination_is_un
 def test_a_failed_dotfiles_install_is_reported_on_its_own_and_runs_in_a_login_shell_in_the_checkout() -> None:
     guest = StepGuest(local_files=False)
     guest.respond(
-        Command(("git", "-C", DOTFILES, "remote", "get-url", "origin"), deadline=60, log_streams=False),
+        Command(("git", "-C", DOTFILES, "config", "--get", "remote.origin.url"), deadline=60, log_streams=False),
         Result(Completed(0), f"{DOTFILES_URL}\n".encode()),
     )
     install = Command(("zsh", "-lc", "./install.sh"), cwd=DOTFILES, deadline=120)

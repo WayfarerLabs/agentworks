@@ -104,6 +104,20 @@ def test_an_at_sign_after_the_host_is_not_a_credential() -> None:
 
 
 @pytest.mark.parametrize(
+    "source", ["https://example.com/d.git", "file::ssh://example.com/d", "git@example.com:me/d.git", "me@host:dots"]
+)
+def test_a_remote_written_without_git_is_not_read_as_a_local_path(source: str) -> None:
+    with pytest.raises(SourceRefError) as refused:
+        parse_source_ref(source)
+    assert source not in str(refused.value)
+
+
+@pytest.mark.parametrize("source", ["~/dots", "./dots", "/srv/a@b:c", "file::~/m.lock", "github:me/dotfiles"])
+def test_a_local_path_is_still_a_local_path(source: str) -> None:
+    assert parse_source_ref(source).kind == "file"
+
+
+@pytest.mark.parametrize(
     ("query", "expected_ref"),
     [
         ("depth=1&ref=main", "main"),
@@ -261,7 +275,7 @@ def test_a_mktemp_that_names_no_staging_directory_clones_nothing(named: str) -> 
 DEST = "/home/a/.dotfiles"
 IS_CLONE = Command(("test", "-d", f"{DEST}/.git"), deadline=60)
 EXISTS = Command(("test", "-d", DEST), deadline=60)
-ORIGIN = Command(("git", "-C", DEST, "remote", "get-url", "origin"), deadline=60, log_streams=False)
+ORIGIN = Command(("git", "-C", DEST, "config", "--get", "remote.origin.url"), deadline=60, log_streams=False)
 
 
 def _check_out(ref: str) -> list[Command]:
@@ -333,7 +347,7 @@ def test_a_credential_in_an_existing_clone_s_origin_reaches_neither_the_warning_
     guest = StepGuest(local_files=False)
     secret = "ghp-origin-secret"
     answer = Result(Completed(0), f"https://u:{secret}@example.com/dots.git\n".encode())
-    guest.access.answer = lambda call: answer if call.request.argv[-2:] == ("get-url", "origin") else None
+    guest.access.answer = lambda call: answer if call.request.argv[-1:] == ("remote.origin.url",) else None
 
     sync_dotfiles(
         guest.files,
@@ -347,7 +361,7 @@ def test_a_credential_in_an_existing_clone_s_origin_reaches_neither_the_warning_
 
     (warning,) = guest.log.warned
     assert secret not in warning
-    (probe,) = [r for r in guest.commands() if isinstance(r, Command) and r.argv[-2:] == ("get-url", "origin")]
+    (probe,) = [r for r in guest.commands() if isinstance(r, Command) and r.argv[-1:] == ("remote.origin.url",)]
     assert secret not in format_record(probe, answer, label="Dotfiles")
 
 
@@ -397,6 +411,21 @@ def test_a_branch_ref_advances_on_an_existing_clone(lane: Files, tmp_path: Path,
     advanced = _commit(origin, "two")
 
     fetch_dir(SourceRef("git", str(origin), "", "main"), lane, str(dest))
+
+    assert _git(dest, "rev-parse", "HEAD") == advanced
+
+
+@requires_git
+def test_an_existing_clone_is_matched_by_its_configured_origin_not_an_insteadof_rewrite(
+    lane: Files, tmp_path: Path, origin: Path
+) -> None:
+    dest = tmp_path / "home" / ".dotfiles"
+    subprocess.run(["git", "clone", "-q", "--", str(origin), str(dest)], check=True)
+    _git(dest, "remote", "set-url", "origin", URL)
+    _git(dest, "config", f"url.{origin}.insteadOf", URL)
+    advanced = _commit(origin, "two")
+
+    fetch_dir(SourceRef("git", URL, "", "main"), lane, str(dest))
 
     assert _git(dest, "rev-parse", "HEAD") == advanced
 
@@ -749,7 +778,16 @@ def test_both_templates_refuse_an_unsuitable_destination_at_load(model: type) ->
 
 
 @pytest.mark.parametrize("model", [AdminConfig, AgentTemplate])
-@pytest.mark.parametrize("source", ["git::https://u:ghp-load-secret@example.com/d.git", "s3::ghp-load-secret"])
+@pytest.mark.parametrize(
+    "source",
+    [
+        "git::https://u:ghp-load-secret@example.com/d.git",
+        "s3::ghp-load-secret",
+        "https://u:ghp-load-secret@example.com/d.git",
+        "file::https://ghp-load-secret@example.com/d.git",
+        "git@ghp-load-secret.example.com:me/d.git",
+    ],
+)
 def test_both_templates_refuse_an_unparsable_dotfiles_source_at_load_without_echoing_it(
     model: type, source: str
 ) -> None:

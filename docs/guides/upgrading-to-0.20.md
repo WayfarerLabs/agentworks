@@ -315,8 +315,10 @@ place its `authorized_keys`; every later step runs as the agent, which cannot ru
   meaning `~/dots`.
 - **Git source URLs may not carry credentials.** A `git::https://` source whose URL holds a user
   name or token, such as `https://user:token@github.com/...`, is refused when the template loads,
-  without echoing it; declare a `git-credential` resource for the host instead. A subpath with an
-  empty or `.` component is refused too, as one with `..` was.
+  without echoing it; declare a `git-credential` resource for the host instead. A remote written
+  without `git::`, such as `https://github.com/me/dots.git` or `git@github.com:me/dots.git`, used to
+  be read as a local path and is now refused too; add the `git::` prefix. A subpath with an empty or
+  `.` component is refused too, as one with `..` was.
 - **A git dotfiles checkout follows its `ref`.** Every sync, fresh clone or reinit, fetches the
   template's `ref` (the remote's default branch when there is none) and checks it out detached, so a
   changed or dropped `ref` takes effect, a branch advances and a tag is checked out. A commit `ref`
