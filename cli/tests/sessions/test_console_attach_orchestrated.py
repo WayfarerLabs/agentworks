@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.db import SessionMode, VMStatus
+from agentworks.db import DesiredRuntimeState, SessionMode, VMStatus
 from agentworks.errors import StateError, ValidationError
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
@@ -315,3 +315,44 @@ def test_restore_session_stopped_vm_drives_the_real_gated_composition(
     # The no-op landing focus still fires (post-restore focus parity).
     assert any("select-pane -t '=aw-console-c1':s1.0" in c for c in fake.commands)
     assert any("already matches config" in m for m in captured_output.info)
+
+
+@pytest.mark.windows
+@pytest.mark.parametrize("status", [VMStatus.RUNNING, VMStatus.STOPPED, VMStatus.DEALLOCATED, VMStatus.UNKNOWN])
+def test_console_attach_with_stopped_parent_intent_is_live_diagnostics_only(
+    db, make_config, target, monkeypatch, resolve_counter, status
+):
+    from agentworks.harness_setup.locking import native_mutation_guard
+
+    config = make_config()
+    _seed_vm(db)
+    _seed_named_console(db)
+    vm = db.get_vm("box")
+    assert vm is not None
+    db.set_vm_desired_runtime_state("box", DesiredRuntimeState.STOPPED, expected_vm_uuid=vm.vm_uuid)
+    before_vm = db.get_vm("box")
+    before_console = db.get_console("c1")
+    monkeypatch.setattr(ProxmoxPlatform, "status", lambda *a: status)
+    monkeypatch.setattr(ProxmoxPlatform, "start", lambda *a: pytest.fail("diagnostic attach started its parent"))
+    monkeypatch.setattr(ProxmoxPlatform, "vm_active", lambda *a, **k: pytest.fail("stopped intent acquired idle hold"))
+    monkeypatch.setattr(
+        vm_manager, "_tailscale_rejoin_required", lambda *a, **k: pytest.fail("diagnostic attach repaired")
+    )
+    monkeypatch.setattr(vm_manager, "_ensure_tailscale", lambda *a, **k: pytest.fail("diagnostic attach rejoined"))
+    attach = target.interactive
+
+    def unlocked_attach(command, **kwargs):
+        with native_mutation_guard(db.path, "box"):
+            return attach(command, **kwargs)
+
+    target.interactive = unlocked_attach
+    if status is VMStatus.RUNNING:
+        assert multi_console.attach_console(db, config, name="c1", interaction=TtyInteractionPolicy.REFUSE) == 0
+        assert len(target.interactive_calls) == 1
+    else:
+        with pytest.raises(StateError):
+            multi_console.attach_console(db, config, name="c1", interaction=TtyInteractionPolicy.REFUSE)
+        assert target.interactive_calls == []
+    assert resolve_counter == [["proxmox-token"]]
+    assert db.get_vm("box") == before_vm
+    assert db.get_console("c1") == before_console

@@ -119,11 +119,6 @@ def _add_desired_runtime_state(conn: sqlite3.Connection, _context: MigrationCont
         "platform_metadata, created_at, last_seen_at, admin_template, debian_release, "
         "debian_release_observed_at, last_started_at"
     )
-    # Preserve declared indexes rather than relying on the current absence of
-    # additional VM indexes. SQLite recreates primary/unique autoindexes itself.
-    indexes = conn.execute(
-        "SELECT sql FROM sqlite_schema WHERE type = 'index' AND tbl_name = 'vms' AND sql IS NOT NULL"
-    ).fetchall()
     for row in conn.execute(f"SELECT {columns}, operator_stopped FROM vms").fetchall():
         values = tuple(row)[:-1]
         target = "stopped" if row[-1] else "on-demand"
@@ -134,8 +129,6 @@ def _add_desired_runtime_state(conn: sqlite3.Connection, _context: MigrationCont
         )
     conn.execute("DROP TABLE vms")
     conn.execute("ALTER TABLE vms_new RENAME TO vms")
-    for index in indexes:
-        conn.execute(index[0])
     for table in ("sessions", "consoles"):
         conn.execute(
             f"ALTER TABLE {table} ADD COLUMN desired_runtime_state TEXT "

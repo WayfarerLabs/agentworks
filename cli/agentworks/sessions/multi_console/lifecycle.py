@@ -98,7 +98,6 @@ def realize_console(
                 registry,
                 vm,
                 resolve_secret=resolver.resolve_gate,
-                interaction=interaction,
                 held_native_guard=guard,
                 vm_node=node,
             )
@@ -167,7 +166,6 @@ def stop_console_runtime(
                 registry,
                 vm,
                 resolve_secret=resolver.resolve_gate,
-                interaction=interaction,
                 held_native_guard=guard,
                 vm_node=node,
             )
@@ -257,11 +255,18 @@ def attach_running_console(
                     registry,
                     vm,
                     resolve_secret=resolver.resolve_gate,
-                    interaction=interaction,
                     held_native_guard=guard,
                     vm_node=node,
                 )
-                activate_vm_runtime(context, resolve_secret=resolver.resolve_gate)
+                if vm.desired_runtime_state is DesiredRuntimeState.STOPPED:
+                    if context.observed_status is not VMStatus.RUNNING:
+                        raise StateError(
+                            "console attach requires an already-running parent VM with stopped intent",
+                            entity_kind="console",
+                            entity_name=name,
+                        )
+                else:
+                    activate_vm_runtime(context, resolve_secret=resolver.resolve_gate)
                 holds.enter_context(context.node.hold_active())
                 target = transport(vm, config)
                 canonical, staging = _mc._console_runtime_presence(target, name)

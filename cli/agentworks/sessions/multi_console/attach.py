@@ -394,7 +394,6 @@ def _prepare_vm_target(
                 registry,
                 vm,
                 resolve_secret=resolver.resolve_gate,
-                interaction=interaction,
                 held_native_guard=guard,
                 vm_node=node,
             )

@@ -19,7 +19,6 @@ if TYPE_CHECKING:
     from agentworks.db import Database, VMRow
     from agentworks.harness_setup.locking import NativeMutationGuard
     from agentworks.resources import Registry
-    from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.vms.nodes import LiveVMNode, VMSiteNode
 
 
@@ -49,17 +48,14 @@ def prepare_vm_runtime(
     vm: VMRow,
     *,
     resolve_secret: Callable[[str], str],
-    interaction: TtyInteractionPolicy,
     held_native_guard: NativeMutationGuard | None = None,
     site_nodes: dict[str, VMSiteNode] | None = None,
     vm_node: LiveVMNode | None = None,
 ) -> VMRuntimeContext:
     """Preflight and observe without activation, using the operation's gate callback."""
     from agentworks.orchestration.walk import walk
-    from agentworks.secrets.policy import require_exact_tty_interaction_policy
     from agentworks.vms.nodes import live_vm_node
 
-    require_exact_tty_interaction_policy(interaction)
     _guard_failed_vm(vm)
     if vm_node is None:
         vm_node = live_vm_node(db, config, registry, vm, held_native_guard=held_native_guard, site_nodes=site_nodes)

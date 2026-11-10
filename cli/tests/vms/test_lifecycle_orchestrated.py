@@ -72,7 +72,6 @@ def _prepared(db, config, vm) -> Iterator[tuple]:
             registry,
             vm,
             resolve_secret=resolver.resolve_gate,
-            interaction=Policy.REFUSE,
             held_native_guard=guard,
         )
         try:
@@ -317,7 +316,6 @@ def test_shared_failed_infrastructure_uses_one_resolver_attempt_without_prefligh
                     registry,
                     vm,
                     resolve_secret=resolver.resolve_gate,
-                    interaction=Policy.REFUSE,
                     held_native_guard=guard,
                 )
         assert resolve_counter == [["proxmox-token"]]
@@ -347,6 +345,5 @@ def test_source_free_vm_preflight_still_rejects_dangling_declared_secret(db, mak
             registry,
             vm,
             resolve_secret=lambda name: pytest.fail("dangling declaration reached a source"),
-            interaction=Policy.REFUSE,
             held_native_guard=guard,
         )
