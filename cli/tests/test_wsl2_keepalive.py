@@ -31,13 +31,31 @@ def _child(code: str):
     )
 
 
+# The simulated guest writes the same LF bytes as guest sh printf, regardless
+# of the workstation Python text stream's newline policy.
+_GUEST_ACK = "sys.stdout.buffer.write(b'agentworks-wsl-keeper-ready\\n'); sys.stdout.buffer.flush()"
+
+
+@pytest.mark.windows
+def test_synthetic_guest_acknowledgement_bypasses_windows_text_newline_translation():
+    text_process = _child(
+        "import sys; sys.stdout.reconfigure(newline='\\r\\n'); print('agentworks-wsl-keeper-ready', flush=True)"
+    )
+    text_output, _ = text_process.communicate(timeout=5)
+    assert text_process.returncode == 0
+    assert text_output == b"agentworks-wsl-keeper-ready\r\n"
+
+    binary_process = _child(f"import sys; sys.stdout.reconfigure(newline='\\r\\n'); {_GUEST_ACK}")
+    binary_output, _ = binary_process.communicate(timeout=5)
+    assert binary_process.returncode == 0
+    assert binary_output == b"agentworks-wsl-keeper-ready\n"
+
+
 @pytest.mark.windows
 @pytest.mark.parametrize("delay", [0, 0.12])
 def test_entry_waits_for_same_guest_keeper_acknowledgement(monkeypatch, delay):
     original_popen = subprocess.Popen
-    process = _child(
-        f"import time; time.sleep({delay}); print('agentworks-wsl-keeper-ready', flush=True); time.sleep(30)"
-    )
+    process = _child(f"import sys,time; time.sleep({delay}); {_GUEST_ACK}; time.sleep(30)")
     called = []
 
     def spawn(argv, **kwargs):
@@ -70,6 +88,7 @@ def test_entry_waits_for_same_guest_keeper_acknowledgement(monkeypatch, delay):
         "pass",
         "print('agentworks-wsl-keeper', end='', flush=True)",
         "print('agentworks-wsl-keeper-ready-extra', flush=True)",
+        "import sys; sys.stdout.buffer.write(b'agentworks-wsl-keeper-ready\\r\\n'); sys.stdout.buffer.flush()",
     ],
 )
 def test_malformed_or_missing_ack_fails_entry_and_reaps(monkeypatch, code):
@@ -120,7 +139,7 @@ def test_cancelled_entry_preserves_cancellation_and_closes_job(monkeypatch, erro
 
 @pytest.mark.windows
 def test_body_failure_is_preserved_and_keeper_is_reaped(monkeypatch):
-    process = _child("import time; print('agentworks-wsl-keeper-ready', flush=True); time.sleep(30)")
+    process = _child(f"import sys,time; {_GUEST_ACK}; time.sleep(30)")
     monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: process)
     error = UserAbort("cancelled body")
     with pytest.raises(UserAbort) as caught, WSL2Platform("wsl2", {}).vm_active(_fake_vm()):
@@ -222,7 +241,7 @@ def test_native_job_close_terminates_its_child() -> None:
 @pytest.mark.windows
 @pytest.mark.parametrize("assignment", [True, False, None])
 def test_job_handle_cleanup_on_success_assignment_failure_and_unavailable(monkeypatch, assignment):
-    process = _child("import time; print('agentworks-wsl-keeper-ready', flush=True); time.sleep(30)")
+    process = _child(f"import sys,time; {_GUEST_ACK}; time.sleep(30)")
     if sys.platform != "win32":
         process._handle = 1234
     monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: process)
@@ -247,10 +266,10 @@ def test_vm_stop_cannot_pass_admission_before_delayed_keeper_ack(tmp_path, db, m
 
     marker = tmp_path / "allow-ack"
     process = _child(
-        "import pathlib,time; "
+        "import pathlib,sys,time; "
         f"p=pathlib.Path({str(marker)!r}); "
         "exec('while not p.exists(): time.sleep(.01)'); "
-        "print('agentworks-wsl-keeper-ready', flush=True); time.sleep(30)"
+        f"{_GUEST_ACK}; time.sleep(30)"
     )
     spawned = threading.Event()
 
