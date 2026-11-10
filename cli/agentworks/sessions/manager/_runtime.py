@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 import agentworks.sessions.manager as _mgr
 from agentworks.capabilities.harness_integration import HarnessLaunchIntent
-from agentworks.db import SessionMode, SessionStatus
+from agentworks.db import DesiredRuntimeState, SessionMode, SessionStatus
 from agentworks.errors import BrokenStateError, NotFoundError, StateError
 
 if TYPE_CHECKING:
@@ -69,7 +69,15 @@ class PreparedSessionLaunch:
 
     @property
     def secret_targets(self) -> tuple[SecretTarget, ...]:
-        return () if self.noop else (self.definition.env_target,)
+        return (self.definition.env_target,) if self.requires_launch else ()
+
+    @property
+    def requires_launch(self) -> bool:
+        return not self.noop and not (self.recovered_startup and not self.definition.replace_running)
+
+    @property
+    def secret_nodes(self) -> tuple[Node, ...]:
+        return self.definition.nodes if self.requires_launch else ()
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -223,6 +231,26 @@ def validate_session_observed_policy(
             )
 
 
+def require_session_launch_identity(definition: SessionLaunchDefinition) -> SessionRow:
+    """Reload selected identity, parent, and target before a consequential action."""
+    from agentworks.sessions.manager._lifecycle import _require_selected_session
+
+    session = _require_selected_session(definition.db, definition.session.name, definition.session.session_uuid)
+    workspace = _mgr._require_workspace(definition.db, session.workspace_name)
+    vm = _mgr._require_vm_for_workspace(definition.db, workspace)
+    if (
+        workspace.name != definition.workspace.name
+        or workspace.vm_name != definition.vm.name
+        or vm.vm_uuid != definition.vm.vm_uuid
+    ):
+        raise StateError("session parent changed during preparation", entity_kind="session", entity_name=session.name)
+    if session.desired_runtime_state != definition.session.desired_runtime_state:
+        raise StateError("session target changed during preparation", entity_kind="session", entity_name=session.name)
+    if vm.desired_runtime_state is DesiredRuntimeState.STOPPED:
+        raise StateError("session parent has stopped desired state", entity_kind="vm", entity_name=vm.name)
+    return session
+
+
 def prepare_session_launch(
     definition: SessionLaunchDefinition,
     *,
@@ -235,9 +263,9 @@ def prepare_session_launch(
     from agentworks.sessions.tmux import startup_protection_enabled
 
     db, config, session = definition.db, definition.config, definition.session
-    from agentworks.sessions.manager._lifecycle import _require_selected_session, _validated_socket_path
+    from agentworks.sessions.manager._lifecycle import _validated_socket_path
 
-    current = _require_selected_session(db, session.name, session.session_uuid)
+    current = require_session_launch_identity(definition)
     if current.workspace_name != definition.workspace.name:
         raise StateError(
             "session workspace changed during preparation", entity_kind="session", entity_name=session.name
@@ -286,26 +314,27 @@ def prepare_session_launch(
                 "session became running without restart authorization", entity_kind="session", entity_name=session.name
             )
     target = _mgr._build_session_target(current, vm=definition.vm, config=config, db=db, admin_target=admin_target)
-    preflight_all(
-        definition.nodes,
-        RunContext(
-            config=config,
-            operation_scope=definition.scope,
-            admin_target=admin_target,
-            agent_target=None if current.agent_name is None else target,
-        ),
-        registry=definition.registry,
-        interaction=interaction,
-    )
-    require_setup_ready(
-        db,
-        definition.registry,
-        definition.session_node.harness_integration,
-        vm=definition.vm,
-        workspace=definition.workspace,
-        agent_name=current.agent_name,
-        runner=target,
-    )
+    if not recovered_startup or definition.replace_running:
+        preflight_all(
+            definition.nodes,
+            RunContext(
+                config=config,
+                operation_scope=definition.scope,
+                admin_target=admin_target,
+                agent_target=None if current.agent_name is None else target,
+            ),
+            registry=definition.registry,
+            interaction=interaction,
+        )
+        require_setup_ready(
+            db,
+            definition.registry,
+            definition.session_node.harness_integration,
+            vm=definition.vm,
+            workspace=definition.workspace,
+            agent_name=current.agent_name,
+            runner=target,
+        )
     return PreparedSessionLaunch(
         definition=definition,
         admin_target=admin_target,
@@ -356,13 +385,15 @@ def prepare_session_stop(
 
 def execute_session_stop(prepared: PreparedSessionStop) -> bool:
     """Apply a prepared stop without changing accepted intent or resolving values."""
-    from agentworks.sessions.manager._lifecycle import _require_selected_session, _teardown_session
+    from agentworks.sessions.manager._lifecycle import _require_selected_session
 
     session = _require_selected_session(prepared.db, prepared.session.name, prepared.session.session_uuid)
     workspace = _mgr._require_workspace(prepared.db, session.workspace_name)
     vm = _mgr._require_vm_for_workspace(prepared.db, workspace)
     if vm.vm_uuid != prepared.vm.vm_uuid or workspace.name != prepared.workspace.name:
         raise StateError("session parent changed before teardown", entity_kind="session", entity_name=session.name)
+    if session.desired_runtime_state != prepared.session.desired_runtime_state:
+        raise StateError("session target changed before teardown", entity_kind="session", entity_name=session.name)
     if prepared.parent_off or prepared.observed_status is SessionStatus.STOPPED:
         return False
     assert prepared.admin_target is not None and prepared.session_target is not None
@@ -371,7 +402,7 @@ def execute_session_stop(prepared: PreparedSessionStop) -> bool:
         if session.socket_path is not None
         else session
     )
-    _teardown_session(
+    _mgr._teardown_session(
         session,
         target=prepared.session_target,
         target_owns_session=True,
@@ -384,7 +415,7 @@ def execute_session_stop(prepared: PreparedSessionStop) -> bool:
 
 def validate_session_values(prepared: PreparedSessionLaunch, values: Mapping[str, str]) -> None:
     """Validate the complete rendered environment before any deferred mutation."""
-    if prepared.noop:
+    if not prepared.requires_launch:
         return
     definition = prepared.definition
     _mgr._resolve_session_env(

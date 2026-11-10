@@ -180,3 +180,111 @@ def test_executor_uses_supplied_values_and_preserves_target(tmp_path, monkeypatc
     assert after.pid == 4243 and after.tmux_server_start_ticks == 1
     assert events.count("tmux_create") == 1
     db.close()
+
+
+def test_executor_refuses_newly_running_session_before_artifact_staging(tmp_path, monkeypatch):
+    from agentworks.sessions.manager._execute import execute_session_start
+
+    db, events = _restart_fixture(tmp_path, monkeypatch, status=SessionStatus.STOPPED)
+    prepared = _prepare_launch(db, monkeypatch)
+    monkeypatch.setattr(manager, "check_session_status", lambda *a, **k: SessionStatus.RUNNING)
+    monkeypatch.setattr("agentworks.artifacts.session.stage_session_artifacts", lambda *a, **k: pytest.fail("staged"))
+    with pytest.raises(StateError):
+        execute_session_start(prepared, secret_values={}, graph_secret_values={})
+    assert "tmux_create" not in events
+    db.close()
+
+
+def test_failed_launch_preparation_preserves_old_runtime_and_target(tmp_path, monkeypatch):
+    from agentworks.errors import ExternalError
+    from agentworks.sessions.manager._execute import execute_session_start
+
+    db, events = _restart_fixture(tmp_path, monkeypatch, status=SessionStatus.RUNNING)
+    prepared = _prepare_launch(db, monkeypatch, status=SessionStatus.RUNNING, replace_running=True)
+    before = db.get_session("s1")
+
+    def fail_compile(*args, **kwargs):
+        raise ExternalError("artifact preparation failed")
+
+    monkeypatch.setattr("agentworks.artifacts.session.prepare_session_artifacts", fail_compile)
+    monkeypatch.setattr(manager, "_teardown_session", lambda *a, **k: pytest.fail("old runtime killed"))
+    with pytest.raises(ExternalError):
+        execute_session_start(prepared, secret_values={}, graph_secret_values={})
+    assert db.get_session("s1") == before
+    assert "tmux_create" not in events
+    db.close()
+
+
+def test_stage_time_identity_replacement_prevents_teardown_or_spawn(tmp_path, monkeypatch):
+    from agentworks.sessions.manager._execute import execute_session_start
+
+    db, events = _restart_fixture(tmp_path, monkeypatch, status=SessionStatus.RUNNING)
+    prepared = _prepare_launch(db, monkeypatch, status=SessionStatus.RUNNING, replace_running=True)
+    old_uuid = prepared.definition.session.session_uuid
+
+    def replace_definition(*args, **kwargs):
+        from agentworks.db import SessionMode
+
+        db.delete_session("s1")
+        db.insert_session(
+            "s1",
+            "ws1",
+            "claude",
+            SessionMode.AGENT,
+            agent_name="a1",
+            socket_path="/run/agentworks/agent-tmux-sockets/agt-a1/s1.sock",
+        )
+
+    monkeypatch.setattr("agentworks.artifacts.session.stage_session_artifacts", replace_definition)
+    monkeypatch.setattr(manager, "_teardown_session", lambda *a, **k: pytest.fail("replacement killed"))
+    with pytest.raises(StateError):
+        execute_session_start(prepared, secret_values={}, graph_secret_values={})
+    assert db.get_session("s1").session_uuid != old_uuid
+    assert "tmux_create" not in events
+    db.close()
+
+
+def test_stopped_parent_refuses_launch_before_transport_creation(tmp_path, monkeypatch):
+    db, _ = _restart_fixture(tmp_path, monkeypatch)
+    definition = _definition(db, monkeypatch, status=SessionStatus.STOPPED)
+    vm = db.get_vm("vm1")
+    db.set_vm_desired_runtime_state("vm1", DesiredRuntimeState.STOPPED, expected_vm_uuid=vm.vm_uuid)
+    monkeypatch.setattr(manager, "transport", lambda *a, **k: pytest.fail("guest transport created"))
+    with pytest.raises(StateError):
+        prepare_session_launch(definition, interaction=TtyInteractionPolicy.REFUSE)
+    assert db.get_session("s1").desired_runtime_state is DesiredRuntimeState.RUNNING
+    db.close()
+
+
+def test_interrupted_startup_recovery_collects_no_launch_requirements(tmp_path, monkeypatch):
+    from agentworks.sessions import tmux
+    from agentworks.sessions.manager._execute import execute_session_start
+
+    db, events = _restart_fixture(tmp_path, monkeypatch, status=SessionStatus.RUNNING)
+    selected = db.get_session("s1")
+    monkeypatch.setattr(tmux, "startup_protection_enabled", lambda *a, **k: True)
+    monkeypatch.setattr(
+        "agentworks.orchestration.readiness.preflight_all", lambda *a, **k: pytest.fail("launch preflight")
+    )
+    monkeypatch.setattr(
+        "agentworks.harness_setup.readiness.require_setup_ready", lambda *a, **k: pytest.fail("setup check")
+    )
+    prepared = _prepare_launch(db, monkeypatch, status=SessionStatus.RUNNING)
+    assert prepared.recovered_startup and not prepared.requires_launch
+    assert prepared.secret_targets == () and prepared.secret_nodes == ()
+    monkeypatch.setattr(
+        tmux,
+        "capture_tmux_server_fingerprint",
+        lambda **k: tmux.FingerprintProbe(
+            tmux.ProbeStatus.PRESENT,
+            tmux.TmuxServerFingerprint(selected.pid, selected.boot_id, selected.tmux_server_start_ticks),
+        ),
+    )
+    monkeypatch.setattr(tmux, "finalize_session_start", lambda *a, **k: events.append("recovered"))
+    monkeypatch.setattr(
+        "agentworks.artifacts.session.prepare_session_artifacts", lambda *a, **k: pytest.fail("launch compiled")
+    )
+    assert execute_session_start(prepared, secret_values={}, graph_secret_values={})
+    assert "recovered" in events and "tmux_create" not in events and "kill" not in events
+    assert db.get_session("s1") == selected
+    db.close()

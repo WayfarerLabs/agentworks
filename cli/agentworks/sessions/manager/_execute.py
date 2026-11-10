@@ -14,7 +14,6 @@ from agentworks.orchestration.secrets import ScopedSecrets
 from agentworks.sessions.manager._lifecycle import (
     _mark_runtime_unknown,
     _redacted_launch_errors,
-    _require_selected_session,
     _validated_socket_path,
 )
 from agentworks.ssh import SSHLogger
@@ -38,13 +37,10 @@ def execute_session_start(
 
     definition = prepared.definition
     db, config, registry = definition.db, definition.config, definition.registry
-    session = _require_selected_session(db, definition.session.name, definition.session.session_uuid)
-    ws = _mgr._require_workspace(db, session.workspace_name)
-    vm = _mgr._require_vm_for_workspace(db, ws)
-    if vm.vm_uuid != definition.vm.vm_uuid or ws.vm_name != definition.vm.name:
-        raise StateError("session parent changed during preparation", entity_kind="session", entity_name=session.name)
-    if session.desired_runtime_state != definition.session.desired_runtime_state:
-        raise StateError("session target changed during preparation", entity_kind="session", entity_name=session.name)
+    from agentworks.sessions.manager._runtime import require_session_launch_identity
+
+    session = require_session_launch_identity(definition)
+    ws, vm = definition.workspace, definition.vm
     name, template, session_node, scope = session.name, definition.template, definition.session_node, definition.scope
     replace_running, force, intent = definition.replace_running, definition.force, definition.intent
     running_restart_authorized = definition.running_restart_authorized
@@ -194,6 +190,7 @@ def execute_session_start(
         )
         if artifact_application.artifacts_dir is not None:
             session_env["AGENTWORKS_ARTIFACTS_DIR"] = artifact_application.artifacts_dir
+        require_session_launch_identity(definition)
         stage_session_artifacts(
             db, name, template.harness_integration, session_target, prepared_artifacts, artifact_application
         )
@@ -202,6 +199,16 @@ def execute_session_start(
         with output.section("Starting Session"):
             output.info(f"{operation.title()}ing session '{name}'...")
 
+            session = require_session_launch_identity(definition)
+            observed_now = observe_session_runtime(
+                session,
+                admin_target=admin_target,
+                session_target=session_target if is_legacy else None,
+            )
+            if observed_now is SessionStatus.UNKNOWN or (
+                observed_now is SessionStatus.RUNNING and prepared.observed_status is not SessionStatus.RUNNING
+            ):
+                raise StateError("session runtime changed before teardown", entity_kind="session", entity_name=name)
             if is_legacy or status in {SessionStatus.RUNNING, SessionStatus.RESIDUAL, SessionStatus.BROKEN}:
                 _mgr._teardown_session(
                     session,
