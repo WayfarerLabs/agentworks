@@ -326,3 +326,30 @@ def test_ensure_proc_hidepid_upgrades_off_by_name() -> None:
     assert eff == "1"
     assert "hidepid=off" not in new
     assert new.count("hidepid=") == 1
+
+
+@pytest.mark.parametrize("value", ["²", "3", "01", "Invisible"])
+def test_ensure_proc_hidepid_leaves_a_value_the_kernel_does_not_name_alone(value: str) -> None:
+    from agentworks.vms.hardening import _ensure_proc_hidepid_in_fstab
+
+    content = f"proc  /proc  proc  defaults,hidepid={value}  0  0\n"
+    new, action, eff = _ensure_proc_hidepid_in_fstab(content)
+    assert action == "preserved-unrecognized"
+    assert eff == value
+    assert new == content
+
+
+@pytest.mark.parametrize(
+    ("options", "action", "effective"),
+    [
+        ("defaults,hidepid=invisible,nosuid,hidepid=1", "no-op", "1"),
+        ("defaults,hidepid=1,nosuid,hidepid=invisible", "preserved-stricter", "invisible"),
+    ],
+)
+def test_ensure_proc_hidepid_reads_the_last_occurrence_as_mount_does(options: str, action: str, effective: str) -> None:
+    from agentworks.vms.hardening import _ensure_proc_hidepid_in_fstab
+
+    content = f"proc  /proc  proc  {options}  0  0\n"
+    new, got_action, eff = _ensure_proc_hidepid_in_fstab(content)
+    assert (got_action, eff) == (action, effective)
+    assert new == content

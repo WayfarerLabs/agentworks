@@ -67,15 +67,17 @@ def _split_fstab_line(line: str) -> tuple[str, str]:
     return line[:idx].rstrip(), line[idx:]
 
 
-_HIDEPID_NAMES = {"off": 0, "noaccess": 1, "invisible": 2, "ptraceable": 4}
-"""The kernel's names for ``hidepid`` values (``proc(5)``), beside the numbers."""
-
-
-def _hidepid_level(value: str) -> int | None:
-    """The numeric level of a ``hidepid=`` value, or ``None`` for one this code does not recognize."""
-    if value in _HIDEPID_NAMES:
-        return _HIDEPID_NAMES[value]
-    return int(value) if value.isdigit() else None
+_HIDEPID_LEVELS = {
+    "0": 0,
+    "1": 1,
+    "2": 2,
+    "4": 4,
+    "off": 0,
+    "noaccess": 1,
+    "invisible": 2,
+    "ptraceable": 4,
+}
+"""Every ``hidepid`` value the kernel accepts (``proc(5)``), by number and by name, with its level."""
 
 
 def _ensure_proc_hidepid_in_fstab(content: str) -> tuple[str, str, str]:
@@ -125,14 +127,15 @@ def _ensure_proc_hidepid_in_fstab(content: str) -> tuple[str, str, str]:
         return content, "malformed", "1"
 
     options = fields[3].split(",")
-    hidepid_opt_idx = next((j for j, opt in enumerate(options) if opt.startswith("hidepid=")), None)
+    # The last occurrence is the one mount applies.
+    hidepid_opt_idx = next((j for j in reversed(range(len(options))) if options[j].startswith("hidepid=")), None)
 
     if hidepid_opt_idx is None:
         options.append("hidepid=1")
         action = "added-option"
     else:
         value = options[hidepid_opt_idx].split("=", 1)[1]
-        level = _hidepid_level(value)
+        level = _HIDEPID_LEVELS.get(value)
         if level is None:
             return content, "preserved-unrecognized", value
         if level == 1:
