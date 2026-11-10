@@ -19,7 +19,7 @@ from pydantic import ValidationError
 
 from agentworks.agents.template import AgentTemplate
 from agentworks.execution.errors import CommandFailed, PathRefused
-from agentworks.execution.requests import Bytes, Command
+from agentworks.execution.requests import Bytes, Command, Script
 from agentworks.execution.results import Completed, Result, Unknown, UnknownReason
 from agentworks.sources import (
     UPLOAD_TREE_SCRIPT,
@@ -44,8 +44,8 @@ if TYPE_CHECKING:
     from agentworks.execution.files import Files
 
 requires_posix_tree = pytest.mark.skipif(
-    sys.platform == "win32" or shutil.which("tar") != "/usr/bin/tar" or not Path("/bin/mv").exists(),
-    reason="the tree upload script runs /usr/bin/tar and mv -T under /bin/sh",
+    sys.platform != "linux" or shutil.which("tar") != "/usr/bin/tar" or not Path("/bin/mv").exists(),
+    reason="the tree upload script runs GNU /usr/bin/tar and mv -T under /bin/sh, as a Linux guest has them",
 )
 
 
@@ -162,6 +162,7 @@ def test_fetch_file_publishes_a_local_source_at_0644(tmp_path: Path) -> None:
     assert guest.commands() == []
 
 
+@pytest.mark.windows
 def test_fetch_file_refuses_a_local_source_it_cannot_read(tmp_path: Path) -> None:
     guest = StepGuest(local_files=False)
 
@@ -423,6 +424,28 @@ def test_a_truncated_archive_leaves_the_destination_byte_identical(
 
     assert _contents(dest) == before
     assert _siblings(dest) == []
+
+
+@pytest.mark.windows
+def test_upload_tree_sends_the_local_tree_as_one_unelevated_script_with_its_two_paths(tmp_path: Path) -> None:
+    local = _tree(tmp_path / "local", {"rc": b"new", "nested/file": b"kept"})
+    guest = StepGuest(local_files=False)
+
+    upload_tree(guest.files, local, "/home/a/.dotfiles")
+
+    (request,) = guest.access.requests()
+    assert isinstance(request, Script) and request.source == UPLOAD_TREE_SCRIPT and not request.elevated
+    assert request.env == {
+        "AGW_TREE_DEST": "/home/a/.dotfiles",
+        "AGW_TREE_TAG": hashlib.sha256(b".dotfiles").hexdigest()[:16],
+    }
+    assert isinstance(request.stdin, Bytes)
+    with tarfile.open(fileobj=io.BytesIO(request.stdin.data), mode="r:gz") as archive:
+        members = {member.name: archive.extractfile(member) for member in archive.getmembers() if member.isfile()}
+        assert {name: handle.read() for name, handle in members.items() if handle} == {
+            "./rc": b"new",
+            "./nested/file": b"kept",
+        }
 
 
 def test_a_tree_with_a_read_only_directory_is_replaced_on_every_upload(lane: Files, tmp_path: Path) -> None:

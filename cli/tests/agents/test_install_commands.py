@@ -15,7 +15,7 @@ from agentworks.agents.initializer import _run_agent_install_commands
 from agentworks.execution.requests import Script
 from agentworks.execution.results import Completed, Result
 from agentworks.install_commands import UserInstallCommandEntry
-from agentworks.vms.initializer.packages import install_run
+from agentworks.vms.initializer.packages import _build_test_command, install_run
 from tests.phase_b_support import StepGuest, requires_file_program
 from tests.vm_access_support import Agent, RecordingVMAccess
 
@@ -82,7 +82,7 @@ def test_an_install_is_skipped_only_when_every_declared_test_passes(home: Path) 
 
     for guest in (passing, failing):
         (check,) = guest.checks()
-        assert f"test -f {home}/.my-tool/installed" in check.source and " && " in check.source
+        assert check.source == _build_test_command(entry, "bash", str(home))
     assert install_run("bash", "run-agent-install") not in passing.access.requests()
     assert install_run("bash", "run-agent-install") in failing.access.requests()
     assert not any(request.elevated or request.env for request in failing.access.requests())

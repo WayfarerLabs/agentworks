@@ -10,7 +10,7 @@ import pytest
 
 from agentworks.agents.initializer import _run_agent_mise_setup
 from agentworks.agents.templates import ResolvedAgentTemplate
-from agentworks.config.validation import check_mise_settings
+from agentworks.config.validation import MiseSettingsError, MiseSettingsErrorKind, check_mise_settings
 from agentworks.execution.errors import CommandFailed, ExecutionIncomplete
 from agentworks.execution.requests import Command
 from agentworks.execution.results import Completed, Result, Unknown, UnknownReason
@@ -64,8 +64,9 @@ def test_mise_validation_allows_scoped_backend_tool_name() -> None:
 def test_mise_validation_rejects_control_characters() -> None:
     # ValueError rather than ConfigError: this is what a model validator
     # raises, and the error bridge frames it with the owning resource.
-    with pytest.raises(ValueError, match="name@version"):
+    with pytest.raises(MiseSettingsError) as refused:
         check_mise_settings(["tool\x00@1"], None, "7d")
+    assert refused.value.kind is MiseSettingsErrorKind.PACKAGE_SYNTAX
 
 
 def _guest(*, lockfile: bool | BaseException) -> StepGuest:
@@ -108,7 +109,7 @@ def test_a_locked_failure_falls_back_when_allowed_and_a_failed_prune_is_ignored(
 
 
 @requires_file_program
-def test_agent_mise_setup_writes_its_config_and_installs_as_the_agent(tmp_path: Path) -> None:
+def test_agent_mise_setup_writes_its_config_then_installs_unlocked(tmp_path: Path) -> None:
     guest = StepGuest()
     guest.respond(Command(("test", "-f", f"{tmp_path}/.config/mise/mise.lock"), deadline=60), Result(Completed(1)))
     template = ResolvedAgentTemplate(name="default", mise_packages=["terraform@1.14.5"])
@@ -116,4 +117,20 @@ def test_agent_mise_setup_writes_its_config_and_installs_as_the_agent(tmp_path: 
     _run_agent_mise_setup(agent_files=guest.files, logger=guest.log, agent_tmpl=template, home=str(tmp_path))
 
     assert "terraform" in tomllib.loads((tmp_path / ".config" / "mise" / "config.toml").read_text())["tools"]
+    assert mise_run("bash", "mise install -y", 300) in guest.commands()
+
+
+@requires_file_program
+def test_agent_mise_setup_still_installs_after_its_config_write_is_refused(tmp_path: Path) -> None:
+    (tmp_path / ".config").mkdir()
+    (tmp_path / "elsewhere").mkdir()
+    (tmp_path / ".config" / "mise").symlink_to(tmp_path / "elsewhere", target_is_directory=True)
+    guest = StepGuest()
+    guest.respond(Command(("test", "-f", f"{tmp_path}/.config/mise/mise.lock"), deadline=60), Result(Completed(1)))
+    template = ResolvedAgentTemplate(name="default", mise_packages=["terraform@1.14.5"])
+
+    _run_agent_mise_setup(agent_files=guest.files, logger=guest.log, agent_tmpl=template, home=str(tmp_path))
+
+    assert list((tmp_path / "elsewhere").iterdir()) == []
+    assert len(guest.log.warned) == 1
     assert mise_run("bash", "mise install -y", 300) in guest.commands()
