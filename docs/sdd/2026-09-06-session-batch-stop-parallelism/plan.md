@@ -254,9 +254,15 @@ rerun. The incomplete Windows private-key scan remains an explicit cleanup-evide
       preserving stopped, uncertain-launch, and incomplete-fingerprint compatibility preparation.
 - [ ] Simplify worker evidence and coordinator drain branches without weakening submission
       ownership, primary-error propagation, or interrupted-persistence retry.
-- [ ] Resolve retry-factory feedback against the independent one-attempt requirement in R6.
+- [x] Resolve retry-factory feedback against the independent one-attempt requirement in R6.
 - [ ] Run the full gates and fresh private project, complexity, and cold correctness reviews on the
       round's exact result, then publish a new ready handoff for the separate tester.
+
+The retry-factory deletion suggestion was assessed against R6 rather than today's equal defaults.
+The independently named attempt constant and explicit factory forwarding remain: five factory lines
+feed the existing SSH retry setting. Removing them couples destructive work to the shared default;
+per-helper overrides or a transport wrapper add more machinery. Independent complexity review
+confirmed this is the smallest shape that enforces the accepted policy.
 
 - [x] Update active command reference and session lifecycle/status guidance.
 - [ ] Add `locked.md` from the implemented exact head and run locked-SDD validation.
