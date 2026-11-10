@@ -20,6 +20,12 @@ shutdown, session exit, or lost console runtime does not end its desired-running
   consoles without remembering their names or restarting healthy peers.
 - Reconcile the fleet after an outage, with useful progress and results even when one VM cannot be
   recovered.
+- Bring up an externally stopped VM used through standalone SSH, shell, or exec, even when it has no
+  managed sessions or consoles.
+- Retry one failed session or console after a partial fleet run without changing its recorded target
+  or touching unrelated workloads.
+- Record targets for existing resources, preview the resulting recovery, then restore them in one
+  batch without launching or stopping anything during adoption.
 - Stop a session or console intentionally and have later reconciliation leave it stopped.
 - Stop a VM intentionally while retaining which child sessions and consoles should return when the
   VM is explicitly started again.
@@ -54,20 +60,32 @@ the same durable desired-state contract.
 
 Creation with an initial start, explicit start, and explicit restart express running intent.
 Explicit stop expresses stopped intent, including when the runtime is already absent. An explicit VM
-start clears an intentional-stop prohibition. Dependency activation of an on-demand VM must not
-silently convert its policy into always running.
+start records running intent, including when the VM is already running, and clears an
+intentional-stop prohibition. Dependency activation of an on-demand VM must not silently convert its
+policy into always running.
 
 Provide an explicit operator action to select any supported desired state without immediately
 changing runtimes. This includes selecting available-on-demand intent for a new or existing VM, and
 adopting existing resources before reconciliation. Architecture owns the command spelling.
 
 Validate local arguments, resource identities, and requested configuration and obtain any required
-confirmation before recording intent. That is the acceptance boundary. Persist accepted intent
-before attempting runtime changes. Guest checks that require activation belong to subsequent
-execution preparation, not local acceptance. A subsequent runtime, guest-readiness, or credential
-failure must leave the accepted target available for a later reconciliation retry. Refused or
-cancelled requests before acceptance must not alter intent. Report the recorded target and actual
-outcome honestly when execution fails.
+confirmation before accepting intent. Refuse operation-policy conflicts established through
+read-only observation before accepting that target, such as a fresh-only start of an already-running
+session. Persist accepted intent before attempting that target's runtime changes. Guest readiness
+checks that require activation belong to subsequent execution preparation. A runtime,
+guest-readiness, credential, or operation-policy failure discovered after acceptance must retain the
+accepted target for later retry. A refusal or cancellation before acceptance must not alter intent.
+Report the recorded target and actual outcome honestly when execution fails.
+
+For a locally valid child start below an intentionally stopped VM, accept running intent and report
+execution blocked without changing the VM's intent or activating it. An ordinary batch start
+establishes running intent for every accepted match, including already-running no-ops; runtime
+liveness must not determine whether that explicit start adopts the resource.
+
+Creation records running intent with its durable definition. Preserve existing domain cleanup on
+failed creation: intent accompanies any retained definition and does not require keeping a failed
+new definition that the domain would otherwise remove. Retry retention applies to accepted
+operations on existing definitions and to any newly created definition the domain retains.
 
 Reconciliation applies recorded intent without changing it. Attach, status, describe, reinit,
 console membership edits, and external runtime changes do not independently change running intent.
@@ -102,8 +120,10 @@ Preserve existing console behavior for displaying unavailable member sessions.
 An intentionally stopped VM takes precedence over desired-running children. Keep it stopped, retain
 child intent, and report those children as blocked rather than clearing their intent or starting the
 VM. After an explicit VM start, reconciliation can restore them. Do not power a VM on solely to stop
-child runtimes known absent because the VM is off. Where shutdown actions are needed on a running
-VM, stop affected dependents before powering it off.
+child runtimes known absent because the VM is off. Stopping a VM during reconciliation uses the same
+provider power-stop policy as explicit VM stop. The shutdown removes its child runtimes while
+preserving their intent; it does not require separate guest access or individual session and console
+teardown before the provider stop.
 
 A focused child reconciliation may activate its on-demand VM. It must respect a stopped VM and must
 not expand into unrelated sibling workload changes.
@@ -139,6 +159,11 @@ Return a nonzero exit when any selected managed target remains failed or blocked
 aborts further work and is never downgraded to a warning; completed actions remain honestly reported
 and retryable. Do not promise transaction rollback for external runtime changes.
 
+Before reporting successful convergence, perform bounded post-action observations using the existing
+status authorities. A target already observed absent again after its start is a failure, not a
+successful change. Results describe the state observed in this invocation, not a promise of
+continued runtime availability or useful harness work after it returns.
+
 ### R7. Prepare the entire batch before workload changes
 
 Share preparation between reconciliation and existing batch session start/restart operations. Select
@@ -152,6 +177,10 @@ Preserve bail-before-prompt behavior: already-satisfied targets and refused acti
 runtime-only secrets. Finish required eligibility checks and confirmations before collecting secrets
 for accepted workload actions. A failed required secret preparation must not leave earlier sessions
 restarted while later sessions are still waiting for credentials.
+
+The barrier also covers a VM shutdown that would remove session or console runtimes as a
+consequence. Infrastructure activation for preparation is permitted; destructive shutdown is not a
+shortcut around workload secret preparation.
 
 Failure to prepare any required workload secret aborts workload execution for the entire selected
 batch, even when an independent target's secrets are available. Infrastructure already activated for
@@ -184,6 +213,11 @@ console independence, preview limitations, batch prompting phases, and partial-r
 permanent product documentation. Keep command reference, help, completion, and retained guide
 content synchronized with the implementation. Current behavior must be understandable without
 reading this SDD.
+
+Call out the changed failure boundary for existing batch session start/restart: a missing required
+workload secret now prevents all selected workload runtime changes, replacing the current
+per-session resolve-and-continue behavior. Include this change and explicit VM start's running
+intent in migration guidance and in the implementing commit's breaking-change footer.
 
 Migrate an existing VM's recorded intentional stop to stopped intent, and its existing permission
 for on-demand activation to available-on-demand intent. Do not infer always-running intent from
@@ -224,6 +258,11 @@ workstation and platform coverage and any unavailable lanes without implying the
 11. Existing ambiguous intent requires explicit adoption and remains visible until adopted.
 12. The same PR contains current permanent documentation, green required gates, live evidence,
     completed plan records, and the final lock after authorized review convergence.
+13. A VM with running intent and no managed children is brought up after an external shutdown.
+14. Focused reconciliation retries only its named workload and applies its existing target,
+    including stopped intent, without changing sibling workload runtimes.
+15. Pure intent selection adopts a resource or returns a VM to on-demand policy without changing
+    runtimes, allowing a subsequent dry run before execution.
 
 ## Non-goals
 
