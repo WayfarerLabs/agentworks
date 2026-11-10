@@ -512,6 +512,11 @@ reads a legacy transport.
       leaves the previous tree in place, and a corrupt archive changes nothing.
 - [ ] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
       issues and fix history), and add incident inventory rows before deleting anything.
+- [ ] `vm reinit --admin-template NAME` and `--admin-spec JSON` (operator ruling 2026-11-10), so a
+      VM whose stored admin spec holds a source reference this release refuses has a repair. They
+      follow `agent reinit`'s retain, replace and clear semantics; the
+      `StoredSourceReferenceRefused` hint for a VM names them. Completions, the command reference
+      and the upgrade guide follow.
 - [ ] Collateral: guides or reference pages whose described init behavior changes.
 - [ ] Live evidence: create and reinit on every platform from at least one workstation each.
 
