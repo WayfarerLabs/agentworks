@@ -450,6 +450,7 @@ class CodexIntegration(HarnessIntegration):
     # conversation than last time.
     _dropped_stale: bool = False
     _artifact_plan: NativeSessionArtifacts = NativeSessionArtifacts()
+    _rendered_extra_args: tuple[str, ...] = ()
 
     @classmethod
     def config_for(cls, facet: Facet | None = None) -> type[BaseModel] | None:
@@ -606,6 +607,7 @@ class CodexIntegration(HarnessIntegration):
         asymmetry to apologize for: a fresh launch resumes nothing, while its
         effective workload config may provide initial input.
         """
+        self._rendered_extra_args = tuple(self.render_context_argv(token) for token in self.config.extra_args)
         artifact_context = self._session_binding.artifact_context
         runner = ctx.admin_target() if self._admin else ctx.agent_target()
         self._artifact_plan, native_root = prepare_session_delivery(
@@ -615,7 +617,7 @@ class CodexIntegration(HarnessIntegration):
             context=artifact_context,
             render=lambda prepared: session_artifacts(
                 prepared,
-                extra_args=self.config.extra_args,
+                extra_args=self._rendered_extra_args,
                 enabled_workarounds=self.config.enabled_workarounds,
             ),
             workspace=self._workspace_path,
@@ -1023,7 +1025,7 @@ class CodexIntegration(HarnessIntegration):
             value = _toml_basic_string(self.config.developer_instructions)
             parts += ["-c", shlex.quote(f"developer_instructions={value}")]
         parts += [shlex.quote(token) for token in self._artifact_plan.argv]
-        parts += [self.quote_context_argv(token) for token in self._extra_arg_tokens()]
+        parts += [shlex.quote(token) for token in self._rendered_extra_args]
         if fresh and (prompt := self._fresh_prompt()) is not None:
             parts += ["--", shlex.quote(prompt)]
         return " ".join(parts)
@@ -1139,10 +1141,6 @@ class CodexIntegration(HarnessIntegration):
         elif isinstance(self.config.web_search, str):
             tokens += ["-c", f"{_WEB_SEARCH_KEY}={_toml_basic_string(self.config.web_search)}"]
         return tokens
-
-    def _extra_arg_tokens(self) -> list[str]:
-        """``extra_args`` as raw option tokens after generated options."""
-        return list(self.config.extra_args)
 
     def _recorded_thread_id(self, transport: Transport) -> str | None:
         """The uuid the notify recorder last wrote for this session, or

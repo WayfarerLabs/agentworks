@@ -347,21 +347,23 @@ class HarnessIntegration(Capability):
         """Bind known launch facts before preflight selects or renders input."""
         self._session = replace(self._session_binding, context_values=dict(values), launch_intent=intent)
 
+    def render_context_argv(self, value: str) -> str:
+        """Render one structured extra argument, leaving replacement text literal."""
+        from agentworks.interpolation import render_template
+
+        return render_template(
+            value,
+            self._session_binding.context_values,
+            field=f"{self.owner_kind}/{self.owner_name}.extra_args",
+        )
+
     def quote_context_argv(self, value: str) -> str:
         """Render one structured extra argument as data, then quote it once.
 
         The returned command is consumed directly, so replacement contents
         remain literal without another rendering pass.
         """
-        from agentworks.interpolation import render_template
-
-        return shlex.quote(
-            render_template(
-                value,
-                self._session_binding.context_values,
-                field=f"{self.owner_kind}/{self.owner_name}.extra_args",
-            )
-        )
+        return shlex.quote(self.render_context_argv(value))
 
     @property
     def _session_binding(self) -> SessionBinding:

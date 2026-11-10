@@ -642,6 +642,55 @@ def test_real_native_probe_failure_preserves_existing_runtime_before_teardown(
     assert "kill" not in lifecycle.events and "tmux_create" not in lifecycle.events
 
 
+@pytest.mark.parametrize(
+    "tool,integration,workaround,flag",
+    [
+        ("claude", "claude-code", "session-skill-plugin", "disable-slash-commands"),
+        ("codex", "codex", "session-home-skills", "profile"),
+        ("grok", "grok-build", "session-home-skills", "disable-skills"),
+    ],
+)
+def test_rendered_carrier_override_refuses_restart_before_staging_or_teardown(
+    lifecycle, monkeypatch, tool, integration, workaround, flag
+):
+    from importlib import import_module
+
+    from agentworks.errors import ConfigError
+
+    lifecycle.restart()
+    workspace = lifecycle.db.get_workspace("ws1")
+    assert workspace is not None
+    lifecycle.db.insert_workspace(
+        flag,
+        workspace_path=workspace.workspace_path,
+        vm_name=workspace.vm_name,
+        linux_group=workspace.linux_group,
+        template=workspace.template,
+    )
+    lifecycle.db._conn.execute("UPDATE sessions SET workspace_name = ? WHERE name = 's1'", (flag,))
+    lifecycle.db._conn.commit()
+    previous = lifecycle.db.get_session("s1")
+    old_files = [(path, path.read_bytes()) for path in lifecycle.files()]
+    root = lifecycle.target.home / ".agentworks-artifacts"
+    old_paths = sorted(root.rglob("*"))
+    lifecycle.template.harness_integration = integration
+    lifecycle.template.harness_integration_config = {
+        "enabled_workarounds": [workaround],
+        "extra_args": ["--${agw:workspace_name}"],
+    }
+    module = import_module(f"agentworks.plugins.{tool}.harness_integration")
+    monkeypatch.setattr(module, "require_commands", lambda *args, **kwargs: None)
+    lifecycle.events.clear()
+    with pytest.raises(ConfigError):
+        lifecycle.restart()
+    current = lifecycle.db.get_session("s1")
+    assert current is not None and previous is not None
+    assert (current.session_uuid, current.run_id, current.pid) == (previous.session_uuid, previous.run_id, previous.pid)
+    assert [(path, path.read_bytes()) for path, _ in old_files] == old_files
+    assert sorted(root.rglob("*")) == old_paths
+    assert "kill" not in lifecycle.events and "tmux_create" not in lifecycle.events
+
+
 @pytest.mark.parametrize("capture_state", ["changed", "missing"])
 def test_unknown_passthrough_restart_records_missing_delivery_and_retires_old_files_after_teardown(
     lifecycle, monkeypatch, captured_output, capture_state

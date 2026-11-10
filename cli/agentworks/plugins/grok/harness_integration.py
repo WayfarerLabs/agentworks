@@ -164,6 +164,7 @@ class GrokBuildIntegration(HarnessIntegration):
 
     _resumed: bool | None = None
     _artifact_plan: NativeSessionArtifacts = NativeSessionArtifacts()
+    _rendered_extra_args: tuple[str, ...] = ()
 
     @classmethod
     def config_for(cls, facet: Facet | None = None) -> type[BaseModel] | None:
@@ -252,6 +253,7 @@ class GrokBuildIntegration(HarnessIntegration):
         intent: HarnessLaunchIntent = HarnessLaunchIntent.RESUME_OR_NEW,
     ) -> HarnessStart:
         """Choose the requested fresh, strict-resume, or fallback policy."""
+        self._rendered_extra_args = tuple(self.render_context_argv(token) for token in self.config.extra_args)
         artifact_context = self._session_binding.artifact_context
         runner = ctx.admin_target() if self._admin else ctx.agent_target()
 
@@ -274,7 +276,7 @@ class GrokBuildIntegration(HarnessIntegration):
             context=artifact_context,
             render=lambda prepared: session_artifacts(
                 prepared,
-                extra_args=self.config.extra_args,
+                extra_args=self._rendered_extra_args,
                 enabled_workarounds=self.config.enabled_workarounds,
                 resolve_home=resolve_home,
             ),
@@ -327,7 +329,7 @@ class GrokBuildIntegration(HarnessIntegration):
         if self.config.rules is not None:
             parts += ["--rules", shlex.quote(self.config.rules)]
         parts += [shlex.quote(token) for token in self._artifact_plan.argv]
-        parts += [self.quote_context_argv(token) for token in self.config.extra_args]
+        parts += [shlex.quote(token) for token in self._rendered_extra_args]
         if not resume and (prompt := self._fresh_prompt()) is not None:
             parts += ["--", shlex.quote(prompt)]
         argv = " ".join(parts)

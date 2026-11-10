@@ -198,6 +198,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
     # HarnessStart note. None until the op runs (nothing decided yet).
     _resumed: bool | None = None
     _artifact_plan: NativeSessionArtifacts = NativeSessionArtifacts()
+    _rendered_extra_args: tuple[str, ...] = ()
 
     @classmethod
     def config_for(cls, facet: Facet | None = None) -> type[BaseModel] | None:
@@ -358,6 +359,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
         intent: HarnessLaunchIntent = HarnessLaunchIntent.RESUME_OR_NEW,
     ) -> HarnessStart:
         """Choose the requested fresh, strict-resume, or fallback policy."""
+        self._rendered_extra_args = tuple(self.render_context_argv(token) for token in self.config.extra_args)
         artifact_context = self._session_binding.artifact_context
         runner = ctx.admin_target() if self._admin else ctx.agent_target()
         self._artifact_plan, native_root = prepare_session_delivery(
@@ -367,7 +369,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
             context=artifact_context,
             render=lambda prepared: session_artifacts(
                 prepared,
-                extra_args=self.config.extra_args,
+                extra_args=self._rendered_extra_args,
                 enabled_workarounds=self.config.enabled_workarounds,
             ),
             workspace=self._workspace_path,
@@ -438,7 +440,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
         if self.config.append_system_prompt is not None:
             parts += ["--append-system-prompt", shlex.quote(self.config.append_system_prompt)]
         parts += [shlex.quote(token) for token in self._artifact_plan.argv]
-        parts += [self.quote_context_argv(token) for token in self.config.extra_args]
+        parts += [shlex.quote(token) for token in self._rendered_extra_args]
         if not resume and (prompt := self._fresh_prompt()) is not None:
             parts += ["--", shlex.quote(prompt)]
         argv = " ".join(parts)
