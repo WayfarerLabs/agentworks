@@ -55,10 +55,11 @@ def prepare_vm_runtime(
     vm_node: LiveVMNode | None = None,
 ) -> VMRuntimeContext:
     """Preflight and observe without activation, using the operation's gate callback."""
-    from agentworks.orchestration.readiness import preflight_all
     from agentworks.orchestration.walk import walk
+    from agentworks.secrets.policy import require_exact_tty_interaction_policy
     from agentworks.vms.nodes import live_vm_node
 
+    require_exact_tty_interaction_policy(interaction)
     _guard_failed_vm(vm)
     if vm_node is None:
         vm_node = live_vm_node(db, config, registry, vm, held_native_guard=held_native_guard, site_nodes=site_nodes)
@@ -66,12 +67,11 @@ def prepare_vm_runtime(
         raise StateError("prepared VM node does not match selection", entity_kind="vm", entity_name=vm.name)
     vm_node.reload_row()
     scope = _vm_scope(db, vm.name)
-    preflight_all(
-        walk(vm_node),
-        RunContext(config=config, operation_scope=scope),
-        registry=registry,
-        interaction=interaction,
-    )
+    readiness_ctx = RunContext(config=config, operation_scope=scope)
+    # Prepared operations share one Resolver. Source prediction here would
+    # bypass its invocation failure memo and retry a shared failed credential.
+    for node in walk(vm_node):
+        node.preflight(readiness_ctx)
     names = vm_node.gate_secret_refs()
     values = {name: resolve_secret(name) for name in names}
     ops_ctx = RunContext(config=config, operation_scope=scope, secrets=ScopedSecrets(values, names))

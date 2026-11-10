@@ -291,3 +291,62 @@ def test_known_local_site_refusal_leaves_target_unaccepted(db, make_config, reso
         action(db, config, "box", interaction=Policy.REFUSE)
     assert db.get_vm("box") == vm
     assert resolve_counter == []
+
+
+def test_shared_failed_infrastructure_uses_one_resolver_attempt_without_preflight_prediction(
+    db, make_config, platform, monkeypatch, resolve_counter
+):
+    from agentworks.errors import SecretUnavailableError
+
+    config = make_config()
+    first = _seed(db)
+    second = db.insert_vm("peer", "proxmox", "peer", desired_runtime_state=Target.ON_DEMAND)
+    registry = load_request_registry(config, live_database=db)
+    monkeypatch.delenv("AW_SECRET_PROXMOX_TOKEN")
+    monkeypatch.setattr(
+        "agentworks.orchestration.secrets.require_predicted_refs",
+        lambda *a, **k: pytest.fail("prepared VM readiness predicted a source outside the Resolver"),
+    )
+    resolver = Resolver(config, registry, interaction=Policy.REFUSE)
+    try:
+        for vm in (first, second):
+            with native_mutation_guard(db.path, vm.name) as guard, pytest.raises(SecretUnavailableError):
+                prepare_vm_runtime(
+                    db,
+                    config,
+                    registry,
+                    vm,
+                    resolve_secret=resolver.resolve_gate,
+                    interaction=Policy.REFUSE,
+                    held_native_guard=guard,
+                )
+        assert resolve_counter == [["proxmox-token"]]
+        assert platform[0] == []
+    finally:
+        resolver.close()
+
+
+def test_source_free_vm_preflight_still_rejects_dangling_declared_secret(db, make_config, monkeypatch):
+    from agentworks.errors import ConfigError
+
+    config = make_config()
+    vm = _seed(db)
+    registry = load_request_registry(config, live_database=db)
+    lookup = registry.lookup
+
+    def without_secret(kind, name):
+        if kind == "secret" and name == "proxmox-token":
+            raise KeyError(name)
+        return lookup(kind, name)
+
+    monkeypatch.setattr(registry, "lookup", without_secret)
+    with native_mutation_guard(db.path, vm.name) as guard, pytest.raises(ConfigError):
+        prepare_vm_runtime(
+            db,
+            config,
+            registry,
+            vm,
+            resolve_secret=lambda name: pytest.fail("dangling declaration reached a source"),
+            interaction=Policy.REFUSE,
+            held_native_guard=guard,
+        )
