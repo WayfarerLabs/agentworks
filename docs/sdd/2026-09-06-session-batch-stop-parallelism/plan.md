@@ -1,6 +1,6 @@
 # Implementation Plan: Session Batch Stop Parallelism
 
-- Status: Authorized implementation feedback round 3 of 3, including PID repair
+- Status: Implementation complete; SDD closeout
 - Date: 2026-09-06
 - Requirements: [frd.md](./frd.md)
 - Architecture: [hla.md](./hla.md)
@@ -370,21 +370,87 @@ head rather than relabeling the preceding checkpoint's results.
 - [x] Propagate database-driver repair failures before batch preparation continues, and prove named
       and batch refusal with real enclosing-transaction replacement regressions.
 - [x] Integrate main `1dd5a06dd` without changing the teardown or transport contracts.
-- [ ] Run full gates, installed-wheel checks, three fresh private review lanes, and hosted CI on the
+- [x] Run full gates, installed-wheel checks, three fresh private review lanes, and hosted CI on the
       coherent result, then publish the third-round ready handoff for the separate tester.
-- [ ] Assess the new exact-head integration report and remaining feedback before final SDD closeout.
+- [x] Assess the new exact-head integration report and remaining feedback before final SDD closeout.
       A further material fix requires new authenticated direction.
 
 - [x] Update active command reference and session lifecycle/status guidance.
-- [ ] Add `locked.md` from the implemented exact head and run locked-SDD validation.
+- [x] Add `locked.md` from the implemented exact head and run locked-SDD validation.
 - [x] Run full Python, lint, Rulesync, website, and installed-wheel gates.
 - [x] Obtain fresh private project-values, Muntz, and cold correctness/security reviews on the exact
       implementation head.
 - [x] Run an isolated shipped-CLI drive with no ambient operator state.
 - [x] Run operator-approved live validation against disposable dedicated sessions on one and
       multiple VMs when the environment permits.
-- [ ] Complete the November three-round feedback allowance, waiting for each separate integration
+- [x] Complete the November three-round feedback allowance, waiting for each separate integration
       report before any next round and stopping on convergence.
+
+#### Final validation and feedback ledger
+
+The implementation was handed off ready at `ca483c9a8`, incorporating main `1dd5a06dd`, on November
+10 at 15:36 UTC. All twelve fresh local gates passed on that frozen combined head: 11,608 tests
+passed and 11 skipped in 340.87 seconds, Ruff formatting checked 975 files, mypy checked 939 files,
+and repository, Rulesync, website and deterministic-build checks passed. Hosted Python
+3.12/3.13/3.14, Windows and CodeQL checks also passed; hosted Python 3.12 reported 11,400 passed and
+219 skipped. These are combined-head results, not relabeled old-main runs.
+
+All three private lanes were clean on the combined head. The project lane read source and artifacts
+without claiming an executable rerun. Independent complexity and correctness selections passed 136
+and 210 tests respectively. Before the merge, the lead's 80-case repair rerun and independent
+controller probes had verified original-exception propagation, zero stale status calls and exact
+replacement preservation; the affected modules remained byte-identical in the combined head.
+
+The rebuilt wheel passed frozen-dependency installation, provenance, parity across eight PR-owned
+and eleven newly merged Python modules, version, and global/stop/rekey help checks. Its SHA256 was
+`9ddcd7747c42ee1299fe3de9b89d090f4bd914e4129a991a6353fc3e7b0fc7b6`. No live rekey or refused
+empty-batch mutation smoke was run. The earlier unconstrained Typer and diagnostic-log
+qualifications remain recorded above.
+
+The separate integration report, PR comment 6772578864, completed at 16:14 UTC for exact head
+`ca483c9a8` and base `1dd5a06dd`. It independently passed all twelve gates with 11,608 tests passed
+and 11 skipped, plus 133 focused tests and seven real SQLite/controller probes. Replacement
+conflicts, real WAL snapshot errors and trigger writer failures preserved rows and original
+exceptions before later status or teardown.
+
+Linux-to-remote-Lima validation reached one real overlapping repair write. An observation barrier
+paused the first filtered batch after genuine native ownership proof and before SQL, with no open
+transaction. A supported second restart created a new run/runtime. The first operation then refused
+with `StateConflictError`, preserving the replacement, selected peer and sentinel with zero later
+status/teardown calls across invoking and worker threads. The fixture cleared only recorded PID
+while retaining genuine ticks and native identity through an exact SQL predicate; this is
+lower-authority fault injection, not a claimed normal API or historical state. Ordinary named
+start/stop and a two-session batch stop passed separately.
+
+The first instrumented start repaired identity but exited 1 later during repeated startup access
+granting. It is not an overall positive CLI pass. Independent source attribution found the grant
+path inherited and `tmux.py` byte-identical across main, the prior head and this head; native
+baseline reproduction was not run. Issue #886 records the separate startup/access-grant defect, its
+fixture qualification and the source-reachable interrupted-finalization retry.
+
+Windows Server 2025 validation launched 74 real SQLite/controller cases through PowerShell 5.1 and
+7.6.9 against the verified non-editable candidate. These covered positive persistence, reloaded
+business retry, rollback, retained identity fields and actual writer errors 517 and 1811. Remote
+boundaries were stubs; this is not Windows guest, SSH, WSL or harness coverage. Other native repair
+branches, queued/repeated interrupts, request counts, continuous eight-worker measurement and
+ambiguous-kill scenarios remain bounded coverage, not universal clearance. Earlier native and
+Windows results keep their original head attribution.
+
+The separate testing lead independently audited cleanup across provider/native state, nine
+database/relationship/event tables, integrity/foreign keys, network reachability, trust entries and
+Windows/Linux disposable profiles. The reported RAM-form scan covered 13,345 files and 2,632 decoded
+members after validating 1,891 archives, with zero post-scan matches or exclusions. These are
+bounded cleanup observations, not a whole-filesystem guarantee.
+
+Published delta review 6771880487 found no material issue. Its optional error-classification and
+transaction-wording notes were addressed in 6771983521 without changing the handed-off source.
+Critical reading 6772756752 accepted the qualified integration evidence and tracked the separate
+startup issue #886. The one-hour feedback window ended at 16:36 UTC without another material
+finding. All three authorized source fix rounds are complete; no fourth source fix or self-merge is
+authorized.
+
+Closeout changes only this plan and `locked.md`. Implementation, tests, packaged resources and
+permanent guidance retain the validated implementation bytes.
 
 ### Phase 4 Definition of Done
 
@@ -401,3 +467,5 @@ head rather than relabeling the preceding checkpoint's results.
   separate safety analysis.
 - Operator-configurable concurrency requires evidence from the fixed-bound implementation.
 - systemd/cgroup process containment remains issue #715.
+- Repeated startup access granting remains issue #886. Its source-attributed inherited failure is
+  separate from repair persistence, and a native baseline reproduction remains follow-up work.
