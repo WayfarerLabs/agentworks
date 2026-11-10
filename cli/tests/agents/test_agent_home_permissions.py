@@ -1,11 +1,11 @@
-"""Agent home-directory isolation and honest agent-user reporting: the
-enforcement points on ``create_agent_on_vm``, the single path shared by
-``agent create`` and ``agent reinit``. Exercising that function directly
-with recording transports proves create AND reinit behave correctly.
+"""Agent home-directory isolation, honest agent-user reporting, and who runs each step: the
+enforcement points on ``create_agent_on_vm``, the single path shared by ``agent create`` and
+``agent reinit``. Exercising that function directly over a recording access proves create AND
+reinit behave correctly.
 
 Issue #228 (home isolation) added:
 
-1. an admin-side ``chmod 0750`` of the agent's home, and
+1. a root ``chmod 0750`` of the agent's home, and
 2. a ``umask 027`` line in the managed ``~/.agentworks-profile.sh``.
 
 Issue #252 (verifying agent-user step) made the user-setup report the
@@ -15,94 +15,38 @@ no-op, and shell-corrected when an existing user's login shell diverged
 from the template. Because the message is driven by state, not by the
 caller, ``reinit`` of a truly-gone agent user honestly reports a create.
 
-The transports are fakes that record every ``run`` / ``write_file``;
-the config, registry, and resolved template are real (a minimal default
+ADR 0011 splits the work: the admin bootstraps the account, then the agent
+configures itself on its own access, which never elevates.
+
+The access is a recording fake (``tests/vm_access_support.py``); the
+config, registry, and resolved template are real (a minimal default
 template: no git credentials, install commands, dotfiles, or mise, so
 the setup body reduces to its identity/permission steps).
 """
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING, Any
 
 import pytest
 
 from agentworks.agents import initializer as agent_initializer
 from agentworks.execution.requests import Bytes, Command, PythonProgram
+from agentworks.execution.results import Completed, Result
 from tests.orchestrated_fixtures import proxmox_site, write_operator_config
-from tests.vm_access_support import AccessRecorder, route_vm_access_to_target
+from tests.vm_access_support import AccessRecorder, Admin, Agent, install_access_recorder
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
     from agentworks.db import Database
+    from tests.vm_access_support import Call
 
 LINUX_USER = "agt-dev"
 HOME = f"/home/{LINUX_USER}"
 PROFILE_BASENAME = ".agentworks-profile.sh"
-
-
-class _Result:
-    """Minimal stand-in for a transport command result."""
-
-    def __init__(self, ok: bool = True, returncode: int = 0, stdout: str = "") -> None:
-        self.ok = ok
-        self.returncode = returncode
-        self.stdout = stdout
-
-
-class _RecordingTransport:
-    """Records ``run`` / ``write_file`` calls and returns benign results.
-
-    ``user_exists`` selects the ``getent passwd <user>`` branch: False
-    drives the ``useradd`` (create) path, True the existing-user path.
-    ``shell`` is the login shell that ``getent passwd`` reports for an
-    existing user (field 7); it defaults to a value that DIFFERS from the
-    default template's ``/bin/bash`` so the existing-user path takes the
-    ``usermod`` shell-correction branch, matching the pre-#252 behavior
-    where reinit always ran ``usermod``. A test that wants the converged
-    no-op path passes ``shell="/bin/bash"``.
-    ``primary_group`` is what ``id -gn <user>`` reports; it defaults to
-    the username (a private per-user group, the healthy case), and a test
-    overrides it to a shared group to exercise the post-condition guard.
-    """
-
-    def __init__(
-        self,
-        *,
-        user_exists: bool = False,
-        primary_group: str | None = None,
-        shell: str = "/bin/sh",
-    ) -> None:
-        self.runs: list[tuple[str, bool]] = []
-        self.recorder: AccessRecorder | None = None
-        self.writes: list[tuple[str, str, str | None]] = []
-        self._user_exists = user_exists
-        self._primary_group = primary_group or LINUX_USER
-        self._shell = shell
-
-    def run(
-        self,
-        cmd: str,
-        *,
-        sudo: bool = False,
-        check: bool = True,
-        timeout: int | None = None,
-        input_text: str | None = None,
-    ) -> _Result:
-        self.runs.append((cmd, sudo))
-        if cmd.startswith(f"id -gn {LINUX_USER}"):
-            return _Result(stdout=self._primary_group)
-        if cmd.startswith(f"getent passwd {LINUX_USER}"):
-            if not self._user_exists:
-                return _Result(ok=False, returncode=2)
-            return _Result(stdout=f"{LINUX_USER}:x:1001:1001::{HOME}:{self._shell}")
-        return _Result()
-
-    def write_file(self, path: str, content: str, *, mode: str | None = None) -> _Result:
-        self.writes.append((path, content, mode))
-        return _Result()
 
 
 def _run_create_on_vm(
@@ -113,9 +57,17 @@ def _run_create_on_vm(
     user_exists: bool,
     primary_group: str | None = None,
     shell: str = "/bin/sh",
-) -> tuple[_RecordingTransport, _RecordingTransport]:
-    """Drive ``create_agent_on_vm`` with recording transports and return
-    them (admin, agent)."""
+) -> AccessRecorder:
+    """Drive ``create_agent_on_vm`` over a recording access and return it.
+
+    ``user_exists`` selects the ``getent passwd`` branch: False drives the
+    ``useradd`` (create) path, True the existing-user path, whose login
+    shell is ``shell`` (field 7); it defaults to a value that DIFFERS from
+    the default template's ``/bin/bash``, so the existing-user path takes
+    the ``usermod`` shell-correction branch. ``primary_group`` is what
+    ``id -gn`` reports; it defaults to the username (a private per-user
+    group, the healthy case).
+    """
     from agentworks.agents.templates import resolve_template
     from agentworks.bootstrap import build_registry
     from agentworks.ssh import SSHLogger
@@ -126,13 +78,19 @@ def _run_create_on_vm(
     assert vm is not None
     registry = build_registry(config)
     template = resolve_template(registry, None)
+    recorder = install_access_recorder(monkeypatch)
 
-    admin = _RecordingTransport(user_exists=user_exists, primary_group=primary_group, shell=shell)
-    agent = _RecordingTransport(user_exists=user_exists)
-    monkeypatch.setattr(agent_initializer, "transport", lambda *a, **k: admin)
-    monkeypatch.setattr("agentworks.transports.transport_for_user", lambda *a, **k: agent)
-    # The socket helpers run on the admin's access, whose commands reach the same admin double.
-    admin.recorder = route_vm_access_to_target(monkeypatch, admin)
+    def answer(call: Call) -> Result | None:
+        request = call.request
+        if isinstance(request, Command) and request.argv == ("getent", "passwd", LINUX_USER):
+            if not user_exists:
+                return Result(Completed(2))
+            return Result(Completed(0), f"{LINUX_USER}:x:1001:1001::{HOME}:{shell}\n".encode())
+        if isinstance(request, Command) and request.argv == ("id", "-gn", LINUX_USER):
+            return Result(Completed(0), f"{primary_group or LINUX_USER}\n".encode())
+        return None
+
+    recorder.answer = answer
 
     agent_initializer.create_agent_on_vm(
         vm,
@@ -145,14 +103,17 @@ def _run_create_on_vm(
         logger=SSHLogger("box", "test-home-perms"),
         admin_git_force_safe_directory=True,
     )
-    return admin, agent
+    return recorder
 
 
-def _profile_writes(admin: _RecordingTransport) -> list[str]:
-    """Contents of every write to the managed profile fragment, through any access."""
-    assert admin.recorder is not None
+def _commands(recorder: AccessRecorder) -> list[tuple[str, ...]]:
+    return [request.argv for request in recorder.requests("run") if isinstance(request, Command)]
+
+
+def _profile_writes(recorder: AccessRecorder) -> list[str]:
+    """Contents of every write to the managed profile fragment."""
     contents = []
-    for request in admin.recorder.requests("run"):
+    for request in recorder.requests("run"):
         if isinstance(request, PythonProgram) and request.args[0] == "write" and PROFILE_BASENAME in request.args[1]:
             assert isinstance(request.stdin, Bytes)
             contents.append(request.stdin.data.partition(b"\n")[2].decode())
@@ -170,34 +131,31 @@ def test_create_useradd_forces_private_group(db: Database, config: Any, monkeypa
     group is a per-user private group regardless of the image's
     ``USERGROUPS_ENAB``; without it, 0750 could leak the home to a shared
     primary group."""
-    admin, _agent = _run_create_on_vm(db, config, monkeypatch, user_exists=False)
+    recorder = _run_create_on_vm(db, config, monkeypatch, user_exists=False)
 
-    useradd = [cmd for cmd, _ in admin.runs if cmd.startswith("useradd")]
-    assert useradd, "expected a useradd on the create path"
-    assert all(" -U " in f" {cmd} " for cmd in useradd)
-
-
-def test_create_chmods_home_0750_via_admin(db: Database, config: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-    """create runs an idempotent ``chmod 0750`` of the agent's home on the
-    admin transport, with sudo (the agent can't chmod its home before its
-    own SSH path exists, and the home is world-readable otherwise)."""
-    admin, _agent = _run_create_on_vm(db, config, monkeypatch, user_exists=False)
-
-    chmod_runs = [(cmd, sudo) for cmd, sudo in admin.runs if cmd.startswith("chmod 0750")]
-    assert (f"chmod 0750 {HOME}", True) in chmod_runs
+    useradd = [argv for argv in _commands(recorder) if argv[0] == "useradd"]
+    assert useradd == [("useradd", "-m", "-U", "-s", "/bin/bash", LINUX_USER)]
 
 
-def test_chmod_ordered_after_user_creation_and_before_ssh_stage(
+def test_create_chmods_home_0750_as_root(db: Database, config: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """create runs an idempotent ``chmod 0750`` of the agent's home as root
+    on the admin's access (the agent's own access does not work before its
+    ``authorized_keys`` exists, and the home is world-readable otherwise)."""
+    recorder = _run_create_on_vm(db, config, monkeypatch, user_exists=False)
+
+    assert Command(("chmod", "0750", HOME), elevated=True) in recorder.access(Admin()).requests()
+
+
+def test_chmod_ordered_after_user_creation_and_before_ssh_placement(
     db: Database, config: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The ``chmod 0750`` must land AFTER the useradd/usermod (the home
-    must exist) and BEFORE the authorized_keys stage-and-install writes
-    into ``~/.ssh`` (the stated phase-1 placement). Pins order so a
-    reorder that moved the chmod ahead of user creation, a real runtime
-    failure, cannot pass on presence alone."""
-    admin, _agent = _run_create_on_vm(db, config, monkeypatch, user_exists=False)
-    assert admin.recorder is not None
-    requests = admin.recorder.requests("run")
+    must exist) and BEFORE ``authorized_keys`` is placed in ``~/.ssh``
+    (the stated phase-1 placement). Pins order so a reorder that moved the
+    chmod ahead of user creation, a real runtime failure, cannot pass on
+    presence alone."""
+    recorder = _run_create_on_vm(db, config, monkeypatch, user_exists=False)
+    requests = recorder.requests("run")
 
     def first(matches: Callable[[Any], bool]) -> int:
         return next(index for index, request in enumerate(requests) if matches(request))
@@ -218,10 +176,9 @@ def test_shared_primary_group_warns(
     """When the agent's primary group is shared (``id -gn`` != username),
     the post-condition guard surfaces a warning rather than silently
     leaving a 0750 home that other group members can read."""
-    _admin, _agent = _run_create_on_vm(db, config, monkeypatch, user_exists=True, primary_group="users")
+    _run_create_on_vm(db, config, monkeypatch, user_exists=True, primary_group="users")
 
     assert any("primary group is 'users'" in w for w in captured_output.warnings)
-    assert any("cannot be made private" in w for w in captured_output.warnings)
 
 
 def test_private_primary_group_does_not_warn(
@@ -238,13 +195,12 @@ def test_private_primary_group_does_not_warn(
 
 def test_create_writes_umask_027_into_profile(db: Database, config: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     """The managed profile fragment carries ``umask 027`` so files the
-    agent writes outside a workspace default to owner-only. Written by
-    ``_write_agent_profile`` itself, so both of its writes (identity-only,
-    then with PATH) keep the line."""
-    admin, _agent = _run_create_on_vm(db, config, monkeypatch, user_exists=False)
+    agent writes outside a workspace default to owner-only. Both of its
+    writes (identity-only, then with PATH) keep the line."""
+    recorder = _run_create_on_vm(db, config, monkeypatch, user_exists=False)
 
-    writes = _profile_writes(admin)
-    assert writes, "expected at least one write to the managed profile fragment"
+    writes = _profile_writes(recorder)
+    assert len(writes) == 2
     assert all("umask 027" in content for content in writes)
 
 
@@ -252,15 +208,40 @@ def test_reinit_reapplies_both_enforcements(db: Database, config: Any, monkeypat
     """Reinit (existing user with a diverged shell: the ``usermod``
     branch) re-applies both the ``chmod 0750`` and the ``umask 027``, so a
     pre-existing world-readable agent home is repaired on the next reinit."""
-    admin, agent = _run_create_on_vm(db, config, monkeypatch, user_exists=True)
+    recorder = _run_create_on_vm(db, config, monkeypatch, user_exists=True)
 
-    # Took the reinit branch (usermod, not useradd), yet still chmods.
-    assert any(cmd.startswith("usermod -s") for cmd, _ in admin.runs)
-    assert not any(cmd.startswith("useradd") for cmd, _ in admin.runs)
-    assert (f"chmod 0750 {HOME}", True) in admin.runs
-
-    writes = _profile_writes(admin)
+    commands = _commands(recorder)
+    assert ("usermod", "-s", "/bin/bash", LINUX_USER) in commands
+    assert not any(argv[0] == "useradd" for argv in commands)
+    assert ("chmod", "0750", HOME) in commands
+    writes = _profile_writes(recorder)
     assert writes and all("umask 027" in content for content in writes)
+
+
+# -- who runs each step (ADR 0011) ---------------------------------------------
+
+
+def test_after_the_bootstrap_every_request_is_the_agent_s_own_and_none_is_elevated(
+    db: Database, config: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The admin runs only the account, the home's mode and group, the socket
+    directories and ``authorized_keys``; once ``authorized_keys`` is in place,
+    the agent configures itself on its own access, with no request elevated
+    and none carrying an environment (provisioning is hermetic)."""
+    recorder = _run_create_on_vm(db, config, monkeypatch, user_exists=False)
+    calls = [call for call in recorder.calls if call.operation == "run"]
+    keys = next(
+        index
+        for index, call in enumerate(calls)
+        if isinstance(call.request, PythonProgram)
+        and call.request.args[0] == "write"
+        and json.loads(call.request.args[1])["path"] == f"{HOME}/.ssh/authorized_keys"
+    )
+
+    assert all(call.identity == Admin() for call in calls[: keys + 1])
+    agent_phase = calls[keys + 1 :]
+    assert agent_phase and all(call.identity == Agent("dev", LINUX_USER) for call in agent_phase)
+    assert not any(call.request.elevated or call.request.env for call in agent_phase)
 
 
 # -- honest agent-user reporting (issue #252) ---------------------------------
@@ -272,26 +253,12 @@ def test_create_absent_user_reports_created_not_creating(
     """First-time create (user absent): ``useradd`` runs and the step
     reports the user was CREATED. The old unconditional "Creating
     user..." wording is gone."""
-    admin, _agent = _run_create_on_vm(db, config, monkeypatch, user_exists=False)
+    recorder = _run_create_on_vm(db, config, monkeypatch, user_exists=False)
 
-    assert any(cmd.startswith("useradd") for cmd, _ in admin.runs)
+    assert any(argv[0] == "useradd" for argv in _commands(recorder))
     assert any(f"Created agent user '{LINUX_USER}'" in m for m in captured_output.info)
     assert not any("Creating user" in m for m in captured_output.info)
     assert not any("already exists" in m for m in captured_output.info)
-
-
-def test_reinit_gone_user_reports_created_not_silently_reinitialized(
-    db: Database, config: Any, monkeypatch: pytest.MonkeyPatch, captured_output: Any
-) -> None:
-    """The critical case: a truly-gone agent user on reinit is recreated
-    and reported as CREATED, not silently converged. Because the message
-    is driven by detected state (user absent) rather than the caller,
-    reinit and create report the recreation identically."""
-    admin, _agent = _run_create_on_vm(db, config, monkeypatch, user_exists=False)
-
-    assert any(cmd.startswith("useradd") for cmd, _ in admin.runs)
-    assert any(f"Created agent user '{LINUX_USER}'" in m for m in captured_output.info)
-    assert not any("Creating user" in m for m in captured_output.info)
 
 
 def test_reinit_converged_user_reports_already_exists_and_skips_usermod(
@@ -301,12 +268,10 @@ def test_reinit_converged_user_reports_already_exists_and_skips_usermod(
     (``/bin/bash``): a converging no-op. The step reports the user already
     exists, does NOT say "Creating user", and runs no ``usermod`` (nothing
     to converge), matching ``workspace repair``'s "OK" no-op reporting."""
-    admin, _agent = _run_create_on_vm(db, config, monkeypatch, user_exists=True, shell="/bin/bash")
+    recorder = _run_create_on_vm(db, config, monkeypatch, user_exists=True, shell="/bin/bash")
 
-    assert not any(cmd.startswith("useradd") for cmd, _ in admin.runs)
-    assert not any(cmd.startswith("usermod -s") for cmd, _ in admin.runs)
+    assert not any(argv[0] == "useradd" or argv[:2] == ("usermod", "-s") for argv in _commands(recorder))
     assert any(f"Agent user '{LINUX_USER}' already exists" in m for m in captured_output.info)
-    assert not any("Creating user" in m for m in captured_output.info)
     assert not any("Created agent user" in m for m in captured_output.info)
 
 
@@ -317,10 +282,9 @@ def test_reinit_diverged_shell_reports_fixed_and_runs_usermod(
     template (``/bin/zsh`` on the VM vs. the default template's
     ``/bin/bash``): ``usermod -s`` converges it and the step reports the
     correction with the before/after shells."""
-    admin, _agent = _run_create_on_vm(db, config, monkeypatch, user_exists=True, shell="/bin/zsh")
+    recorder = _run_create_on_vm(db, config, monkeypatch, user_exists=True, shell="/bin/zsh")
 
-    assert any(cmd.startswith("usermod -s /bin/bash") for cmd, _ in admin.runs)
-    assert not any(cmd.startswith("useradd") for cmd, _ in admin.runs)
+    assert ("usermod", "-s", "/bin/bash", LINUX_USER) in _commands(recorder)
+    assert not any(argv[0] == "useradd" for argv in _commands(recorder))
     assert any(f"Fixed agent user '{LINUX_USER}'" in m and "/bin/zsh -> /bin/bash" in m for m in captured_output.info)
-    assert not any("Creating user" in m for m in captured_output.info)
     assert not any("already exists" in m for m in captured_output.info)

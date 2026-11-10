@@ -675,13 +675,11 @@ def install_fake_target(monkeypatch: pytest.MonkeyPatch, target: _FakeTarget) ->
     # eager top-level import (used by observe_session_statuses and friends).
     fake_factory = lambda vm, config, **kwargs: target  # noqa: E731
     monkeypatch.setattr("agentworks.transports.transport", fake_factory)
-    # ``sessions.manager`` and the agents modules import ``transport`` at
+    # ``sessions.manager`` and ``agents.manager`` import ``transport`` at
     # module load (eager), so the agentworks.transports-side patch alone
     # wouldn't take effect for callers that already captured the binding.
     monkeypatch.setattr("agentworks.sessions.manager.transport", fake_factory)
     monkeypatch.setattr("agentworks.agents.manager.transport", fake_factory)
-    monkeypatch.setattr("agentworks.agents.grants.transport", fake_factory)
-    monkeypatch.setattr("agentworks.agents.initializer.transport", fake_factory)
     stub_vm_gates(monkeypatch)
     # The interactive code path now lives on the transport itself; the
     # fake target exposes it as a no-op so attach flows return cleanly.

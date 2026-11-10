@@ -1,12 +1,11 @@
-"""On-VM agent provisioning: the SSH bodies that create, configure,
-and remove an agent's Linux user.
+"""On-VM agent provisioning: the requests that create, configure, and remove an agent's Linux user.
 
 The agent counterpart of ``agentworks.vms.initializer``. Command orchestration
 (validation, gating, DB rows, rollback choreography) lives in
 ``agentworks.agents.manager`` and ``agents/realize.py``; this module owns the
-remote mutations they drive over SSH: the user bootstrap and
-self-configure sequence, its install-command / profile / rc / mise
-sub-steps, and the user removal.
+guest mutations they drive, on the admin's and the agent's ``VMAccess``: the
+user bootstrap and self-configure sequence, its install-command / profile /
+rc / mise sub-steps, and the user removal.
 """
 
 from __future__ import annotations
@@ -18,7 +17,6 @@ from agentworks import output
 from agentworks.execution.access import Admin, Agent
 from agentworks.execution.requests import Command, Script, Shell
 from agentworks.git_config import ensure_safe_directory_wildcard
-from agentworks.transports import transport
 from agentworks.vms.initializer.mise import MISE_ACTIVATE_LINES
 from agentworks.vms.initializer.shell_env import (
     _ensure_agentworks_files_sourced,
@@ -97,21 +95,24 @@ def create_agent_on_vm(
 
     The work splits cleanly into two phases by who is running each step:
 
-    1. **Bootstrap (admin)**: ``useradd`` / ``usermod`` → tmux socket
-       infrastructure under ``/var/lib/`` → install ``authorized_keys``
-       via stage-and-install. The last step is what makes direct agent
-       SSH possible from this point onward. This is the only admin work
-       in agent create / reinit.
-    2. **Self-configure (agent)**: every subsequent step runs over the
-       agent's own SSH session against ``agent_target``. Covers rc /
-       profile, git config + credentials, dotfiles, install commands,
-       mise. The agent owns its home, so no sudo or
-       cross-uid file writes are needed in this phase.
+    1. **Bootstrap (admin)**: ``useradd`` / ``usermod``, the home's mode
+       and group check, the tmux socket directories under ``/run``, and
+       ``authorized_keys``, all as root on the admin's access. The agent's
+       ``.ssh`` and ``authorized_keys`` are placed by the file program with
+       the agent as owner, through descriptors opened without following a
+       link, before the file is published. That last step is what makes the
+       agent's own access work from this point onward. This is the only
+       admin work in agent create / reinit, and a failure in it raises.
+    2. **Self-configure (agent)**: every subsequent step runs on the
+       agent's own access, which refuses any elevated request before
+       dispatch. Covers the profile and rc fragments and their source
+       lines, git config + credentials, install commands, dotfiles and
+       mise. The agent owns its home, so no root or cross-uid writes are
+       needed in this phase, and a failed step warns.
 
-    Keeping these two phases disjoint by transport (admin_target vs.
-    agent_target) minimizes the code surface that runs as root on the
-    agent's behalf and matches the rule that operations whose target
-    user is the agent open SSH directly as the agent's Linux user.
+    Keeping these two phases disjoint by access minimizes the code surface
+    that runs as root on the agent's behalf and matches the rule that
+    operations whose target user is the agent run as the agent's Linux user.
     """
     # DRIFT GUARD (Phase 7, recipe use-gate): this function is itself never
     # gated; it runs ``_run_agent_install_commands`` (a declarable consumer), so
@@ -124,7 +125,6 @@ def create_agent_on_vm(
         ensure_agent_socket_dir,
         ensure_agent_socket_root,
     )
-    from agentworks.transports import transport_for_user
     from agentworks.vms.initializer import _reconcile_authorized_keys
 
     admin = execution.vm_access(vm, config, Admin(), log=logger.record)
@@ -226,7 +226,6 @@ def create_agent_on_vm(
 
     # -- Phase 2: self-configure (agent) ----------------------------------
 
-    agent_target = transport_for_user(vm, config, user=linux_user, logger=logger)
     agent_access = execution.vm_access(vm, config, Agent(agent_name, linux_user), log=logger.record)
     agent_files = agent_access.files()
 
@@ -304,76 +303,7 @@ def create_agent_on_vm(
 
     # Dotfiles.
     if agent_cfg.dotfiles_source:
-        output.info(f"Syncing agent dotfiles from {agent_cfg.dotfiles_source}...")
-        try:
-            import shlex as _shlex
-
-            from agentworks.sources import SourceRefError, expand_destination, fetch_dir, parse_source_ref
-
-            ref = parse_source_ref(agent_cfg.dotfiles_source)
-            dest = expand_destination(agent_cfg.dotfiles_destination, home)
-
-            if ref.kind == "git":
-                # If already cloned from the same repo, pull instead of clone.
-                is_git = agent_target.run(
-                    f"test -d {_shlex.quote(dest)}/.git",
-                    check=False,
-                )
-                if is_git.ok:
-                    remote = agent_target.run(
-                        f"git -C {_shlex.quote(dest)} remote get-url origin",
-                        check=False,
-                    )
-                    if remote.ok and remote.stdout.strip() == ref.path:
-                        output.detail("Dotfiles already cloned, pulling latest...")
-                        if ref.ref:
-                            agent_target.run(
-                                f"git -C {_shlex.quote(dest)} fetch",
-                                check=False,
-                                timeout=120,
-                            )
-                            checkout = agent_target.run(
-                                f"git -C {_shlex.quote(dest)} checkout {_shlex.quote(ref.ref)}",
-                                check=False,
-                            )
-                            if not checkout.ok:
-                                output.warn(f"dotfiles checkout of '{ref.ref}' failed, skipping")
-                        else:
-                            pull = agent_target.run(
-                                f"git -C {_shlex.quote(dest)} pull",
-                                check=False,
-                                timeout=120,
-                            )
-                            if not pull.ok:
-                                output.warn("dotfiles pull failed (local changes?), skipping")
-                    else:
-                        raise SourceRefError(f"dotfiles destination {dest} exists but is a different repo")
-                else:
-                    clone_cmd = f"git clone {_shlex.quote(ref.path)} {_shlex.quote(dest)}"
-                    if ref.ref:
-                        clone_cmd = (
-                            f"git clone --branch {_shlex.quote(ref.ref)} {_shlex.quote(ref.path)} {_shlex.quote(dest)}"
-                        )
-                    agent_target.run(clone_cmd, timeout=120)
-            else:
-                # Local source: fetch directly into the agent's home over
-                # agent SSH. The agent owns dest, so no sudo / chown
-                # dance. fetch_dir handles existing-dest overwrite.
-                fetch_dir(ref, agent_files, dest)
-
-            output.info(f"Running agent dotfiles install: {agent_cfg.dotfiles_install_cmd}")
-            # Wrap in a login shell so the dotfiles install command sees
-            # static identity (AGENTWORKS_AGENT via the per-user profile
-            # fragment written earlier this phase) and any PATH the agent
-            # already has. Provisioning is hermetic: no operator env
-            # injected (would only reach runtime shells anyway).
-            inner = f"cd {_shlex.quote(dest)} && {agent_cfg.dotfiles_install_cmd}"
-            agent_target.run(
-                f"{agent_shell} -lc {_shlex.quote(inner)}",
-                timeout=120,
-            )
-        except (SourceRefError, Exception) as e:
-            output.warn(f"agent dotfiles failed: {e}")
+        _sync_agent_dotfiles(agent_files, agent_cfg, home, logger)
 
     # Mise.
     _run_agent_mise_setup(agent_files=agent_files, logger=logger, agent_tmpl=agent_tmpl, home=home)
@@ -394,32 +324,87 @@ def delete_agent_on_vm(
     """Remove an agent Linux user from a VM, along with related on-VM
     state: their processes are killed, the user and home directory are
     removed, and the per-agent tmux socket directory is cleaned up.
+
+    Runs as root on the admin's access; a step failure warns.
     """
-    import shlex
-
     from agentworks.sessions.tmux import agent_socket_dir
-    from agentworks.ssh import SSHError
 
-    target = transport(vm, config, logger=logger)
-
+    admin = execution.vm_access(vm, config, Admin(), log=None if logger is None else logger.record)
     try:
         # Kill any running processes for the user. This also frees any live
         # tmux sockets under the per-agent socket dir removed next.
-        target.run(f"pkill -u {linux_user}", sudo=True, check=False)
+        _status(admin, Command(("pkill", "-u", linux_user), elevated=True))
         # Remove the per-agent tmux socket directory (created by
         # ``ensure_agent_socket_dir`` at create time). It lives on tmpfs
         # under /run, is owned by the agent uid, and would otherwise linger
-        # until reboot. Done BEFORE userdel and best-effort (check=False) so
-        # that a userdel failure (e.g. exit 12, home or mail-spool cleanup)
-        # cannot skip it and re-orphan the dir under the freed uid. The dir
-        # is separate from the home directory userdel removes, and the
-        # sockets are already dead from the pkill above, so this ordering is
-        # safe.
-        target.run(f"rm -rf {shlex.quote(agent_socket_dir(linux_user))}", sudo=True, check=False)
+        # until reboot. Done BEFORE userdel and best-effort (its status is
+        # not read) so that a userdel failure (e.g. exit 12, home or
+        # mail-spool cleanup) cannot skip it and re-orphan the dir under the
+        # freed uid. The dir is separate from the home directory userdel
+        # removes, and the sockets are already dead from the pkill above, so
+        # this ordering is safe.
+        _status(admin, Command(("rm", "-rf", "--", agent_socket_dir(linux_user)), elevated=True))
         # Remove the user and their home directory
-        target.run(f"userdel -r {linux_user}", sudo=True)
-    except SSHError as e:
-        output.warn(f"remote cleanup for '{linux_user}' failed: {e}")
+        admin.run(Command(("userdel", "-r", linux_user), elevated=True), check=True)
+    except STEP_FAILURES as error:
+        sanitize = logger.sanitize if logger is not None else str
+        output.warn(f"remote cleanup for '{linux_user}' failed: {describe_failure(error, sanitize)}")
+
+
+DOTFILES_DEADLINE = 120
+"""Seconds a dotfiles clone, fetch or pull, or the dotfiles install, may take."""
+
+
+def _sync_agent_dotfiles(files: Files, agent_cfg: ResolvedAgentTemplate, home: str, log: InitLog) -> None:
+    """Sync the agent's dotfiles as the agent, then run their install in a login shell in the checkout.
+
+    A git checkout of the same repository is fetched and checked out at the
+    template's ref, or pulled; a failed checkout or pull warns and the
+    install still runs. A local directory replaces the destination whole
+    (``sources.fetch_dir``). The install runs as ``{shell} -lc`` with the
+    checkout as its working directory, so it sees static identity
+    (``AGENTWORKS_AGENT`` via the profile fragment written earlier this
+    phase) and the agent's PATH. Provisioning is hermetic: no operator env
+    is injected. Any step failure warns, and the install is skipped when
+    the sync failed.
+    """
+    from agentworks.sources import SourceRefError, expand_destination, fetch_dir, parse_source_ref
+
+    assert agent_cfg.dotfiles_source is not None
+    output.info(f"Syncing agent dotfiles from {agent_cfg.dotfiles_source}...")
+    access = files.access
+
+    def run(argv: tuple[str, ...], deadline: float | None = files.deadline) -> int:
+        return _status(access, Command(argv, deadline=deadline))
+
+    try:
+        ref = parse_source_ref(agent_cfg.dotfiles_source)
+        dest = expand_destination(agent_cfg.dotfiles_destination, home)
+        if ref.kind != "git":
+            fetch_dir(ref, files, dest, log=log)
+        elif run(("test", "-d", f"{dest}/.git")) != 0:
+            branch = ("--branch", ref.ref) if ref.ref else ()
+            access.run(Command(("git", "clone", *branch, ref.path, dest), deadline=DOTFILES_DEADLINE), check=True)
+        else:
+            remote = access.run(Command(("git", "-C", dest, "remote", "get-url", "origin"), deadline=files.deadline))
+            if (
+                remote.require_completed(access.vm_name) != 0
+                or remote.stdout.decode("utf-8", "replace").strip() != ref.path
+            ):
+                raise SourceRefError(f"dotfiles destination {dest} exists but is a different repo")
+            output.detail("Dotfiles already cloned, pulling latest...")
+            if ref.ref:
+                run(("git", "-C", dest, "fetch"), DOTFILES_DEADLINE)
+                if run(("git", "-C", dest, "checkout", ref.ref)) != 0:
+                    output.warn(f"dotfiles checkout of '{ref.ref}' failed, skipping")
+            elif run(("git", "-C", dest, "pull"), DOTFILES_DEADLINE) != 0:
+                output.warn("dotfiles pull failed (local changes?), skipping")
+
+        output.info(f"Running agent dotfiles install: {agent_cfg.dotfiles_install_cmd}")
+        install = (agent_cfg.shell, "-lc", agent_cfg.dotfiles_install_cmd)
+        access.run(Command(install, cwd=dest, deadline=DOTFILES_DEADLINE), check=True)
+    except STEP_FAILURES as error:
+        output.warn(f"agent dotfiles failed: {describe_failure(error, log.sanitize)}")
 
 
 def _run_agent_install_commands(

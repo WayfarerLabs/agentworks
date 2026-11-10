@@ -15,18 +15,21 @@ pass every workspace-inserting path runs
 
 from __future__ import annotations
 
+import shlex
 from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.agents.manager import agent_scope
 from agentworks.errors import NotFoundError, ValidationError
+from agentworks.execution.access import Admin
+from agentworks.execution.requests import Command, Script, Shell
 from agentworks.naming import LINUX_GROUPNAME_MAX_LENGTH
-from agentworks.transports import transport
 from agentworks.vms.manager import gated_vm_boundary
 
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
+    from agentworks.execution.access import VMAccess
     from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.ssh import SSHLogger
 
@@ -249,12 +252,16 @@ def add_to_workspace_group(
     *,
     logger: SSHLogger | None = None,
 ) -> None:
-    """Add an agent user to a workspace's Linux group."""
-    target = transport(vm, config, logger=logger)
+    """Add an agent user to a workspace's Linux group, as root on the admin's access."""
+    admin = _admin_access(vm, config, logger)
     ws_grp = _resolve_ws_group(db, workspace_name)
     # Ensure group exists (idempotent)
-    target.run(f"sh -c 'getent group {ws_grp} >/dev/null 2>&1 || /usr/sbin/groupadd {ws_grp}'", sudo=True)
-    target.run(f"usermod -aG {ws_grp} {linux_user}", sudo=True)
+    group = shlex.quote(ws_grp)
+    admin.run(
+        Script(f"getent group {group} >/dev/null 2>&1 || /usr/sbin/groupadd {group}", Shell.SH, elevated=True),
+        check=True,
+    )
+    admin.run(Command(("usermod", "-aG", ws_grp, linux_user), elevated=True), check=True)
 
 
 def remove_from_workspace_group(
@@ -266,10 +273,21 @@ def remove_from_workspace_group(
     *,
     logger: SSHLogger | None = None,
 ) -> None:
-    """Remove an agent user from a workspace's Linux group."""
-    target = transport(vm, config, logger=logger)
+    """Remove an agent user from a workspace's Linux group, as root on the admin's access.
+
+    The status is not read: the user may not be a member. An outcome that is
+    not a completion raises its typed error.
+    """
+    admin = _admin_access(vm, config, logger)
     ws_grp = _resolve_ws_group(db, workspace_name)
-    target.run(f"gpasswd -d {linux_user} {ws_grp}", sudo=True, check=False)
+    admin.run(Command(("gpasswd", "-d", linux_user, ws_grp), elevated=True)).require_completed(vm.name)
+
+
+def _admin_access(vm: VMRow, config: Config, logger: SSHLogger | None) -> VMAccess:
+    """The admin's access to ``vm``, recording into ``logger`` when there is one."""
+    import agentworks.execution as execution
+
+    return execution.vm_access(vm, config, Admin(), log=None if logger is None else logger.record)
 
 
 # -- Grant-all materialization ---------------------------------------------

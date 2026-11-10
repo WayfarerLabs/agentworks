@@ -11,6 +11,7 @@ from agentworks.capabilities.harness_integration.kinds import HarnessIntegration
 from agentworks.capabilities.harness_integration.shell import ShellIntegration
 from agentworks.db import AppliedStateKey, VersionedPayload
 from agentworks.errors import StateError
+from agentworks.execution.results import Result, Unknown, UnknownReason
 from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
 from agentworks.harness_setup.model import NativeClaim, NativeSetupState, SetupRecord
 from agentworks.harness_setup.state import write_native_setup
@@ -21,6 +22,7 @@ from agentworks.ssh import SSHError, SSHResult
 from agentworks.transports import Transport
 from agentworks.vms.manager import delete_vm
 from agentworks.workspaces.manager import delete_workspace
+from tests.vm_access_support import install_access_recorder
 
 
 def _record(component) -> SetupRecord:
@@ -85,6 +87,12 @@ def deletion(db, tmp_path, monkeypatch):
 
         def close(self):
             self.closed = True
+
+        def record(self, request, result):
+            pass
+
+        def sanitize(self, text):
+            return text
 
     monkeypatch.setattr("agentworks.ssh.SSHLogger", Logger)
     config = SimpleNamespace(paths=SimpleNamespace(vscode_workspaces=tmp_path))
@@ -192,6 +200,8 @@ def test_remote_cleanup_failure_keeps_existing_best_effort_parent_deletion(db, d
     _store_applied_state(db, kind, name, "claims")
     deletion.target.run.side_effect = SSHError("unreachable")
     if kind == "agent":
+        # The user delete runs on the admin's access.
+        install_access_recorder(monkeypatch).access().default_outcome = Result(Unknown(UnknownReason.CONNECTION))
         monkeypatch.setattr("agentworks.agents.initializer.delete_agent_on_vm", deletion.delete_agent_on_vm)
         delete_agent(db, deletion.config, name=name, yes=True, interaction=TtyInteractionPolicy.REFUSE)
         assert db.get_agent(name) is None
