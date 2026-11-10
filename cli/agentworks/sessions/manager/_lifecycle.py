@@ -386,53 +386,6 @@ def _teardown_session(
     )
 
 
-def _execute_stop(
-    targets: list[tuple[SessionRow, Transport, bool]],
-    *,
-    db: Database,
-    force: bool = False,
-    announce_stopped: bool = True,
-) -> list[tuple[str, str]]:
-    """Apply the one verified teardown authority to several sessions.
-
-    ``targets`` is ``[(session, target, target_owns_session)]``. When
-    ``target_owns_session`` is True, the SSH user is the same uid that owns
-    the tmux server (admin sessions over admin SSH, or agent sessions over
-    agent SSH) and no sudo is needed for kill / socket cleanup. When False
-    (admin SSH for an agent session in batch ops), sudo is needed.
-
-    Handles both single and batch stops. Returns list of (name, error) failures.
-
-    ``announce_stopped`` gates the per-session "Session 'x' stopped" body
-    line. Batch stops keep it (the per-item outcome of a loop that has no
-    single terminal); the single-session caller sets it False because it
-    owns a column-0 ``result()`` terminal of its own, and the per-session
-    body line would just duplicate it.
-    """
-    if not targets:
-        return []
-
-    failed: list[tuple[str, str]] = []
-    for session, target, target_owns_session in targets:
-        try:
-            _teardown_session(
-                session,
-                target=target,
-                target_owns_session=target_owns_session,
-                db=db,
-                force=force,
-                legacy_running_authorized=True,
-            )
-            if announce_stopped:
-                output.info(f"Session '{session.name}' stopped")
-        except UserAbort:
-            raise
-        except Exception as exc:
-            failed.append((session.name, str(exc)))
-
-    return failed
-
-
 def stop_session(
     db: Database,
     config: Config,

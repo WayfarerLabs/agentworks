@@ -55,9 +55,6 @@ from ._intent import (
     set_session_desired_runtime_state as set_session_desired_runtime_state,
 )
 from ._lifecycle import (
-    _execute_stop as _execute_stop,
-)
-from ._lifecycle import (
     _teardown_session as _teardown_session,
 )
 from ._lifecycle import (

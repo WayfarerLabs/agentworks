@@ -116,20 +116,30 @@ def test_off_parent_stop_records_proven_absence_without_transport(tmp_path, monk
     db.close()
 
 
-def test_stop_executor_propagates_cancellation(tmp_path, monkeypatch):
+@pytest.mark.parametrize("control_signal", [UserAbort, KeyboardInterrupt])
+def test_prepared_stop_propagates_cancellation_without_marking_runtime_stopped(tmp_path, monkeypatch, control_signal):
     db, _ = _restart_fixture(tmp_path, monkeypatch)
-    failure = UserAbort("cancelled")
+    manager.set_session_desired_runtime_state(db, name="s1", state=DesiredRuntimeState.STOPPED)
+    before = _session(db)
+    prepared = prepare_session_stop(db, SimpleNamespace(), before)
+    failure = control_signal("cancelled")
+    attempted: list[str] = []
 
-    def cancel(*args, **kwargs):
+    def cancel(session, *, target, **kwargs):
+        assert session == before
+        assert target is prepared.session_target
+        attempted.append(session.session_uuid)
         raise failure
 
-    monkeypatch.setattr("agentworks.sessions.manager._lifecycle._teardown_session", cancel)
-    with pytest.raises(UserAbort) as caught:
-        manager._execute_stop(
-            [(_session(db), manager.transport(_vm(db), cast("Config", SimpleNamespace())), True)], db=db
-        )
-    assert caught.value is failure
-    db.close()
+    monkeypatch.setattr(manager, "_teardown_session", cancel)
+    try:
+        with pytest.raises((UserAbort, KeyboardInterrupt)) as caught:
+            execute_session_stop(prepared)
+        assert caught.value is failure
+        assert attempted == [before.session_uuid]
+        assert _session(db) == before
+    finally:
+        db.close()
 
 
 def _launch_definition(db: Database, *, replace_running: bool = False, force: bool = False) -> SessionLaunchDefinition:
