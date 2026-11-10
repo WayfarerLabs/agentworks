@@ -78,14 +78,12 @@ def _retire_vm_checkpoints(conn: sqlite3.Connection, _context: MigrationContext)
 
 def _add_desired_runtime_state(conn: sqlite3.Connection, _context: MigrationContext) -> None:
     """Replace VM activation policy and leave legacy workloads awaiting adoption."""
-    from agentworks.errors import StateError
-
     conn.execute("BEGIN IMMEDIATE")
     invalid = conn.execute(
         "SELECT 1 FROM vms WHERE typeof(operator_stopped) != 'integer' OR operator_stopped NOT IN (0, 1) LIMIT 1"
     ).fetchone()
     if invalid is not None:
-        raise StateError("legacy VM intent is malformed", entity_kind="database")
+        raise MigrationBlockedError("legacy VM intent is malformed", entity_kind="database")
     conn.execute("""
         CREATE TABLE vms_new (
             name                TEXT PRIMARY KEY,

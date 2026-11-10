@@ -24,7 +24,7 @@ from agentworks.db import (
 from agentworks.db import (
     DesiredRuntimeState as Target,
 )
-from agentworks.errors import StateError
+from agentworks.errors import MigrationBlockedError, StateError
 from tests.database_support import build_schema
 
 
@@ -237,8 +237,10 @@ def test_failed_migration_rolls_back_and_retries(tmp_path: Path, monkeypatch: py
                 raise RuntimeError("interrupted")
 
             patch.setattr("agentworks.db.migrations.uuid4", interrupted)
-        with pytest.raises((StateError, RuntimeError, sqlite3.IntegrityError)):
+        with pytest.raises((StateError, RuntimeError, sqlite3.IntegrityError)) as error:
             Database(path)
+        if failure == "flag":
+            assert isinstance(error.value, MigrationBlockedError)
     with sqlite3.connect(path) as conn:
         assert conn.execute("SELECT MAX(version) FROM schema_version").fetchone()[0] == 38
         assert "operator_stopped" in {r[1] for r in conn.execute("PRAGMA table_info(vms)")}
