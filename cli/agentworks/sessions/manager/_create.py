@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 import agentworks.sessions.manager as _mgr
 from agentworks import output
+from agentworks.db import DesiredRuntimeState
 from agentworks.errors import StateError
 from agentworks.harness_setup.outcomes import SetupFailure, raise_setup_failures
 
@@ -390,6 +391,12 @@ def create_session(
         current_vm = _reload_vm(db, plan.target_vm_name)
         if current_vm.vm_uuid != plan.vm.vm_uuid:
             raise StateError("session VM changed during preparation", entity_kind="vm", entity_name=plan.target_vm_name)
+        if current_vm.desired_runtime_state is DesiredRuntimeState.STOPPED:
+            raise StateError(
+                "session parent has stopped desired state",
+                entity_kind="vm",
+                entity_name=current_vm.name,
+            )
         plan = replace(plan, vm=current_vm)
         graph = _build_session_graph(
             db,

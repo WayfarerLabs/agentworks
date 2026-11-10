@@ -372,3 +372,24 @@ def test_pending_runtime_ownership_probe_propagates_cancellation(tmp_path, monke
         _status._pending_launch_is_owned(pending, target=target)
     assert caught.value is failure
     db.close()
+
+
+def test_create_below_stopped_parent_refuses_before_activation(tmp_path, monkeypatch):
+    from agentworks.sessions.manager import _create
+
+    db, _ = _restart_fixture(tmp_path, monkeypatch)
+    vm = db.get_vm("vm1")
+    db.set_vm_desired_runtime_state("vm1", DesiredRuntimeState.STOPPED, expected_vm_uuid=vm.vm_uuid)
+    monkeypatch.setattr(_create, "_build_session_graph", lambda *a, **k: pytest.fail("graph activation preparation"))
+    with pytest.raises(StateError):
+        manager.create_session(
+            db,
+            SimpleNamespace(session=SimpleNamespace(history_limit=1)),
+            name="new-session",
+            workspace="ws1",
+            admin=True,
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+    assert db.get_session("new-session") is None
+    assert db.get_session("s1").desired_runtime_state is DesiredRuntimeState.RUNNING
+    db.close()
