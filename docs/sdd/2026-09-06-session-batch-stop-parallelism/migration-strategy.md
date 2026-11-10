@@ -46,6 +46,12 @@ Missing-fingerprint dedicated rows and legacy rows remain serial. Refuse duplica
 VM/boot/PID process keys among concurrent plans before submission, regardless of whether duplicate
 process keys carry different stored start ticks.
 
+PID repair also captures the original snapshot before native calls and conditionally persists each
+of its four repair outcomes through the same predicate. Preserve the existing desired-runtime
+validation and explicit socket selection, including legacy/admin stopped repair that acquires a
+dedicated address. Propagate repair snapshot conflicts out of best-effort batch preparation before
+any later status or destructive dispatch. Ordinary repair refusals retain their existing behavior.
+
 ### 2. Extract value-based dedicated teardown
 
 Introduce one immutable complete-fingerprint dedicated plan. Extract the database-free remote phase
@@ -156,6 +162,10 @@ already-committed desired state after an interrupted attempt. Serial partial rec
 cleanup, and legacy exact-session teardown copy that snapshot before native calls. A changed row,
 run, or runtime remains untouched and produces a typed conflict. PR #764's database-use lock
 prevents live-file replacement while the writable command remains open.
+
+These conditional updates do not make an entire lifecycle command atomic. The existing interval
+between successful PID-repair persistence and its subsequent row refetch can still observe a later
+replacement. Closing that interval across lifecycle phases needs separate coordination analysis.
 
 ### Interrupt loses successful work
 

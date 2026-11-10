@@ -28,6 +28,25 @@ cross-process serialization, and eligible workers retain the current immediate f
 capture-to-kill sequence. The only new persistence gap is between verified remote completion and the
 coordinator's stopped-state update; atomic compare-and-set fences that gap.
 
+### PID-repair preparation
+
+Before any native observation, `_repair_session_pid` copies the original seven-field
+`SessionRuntimeSnapshot`. Its four writes use `compare_and_set_session_runtime_repair`: legacy/admin
+learned boot, recovered fingerprint, dedicated learned boot, and verified stopped state. The desired
+socket is explicit because legacy/admin stopped recovery can assign a dedicated address while the
+expected socket remains null. The existing runtime-shape validator is shared with
+`update_session_runtime`; no native ownership or absence authority comes from the snapshot.
+
+The repair operation reuses the concrete conditional SQL primitive below. No match raises
+`StateConflictError`, a kind-based `StateError` subtype. `ensure_pids_batch` propagates that
+conflict before its existing best-effort catches, preventing stop, cascading deletion, and rehome
+callers from continuing on the failed selection. `_ensure_pid` already propagates repair failures.
+Ordinary ownership, absence, and connectivity refusals retain their existing caller handling.
+
+The fence covers the repair write, not the whole command. A successful repair still has a separate
+subsequent refetch that can see later changes; this round does not introduce post-success command
+serialization or migrate unrelated startup writes.
+
 ## Pre-mutation Collision Gate
 
 After preparation, batch stop indexes only the selected plans eligible for concurrent execution:
@@ -373,6 +392,9 @@ invoke continues through the one dispatcher and never enters the concurrent coor
 - atomic and retry-safe compare-and-set, persistence-before-output, and persistence failure;
 - positive completion and two-connection row/run/runtime replacement during all three serial
   compatibility branches, with nullable expected fields and exact replacement preservation;
+- all four PID-repair writes, including legacy/admin socket adoption, with independent-connection
+  UUID-only, run-only, nullable-runtime-field changes and row removal; commit/rollback and desired
+  runtime validation; named and batch conflict propagation before status or destructive dispatch;
 - sibling success under worker failure;
 - five-second heartbeat behavior;
 - first-interrupt queued cancellation and running reconciliation;

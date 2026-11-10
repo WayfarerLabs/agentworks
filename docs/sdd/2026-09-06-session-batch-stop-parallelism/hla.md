@@ -43,6 +43,15 @@ boundaries. It partitions actionable work by persisted identity completeness. De
 complete valid fingerprint become immutable concurrent plans. Incomplete dedicated and legacy rows
 stay on the existing synchronous dispatcher.
 
+PID repair remains serial before partitioning. Each repair captures an immutable original
+session/run/nullable-runtime snapshot before its first native observation. All four persistence
+branches, learning an unrecorded boot on a legacy or dedicated row, recovering a fingerprint, and
+recording absence, validate the desired runtime shape and conditionally write against that snapshot.
+A failed fence raises a state-conflict error that batch preparation cannot swallow as ordinary
+best-effort repair failure. No stale selection proceeds into status or destructive dispatch after
+that conflict. Existing native ownership, absence proof, and ordinary refusal handling remain
+intact.
+
 Synchronous and batch routing use one raw-field-presence classifier, excluding the stopped sentinel.
 The classifier grants no authority: non-null malformed identities fail preparation rather than
 entering either remote execution or safe-recovery cleanup through routing alone.
@@ -122,6 +131,11 @@ fields and durable session/run identities before remote observations. Their pers
 does not authorize native work or make them concurrent plans. Acquisition and stopped-state
 reconciliation share one concrete conditional update primitive, with separate conflict and
 interrupted-commit policies in their operation wrappers.
+
+Repair uses that same primitive with its explicit desired socket, including the existing
+legacy/admin recovery that assigns a dedicated address after proving absence. It shares
+runtime-shape validation with the ordinary runtime writer. Its wrapper treats every snapshot
+mismatch as conflict; it does not adopt stopped reconciliation's interrupted-commit retry policy.
 
 Persistence precedes success output. A persistence error converts that session to failure. Remote
 success cannot be rolled back, so the failure tells the truth rather than pretending the runtime
@@ -242,6 +256,10 @@ workers preserve the existing immediate capture-to-kill window. A new lock and t
 through every lifecycle caller would turn a bounded batch optimization into a separate global
 coordination project. PR #764 already prevents live-database replacement, while compare-and-set
 protects the newly introduced worker-to-persistence gap.
+
+Conditional writes are not whole-command serialization. In particular, the existing successful
+PID-repair write followed by a separate row refetch can observe a later replacement; this effort
+does not close that post-success window or promise atomicity across subsequent command phases.
 
 ## Deployment Shape
 

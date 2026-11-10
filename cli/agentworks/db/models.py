@@ -55,6 +55,25 @@ class SessionStatus(Enum):
 # Distinct from NULL (never checked / pre-enhancement).
 PID_STOPPED = -1
 
+
+def _validate_session_runtime_fields(
+    *, pid: int | None, boot_id: str | None, tmux_server_start_ticks: int | None
+) -> None:
+    """Validate the desired persisted runtime shape at the database write boundary."""
+    if pid is not None and pid != PID_STOPPED and pid <= 0:
+        raise ValueError(f"invalid runtime PID: {pid}")
+    if (
+        pid is not None
+        and pid > 0
+        and (boot_id is None or tmux_server_start_ticks is None or tmux_server_start_ticks <= 0)
+    ):
+        raise ValueError("a live runtime requires boot ID and positive process start time")
+    if pid == PID_STOPPED and (boot_id is not None or tmux_server_start_ticks is not None):
+        raise ValueError("a stopped runtime cannot retain a process fingerprint")
+    if pid is None and tmux_server_start_ticks is not None:
+        raise ValueError("an unknown runtime cannot retain process start time")
+
+
 # Settings-table keys (install-level identity). Defined next to the accessors'
 # owner so consumers (vms.manager, ssh_config) share one spelling
 # without a layering inversion. (A retired key may linger as an orphan

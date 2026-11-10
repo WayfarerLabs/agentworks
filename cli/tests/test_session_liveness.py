@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.db import PID_STOPPED, SessionMode, SessionRow, SessionStatus
+from agentworks.db import PID_STOPPED, SessionMode, SessionRow, SessionRuntimeSnapshot, SessionStatus
 from agentworks.errors import ConnectivityError, NotFoundError, StateError
 from agentworks.sessions.manager import (
     _needs_repair,
@@ -429,7 +429,7 @@ def test_agent_fingerprint_repair_uses_elevation_and_refuses_unknown(
     )
 
     class _NoMutationDB:
-        def update_session_runtime(self, *args: object, **kwargs: object) -> None:
+        def compare_and_set_session_runtime_repair(self, *args: object, **kwargs: object) -> None:
             pytest.fail("indeterminate repair mutated session runtime state")
 
     with pytest.raises(StateError):
@@ -458,8 +458,8 @@ def test_repair_can_converge_without_pre_table_narration(
     )
 
     class _DB:
-        def update_session_runtime(self, name: str, **kwargs: object) -> None:
-            updates.append({"name": name, **kwargs})
+        def compare_and_set_session_runtime_repair(self, expected: SessionRuntimeSnapshot, **kwargs: object) -> None:
+            updates.append({"name": expected.name, **kwargs})
 
     assert _repair_session_pid(session, target=_FakeTarget(), db=_DB(), announce=False)  # type: ignore[arg-type]
     assert len(updates) == 1
@@ -584,7 +584,7 @@ def test_agent_repair_does_not_treat_sudo_refusal_as_absence(
     )
 
     class _NoMutationDB:
-        def update_session_runtime(self, *args: object, **kwargs: object) -> None:
+        def compare_and_set_session_runtime_repair(self, *args: object, **kwargs: object) -> None:
             pytest.fail("sudo refusal mutated session runtime state")
 
     with pytest.raises(ConnectivityError):

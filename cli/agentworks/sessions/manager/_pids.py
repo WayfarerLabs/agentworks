@@ -7,10 +7,11 @@ from typing import TYPE_CHECKING
 
 import agentworks.sessions.manager as _mgr
 from agentworks import output
-from agentworks.db import PID_STOPPED, SessionMode
+from agentworks.db import PID_STOPPED, SessionMode, SessionRuntimeSnapshot
 from agentworks.errors import (
     ConnectivityError,
     NotFoundError,
+    StateConflictError,
     StateError,
 )
 
@@ -106,6 +107,7 @@ def _repair_session_pid(
         require_socket_path,
     )
 
+    expected = SessionRuntimeSnapshot.from_session(session)
     sock = session.socket_path
     if sock is None:
         presence = probe_tmux_session(
@@ -145,8 +147,8 @@ def _repair_session_pid(
             if session.pid != PID_STOPPED and session.boot_id is None:
                 boot_id = _mgr._get_boot_id(target)
                 if boot_id is not None:
-                    db.update_session_runtime(
-                        session.name, socket_path=None, pid=None, boot_id=boot_id, tmux_server_start_ticks=None
+                    db.compare_and_set_session_runtime_repair(
+                        expected, socket_path=None, pid=None, boot_id=boot_id, tmux_server_start_ticks=None
                     )
                 raise StateError(
                     f"session '{session.name}' has no recorded launch identity",
@@ -191,8 +193,8 @@ def _repair_session_pid(
                     )
                 )
             ):
-                db.update_session_runtime(
-                    session.name,
+                db.compare_and_set_session_runtime_repair(
+                    expected,
                     socket_path=sock,
                     pid=fingerprint.pid,
                     boot_id=observed_boot_id,
@@ -225,8 +227,8 @@ def _repair_session_pid(
         if session.boot_id is None:
             boot_id = _mgr._get_boot_id(target)
             if boot_id is not None:
-                db.update_session_runtime(
-                    session.name,
+                db.compare_and_set_session_runtime_repair(
+                    expected,
                     socket_path=sock,
                     pid=None,
                     boot_id=boot_id,
@@ -246,8 +248,8 @@ def _repair_session_pid(
                 hint="Investigate the tmux server manually.",
             )
 
-    db.update_session_runtime(
-        session.name,
+    db.compare_and_set_session_runtime_repair(
+        expected,
         socket_path=sock,
         pid=PID_STOPPED,
         boot_id=None,
@@ -450,6 +452,8 @@ def ensure_pids_batch(
             try:
                 if _repair_session_pid(session, target=target, db=db, announce=announce):
                     repaired_names.add(session.name)
+            except StateConflictError:
+                raise
             except (ConnectivityError, StateError) as exc:
                 if announce:
                     output.warn(str(exc))
