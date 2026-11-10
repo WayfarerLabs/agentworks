@@ -7,7 +7,6 @@ safe for every other submodule to depend on.
 
 from __future__ import annotations
 
-import contextlib
 import re
 from typing import TYPE_CHECKING, NamedTuple
 
@@ -17,8 +16,6 @@ from agentworks.errors import NotFoundError, ValidationError
 from agentworks.path_rendering import format_host_path
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
-
     from agentworks.capabilities.base import OperationScope
     from agentworks.config import Config
     from agentworks.db import Database, VMRow, WorkspaceRow
@@ -255,51 +252,6 @@ def _guard_failed_vm(vm: VMRow, *, allow_failed_init: bool = False) -> None:
             entity_name=vm.name,
             hint="Use 'vm reinit' to retry or 'vm delete' to remove.",
         )
-
-
-@contextlib.contextmanager
-def _mask_env_var_backend_for(
-    decl: SecretDecl,
-    *,
-    masked: bool,
-) -> Iterator[None]:
-    """Mask the env-var backend's view of ``decl`` for the duration of
-    the block when ``masked`` is True; pass-through otherwise.
-
-    Used by ``vm rekey --ignore-env`` to force the source chain to
-    skip the env-var source and fall through to the prompt source.
-    The env-var source reads ``os.environ`` during preview and resolution,
-    so popping the matching env vars during the resolve call makes the
-    source silently skips; the next source in the chain takes over.
-
-    The masked names cover (a) the framework's default convention
-    ``AW_SECRET_<UPPER_NAME>`` for ``decl.name``, plus (b) any
-    operator-typed string override at ``decl.backend_mappings["env-var"]``.
-    Both names are restored on exit, even on exception, so a
-    ``KeyboardInterrupt`` during a prompt doesn't leave the operator's
-    shell with the var missing.
-    """
-    import os
-
-    if not masked:
-        yield
-        return
-
-    from agentworks.capabilities.secret_backend.env_var import env_var_name_for
-
-    masked_names: list[str] = [env_var_name_for(decl.name)]
-    mapping = decl.backend_mappings.get("env-var")
-    if isinstance(mapping, str):
-        masked_names.append(mapping)
-
-    saved: dict[str, str] = {}
-    for var in masked_names:
-        if var in os.environ:
-            saved[var] = os.environ.pop(var)
-    try:
-        yield
-    finally:
-        os.environ.update(saved)
 
 
 def _lookup_or_synthesize_secret(registry: Registry, name: str) -> SecretDecl:
