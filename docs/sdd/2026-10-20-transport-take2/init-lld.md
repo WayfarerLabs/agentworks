@@ -357,9 +357,12 @@ initializers are its only callers.
 
 The fstab step reads first because its messages and the remount need the parsed action
 (`hardening.py:208-226`); `update` then writes the content `_ensure_proc_hidepid_in_fstab` returned,
-so a `no-op`, `preserved-stricter` or `malformed` action writes nothing, and an existing file keeps
-its owner, mode and attributes. A missing `/etc/fstab` (`read` returns `None`) keeps today's warning
-and skip (`hardening.py:200-205`).
+so a `no-op`, `preserved-stricter`, `preserved-unrecognized` or `malformed` action writes nothing,
+and an existing file keeps its owner, mode and attributes. Any `hidepid=` value already present
+counts as present: the kernel's names (`off`, `noaccess`, `invisible`, `ptraceable`) are read as
+their levels, a value the code does not recognize is reported and left alone, and the remount uses
+the value as written. A missing `/etc/fstab` (`read` returns `None`) keeps today's warning and skip
+(`hardening.py:200-205`).
 
 `with_identity_block(current, block)` is today's logic as a function: an absent file gets the block
 alone; with both markers present the old block is stripped and the new one appended; otherwise the

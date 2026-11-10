@@ -22,7 +22,7 @@ from tests.phase_b_support import StepGuest, requires_file_program
 RELOAD = Command(("sysctl", "--system"), elevated=True, deadline=60)
 
 
-def _remount(value: int) -> Command:
+def _remount(value: int | str) -> Command:
     return Command(("mount", "-o", f"remount,hidepid={value}", "/proc"), elevated=True, deadline=60)
 
 
@@ -172,11 +172,17 @@ def test_an_fstab_edit_is_published_keeping_the_files_metadata_and_proc_is_remou
 @requires_file_program
 @pytest.mark.parametrize(
     ("content", "effective"),
-    [("proc  /proc  proc  defaults,hidepid=1  0  0\n", 1), ("proc  /proc  proc  defaults,hidepid=2  0  0\n", 2)],
-    ids=["already-1", "stricter-2"],
+    [
+        ("proc  /proc  proc  defaults,hidepid=1  0  0\n", 1),
+        ("proc  /proc  proc  defaults,hidepid=noaccess  0  0\n", "noaccess"),
+        ("proc  /proc  proc  defaults,hidepid=2  0  0\n", 2),
+        ("proc  /proc  proc  defaults,hidepid=invisible  0  0\n", "invisible"),
+        ("proc  /proc  proc  defaults,hidepid=bogus  0  0\n", "bogus"),
+    ],
+    ids=["already-1", "already-noaccess", "stricter-2", "stricter-invisible", "unrecognized"],
 )
 def test_an_fstab_that_needs_no_edit_is_not_written_and_proc_keeps_its_value(
-    guest: StepGuest, content: str, effective: int
+    guest: StepGuest, content: str, effective: int | str
 ) -> None:
     _fstab().write_text(content)
 
@@ -243,7 +249,7 @@ def test_ensure_proc_hidepid_appends_when_no_proc_line() -> None:
     content = "UUID=root  /  ext4  defaults  0  1\n"
     new, action, eff = _ensure_proc_hidepid_in_fstab(content)
     assert action == "appended"
-    assert eff == 1
+    assert eff == "1"
     assert "proc" in new and "hidepid=1" in new
 
 
@@ -253,7 +259,7 @@ def test_ensure_proc_hidepid_added_option() -> None:
     content = "proc  /proc  proc  defaults  0  0\n"
     new, action, eff = _ensure_proc_hidepid_in_fstab(content)
     assert action == "added-option"
-    assert eff == 1
+    assert eff == "1"
     assert "hidepid=1" in new
 
 
@@ -263,7 +269,7 @@ def test_ensure_proc_hidepid_upgraded() -> None:
     content = "proc  /proc  proc  defaults,hidepid=0  0  0\n"
     new, action, eff = _ensure_proc_hidepid_in_fstab(content)
     assert action == "upgraded"
-    assert eff == 1
+    assert eff == "1"
     assert "hidepid=1" in new
     assert "hidepid=0" not in new
 
@@ -274,7 +280,7 @@ def test_ensure_proc_hidepid_no_op() -> None:
     content = "proc  /proc  proc  defaults,hidepid=1  0  0\n"
     new, action, eff = _ensure_proc_hidepid_in_fstab(content)
     assert action == "no-op"
-    assert eff == 1
+    assert eff == "1"
     assert new == content
 
 
@@ -284,7 +290,7 @@ def test_ensure_proc_hidepid_preserves_stricter() -> None:
     content = "proc  /proc  proc  defaults,hidepid=2  0  0\n"
     new, action, eff = _ensure_proc_hidepid_in_fstab(content)
     assert action == "preserved-stricter"
-    assert eff == 2
+    assert eff == "2"
     assert new == content
 
 
@@ -306,4 +312,14 @@ def test_ensure_proc_hidepid_malformed() -> None:
     new, action, eff = _ensure_proc_hidepid_in_fstab(content)
     assert action == "malformed"
     assert new == content
-    assert eff == 1
+    assert eff == "1"
+
+
+def test_ensure_proc_hidepid_upgrades_off_by_name() -> None:
+    from agentworks.vms.hardening import _ensure_proc_hidepid_in_fstab
+
+    new, action, eff = _ensure_proc_hidepid_in_fstab("proc  /proc  proc  defaults,hidepid=off  0  0\n")
+    assert action == "upgraded"
+    assert eff == "1"
+    assert "hidepid=off" not in new
+    assert new.count("hidepid=") == 1

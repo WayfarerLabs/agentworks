@@ -67,23 +67,39 @@ def _split_fstab_line(line: str) -> tuple[str, str]:
     return line[:idx].rstrip(), line[idx:]
 
 
-def _ensure_proc_hidepid_in_fstab(content: str) -> tuple[str, str, int]:
+_HIDEPID_NAMES = {"off": 0, "noaccess": 1, "invisible": 2, "ptraceable": 4}
+"""The kernel's names for ``hidepid`` values (``proc(5)``), beside the numbers."""
+
+
+def _hidepid_level(value: str) -> int | None:
+    """The numeric level of a ``hidepid=`` value, or ``None`` for one this code does not recognize."""
+    if value in _HIDEPID_NAMES:
+        return _HIDEPID_NAMES[value]
+    return int(value) if value.isdigit() else None
+
+
+def _ensure_proc_hidepid_in_fstab(content: str) -> tuple[str, str, str]:
     """Pure: edit fstab content so /proc is mounted with hidepid>=1.
 
     Returns ``(new_content, action, effective_hidepid)``.
 
     Actions:
-    - ``"no-op"``: existing /proc has hidepid=1 already; content unchanged.
+    - ``"no-op"``: existing /proc has hidepid=1 (or ``noaccess``) already;
+      content unchanged.
     - ``"appended"``: no /proc line in fstab; appended a new one.
     - ``"added-option"``: existing /proc line; appended hidepid=1 to options.
-    - ``"upgraded"``: existing /proc line had hidepid=0; upgraded to 1.
-    - ``"preserved-stricter"``: existing /proc has hidepid>=2; content unchanged.
+    - ``"upgraded"``: existing /proc line had hidepid=0 (or ``off``);
+      upgraded to 1.
+    - ``"preserved-stricter"``: existing /proc has a stricter hidepid;
+      content unchanged.
+    - ``"preserved-unrecognized"``: existing /proc has a ``hidepid=`` value
+      this code does not recognize; content unchanged, caller reports it.
     - ``"malformed"``: found a /proc line that doesn't split cleanly into the
       six expected fstab fields; content unchanged, caller should warn.
 
     ``effective_hidepid`` is the value /proc should be mounted with after
-    this runs (used by the live remount). For ``preserved-stricter`` this is
-    the existing stricter value; otherwise 1.
+    this runs (used by the live remount): the existing value as written when
+    it is kept, otherwise ``"1"``.
     """
     lines = content.splitlines()
     proc_line_indices: list[int] = []
@@ -99,41 +115,33 @@ def _ensure_proc_hidepid_in_fstab(content: str) -> tuple[str, str, int]:
 
     if not proc_line_indices:
         lines.append(HARDENING_FSTAB_NEW_LINE)
-        return "\n".join(lines) + "\n", "appended", 1
+        return "\n".join(lines) + "\n", "appended", "1"
 
     proc_line_idx = proc_line_indices[0]
     existing_line = lines[proc_line_idx]
     code, trailing_comment = _split_fstab_line(existing_line)
     fields = code.split()
     if len(fields) < 6:
-        return content, "malformed", 1
+        return content, "malformed", "1"
 
     options = fields[3].split(",")
-    hidepid_value: int | None = None
-    hidepid_opt_idx: int | None = None
-    for j, opt in enumerate(options):
-        if opt.startswith("hidepid="):
-            try:
-                hidepid_value = int(opt.split("=", 1)[1])
-                hidepid_opt_idx = j
-                break
-            except ValueError:
-                continue
+    hidepid_opt_idx = next((j for j, opt in enumerate(options) if opt.startswith("hidepid=")), None)
 
-    if hidepid_value is None:
+    if hidepid_opt_idx is None:
         options.append("hidepid=1")
         action = "added-option"
-        effective = 1
-    elif hidepid_value == 0:
-        assert hidepid_opt_idx is not None
+    else:
+        value = options[hidepid_opt_idx].split("=", 1)[1]
+        level = _hidepid_level(value)
+        if level is None:
+            return content, "preserved-unrecognized", value
+        if level == 1:
+            return content, "no-op", value
+        if level > 1:
+            # Stricter than agentworks's default; respect it.
+            return content, "preserved-stricter", value
         options[hidepid_opt_idx] = "hidepid=1"
         action = "upgraded"
-        effective = 1
-    elif hidepid_value == 1:
-        return content, "no-op", 1
-    else:
-        # hidepid >= 2: stricter than agentworks's default; respect it.
-        return content, "preserved-stricter", hidepid_value
 
     # Rebuild the line: keep the existing trailing comment if any, otherwise
     # add our informational marker.
@@ -141,7 +149,7 @@ def _ensure_proc_hidepid_in_fstab(content: str) -> tuple[str, str, int]:
     new_code = "  ".join(new_fields)
     new_line = f"{new_code}  {trailing_comment}" if trailing_comment else f"{new_code}  {HARDENING_FSTAB_COMMENT}"
     lines[proc_line_idx] = new_line
-    return "\n".join(lines) + "\n", action, effective
+    return "\n".join(lines) + "\n", action, "1"
 
 
 def apply_vm_hardening(files: Files, log: InitLog) -> None:
@@ -211,6 +219,8 @@ def _apply_hardening_fstab(files: Files, log: InitLog) -> None:
         warn(log, msg)
     elif action == "preserved-stricter":
         output.detail(f"/proc already mounted with hidepid={effective} (stricter than agentworks default); preserved.")
+    elif action == "preserved-unrecognized":
+        output.detail(f"/proc has hidepid={effective} in {HARDENING_FSTAB_PATH}, a value Agentworks leaves as it is.")
     elif action != "no-op":
         # action in {"appended", "added-option", "upgraded"}: the content changed.
         output.detail(
