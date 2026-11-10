@@ -80,12 +80,12 @@ def seed_results(invocation: RuntimeInvocation) -> None:
     for vm in invocation.selection.vms:
         if vm.name in invocation.selection.explicit_vms:
             invocation.results[("vm", vm.name)] = RuntimeResult(
-                kind="vm", name=vm.name, desired_runtime_state=vm.desired_runtime_state, vm_uuid=vm.vm_uuid
+                kind="vm", name=vm.name, desired_runtime_state=vm.desired_runtime_state
             )
     for session in invocation.selection.sessions:
         target = session.desired_runtime_state
         invocation.results[("session", session.name)] = RuntimeResult(
-            kind="session", name=session.name, desired_runtime_state=target, session_uuid=session.session_uuid
+            kind="session", name=session.name, desired_runtime_state=target
         )
 
 
@@ -176,5 +176,4 @@ def acquire_families(invocation: RuntimeInvocation) -> None:
             kind="console",
             name=name,
             desired_runtime_state=current_console.desired_runtime_state,
-            vm_uuid=invocation.vms[parent].vm_uuid,
         )

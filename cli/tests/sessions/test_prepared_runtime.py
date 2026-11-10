@@ -105,12 +105,13 @@ def test_ineligible_preparation_never_repairs_or_collects_values(tmp_path, monke
     db.close()
 
 
-def test_off_parent_stop_has_no_transport_or_runtime_mutation(tmp_path, monkeypatch):
+def test_off_parent_stop_records_proven_absence_without_transport(tmp_path, monkeypatch):
     db, _ = _restart_fixture(tmp_path, monkeypatch)
     monkeypatch.setattr(manager, "transport", lambda *a, **k: pytest.fail("transport created"))
     prepared = prepare_session_stop(db, SimpleNamespace(), _session(db), parent_off=True)
     assert prepared.parent_off and prepared.observed_status is SessionStatus.STOPPED
-    assert execute_session_stop(prepared) is False
+    assert execute_session_stop(prepared) is True
+    assert _session(db).pid == -1 and _session(db).boot_id is None
     assert _session(db).desired_runtime_state is DesiredRuntimeState.RUNNING
     db.close()
 

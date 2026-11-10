@@ -234,7 +234,7 @@ def prepare_infrastructure(invocation: RuntimeInvocation) -> None:
                     outcome=Outcome.CHANGED if changed else Outcome.UNCHANGED,
                 )
                 invocation.completed.add(("vm", name))
-        except UserAbort:
+        except (UserAbort, KeyboardInterrupt):
             if context.started or context.repaired:
                 invocation.ensure_vm_result(name)
                 invocation.record("vm", name, action="start" if context.started else "repair", outcome=Outcome.CHANGED)
@@ -269,7 +269,13 @@ def prepare_guest_workloads(invocation: RuntimeInvocation) -> None:
                     "session",
                     name,
                     observation=prepared.observed_status,
-                    action="unchanged" if prepared.noop else "start" if prepared.requires_launch else "recover-startup",
+                    action="checkpoint-runtime-identity"
+                    if prepared.checkpoint_only
+                    else "unchanged"
+                    if prepared.noop
+                    else "start"
+                    if prepared.requires_launch
+                    else "recover-startup",
                 )
             elif (
                 vm_name in invocation.selection.explicit_vms
@@ -286,7 +292,12 @@ def prepare_guest_workloads(invocation: RuntimeInvocation) -> None:
                     force=invocation.force,
                 )
                 invocation.stops[name] = prepared_stop
-                invocation.record("session", name, observation=prepared_stop.observed_status, action="stop")
+                invocation.record(
+                    "session",
+                    name,
+                    observation=prepared_stop.observed_status,
+                    action="checkpoint-runtime-identity" if prepared_stop.checkpoint_only else "stop",
+                )
         except UserAbort:
             raise
         except Exception as error:

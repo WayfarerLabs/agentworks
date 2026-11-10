@@ -236,3 +236,135 @@ def test_keyboard_interrupt_after_activation_prevents_deferred_provider_stops(db
     assert any(row.kind == "vm" and row.name == "shutdown" and row.outcome is Outcome.BLOCKED for row in rendered)
     with native_mutation_guard(db.path, "work"), native_mutation_guard(db.path, "shutdown"):
         pass
+
+
+def test_keyboard_interrupt_inside_activation_retains_completed_power_fact(db, make_config, runtime, monkeypatch):
+    import agentworks.vms.manager as vms
+
+    seed_vm(db, "work")
+    seed_vm(db, "shutdown", target=DesiredRuntimeState.STOPPED)
+    runtime[0]["work"] = VMStatus.STOPPED
+    failure = KeyboardInterrupt()
+    contexts = []
+
+    def interrupt(context, **kwargs):
+        context.started = True
+        contexts.append(context)
+        runtime[0][context.vm.name] = VMStatus.RUNNING
+        raise failure
+
+    monkeypatch.setattr(vms, "activate_vm_runtime", interrupt)
+    rendered = []
+    monkeypatch.setattr("agentworks.runtime_state._service.render_results", lambda rows, **k: rendered.extend(rows))
+    with pytest.raises(KeyboardInterrupt) as caught:
+        reconcile_vm(db, make_config(), all_vms=True, interaction=REFUSE)
+    assert caught.value is failure
+    assert any(row.kind == "vm" and row.name == "work" and row.outcome is Outcome.CHANGED for row in rendered)
+    assert not any(action == "vm-stop" for action, _ in runtime[2])
+    assert contexts and all(not context._provider_values for context in contexts)
+    with native_mutation_guard(db.path, "work"), native_mutation_guard(db.path, "shutdown"):
+        pass
+
+
+@pytest.mark.parametrize("kind", ["vm", "session", "console"])
+def test_preview_uses_fresh_stored_target_after_selection(db, make_config, runtime, monkeypatch, kind):
+    import agentworks.bootstrap as bootstrap
+    from agentworks.runtime_state import reconcile_console
+
+    seed_vm(db, "box")
+    seed_session(db, "work", "box")
+    create_console_record(db, name="view", vm_name="box", session_specs=[], add_admin_shell=True)
+    selected_vm = db.get_vm("box")
+    selected_session = db.get_session("work")
+    assert selected_vm is not None and selected_session is not None
+    loader = bootstrap.load_request_registry
+
+    def change_target(*args, **kwargs):
+        registry = loader(*args, **kwargs)
+        if kind == "vm":
+            db.set_vm_desired_runtime_state("box", DesiredRuntimeState.STOPPED, expected_vm_uuid=selected_vm.vm_uuid)
+        elif kind == "session":
+            db.set_session_desired_runtime_state(
+                "work", DesiredRuntimeState.STOPPED, expected_session_uuid=selected_session.session_uuid
+            )
+        else:
+            db.set_console_desired_runtime_state("view", DesiredRuntimeState.STOPPED)
+        return registry
+
+    monkeypatch.setattr(bootstrap, "load_request_registry", change_target)
+    monkeypatch.setattr(mc, "_console_runtime_presence", lambda *a: (ProbeStatus.ABSENT, ProbeStatus.ABSENT))
+    rendered = []
+    monkeypatch.setattr("agentworks.runtime_state._preview.render_results", lambda rows, **k: rendered.extend(rows))
+    if kind == "vm":
+        # The selected running children remain blocked by the freshly stopped parent.
+        with pytest.raises(StateError):
+            reconcile_vm(db, make_config(), name="box", dry_run=True, interaction=REFUSE)
+    elif kind == "session":
+        reconcile_session(db, make_config(), name="work", dry_run=True, interaction=REFUSE)
+    else:
+        reconcile_console(db, make_config(), name="view", dry_run=True, interaction=REFUSE)
+    result = next(row for row in rendered if row.kind == kind)
+    assert result.desired_runtime_state is DesiredRuntimeState.STOPPED
+    assert not runtime[2]
+    assert not (db.path.parent / f".{db.path.name}.native-locks").exists()
+
+
+def test_checkpoint_only_evidence_waits_for_complete_workload_secret_success(db, make_config, runtime, monkeypatch):
+    seed_vm(db, "box")
+    seed_session(db, "checkpoint", "box")
+    seed_session(db, "launch", "box", template="requires-token")
+    path = "/run/agentworks/admin-tmux-sockets/admin/checkpoint.sock"
+    db.update_session_runtime("checkpoint", socket_path=path, pid=None, boot_id=None, tmux_server_start_ticks=None)
+    before = db.get_session("checkpoint")
+    monkeypatch.setattr(
+        manager,
+        "check_session_status",
+        lambda row, **k: SessionStatus.UNKNOWN if row.name == "checkpoint" else SessionStatus.STOPPED,
+    )
+    capture = tmux.capture_tmux_server_fingerprint
+    monkeypatch.setattr(
+        tmux,
+        "capture_tmux_server_fingerprint",
+        lambda **k: tmux.FingerprintProbe(ProbeStatus.ABSENT) if k["socket_path"] == path else capture(**k),
+    )
+    prepare = manager.prepare_session_launch
+    prepared = []
+
+    def record(definition):
+        result = prepare(definition)
+        prepared.append(result)
+        return result
+
+    monkeypatch.setattr(manager, "prepare_session_launch", record)
+    monkeypatch.setattr(
+        manager, "_ensure_pid", lambda *a, **k: pytest.fail("evidence written before complete workload boundary")
+    )
+    with pytest.raises(StateError):
+        reconcile_vm(db, make_config(manifests=[required_template()]), name="box", interaction=REFUSE)
+    checkpoint = next(row for row in prepared if row.definition.session.name == "checkpoint")
+    assert checkpoint.checkpoint_only and not checkpoint.requires_launch
+    assert checkpoint.secret_nodes == () and checkpoint.secret_targets == ()
+    assert db.get_session("checkpoint") == before
+    assert not any(action == "session-start" for action, _ in runtime[2])
+
+
+@pytest.mark.parametrize("kind", ["session", "console"])
+def test_stopped_workload_preview_does_not_propose_starting_off_running_intent_parent(
+    db, make_config, runtime, monkeypatch, kind
+):
+    from agentworks.runtime_state import reconcile_console
+
+    seed_vm(db, "box", target=DesiredRuntimeState.RUNNING)
+    seed_session(db, "work", "box", target=DesiredRuntimeState.STOPPED)
+    create_console_record(db, name="view", vm_name="box", session_specs=[], add_admin_shell=True)
+    db.set_console_desired_runtime_state("view", DesiredRuntimeState.STOPPED)
+    runtime[0]["box"] = VMStatus.STOPPED
+    rendered = []
+    monkeypatch.setattr("agentworks.runtime_state._preview.render_results", lambda rows, **k: rendered.extend(rows))
+    if kind == "session":
+        reconcile_session(db, make_config(), name="work", dry_run=True, interaction=REFUSE)
+    else:
+        reconcile_console(db, make_config(), name="view", dry_run=True, interaction=REFUSE)
+    assert not any(row.kind == "vm" and row.outcome is Outcome.CHANGED for row in rendered)
+    assert all(row.outcome is Outcome.UNCHANGED for row in rendered)
+    assert not runtime[2]

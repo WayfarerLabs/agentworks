@@ -7,7 +7,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Literal
 
 from agentworks import output
-from agentworks.errors import StateError
+from agentworks.errors import AgentworksError, StateError
 from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
 
 if TYPE_CHECKING:
@@ -49,9 +49,6 @@ class RuntimeResult:
     action: str = "inspect"
     outcome: Outcome = Outcome.UNCHANGED
     reason: str | None = None
-    vm_uuid: str | None = field(default=None, repr=False)
-    session_uuid: str | None = field(default=None, repr=False)
-    proposed: bool = False
     target_known: bool = True
 
 
@@ -126,7 +123,8 @@ class RuntimeInvocation:
         )
 
     def fail(self, kind: Kind, name: str, error: Exception | str, *, blocked: bool = False) -> None:
-        reason = sanitize_setup_diagnostic(str(error), redactions=self.redactions)[:500]
+        detail = f"{error} {error.hint}" if isinstance(error, AgentworksError) and error.hint else str(error)
+        reason = sanitize_setup_diagnostic(detail, redactions=self.redactions)[:500]
         self.record(kind, name, outcome=Outcome.BLOCKED if blocked else Outcome.FAILED, reason=reason)
 
     def unavailable(self, kind: Kind, name: str) -> bool:
@@ -136,7 +134,7 @@ class RuntimeInvocation:
         vm = self.vms[name]
         self.results.setdefault(
             ("vm", name),
-            RuntimeResult(kind="vm", name=name, desired_runtime_state=vm.desired_runtime_state, vm_uuid=vm.vm_uuid),
+            RuntimeResult(kind="vm", name=name, desired_runtime_state=vm.desired_runtime_state),
         )
 
     def close(self) -> None:
@@ -153,7 +151,7 @@ def render_results(results: tuple[RuntimeResult, ...], *, dry_run: bool = False)
     for result in results:
         target = result.desired_runtime_state or ("adoption required" if result.target_known else "unavailable")
         observed = result.observation.value if result.observation is not None else "unavailable"
-        outcome = f"would {result.outcome}" if result.proposed and result.outcome is Outcome.CHANGED else result.outcome
+        outcome = f"would {result.outcome}" if dry_run and result.outcome is Outcome.CHANGED else result.outcome
         reason = f": {result.reason}" if result.reason else ""
         output.result(
             f"{result.kind} '{result.name}': {outcome} ({result.action}; desired {target}; observed {observed}){reason}"

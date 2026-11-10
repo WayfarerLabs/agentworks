@@ -60,6 +60,10 @@ def preview_selected(
                 if current is None or current.vm_uuid != selected.vm_uuid:
                     raise StateError("VM changed during preview selection", entity_kind="vm", entity_name=selected.name)
                 invocation.vms[current.name] = current
+                if ("vm", current.name) in invocation.results:
+                    invocation.results[("vm", current.name)] = replace(
+                        invocation.results[("vm", current.name)], desired_runtime_state=current.desired_runtime_state
+                    )
                 invocation.nodes[current.name] = live_vm_node(db, config, registry, current, site_nodes=site_nodes)
             for selected_session in selection.sessions:
                 session = db.get_session(selected_session.name)
@@ -82,7 +86,6 @@ def preview_selected(
                 invocation.results[("session", session.name)] = replace(
                     invocation.results[("session", session.name)],
                     desired_runtime_state=session.desired_runtime_state,
-                    proposed=True,
                 )
             routes = list(selection.console_routes)
             if selection.expand_consoles:
@@ -97,7 +100,7 @@ def preview_selected(
                     )
                 invocation.consoles[name] = console
                 invocation.results[("console", name)] = RuntimeResult(
-                    kind="console", name=name, desired_runtime_state=console.desired_runtime_state, proposed=True
+                    kind="console", name=name, desired_runtime_state=console.desired_runtime_state
                 )
             prepare_local_workloads(invocation)
             _observe_providers(invocation)
@@ -132,8 +135,11 @@ def _observe_providers(invocation: RuntimeInvocation) -> None:
             if power is VMStatus.UNKNOWN:
                 _block_family(invocation, name, "provider power observation is unknown")
                 continue
-            wants_running = vm.desired_runtime_state is DesiredRuntimeState.RUNNING or (
-                vm.desired_runtime_state is DesiredRuntimeState.ON_DEMAND and _needs_running_guest(invocation, name)
+            wants_running = (
+                name in invocation.selection.explicit_vms
+                and vm.desired_runtime_state is DesiredRuntimeState.RUNNING
+                or vm.desired_runtime_state is not DesiredRuntimeState.STOPPED
+                and _needs_running_guest(invocation, name)
             )
             changed = (
                 wants_running
@@ -147,7 +153,6 @@ def _observe_providers(invocation: RuntimeInvocation) -> None:
                 invocation.results[("vm", name)] = replace(
                     invocation.results[("vm", name)],
                     observation=power,
-                    proposed=True,
                     action="start" if wants_running and power in OFF else "stop" if changed else "inspect",
                     outcome=Outcome.CHANGED if changed else Outcome.UNCHANGED,
                 )
@@ -203,7 +208,6 @@ def _preview_sessions(invocation: RuntimeInvocation) -> None:
             invocation.results[("session", name)] = replace(
                 invocation.results[("session", name)],
                 observation=status,
-                proposed=True,
                 action=action,
                 reason=reason,
                 outcome=Outcome.CHANGED if changed else Outcome.UNCHANGED,
@@ -255,7 +259,6 @@ def _preview_consoles(invocation: RuntimeInvocation) -> None:
                     canonical_present=canonical is ProbeStatus.PRESENT, staging_present=staging is ProbeStatus.PRESENT
                 ),
                 action=action,
-                proposed=True,
                 outcome=Outcome.UNCHANGED if action == "unchanged" else Outcome.CHANGED,
             )
         except UserAbort:

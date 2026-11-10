@@ -8,7 +8,7 @@ import agentworks.sessions.manager as _mgr
 from agentworks import output
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.harness_integration import require_implemented_start
-from agentworks.db import SessionMode, SessionStatus
+from agentworks.db import PID_STOPPED, SessionMode, SessionStatus
 from agentworks.errors import ExternalError, StateError
 from agentworks.orchestration.secrets import ScopedSecrets
 from agentworks.sessions.manager._lifecycle import (
@@ -48,7 +48,10 @@ def execute_session_start(
     is_admin, is_legacy = session.mode == SessionMode.ADMIN.value, prepared.legacy
     admin_target, session_target = prepared.admin_target, prepared.session_target
     from agentworks.sessions.manager._runtime import observe_session_runtime
+    from agentworks.sessions.manager._runtime_observation import checkpoint_session_identity
 
+    if prepared.checkpoint_only:
+        checkpoint_session_identity(db, session, vm=vm, admin_target=admin_target)
     observed_now = observe_session_runtime(
         session, admin_target=admin_target, session_target=session_target if is_legacy else None
     )
@@ -74,8 +77,9 @@ def execute_session_start(
         output.result(f"Session '{name}' is already running")
         return False
     # Evidence repair is deferred until every eligible workload has valid values.
-    if not is_legacy:
+    if not is_legacy or session.pid in {None, PID_STOPPED}:
         session = _mgr._ensure_pid(session, target=admin_target, db=db)
+        is_legacy = session.socket_path is None
     status = _mgr.check_session_status(session, target=admin_target) if not is_legacy else observed_now
     if status is SessionStatus.UNKNOWN:
         raise StateError("session runtime became unknown before execution", entity_kind="session", entity_name=name)

@@ -8,8 +8,15 @@ from typing import TYPE_CHECKING
 
 import agentworks.sessions.manager as _mgr
 from agentworks.capabilities.harness_integration import HarnessLaunchIntent
-from agentworks.db import DesiredRuntimeState, SessionMode, SessionStatus
+from agentworks.db import PID_STOPPED, DesiredRuntimeState, SessionMode, SessionStatus
 from agentworks.errors import BrokenStateError, NotFoundError, StateError
+
+from ._runtime_observation import (
+    can_checkpoint_session,
+    checkpoint_session_identity,
+    require_unaddressed_session_absence,
+)
+from ._runtime_observation import observe_session_runtime as observe_session_runtime
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -65,6 +72,7 @@ class PreparedSessionLaunch:
     legacy: bool
     recovered_startup: bool
     noop: bool
+    checkpoint_only: bool = False
 
     @property
     def secret_targets(self) -> tuple[SecretTarget, ...]:
@@ -72,7 +80,11 @@ class PreparedSessionLaunch:
 
     @property
     def requires_launch(self) -> bool:
-        return not self.noop and not (self.recovered_startup and not self.definition.replace_running)
+        return (
+            not self.noop
+            and not self.checkpoint_only
+            and not (self.recovered_startup and not self.definition.replace_running)
+        )
 
     @property
     def secret_nodes(self) -> tuple[Node, ...]:
@@ -93,6 +105,7 @@ class PreparedSessionStop:
     observed_status: SessionStatus
     parent_off: bool
     force: bool
+    checkpoint_only: bool = False
 
 
 def prepare_session_definition(
@@ -186,26 +199,6 @@ def prepare_session_definition(
     )
 
 
-def observe_session_runtime(
-    session: SessionRow, *, admin_target: Transport, session_target: Transport | None = None
-) -> SessionStatus:
-    """Observe exact dedicated or legacy presence without repairing evidence."""
-    if session.socket_path is not None:
-        return _mgr.check_session_status(session, target=admin_target)
-    from agentworks.sessions.tmux import ProbeStatus, probe_tmux_session
-
-    target = session_target or admin_target
-    run = (
-        target.run if session_target is not None else partial(target.run, sudo=session.mode == SessionMode.AGENT.value)
-    )
-    presence = probe_tmux_session(session.name, run_command=run, socket_path=None)
-    return {
-        ProbeStatus.PRESENT: SessionStatus.RUNNING,
-        ProbeStatus.ABSENT: SessionStatus.STOPPED,
-        ProbeStatus.UNKNOWN: SessionStatus.UNKNOWN,
-    }[presence]
-
-
 def validate_session_observed_policy(
     session: SessionRow,
     status: SessionStatus,
@@ -271,7 +264,23 @@ def prepare_session_launch(definition: SessionLaunchDefinition) -> PreparedSessi
 
     require_vm_ssh_boundary(db, config, definition.vm)
     admin_target = _mgr.transport(definition.vm, config)
-    status = observe_session_runtime(current, admin_target=admin_target)
+    try:
+        status = observe_session_runtime(current, admin_target=admin_target)
+    except StateError:
+        if not can_checkpoint_session(current, vm=definition.vm, admin_target=admin_target):
+            raise
+        status = SessionStatus.UNKNOWN
+    if status is SessionStatus.UNKNOWN and can_checkpoint_session(current, vm=definition.vm, admin_target=admin_target):
+        return PreparedSessionLaunch(
+            definition=definition,
+            admin_target=admin_target,
+            session_target=admin_target,
+            observed_status=status,
+            legacy=current.socket_path is None,
+            recovered_startup=False,
+            noop=False,
+            checkpoint_only=True,
+        )
     if status is SessionStatus.UNKNOWN:
         raise StateError("session runtime state is unknown", entity_kind="session", entity_name=session.name)
     if status is SessionStatus.BROKEN and not definition.force:
@@ -313,6 +322,7 @@ def prepare_session_launch(definition: SessionLaunchDefinition) -> PreparedSessi
             raise StateError(
                 "session became running without restart authorization", entity_kind="session", entity_name=session.name
             )
+    require_unaddressed_session_absence(current, vm=definition.vm, admin_target=admin_target)
     target = _mgr._build_session_target(current, vm=definition.vm, config=config, db=db, admin_target=admin_target)
     if not recovered_startup or definition.replace_running:
         context = RunContext(
@@ -359,15 +369,29 @@ def prepare_session_stop(
 
         require_vm_ssh_boundary(db, config, vm)
     admin_target = None if parent_off else _mgr.transport(vm, config)
-    status = SessionStatus.STOPPED if parent_off else observe_session_runtime(session, admin_target=admin_target)  # type: ignore[arg-type]
-    if status is SessionStatus.UNKNOWN:
+    checkpoint_only = False
+    if admin_target is None:
+        status = SessionStatus.STOPPED
+    else:
+        try:
+            status = observe_session_runtime(session, admin_target=admin_target)
+        except StateError:
+            if not can_checkpoint_session(session, vm=vm, admin_target=admin_target):
+                raise
+            status = SessionStatus.UNKNOWN
+        checkpoint_only = status is SessionStatus.UNKNOWN and can_checkpoint_session(
+            session, vm=vm, admin_target=admin_target
+        )
+    if status is SessionStatus.UNKNOWN and not checkpoint_only:
         raise StateError("session runtime state is unknown", entity_kind="session", entity_name=session.name)
     if status is SessionStatus.BROKEN and not force:
         raise BrokenStateError(
             "session runtime requires explicit force recovery", entity_kind="session", entity_name=session.name
         )
+    if admin_target is not None and not checkpoint_only:
+        require_unaddressed_session_absence(session, vm=vm, admin_target=admin_target)
     target = None
-    if status is not SessionStatus.STOPPED:
+    if status is not SessionStatus.STOPPED and not checkpoint_only:
         assert admin_target is not None
         target = _mgr._build_session_target(session, vm=vm, config=config, db=db, admin_target=admin_target)
     return PreparedSessionStop(
@@ -381,6 +405,7 @@ def prepare_session_stop(
         observed_status=status,
         parent_off=parent_off,
         force=force,
+        checkpoint_only=checkpoint_only,
     )
 
 
@@ -395,7 +420,23 @@ def execute_session_stop(prepared: PreparedSessionStop) -> bool:
         raise StateError("session parent changed before teardown", entity_kind="session", entity_name=session.name)
     if session.desired_runtime_state != prepared.session.desired_runtime_state:
         raise StateError("session target changed before teardown", entity_kind="session", entity_name=session.name)
-    if prepared.parent_off or prepared.observed_status is SessionStatus.STOPPED:
+    if prepared.parent_off:
+        from ._lifecycle import _mark_stopped
+
+        changed = (
+            session.pid != PID_STOPPED or session.boot_id is not None or session.tmux_server_start_ticks is not None
+        )
+        if changed:
+            _mark_stopped(prepared.db, session)
+        return changed
+    if prepared.checkpoint_only:
+        assert prepared.admin_target is not None
+        checkpoint_session_identity(prepared.db, session, vm=vm, admin_target=prepared.admin_target)
+    if prepared.observed_status is SessionStatus.STOPPED:
+        assert prepared.admin_target is not None
+        if _mgr._needs_repair(session) or session.socket_path is None:
+            repaired = _mgr._ensure_pid(session, target=prepared.admin_target, db=prepared.db)
+            return repaired != session
         return False
     assert prepared.admin_target is not None and prepared.session_target is not None
     session = (
