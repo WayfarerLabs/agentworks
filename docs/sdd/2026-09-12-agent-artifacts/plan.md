@@ -59,13 +59,45 @@ preservation and native metadata/write faults passed through actual local Git, c
 file-publisher boundaries. Twenty-six selected regressions fail against the original `b8c03be5`
 product; the restored frozen selection passes 137 tests. Focused Ruff, format and mypy passed. Two
 initial rehome directory checks now quote their operands, matching the actual target-with-space
-control. Noncrux VM, ACL/system ownership and final system cleanup remain disclosed fixture seams.
+control. VM routing, ACL/system ownership and final system cleanup remain disclosed fixture seams.
 
 Original failures remain in the worker receipts: the first lifecycle runs used an owned proof root
 with inherited group/default ACL conditions, then passed unchanged product guards after that root
 was corrected; new test annotations and formatting were corrected after their initial failures. The
 lead's first file-lint run failed only on source-archive terminology, then passed after ordinary
 wording. Complete integrated gates and the three private review lanes remain pending.
+
+### Private review corrections
+
+Project and generic reviews at `e797b380` independently reproduced a second supported rehome
+dropping all exclusions: general file inventory stays at its original root, so the second move had
+no desired paths. The generic lane also proved that malformed external destination types escaped as
+AttributeError, and that a retained modified old pair could produce a duplicate ownership key after
+publishing its replacement. Revalidation rejected that checkpoint; prior database state remained
+valid. No stored-corruption claim is made.
+
+Worker `f8fd2ce3`, integrated as `5f59adbe`, derives migration paths from verified current-owner
+claims through the same canonical validator, before current Git checks every desired tracked path.
+Ordinary removal does not derive desired inputs from claims. It validates external destination types
+and skips a conflicting replacement before writing while retaining old evidence and allowing
+independent pairs/core rehome. No state schema, ledger, general native relocation or broad internal
+exception handler was added.
+
+The frozen focused selection passed 165 tests. Three consecutive actual public rehomes, both
+old-copy modes, full/nested/linked repositories, later tracked files, modified-pair preservation and
+malformed-response deletion are covered. The before-control returned 20 failures and four
+already-correct malformed-string passes; both tracked-query removal controls failed. Original source
+bytes were restored and verified. Focused Ruff, format and mypy passed. Complete combined gates and
+exact correction re-reviews remain necessary.
+
+The lead initially put website temporary output beneath the checkout. The builder correctly refused
+that location, and browser fixtures exited before DevTools opened; the original 160-test run
+returned 11 failures and three errors. Using a short owned temporary directory outside the checkout,
+unchanged website inputs passed all 160 tests in 34.112 seconds; four builds and two deterministic
+diffs passed. That temporary root was removed and independently checked absent. No website source
+was changed or independent Chromium root cause claimed. Node's 103 tests, Rulesync and locked-SDD
+checks passed. CI on `e797b380` passed Python/Windows and website jobs but failed file lint on one
+authored word; ordinary wording corrected it and local file lint passed.
 
 ## Native delivery feedback, round 1 of 3, 2026-11-09
 
