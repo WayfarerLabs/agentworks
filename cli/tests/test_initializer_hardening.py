@@ -329,7 +329,7 @@ def test_ensure_proc_hidepid_upgrades_off_by_name() -> None:
 
 
 @pytest.mark.parametrize("value", ["²", "3", "01", "Invisible"])
-def test_ensure_proc_hidepid_leaves_a_value_the_kernel_does_not_name_alone(value: str) -> None:
+def test_ensure_proc_hidepid_leaves_a_value_outside_the_canonical_spellings_alone(value: str) -> None:
     from agentworks.vms.hardening import _ensure_proc_hidepid_in_fstab
 
     content = f"proc  /proc  proc  defaults,hidepid={value}  0  0\n"

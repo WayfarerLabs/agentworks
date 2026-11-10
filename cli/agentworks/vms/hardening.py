@@ -77,7 +77,7 @@ _HIDEPID_LEVELS = {
     "invisible": 2,
     "ptraceable": 4,
 }
-"""Every ``hidepid`` value the kernel accepts (``proc(5)``), by number and by name, with its level."""
+"""The kernel's canonical spellings of ``hidepid`` (``proc(5)``), by number and by name, with each level."""
 
 
 def _ensure_proc_hidepid_in_fstab(content: str) -> tuple[str, str, str]:
