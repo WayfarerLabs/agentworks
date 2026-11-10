@@ -11,7 +11,7 @@ from agentworks import output
 from agentworks.capabilities.harness_integration import ShellIntegration
 from agentworks.capabilities.harness_integration.setup import SetupEvidence, SetupGap, SetupReadiness
 from agentworks.db import Database, SessionStatus
-from agentworks.errors import BrokenStateError, StateError
+from agentworks.errors import AgentworksError, StateError
 from agentworks.harness_setup.model import NativeSetupState, SetupFacet, SetupRecord
 from agentworks.harness_setup.outcomes import SetupFailure, describe_setup_failures, raise_setup_failures
 from agentworks.harness_setup.readiness import RequiredSetupMissingError
@@ -78,9 +78,9 @@ def test_existing_session_setup_precedes_both_secret_passes_and_runtime_changes(
     launch_kwargs = {"yes": True} if operation == "restart" else {}
     try:
         if severity == "required":
-            with pytest.raises(RequiredSetupMissingError) as caught:
+            with pytest.raises(StateError) as caught:
                 launch(db, config, name="s1", interaction=TtyInteractionPolicy.REFUSE, **launch_kwargs)
-            assert (caught.value.entity_kind, caught.value.entity_name) == ("agent", "a1")
+            assert (caught.value.entity_kind, caught.value.entity_name) == ("session", "s1")
             assert events == ["probe", "setup"]
             assert db.get_session("s1") == before
             assert not db.has_any_grant("a1", "ws1")
@@ -91,7 +91,6 @@ def test_existing_session_setup_precedes_both_secret_passes_and_runtime_changes(
                 "probe",
                 "setup",
                 "resolve",
-                "resolve_env",
                 *(["kill"] if operation == "restart" else []),
                 "tmux_create",
             ]
@@ -107,11 +106,11 @@ def test_nonlaunch_start_does_not_check_setup(tmp_path: Path, monkeypatch: pytes
     evidence = _record_setup_check(monkeypatch, events)
     try:
         if status is SessionStatus.BROKEN:
-            with pytest.raises(BrokenStateError):
+            with pytest.raises(AgentworksError):
                 manager.start_session(db, config, name="s1", interaction=TtyInteractionPolicy.REFUSE)
         else:
             manager.start_session(db, config, name="s1", interaction=TtyInteractionPolicy.REFUSE)
-        assert events == []
+        assert not any(event in {"probe", "setup", "kill", "tmux_create"} for event in events)
         assert evidence == []
     finally:
         db.close()

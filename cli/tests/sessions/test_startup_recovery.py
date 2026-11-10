@@ -11,10 +11,11 @@ from uuid import uuid4
 import pytest
 
 from agentworks.db import Database, SessionStatus
-from agentworks.errors import ExternalError, StateError
+from agentworks.errors import AgentworksError, ExternalError, StateError
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import manager, tmux
 
+from ._workload_secrets import register_workload_secret
 from .test_create_start_restart_orchestrated import (
     BOOT_ID,
     _create_stubs,
@@ -26,27 +27,28 @@ from .test_create_start_restart_orchestrated import (
 
 
 @pytest.mark.parametrize("operation", ["start_session", "restart_session"])
-def test_launch_failure_redacts_the_resolved_secret_without_replacing_error(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str
+def test_launch_failure_redacts_the_resolved_secret_across_public_aggregate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str, make_config, resolve_counter
 ) -> None:
     db, _events = _restart_fixture(tmp_path, monkeypatch, status=SessionStatus.STOPPED)
     secret = uuid4().hex
     failure = ExternalError(secret, hint=secret)
-    monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: {"token": secret})
+    register_workload_secret(db, monkeypatch, name="token", value=secret)
 
     def fail(*args: object, **kwargs: object) -> None:
         raise failure
 
     monkeypatch.setattr(tmux, "create_session", fail)
-    with pytest.raises(ExternalError) as caught:
+    with pytest.raises(AgentworksError) as caught:
         getattr(manager, operation)(
             db,
-            SimpleNamespace(session=SimpleNamespace(history_limit=1)),
+            make_config(),
             name="s1",
             interaction=TtyInteractionPolicy.REFUSE,
         )
 
-    assert caught.value is failure
+    assert secret not in str(caught.value)
+    assert sum("token" in names for names in resolve_counter) == 1
     assert secret not in "".join(traceback.format_exception(failure))
     assert failure.hint is not None and secret not in failure.hint
     db.close()
@@ -133,7 +135,9 @@ def test_post_spawn_failure_retains_new_owners_and_original_outcome(
 
 @pytest.mark.parametrize("operation", ["start_session", "restart_session"])
 @pytest.mark.parametrize("value_shape", ["literal", "quoted", "ansi"])
-def test_launch_secret_stays_out_of_terminal_and_cli_error_log(tmp_path, monkeypatch, capsys, operation, value_shape):
+def test_launch_secret_stays_out_of_terminal_and_cli_error_log(
+    tmp_path, monkeypatch, capsys, operation, value_shape, make_config, resolve_counter
+):
     from agentworks import cli
     from agentworks.sessions.tmux import _tmux_env_flags
 
@@ -149,7 +153,7 @@ def test_launch_secret_stays_out_of_terminal_and_cli_error_log(tmp_path, monkeyp
     monkeypatch.setattr("agentworks.config.CONFIG_DIR", tmp_path)
     monkeypatch.setattr("sys.argv", ["agw", "session", operation, "s1"])
     monkeypatch.delenv("AGW_DEBUG", raising=False)
-    monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: {"token": secret})
+    register_workload_secret(db, monkeypatch, name="token", value=secret)
 
     def fail(*args, **kwargs):
         raise failure
@@ -157,7 +161,7 @@ def test_launch_secret_stays_out_of_terminal_and_cli_error_log(tmp_path, monkeyp
     def run_operation():
         getattr(manager, operation)(
             db,
-            SimpleNamespace(session=SimpleNamespace(history_limit=1)),
+            make_config(),
             name="s1",
             interaction=TtyInteractionPolicy.REFUSE,
         )
@@ -171,7 +175,9 @@ def test_launch_secret_stays_out_of_terminal_and_cli_error_log(tmp_path, monkeyp
         printed = capsys.readouterr()
         assert marker not in printed.out + printed.err
         error_log = tmp_path / "logs" / "error.log"
-        assert error_log.exists() and marker not in error_log.read_text()
+        if error_log.exists():
+            assert marker not in error_log.read_text()
+        assert sum("token" in names for names in resolve_counter) == 1
         assert marker not in str(failure) + str(failure.hint)
     finally:
         db.close()

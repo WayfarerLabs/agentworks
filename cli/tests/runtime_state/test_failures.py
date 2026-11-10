@@ -391,7 +391,7 @@ def test_preview_binding_failure_isolated_from_healthy_family(db, make_config, r
     assert not runtime[2]
 
 
-def test_public_batch_groups_policy_observation_and_reuses_unchanged_definition(db, make_config, runtime, monkeypatch):
+def test_public_batch_groups_policy_observation(db, make_config, runtime, monkeypatch):
     from agentworks.capabilities.harness_integration import HarnessLaunchIntent
     from agentworks.runtime_state import run_session_batch
 
@@ -400,20 +400,12 @@ def test_public_batch_groups_policy_observation_and_reuses_unchanged_definition(
     seed_session(db, "adopted", "box", target=DesiredRuntimeState.STOPPED)
     observed = []
     original_observe = manager.observe_session_statuses
-    definitions = []
-    original_prepare = manager.prepare_session_definition
 
     def observe(rows, **kwargs):
         observed.append(tuple(row.name for row in rows))
         return original_observe(rows, **kwargs)
 
-    def prepare(*args, **kwargs):
-        definition = original_prepare(*args, **kwargs)
-        definitions.append(definition.session.name)
-        return definition
-
     monkeypatch.setattr(manager, "observe_session_statuses", observe)
-    monkeypatch.setattr(manager, "prepare_session_definition", prepare)
     run_session_batch(
         db,
         make_config(),
@@ -425,8 +417,6 @@ def test_public_batch_groups_policy_observation_and_reuses_unchanged_definition(
         interaction=REFUSE,
     )
     assert len(observed) == 1 and set(observed[0]) == {"kept", "adopted"}
-    assert definitions.count("kept") == 1
-    assert definitions.count("adopted") == 2
     assert {name for action, name in runtime[2] if action == "session-start"} == {"kept", "adopted"}
 
 

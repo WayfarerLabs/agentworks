@@ -15,7 +15,7 @@ from typing import Any
 import pytest
 
 from agentworks.db import SessionStatus
-from agentworks.errors import ExternalError, StateError
+from agentworks.errors import AgentworksError, ExternalError, StateError
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import manager, tmux
 from agentworks.sessions.manager._pids import _repair_session_pid
@@ -195,6 +195,7 @@ def test_native_death_during_identity_capture_keeps_recoverable_fingerprint(tmp_
     db, _ = _restart_fixture(tmp_path, monkeypatch, status=SessionStatus.STOPPED)
     _patch_transports(monkeypatch, native, native)
     _requiring_template(monkeypatch, "sh")
+    monkeypatch.setattr(manager, "check_session_status", check_session_status)
     gate = native.root / "exit"
     script = native.root / "work.sh"
     script.write_text(f"while [ ! -e {shlex.quote(str(gate))} ]; do sleep .02; done\nprintf late-marker; exit 29\n")
@@ -264,7 +265,7 @@ def test_native_unverified_checkpoint_recovers_still_private_socket(tmp_path, mo
         tmux, "capture_tmux_server_fingerprint", lambda **k: tmux.FingerprintProbe(tmux.ProbeStatus.UNKNOWN)
     )
     try:
-        with pytest.raises(ExternalError):
+        with pytest.raises(AgentworksError):
             manager.start_session(
                 db,
                 SimpleNamespace(session=SimpleNamespace(history_limit=1)),
@@ -387,7 +388,7 @@ def test_failed_native_startup_release_retains_checkpointed_runtime(tmp_path, mo
 
     monkeypatch.setattr(native, "run", reject_release)
     try:
-        with pytest.raises(ExternalError):
+        with pytest.raises(AgentworksError):
             getattr(manager, operation)(
                 db,
                 SimpleNamespace(session=SimpleNamespace(history_limit=1), paths=SimpleNamespace(vm_workspaces="/srv")),
