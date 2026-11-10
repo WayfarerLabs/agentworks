@@ -239,6 +239,8 @@ def test_an_agent_access_refuses_an_elevated_file_operation_before_dispatch() ->
         access.files().write("/etc/x", b"x", mode=0o644, parent_mode=0o755, elevated=True)
     with pytest.raises(PermissionDenied):
         access.files().update("/etc/x", b"x", observed=None, mode=0o644, parent_mode=0o755, elevated=True)
+    with pytest.raises(PermissionDenied):
+        access.files().ensure_directory("/home/other/.ssh", mode=0o700, owner="other", elevated=True)
 
 
 # -- Over the L lane ------------------------------------------------------------------------------

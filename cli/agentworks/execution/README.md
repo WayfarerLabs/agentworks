@@ -147,31 +147,34 @@ content travels as `Bytes` on stdin, never as an argument. So do the digests `wr
 `remove_if` compare and verify, so the operation log, which records arguments, holds no content and
 no digest of it. The deadline bounds every request.
 
-| Method                                          | Does                                                                                           |
-| ----------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `read(path, limit=1 MiB)`                       | The file's bytes, or `None` when the file or a parent is absent                                |
-| `stat(path)`                                    | `Absent()`, `Directory()` or `RegularFile(digest, mode)`, hashed on the guest                  |
-| `write(path, data, mode=, owner=, group=, ...)` | Replaces the file whatever it holds, with that mode and ownership; creates missing parents     |
-| `write_if(path, data, expected=, mode=, ...)`   | Replaces the file only while its digest is `expected` (`None`: still absent)                   |
-| `update(path, data, observed=, mode=, ...)`     | `write_if` against what the caller read; data equal to `observed` sends nothing, returns false |
-| `remove_if(path, expected=)`                    | Removes the file only while its digest is `expected`                                           |
-| `ensure_directory(path, mode=)`                 | Creates the directory and missing parents with `mode`; never changes one                       |
-| `prune_empty_parents(path, root=)`              | Removes empty parents up to and including `root`; returns a `Pruned`                           |
+| Method                                          | Does                                                                                            |
+| ----------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `read(path, limit=1 MiB)`                       | The file's bytes, or `None` when the file or a parent is absent                                 |
+| `stat(path)`                                    | `Absent()`, `Directory()` or `RegularFile(digest, mode)`, hashed on the guest                   |
+| `write(path, data, mode=, owner=, group=, ...)` | Replaces the file whatever it holds, with that mode and ownership; creates missing parents      |
+| `write_if(path, data, expected=, mode=, ...)`   | Replaces the file only while its digest is `expected` (`None`: still absent)                    |
+| `update(path, data, observed=, mode=, ...)`     | `write_if` against what the caller read; data equal to `observed` sends nothing, returns false  |
+| `remove_if(path, expected=)`                    | Removes the file only while its digest is `expected`                                            |
+| `ensure_directory(path, mode=, owner=, group=)` | Creates the directory and missing parents with `mode`; with an owner, converges an existing one |
+| `prune_empty_parents(path, root=)`              | Removes empty parents up to and including `root`; returns a `Pruned`                            |
 
-Each but `ensure_directory` takes `elevated`, which an agent's access refuses before dispatch. Paths
-must be absolute and normalized (`guest_path`). Nothing is read or written through a symbolic link:
-every component is opened relative to its parent without following links, and a link or the wrong
-type anywhere on the path is `PathRefused(UNSUITABLE)`, a permission denial `PathRefused(DENIED)`.
-`write` and `write_if` read their whole content and check its size and SHA-256 before creating
-anything, so a dropped connection publishes nothing (`FileContentMismatch`); each writes a sibling
-temporary file with the requested owner, group and mode, set before the rename, so the destination
-never holds the content without them. `write` keeps nothing of the file it replaces, and a link or
-anything but a regular file there is refused. With `write_if`, `preserve_metadata=True` gives the
-temporary file the existing file's owner, group, mode and extended attributes instead, and a changed
-destination is `FileConflict`, with nothing written. `update` is how a caller that reads, decides
-and writes publishes: an unchanged file keeps its inode, mode and ACLs, and a file another writer
-changed since the read is `FileConflict`, never retried. `read` and `stat` keep their streams out of
-the operation log.
+Each takes `elevated`, which an agent's access refuses before dispatch. Paths must be absolute and
+normalized (`guest_path`). Nothing is read or written through a symbolic link: every component is
+opened relative to its parent without following links, and a link or the wrong type anywhere on the
+path is `PathRefused(UNSUITABLE)`, a permission denial `PathRefused(DENIED)`. `write` and `write_if`
+read their whole content and check its size and SHA-256 before creating anything, so a dropped
+connection publishes nothing (`FileContentMismatch`); each writes a sibling temporary file with the
+requested owner, group and mode, set before the rename, so the destination never holds the content
+without them. `write` keeps nothing of the file it replaces, and a link or anything but a regular
+file there is refused. With `write_if`, `preserve_metadata=True` gives the temporary file the
+existing file's owner, group, mode and extended attributes instead, and a changed destination is
+`FileConflict`, with nothing written. `update` is how a caller that reads, decides and writes
+publishes: an unchanged file keeps its inode, mode and ACLs, and a file another writer changed since
+the read is `FileConflict`, never retried. `ensure_directory` leaves an existing directory as it is,
+unless given an `owner` or `group`: then it opens the directory, new or existing, without following
+a link and sets them and `mode` on that descriptor, which is how an elevated caller places a
+directory inside another account's home. `read` and `stat` keep their streams out of the operation
+log.
 
 Every mutating operation holds one VM-wide lock, `/run/lock/agentworks-files.lock`, from its walk to
 its last system call, whichever identity runs it: opened read-only, created world-readable only when

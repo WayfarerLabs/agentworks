@@ -253,10 +253,25 @@ class Files:
         )
         return True
 
-    def ensure_directory(self, path: str, *, mode: int) -> None:
-        """Create the directory ``path``, and its missing parents, with ``mode``; an existing one is left as it is."""
+    def ensure_directory(
+        self,
+        path: str,
+        *,
+        mode: int,
+        owner: str | None = None,
+        group: str | None = None,
+        elevated: bool = False,
+    ) -> None:
+        """Create the directory ``path``, and its missing parents, with ``mode``.
+
+        Without ``owner`` and ``group`` an existing directory is left as it
+        is. With either, the directory, new or existing, gets them and
+        ``mode`` through a descriptor opened without following a link, which
+        for another account's owner takes ``elevated``.
+        """
         path = guest_path(path)
-        status, result = self._run("ensure_directory", {"path": path, "mode": mode}, elevated=False)
+        params = {"path": path, "mode": mode, "owner": owner, "group": group}
+        status, result = self._run("ensure_directory", params, elevated=elevated)
         self._require_done("ensure_directory", path, status, result)
 
     def remove_if(self, path: str, *, expected: str, elevated: bool = False) -> None:

@@ -129,6 +129,12 @@ class Guest:
         options = {key: overrides.pop(key) for key in ("patch", "sudo", "umask") if key in overrides}
         return self.run("write", {**params, **overrides}, stdin=data, **options)
 
+    def ensure_directory(
+        self, path: Path, *, mode: int, owner: str | None = None, group: str | None = None, **options: object
+    ) -> subprocess.CompletedProcess[bytes]:
+        params = {"path": str(path), "mode": mode, "owner": owner, "group": group}
+        return self.run("ensure_directory", params, **options)
+
 
 def digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
@@ -411,8 +417,8 @@ def test_ensure_directory_creates_it_and_its_parents_with_the_mode_and_leaves_an
     existing.mkdir()
     existing.chmod(0o755)
 
-    made = guest.run("ensure_directory", {"path": str(guest.tree / "a" / "b"), "mode": 0o710}, umask=0o077)
-    kept = guest.run("ensure_directory", {"path": str(existing), "mode": 0o700})
+    made = guest.ensure_directory(guest.tree / "a" / "b", mode=0o710, umask=0o077)
+    kept = guest.ensure_directory(existing, mode=0o700)
 
     assert (made.returncode, kept.returncode) == (0, 0), (made.stderr, kept.stderr)
     assert stat.S_IMODE((guest.tree / "a").stat().st_mode) == 0o710
@@ -423,10 +429,55 @@ def test_ensure_directory_creates_it_and_its_parents_with_the_mode_and_leaves_an
 def test_ensure_directory_refuses_a_file_at_the_path(guest: Guest) -> None:
     (guest.tree / "file").write_bytes(b"content")
 
-    result = guest.run("ensure_directory", {"path": str(guest.tree / "file"), "mode": 0o700})
+    result = guest.ensure_directory(guest.tree / "file", mode=0o700)
 
     assert result.returncode == file_program.EXIT_UNSUITABLE
     assert (guest.tree / "file").read_bytes() == b"content"
+
+
+def test_ensure_directory_with_an_owner_converges_an_existing_directory_s_mode(guest: Guest) -> None:
+    owner, group = _owner_and_group()
+    existing = guest.tree / "existing"
+    existing.mkdir()
+    existing.chmod(0o2755)
+
+    result = guest.ensure_directory(existing, mode=0o700, owner=owner, group=group)
+
+    assert result.returncode == 0, result.stderr
+    assert stat.S_IMODE(existing.stat().st_mode) == 0o700
+
+
+def test_an_elevated_ensure_directory_gives_an_existing_directory_its_owner_and_mode(
+    guest: Guest, as_root: None
+) -> None:
+    owner, group = _owner_and_group()
+    directory = guest.tree / "home" / ".ssh"
+    made = guest.ensure_directory(directory, mode=0o755, sudo=True)
+    assert made.returncode == 0, made.stderr
+    assert directory.stat().st_uid == 0
+
+    result = guest.ensure_directory(directory, mode=0o700, owner=owner, group=group, sudo=True)
+
+    assert result.returncode == 0, result.stderr
+    placed = directory.stat()
+    assert (stat.S_IMODE(placed.st_mode), placed.st_uid, placed.st_gid) == (0o700, os.getuid(), os.getgid())
+    assert (guest.tree / "home").stat().st_uid == 0
+
+
+@pytest.mark.parametrize("where", ["directory", "parent"])
+def test_ensure_directory_with_an_owner_refuses_a_link_leaving_its_target_untouched(guest: Guest, where: str) -> None:
+    owner, group = _owner_and_group()
+    target = guest.root / "target"
+    target.mkdir()
+    target.chmod(0o755)
+    (guest.tree / "link").symlink_to(target, target_is_directory=True)
+    path = guest.tree / "link" if where == "directory" else guest.tree / "link" / ".ssh"
+
+    result = guest.ensure_directory(path, mode=0o700, owner=owner, group=group)
+
+    assert result.returncode == file_program.EXIT_UNSUITABLE
+    assert stat.S_IMODE(target.stat().st_mode) == 0o755
+    assert os.listdir(target) == []
 
 
 # -- Links, types and permissions ----------------------------------------------------------
@@ -449,7 +500,7 @@ def _all_operations(path: Path) -> list[tuple[str, dict, bytes]]:
         ("stat", {"path": str(path)}, b""),
         ("write_if", write, data),
         ("remove_if", {"path": str(path), "expected": digest(b"target")}, b""),
-        ("ensure_directory", {"path": str(path), "mode": 0o700}, b""),
+        ("ensure_directory", {"path": str(path), "mode": 0o700, "owner": None, "group": None}, b""),
         ("prune_empty_parents", {"path": str(path / "member"), "root": str(path)}, b""),
     ]
 

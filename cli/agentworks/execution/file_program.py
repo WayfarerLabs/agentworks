@@ -385,9 +385,29 @@ def _remove_if(params: Params) -> int:
 
 
 def _ensure_directory(params: Params) -> int:
+    """Create the directory, and its missing parents, with ``mode``.
+
+    An existing directory is left as it is unless ``owner`` or ``group`` is
+    given: then the directory, new or existing, is opened without following
+    a link and given them (``fchown`` first, since it clears set-id bits) and
+    ``mode`` through that descriptor.
+    """
+    import grp
+    import pwd
+
+    uid = -1 if params["owner"] is None else pwd.getpwnam(params["owner"]).pw_uid
+    gid = -1 if params["group"] is None else grp.getgrnam(params["group"]).gr_gid
     walk = _Walk(params["path"], create_mode=params["mode"])
     try:
         os.close(walk.open_or_make(walk.name, params["mode"], -1))
+        if uid == -1 and gid == -1:
+            return 0
+        directory = os.open(walk.name, _OPEN_DIRECTORY, dir_fd=walk.parent)
+        try:
+            os.fchown(directory, uid, gid)
+            os.fchmod(directory, params["mode"])
+        finally:
+            os.close(directory)
         return 0
     finally:
         walk.close()
