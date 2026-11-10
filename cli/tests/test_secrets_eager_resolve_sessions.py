@@ -3,8 +3,8 @@
 Split out of the original ``test_secrets_eager_resolve.py`` (see
 ``_secrets_eager_support.py`` for the full background on FRD R4's
 operator-facing guarantee). This file covers the session-lifecycle slice:
-``create_session`` and ``restart_session`` must eager-resolve secrets
-BEFORE any state mutation (session-create DB insert, session-kill), and
+``create_session`` and ``restart_session`` resolve secrets before runtime
+mutation (session-create DB insert, session-kill), and
 the read-only session commands (``attach``, ``list``, ``describe``) must
 NOT eager-resolve at all, since they open no new shells and consume no
 secrets per FRD R4/R5.
@@ -164,11 +164,9 @@ def test_session_restart_broken_no_force_bails_before_eager_resolve(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A BROKEN session restarted without --force must raise BrokenStateError
-    BEFORE eager-resolve runs. The operator gets a clean error without
-    being asked for credentials they would have discarded."""
-    from agentworks.db import SessionMode, SessionStatus
-    from agentworks.errors import BrokenStateError
+    """A known broken session refuses before accepting intent or resolving."""
+    from agentworks.db import DesiredRuntimeState, SessionMode, SessionStatus
+    from agentworks.errors import StateError
     from agentworks.sessions import manager as session_manager
 
     db = _seed_basic_db(tmp_path)
@@ -177,7 +175,14 @@ def test_session_restart_broken_no_force_bails_before_eager_resolve(
     # A non-NULL socket_path keeps this session on the new per-session-socket
     # model; with socket_path=None, restart_session treats the row as a
     # legacy migration target and skips the gates these tests exist to pin.
-    db.insert_session("s1", "ws1", "default", SessionMode.ADMIN, socket_path="/tmp/sock")
+    db.insert_session(
+        "s1",
+        "ws1",
+        "default",
+        SessionMode.ADMIN,
+        socket_path="/tmp/sock",
+        desired_runtime_state=DesiredRuntimeState.STOPPED,
+    )
     db._conn.execute("UPDATE sessions SET pid = 9999 WHERE name = 's1'")
     db._conn.commit()
 
@@ -187,6 +192,11 @@ def test_session_restart_broken_no_force_bails_before_eager_resolve(
         lambda session, **kwargs: session,
     )
     monkeypatch.setattr(session_manager, "check_session_status", lambda *a, **k: SessionStatus.BROKEN)
+    monkeypatch.setattr(
+        session_manager,
+        "observe_session_statuses",
+        lambda sessions, **kwargs: {session.name: SessionStatus.BROKEN for session in sessions},
+    )
     monkeypatch.setattr(
         session_manager,
         "_build_session_target",
@@ -199,11 +209,11 @@ def test_session_restart_broken_no_force_bails_before_eager_resolve(
         resolve_calls.append(args)
         return {}
 
-    monkeypatch.setattr("agentworks.secrets.resolve_for_command", _track_resolve)
+    monkeypatch.setattr("agentworks.secrets.resolver.Resolver.resolve", _track_resolve)
 
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
-    with pytest.raises(BrokenStateError, match="broken"):
+    with pytest.raises(StateError):
         session_manager.restart_session(
             db,
             config,  # type: ignore[arg-type]
@@ -216,6 +226,8 @@ def test_session_restart_broken_no_force_bails_before_eager_resolve(
         "BROKEN + no --force must bail BEFORE eager-resolve so the "
         "operator isn't asked for credentials they would discard"
     )
+    selected = db.get_session("s1")
+    assert selected is not None and selected.desired_runtime_state is DesiredRuntimeState.STOPPED
     db.close()
 
 
@@ -223,7 +235,7 @@ def test_session_restart_eager_resolve_fires_before_teardown(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """restart_session must call resolve_for_command before runtime teardown.
+    """restart_session must resolve its shared boundary before runtime teardown.
     A failed eager-resolve leaves the running session untouched."""
     from agentworks.db import SessionMode, SessionStatus
     from agentworks.sessions import manager as session_manager
@@ -263,14 +275,16 @@ def test_session_restart_eager_resolve_fires_before_teardown(
         env: dict[str, str] = {}
 
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: _Tmpl())
-    monkeypatch.setattr(session_manager, "_session_secret_target", lambda *a, **k: object())
+    from tests.conftest import empty_secret_target
+
+    monkeypatch.setattr(session_manager, "_session_secret_target", lambda *a, **k: empty_secret_target())
 
     kill_calls: list[str] = []
 
     def _track_teardown(*args: object, **kwargs: object) -> None:
         kill_calls.append("s1")
 
-    monkeypatch.setattr("agentworks.sessions.manager._lifecycle._teardown_session", _track_teardown)
+    monkeypatch.setattr(session_manager, "_teardown_session", _track_teardown)
 
     def _explode(*args: object, **kwargs: object) -> None:
         raise SecretUnavailableError(
@@ -278,11 +292,13 @@ def test_session_restart_eager_resolve_fires_before_teardown(
             hint="api-key: tried env-var",
         )
 
-    monkeypatch.setattr("agentworks.secrets.resolve_for_command", _explode)
+    monkeypatch.setattr("agentworks.secrets.resolver.Resolver.resolve", _explode)
 
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
-    with pytest.raises(SecretUnavailableError, match="api-key"):
+    from agentworks.errors import StateError
+
+    with pytest.raises(StateError, match="api-key"):
         session_manager.restart_session(
             db,
             config,  # type: ignore[arg-type]
