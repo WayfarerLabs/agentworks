@@ -18,6 +18,7 @@ from agentworks.capabilities.harness_integration.base import (
 )
 from agentworks.schema import AgwModel
 from agentworks.topics import TopicProse
+from agentworks.vms.home_layout import AGENTWORKS_ARTIFACTS
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
@@ -115,7 +116,7 @@ class ShellIntegration(HarnessIntegration):
         return (
             ArtifactApplication()
             if self.retiring
-            else shell_artifacts(invocation.artifacts, f"{invocation.home}/.agentworks-artifacts/user")
+            else shell_artifacts(invocation.artifacts, f"{invocation.home}/{AGENTWORKS_ARTIFACTS}/user")
         )
 
     def workspace_init(self, invocation: WorkspaceSetupInvocation) -> ArtifactApplication:

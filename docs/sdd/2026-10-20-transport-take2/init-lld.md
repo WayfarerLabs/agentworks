@@ -486,13 +486,15 @@ rewrites every `~` in it (`driver.py:568`, `agents/initializer.py:312`).
 a relative path, a bare relative path (normalized to `~/` and the path, which is what it always
 meant, so a stored `dots` keeps working), or an absolute path; it has no empty, `.` or `..`
 component and no other user's `~`; a trailing `/` is dropped; and `~` or `~/` alone, the home
-itself, is refused, since replacing it would move the home aside. A path in the home that is, or is
-a parent of, one Agentworks manages there (`vms/home_layout.py`'s `MANAGED`: the two fragments,
-`.ssh`, `.config/mise` and the credential state's `.agentworks`) is refused too. Refusals are
-`DestinationError`, an `errors.ValueFreeError` whose message names the accepted forms and no part of
-the value, which `instance_overlay_codec` shows in place of its generic message.
-`expand_destination(value, home)` replaces only the leading `~` and refuses, before any request, an
-absolute value that is the home or one of its ancestors, or that lands on a managed path.
+itself, is refused, since replacing it would move the home aside. A path in the home that is, holds
+or lies inside one Agentworks manages there (`vms/home_layout.py`'s `MANAGED`: the two fragments,
+`.ssh`, the credential state's `.agentworks` and `.agentworks-artifacts`) is refused too.
+`.config/mise` is not among them: dotfiles may own `~/.config`, and the mise config is written after
+the dotfiles sync, so the order settles it. Refusals are `DestinationError`, an
+`errors.ValueFreeError` whose message names the accepted forms and no part of the value, which
+`instance_overlay_codec` shows in place of its generic message. `expand_destination(value, home)`
+replaces only the leading `~` and refuses, before any request, an absolute value that is the home or
+one of its ancestors, or that lands on a managed path.
 
 ### Source lines
 
@@ -762,8 +764,8 @@ from either source it is now 0644. `/etc/fstab` was reset to 0644 `root:root` by
 - A local dotfiles directory is replaced through a temporary sibling; the previous tree comes back
   if the upload fails or is interrupted, and the replacement no longer marks the reinit partial.
 - `dotfiles_destination` is a path in the home (`dots` or `~/dots`) or an absolute path; it may not
-  name the home itself, be or hold a path Agentworks manages there, or use `..`, and loses a
-  trailing `/`; only its leading `~` is expanded.
+  name the home itself, be, hold or lie inside a path Agentworks manages there, or use `..`, and
+  loses a trailing `/`; only its leading `~` is expanded.
 - Git credentials reconcile under bash for every account, so an `sh` or `dash` admin or agent gets
   its credentials.
 - A bash account no longer gets a `~/.zprofile` or `~/.zshrc` created for it.
@@ -1033,8 +1035,8 @@ no longer use them. The departures from the tables above, each recorded where it
   completion and status, warning when it fails.
 - One git sequence for every case (above, "One dotfiles sync"): the ref, or `HEAD`, is fetched and
   checked out detached after any clone, and a failed sync skips the install for the agent too.
-- A bare relative `dotfiles_destination` is a path in the home, and one that is or holds a managed
-  path is refused (above, "Dotfiles destinations").
+- A bare relative `dotfiles_destination` is a path in the home, and one that is, holds or lies
+  inside a managed path is refused (above, "Dotfiles destinations").
 - Both templates validate `dotfiles_source` at load with `sources.check_source_ref`, whose
   `SourceRefFormError` (a `ValueFreeError`) names the accepted forms and no part of the value, so
   doctor and `resource show` never meet an unparsable stored source.

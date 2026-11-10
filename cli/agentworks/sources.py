@@ -187,8 +187,8 @@ def normalize_destination(value: str) -> str:
     with no leading ``~/`` or ``/`` is in the home, as it always meant, so
     ``dots`` becomes ``~/dots``. No component may be empty, ``.`` or ``..``
     and ``~user`` is refused; a trailing ``/`` is dropped. The home
-    itself (``~`` or ``~/``), and a path in it that is or holds one Agentworks
-    manages there (:data:`agentworks.vms.home_layout.MANAGED`), are refused,
+    itself (``~`` or ``~/``), and a path in it that is, holds or lies inside
+    one Agentworks manages there (:data:`agentworks.vms.home_layout.MANAGED`), are refused,
     since replacing the checkout would replace them. Refusals are
     :class:`DestinationError`, whose message holds no part of ``value``.
     """
@@ -210,10 +210,13 @@ def normalize_destination(value: str) -> str:
 
 
 def _refuse_managed(relative: str) -> None:
-    """Refuse the path ``relative`` to a home when it is, or is a parent of, a path Agentworks manages there."""
-    if any(managed == relative or managed.startswith(relative + "/") for managed in MANAGED):
+    """Refuse the path ``relative`` to a home when it is, holds, or lies inside a path Agentworks manages there."""
+    if any(
+        managed == relative or managed.startswith(relative + "/") or relative.startswith(managed + "/")
+        for managed in MANAGED
+    ):
         raise DestinationError(
-            "dotfiles_destination may not be, or hold, a path Agentworks manages in the home: "
+            "dotfiles_destination may not be, hold, or lie inside a path Agentworks manages in the home: "
             + ", ".join(f"~/{managed}" for managed in MANAGED)
         )
 

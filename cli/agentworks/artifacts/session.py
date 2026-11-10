@@ -25,6 +25,7 @@ from agentworks.harness_setup.model import NativeSetupState, SetupRecord
 from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
 from agentworks.harness_setup.state import read_native_setup, replace_setup_record, write_native_setup
 from agentworks.schema import CapabilityConfig
+from agentworks.vms.home_layout import AGENTWORKS_ARTIFACTS
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -108,7 +109,7 @@ def prepare_session_artifacts(
     context = SessionArtifactContext(
         inputs=routed.inputs,
         home=home,
-        directory=f"{home}/.agentworks-artifacts/session/{identity}/{run_id}",
+        directory=f"{home}/{AGENTWORKS_ARTIFACTS}/session/{identity}/{run_id}",
         session_uuid=identity,
         run_id=run_id,
         ancestor_files=routed.ancestor_files,
@@ -246,7 +247,7 @@ def commit_session_artifacts(
             (),
             obsolete,
             checkpoint,
-            roots=(f"{context.home}/.agentworks-artifacts/session/{context.session_uuid}",),
+            roots=(f"{context.home}/{AGENTWORKS_ARTIFACTS}/session/{context.session_uuid}",),
         )
         updated = record.model_copy(
             update={
@@ -284,7 +285,7 @@ def cleanup_session_artifacts(db: Database, session: SessionRow, access: VMAcces
             (),
             record.artifact_files,
             checkpoint,
-            roots=(f"{home}/.agentworks-artifacts/session/{session.session_uuid}",),
+            roots=(f"{home}/{AGENTWORKS_ARTIFACTS}/session/{session.session_uuid}",),
         )
         if remaining.files:
             raise StateError("modified session artifacts remain; inspect them before deleting their ownership record")

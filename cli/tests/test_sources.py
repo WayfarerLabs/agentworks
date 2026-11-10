@@ -676,7 +676,6 @@ def test_workstation_snapshot_error_identifies_declared_source_without_io_cause(
         ("a/b/", "~/a/b"),
         ("/x/y", "/x/y"),
         ("/x/y/", "/x/y"),
-        ("~/.config/mise/dots", "~/.config/mise/dots"),
     ],
 )
 def test_normalize_destination_accepts_a_path_in_the_home_or_an_absolute_path(value: str, normalized: str) -> None:
@@ -692,8 +691,8 @@ def test_normalize_destination_refuses_the_home_another_users_home_and_unnormali
 
 
 @pytest.mark.parametrize("managed", MANAGED)
-def test_a_destination_that_is_or_holds_a_path_agentworks_manages_in_the_home_is_refused(managed: str) -> None:
-    parts = managed.split("/")
+def test_a_destination_that_is_holds_or_lies_inside_a_managed_path_is_refused(managed: str) -> None:
+    parts = [*managed.split("/"), "inside"]
     for depth in range(1, len(parts) + 1):
         relative = "/".join(parts[:depth])
         for value in (f"~/{relative}", relative):
@@ -701,6 +700,29 @@ def test_a_destination_that_is_or_holds_a_path_agentworks_manages_in_the_home_is
                 normalize_destination(value)
         with pytest.raises(SourceRefError):
             expand_destination(f"/home/agent/{relative}", "/home/agent")
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "~/.ssh",
+        "~/.ssh/dots",
+        "~/.agentworks",
+        "~/.agentworks/git-credentials",
+        "~/.agentworks-artifacts",
+        "~/.agentworks-artifacts/user",
+        "~/.agentworks-profile.sh",
+        "~/.agentworks-rc.sh",
+    ],
+)
+def test_the_paths_initialization_writes_in_the_home_are_refused(value: str) -> None:
+    with pytest.raises(DestinationError):
+        normalize_destination(value)
+
+
+@pytest.mark.parametrize("value", ["~/.config", "~/.config/mise", "~/.config/mise/dots", "~/.agentworks-dots"])
+def test_a_destination_beside_or_over_the_mise_config_is_accepted(value: str) -> None:
+    assert normalize_destination(value) == value
 
 
 def test_a_refused_destination_names_no_part_of_the_value() -> None:
