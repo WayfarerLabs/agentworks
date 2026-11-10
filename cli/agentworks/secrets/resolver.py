@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from agentworks.errors import StateError
+from agentworks.errors import AgentworksError, SecretUnavailableError, StateError, UserAbort
 from agentworks.secrets.policy import require_exact_tty_interaction_policy
 
 if TYPE_CHECKING:
@@ -67,6 +67,7 @@ class Resolver:
         self._decls: dict[str, SecretDecl] = {}
         self._targets: list[SecretTarget] = []
         self._seeded: dict[str, str] = {}
+        self._failed_gates: set[str] = set()
         self._values: dict[str, str] | None = None
 
     # -- registration --------------------------------------------------
@@ -186,6 +187,9 @@ class Resolver:
 
             validate_target_values(self._targets, self._values)
             return
+        # An independently failed VM may share a credential with an eligible
+        # workload. Fail its complete boundary before touching any new source.
+        self._check_failed_gates(self._decls)
         # Gate-seeded values are already resolved (by the gate's own
         # source-chain pass); the boundary loop covers only the rest.
         missing = [decl for name, decl in self._decls.items() if name not in self._seeded]
@@ -200,19 +204,40 @@ class Resolver:
         self._values = resolved
 
     def resolve_gate(self, name: str) -> str:
-        """Resolve and seed one declaration before the operation boundary."""
+        """Resolve one gate name once, memoizing success or value-free failure.
+
+        A failed infrastructure name is not itself a workload requirement.
+        Register it only on success, or when an eligible workload declares it.
+        """
         if self._values is not None:
             raise StateError("a gate secret cannot resolve after the operation boundary")
-        decl = self.register_name(name)
+        self._check_failed_gates((name,))
         existing = self._seeded.get(name)
         if existing is not None:
             return existing
-        batch = self._resolve_declarations([decl])
-        projected = batch.complete_or_raise()
-        if tuple(projected) != (name,):
-            raise StateError("gate secret resolution returned an invalid singleton result")
+        decl = self._decls.get(name) or self._decl_for(name)
+        try:
+            batch = self._resolve_declarations([decl])
+            projected = batch.complete_or_raise()
+            if tuple(projected) != (name,):
+                raise StateError("gate secret resolution returned an invalid singleton result")
+        except UserAbort:
+            raise
+        except AgentworksError:
+            # Keep no exception, traceback, batch, or partial secret values.
+            self._failed_gates.add(name)
+            raise
+        self.register((decl,))
         self._seeded[name] = projected[name]
         return self._seeded[name]
+
+    def _check_failed_gates(self, names: Iterable[str]) -> None:
+        failed = sorted(self._failed_gates.intersection(names))
+        if failed:
+            raise SecretUnavailableError(
+                f"Secret resolution already failed in this operation: {', '.join(failed)}",
+                hint="Correct the earlier secret failure and retry the operation.",
+            ) from None
 
     def resolve_late_repair(self, decl: SecretDecl) -> str:
         """Resolve one authorized repair secret without widening the cache."""
