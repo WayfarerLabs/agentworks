@@ -17,7 +17,7 @@ its checkpoint and green. The PR remains draft until the complete implementation
 | FRD                     | Draft plus `review-requested`               | Up to two rounds                      | Converged at `c6337609d`, two rounds used |
 | Complete design         | Draft plus `review-requested`               | Up to two rounds                      | Converged at `32a176600`; two rounds used |
 | Complete implementation | Ready                                       | Up to two rounds                      | Converged at `452eb0622`; one round used  |
-| Closeout                | Final lock in the same PR after convergence | No new feature/fix allowance inferred | Final evidence and lock review            |
+| Closeout                | Final lock in the same PR after convergence | No new feature/fix allowance inferred | Lock and closeout checks completed        |
 
 The FRD convergence reading is PR comment 6762771633. The final report accepted prior corrections;
 its remaining phrase suggestion was independently assessed as optional. The HLA states uniform
@@ -310,15 +310,18 @@ CI, and converged authorized published review. No merge occurs under this plan.
       documentation, and live evidence. Finish outstanding collateral and record actual outcomes.
 - [x] Create dated `locked.md` in this same PR after implementation convergence, summarizing the
       final implementation and actual validation/coverage.
-- [ ] Run closeout project and complexity reviews at a pinned head and required affected local
+- [x] Run closeout project and complexity reviews at a pinned head and required affected local
       checks. Remove checkpoint labels when no checkpoint remains.
-- [ ] Clean up lead/delegate scratch worktrees, branches, temporary outputs, and owned live residue
-      without deleting the reviewable feature branch or unrelated resources. Report PR and final
-      state.
+- [x] Clean up lead/delegate scratch worktrees, branches, temporary outputs, and owned live residue
+      without deleting the reviewable feature branch or unrelated resources.
 
 Publish the final closeout only after exact-head CI is green, with a scoped evidence comment and the
 ready transition. The PR records that publication; completed checkboxes record work already done.
 Closeout changes only SDD records, preserving the tested application and permanent guidance.
+
+Project and complexity closeout reviews were clean at `ef2127941`; affected local checks passed. All
+nine delegated worktrees, eight subordinate local/remote branches, generated website outputs, and
+task-owned lead scratch were retired. The feature branch and PR remain available for review.
 
 ## Delegate ownership after design convergence
 
