@@ -18,6 +18,7 @@ pattern used across the rest of the package for patched names.
 
 from __future__ import annotations
 
+import contextlib
 import posixpath
 import shlex
 from dataclasses import dataclass, field
@@ -31,7 +32,7 @@ from agentworks.sessions.tmux import exact_tmux_target
 from ._helpers import ADMIN_SHELL_WINDOW, tmux_session_name, tmux_staging_name
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
     from agentworks.db import ConsoleRow, ConsoleSessionRow, Database, SessionRow, ShellEntry, VMRow
     from agentworks.resources.registry import Registry
@@ -491,13 +492,14 @@ def _build_console_tmux(
     *,
     values: Mapping[str, str],
     layout: str,
+    members: Sequence[ConsoleSessionRow] | None = None,
 ) -> None:
     """Build under a reserved name and publish only a complete console."""
-    from agentworks.sessions.tmux import ProbeStatus
+    from agentworks.sessions.tmux import ProbeStatus, _tmux_env_flags
 
     from .attach import _teardown_console_tmux, _tmux_session_presence
 
-    members = db.list_console_sessions(console.name)
+    members = tuple(db.list_console_sessions(console.name) if members is None else members)
     if not members and not console.admin_shell:
         raise ExternalError(
             f"console '{console.name}' has no configured windows",
@@ -526,9 +528,12 @@ def _build_console_tmux(
         if console.admin_shell:
             # Window 0 is the admin shell. The literal tmux window name
             # '--admin--' cannot collide with a valid session name.
+            pane_env = _mc._resolve_admin_env(db, registry, values=values, vm=vm)
+            env_flags = _tmux_env_flags(pane_env)
             created = target.run(
-                f"tmux new-session -d -s {q_staging_create} -n {shlex.quote(ADMIN_SHELL_WINDOW)} "
-                f"{shlex.quote('exec $SHELL -l')}"
+                f"tmux new-session -d -s {q_staging_create} -n {shlex.quote(ADMIN_SHELL_WINDOW)}"
+                f"{env_flags} {shlex.quote('exec $SHELL -l')}",
+                env=pane_env,
             )
             placeholder_used = False
             placeholder = ""
@@ -595,5 +600,7 @@ def _build_console_tmux(
             )
         db.record_console_started(console.name)
     except (KeyboardInterrupt, Exception):
-        _teardown_console_tmux(target, console.name)
+        # Cleanup must preserve the original failure, including cancellation.
+        with contextlib.suppress(KeyboardInterrupt, Exception):
+            _teardown_console_tmux(target, console.name)
         raise

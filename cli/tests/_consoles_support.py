@@ -33,10 +33,7 @@ def _stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _seed_vm(db: Database, vm_name: str = "vm1", *, with_tailscale: bool = False) -> None:
     """Insert a VM and a workspace. No tailscale host -> live-sync skips."""
-    db._conn.execute(
-        "INSERT INTO vms (name, site, hostname, admin_username) VALUES (?, 'lima', 'h', 'admin')",
-        (vm_name,),
-    )
+    db.insert_vm(vm_name, "lima", "h", admin_username="admin")
     if with_tailscale:
         db._conn.execute(
             "UPDATE vms SET tailscale_host = ? WHERE name = ?",
