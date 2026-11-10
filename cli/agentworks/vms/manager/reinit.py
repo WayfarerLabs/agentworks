@@ -55,8 +55,6 @@ def reinit_vm(
     """
     import agentworks.vms.manager as _mgr
     from agentworks.bootstrap import load_request_registry
-    from agentworks.transports import transport
-    from agentworks.vms.initializer.steps import STEP_DEADLINE
 
     # build_registry runs first so framework miss-policies surface
     # before any template / DB / VM business logic.
@@ -257,7 +255,7 @@ def reinit_vm(
         credential_ops = credential_requests(cred_nodes, scoped_ctx)
         git_redactions = credential_redactions(cred_nodes, resolver.values)
 
-        # Build Tailscale SSH target with logging
+        # The operation log every request of this reinit records into.
         from agentworks.ssh import SSHLogger
 
         # This operation log's redaction set includes credentials and every
@@ -267,9 +265,6 @@ def reinit_vm(
             "vm-reinit",
             redactions=tuple(dict.fromkeys((*git_redactions, *(resolver.values.values() if setup_inputs else ())))),
         )
-        # The legacy target the Admin Initialization steps still take beside the access.
-        legacy_target = transport(vm, config, default_timeout=STEP_DEADLINE, logger=logger)
-
         home = f"/home/{vm.admin_username}"
 
         # try/finally ensures the SSH logger is closed exactly once,
@@ -299,7 +294,6 @@ def reinit_vm(
                     home,
                     vm.admin_username,
                     logger,
-                    legacy_target=legacy_target,
                     debian_release=verified_release,
                     operation=_mgr.VMInitializationOperation.VM_REINIT,
                     setup_failures=setup_failures,

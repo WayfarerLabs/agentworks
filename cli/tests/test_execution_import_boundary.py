@@ -84,6 +84,16 @@ MIGRATED_FILES = (
     "vms/initializer/workspaces_dir.py",
     "workspaces/acls.py",
     "sources.py",
+    "vms/initializer/__init__.py",
+    "vms/initializer/driver.py",
+    "vms/initializer/mise.py",
+    "vms/initializer/shell_env.py",
+    "vms/initializer/ssh_keys.py",
+    "git_config.py",
+    "git_credentials/__init__.py",
+    "git_credentials/reconcile.py",
+    "agents/initializer.py",
+    "harness_setup/lifecycle.py",
 )
 
 

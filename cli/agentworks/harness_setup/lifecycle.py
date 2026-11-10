@@ -7,7 +7,7 @@ Install-command transports remain independent of this setup environment.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 import agentworks.execution as execution
 from agentworks.artifacts.state import capture_owner, read_captures
@@ -36,15 +36,27 @@ if TYPE_CHECKING:
     from agentworks.db import Database, VMRow
     from agentworks.db.instance_state import InstanceKind
     from agentworks.execution.files import Files
+    from agentworks.execution.requests import RunRequest
+    from agentworks.execution.results import Result
     from agentworks.harness_setup.locking import NativeMutationGuard
     from agentworks.harness_setup.model import NativeSetupState, SetupComponent
     from agentworks.harness_setup.outcomes import SetupFailure
     from agentworks.resources.registry import Registry
     from agentworks.schema import CapabilityConfig
-    from agentworks.ssh import SSHLogger
     from agentworks.vms.admin import AdminConfig
     from agentworks.vms.templates import ResolvedVMTemplate
     from agentworks.workspaces.templates import ResolvedTemplate
+
+
+class SetupLog(Protocol):
+    """What native setup reads of the owning operation's log (``SSHLogger`` satisfies it)."""
+
+    @property
+    def redactions(self) -> tuple[str, ...]: ...
+
+    def warning(self, msg: str) -> None: ...
+
+    def record(self, request: RunRequest, result: Result) -> None: ...
 
 
 def _needed(
@@ -169,7 +181,7 @@ def apply_vm_setup(
     inputs: tuple[SetupInputs, ...],
     vm: VMRow,
     values: Mapping[str, str],
-    logger: SSHLogger,
+    logger: SetupLog,
     held: NativeMutationGuard,
     operation: str,
     failures: list[SetupFailure],
@@ -230,7 +242,7 @@ def apply_agent_setup(
     vm: VMRow,
     username: str,
     values: Mapping[str, str],
-    logger: SSHLogger,
+    logger: SetupLog,
     held: NativeMutationGuard,
     operation: str,
     failures: list[SetupFailure],
@@ -281,7 +293,7 @@ def apply_workspace_setup(
     root: str,
     linux_group: str,
     values: Mapping[str, str],
-    logger: SSHLogger,
+    logger: SetupLog,
     held: NativeMutationGuard,
     operation: str,
     failures: list[SetupFailure],

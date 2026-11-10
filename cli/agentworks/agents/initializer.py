@@ -34,7 +34,6 @@ if TYPE_CHECKING:
     from agentworks.execution.requests import AccountShell, RunRequest
     from agentworks.git_credentials import CredentialRequest
     from agentworks.resources import Registry
-    from agentworks.ssh import SSHLogger
     from agentworks.vms.initializer.steps import InitLog
 
 
@@ -44,7 +43,7 @@ def create_new_agent_user(
     linux_user: str,
     *,
     shell: AccountShell,
-    logger: SSHLogger,
+    logger: InitLog,
 ) -> None:
     """Establish fresh ownership before the caller may arm user rollback.
 
@@ -84,7 +83,7 @@ def create_agent_on_vm(
     *,
     agent_name: str,
     credential_requests: tuple[CredentialRequest, ...],
-    logger: SSHLogger,
+    logger: InitLog,
     admin_git_force_safe_directory: bool,
 ) -> None:
     """Create an agent Linux user on a VM and configure their environment.
@@ -319,7 +318,7 @@ def delete_agent_on_vm(
     config: Config,
     linux_user: str,
     *,
-    logger: SSHLogger | None = None,
+    logger: InitLog | None = None,
 ) -> None:
     """Remove an agent Linux user from a VM, along with related on-VM
     state: their processes are killed, the user and home directory are

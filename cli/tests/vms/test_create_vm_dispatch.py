@@ -135,7 +135,7 @@ def test_create_vm_request_shape_and_row(
         start_events.append("attest")
         attested_release.append(expected_release)
         db.update_vm_debian_release("dvm", expected_release)
-        return SimpleNamespace(), SimpleNamespace(), "/home/agentworks", expected_release
+        return SimpleNamespace(), "/home/agentworks", expected_release
 
     monkeypatch.setattr(vm_manager, "bootstrap_vm", _attest)
 
@@ -496,7 +496,7 @@ def test_create_vm_logger_close_failure_retains_owner_and_reports_once(
     monkeypatch.setattr(
         vm_manager,
         "bootstrap_vm",
-        lambda *args, **kwargs: (SimpleNamespace(), SimpleNamespace(), "/home/agentworks", DebianRelease.TRIXIE),
+        lambda *args, **kwargs: (SimpleNamespace(), "/home/agentworks", DebianRelease.TRIXIE),
     )
     monkeypatch.setattr(vm_manager, "run_initialization", lambda *args, **kwargs: None)
     monkeypatch.setattr(SSHLogger, "close", lambda self: (_ for _ in ()).throw(RuntimeError("close failed")))
@@ -552,7 +552,7 @@ def test_create_vm_stores_and_provisions_selected_admin_template(
     monkeypatch.setattr(
         vm_manager,
         "bootstrap_vm",
-        lambda *a, **k: (SimpleNamespace(), SimpleNamespace(), "/home/agentworks", DebianRelease.TRIXIE),
+        lambda *a, **k: (SimpleNamespace(), "/home/agentworks", DebianRelease.TRIXIE),
     )
     monkeypatch.setattr(vm_manager, "run_initialization", lambda *a, **k: None)
 
@@ -715,7 +715,7 @@ def test_create_vm_composes_r11_hostname_with_slug(
     monkeypatch.setattr(
         vm_manager,
         "bootstrap_vm",
-        lambda *a, **k: (SimpleNamespace(), SimpleNamespace(), "/home/agentworks", DebianRelease.TRIXIE),
+        lambda *a, **k: (SimpleNamespace(), "/home/agentworks", DebianRelease.TRIXIE),
     )
     monkeypatch.setattr(vm_manager, "run_initialization", lambda *a, **k: None)
 

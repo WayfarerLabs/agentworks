@@ -6,11 +6,9 @@ Phase A is provisioning: after the platform completes create-time bootstrap,
 host key, check the contract) and syncs SSH config, then returns the admin's
 ``VMAccess`` and home for Phase B. Every Phase B request runs on that one
 access, each bounded by ``steps.STEP_DEADLINE`` unless it has a bound of its
-own, except that the Admin Initialization steps still on the legacy
-transport, and the final ``authorized_keys`` write, take the legacy target
-``bootstrap_vm`` and reinit build beside the access. Phase B is initialization:
-``run_initialization`` runs it, both after ``bootstrap_vm`` on ``vm create``
-and standalone on ``vm reinit``.
+own. Phase B is initialization: ``run_initialization`` runs it, both after
+``bootstrap_vm`` on ``vm create`` and standalone on ``vm reinit``, with the
+access reinit built for the VM contract.
 
 ``create_vm`` (in ``vms.manager.lifecycle``) drives ``bootstrap_vm`` inside
 its ``Provisioning`` output section and ``run_initialization`` after it, so
@@ -22,18 +20,16 @@ owns only the per-phase step sequences and status/event bookkeeping.
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 import agentworks.execution as execution
 from agentworks import output
 from agentworks.db import InitStatus
 from agentworks.env import ResourceContext, vm_stable_identity_env
-from agentworks.execution import trust
 from agentworks.execution.access import Admin
 from agentworks.execution.requests import Command
 from agentworks.git_config import ensure_safe_directory_wildcard
 from agentworks.git_credentials import configure_user_git_credentials
-from agentworks.transports import SSHTransport, Transport
 
 from . import phase_a
 from .mise import (
@@ -69,11 +65,11 @@ from .ssh_keys import (
     _preserve_ssh_host_keys,
     _reconcile_authorized_keys,
 )
-from .steps import STEP_DEADLINE, STEP_FAILURES, status, warn_step
+from .steps import STEP_DEADLINE, STEP_FAILURES, InitLog, status, warn_step
 from .workspaces_dir import _setup_workspaces_directory
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
     from agentworks.capabilities.base import RunContext
     from agentworks.capabilities.vm_platform import VMPlatform
@@ -88,11 +84,26 @@ if TYPE_CHECKING:
     from agentworks.harness_setup.locking import NativeMutationGuard
     from agentworks.harness_setup.outcomes import SetupFailure
     from agentworks.resources.registry import Registry
-    from agentworks.ssh import SSHLogger
     from agentworks.vms.admin import AdminConfig
     from agentworks.vms.templates import ResolvedVMTemplate
 
-    from .steps import InitLog
+
+class PhaseBLog(InitLog, Protocol):
+    """The operation log initialization writes (``SSHLogger`` satisfies it).
+
+    Phase B's steps write it (``InitLog``), native setup reads its
+    redactions (``harness_setup.lifecycle.SetupLog``), and the outcome
+    counts its warnings.
+    """
+
+    @property
+    def redactions(self) -> tuple[str, ...]: ...
+
+    @property
+    def has_warnings(self) -> bool: ...
+
+    @property
+    def warnings(self) -> Sequence[str]: ...
 
 
 class VMInitializationOperation(StrEnum):
@@ -108,12 +119,12 @@ def bootstrap_vm(
     vm_name: str,
     platform: VMPlatform,
     ctx: RunContext,
-    logger: SSHLogger,
+    logger: PhaseBLog,
     *,
     admin_username: str,
     tailnet_address: str,
     expected_release: DebianRelease,
-) -> tuple[VMAccess, Transport, str, DebianRelease]:
+) -> tuple[VMAccess, str, DebianRelease]:
     """Run Phase A (``phase_a.bootstrap``), then hand Phase B the admin's access.
 
     Phase A records the platform's address, makes the first contact in Enroll
@@ -121,9 +132,8 @@ def bootstrap_vm(
     ``agentworks.execution``; see :mod:`.phase_a` for its fail-closed span.
     The non-fatal SSH-config sync follows.
 
-    Returns ``(access, legacy_target, home, release)``: the admin's access,
-    built from the row Phase A recorded the address on, the legacy target the
-    Admin Initialization steps still take beside it, the home for
+    Returns ``(access, home, release)``: the admin's access, built from the
+    row Phase A recorded the address on, the home for
     ``run_initialization``, and the release Phase A attested. The caller owns
     the availability hold spanning both phases, the ``Provisioning`` output
     section and ``logger``'s lifetime.
@@ -149,15 +159,7 @@ def bootstrap_vm(
     vm = db.get_vm(vm_name)
     assert vm is not None, f"VM '{vm_name}' missing from DB after Phase A"
     access = execution.vm_access(vm, config, Admin(), log=logger.record)
-    legacy_target = SSHTransport(
-        host=address,
-        trust=trust.TrustBinding(trust.TrustMode.VM, vm_name),
-        user=admin_username,
-        identity_file=config.operator.ssh_private_key,
-        default_timeout=STEP_DEADLINE,
-        logger=logger,
-    )
-    return access, legacy_target, f"/home/{admin_username}", release
+    return access, f"/home/{admin_username}", release
 
 
 def run_initialization(
@@ -171,9 +173,8 @@ def run_initialization(
     credential_requests: tuple[CredentialRequest, ...],
     home: str,
     admin_username: str,
-    logger: SSHLogger,
+    logger: PhaseBLog,
     *,
-    legacy_target: Transport,
     debian_release: DebianRelease,
     operation: VMInitializationOperation,
     setup_failures: list[SetupFailure],
@@ -193,9 +194,7 @@ def run_initialization(
     reports them after its remaining command bookkeeping.
 
     ``access`` is the admin's, and every step's requests run on it, bounded
-    by ``STEP_DEADLINE`` through one ``Files``. ``legacy_target`` is the
-    admin's legacy transport, which the Admin Initialization steps and the
-    final ``authorized_keys`` write take until they move onto ``access``.
+    by ``STEP_DEADLINE`` through one ``Files``.
     """
     from agentworks.harness_setup.locking import native_mutation_guard
 
@@ -219,7 +218,6 @@ def run_initialization(
                 home,
                 admin_username,
                 logger,
-                legacy_target=legacy_target,
                 debian_release=debian_release,
                 operation=operation,
             )
@@ -320,9 +318,8 @@ def _phase_b_setup(
     credential_requests: tuple[CredentialRequest, ...],
     home: str,
     admin_username: str,
-    logger: SSHLogger,
+    logger: PhaseBLog,
     *,
-    legacy_target: Transport,
     debian_release: DebianRelease,
     operation: VMInitializationOperation,
 ) -> None:

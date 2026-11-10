@@ -26,6 +26,7 @@ the setup body reduces to its identity/permission steps).
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from typing import TYPE_CHECKING, Any
 
@@ -57,6 +58,8 @@ def _run_create_on_vm(
     user_exists: bool,
     primary_group: str | None = None,
     shell: str = "/bin/sh",
+    before_create: Callable[[AccessRecorder], None] | None = None,
+    dotfiles: Path | None = None,
 ) -> AccessRecorder:
     """Drive ``create_agent_on_vm`` over a recording access and return it.
 
@@ -78,6 +81,8 @@ def _run_create_on_vm(
     assert vm is not None
     registry = build_registry(config)
     template = resolve_template(registry, None)
+    if dotfiles is not None:
+        template = dataclasses.replace(template, dotfiles_source=str(dotfiles))
     recorder = install_access_recorder(monkeypatch)
 
     def answer(call: Call) -> Result | None:
@@ -91,6 +96,8 @@ def _run_create_on_vm(
         return None
 
     recorder.answer = answer
+    if before_create is not None:
+        before_create(recorder)
 
     agent_initializer.create_agent_on_vm(
         vm,
@@ -288,3 +295,41 @@ def test_reinit_diverged_shell_reports_fixed_and_runs_usermod(
     assert not any(argv[0] == "useradd" for argv in _commands(recorder))
     assert any(f"Fixed agent user '{LINUX_USER}'" in m and "/bin/zsh -> /bin/bash" in m for m in captured_output.info)
     assert not any("already exists" in m for m in captured_output.info)
+
+
+def test_the_profile_fragment_is_written_before_the_install_commands_run(
+    db: Database, config: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Install commands see ``AGENTWORKS_AGENT`` only through the profile fragment, so it comes first."""
+    profile_writes_seen: list[int] = []
+    run_install_commands = agent_initializer._run_agent_install_commands
+
+    def watch(recorder: AccessRecorder) -> None:
+        def record_order(**kwargs: Any) -> None:
+            profile_writes_seen.append(len(_profile_writes(recorder)))
+            run_install_commands(**kwargs)
+
+        monkeypatch.setattr(agent_initializer, "_run_agent_install_commands", record_order)
+
+    _run_create_on_vm(db, config, monkeypatch, user_exists=False, before_create=watch)
+
+    assert profile_writes_seen == [1]
+
+
+def test_the_source_lines_are_ensured_after_the_dotfiles_install(
+    db: Database, config: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A dotfiles installer that replaces an rc file cannot leave it without its source lines."""
+    (tmp_path / "dots").mkdir()
+    recorder = _run_create_on_vm(db, config, monkeypatch, user_exists=False, dotfiles=tmp_path / "dots")
+    requests = recorder.requests("run")
+
+    install = requests.index(Command(("bash", "-lc", "./install.sh"), cwd=f"{HOME}/.dotfiles", deadline=120))
+    bashrc_reads = [
+        index
+        for index, request in enumerate(requests)
+        if isinstance(request, PythonProgram)
+        and request.args[0] == "read"
+        and json.loads(request.args[1])["path"] == f"{HOME}/.bashrc"
+    ]
+    assert bashrc_reads and max(bashrc_reads) > install

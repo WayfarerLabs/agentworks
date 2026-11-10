@@ -198,7 +198,6 @@ def test_configure_apt_sources_resolves_all_mappings_before_guest_mutation() -> 
 
 
 def test_phase_b_resolves_all_release_maps_before_any_guest_call(monkeypatch: pytest.MonkeyPatch) -> None:
-    target = MagicMock()
     guest = StepGuest(local_files=False)
     vm_template = _make_vm_template(apt_packages=["test-pkg"])
     entries = _make_entries()
@@ -231,14 +230,12 @@ def test_phase_b_resolves_all_release_maps_before_any_guest_call(monkeypatch: py
             "/home/operator",
             "operator",
             MagicMock(),
-            legacy_target=target,
             debian_release=DebianRelease.BOOKWORM,
             operation=VMInitializationOperation.VM_REINIT,
         )
 
     assert caught.value.entity_kind == "apt-source"
     assert guest.access.requests() == []
-    target.run.assert_not_called()
 
 
 # -- System and apt packages ------------------------------------------------------------

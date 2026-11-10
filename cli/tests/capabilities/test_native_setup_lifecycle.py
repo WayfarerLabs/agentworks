@@ -478,7 +478,6 @@ def test_vm_and_admin_setup_follow_core_before_terminal_checkpoint(
             "/home/admin",
             "admin",
             logger,
-            legacy_target=native.target,
             debian_release=DebianRelease.TRIXIE,
             operation=VMInitializationOperation.VM_REINIT,
             setup_inputs=inputs,

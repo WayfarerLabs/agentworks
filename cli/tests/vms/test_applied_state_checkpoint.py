@@ -106,7 +106,6 @@ def _run(
         "/home/agentworks",
         "agentworks",
         active_logger,
-        legacy_target=MagicMock(),
         debian_release=DebianRelease.TRIXIE,
         operation=operation,
         setup_failures=[] if setup_failures is None else setup_failures,

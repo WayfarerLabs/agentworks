@@ -617,7 +617,7 @@ def create_vm(
                 # so a failure to open it maps like any other init failure, as
                 # it did when the hold was entered inside the old initialize_vm.
                 init_stack.enter_context(platform_obj.vm_active(init_row, config=config))
-                access, legacy_target, home, observed_release = _mgr.bootstrap_vm(
+                access, home, observed_release = _mgr.bootstrap_vm(
                     db,
                     config,
                     vm_name,
@@ -655,8 +655,8 @@ def create_vm(
                 _raise_init_failure(db, vm_name, e)
 
         # -- Initialization (Phase B) --
-        # Sibling of Provisioning: runs after the section closes, over
-        # Tailscale SSH, with the same failure mapping as Phase A.
+        # Sibling of Provisioning: runs after the section closes, on the
+        # admin's access Phase A returned, with the same failure mapping.
         try:
             _mgr.run_initialization(
                 db,
@@ -670,7 +670,6 @@ def create_vm(
                 home,
                 resolved_admin_username,
                 logger,
-                legacy_target=legacy_target,
                 debian_release=observed_release,
                 operation=_mgr.VMInitializationOperation.VM_CREATE,
                 setup_failures=setup_failures,

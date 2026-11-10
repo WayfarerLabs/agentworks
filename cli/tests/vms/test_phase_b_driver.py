@@ -1,9 +1,8 @@
-"""Phase B's VM Initialization section, driven whole over a recording admin access.
+"""Phase B, both its sections, driven whole over a recording admin access.
 
-Every request the section makes runs on the access, and its file operations
-are answered from memory (nothing touches this machine's paths). The Admin
-Initialization steps that still run on the legacy transport are stubbed.
-What run_initialization makes of a warning or a raise (partial or failed) is
+Every request Phase B makes runs on the access, and its file operations are
+answered from memory (nothing touches this machine's paths). What
+run_initialization makes of a warning or a raise (partial or failed) is
 covered by ``test_applied_state_checkpoint.py``.
 """
 
@@ -46,6 +45,7 @@ from tests.test_tailscale_dns import DNS_PROBE, READ_RESOLV, RESOLVED_ACTIVE
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
 
     from agentworks.db import Database
     from agentworks.execution.requests import RunRequest
@@ -73,8 +73,11 @@ def _is(expected: RunRequest) -> Callable[[RunRequest], bool]:
     return lambda request: request == expected
 
 
+ADMIN_GROUP = Command(("id", "-gn", "agentworks"), deadline=60)
+
+
 class Guest(StepGuest):
-    """A steady guest: reads find a hardened ``/etc/fstab`` and empty files, everything else succeeds."""
+    """A steady guest: a hardened ``/etc/fstab``, a private admin group and empty files; all else succeeds."""
 
     def __init__(self) -> None:
         super().__init__(local_files=False)
@@ -90,24 +93,15 @@ class Guest(StepGuest):
                 return error
         if _file_operation(call.request) == ("read", HARDENING_FSTAB_PATH):
             return Result(Completed(0), f"{HARDENING_FSTAB_NEW_LINE}\n".encode())
+        if call.request == ADMIN_GROUP:
+            return Result(Completed(0), b"agentworks\n")
         return None
 
 
 @pytest.fixture
-def run_section(db: Database, monkeypatch: pytest.MonkeyPatch) -> Callable[[Guest], None]:
+def run_section(db: Database, monkeypatch: pytest.MonkeyPatch) -> Callable[..., None]:
     db.insert_vm("box", site="lima-local", hostname="box")
     monkeypatch.setattr("agentworks.vms.sites.site_platform_name", lambda site, registry: "lima")
-    # Admin Initialization steps still on the legacy transport.
-    for name in (
-        "_harden_admin_home",
-        "configure_user_git_credentials",
-        "_write_mise_config",
-        "_run_mise_install",
-        "_write_agentworks_profile",
-        "_write_agentworks_rc",
-        "_ensure_agentworks_files_sourced",
-    ):
-        monkeypatch.setattr(driver, name, lambda *args, **kwargs: None)
     kinds: dict[str, dict[str, Any]] = {
         "system-install-command": {
             "sys-tool": SystemInstallCommandEntry(name="sys-tool", description="", command="install-sys-tool")
@@ -121,21 +115,20 @@ def run_section(db: Database, monkeypatch: pytest.MonkeyPatch) -> Callable[[Gues
     config: Any = MagicMock()
     config.paths.vm_workspaces = "/opt/agentworks/workspaces"
 
-    def run(guest: Guest) -> None:
+    def run(guest: Guest, admin: AdminConfig | None = None) -> None:
         log: Any = guest.log
         driver._phase_b_setup(
             db,
             config,
             registry,
             ResolvedVMTemplate(name="default", apt=["jq"], system_install_commands=["sys-tool"]),
-            AdminConfig(user_install_commands=["user-tool"]),
+            admin or AdminConfig(user_install_commands=["user-tool"]),
             "box",
             guest.files,
             (),
             HOME,
             "agentworks",
             log,
-            legacy_target=MagicMock(),
             debian_release=DebianRelease.TRIXIE,
             operation=driver.VMInitializationOperation.VM_REINIT,
         )
@@ -143,7 +136,7 @@ def run_section(db: Database, monkeypatch: pytest.MonkeyPatch) -> Callable[[Gues
     return run
 
 
-def test_a_steady_section_runs_every_step_without_a_warning(run_section: Callable[[Guest], None]) -> None:
+def test_a_steady_section_runs_every_step_without_a_warning(run_section: Callable[..., None]) -> None:
     guest = Guest()
 
     run_section(guest)
@@ -154,7 +147,7 @@ def test_a_steady_section_runs_every_step_without_a_warning(run_section: Callabl
 
 
 def test_skel_seeds_and_the_zprofile_block_are_written_after_apt_installs(
-    run_section: Callable[[Guest], None],
+    run_section: Callable[..., None],
 ) -> None:
     """apt's ``--force-confnew`` would replace them with the packages' defaults if they came first."""
     guest = Guest()
@@ -176,17 +169,43 @@ def test_skel_seeds_and_the_zprofile_block_are_written_after_apt_installs(
     assert max(installs) < min(seeds)
 
 
-def test_no_request_carries_an_environment_but_apts(run_section: Callable[[Guest], None]) -> None:
+def _local_dotfiles(tmp_path: Path) -> AdminConfig:
+    (tmp_path / "dots").mkdir()
+    (tmp_path / "dots" / "install.sh").write_text("#!/bin/sh\n")
+    return AdminConfig(user_install_commands=["user-tool"], dotfiles_source=str(tmp_path / "dots"))
+
+
+def test_no_request_carries_an_environment_but_apts_and_the_tree_upload_s(
+    run_section: Callable[..., None], tmp_path: Path
+) -> None:
     """Provisioning is hermetic: identity reaches installs only through the profile fragments."""
     guest = Guest()
 
-    run_section(guest)
+    run_section(guest, _local_dotfiles(tmp_path))
 
     requests = guest.access.requests()
     assert install_run("bash", "install-sys-tool") in requests
     assert install_run("bash", "install-user-tool") in requests
-    environments = {json.dumps(dict(request.env), sort_keys=True) for request in requests}
-    assert environments <= {"{}", json.dumps({"DEBIAN_FRONTEND": "noninteractive"})}
+    assert Command(("bash", "-lc", "./install.sh"), cwd=f"{HOME}/.dotfiles", deadline=120) in requests
+    environments = {tuple(sorted(request.env)) for request in requests}
+    assert environments == {(), ("DEBIAN_FRONTEND",), ("AGW_TREE_DEST", "AGW_TREE_TAG")}
+    assert guest.log.warned == []
+
+
+def test_the_source_lines_are_ensured_after_the_dotfiles_install(
+    run_section: Callable[..., None], tmp_path: Path
+) -> None:
+    """A dotfiles installer that replaces an rc file cannot leave it without its source lines."""
+    guest = Guest()
+
+    run_section(guest, _local_dotfiles(tmp_path))
+
+    requests = guest.access.requests()
+    install = requests.index(Command(("bash", "-lc", "./install.sh"), cwd=f"{HOME}/.dotfiles", deadline=120))
+    bashrc = [
+        index for index, request in enumerate(requests) if _file_operation(request) == ("read", f"{HOME}/.bashrc")
+    ]
+    assert bashrc and max(bashrc) > install
 
 
 @pytest.mark.parametrize(
@@ -202,7 +221,7 @@ def test_no_request_carries_an_environment_but_apts(run_section: Callable[[Guest
     ids=["CommandFailed", "ExecutionIncomplete", "PathRefused", "RequestRefused", "FileConflict", "FileLockTimeout"],
 )
 def test_a_failed_step_warns_and_every_later_step_still_runs(
-    run_section: Callable[[Guest], None], error: BaseException
+    run_section: Callable[..., None], error: BaseException
 ) -> None:
     steady = Guest()
     run_section(steady)
@@ -244,7 +263,7 @@ def _dns_latched(guest: Guest) -> None:
     ids=["system-packages", "dns-latch", "TrustMissing", "TrustMismatch", "VMNotReady"],
 )
 def test_what_stops_initialization_is_raised_not_warned(
-    run_section: Callable[[Guest], None], stop: Callable[[Guest], None], raised: type[BaseException]
+    run_section: Callable[..., None], stop: Callable[[Guest], None], raised: type[BaseException]
 ) -> None:
     guest = Guest()
     stop(guest)
