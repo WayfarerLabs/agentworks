@@ -162,6 +162,25 @@ def test_focused_admin_dotfiles_matches_bulk_and_empty_source_has_no_check(
     assert focused[0] in bulk_group.checks
 
 
+def test_doctor_reports_a_dotfiles_source_with_a_credential_without_raising_or_echoing_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks import config as config_module
+
+    secret = "ghp-doctor-secret"
+    config_path = _write_config(
+        tmp_path, admin_fields={"dotfiles_source": f"git::https://u:{secret}@example.com/dots.git"}
+    )
+    monkeypatch.setattr(config_module, "CONFIG_PATH", config_path)
+
+    group, _config, registry = _check_config()
+
+    assert registry is None
+    assert any(check.status is Status.FAIL for check in group.checks)
+    assert not any(secret in f"{check.message} {check.hint}" for check in group.checks)
+
+
 @pytest.mark.parametrize(
     ("active", "enabled", "not_ready_reason", "expected"),
     [

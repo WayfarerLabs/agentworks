@@ -1035,6 +1035,9 @@ no longer use them. The departures from the tables above, each recorded where it
   checked out detached after any clone, and a failed sync skips the install for the agent too.
 - A bare relative `dotfiles_destination` is a path in the home, and one that is or holds a managed
   path is refused (above, "Dotfiles destinations").
+- Both templates validate `dotfiles_source` at load with `sources.check_source_ref`, whose
+  `SourceRefFormError` (a `ValueFreeError`) names the accepted forms and no part of the value, so
+  doctor and `resource show` never meet an unparsable stored source.
 - A `git::https://` URL carrying a user name or token is refused without being echoed, `--` precedes
   the URL in `git clone` and `git remote add`, and the subpath's component check is the parser's.
 - A directory at a write's fixed temporary name is `PathRefused(UNSUITABLE)` and left alone.

@@ -136,6 +136,27 @@ def _parse_git_source(url_str: str, default_filename: str) -> SourceRef:
     return SourceRef(kind="git", path=url_str, subpath=subpath, ref=ref)
 
 
+class SourceRefFormError(ValueFreeError):
+    """A configured source reference that does not parse; the message names the accepted forms, never the value."""
+
+
+def check_source_ref(value: str, *, field: str) -> str:
+    """``value`` when it parses as a source reference, else :class:`SourceRefFormError` naming ``field``.
+
+    Boundary: a template's source fields, operator configuration and stored
+    overlays alike, validated at load. The message holds no part of
+    ``value``, since a refused URL may carry a credential.
+    """
+    try:
+        parse_source_ref(value)
+    except SourceRefError:
+        raise SourceRefFormError(
+            f"{field} must be a local path, file::<path>, or git:: and an https:// or git@ URL holding no user "
+            "name or token, with an optional //<subpath> and ?ref=<branch, tag or full commit hash>"
+        ) from None
+    return value
+
+
 def _extract_ref(query: str) -> str:
     """Extract ref= value from a query string."""
     refs = []

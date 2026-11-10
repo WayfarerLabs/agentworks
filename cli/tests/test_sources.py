@@ -719,6 +719,35 @@ def test_both_templates_refuse_an_unsuitable_destination_at_load(model: type) ->
     assert model(name="t", dotfiles_destination="dots/").dotfiles_destination == "~/dots"
 
 
+@pytest.mark.parametrize("model", [AdminConfig, AgentTemplate])
+@pytest.mark.parametrize("source", ["git::https://u:ghp-load-secret@example.com/d.git", "s3::ghp-load-secret"])
+def test_both_templates_refuse_an_unparsable_dotfiles_source_at_load_without_echoing_it(
+    model: type, source: str
+) -> None:
+    with pytest.raises(ValidationError) as refused:
+        model(name="t", dotfiles_source=source)
+
+    assert [error["loc"] for error in refused.value.errors()] == [("dotfiles_source",)]
+    assert not any("ghp-load-secret" in error["msg"] for error in refused.value.errors(include_input=False))
+    assert model(name="t", dotfiles_source="git::https://example.com/d.git?ref=v1").dotfiles_source
+
+
+def test_a_stored_unparsable_dotfiles_source_is_refused_with_the_accepted_forms() -> None:
+    from agentworks.agents.instance_overlay import decode_overlay
+    from agentworks.errors import ValidationError as OverlayError
+    from agentworks.sources import SourceRefFormError, check_source_ref
+    from agentworks.vms.instance_overlay import decode_admin_overlay
+
+    stored = "git::https://u:ghp-stored-secret@example.com/d.git"
+    with pytest.raises(SourceRefFormError) as direct:
+        check_source_ref(stored, field="dotfiles_source")
+    for decode in (decode_overlay, decode_admin_overlay):
+        with pytest.raises(OverlayError) as decoded:
+            decode({"dotfiles_source": stored})
+        assert str(direct.value) in str(decoded.value)
+        assert "ghp-stored-secret" not in str(decoded.value)
+
+
 def test_a_stored_relative_destination_decodes_into_the_home_and_a_refusal_names_the_accepted_forms() -> None:
     from agentworks.agents.instance_overlay import decode_overlay
     from agentworks.errors import ValidationError as OverlayError

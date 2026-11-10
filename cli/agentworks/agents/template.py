@@ -117,7 +117,15 @@ class AgentTemplate(DeclaredResource):
     """Names of ``user-install-command`` resources run during agent init."""
 
     dotfiles_source: str | None = None
-    """Where to fetch the agent user's dotfiles from."""
+    """Where to fetch the agent user's dotfiles from, a source reference (see the
+    source references guide) checked at load."""
+
+    @field_validator("dotfiles_source")
+    @classmethod
+    def _check_dotfiles_source(cls, value: str | None) -> str | None:
+        from agentworks.sources import check_source_ref
+
+        return None if value is None else check_source_ref(value, field="dotfiles_source")
 
     dotfiles_destination: str | None = None
     """Where the fetched dotfiles are checked out: a path in the agent's home
