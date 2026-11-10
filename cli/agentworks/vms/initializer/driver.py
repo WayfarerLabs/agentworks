@@ -581,11 +581,12 @@ def _phase_b_setup(
         # operator can act on and a later failure that looks unrelated to it.
         if admin.dotfiles_source:
             logger.step("Dotfiles")
-            dest = admin.dotfiles_destination.replace("~", home)
+            dest = admin.dotfiles_destination
             synced = False
             try:
-                from agentworks.sources import fetch_dir, parse_source_ref
+                from agentworks.sources import expand_destination, fetch_dir, parse_source_ref
 
+                dest = expand_destination(dest, home)
                 ref = parse_source_ref(admin.dotfiles_source)
                 output.info(f"Syncing dotfiles from {admin.dotfiles_source}...")
                 fetch_dir(ref, legacy_target, dest, logger=logger)

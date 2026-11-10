@@ -307,10 +307,10 @@ def create_agent_on_vm(
         try:
             import shlex as _shlex
 
-            from agentworks.sources import SourceRefError, fetch_dir, parse_source_ref
+            from agentworks.sources import SourceRefError, expand_destination, fetch_dir, parse_source_ref
 
             ref = parse_source_ref(agent_cfg.dotfiles_source)
-            dest = agent_cfg.dotfiles_destination.replace("~", home)
+            dest = expand_destination(agent_cfg.dotfiles_destination, home)
 
             if ref.kind == "git":
                 # If already cloned from the same repo, pull instead of clone.

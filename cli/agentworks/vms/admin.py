@@ -120,7 +120,16 @@ class AdminConfig(DeclaredResource):
     """Where to fetch the admin user's dotfiles from. Omit to install none."""
 
     dotfiles_destination: str = "~/.dotfiles"
-    """Where the fetched dotfiles are checked out."""
+    """Where the fetched dotfiles are checked out: `~/` followed by a path in the
+    admin's home, or an absolute path. It may not be the home itself or one of its
+    parents, or have an empty, `.` or `..` component; a trailing `/` is dropped."""
+
+    @field_validator("dotfiles_destination")
+    @classmethod
+    def _normalize_destination(cls, value: str) -> str:
+        from agentworks.sources import normalize_destination
+
+        return normalize_destination(value)
 
     dotfiles_install_cmd: str = "./install.sh"
     """The command run inside the checkout to install the dotfiles."""

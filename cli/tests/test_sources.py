@@ -6,9 +6,19 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from pydantic import ValidationError
 
-from agentworks.sources import SourceRef, SourceRefError, fetch_file, parse_source_ref
+from agentworks.agents.template import AgentTemplate
+from agentworks.sources import (
+    SourceRef,
+    SourceRefError,
+    expand_destination,
+    fetch_file,
+    normalize_destination,
+    parse_source_ref,
+)
 from agentworks.ssh import SSHError
+from agentworks.vms.admin import AdminConfig
 
 
 def test_parse_git_source_with_subpath_and_ref() -> None:
@@ -163,3 +173,38 @@ def test_workstation_snapshot_error_identifies_declared_source_without_io_cause(
     assert repr(source) in str(caught.value)
     assert caught.value.__cause__ is None
     assert caught.value.__suppress_context__
+
+
+# -- Dotfiles destinations ----------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("value", "normalized"),
+    [("~/x", "~/x"), ("~/a/b/", "~/a/b"), ("/x/y", "/x/y"), ("/x/y/", "/x/y")],
+)
+def test_normalize_destination_accepts_a_home_relative_or_absolute_path(value: str, normalized: str) -> None:
+    assert normalize_destination(value) == normalized
+
+
+@pytest.mark.parametrize("value", ["~", "~/", "/", "x", "./x", "~x", "~/../x", "~/a//b", "/a/./b", "/a/../b", "~/a\nb"])
+def test_normalize_destination_refuses_the_home_a_relative_path_and_unnormalized_components(value: str) -> None:
+    with pytest.raises(ValueError, match="dotfiles_destination"):
+        normalize_destination(value)
+
+
+@pytest.mark.parametrize("model", [AdminConfig, AgentTemplate])
+def test_both_templates_refuse_an_unsuitable_destination_at_load(model: type) -> None:
+    with pytest.raises(ValidationError, match="dotfiles_destination"):
+        model(name="t", dotfiles_destination="~/")
+    assert model(name="t", dotfiles_destination="~/dots/").dotfiles_destination == "~/dots"
+
+
+def test_expand_destination_replaces_only_the_leading_tilde() -> None:
+    assert expand_destination("~/dots~1/a~b", "/home/agent") == "/home/agent/dots~1/a~b"
+    assert expand_destination("/srv/dots~", "/home/agent") == "/srv/dots~"
+
+
+@pytest.mark.parametrize("value", ["/home/agent", "/home", "/"])
+def test_expand_destination_refuses_the_home_and_its_parents(value: str) -> None:
+    with pytest.raises(SourceRefError):
+        expand_destination(value, "/home/agent")

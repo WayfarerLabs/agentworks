@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 
 
 class SourceRefError(ExternalError):
-    """Raised when a source reference is invalid."""
+    """Raised when a source reference or a destination is invalid, or a fetch from it fails."""
 
 
 # Ref must be safe for shell and git: alphanumeric, hyphens, dots, underscores, slashes
@@ -130,6 +130,41 @@ def _extract_ref(query: str) -> str:
     if len(refs) != 1 or not refs[0]:
         raise SourceRefError("git source query must contain exactly one non-empty ref parameter")
     return refs[0]
+
+
+def normalize_destination(value: str) -> str:
+    """``value`` as a dotfiles destination: ``~/`` and a path in the home, or an absolute path.
+
+    Boundary: the templates' ``dotfiles_destination``, operator configuration,
+    is validated here at load. No component may be empty, ``.`` or ``..``,
+    a trailing ``/`` is dropped, and the home itself (``~`` or ``~/``) is
+    refused, since replacing the checkout would move the home aside.
+    """
+    if value.startswith("~/"):
+        prefix, rest = "~/", value[2:]
+    elif value.startswith("/"):
+        prefix, rest = "/", value[1:]
+    else:
+        raise ValueError(f"dotfiles_destination must start with '~/' or '/': {value!r}")
+    rest = rest.removesuffix("/")
+    if not value.isprintable() or not rest or any(part in ("", ".", "..") for part in rest.split("/")):
+        raise ValueError(
+            f"dotfiles_destination must name a directory below '~/' or '/' with no empty, '.' or '..' "
+            f"component: {value!r}"
+        )
+    return prefix + rest
+
+
+def expand_destination(value: str, home: str) -> str:
+    """The guest path of the normalized destination ``value`` for an account whose home is ``home``.
+
+    Only a leading ``~`` is replaced. An absolute destination that is the
+    home or one of its ancestors is refused before anything is sent.
+    """
+    path = home + value[1:] if value.startswith("~/") else value
+    if path == home or home.startswith(path.rstrip("/") + "/"):
+        raise SourceRefError(f"dotfiles destination {path} is the home {home} or one of its parents")
+    return path
 
 
 def snapshot_workstation_file(source: str) -> bytes:
