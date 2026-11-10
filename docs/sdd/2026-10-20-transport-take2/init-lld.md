@@ -54,7 +54,7 @@ core writes (`capabilities/vm_platform/bootstrap_script.py:179`,
 | `execution/file_program.py`                                                                  | `write`; `ensure_directory` gains `owner`, `group` and elevation; `SEALED` gains `write`                                                                                                     |
 | `execution/files.py`                                                                         | `Files.write`, `Files.update`, `ensure_directory(owner=, group=, elevated=)`; the module docstring stops saying every mutation is conditional                                                |
 | `execution/errors.py`                                                                        | `CommandFailed.streams_logged`, the failed request's `log_streams`                                                                                                                           |
-| `vms/initializer/steps.py` (new)                                                             | `STEP_DEADLINE`, `STEP_FAILURES`, `InitLog`, `describe_failure`, `status`, `warn`, `warn_step`, `update_and_apply`, `NotRestored`                                                            |
+| `vms/initializer/steps.py` (new)                                                             | `STEP_DEADLINE`, `STEP_FAILURES`, `InitLog`, `describe_failure`, `status`, `warn`, `warn_step`, `update_and_apply`                                                                           |
 | `vms/initializer/driver.py`                                                                  | `bootstrap_vm` returns an admin `VMAccess`; `run_initialization` and `_phase_b_setup` take it in place of `ts_target`                                                                        |
 | `vms/initializer/shell_env.py`, `ssh_keys.py`, `packages.py`, `mise.py`, `workspaces_dir.py` | Each helper takes `files: Files`; `ensure_source_line` and `source_files` (new, `shell_env.py`) replace the seven grep-or-append strings and their four file lists                           |
 | `vms/hardening.py`, `vms/tailscale_dns.py`                                                   | On `Files`                                                                                                                                                                                   |
@@ -385,17 +385,18 @@ baseline file alone, `daemon-reload`) succeeds. Any failure after the write (a r
 status, a timeout or dropped connection, an interrupt) puts the prior content back, or removes a
 file the run created, conditional on the file still holding what the run wrote, and then propagates;
 the restore runs under `interrupts_deferred`, and an interrupt is re-raised after it. A write whose
-own outcome is unknown (a lost connection, an interrupt during it) gets the same restore, and a
-`FileConflict` from that restore means the write did not land, which needs no further report.
-Putting the prior content back is what makes the next reinit retry, since it sees a difference
-again.
+own outcome is unknown and may have run (a lost connection, but not a refused key, or an interrupt
+during it) gets the same restore. Putting the prior content back is what makes the next reinit
+retry, since it sees a difference again.
 
-When the restore fails too, the file may hold the new content with nothing applying it, and a re-run
-reads it as applied and retries nothing. A step failure then becomes `steps.NotRestored`, whose
-warning keeps the original failure's description, names the file, and says to put the prior content
-back or remove the file and reinit. A failure that is not a step failure (an interrupt, including
-one held through the restore and delivered as it ends) warns the same way on the step's log before
-it propagates.
+The restore alone classifies what it finds, and is the one place that warns about it. A
+`FileConflict` means the file does not hold what the run wrote: the write never landed, or something
+replaced it since; either way the next reinit sees a difference and retries, so nothing more is
+reported. Any other step failure leaves the new content in place with nothing applying it, which a
+re-run reads as applied and retries nothing; the restore warns, naming the file and saying to put
+the prior content back or remove it and reinit. The original failure then propagates as it was: a
+step failure is the step's own warning, after the stranded one, and an interrupt, one held through
+the restore included, propagates after it.
 
 The baseline is loaded with `sysctl -p` of its own file rather than `sysctl --system`, so another
 package's `sysctl.d` key that the running kernel lacks cannot fail the load and undo the baseline.

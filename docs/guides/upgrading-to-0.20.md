@@ -262,8 +262,10 @@ workspaces directory and the user install commands of Admin Initialization.
   baseline (now `sysctl -p` of that file alone, not `sysctl --system`), or `systemctl daemon-reload`
   after the tailscaled drop-in fails, times out or is interrupted, the file gets its previous
   content back (or is removed if it is new), with a warning, so the next `vm reinit` tries again. If
-  putting it back fails too, the next `vm reinit` does not retry it: the warning names the file, to
-  put back or remove before you reinit.
+  putting it back fails, a separate warning names the file, which then holds content that is not in
+  effect and that the next `vm reinit` will not retry: put its previous content back or remove it,
+  then reinit. If something else changed the file in the meantime, nothing is put back and the next
+  `vm reinit` tries again.
 - **`/etc/fstab` keeps its owner, group and mode** when its `/proc` line changes, and a `hidepid`
   value already on that line is kept, a name such as `hidepid=invisible` included; only a missing
   `hidepid`, `hidepid=0` or `hidepid=off` becomes `hidepid=1`.
