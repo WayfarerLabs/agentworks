@@ -361,7 +361,7 @@ replacement-conflict kind; it adds no retry or command-wide serialization.
       replacements, including nullable fields and relevant named/batch caller behavior.
 - [x] Update response design and permanent guidance to describe the implemented repair boundary
       without promising whole-command cross-process atomicity.
-- [ ] Propagate database-driver repair failures before batch preparation continues, and prove named
+- [x] Propagate database-driver repair failures before batch preparation continues, and prove named
       and batch refusal with real enclosing-transaction replacement regressions.
 - [ ] Run full gates, installed-wheel checks, three fresh private review lanes, and hosted CI on the
       coherent result, then publish the third-round ready handoff for the separate tester.
