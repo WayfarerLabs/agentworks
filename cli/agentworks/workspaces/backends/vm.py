@@ -15,6 +15,7 @@ from agentworks.errors import AlreadyExistsError
 from agentworks.execution.access import Admin
 from agentworks.ssh import SSHError
 from agentworks.transports import transport
+from agentworks.vms.home_layout import TMUXINATOR_CONFIG_DIR
 from agentworks.workspaces.acls import apply_workspace_acls
 from agentworks.workspaces.tmuxinator import console_session_name, generate_config
 
@@ -181,9 +182,9 @@ def create_vm_workspace(
             generated_config = (config_path, hashlib.sha256(tmux_config.encode()).hexdigest())
             # Symlink so tmuxinator can find it by console session name
             session = console_session_name(ws_name)
-            target.run("mkdir -p ~/.config/tmuxinator", timeout=10)
+            target.run(f"mkdir -p ~/{TMUXINATOR_CONFIG_DIR}", timeout=10)
             target.run(
-                f"ln -s -- {shlex.quote(config_path)} ~/.config/tmuxinator/{session}.yml",
+                f"ln -s -- {shlex.quote(config_path)} ~/{TMUXINATOR_CONFIG_DIR}/{session}.yml",
                 timeout=10,
             )
 
@@ -285,7 +286,7 @@ def delete_vm_workspace(
         else:
             target.run(f"rm -rf {quoted}", sudo=True, timeout=30)
         session = console_session_name(ws_name)
-        link = f"~/.config/tmuxinator/{session}.yml"
+        link = f"~/{TMUXINATOR_CONFIG_DIR}/{session}.yml"
         target.run(
             f'if test -L {link} && test "$(readlink -- {link})" = '
             f"{shlex.quote(workspace_path + '/.tmuxinator.yml')}; then rm -- {link}; fi",

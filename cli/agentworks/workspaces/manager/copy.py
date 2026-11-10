@@ -14,6 +14,7 @@ from agentworks.execution.access import Admin
 from agentworks.naming import validate_name
 from agentworks.path_rendering import format_host_path
 from agentworks.programs import resolve_program
+from agentworks.vms.home_layout import TMUXINATOR_CONFIG_DIR
 from agentworks.vms.manager import gated_vm_boundary
 from agentworks.workspaces.backends.vm import default_workspace_path
 from agentworks.workspaces.manager._common import _guard_vm_status, _resolve_vm, _workspace_scope
@@ -228,9 +229,9 @@ def copy_workspace(
                 tmux_config = generate_config(dest_name, workspace_path)
                 dest_target.write_file(f"{workspace_path}/.tmuxinator.yml", tmux_config)
                 session = console_session_name(dest_name)
-                dest_target.run("mkdir -p ~/.config/tmuxinator", timeout=10)
+                dest_target.run(f"mkdir -p ~/{TMUXINATOR_CONFIG_DIR}", timeout=10)
                 dest_target.run(
-                    f"ln -sf {workspace_path}/.tmuxinator.yml ~/.config/tmuxinator/{session}.yml",
+                    f"ln -sf {workspace_path}/.tmuxinator.yml ~/{TMUXINATOR_CONFIG_DIR}/{session}.yml",
                     timeout=10,
                 )
                 vscode_path = generate_vscode_workspace(dest_vm, config, dest_name, workspace_path)

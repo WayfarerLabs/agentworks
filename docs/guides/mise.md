@@ -126,7 +126,8 @@ When no lockfile is present, `mise install` runs without `--locked` (no verifica
 
 ## Sequencing
 
-Understanding the init ordering matters if your dotfiles also configure mise:
+Understanding the init ordering matters if your dotfiles also configure mise. The order is the same
+for the admin and for every agent:
 
 1. **Mise config write** -- agentworks writes `~/.config/mise/config.toml` from `mise_packages`
 2. **Dotfiles sync** -- your dotfiles can override the mise config (or provide their own lockfile)

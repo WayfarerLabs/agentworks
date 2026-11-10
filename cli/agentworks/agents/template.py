@@ -131,9 +131,9 @@ class AgentTemplate(DeclaredResource):
     """Where the fetched dotfiles are checked out: a path in the agent's home
     (`dots` or `~/dots`), or an absolute path. It may not be the home itself or one
     of its parents, be, hold or lie inside a path Agentworks manages in the home
-    (`~/.ssh`, `~/.agentworks`, `~/.agentworks-artifacts` and the
-    `~/.agentworks-*.sh` fragments), or have an empty, `.` or `..` component; a
-    trailing `/` is dropped."""
+    (`~/.ssh`, `~/.agentworks`, `~/.agentworks-artifacts`, `~/.config/tmuxinator`
+    and the `~/.agentworks-*.sh` fragments), or have an empty, `.` or `..`
+    component; a trailing `/` is dropped."""
 
     @field_validator("dotfiles_destination")
     @classmethod

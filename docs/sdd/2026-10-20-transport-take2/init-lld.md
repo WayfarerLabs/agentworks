@@ -460,8 +460,8 @@ access and bound since slice 5.
 - **Local dotfiles** were logged as `logger.warning(f"overwriting existing {dest}")`
   (`sources.py:282-284`), which marks every admin reinit with a local dotfiles directory partial
   (`driver.py:256`). The replacement is expected, so it is a `logger.output` line (decision 4).
-- **Git destinations** keep `git`'s own handling: `test -d`, `git -C`, `fetch`, `checkout`, `pull`
-  and `clone` follow a link at the destination, as today.
+- **Git destinations** keep `git`'s own handling: `test -d`, `git -C`, `fetch`, `checkout` and
+  `clone` follow a link at the destination, as today.
 - **One dotfiles sync.** `vms/initializer/dotfiles.py`'s `sync_dotfiles` is both accounts' sync and
   install, so the agent's own git handling (`agents/initializer.py:316-355`) goes. A fresh clone
   takes no `--branch`; then, fresh or existing, the ref (or `HEAD` without one) is fetched from
@@ -488,9 +488,10 @@ meant, so a stored `dots` keeps working), or an absolute path; it has no empty, 
 component and no other user's `~`; a trailing `/` is dropped; and `~` or `~/` alone, the home
 itself, is refused, since replacing it would move the home aside. A path in the home that is, holds
 or lies inside one Agentworks manages there (`vms/home_layout.py`'s `MANAGED`: the two fragments,
-`.ssh`, the credential state's `.agentworks` and `.agentworks-artifacts`) is refused too.
-`.config/mise` is not among them: dotfiles may own `~/.config`, and the mise config is written after
-the dotfiles sync, so the order settles it. Refusals are `DestinationError`, an
+`.ssh`, the state directory `.agentworks`, `.agentworks-artifacts` and the workspace links'
+`.config/tmuxinator`) is refused too, so `~/.config` is. `.config/mise` is not among them: dotfiles
+may own or override the mise config, since both accounts write it before the dotfiles sync and fetch
+the lockfile and install after it (`docs/guides/mise.md`). Refusals are `DestinationError`, an
 `errors.ValueFreeError` whose message names the accepted forms and no part of the value, which
 `instance_overlay_codec` shows in place of its generic message. `expand_destination(value, home)`
 replaces only the leading `~` and refuses, before any request, an absolute value that is the home or
@@ -1034,6 +1035,9 @@ no longer use them. The departures from the tables above, each recorded where it
   replaced on every upload and `restore` always reaches its rename. The git file source requires
   `mktemp`'s output to be a guest path under its staging prefix before using it, and reads its
   staging removal's completion and status, warning when it fails.
+- The agent writes its mise config before its dotfiles sync and fetches its lockfile and installs
+  after it (`_write_agent_mise_config`, `_install_agent_mise`), the admin's documented order;
+  through v0.19.0 the agent synced dotfiles first, so its template's config overwrote the dotfiles'.
 - One git sequence for every case (above, "One dotfiles sync"): the ref, or `HEAD`, is fetched and
   checked out detached after any clone, and a failed sync skips the install for the agent too.
 - A bare relative `dotfiles_destination` is a path in the home, and one that is, holds or lies

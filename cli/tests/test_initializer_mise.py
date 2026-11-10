@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from agentworks.agents.initializer import _run_agent_mise_setup
+from agentworks.agents.initializer import _install_agent_mise, _write_agent_mise_config
 from agentworks.agents.templates import ResolvedAgentTemplate
 from agentworks.config.validation import MiseSettingsError, MiseSettingsErrorKind, check_mise_settings
 from agentworks.execution.errors import CommandFailed, ExecutionIncomplete
@@ -114,7 +114,8 @@ def test_agent_mise_setup_writes_its_config_then_installs_unlocked(tmp_path: Pat
     guest.respond(Command(("test", "-f", f"{tmp_path}/.config/mise/mise.lock"), deadline=60), Result(Completed(1)))
     template = ResolvedAgentTemplate(name="default", mise_packages=["terraform@1.14.5"])
 
-    _run_agent_mise_setup(agent_files=guest.files, logger=guest.log, agent_tmpl=template, home=str(tmp_path))
+    for step in (_write_agent_mise_config, _install_agent_mise):
+        step(agent_files=guest.files, logger=guest.log, agent_tmpl=template, home=str(tmp_path))
 
     assert "terraform" in tomllib.loads((tmp_path / ".config" / "mise" / "config.toml").read_text())["tools"]
     assert mise_run("bash", "mise install -y", 300) in guest.commands()
@@ -129,7 +130,8 @@ def test_agent_mise_setup_still_installs_after_its_config_write_is_refused(tmp_p
     guest.respond(Command(("test", "-f", f"{tmp_path}/.config/mise/mise.lock"), deadline=60), Result(Completed(1)))
     template = ResolvedAgentTemplate(name="default", mise_packages=["terraform@1.14.5"])
 
-    _run_agent_mise_setup(agent_files=guest.files, logger=guest.log, agent_tmpl=template, home=str(tmp_path))
+    for step in (_write_agent_mise_config, _install_agent_mise):
+        step(agent_files=guest.files, logger=guest.log, agent_tmpl=template, home=str(tmp_path))
 
     assert list((tmp_path / "elsewhere").iterdir()) == []
     assert len(guest.log.warned) == 1

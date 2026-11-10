@@ -14,14 +14,10 @@ AGENTWORKS_RC = ".agentworks-rc.sh"
 SSH_DIR = ".ssh"
 """The directory of ``authorized_keys`` (``vms.initializer.ssh_keys``)."""
 
-MISE_CONFIG_DIR = ".config/mise"
-"""The directory of the mise config and lockfile (``vms.initializer.mise``).
+AGENTWORKS_STATE_DIR = ".agentworks"
+"""Agentworks' own state directory: the git credential state and the codex recorder live in it."""
 
-Not in :data:`MANAGED`: dotfiles may own ``~/.config``, and initialization
-writes the mise config after the dotfiles sync, so the order settles it.
-"""
-
-GIT_CREDENTIAL_STATE_DIR = ".agentworks"
+GIT_CREDENTIAL_STATE_DIR = AGENTWORKS_STATE_DIR
 """The directory of the git credential state (``git_credentials``), rendered into its scripts and config.
 
 Its include path is deployed into every account's ``~/.gitconfig``, so
@@ -32,5 +28,24 @@ changing it means retiring the old include as well, as
 AGENTWORKS_ARTIFACTS = ".agentworks-artifacts"
 """The directory of user and session artifacts (``artifacts.session``, ``harness_integration.shell``)."""
 
-MANAGED = (AGENTWORKS_PROFILE, AGENTWORKS_RC, SSH_DIR, GIT_CREDENTIAL_STATE_DIR, AGENTWORKS_ARTIFACTS)
+TMUXINATOR_CONFIG_DIR = ".config/tmuxinator"
+"""Where each workspace's tmuxinator config is linked by console session name (``workspaces``)."""
+
+MISE_CONFIG_DIR = ".config/mise"
+"""The directory of the mise config and lockfile (``vms.initializer.mise``).
+
+Not in :data:`MANAGED`: dotfiles may own or override the mise config. For
+the admin and every agent alike, initialization writes the config before the
+dotfiles sync and fetches the lockfile and installs after it
+(``docs/guides/mise.md``).
+"""
+
+MANAGED = (
+    AGENTWORKS_PROFILE,
+    AGENTWORKS_RC,
+    SSH_DIR,
+    AGENTWORKS_STATE_DIR,
+    AGENTWORKS_ARTIFACTS,
+    TMUXINATOR_CONFIG_DIR,
+)
 """The paths a dotfiles destination may not be, hold, or lie inside."""

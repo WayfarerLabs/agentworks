@@ -34,7 +34,7 @@ import pytest
 
 from agentworks.agents import initializer as agent_initializer
 from agentworks.execution.errors import CommandFailed
-from agentworks.execution.requests import Bytes, Command, PythonProgram
+from agentworks.execution.requests import Bytes, Command, PythonProgram, Script
 from agentworks.execution.results import Completed, Result
 from tests.orchestrated_fixtures import proxmox_site, write_operator_config
 from tests.vm_access_support import AccessRecorder, Admin, Agent, install_access_recorder
@@ -61,6 +61,7 @@ def _run_create_on_vm(
     shell: str = "/bin/sh",
     before_create: Callable[[AccessRecorder], None] | None = None,
     dotfiles: Path | str | None = None,
+    mise_packages: list[str] | None = None,
 ) -> AccessRecorder:
     """Drive ``create_agent_on_vm`` over a recording access and return it.
 
@@ -84,6 +85,8 @@ def _run_create_on_vm(
     template = resolve_template(registry, None)
     if dotfiles is not None:
         template = dataclasses.replace(template, dotfiles_source=str(dotfiles))
+    if mise_packages is not None:
+        template = dataclasses.replace(template, mise_packages=mise_packages)
     recorder = install_access_recorder(monkeypatch)
 
     def answer(call: Call) -> Result | None:
@@ -364,3 +367,29 @@ def test_a_failed_git_dotfiles_sync_skips_the_agent_install(
     commands = _commands(recorder)
     assert any(argv[:4] == ("git", "-C", dest, "fetch") for argv in commands)
     assert ("bash", "-lc", "./install.sh") not in commands
+
+
+def test_the_agent_writes_its_mise_config_before_its_dotfiles_and_installs_after(
+    db: Database, config: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The documented order (docs/guides/mise.md), as the admin's: config, dotfiles, then install."""
+    (tmp_path / "dots").mkdir()
+
+    recorder = _run_create_on_vm(
+        db, config, monkeypatch, user_exists=False, dotfiles=tmp_path / "dots", mise_packages=["jq@1"]
+    )
+    requests = recorder.requests("run")
+
+    def first(predicate: Callable[[Any], bool]) -> int:
+        return next(index for index, request in enumerate(requests) if predicate(request))
+
+    config_write = first(
+        lambda r: (
+            isinstance(r, PythonProgram)
+            and r.args[0] == "write"
+            and json.loads(r.args[1])["path"] == f"{HOME}/.config/mise/config.toml"
+        )
+    )
+    tree_upload = first(lambda r: isinstance(r, Script) and "AGW_TREE_DEST" in r.env)
+    install = first(lambda r: isinstance(r, Command) and r.argv[-1].startswith("mise install"))
+    assert config_write < tree_upload < install

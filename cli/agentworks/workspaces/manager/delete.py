@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.errors import NotFoundError, StateError, UserAbort
+from agentworks.vms.home_layout import AGENTWORKS_ARTIFACTS
 from agentworks.vms.manager import gated_vm_boundary
 from agentworks.workspaces.manager._common import _workspace_scope
 
@@ -193,7 +194,7 @@ def delete_workspace(
                         except Exception:
                             output.warn(
                                 f"Private artifact cleanup for session '{session.name}' could not finish. "
-                                f"Check ~/.agentworks-artifacts/session/{session.session_uuid} in that session user's "
+                                f"Check ~/{AGENTWORKS_ARTIFACTS}/session/{session.session_uuid} in that session user's "
                                 "home; remaining files will no longer have managed cleanup evidence after deletion."
                             )
                 db.delete_sessions_for_workspace(name)

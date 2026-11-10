@@ -716,6 +716,10 @@ def test_a_destination_that_is_holds_or_lies_inside_a_managed_path_is_refused(ma
         "~/.agentworks-artifacts/user",
         "~/.agentworks-profile.sh",
         "~/.agentworks-rc.sh",
+        "~/.agentworks/codex",
+        "~/.config",
+        "~/.config/tmuxinator",
+        "~/.config/tmuxinator/dots",
     ],
 )
 def test_the_paths_initialization_writes_in_the_home_are_refused(value: str) -> None:
@@ -723,7 +727,7 @@ def test_the_paths_initialization_writes_in_the_home_are_refused(value: str) -> 
         normalize_destination(value)
 
 
-@pytest.mark.parametrize("value", ["~/.config", "~/.config/mise", "~/.config/mise/dots", "~/.agentworks-dots"])
+@pytest.mark.parametrize("value", ["~/.config/mise", "~/.config/mise/dots", "~/.config/nvim", "~/.agentworks-dots"])
 def test_a_destination_beside_or_over_the_mise_config_is_accepted(value: str) -> None:
     assert normalize_destination(value) == value
 

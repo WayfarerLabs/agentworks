@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 from agentworks.sessions.multi_console import ADMIN_SHELL_WINDOW
 from agentworks.sessions.tmux import exact_tmux_target, tmux_cmd
+from agentworks.vms.home_layout import TMUXINATOR_CONFIG_DIR
 
 if TYPE_CHECKING:
     from agentworks.db import SessionRow
@@ -34,7 +35,7 @@ def remove_config(target: Transport, ws_name: str, workspace_path: str) -> None:
     config_path = shlex.quote(f"{workspace_path}/.tmuxinator.yml")
     session = shlex.quote(console_session_name(ws_name))
     target.run(
-        f"rm -f {config_path} ~/.config/tmuxinator/{session}.yml",
+        f"rm -f {config_path} ~/{TMUXINATOR_CONFIG_DIR}/{session}.yml",
         check=False,
         timeout=10,
     )

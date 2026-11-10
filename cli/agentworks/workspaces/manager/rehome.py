@@ -19,6 +19,7 @@ from agentworks.execution.access import Admin
 from agentworks.execution.errors import CommandFailed, ExecutionIncomplete, RequestRefused
 from agentworks.path_rendering import format_host_path
 from agentworks.secrets.policy import require_exact_tty_interaction_policy
+from agentworks.vms.home_layout import TMUXINATOR_CONFIG_DIR
 from agentworks.vms.manager import gated_vm_boundary
 from agentworks.workspaces.manager._common import _guard_vm_status, _workspace_scope
 from agentworks.workspaces.manager.repair import _rehome_partial_state_hint
@@ -290,11 +291,11 @@ def _rehome_vm(
                     tmux_config = generate_config(ws_name, new_path)
                     target.write_file(f"{new_path}/.tmuxinator.yml", tmux_config)
                     session = console_session_name(ws_name)
-                    target.run("mkdir -p ~/.config/tmuxinator", timeout=10)
-                    # Keep ~/.config/tmuxinator/ literal so tilde expansion still
+                    target.run(f"mkdir -p ~/{TMUXINATOR_CONFIG_DIR}", timeout=10)
+                    # Keep the leading ~/ literal so tilde expansion still
                     # happens; quote just the filename for layered defense.
                     target.run(
-                        f"ln -sf {np}/.tmuxinator.yml ~/.config/tmuxinator/{shlex.quote(session)}.yml",
+                        f"ln -sf {np}/.tmuxinator.yml ~/{TMUXINATOR_CONFIG_DIR}/{shlex.quote(session)}.yml",
                         timeout=10,
                     )
                 else:

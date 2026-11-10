@@ -309,9 +309,10 @@ place its `authorized_keys`; every later step runs as the agent, which cannot ru
 - **`dotfiles_destination` is checked when the template loads.** It is a path in the home (`dots` or
   `~/dots`) or an absolute path. It may not name the home itself or one of its parents, may not be,
   hold or lie inside a path Agentworks manages in the home (`~/.ssh`, `~/.agentworks`,
-  `~/.agentworks-artifacts` and the `~/.agentworks-*.sh` fragments), and may not contain an empty,
-  `.` or `..` component; a trailing `/` is dropped, and only its leading `~` is expanded. A stored
-  destination such as `dots` keeps meaning `~/dots`.
+  `~/.agentworks-artifacts`, `~/.config/tmuxinator` and the `~/.agentworks-*.sh` fragments), so
+  `~/.config` itself is refused too, and may not contain an empty, `.` or `..` component; a trailing
+  `/` is dropped, and only its leading `~` is expanded. A stored destination such as `dots` keeps
+  meaning `~/dots`.
 - **Git source URLs may not carry credentials.** A `git::https://` source whose URL holds a user
   name or token, such as `https://user:token@github.com/...`, is refused when the template loads,
   without echoing it; declare a `git-credential` resource for the host instead. A subpath with an
@@ -336,6 +337,11 @@ place its `authorized_keys`; every later step runs as the agent, which cannot ru
   in an interactive login shell (`-lic`), as the admin's always has, and the agent's mise config,
   lockfile and install follow the admin's steps; its profile, rc and mise warnings now also reach
   the agent's operation log.
+- **An agent's mise config is written before its dotfiles.** Agents now follow the admin's order:
+  the mise config from `mise_packages`, then the dotfiles sync, then the mise lockfile and install.
+  An agent template with `mise_packages` whose dotfiles also provide `~/.config/mise/config.toml`
+  now ends with the dotfiles' config, where the template's used to overwrite it. Drop
+  `mise_packages` if the dotfiles own the config, or stop shipping it in the dotfiles.
 - **A missing login shell warns.** Setting the admin's login shell to one that is not installed
   fails the shell configuration step with a warning, instead of running `usermod` with an empty
   shell.
