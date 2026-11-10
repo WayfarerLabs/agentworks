@@ -17,7 +17,7 @@ itself. Agentworks does not reinvent mise's integrity mechanisms.
 
 ## Quick start
 
-Add packages to your admin template -- as a YAML manifest in `~/.config/agentworks/resources/`:
+Add packages to your admin template, as a YAML manifest in `~/.config/agentworks/resources/`:
 
 ```yaml
 apiVersion: agentworks/v1
@@ -129,11 +129,15 @@ When no lockfile is present, `mise install` runs without `--locked` (no verifica
 Understanding the init ordering matters if your dotfiles also configure mise. The order is the same
 for the admin and for every agent:
 
-1. **Mise config write** -- agentworks writes `~/.config/mise/config.toml` from `mise_packages`
-2. **Dotfiles sync** -- your dotfiles can override the mise config (or provide their own lockfile)
-3. **Mise lockfile fetch** -- if `mise_lockfile` is set, it is copied last, overriding anything
-   dotfiles put there
-4. **Mise install** -- runs with the final config + lockfile state
+1. **Mise config write.** When `mise_packages` is set, agentworks writes
+   `~/.config/mise/config.toml` from it.
+2. **Dotfiles sync.** Your dotfiles can override the mise config, or provide their own lockfile.
+3. **Mise lockfile fetch.** If `mise_lockfile` is set, it is copied last, overriding anything the
+   dotfiles put there.
+4. **Mise install.** It runs with the final config and lockfile, whenever `mise_packages` or
+   `mise_lockfile` is set or the home has a config (one your dotfiles supplied counts), and prunes
+   on reinit as `mise_prune_on_reinit` says.
+5. **User install commands.** They run after the mise install, so they can use mise's tools.
 
 This means:
 
@@ -148,6 +152,9 @@ This means:
   leaves it alone and warns while `mise_packages` is set: let the dotfiles own the config and drop
   `mise_packages`, or stop linking it. The same holds for an explicit `mise_lockfile` over a linked
   `mise.lock`.
+- A git dotfiles checkout at `~/.config/mise` itself cannot be combined with `mise_packages`: the
+  config write creates that directory first, so the clone then finds it in place and the sync fails.
+  Let the dotfiles own the config and drop `mise_packages`, or check the dotfiles out elsewhere.
 
 ## Release age filtering
 

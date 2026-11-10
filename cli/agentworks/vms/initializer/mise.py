@@ -41,6 +41,15 @@ MISE_ACTIVATE_LINES = (
 )
 
 
+def _has_mise_config(files: Files, home: str) -> bool:
+    """Whether the account's home has a mise config (dotfiles may supply one); a probe that cannot run means no."""
+    try:
+        probe = Command(("test", "-f", f"{home}/{MISE_CONFIG_DIR}/config.toml"), deadline=files.deadline)
+        return status(files.access, probe) == 0
+    except STEP_FAILURES:
+        return False
+
+
 def _mise_shims_path(home: str) -> list[str]:
     """Return PATH additions for mise shims (for non-interactive contexts)."""
     return [f"{home}/.local/share/mise/shims"]

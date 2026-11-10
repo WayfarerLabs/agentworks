@@ -30,13 +30,13 @@ from agentworks.execution.access import Admin
 from agentworks.execution.requests import Command
 from agentworks.git_config import ensure_safe_directory_wildcard
 from agentworks.git_credentials import configure_user_git_credentials
-from agentworks.vms.home_layout import MISE_CONFIG_DIR
 
 from . import phase_a
 from .dotfiles import sync_dotfiles
 from .mise import (
     MISE_ACTIVATE_LINES,
     _fetch_mise_lockfile,
+    _has_mise_config,
     _mise_shims_path,
     _run_mise_install,
     _write_mise_config,
@@ -66,7 +66,7 @@ from .ssh_keys import (
     _preserve_ssh_host_keys,
     _reconcile_authorized_keys,
 )
-from .steps import STEP_DEADLINE, STEP_FAILURES, InitLog, status, warn_step
+from .steps import STEP_DEADLINE, STEP_FAILURES, InitLog, warn_step
 from .workspaces_dir import _setup_workspaces_directory
 
 if TYPE_CHECKING:
@@ -584,12 +584,3 @@ def _phase_b_setup(
         _write_agentworks_profile(files, all_paths, logger, home=home, shell=admin_shell)
         rc_snippets = [MISE_ACTIVATE_LINES] if admin.mise_activate else ["# mise activation disabled"]
         _write_agentworks_rc(files, rc_snippets, logger, home=home, shell=admin_shell)
-
-
-def _has_mise_config(files: Files, home: str) -> bool:
-    """Whether the admin's home has a mise config (dotfiles may supply one); a probe that cannot run means no."""
-    try:
-        probe = Command(("test", "-f", f"{home}/{MISE_CONFIG_DIR}/config.toml"), deadline=files.deadline)
-        return status(files.access, probe) == 0
-    except STEP_FAILURES:
-        return False

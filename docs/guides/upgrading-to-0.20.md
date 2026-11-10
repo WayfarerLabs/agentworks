@@ -339,11 +339,17 @@ place its `authorized_keys`; every later step runs as the agent, which cannot ru
   in an interactive login shell (`-lic`), as the admin's always has, and the agent's mise config,
   lockfile and install follow the admin's steps; its profile, rc and mise warnings now also reach
   the agent's operation log.
-- **An agent's mise config is written before its dotfiles.** Agents now follow the admin's order:
-  the mise config from `mise_packages`, then the dotfiles sync, then the mise lockfile and install.
-  An agent template with `mise_packages` whose dotfiles also provide `~/.config/mise/config.toml`
-  now ends with the dotfiles' config, where the template's used to overwrite it. Drop
-  `mise_packages` if the dotfiles own the config, or stop shipping it in the dotfiles.
+- **Agents follow the admin's mise and install-command order.** An agent now gets the mise config
+  from `mise_packages`, then its dotfiles sync, then the mise lockfile and install, then its user
+  install commands, as the admin always has. Three things change for agents:
+  - A template with `mise_packages` whose dotfiles also provide `~/.config/mise/config.toml` now
+    ends with the dotfiles' config, where the template's used to overwrite it. Drop `mise_packages`
+    if the dotfiles own the config, or stop shipping it in the dotfiles.
+  - Dotfiles that supply a mise config without `mise_packages` or `mise_lockfile` now get a
+    `mise install`, and a prune on reinit when `mise_prune_on_reinit` is on.
+  - User install commands run after the mise install instead of before the dotfiles, so they can use
+    mise's tools and see what the dotfiles installed. The profile always carries mise's shims on
+    `PATH`, as the admin's does.
 - **A missing login shell warns.** Setting the admin's login shell to one that is not installed
   fails the shell configuration step with a warning, instead of running `usermod` with an empty
   shell.

@@ -125,7 +125,7 @@ def test_the_profile_keeps_install_paths_in_precedence_with_mise_s_shims_first(h
     for name in [".profile", ".bashrc"] + ([".zprofile"] if shell == "zsh" else []):
         assert (home / name).read_text().splitlines() == [profile_line]
 
-    # Removing the install commands and mise on reinit also removes their managed paths.
+    # Removing the install commands on reinit removes their managed paths; mise's shims stay, as the admin's do.
     _run(AgentGuest(status=1), home, shell=shell)
     result = subprocess.run(
         [shell_path, "-c", '. "$HOME/.agentworks-profile.sh"; printf "%s" "$PATH"'],
@@ -134,4 +134,4 @@ def test_the_profile_keeps_install_paths_in_precedence_with_mise_s_shims_first(h
         capture_output=True,
         text=True,
     )
-    assert result.stdout == "/usr/bin:/bin"
+    assert result.stdout == f"{shims}:/usr/bin:/bin"

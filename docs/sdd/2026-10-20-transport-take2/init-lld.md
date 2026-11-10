@@ -1035,9 +1035,11 @@ no longer use them. The departures from the tables above, each recorded where it
   replaced on every upload and `restore` always reaches its rename. The git file source requires
   `mktemp`'s output to be a guest path under its staging prefix before using it, and reads its
   staging removal's completion and status, warning when it fails.
-- The agent writes its mise config before its dotfiles sync and fetches its lockfile and installs
-  after it (`_write_agent_mise_config`, `_install_agent_mise`), the admin's documented order;
-  through v0.19.0 the agent synced dotfiles first, so its template's config overwrote the dotfiles'.
+- The agent follows the admin's order: its mise config (when `mise_packages` is set), dotfiles, mise
+  lockfile and install (when packages, a lockfile or a config in the home, `mise._has_mise_config`),
+  then its user install commands, with mise's shims always on its profile's `PATH`
+  (`_write_agent_mise_config`, `_install_agent_mise`). Through v0.19.0 the agent ran its install
+  commands, then dotfiles, then mise, so its template's config overwrote the dotfiles'.
 - One git sequence for every case (above, "One dotfiles sync"): the ref, or `HEAD`, is fetched and
   checked out detached after any clone, and a failed sync skips the install for the agent too.
 - A bare relative `dotfiles_destination` is a path in the home, and one that is, holds or lies

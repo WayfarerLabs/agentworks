@@ -99,10 +99,12 @@ def create_agent_on_vm(
        admin work in agent create / reinit, and a failure in it raises.
     2. **Self-configure (agent)**: every subsequent step runs on the
        agent's own access, which refuses any elevated request before
-       dispatch. Covers the profile and rc fragments and their source
-       lines, git config + credentials, install commands, dotfiles and
-       mise. The agent owns its home, so no root or cross-uid writes are
-       needed in this phase, and a failed step warns.
+       dispatch. In order: the profile and rc fragments and their source
+       lines, the mise config, git config + credentials, dotfiles, the
+       mise lockfile and install, the user install commands (with the
+       profile rewritten), and a final pass over the source lines; the
+       admin's order. The agent owns its home, so no root or cross-uid
+       writes are needed in this phase, and a failed step warns.
 
     Keeping these two phases disjoint by access minimizes the code surface
     that runs as root on the agent's behalf and matches the rule that
@@ -230,11 +232,11 @@ def create_agent_on_vm(
     # install commands run) reaches the runners through login-shell
     # sourcing. Integration setup receives operator env through its own runner.
 
-    # Write the agent's per-user profile fragment EARLY -- before any
-    # install commands run -- so that AGENTWORKS_AGENT is visible to
-    # those commands via the login-shell sourcing chain. The fragment
-    # gets rewritten at the end of _run_agent_install_commands with
-    # accumulated PATH entries from user install commands.
+    # Write the agent's per-user profile fragment EARLY, before any install
+    # command or dotfiles installer runs, so that AGENTWORKS_AGENT is
+    # visible to them via the login-shell sourcing chain. The fragment gets
+    # rewritten at the end of _run_agent_install_commands with accumulated
+    # PATH entries from user install commands.
     from agentworks.env import ResourceContext, per_user_identity_env
     from agentworks.vms.sites import site_platform_name
 
@@ -262,6 +264,12 @@ def create_agent_on_vm(
     # starship / powerlevel10k anyway, and clobbered symlinked dotfiles
     # via scp.
 
+    # The admin's order from here on (docs/guides/mise.md): the mise config,
+    # dotfiles, the mise lockfile and install, then the user install commands,
+    # which may depend on mise's tools. Dotfiles may override the config, and
+    # an explicit lockfile overrides the dotfiles'.
+    _write_agent_mise_config(agent_files=agent_files, logger=logger, agent_tmpl=agent_tmpl, home=home)
+
     # Git safe.directory wildcard (agents access repos owned by admin).
     # The caller passes the VM's effective admin declaration, including
     # its stored final layer, so this path cannot silently fall back to a
@@ -285,21 +293,6 @@ def create_agent_on_vm(
         target_role="agent",
     )
 
-    # User install commands + login-shell PATH profile fragment.
-    _run_agent_install_commands(
-        agent_files=agent_files,
-        logger=logger,
-        registry=registry,
-        agent_tmpl=agent_tmpl,
-        home=home,
-        identity_env=agent_identity,
-    )
-
-    # Mise config, dotfiles, then the mise lockfile and install: the admin's
-    # order (docs/guides/mise.md), so dotfiles may override the config and an
-    # explicit lockfile overrides the dotfiles'.
-    _write_agent_mise_config(agent_files=agent_files, logger=logger, agent_tmpl=agent_tmpl, home=home)
-
     # Dotfiles: the same sync as the admin's, as the agent.
     if agent_cfg.dotfiles_source:
         sync_dotfiles(
@@ -313,6 +306,16 @@ def create_agent_on_vm(
         )
 
     _install_agent_mise(agent_files=agent_files, logger=logger, agent_tmpl=agent_tmpl, home=home)
+
+    # User install commands + login-shell PATH profile fragment.
+    _run_agent_install_commands(
+        agent_files=agent_files,
+        logger=logger,
+        registry=registry,
+        agent_tmpl=agent_tmpl,
+        home=home,
+        identity_env=agent_identity,
+    )
 
     # Defensive final step: re-ensure source lines in case dotfiles
     # install (or any other later step) overwrote a shell rc file in
@@ -373,8 +376,8 @@ def _run_agent_install_commands(
     passes is skipped, and a failure warns but does not abort. The profile
     fragment is rewritten unconditionally (even when there are no install
     commands and no PATH additions) so that reinit can clear previously set
-    paths, with mise's shims last when mise is configured, so they take
-    precedence.
+    paths, with mise's shims last, as the admin's profile always carries
+    them, so they take precedence.
 
     Install commands run without any injected environment: provisioning is
     hermetic. Static identity (``AGENTWORKS_AGENT``, etc.) reaches them
@@ -382,6 +385,7 @@ def _run_agent_install_commands(
     phase 2.
     """
     from agentworks.resources.access import kind_dict
+    from agentworks.vms.initializer.mise import _mise_shims_path
     from agentworks.vms.initializer.packages import _run_install_commands
 
     # DRIFT GUARD (Phase 7, recipe use-gate): this runner consumes
@@ -398,8 +402,7 @@ def _run_agent_install_commands(
         logger,
         label="Agent install command",
     )
-    if agent_tmpl.mise_packages or agent_tmpl.mise_lockfile:
-        path_additions.append(f"{home}/.local/share/mise/shims")
+    path_additions.extend(_mise_shims_path(home))
     _write_agentworks_profile(
         agent_files, path_additions, logger, home=home, shell=agent_tmpl.shell, identity_env=identity_env
     )
@@ -408,14 +411,15 @@ def _run_agent_install_commands(
 def _write_agent_mise_config(
     *, agent_files: Files, logger: InitLog, agent_tmpl: ResolvedAgentTemplate, home: str
 ) -> None:
-    """Write the agent's mise config from its template, as the agent, before its dotfiles sync.
+    """Write the agent's mise config from its ``mise_packages``, as the agent, before its dotfiles sync.
 
-    Phase B's ``_write_mise_config`` on the agent's own access. Nothing is
-    written when the template declares neither packages nor a lockfile.
+    Phase B's ``_write_mise_config`` on the agent's own access, under the
+    admin's guard: nothing is written when the template declares no
+    packages, so a config the dotfiles supply is left to them.
     """
     from agentworks.vms.initializer.mise import _write_mise_config
 
-    if not agent_tmpl.mise_packages and not agent_tmpl.mise_lockfile:
+    if not agent_tmpl.mise_packages:
         return
     _write_mise_config(agent_files, agent_tmpl.mise_packages, agent_tmpl.mise_install_before, home, logger)
 
@@ -423,20 +427,21 @@ def _write_agent_mise_config(
 def _install_agent_mise(*, agent_files: Files, logger: InitLog, agent_tmpl: ResolvedAgentTemplate, home: str) -> None:
     """Fetch the agent's mise lockfile and install its tools, as the agent, after its dotfiles sync.
 
-    The same steps as the admin's (``vms.initializer.mise``), with the
-    agent's template, and they run even when the config write warned. The
-    shims PATH entry is part of the profile fragment
-    (``_run_agent_install_commands``). ``mise install`` / ``mise prune`` run
+    The same steps and guard as the admin's (``vms.initializer.mise``), with
+    the agent's template: the install runs when the template declares
+    packages or a lockfile, or the home has a config (its dotfiles may supply
+    one), and it runs even when the config write warned. The shims PATH
+    entry is part of the profile fragment (``_run_agent_install_commands``). ``mise install`` / ``mise prune`` run
     in a login shell (``{shell} -lc``) so the agent's PATH and any other
     profile-exported env are in scope. No env= injection: provisioning is
     hermetic.
     """
-    from agentworks.vms.initializer.mise import _fetch_mise_lockfile, _run_mise_install
+    from agentworks.vms.initializer.mise import _fetch_mise_lockfile, _has_mise_config, _run_mise_install
 
-    if not agent_tmpl.mise_packages and not agent_tmpl.mise_lockfile:
-        return
     if agent_tmpl.mise_lockfile:
         _fetch_mise_lockfile(agent_files, agent_tmpl.mise_lockfile, home, logger)
+    if not (agent_tmpl.mise_packages or agent_tmpl.mise_lockfile or _has_mise_config(agent_files, home)):
+        return
     _run_mise_install(
         agent_files,
         agent_tmpl.shell,

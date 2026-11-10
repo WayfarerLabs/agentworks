@@ -62,6 +62,7 @@ def _run_create_on_vm(
     before_create: Callable[[AccessRecorder], None] | None = None,
     dotfiles: Path | str | None = None,
     mise_packages: list[str] | None = None,
+    mise_lockfile: str | None = None,
 ) -> AccessRecorder:
     """Drive ``create_agent_on_vm`` over a recording access and return it.
 
@@ -87,6 +88,8 @@ def _run_create_on_vm(
         template = dataclasses.replace(template, dotfiles_source=str(dotfiles))
     if mise_packages is not None:
         template = dataclasses.replace(template, mise_packages=mise_packages)
+    if mise_lockfile is not None:
+        template = dataclasses.replace(template, mise_lockfile=mise_lockfile)
     recorder = install_access_recorder(monkeypatch)
 
     def answer(call: Call) -> Result | None:
@@ -369,27 +372,60 @@ def test_a_failed_git_dotfiles_sync_skips_the_agent_install(
     assert ("bash", "-lc", "./install.sh") not in commands
 
 
-def test_the_agent_writes_its_mise_config_before_its_dotfiles_and_installs_after(
+def test_the_agent_follows_the_admin_s_mise_dotfiles_and_install_command_order(
     db: Database, config: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """The documented order (docs/guides/mise.md), as the admin's: config, dotfiles, then install."""
+    """The documented order (docs/guides/mise.md), as the admin's: mise config, dotfiles, mise
+    lockfile, mise install, then the user install commands, which may depend on mise's tools."""
     (tmp_path / "dots").mkdir()
+    (tmp_path / "mise.lock").write_text("[tools]\n")
+    install_commands_at: list[int] = []
+    run_install_commands = agent_initializer._run_agent_install_commands
+
+    def watch(recorder: AccessRecorder) -> None:
+        def record_position(**kwargs: Any) -> None:
+            install_commands_at.append(len(recorder.requests("run")))
+            run_install_commands(**kwargs)
+
+        monkeypatch.setattr(agent_initializer, "_run_agent_install_commands", record_position)
 
     recorder = _run_create_on_vm(
-        db, config, monkeypatch, user_exists=False, dotfiles=tmp_path / "dots", mise_packages=["jq@1"]
+        db,
+        config,
+        monkeypatch,
+        user_exists=False,
+        dotfiles=tmp_path / "dots",
+        mise_packages=["jq@1"],
+        mise_lockfile=str(tmp_path / "mise.lock"),
+        before_create=watch,
     )
     requests = recorder.requests("run")
 
     def first(predicate: Callable[[Any], bool]) -> int:
         return next(index for index, request in enumerate(requests) if predicate(request))
 
-    config_write = first(
-        lambda r: (
+    def writes(name: str) -> Callable[[Any], bool]:
+        return lambda r: (
             isinstance(r, PythonProgram)
             and r.args[0] == "write"
-            and json.loads(r.args[1])["path"] == f"{HOME}/.config/mise/config.toml"
+            and json.loads(r.args[1])["path"] == f"{HOME}/.config/mise/{name}"
         )
-    )
+
+    config_write = first(writes("config.toml"))
     tree_upload = first(lambda r: isinstance(r, Script) and "AGW_TREE_DEST" in r.env)
+    lockfile = first(writes("mise.lock"))
     install = first(lambda r: isinstance(r, Command) and r.argv[-1].startswith("mise install"))
-    assert config_write < tree_upload < install
+    (install_commands,) = install_commands_at
+    assert config_write < tree_upload < lockfile < install < install_commands
+
+
+def test_dotfiles_that_supply_a_mise_config_get_an_install_without_mise_packages(
+    db: Database, config: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The admin's guard: a config in the home after the dotfiles sync is installed from."""
+    (tmp_path / "dots").mkdir()
+    recorder = _run_create_on_vm(db, config, monkeypatch, user_exists=False, dotfiles=tmp_path / "dots")
+
+    commands = _commands(recorder)
+    assert ("test", "-f", f"{HOME}/.config/mise/config.toml") in commands
+    assert any(argv[-1].startswith("mise install") for argv in commands)
