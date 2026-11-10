@@ -85,9 +85,10 @@ VM target and power state; both child targets remain available for future recove
   leaving earlier successful restarts and continuing one session at a time.
 - Batch stop uses non-activating parent observation and the same prepared stop helpers, retaining
   filters and explicit force policy. Remove the old batch VM boundary and its late-repair method.
-- A stopped parent or failed infrastructure credential blocks that family while independent batch
-  families proceed; the old boundary refused the whole batch. The workload-secret barrier remains
-  operation-wide.
+- A stopped parent blocks selected running workloads, while accepted stop work remains permitted.
+  Infrastructure credential failures block only families needing that credential; independent
+  eligible families proceed. The old boundary refused the whole batch. The workload-secret barrier
+  remains operation-wide.
 - All deferred actions, including VM stops during reconciliation, wait for this shared boundary.
   Required VM activation/repair may already have completed and is not rolled back on failure.
 - Stopping an already-off child no longer needs to activate its VM solely for a stop operation.

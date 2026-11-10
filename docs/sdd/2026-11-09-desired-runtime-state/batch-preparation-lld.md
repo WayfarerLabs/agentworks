@@ -187,9 +187,10 @@ workload env targets. Retire `_batch_vm_boundary_impl`, `_batch_vm_boundary`, th
 after these callers move. Singular services use the same concrete helpers. Extract focused modules
 rather than extending the already-large lifecycle file.
 
-A stopped parent or failed infrastructure credential blocks its own batch family while independent
-families continue. This changes the old batch boundary's whole-batch refusal and must be documented;
-shared required workload-secret failure still prevents every deferred runtime action.
+A stopped parent blocks selected running workloads; infrastructure credential failures block only
+families needing that credential. Independent eligible families continue. Accepted stop work below a
+stopped parent remains permitted. This changes the old boundary's whole-batch refusal and must be
+documented; shared workload-secret failure still prevents every deferred runtime action.
 
 ## Execution and final observations
 
@@ -261,6 +262,8 @@ Execution rebuilds and revalidates its plan rather than consuming preview text.
   barrier without a second source call. The same failure does not block an unrelated workload union.
   A stop-only parent receives observation without activation or an implicitly booting hold.
 - Two repair paths share one conditional key; a healthy VM never requests it.
+- Batch stop below a stopped-intent parent records accepted stopped targets without activation. An
+  off parent satisfies absence; a live parent permits safe stop cleanup. Preserve filters and force.
 - Mixed session launches and console builds share one workload union; an invalid value for any
   consumer prevents all tmux changes and every deferred provider stop.
 - No-op, refused, stopped-parent, pending-adoption, and cleanup-only targets contribute no unused
