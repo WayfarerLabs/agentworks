@@ -185,9 +185,11 @@ whole singular launcher in a loop. Batch stop uses the same stop preparation wit
 workload env targets. Retire `_batch_vm_boundary_impl`, `_batch_vm_boundary`, the unused
 `_best_effort_batch_vm_boundary`, their exports, and the sole `Resolver.resolve_late_repair` path
 after these callers move. Singular services use the same concrete helpers. Extract focused modules
-rather than extending the already-large lifecycle file.
+rather than extending the already-large lifecycle file. Update the obsolete late-repair description
+in `orchestration/activation.py` and replace tests patching retired helpers with behavioral coverage
+of the new composition.
 
-A stopped parent blocks selected running workloads; infrastructure credential failures block only
+A stopped parent blocks workloads whose desired target is running; credential failures block only
 families needing that credential. Independent eligible families continue. Accepted stop work below a
 stopped parent remains permitted. This changes the old boundary's whole-batch refusal and must be
 documented; shared workload-secret failure still prevents every deferred runtime action.

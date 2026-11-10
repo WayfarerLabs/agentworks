@@ -12,12 +12,12 @@ on `feat/desired-runtime-state`, based on main. No split PR, stack, early merge,
 is authorized. Private implementation commits may be partial; each published handoff is complete for
 its checkpoint and green. The PR remains draft until the complete implementation handoff.
 
-| Stage                   | Signal                                      | Published fix allowance               | Current record                                 |
-| ----------------------- | ------------------------------------------- | ------------------------------------- | ---------------------------------------------- |
-| FRD                     | Draft plus `review-requested`               | Up to two rounds                      | Converged at `c6337609d`, two rounds used      |
-| Complete design         | Draft plus `review-requested`               | Up to two rounds                      | Initial handoff `f3861bb6`; round one underway |
-| Complete implementation | Ready                                       | Up to two rounds                      | Not started                                    |
-| Closeout                | Final lock in the same PR after convergence | No new feature/fix allowance inferred | Not started                                    |
+| Stage                   | Signal                                      | Published fix allowance               | Current record                                   |
+| ----------------------- | ------------------------------------------- | ------------------------------------- | ------------------------------------------------ |
+| FRD                     | Draft plus `review-requested`               | Up to two rounds                      | Converged at `c6337609d`, two rounds used        |
+| Complete design         | Draft plus `review-requested`               | Up to two rounds                      | Round-one handoff `288d4a05`; round two underway |
+| Complete implementation | Ready                                       | Up to two rounds                      | Not started                                      |
+| Closeout                | Final lock in the same PR after convergence | No new feature/fix allowance inferred | Not started                                      |
 
 The FRD convergence reading is PR comment 6762771633. The final report accepted prior corrections;
 its remaining phrase suggestion was independently assessed as optional. The HLA states uniform
@@ -98,7 +98,9 @@ with the new model while provider contracts remain unchanged.
       one complete eligible workload resolution. Include safe residual starts and ordinary no-ops.
 - [ ] Route batch stop through non-activating parent observation and prepared stops, including
       accepted absent no-ops and existing filters/force. Retire all old batch boundary helpers,
-      unused best-effort exports, and the sole Resolver late-repair method.
+      unused best-effort exports, and the sole Resolver late-repair method. Update the obsolete
+      activation late-repair docstring and replace tests patching retired helpers with coverage of
+      the new composition.
 - [ ] Separate console observation/target collection from staging cleanup and realization. Add
       intent handling and selection under guards, preserve membership independence, and guard
       definition/member/cascade mutations. Put console delete selection and consent under the same
@@ -162,6 +164,9 @@ existing domain authorities, with no generic runnable lifecycle framework.
       running behavior, parent precedence, console independence, preview limits, and batch-secret
       failure changes, per-family preparation isolation, and contention during secret prompts,
       console consent, and hold admission. Add the implementing commit's breaking-change footer.
+- [ ] Explain that live WSL guests with stopped intent receive no idle protection during access or
+      management commands and may stop mid-command. Show explicit on-demand/running selection as
+      permitting normal holds and activation, rather than a keepalive-only switch.
 - [ ] Run the complete implementation's independent project review, complexity pass, and a
       fresh-context generic correctness/security pass at one pinned head in separate worktrees.
       Scale depth to migration, concurrency, secret delivery, and lifecycle behavior; verify

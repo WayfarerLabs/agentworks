@@ -85,10 +85,10 @@ VM target and power state; both child targets remain available for future recove
   leaving earlier successful restarts and continuing one session at a time.
 - Batch stop uses non-activating parent observation and the same prepared stop helpers, retaining
   filters and explicit force policy. Remove the old batch VM boundary and its late-repair method.
-- A stopped parent blocks selected running workloads, while accepted stop work remains permitted.
-  Infrastructure credential failures block only families needing that credential; independent
-  eligible families proceed. The old boundary refused the whole batch. The workload-secret barrier
-  remains operation-wide.
+- A stopped parent blocks workloads whose desired target is running; accepted stop work is
+  permitted. Infrastructure credential failures block only families needing that credential;
+  independent eligible families proceed. The old boundary refused the whole batch. The
+  workload-secret barrier remains operation-wide.
 - All deferred actions, including VM stops during reconciliation, wait for this shared boundary.
   Required VM activation/repair may already have completed and is not rolled back on failure.
 - Stopping an already-off child no longer needs to activate its VM solely for a stop operation.
@@ -121,6 +121,12 @@ A same-keeper guest acknowledgement precedes admission completion. Reachability 
 read-only, but even live diagnostic commands can report busy at admission. No new guard spans the
 interactive body. Reconciliation secret prompts and console delete confirmation can hold a family
 busy; retry the command after that operation completes.
+
+On WSL, access and management commands against an already-live VM with stopped intent receive no
+idle-shutdown protection, so the distro may stop during a long command. This includes shell access,
+workspace creation, and agent reinitialization. To permit normal hold behavior, explicitly select
+on-demand or running intent first. On-demand also permits future activation; changing intent is not
+merely enabling a per-command keepalive. Commands do not change that intent automatically.
 
 Update full database restore sentinels and row-backed backup serialization for the new fields.
 Validate all historical completed schemas as well as the new one. A full database backup preserves
