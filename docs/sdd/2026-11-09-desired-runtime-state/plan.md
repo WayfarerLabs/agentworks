@@ -16,7 +16,7 @@ its checkpoint and green. The PR remains draft until the complete implementation
 | ----------------------- | ------------------------------------------- | ------------------------------------- | ----------------------------------------- |
 | FRD                     | Draft plus `review-requested`               | Up to two rounds                      | Converged at `c6337609d`, two rounds used |
 | Complete design         | Draft plus `review-requested`               | Up to two rounds                      | Converged at `32a176600`; two rounds used |
-| Complete implementation | Ready                                       | Up to two rounds                      | Private work in progress                  |
+| Complete implementation | Ready                                       | Up to two rounds                      | Implemented; initial handoff pending      |
 | Closeout                | Final lock in the same PR after convergence | No new feature/fix allowance inferred | Not started                               |
 
 The FRD convergence reading is PR comment 6762771633. The final report accepted prior corrections;
@@ -88,7 +88,7 @@ explicit migration and CLI contract, a green handed-off head, and a recorded con
       explicit held-token reuse through all current guarded agent/workspace/session callers. Guard
       hold admission too; release admission-only locking before interactive access. Require bounded
       same-keeper guest acknowledgement on WSL entry, with complete failure cleanup.
-- [ ] Verify populated and historical migrations, rollback/retry, UUID stability/replacement,
+- [x] Verify populated and historical migrations, rollback/retry, UUID stability/replacement,
       database restore, row-backed backup serialization, wrong-kind values, and Windows lock
       behavior.
 
@@ -177,11 +177,11 @@ existing domain authorities, with no generic runnable lifecycle framework.
 - [x] Explain that live WSL guests with stopped intent receive no idle protection during access or
       management commands and may stop mid-command. Show explicit on-demand/running selection as
       permitting normal holds and activation, rather than a keepalive-only switch.
-- [ ] Run the complete implementation's independent project review, complexity pass, and a
+- [x] Run the complete implementation's independent project review, complexity pass, and a
       fresh-context generic correctness/security pass at one pinned head in separate worktrees.
       Scale depth to migration, concurrency, secret delivery, and lifecycle behavior; verify
       material claims.
-- [ ] Run required Python lint/format/type/test and typer-isolation gates, file-quality linters,
+- [x] Run required Python lint/format/type/test and typer-isolation gates, file-quality linters,
       locked-SDD and rulesync checks, website Python/Node tests, and deterministic double builds on
       real exit codes. Add meaningful Windows-marked coverage for host-sensitive changes.
 
@@ -192,13 +192,22 @@ corrections are integrated. A legacy-agent transport report was refuted against 
 constraint and prompted no change. Evidence-only checkpoint recovery remains behind the shared
 secret barrier and never falls through to a launch.
 
-The full suite at `0830ee49b` passed 11,647 tests with 11 skips. The subsequent
-preview-disappearance fixes have focused regression coverage using normal public deletion services
-through a second database connection. They preserve independent results without acquiring a preview
-guard. Final required gates and private reviews at the final head are running before publication.
-Local CLI process checks used isolated state and exercised setters and inspection; they did not
-exercise a provider. Actual recovery and Windows/WSL live evidence await the separate integration
-tester.
+Final verification at `ca3e94194` passed 11,652 tests with 11 skips, plus lint, format, type,
+typer-isolation, file-quality, locked-SDD and rulesync checks. Website verification passed 160
+Python and 103 Node tests and deterministic double builds at both site bases. All three Linux Python
+CI jobs passed. The preview-disappearance regressions use normal public deletion services through a
+second database connection and preserve independent results without acquiring a preview guard.
+
+The Windows gate exposed a synthetic producer's text-newline translation. The test-only correction
+at `9b1193e00` emits guest LF bytes directly; production validation remains strict. Its keeper suite
+passed 19 tests with one Linux skip, and the native Windows CI job passed. Application code,
+permanent guidance, and SDD content were unchanged from the complete-feature review head. Full
+project, complexity, and generic correctness reviews at `ca3e94194`, followed by all three delta
+reviews at `9b1193e00`, were clean. Final handoff CI must be green before ready is applied.
+
+Local CLI process checks used isolated state and exercised all six help paths, pure setters,
+repeated setters, invalid child-state choices, and JSON inspection. They did not exercise a
+provider. Actual recovery and Windows/WSL live evidence await the separate integration tester.
 
 Definition of done: no material private finding remains; permanent docs describe shipped behavior
 without relying on SDD paths; required gates are green and evidence names the exact tested head.
