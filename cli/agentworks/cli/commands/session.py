@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
+import click
 import typer
 
 from agentworks.cli._app import app
@@ -16,6 +17,8 @@ session_app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(session_app)
+
+_DESIRED_STATE_CHOICES = click.Choice(["running", "stopped"])
 
 
 @session_app.command("create")
@@ -376,6 +379,38 @@ def _launch_sessions(
             )
     else:
         raise typer.BadParameter("provide a session name or use --all")
+
+
+@session_app.command("set-desired-state")
+def session_set_desired_state(
+    name: Annotated[str, typer.Argument(help="Session name")],
+    state: Annotated[
+        str,
+        typer.Argument(help="Desired runtime state", click_type=_DESIRED_STATE_CHOICES),
+    ],
+) -> None:
+    """Set the stored runtime target without changing the running state."""
+    from agentworks.sessions.manager import set_session_desired_runtime_state
+
+    set_session_desired_runtime_state(get_db(), name=name, state=state)
+
+
+@session_app.command("reconcile")
+def session_reconcile(
+    name: Annotated[str, typer.Argument(help="Session name")],
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Observe and report without changing runtime")] = False,
+) -> None:
+    """Converge the session to stored runtime targets."""
+    from agentworks.config import load_config
+    from agentworks.runtime_state import reconcile_session
+
+    reconcile_session(
+        get_db(),
+        load_config(),
+        name=name,
+        dry_run=dry_run,
+        interaction=ordinary_tty_interaction_policy(),
+    )
 
 
 @session_app.command("start")
