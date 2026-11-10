@@ -223,3 +223,34 @@ def test_gate_cancellation_is_not_memoized_as_credential_failure(
     resolver.resolve()
     assert backend.calls == [["shared"], ["shared"]]
     assert resolver.values == {"shared": "ghtok"}
+
+
+@pytest.mark.parametrize("phase", ["initial", "gate", "boundary"])
+def test_disposal_prevents_source_access_and_cached_value_reads(
+    backend: _ResolveSpy,
+    phase: str,
+) -> None:
+    resolver = _resolver()
+    if phase != "initial":
+        resolver.resolve_gate("shared")
+    if phase == "boundary":
+        resolver.resolve()
+    completed_calls = list(backend.calls)
+
+    resolver.close()
+    resolver.close()
+
+    assert not resolver.resolved
+    with pytest.raises(StateError):
+        resolver.get("shared")
+    with pytest.raises(StateError):
+        _ = resolver.values
+    with pytest.raises(StateError):
+        resolver.resolve_gate("new")
+    with pytest.raises(StateError):
+        resolver.resolve()
+    with pytest.raises(StateError):
+        resolver.register_name("new")
+    with pytest.raises(StateError):
+        resolver.seed({"new": "unused"})
+    assert backend.calls == completed_calls
