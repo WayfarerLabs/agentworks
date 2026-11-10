@@ -1,6 +1,6 @@
 """Thin REST client for the Proxmox VE API.
 
-Uses stdlib urllib.request -- no external dependencies. Authentication
+Uses stdlib urllib.request, with no external dependencies. Authentication
 is via PVEAPIToken (token ID + secret), not session cookies.
 """
 
