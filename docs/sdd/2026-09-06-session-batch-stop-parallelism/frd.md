@@ -277,3 +277,12 @@ Tests MUST assert behavior and state, not authored prose.
    step?
 2. Should serial compatibility teardown run before or after the concurrent lane? The proposed design
    runs it afterward so incomplete or shared-server work cannot delay independent modern runtimes.
+
+## Operator Rulings
+
+### 2026-11-10: Additional PID-repair round
+
+Authenticated operator reply to the scope question about including PID repair from issue #884 in
+PR #776:
+
+> Authorize an additional round to include PID repair
