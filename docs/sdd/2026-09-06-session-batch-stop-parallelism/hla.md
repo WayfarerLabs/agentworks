@@ -82,8 +82,10 @@ thread safety.
 Synchronous callers use the same complete-plan preparation, remote execution, and conditional
 reconciliation. Stopped, incomplete, and uncertain rows retain invoking-thread compatibility
 preparation. An incomplete identity can become a complete plan only after recorded launch-attempt
-proof, persistence, and a refetch confirming the same session, run, and observed fingerprint. The
-common engine then captures the runtime afresh before destructive use.
+proof, conditional persistence against the original session/run/runtime snapshot, and a refetch
+confirming the same session, run, and observed fingerprint. A changed row cannot be overwritten
+during identity acquisition. The common engine then captures the runtime afresh before destructive
+use.
 
 ### Remote teardown engine
 

@@ -956,6 +956,42 @@ class Database:
         )
         self._commit_unless_in_tx()
 
+    def complete_session_runtime_identity(
+        self,
+        expected: SessionRow,
+        *,
+        boot_id: str,
+        tmux_server_start_ticks: int,
+    ) -> None:
+        """Persist observed identity only while its original runtime snapshot still holds."""
+        result = self._conn.execute(
+            "UPDATE sessions SET boot_id = ?, tmux_server_start_ticks = ?, "
+            "updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') "
+            "WHERE name = ? AND session_uuid = ? AND run_id IS ? AND socket_path IS ? "
+            "AND pid IS ? AND boot_id IS ? AND tmux_server_start_ticks IS ?",
+            (
+                boot_id,
+                tmux_server_start_ticks,
+                expected.name,
+                expected.session_uuid,
+                expected.run_id,
+                expected.socket_path,
+                expected.pid,
+                expected.boot_id,
+                expected.tmux_server_start_ticks,
+            ),
+        )
+        self._commit_unless_in_tx()
+        if result.rowcount != 1:
+            from agentworks.errors import StateError
+
+            raise StateError(
+                f"session '{expected.name}' identity changed before its runtime could be completed",
+                entity_kind="session",
+                entity_name=expected.name,
+                hint="Inspect the current session runtime before retrying.",
+            )
+
     def compare_and_set_session_stopped(
         self,
         name: str,

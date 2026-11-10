@@ -421,10 +421,8 @@ def teardown_dedicated_session(
                 hint="Stop the native workload manually, or stop and start its VM, then retry.",
             )
         original_identity = (session.session_uuid, session.run_id)
-        db.update_session_runtime(
-            session.name,
-            socket_path=socket_path,
-            pid=observed.pid,
+        db.complete_session_runtime_identity(
+            session,
             boot_id=observed_boot_id,
             tmux_server_start_ticks=observed.start_ticks,
         )

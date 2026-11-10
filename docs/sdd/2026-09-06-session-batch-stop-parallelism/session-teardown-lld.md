@@ -157,6 +157,12 @@ then enters the same complete-plan preparation as an originally complete row. Th
 captures the runtime again after preparation; the compatibility capture is not retained as
 destructive authority across the persistence checkpoint.
 
+The acquisition write itself is conditional on the original row's name, session UUID, nullable run
+ID, socket, PID, boot ID, and missing start ticks. The database atomically fills the validated boot
+ID and start ticks only if that snapshot still matches. A zero-row result raises a typed conflict
+without changing a replacement. The subsequent reread separately refuses changes after the write; it
+is not a substitute for the atomic acquisition predicate.
+
 The compatibility path also preserves current-main recovery for uncertain launches: a positively
 observed VM boot change proves the previous workload gone even without a known PID; an uncertain
 launch on the current boot cannot gain cleanup authority. A stopped row with a live server at its
