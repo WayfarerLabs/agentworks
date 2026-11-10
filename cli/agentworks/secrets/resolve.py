@@ -722,9 +722,7 @@ def _resolve_batch(
             if reason is None:
                 return None
             prospective.source_blocks.append((source.name, description.identifier, source.backend_class.name, reason))
-        return _collapse_actual(
-            secret.name, prospective, sources_empty=configured_sources_empty and secret.name not in prompt_names
-        )
+        return _collapse_actual(secret.name, prospective, sources_empty=configured_sources_empty)
 
     for source_index, source in enumerate(sources):
         unresolved = [declarations[name] for name in deduped if name not in outcomes]
@@ -817,9 +815,7 @@ def _resolve_batch(
 
     for name in deduped:
         if name not in outcomes:
-            outcomes[name] = _collapse_actual(
-                name, evidence[name], sources_empty=configured_sources_empty and name not in prompt_names
-            )
+            outcomes[name] = _collapse_actual(name, evidence[name], sources_empty=configured_sources_empty)
     return ResolutionBatch(tuple(outcomes[name] for name in deduped), values)
 
 

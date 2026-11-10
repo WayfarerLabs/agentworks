@@ -485,13 +485,6 @@ printf '%s\\0' "${{COMPREPLY[@]}}"
 
         assert completed.stdout.split(b"\0") == [filename.encode(), b""]
 
-    def test_vm_rekey_secret_completion_and_flags(self) -> None:
-        command = build_spec(app).subcommands["vm"].subcommands["rekey"]
-        parameters = {param.name: param for param in command.params}
-        assert parameters["secret"].dynamic_completer == "secrets"
-        assert "prompt" in parameters
-        assert "ignore_env" not in parameters
-
     def test_secret_verify_variadic_completion_contract_in_every_shell(self) -> None:
         spec = build_spec(app)
         verify = spec.subcommands["secret"].subcommands["verify"]

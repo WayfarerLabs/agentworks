@@ -86,10 +86,30 @@ def test_explicit_secret_is_validated_before_operations(db, make_config, resolve
     assert db.get_vm("box").tailscale_host == "100.64.0.9"
 
 
-def test_secret_and_prompt_are_mutually_exclusive(db, make_config, resolve_counter) -> None:
+def test_secret_and_prompt_are_mutually_exclusive(db, make_config, resolve_counter, monkeypatch) -> None:
+    config = make_config(
+        '[secret_config]\nsources = ["env-var"]\n',
+        manifests=[ManifestDoc("secret", "replacement-key", description="replacement")],
+    )
+    _seed_vm(db)
+    before = db.get_vm("box")
+    monkeypatch.setenv("AW_SECRET_REPLACEMENT_KEY", "replacement-value")
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    prompts = []
+    monkeypatch.setattr(output, "prompt_secret", lambda label, **kwargs: prompts.append(label) or "fresh-key")
+    _reachable(monkeypatch, True)
+    events = _fake_status(monkeypatch, VMStatus.RUNNING)
+    calls = _fake_rekey_transports(monkeypatch)
+
     with pytest.raises(ValidationError):
-        manager.rekey_vm(db, make_config(), "box", secret="", prompt=True, interaction=TtyInteractionPolicy.ALLOW)
+        manager.rekey_vm(
+            db, config, "box", secret="replacement-key", prompt=True, interaction=TtyInteractionPolicy.ALLOW
+        )
     assert resolve_counter == []
+    assert prompts == []
+    assert events == []
+    assert calls == []
+    assert db.get_vm("box") == before
 
 
 def test_prompt_ignores_stale_key_but_resolves_site_normally(

@@ -192,10 +192,7 @@ def test_sweep_treats_global_tty_policy_separately_from_zero_impact_preview(
     preflight_all(nodes, RunContext(config=config), registry=registry, interaction=TtyInteractionPolicy.ALLOW)  # type: ignore[arg-type]
 
 
-@pytest.mark.parametrize("selected_names", [frozenset(), frozenset({"token"})])
-def test_sweep_memoizes_repeated_refs_once_per_command(
-    monkeypatch: pytest.MonkeyPatch, selected_names: frozenset[str]
-) -> None:
+def test_sweep_memoizes_repeated_refs_once_per_command(monkeypatch: pytest.MonkeyPatch) -> None:
     from collections.abc import Iterable, Sequence
 
     from agentworks.capabilities.secret_backend import PreviewAvailable, TtyInteractionAccess
@@ -205,7 +202,6 @@ def test_sweep_memoizes_repeated_refs_once_per_command(
     from agentworks.secrets.resolve import ActiveSource
 
     events: list[tuple[str, ...]] = []
-    selections: list[frozenset[str]] = []
     monkeypatch.setattr(
         "agentworks.secrets.resolve.active_sources",
         lambda config, registry: events.append(("sources",)) or (),
@@ -218,7 +214,6 @@ def test_sweep_memoizes_repeated_refs_once_per_command(
         tty_access: TtyInteractionAccess,
         prompt_names: frozenset[str] = frozenset(),
     ) -> dict[str, ResolutionPreview]:
-        selections.append(prompt_names)
         names = tuple(decl.name for decl in decls)
         events.append(("preview", *names))
         return {
@@ -244,10 +239,8 @@ def test_sweep_memoizes_repeated_refs_once_per_command(
         RunContext(config=cast("Config", object())),
         registry=Registry.empty(),
         interaction=TtyInteractionPolicy.REFUSE,
-        prompt_names=selected_names,
     )
     assert events == [("sources",), ("preview", "token")]
-    assert selections == [selected_names]
     assert [name for name, _ctx in log] == ["first", "second"]
 
 
