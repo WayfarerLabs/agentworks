@@ -70,7 +70,7 @@ from .ssh_keys import (
     _preserve_ssh_host_keys,
     _reconcile_authorized_keys,
 )
-from .steps import STEP_DEADLINE, STEP_FAILURES, warn_step
+from .steps import STEP_DEADLINE, STEP_FAILURES, status, warn_step
 from .workspaces_dir import _setup_workspaces_directory
 
 if TYPE_CHECKING:
@@ -554,7 +554,7 @@ def _phase_b_setup(
         # Non-fatal: mise config (written before dotfiles so dotfiles can override)
         mise_path: list[str] = _mise_shims_path(home)
         if admin.mise_packages:
-            _write_mise_config(legacy_target, admin.mise_packages, admin.mise_install_before, home, logger)
+            _write_mise_config(files, admin.mise_packages, admin.mise_install_before, home, logger)
 
         # Non-fatal: git safe.directory wildcard (disables ownership checks for the
         # multi-user workspace model where agents access repos owned by admin)
@@ -587,29 +587,8 @@ def _phase_b_setup(
 
         # Non-fatal: mise install (after config + dotfiles + lockfile are all settled)
         prune = admin.mise_prune_on_reinit
-        if admin.mise_packages or admin.mise_lockfile:
-            _run_mise_install(
-                legacy_target,
-                admin_shell,
-                home,
-                admin.mise_allow_unlocked,
-                logger,
-                prune=prune,
-            )
-        else:
-            try:
-                check = legacy_target.run(f"test -f {home}/.config/mise/config.toml", check=False)
-                if check.ok:
-                    _run_mise_install(
-                        legacy_target,
-                        admin_shell,
-                        home,
-                        admin.mise_allow_unlocked,
-                        logger,
-                        prune=prune,
-                    )
-            except SSHError:
-                pass
+        if admin.mise_packages or admin.mise_lockfile or _has_mise_config(files, home):
+            _run_mise_install(files, admin_shell, home, admin.mise_allow_unlocked, logger, prune=prune)
 
         # Non-fatal: user install commands for admin user (may depend on mise tools)
         user_path = _run_install_commands(
@@ -673,3 +652,11 @@ def _sync_dotfiles(files: Files, admin: AdminConfig, shell: str, home: str, log:
         )
     except STEP_FAILURES as error:
         warn_step(log, f"dotfiles install '{admin.dotfiles_install_cmd}' failed in {dest}", error)
+
+
+def _has_mise_config(files: Files, home: str) -> bool:
+    """Whether the admin's home has a mise config (dotfiles may supply one); a probe that cannot run means no."""
+    try:
+        return status(files, Command(("test", "-f", f"{home}/.config/mise/config.toml"), deadline=files.deadline)) == 0
+    except STEP_FAILURES:
+        return False

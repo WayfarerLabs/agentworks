@@ -37,7 +37,6 @@ if TYPE_CHECKING:
     from agentworks.git_credentials import CredentialRequest
     from agentworks.resources import Registry
     from agentworks.ssh import SSHLogger
-    from agentworks.transports import Transport
     from agentworks.vms.initializer.steps import InitLog
 
 
@@ -377,7 +376,7 @@ def create_agent_on_vm(
             output.warn(f"agent dotfiles failed: {e}")
 
     # Mise.
-    _run_agent_mise_setup(agent_target=agent_target, agent_files=agent_files, agent_tmpl=agent_tmpl, home=home)
+    _run_agent_mise_setup(agent_files=agent_files, logger=logger, agent_tmpl=agent_tmpl, home=home)
 
     # Defensive final step: re-ensure source lines in case dotfiles
     # install (or any other later step) overwrote a shell rc file in
@@ -471,113 +470,28 @@ def _run_agent_install_commands(
     )
 
 
-def _run_agent_mise_setup(
-    *,
-    agent_target: Transport,
-    agent_files: Files,
-    agent_tmpl: ResolvedAgentTemplate,
-    home: str,
-) -> None:
-    """Set up mise for an agent: shims PATH, config, lockfile, install.
+def _run_agent_mise_setup(*, agent_files: Files, logger: InitLog, agent_tmpl: ResolvedAgentTemplate, home: str) -> None:
+    """Set up mise as the agent, on its own access: config, lockfile, install and prune.
 
-    Runs entirely over agent SSH. Writes the mise config and
-    rc files directly via ``agent_target.write_file``; fetches the
-    lockfile via ``fetch_file`` over the same agent transport so the
-    file lands at its final path owned by the agent with no sudo step.
-
-    ``mise install`` / ``mise prune`` are wrapped in a login shell
-    (``{shell} -lc``) so the agent's PATH and any other profile-exported
-    env (mise's own activation hooks, plugin discovery paths, downstream
-    tooling like ``npm`` / ``pip`` that mise plugins shell out to during
-    install) are in scope. No env= injection: provisioning is hermetic.
+    The same steps as the admin's (``vms.initializer.mise``), with the
+    agent's template. The shims PATH entry is part of the profile fragment
+    (``_run_agent_install_commands``). ``mise install`` / ``mise prune`` run
+    in a login shell (``{shell} -lc``) so the agent's PATH and any other
+    profile-exported env are in scope. No env= injection: provisioning is
+    hermetic.
     """
-    import shlex
+    from agentworks.vms.initializer.mise import _fetch_mise_lockfile, _run_mise_install, _write_mise_config
 
-    from agentworks.ssh import SSHError
-
-    agent_cfg = agent_tmpl
-    agent_shell = agent_cfg.shell
-    has_packages = bool(agent_cfg.mise_packages)
-    has_lockfile = bool(agent_cfg.mise_lockfile)
-
-    if not has_packages and not has_lockfile:
+    if not agent_tmpl.mise_packages and not agent_tmpl.mise_lockfile:
         return
-
-    mise_config_dir = f"{home}/.config/mise"
-
-    # Write mise config if packages declared
-    if has_packages:
-        output.info(f"Writing mise config for agent ({len(agent_cfg.mise_packages)} packages)...")
-        settings_lines = ["[settings]", f'install_before = "{agent_cfg.mise_install_before}"', ""]
-        tools_lines = ["[tools]"]
-        for pkg in agent_cfg.mise_packages:
-            if "@" in pkg:
-                name, version = pkg.rsplit("@", 1)
-                tools_lines.append(f'"{name}" = "{version}"')
-            else:
-                tools_lines.append(f'"{pkg}" = "latest"')
-        mise_config = "\n".join(settings_lines + tools_lines) + "\n"
-        try:
-            agent_target.run(f"mkdir -p {mise_config_dir}")
-            agent_target.write_file(f"{mise_config_dir}/config.toml", mise_config, mode="0644")
-        except SSHError as e:
-            output.warn(f"agent mise config write failed: {e}")
-            return
-
-    # Copy lockfile if configured
-    if has_lockfile and agent_cfg.mise_lockfile:
-        output.info(f"Fetching agent mise lockfile from {agent_cfg.mise_lockfile}...")
-        try:
-            from agentworks.sources import fetch_file, parse_source_ref
-
-            ref = parse_source_ref(agent_cfg.mise_lockfile, default_filename="mise.lock")
-            # Published as the agent, which owns the destination.
-            fetch_file(ref, agent_files, f"{mise_config_dir}/mise.lock")
-        except STEP_FAILURES as error:
-            output.warn(f"agent mise lockfile fetch failed: {error}")
-
-    # Run mise install as the agent user
-    lockfile_exists = False
-    try:
-        result = agent_target.run(f"test -f {mise_config_dir}/mise.lock", check=False)
-        lockfile_exists = result.ok
-    except SSHError:
-        pass
-
-    installed = False
-    install_flags = "-y --locked" if lockfile_exists else "-y"
-    try:
-        agent_target.run(
-            f"{agent_shell} -lc {shlex.quote(f'mise install {install_flags}')}",
-            timeout=300,
-        )
-        output.info("Agent mise packages installed")
-        installed = True
-    except SSHError as e:
-        if lockfile_exists and agent_cfg.mise_allow_unlocked:
-            output.warn("some agent packages not in lockfile, installing unlocked...")
-            try:
-                agent_target.run(
-                    f"{agent_shell} -lc {shlex.quote('mise install -y')}",
-                    timeout=300,
-                )
-                output.info("Agent mise packages installed (unlocked)")
-                installed = True
-            except SSHError as e2:
-                output.warn(f"agent mise install failed: {e2}")
-        else:
-            output.warn(f"agent mise install failed: {e}")
-            if lockfile_exists:
-                output.warn("set mise_allow_unlocked = true to install unlocked packages")
-
-    # Prune stale tool versions not in the current config
-    if installed and agent_cfg.mise_prune_on_reinit:
-        import contextlib
-
-        from agentworks.ssh import SSHError as _SSHError
-
-        with contextlib.suppress(_SSHError):
-            agent_target.run(
-                f"{agent_shell} -lc {shlex.quote('mise prune -y')}",
-                timeout=60,
-            )
+    _write_mise_config(agent_files, agent_tmpl.mise_packages, agent_tmpl.mise_install_before, home, logger)
+    if agent_tmpl.mise_lockfile:
+        _fetch_mise_lockfile(agent_files, agent_tmpl.mise_lockfile, home, logger)
+    _run_mise_install(
+        agent_files,
+        agent_tmpl.shell,
+        home,
+        agent_tmpl.mise_allow_unlocked,
+        logger,
+        prune=agent_tmpl.mise_prune_on_reinit,
+    )

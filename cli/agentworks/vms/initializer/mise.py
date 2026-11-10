@@ -1,20 +1,24 @@
 """Mise (the polyglot tool-version manager) installation on the VM:
 apt source consts, config.toml generation, lockfile fetch, and the
 locked-then-unlocked install sequence.
+
+Each step runs as one account through its ``Files``: the admin's in Phase B,
+the agent's own in agent initialization.
 """
 
 from __future__ import annotations
 
+import contextlib
 from typing import TYPE_CHECKING
 
 from agentworks import output
-from agentworks.ssh import SSHError, SSHLogger
+from agentworks.execution.errors import CommandFailed, PathRefusal, PathRefused
+from agentworks.execution.requests import Command
 
-from .steps import STEP_FAILURES, warn_step
+from .steps import STEP_FAILURES, describe_failure, status, warn, warn_step
 
 if TYPE_CHECKING:
     from agentworks.execution.files import Files
-    from agentworks.transports import Transport
 
     from .steps import InitLog
 
@@ -42,20 +46,22 @@ def _mise_shims_path(home: str) -> list[str]:
 
 
 def _write_mise_config(
-    target: Transport,
+    files: Files,
     packages: list[str],
     install_before: str,
     home: str,
-    logger: SSHLogger,
+    log: InitLog,
 ) -> None:
-    """Write ~/.config/mise/config.toml from mise_packages list.
+    """Write ``~/.config/mise/config.toml``, 0644, from the ``mise_packages`` list, as ``files``' identity.
 
-    Packages are name@version strings (e.g., "jq@1.8.1").
+    Packages are name@version strings (e.g., "jq@1.8.1"). A link or another
+    file at the config's path or its directory is refused, never written
+    through, and warned about in the config's own terms.
     """
     if not packages:
         return
 
-    logger.step("Mise config")
+    log.step("Mise config")
     output.info(f"Writing mise config with {output.count(len(packages), 'package')}...")
 
     settings_lines = ["[settings]", f'install_before = "{install_before}"', ""]
@@ -69,15 +75,21 @@ def _write_mise_config(
             tools_lines.append(f'"{pkg}" = "latest"')
 
     mise_config = "\n".join(settings_lines + tools_lines) + "\n"
-
+    path = f"{home}/.config/mise/config.toml"
     try:
-        mise_config_dir = f"{home}/.config/mise"
-        target.run(f"mkdir -p {mise_config_dir}")
-        target.write_file(f"{mise_config_dir}/config.toml", mise_config)
-    except SSHError as e:
-        msg = f"mise config write failed: {e}"
-        logger.warning(msg)
-        output.warn(msg)
+        files.write(path, mise_config.encode(), mode=0o644, parent_mode=0o755)
+    except PathRefused as refused:
+        if refused.reason is not PathRefusal.UNSUITABLE:
+            warn_step(log, "mise config write failed", refused)
+            return
+        warn(
+            log,
+            f"the mise config {path} was not written: a link or another file is at it or its directory, "
+            "which dotfiles usually own, so mise_packages does not reach it until the template drops "
+            "mise_packages or the dotfiles drop the link",
+        )
+    except STEP_FAILURES as error:
+        warn_step(log, "mise config write failed", error)
 
 
 def _fetch_mise_lockfile(files: Files, lockfile_source: str, home: str, log: InitLog) -> None:
@@ -94,17 +106,19 @@ def _fetch_mise_lockfile(files: Files, lockfile_source: str, home: str, log: Ini
         warn_step(log, "mise lockfile fetch failed", error)
 
 
-def _parse_mise_failures(error: SSHError) -> list[str]:
-    """Extract failed tool names from mise stderr output.
+def _parse_mise_failures(error: Exception) -> list[str]:
+    """Extract failed tool names from a failed mise install's stderr.
 
     Parses lines like:
       mise ERROR Failed to install aqua:npryce/adr-tools@3.0.0: reason here
     The tool name can contain colons (backend:path@version), so we split
-    on ": " (colon-space) to separate tool from reason.
+    on ": " (colon-space) to separate tool from reason. Only a
+    ``CommandFailed`` whose streams were logged carries stderr.
     """
+    if not isinstance(error, CommandFailed) or not error.streams_logged:
+        return []
     failures: list[str] = []
-    error_str = str(error)
-    for line in error_str.splitlines():
+    for line in error.result.stderr.decode("utf-8", "replace").splitlines():
         if "Failed to install" in line:
             part = line.split("Failed to install", 1)[1].strip()
             tool = part.split(": ", 1)[0].strip()
@@ -113,34 +127,47 @@ def _parse_mise_failures(error: SSHError) -> list[str]:
     return failures
 
 
+MISE_INSTALL_DEADLINE = 300
+"""Seconds a ``mise install`` may take."""
+
+MISE_PRUNE_DEADLINE = 60
+"""Seconds a ``mise prune`` may take."""
+
+
+def mise_run(shell: str, command: str, deadline: float) -> Command:
+    """The request that runs a mise command in ``shell``'s login environment."""
+    return Command((shell, "-lc", command), deadline=deadline)
+
+
 def _run_mise_install(
-    target: Transport,
+    files: Files,
     shell: str,
     home: str,
     allow_unlocked: bool,
-    logger: SSHLogger,
+    log: InitLog,
     *,
     prune: bool = True,
 ) -> None:
-    """Run mise install, handling locked/unlocked modes.
+    """Run mise install as ``files``' identity, handling locked/unlocked modes.
 
     If a lockfile is present, tries --locked first. If that fails due to
     unlocked packages and allow_unlocked is true, retries without --locked.
+    A lockfile probe that cannot run counts as no lockfile, and a prune that
+    fails is ignored.
 
     Runs without env injection: provisioning is hermetic. mise hooks see
     static identity via the system-wide profile fragment (login-shell
     sourcing) and have no access to operator env (those reach runtime
     shells only).
     """
-    logger.step("Mise install")
+    log.step("Mise install")
+    access = files.access
 
-    # Check if a lockfile is present
-    lockfile_path = f"{home}/.config/mise/mise.lock"
     has_lockfile = False
     try:
-        check = target.run(f"test -f {lockfile_path}", check=False)
-        has_lockfile = check.ok
-    except SSHError:
+        lockfile = Command(("test", "-f", f"{home}/.config/mise/mise.lock"), deadline=files.deadline)
+        has_lockfile = status(files, lockfile) == 0
+    except STEP_FAILURES:
         pass
 
     installed = False
@@ -148,15 +175,12 @@ def _run_mise_install(
     if has_lockfile:
         output.info("Running mise install (locked)...")
         try:
-            target.run(
-                f"{shell} -lc 'mise install -y --locked'",
-                timeout=300,
-            )
+            access.run(mise_run(shell, "mise install -y --locked", MISE_INSTALL_DEADLINE), check=True)
             output.detail("Mise packages installed (locked)")
             installed = True
-        except SSHError as e:
-            logger.warning(f"mise install --locked failed: {e}")
-            failures = _parse_mise_failures(e)
+        except STEP_FAILURES as error:
+            log.warning(f"mise install --locked failed: {describe_failure(error, log.sanitize)}")
+            failures = _parse_mise_failures(error)
             for tool in failures:
                 output.warn(f"Locked install failed, not in lockfile: {tool}")
             if not failures:
@@ -169,15 +193,12 @@ def _run_mise_install(
     if not installed:
         output.info("Running mise install...")
         try:
-            target.run(
-                f"{shell} -lc 'mise install -y'",
-                timeout=300,
-            )
+            access.run(mise_run(shell, "mise install -y", MISE_INSTALL_DEADLINE), check=True)
             output.detail("Mise packages installed")
             installed = True
-        except SSHError as e:
-            logger.warning(f"mise install failed: {e}")
-            failures = _parse_mise_failures(e)
+        except STEP_FAILURES as error:
+            log.warning(f"mise install failed: {describe_failure(error, log.sanitize)}")
+            failures = _parse_mise_failures(error)
             for tool in failures:
                 output.warn(f"Failed: {tool}")
             if not failures:
@@ -185,7 +206,5 @@ def _run_mise_install(
 
     # Prune stale tool versions not in the current config
     if installed and prune:
-        import contextlib
-
-        with contextlib.suppress(SSHError):
-            target.run(f"{shell} -lc 'mise prune -y'", timeout=60)
+        with contextlib.suppress(*STEP_FAILURES):
+            access.run(mise_run(shell, "mise prune -y", MISE_PRUNE_DEADLINE), check=True)
