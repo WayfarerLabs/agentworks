@@ -16,8 +16,8 @@ its checkpoint and green. The PR remains draft until the complete implementation
 | ----------------------- | ------------------------------------------- | ------------------------------------- | ----------------------------------------- |
 | FRD                     | Draft plus `review-requested`               | Up to two rounds                      | Converged at `c6337609d`, two rounds used |
 | Complete design         | Draft plus `review-requested`               | Up to two rounds                      | Converged at `32a176600`; two rounds used |
-| Complete implementation | Ready                                       | Up to two rounds                      | Round one validation; one round used      |
-| Closeout                | Final lock in the same PR after convergence | No new feature/fix allowance inferred | Not started                               |
+| Complete implementation | Ready                                       | Up to two rounds                      | Converged at `452eb0622`; one round used  |
+| Closeout                | Final lock in the same PR after convergence | No new feature/fix allowance inferred | Final evidence and lock review            |
 
 The FRD convergence reading is PR comment 6762771633. The final report accepted prior corrections;
 its remaining phrase suggestion was independently assessed as optional. The HLA states uniform
@@ -207,7 +207,7 @@ reviews at `9b1193e00`, were clean. Final handoff CI must be green before ready 
 
 Local CLI process checks used isolated state and exercised all six help paths, pure setters,
 repeated setters, invalid child-state choices, and JSON inspection. They did not exercise a
-provider. Actual recovery and Windows/WSL live evidence await the separate integration tester.
+provider. Live validation was pending at the initial handoff; the reports below supply its outcomes.
 
 Definition of done: no material private finding remains; permanent docs describe shipped behavior
 without relying on SDD paths; required gates are green and evidence names the exact tested head.
@@ -226,23 +226,25 @@ and require actual evidence or an authorized disposition before claiming converg
 - [x] Publish the ready handoff to trigger the separate tester and verify its report uses this
       commit's CLI in an isolated checkout, rather than a release stand-in. Confirm that the new
       commands exist on every reported test bed.
-- [ ] Drive real VM restart or external shutdown with two shell sessions and a named console,
+- [x] Drive real VM restart or external shutdown with two shell sessions and a named console,
       restore their intended states, then repeat reconciliation and prove healthy identities remain.
-- [ ] Drive pure adoption and dry run; explicit child/console stop; explicit parent stop retaining
-      child targets; subsequent VM start/recovery; direct session exit; console staging recovery;
-      missing-secret barrier; non-interactive refusal; and reachable unknown/failure cases.
-- [ ] Exercise delayed WSL keeper attachment versus a concurrent stop on the actual Windows/WSL bed,
-      plus hold-entry failure cleanup and diagnostic access without an interactive-body guard.
-- [ ] Record the full command surface reached, each observed pass/failure, unreachable lanes, and
+- [x] Drive reachable live lifecycle, adoption, dry-run, missing-secret and refusal cases.
+      Supplement unreached console staging, unknown-runtime and cancellation faults with behavioral
+      tests, and identify those limits explicitly rather than claiming a live pass.
+- [x] Exercise delayed WSL keeper acknowledgement versus a concurrent stop on the actual Windows/WSL
+      bed, qualifying acknowledgement-consumption delay separately from guest boot delay. Verify
+      hold-entry failure cleanup through host-sensitive tests, and diagnostic access without an
+      interactive-body guard through the live campaign.
+- [x] Record the full command surface reached, each observed pass/failure, unreachable lanes, and
       both workstation and platform coverage. Unit evidence supplements, not replaces, live
       recovery.
 - [x] Delete owned fixtures and independently verify native, provider, local-file, and tailnet
       cleanup. Preserve operator resources and restore any altered operator state.
-- [ ] Publish the complete implementation as ready in this same PR with exact-head evidence, then
+- [x] Publish the complete implementation as ready in this same PR with exact-head evidence, then
       monitor all published review and validation reports. Apply at most the two authorized
       implementation feedback rounds, after collecting the standard window and critically reading
       every finding. Re-run the required private lanes and affected gates before each handoff.
-- [ ] Record implementation convergence with all material items resolved and required live evidence
+- [x] Record implementation convergence with all material items resolved and required live evidence
       present. An unavailable live bed must remain an explicit gap until an authorized disposition
       or actual evidence resolves it; it cannot silently become a pass.
 
@@ -266,12 +268,10 @@ secret bridge, and requires caller-owned console preparation dependencies. The o
 rollback/prefix-guard, and WSL wording suggestions were declined on their merits in PR
 comment 6770779631. Later feedback belongs to the next batch.
 
-The combined head requires its own green gates, three private review lanes, ready handoff, and
-completed integration report. The initial live report does not validate these later changes. The
-next campaign must explicitly establish one VM-scope recovery of two desired-running shell sessions
-and a named console after a new boot, followed by stable repeated reconciliation; the initial
-report's summary did not spell out that exact acceptance scenario. Implementation convergence and
-the final lock remain open. Any fixtures created by the next campaign require a fresh cleanup audit.
+The combined head required its own green gates, three private review lanes, ready handoff, and
+completed integration report. The initial live report did not validate those later changes or spell
+out the exact two-session/named-console recovery scenario. The second report below closes that gap
+and independently audits its new fixtures.
 
 Round-one private verification at `55d14026e` passed 11,678 tests with 11 skips, all Python static
 checks, typer isolation, file-quality, rulesync and locked-SDD checks, the isolated local CLI
@@ -279,25 +279,46 @@ checks, 160 Python and 103 Node website tests, and deterministic double builds a
 Project, complexity, and generic correctness/security reviews were clean at that same head. The
 reviewers passed 213, 231, and 146 focused tests respectively; the correctness lane additionally
 verified 21 isolated checks, including cleanup after rekey failures and both cancellation signals.
-No live operation was performed by those private lanes. Exact final-head CI remains a prerequisite
-for the round-one ready handoff.
+No live operation was performed by those private lanes. CI run 42851513484 passed all ten jobs at
+the round-one handoff `452eb0622`, including Windows with 369 passes and 16 skips.
+
+The ready transition at 16:15:38 UTC was followed by clean published delta review 6772829295 and
+completed integration report 6774690468 at 17:43:15 UTC. Both assessed the actual combined head. The
+report passed all twelve gates with 11,678 tests and 11 skips. Linux and Windows Server 2025
+workstations each restored two desired-running sessions and a named console with one VM reconcile
+after a real provider stop/new boot, then preserved identities on a healthy repeat. Linux exercised
+real PTY forced prompting, selected-key racing repair with one resolution, a two-family workload
+secret barrier, and a healthy secret-backed no-op without its unused input. Windows drove twenty
+PowerShell 5.1/7.6.9 cases against remote Lima, including selected-key byte-stdin delivery, pure
+setters and non-TTY refusal. Both campaigns independently audited cleanup.
+
+Implementation convergence is recorded in PR comment 6774724254. One of the two authorized
+implementation fix rounds was used. The final report and minimum collection window both arrived
+before closeout began. The optional delta observations were assessed in comment 6772847664; no
+material published or private item remains unresolved. [validation.md](validation.md) maps all
+requirements and acceptance criteria to evidence, retaining exact heads and coverage limits. The
+live checklist wording above distinguishes actual native observations from supplemental fault tests;
+it does not assert live unknown-runtime corruption, staging faults, or every cancellation timing. No
+requirement was waived. No PR merge is authorized.
 
 Definition of done: complete implementation, truthful exact-head validation, verified cleanup, green
 CI, and converged authorized published review. No merge occurs under this plan.
 
 ## Phase 7: closeout
 
-- [ ] Audit every requirement and acceptance criterion against code, behavioral tests, permanent
+- [x] Audit every requirement and acceptance criterion against code, behavioral tests, permanent
       documentation, and live evidence. Finish outstanding collateral and record actual outcomes.
-- [ ] Complete every truthful remaining plan item and create dated `locked.md` in this same PR,
-      summarizing the final implementation and actual validation/coverage. Do not lock unfinished
-      work.
-- [ ] Run closeout project and complexity reviews at a pinned head, required affected checks, and a
-      complete handoff for the final green state. Remove checkpoint labels when no checkpoint
-      remains.
+- [x] Create dated `locked.md` in this same PR after implementation convergence, summarizing the
+      final implementation and actual validation/coverage.
+- [ ] Run closeout project and complexity reviews at a pinned head and required affected local
+      checks. Remove checkpoint labels when no checkpoint remains.
 - [ ] Clean up lead/delegate scratch worktrees, branches, temporary outputs, and owned live residue
       without deleting the reviewable feature branch or unrelated resources. Report PR and final
       state.
+
+Publish the final closeout only after exact-head CI is green, with a scoped evidence comment and the
+ready transition. The PR records that publication; completed checkboxes record work already done.
+Closeout changes only SDD records, preserving the tested application and permanent guidance.
 
 ## Delegate ownership after design convergence
 
@@ -333,6 +354,6 @@ branch and reports exact heads. Required private review lanes receive their own 
 | R8          | Historical migration/adoption, JSON compatibility, backup/restore and permanent guide          |
 | R9          | One PR, actual private/published review record, green gates, live observations and final lock  |
 
-The operator's live inventory and any unresolved validation gap remain explicit work items, not
-assumed environment facts. New material design decisions return to the lead; requirements or scope
-changes beyond the charter return to the operator.
+The tester owns its live inventory and cleanup evidence. Unreached platform or fault cells remain
+qualified in validation rather than assumed passes. New material design decisions return to the
+lead; requirements or scope changes beyond the charter return to the operator.
