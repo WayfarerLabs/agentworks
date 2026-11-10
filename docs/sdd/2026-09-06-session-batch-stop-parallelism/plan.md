@@ -350,6 +350,12 @@ reproduced the controller behavior with two real SQLite connections and stubbed 
 The correction propagates the existing database-driver error family alongside the
 replacement-conflict kind; it adds no retry or command-wide serialization.
 
+During private validation, main advanced to `1dd5a06dd` with PR #881's operation-local rekey-secret
+selection. Its shared secret/preflight parameters retain their default behavior for session callers;
+it changes no session, database, or transport implementation. The lead integrated that main tip with
+a clean merge. Final gates, installed-wheel checks, private review, and CI must cover the combined
+head rather than relabeling the preceding checkpoint's results.
+
 - [x] Receive and critically assess the report on `59f9f41ae` before starting the additional round.
 - [x] Record the operator's exact ruling in the FRD and append this phase without rewriting
       completed implementation history.
@@ -363,6 +369,7 @@ replacement-conflict kind; it adds no retry or command-wide serialization.
       without promising whole-command cross-process atomicity.
 - [x] Propagate database-driver repair failures before batch preparation continues, and prove named
       and batch refusal with real enclosing-transaction replacement regressions.
+- [x] Integrate main `1dd5a06dd` without changing the teardown or transport contracts.
 - [ ] Run full gates, installed-wheel checks, three fresh private review lanes, and hosted CI on the
       coherent result, then publish the third-round ready handoff for the separate tester.
 - [ ] Assess the new exact-head integration report and remaining feedback before final SDD closeout.
