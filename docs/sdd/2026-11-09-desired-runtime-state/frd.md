@@ -20,8 +20,9 @@ shutdown, session exit, or lost console runtime does not end its desired-running
   consoles without remembering their names or restarting healthy peers.
 - Reconcile the fleet after an outage, with useful progress and results even when one VM cannot be
   recovered.
-- Bring up an externally stopped VM used through standalone SSH, shell, or exec, even when it has no
-  managed sessions or consoles.
+- Bring up an externally stopped VM before connecting through plain SSH or an IDE over Tailscale,
+  even when it has no managed sessions or consoles. Those direct clients do not invoke Agentworks'
+  activation gate.
 - Retry one failed session or console after a partial fleet run without changing its recorded target
   or touching unrelated workloads.
 - Record targets for existing resources, preview the resulting recovery, then restore them in one
@@ -78,9 +79,9 @@ accepted target for later retry. A refusal or cancellation before acceptance mus
 Report the recorded target and actual outcome honestly when execution fails.
 
 For a locally valid child start below an intentionally stopped VM, accept running intent and report
-execution blocked without changing the VM's intent or activating it. An ordinary batch start
-establishes running intent for every accepted match, including already-running no-ops; runtime
-liveness must not determine whether that explicit start adopts the resource.
+execution blocked with a nonzero exit, without changing the VM's intent or activating it. An
+ordinary batch start establishes running intent for every accepted match, including already-running
+no-ops; runtime liveness must not determine whether that explicit start adopts the resource.
 
 Creation records running intent with its durable definition. Preserve existing domain cleanup on
 failed creation: intent accompanies any retained definition and does not require keeping a failed
@@ -178,17 +179,20 @@ runtime-only secrets. Finish required eligibility checks and confirmations befor
 for accepted workload actions. A failed required secret preparation must not leave earlier sessions
 restarted while later sessions are still waiting for credentials.
 
-The barrier also covers a VM shutdown that would remove session or console runtimes as a
-consequence. Infrastructure activation for preparation is permitted; destructive shutdown is not a
-shortcut around workload secret preparation.
+Before the shared workload secret boundary, changes to managed runtimes are limited to required VM
+activation and connection repair. Required activation includes a selected VM with running intent and
+no children, as well as VMs needed to prepare selected workloads, subject to R4's stopped-VM
+prohibition. Defer every other managed runtime-changing action, including any VM stop, until
+preparation succeeds. If required secret preparation fails, execute none of those deferred actions.
+Only eligible workload actions contribute workload secrets; children blocked by a stopped VM add
+none merely because their parent will be stopped.
 
 Failure to prepare any required workload secret aborts workload execution for the entire selected
 batch, even when an independent target's secrets are available. Infrastructure already activated for
 preparation may remain running. R6's independent execution applies after successful shared secret
 preparation; this boundary prevents a partially restarted batch caused by missing secrets.
 
-Infrastructure preparation can precede workload preparation because guest checks need a reachable
-VM. Collect known infrastructure credentials together where possible. Existing conditional Tailscale
+Collect known infrastructure credentials together where possible. Existing conditional Tailscale
 repair credentials may still be acquired when startup proves repair is needed. Complete that
 infrastructure interaction before announcing that the operation can proceed unattended and before
 beginning any session or console runtime changes. Do not request speculative repair keys on healthy
@@ -258,7 +262,8 @@ workstation and platform coverage and any unavailable lanes without implying the
 11. Existing ambiguous intent requires explicit adoption and remains visible until adopted.
 12. The same PR contains current permanent documentation, green required gates, live evidence,
     completed plan records, and the final lock after authorized review convergence.
-13. A VM with running intent and no managed children is brought up after an external shutdown.
+13. A VM with running intent and no managed children is brought up after an external shutdown so
+    plain SSH or an IDE over Tailscale can connect without invoking Agentworks' activation gate.
 14. Focused reconciliation retries only its named workload and applies its existing target,
     including stopped intent, without changing sibling workload runtimes.
 15. Pure intent selection adopts a resource or returns a VM to on-demand policy without changing
