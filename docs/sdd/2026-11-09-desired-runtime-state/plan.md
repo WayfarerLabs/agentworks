@@ -42,11 +42,11 @@ GitHub feedback does not extend authority. Optional wording does not independent
 
 ## Phase 1: complete design checkpoint
 
-- [ ] Finish and cross-check every linked artifact, including data/identity constraints, complete
+- [x] Finish and cross-check every linked artifact, including data/identity constraints, complete
       cutover, concrete preparation/execution seams, failure isolation, preview, compatibility, and
       migration guidance. No unspecified user-facing policy may be deferred to an implementation
       guess.
-- [ ] Run an independent project review and complexity pass at one pinned design head in separate
+- [x] Run an independent project review and complexity pass at one pinned design head in separate
       detached worktrees. Critically resolve findings; add a targeted correctness reading where an
       algorithm or failure example needs it. Keep the lead responsible for architecture and plan.
 - [ ] Run documentation lint/format/spelling, typography and link checks, locked-SDD guard, and
