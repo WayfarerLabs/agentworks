@@ -25,7 +25,6 @@ if TYPE_CHECKING:
     from agentworks.env import EnvEntry
     from agentworks.resources import Registry
     from agentworks.secrets import SecretTarget
-    from agentworks.secrets.base import SecretDecl
     from agentworks.vms.initializer.phase_a import OperationLog
 
 
@@ -296,43 +295,6 @@ def _guard_incomplete_vm(vm: VMRow, *, allow_failed_init: bool = False) -> None:
             entity_name=vm.name,
             hint="Use 'vm reinit' to retry or 'vm delete' to remove.",
         )
-
-
-@contextlib.contextmanager
-def _mask_env_var_backend_for(
-    decl: SecretDecl,
-    *,
-    masked: bool,
-) -> Iterator[None]:
-    """Mask the env-var backend's view of ``decl`` for the duration of
-    the block when ``masked`` is True; pass-through otherwise.
-
-    Used by ``vm rekey --ignore-env`` to force the source chain to
-    skip the env-var source and fall through to the prompt source.
-    The env-var source reads its variables during preview and resolution,
-    so hiding the matching ones (``env_var.masking``) during the resolve
-    call makes the source miss; the next source in the chain takes over.
-
-    The masked names cover (a) the framework's default convention
-    ``AW_SECRET_<UPPER_NAME>`` for ``decl.name``, plus (b) any
-    operator-typed string override at ``decl.backend_mappings["env-var"]``.
-    Both names are restored on exit, even on exception, so a
-    ``KeyboardInterrupt`` during a prompt doesn't lose the value for the
-    rest of the command.
-    """
-    if not masked:
-        yield
-        return
-
-    from agentworks.capabilities.secret_backend.env_var import env_var_name_for, masking
-
-    masked_names: list[str] = [env_var_name_for(decl.name)]
-    mapping = decl.backend_mappings.get("env-var")
-    if isinstance(mapping, str):
-        masked_names.append(mapping)
-
-    with masking(masked_names):
-        yield
 
 
 def _query_live_resources(db: Database, vm: VMRow, config: Config) -> dict[str, str] | None:

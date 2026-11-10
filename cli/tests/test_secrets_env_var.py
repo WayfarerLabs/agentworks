@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from agentworks.capabilities.secret_backend import OperatorImpact, ResolutionIntent, TtyInteractionAccess, env_var
+from agentworks.capabilities.secret_backend import OperatorImpact, ResolutionIntent, TtyInteractionAccess
 from agentworks.capabilities.secret_backend.env_var import EnvVarBackend, EnvVarSourceConfig
 from agentworks.resources.graph import Readiness
 from agentworks.schema import CapabilityBlock
@@ -222,18 +222,3 @@ def test_no_child_inherits_a_carrier_and_the_backend_still_reads_it() -> None:
         "child": ["PROBE_MAPPED"],
         "resolved": {"probe": "carried", "mapped": "the operator's own"},
     }
-
-
-def test_masking_hides_a_withheld_carrier_and_restores_it(monkeypatch: pytest.MonkeyPatch) -> None:
-    """``vm rekey --ignore-env`` must still skip a carrier the entry point withheld."""
-    monkeypatch.setenv("AW_SECRET_PROBE", "carried")
-    env_var.withhold_carriers()
-    decl = SecretDecl(name="probe", description="conventional")
-
-    with env_var.masking([env_var.env_var_name_for("probe")]):
-        masked = resolve_batch(
-            [decl], [_source()], tty_access=TtyInteractionAccess.DISABLED, interaction_broker=None
-        ).outcomes[0]
-
-    assert masked.status is ResolutionStatus.MISSING
-    assert _resolve(decl)[0] == {"probe": "carried"}

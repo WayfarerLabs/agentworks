@@ -7,9 +7,9 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.db import VMStatus
-from agentworks.errors import AgentworksError, StateError, UserAbort
+from agentworks.errors import AgentworksError, StateError, UserAbort, ValidationError
 from agentworks.execution import trust
-from agentworks.naming import NAME_RE
+from agentworks.naming import MAX_SECRET_NAME_LENGTH, NAME_RE, validate_name
 from agentworks.secrets.policy import require_exact_tty_interaction_policy
 
 from ._helpers import _guard_incomplete_vm, _operation_log, _require_known_power_state, _require_vm
@@ -346,7 +346,8 @@ def rekey_vm(
     name: str,
     *,
     wait_for_share: bool = False,
-    ignore_env: bool = False,
+    secret: str | None = None,
+    prompt: bool = False,
     interaction: TtyInteractionPolicy,
 ) -> None:
     """Assign a new Tailscale auth key to a VM (logout + rejoin).
@@ -363,6 +364,10 @@ def rekey_vm(
     and the activation gate opens AFTER it: a not-running VM errors before any
     gate, so rekey never auto-starts one outside the race of a VM stopping in
     between.
+
+    ``secret`` selects a declared replacement key for this operation only;
+    ``prompt`` forces terminal entry of the template's key instead. Both are
+    checked here, before anything is touched, and applied in the boundary.
     """
     import agentworks.execution as execution
     import agentworks.vms.manager as _mgr
@@ -373,6 +378,12 @@ def rekey_vm(
     from agentworks.orchestration.activation import activation_gate
     from agentworks.ssh_config import sync_ssh_config
     from agentworks.vms import recovery
+
+    require_exact_tty_interaction_policy(interaction)
+    if secret is not None and prompt:
+        raise ValidationError("--secret and --prompt are mutually exclusive")
+    if secret is not None:
+        validate_name(secret, max_length=MAX_SECRET_NAME_LENGTH)
 
     vm = _require_vm(db, name)
     _guard_incomplete_vm(vm)
@@ -389,7 +400,7 @@ def rekey_vm(
     execution.resolve_ssh()
 
     vm_node, resolver, ops_ctx, auth_key = _auth_key_boundary(
-        db, config, vm, ignore_env=ignore_env, interaction=interaction
+        db, config, vm, secret=secret, prompt=prompt, interaction=interaction
     )
     platform = vm_node.site.platform
     status = platform.status(vm, ops_ctx)

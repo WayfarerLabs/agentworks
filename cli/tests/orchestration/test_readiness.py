@@ -212,6 +212,7 @@ def test_sweep_memoizes_repeated_refs_once_per_command(monkeypatch: pytest.Monke
         sources: Sequence[ActiveSource],
         *,
         tty_access: TtyInteractionAccess,
+        prompt_names: frozenset[str] = frozenset(),
     ) -> dict[str, ResolutionPreview]:
         names = tuple(decl.name for decl in decls)
         events.append(("preview", *names))

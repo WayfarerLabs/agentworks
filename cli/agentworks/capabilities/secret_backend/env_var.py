@@ -18,7 +18,7 @@ stays readable to the same user and to root (``/proc/<pid>/environ``,
 from __future__ import annotations
 
 import os
-from contextlib import AbstractContextManager, contextmanager
+from contextlib import AbstractContextManager
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from agentworks.capabilities.secret_backend.base import SecretBackend
@@ -45,7 +45,7 @@ from agentworks.schema import AgwModel, AgwRootModel, NonEmptyStr
 from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping
+    from collections.abc import Mapping
 
     from pydantic import BaseModel
 
@@ -82,18 +82,6 @@ def read_variable(name: str) -> str | None:
     """The value the operator's environment gave ``name``, a withheld carrier included."""
     value = os.environ.get(name)
     return _withheld.get(_key(name)) if value is None else value
-
-
-@contextmanager
-def masking(names: list[str]) -> Iterator[None]:
-    """Hide ``names`` from this backend for the duration, restoring them afterwards, even on an exception."""
-    saved_environ = {name: os.environ.pop(name) for name in names if name in os.environ}
-    saved_withheld = {_key(name): _withheld.pop(_key(name)) for name in names if _key(name) in _withheld}
-    try:
-        yield
-    finally:
-        os.environ.update(saved_environ)
-        _withheld.update(saved_withheld)
 
 
 class EnvVarSourceConfig(AgwModel):

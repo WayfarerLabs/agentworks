@@ -31,6 +31,7 @@ from agentworks.secrets.resolve import (
     _BrokerScopeViolationError,
     _drive_source,
     _lookup_projection,
+    _operation_prompt_source,
     _require_interaction_broker,
 )
 
@@ -270,12 +271,16 @@ def preview_batch(
     impact: OperatorImpact,
     tty_access: TtyInteractionAccess,
     interaction_broker: InteractionBroker | None,
+    prompt_names: frozenset[str] = frozenset(),
 ) -> dict[str, ResolutionPreview]:
     """Preview a deduplicated batch in one bounded source-first pass."""
     if type(impact) is not OperatorImpact:
         raise StateError("impact must be an exact OperatorImpact")
     if type(tty_access) is not TtyInteractionAccess:
         raise StateError("tty_access must be an exact TtyInteractionAccess")
+    prompt_source = _operation_prompt_source() if prompt_names else None
+    if prompt_source is not None:
+        sources = (*sources, prompt_source)
     names = list(dict.fromkeys(secret.name for secret in secrets))
     declarations: dict[str, SecretDecl] = {}
     for secret in secrets:
@@ -290,7 +295,9 @@ def preview_batch(
         projected: list[tuple[SecretLookupRequest, str | None]] = []
         for secret in pending:
             try:
-                request, description = _lookup_projection(secret, source)
+                request, description = _lookup_projection(
+                    secret, source, prompt_names=prompt_names, prompt_source=prompt_source
+                )
             except _BackendProtocolError:
                 protocol_result = PreviewFailed(FailureReason.BACKEND_PROTOCOL)
                 attempt = SourcePreviewAttempt(source.name, None, protocol_result)
