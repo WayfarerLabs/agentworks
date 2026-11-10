@@ -50,6 +50,7 @@ if TYPE_CHECKING:
     from agentworks.db import AgentRow, Database, VMRow
     from agentworks.git_credentials import CredentialRequest
     from agentworks.harness_setup.inputs import SetupInputs
+    from agentworks.harness_setup.locking import NativeMutationGuard
     from agentworks.harness_setup.outcomes import SetupFailure
     from agentworks.instance_specs import InstanceOverlay
     from agentworks.resources.registry import Registry
@@ -73,6 +74,7 @@ def realize_agent(
     setup_failures: list[SetupFailure],
     setup_inputs: SetupInputs | None = None,
     setup_values: Mapping[str, str] | None = None,
+    held_native_guard: NativeMutationGuard | None = None,
 ) -> AgentRow:
     """Make agent ``name`` real on ``vm``: create and configure the
     Linux user (including the git-credential materials, their write-step
@@ -114,7 +116,7 @@ def realize_agent(
     from agentworks.harness_setup.lifecycle import require_prepared_setup
     from agentworks.harness_setup.locking import native_mutation_guard
 
-    with native_mutation_guard(db.path, vm.name) as guard:
+    with native_mutation_guard(db.path, vm.name, held=held_native_guard) as guard:
         require_prepared_setup(db, "agent", name, ("agent",), () if setup_inputs is None else (setup_inputs,))
         ssh_logger = SSHLogger(
             vm.name,

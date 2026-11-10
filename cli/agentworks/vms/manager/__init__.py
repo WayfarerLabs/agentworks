@@ -62,6 +62,13 @@ from .inspect import (
 from .lifecycle import create_vm, reinit_vm
 from .power import delete_vm, rekey_vm, set_vm_desired_runtime_state, start_vm, stop_vm
 from .release import confirm_vm_release, verified_vm_release
+from .runtime import (
+    VMRuntimeContext,
+    activate_vm_runtime,
+    execute_vm_stop,
+    observe_vm_runtime,
+    prepare_vm_runtime,
+)
 from .tailscale import (
     _ensure_tailscale,
     _is_tailscale_reachable,
@@ -93,6 +100,11 @@ __all__ = [
     "_vm_scope",
     "_vm_secret_target",
     "_warned_tailscale_missing",
+    "activate_vm_runtime",
+    "execute_vm_stop",
+    "observe_vm_runtime",
+    "prepare_vm_runtime",
+    "VMRuntimeContext",
     "bootstrap_vm",
     "confirm_vm_release",
     "create_vm",
