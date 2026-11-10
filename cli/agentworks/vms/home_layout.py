@@ -16,7 +16,7 @@ SSH_DIR = ".ssh"
 """The directory of ``authorized_keys`` (``vms.initializer.ssh_keys``)."""
 
 AGENTWORKS_STATE_DIR = ".agentworks"
-"""Agentworks' own state directory: the git credential state and the codex recorder live in it."""
+"""Agentworks' own state directory: the git credential state, and integrations' own files under ``<integration>/``."""
 
 GIT_CREDENTIAL_STATE_DIR = AGENTWORKS_STATE_DIR
 """The directory of the git credential state (``git_credentials``), rendered into its scripts and config.

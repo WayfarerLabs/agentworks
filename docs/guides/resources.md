@@ -610,7 +610,8 @@ all must pass before Agentworks skips the command. With no checks, the command a
 A `system-install-command` is VM-wide in scope, but Agentworks executes it as the VM admin user, not
 root. The command must explicitly use `sudo` for each step that needs root privileges. A
 `user-install-command` runs as the admin or agent user whose template selects it and should not
-assume elevation.
+assume elevation. For either account it runs after that account's dotfiles sync and mise install, so
+it can use mise's tools.
 
 An install-command's `path` entries persist in the target user's managed `~/.agentworks-profile.sh`.
 User install commands contribute to the selected admin or agent user's profile; system install

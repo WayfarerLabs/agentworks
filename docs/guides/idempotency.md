@@ -101,9 +101,9 @@ These add things on reinit but do not remove them when removed from config:
 
 ### Other
 
-| Step                    | Notes                                                                                                                                                     |
-| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Dotfiles (local source) | Replaced whole through a temporary sibling, not merged; the previous tree comes back if the upload fails. Side effects from previous installs may linger. |
+| Step                    | Notes                                                                                                                                                                                                                                                                                            |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Dotfiles (local source) | Replaced whole through a temporary sibling, not merged; the previous tree comes back if the upload fails. Side effects from previous installs may linger. A destination at a tool's own directory, such as `~/.claude` or `~/.codex`, is replaced whole on every reinit, runtime state included. |
 
 ## Agent reinit
 
@@ -153,9 +153,9 @@ access was restored.
 
 ### Other
 
-| Step                    | Notes                                                                                                                                                     |
-| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Dotfiles (local source) | Replaced whole through a temporary sibling, not merged; the previous tree comes back if the upload fails. Side effects from previous installs may linger. |
+| Step                    | Notes                                                                                                                                                                                                                                                                                            |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Dotfiles (local source) | Replaced whole through a temporary sibling, not merged; the previous tree comes back if the upload fails. Side effects from previous installs may linger. A destination at a tool's own directory, such as `~/.claude` or `~/.codex`, is replaced whole on every reinit, runtime state included. |
 
 ## Workspace creation and interruption
 
