@@ -166,9 +166,10 @@ def infrastructure_reader(invocation: RuntimeInvocation, node: LiveVMNode) -> Ca
 
 
 def _needs_running_guest(invocation: RuntimeInvocation, vm_name: str) -> bool:
+    routes = dict(invocation.selection.session_routes)
     return any(
-        session_vm_name(invocation, session) == vm_name
-        and not invocation.unavailable("session", name)
+        not invocation.unavailable("session", name)
+        and routes[name] == vm_name
         and session.desired_runtime_state is DesiredRuntimeState.RUNNING
         for name, session in invocation.sessions.items()
     ) or any(
@@ -183,8 +184,9 @@ def _block_family(invocation: RuntimeInvocation, vm_name: str, error: Exception 
     invocation.failed_families.add(vm_name)
     invocation.ensure_vm_result(vm_name)
     invocation.fail("vm", vm_name, error)
-    for name, session in invocation.sessions.items():
-        if session_vm_name(invocation, session) == vm_name and not invocation.unavailable("session", name):
+    routes = dict(invocation.selection.session_routes)
+    for name in invocation.sessions:
+        if not invocation.unavailable("session", name) and routes[name] == vm_name:
             invocation.fail("session", name, "parent infrastructure preparation failed", blocked=True)
     for name, console in invocation.consoles.items():
         if console.vm_name == vm_name and not invocation.unavailable("console", name):

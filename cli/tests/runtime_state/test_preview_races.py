@@ -2,7 +2,7 @@
 
 import pytest
 
-from agentworks.db import DesiredRuntimeState, SessionStatus
+from agentworks.db import DesiredRuntimeState, SessionStatus, VMStatus
 from agentworks.errors import StateError
 from agentworks.runtime_state import reconcile_vm
 from agentworks.runtime_state._models import Outcome
@@ -107,3 +107,43 @@ def test_preview_console_deleted_after_route_selection_keeps_independent_results
     assert not gone.target_known and gone.desired_runtime_state is None
     assert results[("vm", "good")].outcome is Outcome.UNCHANGED
     assert not runtime[2]
+
+
+@pytest.mark.parametrize("bad_power", [VMStatus.RUNNING, VMStatus.UNKNOWN])
+def test_preview_workspace_deleted_before_provider_observation_keeps_family_reporting(
+    db, make_config, runtime, monkeypatch, bad_power
+):
+    from agentworks.db import Database
+    from agentworks.runtime_state._prepare import prepare_local_workloads
+    from agentworks.workspaces.manager import delete_workspace
+
+    seed_vm(db, "bad", target=DesiredRuntimeState.ON_DEMAND)
+    seed_session(db, "bad-child", "bad")
+    seed_vm(db, "good")
+    seed_session(db, "good-child", "good", target=DesiredRuntimeState.STOPPED)
+    runtime[0]["bad"] = bad_power
+    config = make_config()
+    rendered = []
+    monkeypatch.setattr("agentworks.vms.manager._is_tailscale_reachable", lambda *a, **k: True)
+    monkeypatch.setattr(manager, "_teardown_session", lambda *a, **k: None)
+    monkeypatch.setattr("agentworks.workspaces.backends.vm.delete_vm_workspace", lambda *a, **k: None)
+
+    def prepare_then_delete(invocation):
+        prepare_local_workloads(invocation)
+        other = Database(db.path)
+        try:
+            delete_workspace(other, config, "ws-bad", force=True, yes=True, interaction=REFUSE)
+        finally:
+            other.close()
+
+    monkeypatch.setattr("agentworks.runtime_state._preview.prepare_local_workloads", prepare_then_delete)
+    monkeypatch.setattr("agentworks.runtime_state._preview.render_results", lambda rows, **k: rendered.extend(rows))
+    with pytest.raises(StateError):
+        reconcile_vm(db, config, all_vms=True, dry_run=True, interaction=REFUSE)
+    results = {(row.kind, row.name): row for row in rendered}
+    assert results[("session", "bad-child")].outcome is Outcome.BLOCKED
+    assert results[("session", "good-child")].outcome is Outcome.UNCHANGED
+    assert results[("vm", "good")].outcome is Outcome.UNCHANGED
+    if bad_power is VMStatus.UNKNOWN:
+        assert results[("vm", "bad")].outcome is Outcome.FAILED
+    assert db.get_workspace("ws-bad") is None and db.get_session("bad-child") is None
