@@ -496,18 +496,20 @@ script, so asking again is safe; a token rejection raises `TokenRejectedError` a
 `ProxmoxAPIError` means not yet (anything else the client raises is a bug and propagates), and no
 answer within `AGENT_WAIT_SECONDS` (120 s) or the deadline, whichever comes first, raises
 `ChannelUnreachable` saying no script was dispatched, so a VM with no agent fails in about two
-minutes rather than after the repair's 600. Then one `guest_agent_exec` of `["/bin/bash", "-s"]`
-with `input-data`, with whatever remains of the deadline, then `guest_agent_exec_status` every two
-seconds until it reports exit or the deadline passes. A poll carries only the PID, so a failed one
-is asked again at the next interval; only polls that keep failing for `STATUS_RETRY_SECONDS` (30 s)
-give up, as they do for an agent that restarted and lost the PID. Dispatch and status failures raise
-`ConnectivityError` with no stdin in the message (`transport.py:69-123`), except an HTTP 401 or 403,
-which raises `TokenRejectedError` at once; a status failure of either kind says the script may still
-be running, and a status failure from the API adds the API's own error text (an agent that restarted
-mid-script answers `Agent error: PID <pid> does not exist`), since that request carries only the
-PID. A dispatch failure adds none, since its request carries the script. A `_TruncatedQGAOutput`
-report raises `ConnectivityError` saying the script exited with its output cut short. No failure
-chains the API error, whose request quotes the script. `create` waits for cloud-init through it
+minutes rather than after the repair's 600. Then, unless the pinging left none of the deadline
+(which raises `ChannelUnreachable` the same way), one `guest_agent_exec` of `["/bin/bash", "-s"]`
+with `input-data`, then `guest_agent_exec_status` every two seconds until it reports exit or the
+deadline passes. Each request gets what remains of the deadline, at most the API's 30-second
+`REQUEST_TIMEOUT_SECONDS`. A poll carries only the PID, so a failed one is asked again at the next
+interval; only polls that keep failing for `STATUS_RETRY_SECONDS` (30 s) give up, as they do for an
+agent that restarted and lost the PID. Dispatch and status failures raise `ConnectivityError` with
+no stdin in the message (`transport.py:69-123`), except an HTTP 401 or 403, which raises
+`TokenRejectedError` at once; a status failure of either kind says the script may still be running,
+and a status failure from the API adds the API's own error text (an agent that restarted mid-script
+answers `Agent error: PID <pid> does not exist`), since that request carries only the PID. A
+dispatch failure adds none, since its request carries the script. A `_TruncatedQGAOutput` report
+raises `ConnectivityError` saying the script exited with its output cut short. No failure chains the
+API error, whose request quotes the script. `create` waits for cloud-init through it
 (`cloud-init status --wait --long`, the cloud bootstrap's readiness command, 420 s, which covers the
 agent ping's 120 and cloud-init's 300, status 2 a warning, and any other failure quoting
 cloud-init's last lines as the cloud bootstrap does; a channel failure is asked again within that
@@ -536,7 +538,12 @@ gone guest with a hint naming `agw vm delete`, so delete's logout, which reads `
 then goes through the root channel, never reaches another guest. `teardown.remove_guest` stops and
 deletes a confirmed guest and returns once a destroy task completes; a failed delete counts as done
 only when `/cluster/nextid` says the VMID is free. A rollback whose clone lost its VMID to another
-create finds the winner's name there and leaves it untouched.
+create finds the winner's name there and leaves it untouched. A caller with a budget passes
+`find_guest` its expiry: each read gets what remains of it, at most `REQUEST_TIMEOUT_SECONDS`, and a
+status read whose failure spends it asks nothing more and re-raises. `status` gives the whole check
+10 s and reads an API failure as unknown. The root channel's check spends the script's own deadline,
+and the guest agent gets only what is left; a check the deadline runs out on, an API failure it cut
+short included, raises `ChannelUnreachable` with nothing dispatched.
 
 ### AWS, Azure and GCP
 

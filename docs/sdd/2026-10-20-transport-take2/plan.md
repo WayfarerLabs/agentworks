@@ -447,6 +447,10 @@ Line numbers in this slice are at `60d347220`, the platform LLD's baseline.
   - after a local Lima `vm create` with `AW_SECRET_TAILSCALE_AUTH_KEY` set, no `limactl` process
     left running on the workstation has an `AW_SECRET_` variable in its environment;
   - a frozen install on Windows with Python 3.15 resolves cffi 2.1.1 from its cp315 wheel.
+- [ ] Live evidence for round 6: on Proxmox, behind a proxy that delays each API answer, the
+      missing-host-key `vm recover` path's root script stops within its deadline, each identity read
+      and guest-agent request given at most what remains of it, and refuses with nothing dispatched
+      when the identity check spends it.
 
 Definition of done: core reaches a native channel only through `run_as_root` or `native_shell`, and
 no platform's private access imports a legacy module.
