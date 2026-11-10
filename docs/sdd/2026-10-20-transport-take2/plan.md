@@ -593,6 +593,17 @@ Definition of done: no workspace, session or backup module imports a legacy modu
       supersede ADR 0014; otherwise record what still needs it in that ADR.
 - [ ] Confirm by search that no core code builds its own `ssh` or `scp` command line outside
       `agentworks.execution` and platforms' private access.
+- [ ] Take the optional items from the delta review of PR B's round 5, which had no rounds left:
+  - hold interrupts inside each cloud's `remove_ssh_allow` instead of at its call sites, keeping
+    create's rollback on its two-Ctrl-C protocol;
+  - drop `create_vm`'s `ValidationError` pass-through, which no platform's `create` raises now, or
+    document that a `create` may raise it;
+  - fold `validate_create_hostname` into `validate_create_release` as one pre-create check, if that
+    reads simpler;
+  - settle whether hostnames with underscores misbehave on platforms other than WSL2 (a live check
+    on one non-WSL2 VM), and move the rule into core if they do;
+  - make the bootstrap's swap step recover from an interruption between `fallocate` and the fstab
+    line.
 - [ ] Complete the evidence matrix, sending any gap to the operator.
 - [ ] Confirm that the permanent docs (the `agentworks.execution` README, platform author guidance
       and the operator guides) describe the end state, then write `locked.md`.
