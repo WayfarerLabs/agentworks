@@ -54,7 +54,7 @@ core writes (`capabilities/vm_platform/bootstrap_script.py:179`,
 | `execution/file_program.py`                                                                  | `write`; `ensure_directory` gains `owner`, `group` and elevation; `SEALED` gains `write`                                                                                                     |
 | `execution/files.py`                                                                         | `Files.write`, `Files.update`, `ensure_directory(owner=, group=, elevated=)`; the module docstring stops saying every mutation is conditional                                                |
 | `execution/errors.py`                                                                        | `CommandFailed.streams_logged`, the failed request's `log_streams`                                                                                                                           |
-| `vms/initializer/steps.py` (new)                                                             | `STEP_DEADLINE`, `STEP_FAILURES`, `InitLog`, `describe_failure`, `warn_step`                                                                                                                 |
+| `vms/initializer/steps.py` (new)                                                             | `STEP_DEADLINE`, `STEP_FAILURES`, `InitLog`, `describe_failure`, `status`, `warn`, `warn_step`, `update_and_apply`, `NotRestored`                                                            |
 | `vms/initializer/driver.py`                                                                  | `bootstrap_vm` returns an admin `VMAccess`; `run_initialization` and `_phase_b_setup` take it in place of `ts_target`                                                                        |
 | `vms/initializer/shell_env.py`, `ssh_keys.py`, `packages.py`, `mise.py`, `workspaces_dir.py` | Each helper takes `files: Files`; `ensure_source_line` and `source_files` (new, `shell_env.py`) replace the seven grep-or-append strings and their four file lists                           |
 | `vms/hardening.py`, `vms/tailscale_dns.py`                                                   | On `Files`                                                                                                                                                                                   |
@@ -218,7 +218,8 @@ since no conditional writer works beneath a dotfiles checkout.
 - **One access.** `bootstrap_vm` builds the admin's access from the row it re-reads after Phase A
   recorded the address
   (`execution.vm_access(db.get_vm(vm_name), config, Admin(), log=logger.record)`) and returns it in
-  place of `ts_target` (`driver.py:139-147`). Reinit passes the access it already built for the
+  place of `ts_target` (`driver.py:139-147`); until batch B it returns
+  `(access, legacy_target, home, release)`. Reinit passes the access it already built for the
   contract (`reinit.py:282`) and drops `ts_target` (`:269`). Phase B uses that one access for
   everything, the git credentials' runup included (`driver.py:555`).
 - **One bound.** `vms/initializer/steps.py` defines `STEP_DEADLINE = 60`, today's
@@ -243,7 +244,8 @@ since no conditional writer works beneath a dotfiles checkout.
   mismatch was ssh's exit 255, an `SSHError` that every remaining step warned about in turn.
   "Catches" below says which steps differ.
 - **What a warning says.** `warn_step(log, summary, error)` replaces the 39 copies of
-  `msg = f"... failed: {e}"; logger.warning(msg); output.warn(msg)`. It writes
+  `msg = f"... failed: {e}"; logger.warning(msg); output.warn(msg)`, and `warn(log, message)`, which
+  it calls, writes a warning that carries no error. It writes
   `describe_failure(error, log.sanitize)`: the error's message, and for a `CommandFailed` whose
   request logged its streams (`streams_logged`), a tail of its stderr. The whole stderr is decoded
   and redacted with the log's registered secrets first (`SSHLogger.sanitize`, `ssh.py:194-198`), so
@@ -257,10 +259,10 @@ since no conditional writer works beneath a dotfiles checkout.
 - **`streams_logged`.** `CommandFailed` takes the failed request's `log_streams` as a required
   constructor argument; its three raisers, `VMAccess.run(check=True)`, `Files` and `upload_tree`,
   pass it. A request that keeps its streams out of the log keeps them out of a warning too.
-- **The log protocol.** `steps.InitLog(OperationLog, Protocol)` adds Phase B's members (`warning`,
-  `sanitize`, `redactions`, `warnings`, `has_warnings`) to Phase A's `OperationLog` (`phase_a.py`),
-  which already has `record`, and which stays as it is. `SSHLogger` satisfies both, and the migrated
-  files import nothing from `agentworks.ssh`, so they join the static check.
+- **The log protocol.** `steps.InitLog(OperationLog, Protocol)` adds Phase B's members (`warning`
+  and `sanitize`) to Phase A's `OperationLog` (`phase_a.py`), which already has `record`, and which
+  stays as it is. `SSHLogger` satisfies both, and the migrated files import nothing from
+  `agentworks.ssh`, so they join the static check.
 
 ### Shapes
 
@@ -931,7 +933,10 @@ a shared helper moves every caller of it**, so no helper exists in two forms bet
   - **Bridges A leaves**, each gone in B: the driver and reinit still build the legacy target
     (`legacy_target`), which the Admin Initialization steps other than the workspaces directory and
     the user install commands, and the final `authorized_keys` write, take beside the access; agent
-    create's socket calls use an admin access beside its legacy targets.
+    create's socket calls use an admin access beside its legacy targets. In the tests,
+    `route_vm_access_to_target` and `files_over_target` (`cli/tests/vm_access_support.py`) run a
+    moved step's requests on a legacy transport double, and `tmux.CommandOutcome` mirrors
+    `SSHResult` for the `RunCommand` readers; slice 7 removes them with the last legacy targets.
 - **B, the user files, agents and closure.**
   - New: `ensure_directory`'s owner and elevation, with their tests; `upload_tree`, with the plan's
     tree-upload test; `ensure_source_line` and `source_files`; `normalize_destination` and
