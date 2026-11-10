@@ -13,6 +13,7 @@ from agentworks.errors import (
     AgentworksError,
     ConfigError,
     ConnectivityError,
+    NotFoundError,
     StateError,
     UserAbort,
 )
@@ -441,8 +442,12 @@ def observe_session_statuses(
     result_map = {session.name: SessionStatus.UNKNOWN for session in sessions}
 
     for s in sessions:
-        ws = _mgr._require_workspace(db, s.workspace_name)
-        vm = _mgr._require_vm_for_workspace(db, ws)
+        try:
+            ws = _mgr._require_workspace(db, s.workspace_name)
+            vm = _mgr._require_vm_for_workspace(db, ws)
+        except NotFoundError:
+            # Guard-free readers can race a normal workspace or VM deletion.
+            continue
         if ws.vm_name in unavailable_vms:
             continue
         if ws.vm_name not in vm_targets:

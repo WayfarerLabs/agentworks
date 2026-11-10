@@ -115,9 +115,11 @@ def preview_selected(
             for name, parent in routes:
                 console = db.get_console(name)
                 if console is None or console.vm_name != parent:
-                    raise StateError(
-                        "console changed during preview selection", entity_kind="console", entity_name=name
+                    invocation.results[("console", name)] = RuntimeResult(
+                        kind="console", name=name, desired_runtime_state=None, target_known=False
                     )
+                    invocation.fail("console", name, "console changed during preview selection", blocked=True)
+                    continue
                 invocation.consoles[name] = console
                 invocation.results[("console", name)] = RuntimeResult(
                     kind="console", name=name, desired_runtime_state=console.desired_runtime_state
@@ -190,12 +192,18 @@ def _preview_sessions(invocation: RuntimeInvocation) -> None:
 
     import agentworks.sessions.manager as sessions
 
-    candidates = [
-        session
-        for name, session in invocation.sessions.items()
-        if not invocation.unavailable("session", name)
-        and invocation.contexts[session_vm_name(invocation, session)].observed_status is VMStatus.RUNNING
-    ]
+    candidates = []
+    for name, session in invocation.sessions.items():
+        if invocation.unavailable("session", name):
+            continue
+        try:
+            context = invocation.contexts[session_vm_name(invocation, session)]
+            if context.observed_status is VMStatus.RUNNING:
+                candidates.append(session)
+        except UserAbort:
+            raise
+        except AgentworksError as error:
+            invocation.fail("session", name, error, blocked=True)
     observations = (
         sessions.observe_session_statuses(candidates, db=invocation.db, config=invocation.config, include_legacy=True)
         if candidates
