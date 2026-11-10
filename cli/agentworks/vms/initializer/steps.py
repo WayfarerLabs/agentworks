@@ -153,8 +153,12 @@ def update_and_apply(
     return True
 
 
-def warn_step(log: InitLog, summary: str, error: Exception) -> None:
-    """Warn, on the console and in the log, that the step ``summary`` names failed with ``error``."""
-    message = f"{summary}: {describe_failure(error, log.sanitize)}"
+def warn(log: InitLog, message: str) -> None:
+    """Warn with ``message`` on the console and in the log, which leaves initialization partial."""
     log.warning(message)
     output.warn(message)
+
+
+def warn_step(log: InitLog, summary: str, error: Exception) -> None:
+    """Warn, on the console and in the log, that the step ``summary`` names failed with ``error``."""
+    warn(log, f"{summary}: {describe_failure(error, log.sanitize)}")

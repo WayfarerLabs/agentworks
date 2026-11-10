@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.execution.requests import Command
-from agentworks.vms.initializer.steps import STEP_FAILURES, update_and_apply, warn_step
+from agentworks.vms.initializer.steps import STEP_FAILURES, update_and_apply, warn, warn_step
 
 if TYPE_CHECKING:
     from agentworks.execution.files import Files
@@ -200,8 +200,7 @@ def _apply_hardening_fstab(files: Files, log: InitLog) -> None:
     current = files.read(HARDENING_FSTAB_PATH, elevated=True)
     if current is None:
         msg = f"could not read {HARDENING_FSTAB_PATH}; skipping hidepid edit"
-        log.warning(msg)
-        output.warn(msg)
+        warn(log, msg)
         return
 
     # surrogateescape keeps any byte that is not UTF-8 exactly as it was.
@@ -209,8 +208,7 @@ def _apply_hardening_fstab(files: Files, log: InitLog) -> None:
 
     if action == "malformed":
         msg = f"{HARDENING_FSTAB_PATH} /proc line did not parse cleanly; leaving fstab unchanged. Will still remount."
-        log.warning(msg)
-        output.warn(msg)
+        warn(log, msg)
     elif action == "preserved-stricter":
         output.detail(f"/proc already mounted with hidepid={effective} (stricter than agentworks default); preserved.")
     elif action != "no-op":

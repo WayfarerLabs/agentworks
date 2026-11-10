@@ -54,7 +54,7 @@ from typing import TYPE_CHECKING
 from agentworks import output
 from agentworks.errors import StateError
 from agentworks.execution.requests import Command
-from agentworks.vms.initializer.steps import STEP_FAILURES, status, update_and_apply, warn_step
+from agentworks.vms.initializer.steps import STEP_FAILURES, status, update_and_apply, warn, warn_step
 
 if TYPE_CHECKING:
     from agentworks.execution.files import Files
@@ -236,8 +236,7 @@ def _diagnose_dns(files: Files, log: InitLog) -> bool:
             f"/etc/resolv.conf could not be read for further diagnosis. "
             f"Subsequent steps that need external DNS will likely fail."
         )
-        log.warning(msg)
-        output.warn(msg)
+        warn(log, msg)
         return False
 
     if _TAILSCALED_RESOLV_SIGNATURE not in resolv.stdout.decode("utf-8", "replace"):
@@ -248,8 +247,7 @@ def _diagnose_dns(files: Files, log: InitLog) -> bool:
             f"Investigate the platform resolver; subsequent steps that "
             f"need external DNS will likely fail."
         )
-        log.warning(msg)
-        output.warn(msg)
+        warn(log, msg)
         return False
 
     # /etc/resolv.conf IS tailscaled-managed and libc DNS is broken.
@@ -267,7 +265,6 @@ def _diagnose_dns(files: Files, log: InitLog) -> bool:
             f"resolver). Subsequent steps that need external DNS will "
             f"likely fail."
         )
-        log.warning(msg)
-        output.warn(msg)
+        warn(log, msg)
         return False
     return True

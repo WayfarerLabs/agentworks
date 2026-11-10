@@ -11,7 +11,7 @@ from agentworks import output
 from agentworks.execution.requests import Command, Script, Shell
 from agentworks.ssh import SSHError, SSHLogger
 
-from .steps import STEP_FAILURES, status, warn_step
+from .steps import STEP_FAILURES, status, warn, warn_step
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -212,8 +212,7 @@ def _apply_sve_mask(files: Files, log: InitLog) -> None:
         files.write(SVE_NOSVE_GRUB_PATH, SVE_NOSVE_GRUB_CONTENT.encode(), mode=0o644, parent_mode=0o755, elevated=True)
         if status(files, Command(("update-grub",), elevated=True, deadline=files.deadline)):
             msg = "SVE mask: update-grub failed; VM may crash on SVE (SIGILL)."
-            log.warning(msg)
-            output.warn(msg)
+            warn(log, msg)
             return
         # The drop-in is installed but the running kernel picked it up only if
         # arm64.nosve is already on the cmdline (i.e. the VM was rebooted since).

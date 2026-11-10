@@ -19,7 +19,7 @@ from agentworks.capabilities.vm_platform.cloud_init import INIT_SYSTEM_PACKAGES
 from agentworks.execution.requests import Command, Script, Shell
 
 from .mise import MISE_GPG_KEY_PATH, MISE_GPG_KEY_URL, MISE_SOURCE_FILE, MISE_SOURCE_LINE
-from .steps import STEP_FAILURES, describe_failure, status, warn_step
+from .steps import STEP_FAILURES, describe_failure, status, warn, warn_step
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -254,11 +254,6 @@ def _build_test_command(
     return " && ".join(commands) or None
 
 
-def install_check(test_command: str) -> Script:
-    """The request that runs an install command's completion test: ``/bin/sh``, bounded short."""
-    return Script(test_command, Shell.SH, deadline=INSTALL_CHECK_DEADLINE)
-
-
 def install_run(shell: str, command: str) -> Command:
     """The request that runs an install command in ``shell``'s login environment."""
     return Command((shell, "-lc", command), deadline=INSTALL_COMMAND_DEADLINE)
@@ -296,8 +291,7 @@ def _run_install_commands(
         entry = entries.get(name)
         if entry is None:
             msg = f"'{name}' is not a declared {label.lower()}"
-            log.warning(msg)
-            output.warn(msg)
+            warn(log, msg)
             continue
         log.step(f"{label} {i}/{total}: {name}")
 
@@ -305,7 +299,7 @@ def _run_install_commands(
         test_cmd = _build_test_command(entry, shell, home)
         if test_cmd:
             try:
-                if status(files, install_check(test_cmd)) == 0:
+                if status(files, Script(test_cmd, Shell.SH, deadline=INSTALL_CHECK_DEADLINE)) == 0:
                     output.info(f"{label} {i}/{total} ({name}): already installed, skipping")
                     log.output(f"{name}: already installed ({test_cmd}), skipping")
                     path_additions.extend(entry.path)
