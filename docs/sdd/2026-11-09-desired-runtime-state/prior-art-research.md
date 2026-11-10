@@ -45,7 +45,9 @@ composition over existing node graphs; the design preserves that approach.
 The source survey found session-specific readiness contexts, separate per-session env resolution,
 and an existing resolver that refuses unresolved names added after its boundary. Those facts drive
 two explicit preparation compositions with shared values, rather than appending workload names to a
-completed VM batch resolver. The source anchors are recorded in the LLDs.
+completed VM batch resolver. The existing `Resolver.resolve_gate` already caches and seeds singleton
+successes. Extending it with value-free failure memoization and a pre-source boundary check avoids a
+parallel cache. The source anchors are recorded in the LLDs.
 
 ## Refuted or deliberately not adopted
 

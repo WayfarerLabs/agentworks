@@ -17,15 +17,16 @@ and false to on-demand, then removes the old column. New resources created with 
 runtime record running intent. No target belongs in a template, instance overlay, applied-state
 slice, or secret store. Initialization evidence and observed runtime fingerprints remain separate.
 
-Give VM and console rows durable UUIDs, following the existing session UUID pattern. These identify
-the selected resource across confirmation and preparation, where a name may be deleted and reused.
-Graph keys and CLI operands remain kind/name. UUIDs are execution checks, not new addressing syntax
-or an observed-status framework. Details are in [state and concurrency](runtime-state-lld.md).
+Give VM rows durable UUIDs, following the existing session UUID pattern. These bind nodes captured
+before guard acquisition to their selected VM. Console selection instead occurs under the family
+guard, including delete confirmation; it needs no new UUID or table rebuild. Graph keys and CLI
+operands remain kind/name. Details are in [state and concurrency](runtime-state-lld.md).
 
 Keep lifecycle ownership in the current VM, session, and console managers. There is no `Runnable`
-base class, adapter registry, generic lifecycle manager, provider change, or background controller.
-A small `runtime_state` package owns explicit reconciliation coordination, result records, and the
-operation's infrastructure secret cache. Domain preparation and execution stay with their managers.
+base class, adapter registry, generic lifecycle manager, provider API change, or background
+controller. A small `runtime_state` package owns explicit reconciliation coordination and result
+records. Domain preparation and execution stay with their managers. The existing Resolver owns
+invocation secrets.
 
 ## CLI contract
 
@@ -72,10 +73,12 @@ Execution constructs an in-memory plan from current rows and applies it once. It
 executable plan or retry automatically. Dry run follows the separate observation path below and does
 not acquire or create mutation guards.
 
-1. Validate scope and select resource identities. Acquire VM-family guards in deterministic order,
-   retaining successful families and reporting busy ones as blocked. Reload and validate selected
-   identities and targets under those guards. Structural database-open or registry failures before
-   selection remain command errors; ordinary per-VM preparation failures remain isolated.
+1. Validate scope and retain VM/session identities. A preliminary focused-console lookup locates its
+   parent guard only. Acquire VM-family guards in deterministic order, retaining successful families
+   and reporting busy ones as blocked. Reload and validate VM/session identities; select consoles
+   and their definitions under the guards, refusing a changed parent on focused lookup. Structural
+   database-open or registry failures remain command errors; per-VM preparation failures are
+   isolated.
 2. Build observation/provider contexts for every affected VM, including parents needed only to
    inspect or stop children. Activation is a separate decision: activate every selected VM with
    running intent, regardless of child count or child targets, plus permitted parents needed by
@@ -88,12 +91,12 @@ not acquire or create mutation guards.
    and transports. Existing status, policy, command rendering, command-presence, and setup checks
    run before workload secret collection. Healthy running targets and refused operations add no
    workload-only secrets. A console may still build a waiting view for an absent member session.
-5. Register eligible graph declarations and effective environment/pane targets on one workload
-   resolver. If any required name already failed infrastructure resolution, fail this shared
-   boundary from the cached error without retrying the source. Otherwise seed applicable successful
-   infrastructure values, resolve once, and validate every target's use of those values. Failure
-   prevents every remaining runtime change, including every VM stop. Already-activated
-   infrastructure may remain running and is reported.
+5. Register eligible graph declarations and effective environment/pane targets on the same Resolver
+   used for infrastructure gates. Its boundary checks required names against memoized gate failures
+   before any source call. Otherwise it reuses seeded successes, resolves the remaining union once,
+   and validates every target's use of those values. Failure prevents every remaining runtime
+   change, including every VM stop. Already-activated infrastructure may remain running and is
+   reported.
 6. Execute concrete domain operations with supplied values: session actions before console builds
    within each VM, then deferred provider stops. Do not individually tear down children merely to
    stop their VM. A failed action does not prevent independent actions. Abort stops further work.
@@ -117,26 +120,29 @@ graph and correct context per session operation, run its readiness checks, then 
 requirements. Do not combine multiple sessions' graphs and walk them with the wrong guest context.
 Shared VM/site construction may be memoized; no capability API or target-routing registry is needed.
 
-Infrastructure preparation and workload preparation are distinct compositions. Infrastructure
-credentials can fail independently across VMs. Resolve each distinct required infrastructure secret
-once through the existing complete-resolution API, caching both success and failure for this
-invocation. This small per-name preparation avoids exposing partial values from a failed complete
-batch or making one site's missing credential doom another site. Known requests are front-loaded;
-conditional repair names join the same cache only when a VM proves they are needed.
+Infrastructure preparation and workload preparation are distinct compositions over one existing
+Resolver. Extend `resolve_gate`, which already resolves and seeds successful singleton requests,
+with value-free failure memoization. Register a new gate name only after success. This isolates a
+failed site's credential without exposing partial values or retrying a shared failure. Known
+requests are front-loaded; conditional repair joins only when needed. Cancellation is never cached.
 
-The workload composition uses the existing `Resolver.register_targets`, declaration registration,
-`seed`, `resolve`, and `ScopedSecrets`. It resolves the complete eligible workload union together,
-so a missing value is an operation-wide barrier rather than a partial restart. It does not reuse the
-old batch's completed VM resolver by registering new names after its boundary. Add a value-free
-`registered_names` query to Resolver for the cached-failure intersection before resolution. Only
-failures required by this eligible union block it; an unrelated failed site key does not poison
-healthy workloads.
+Register eligible workload declarations and `SecretTarget`s afterward. Inside `resolve()`, reject
+required names with memoized gate failures before any source call; ignore failures outside that
+union. Existing seeded successes are reused and remaining workload names resolve in one complete
+batch. No separate cache, name-query API, seed transfer, or partial-resolution API is needed. Do not
+pre-register every infrastructure graph's names, which would poison unrelated workloads.
 
-After phase 5, domain execution can read supplied values but cannot resolve more. The infrastructure
-cache is closed to new resolution before workload execution. Any newly discovered requirement is a
-failure requiring another invocation. Values never enter a serialized plan, stored intent, result
-record, or log. Detailed seams and failure cases are in
+Boundary failure terminates the invocation and disposes its Resolver; no catch-and-continue path can
+reopen gate resolution. Successful resolution closes gates through the existing boundary rule.
+Execution and final observation receive supplied values without a resolution callback. Newly
+discovered requirements fail and require another invocation. Values never enter a serialized plan,
+stored intent, result record, or log. Detailed seams and failure cases are in
 [batch preparation](batch-preparation-lld.md).
+
+Existing batch session start, restart, and stop use the same domain preparation. Stop observes
+parents without activation and contributes no workload env targets. Retire the old batch VM boundary
+and its late-repair path once these callers move. Preparation failures remain local to their VM
+families; the complete workload-secret failure remains an operation-wide barrier.
 
 ## Observation and dry run
 
@@ -152,11 +158,11 @@ conditional checks needed after activation instead of treating an unattempted pr
 runtime that can be replaced. No saved dry-run output is accepted as execution authority.
 
 Final execution observations use prepared provider contexts and direct guest observers, so they
-cannot introduce new secret prompts. An inconclusive observation or unmet target is reported as
-such. Successful observation is not an uptime, useful-work, or continued-availability guarantee.
-Guest probes retain their finite existing attempt/time limits. Provider checks retain documented
-backend limits, including AWS/Azure SDK defaults that can exceed ten seconds; no uniform ten-second
-provider deadline or unbounded convergence polling is added.
+cannot introduce new secret prompts. An inconclusive observation blocks convergence; a target absent
+again after its start is failed. Successful observation is not an uptime, useful-work, or
+continued-availability guarantee. Guest probes retain their finite existing attempt/time limits.
+Provider checks retain documented backend limits, including AWS/Azure SDK defaults that can exceed
+ten seconds; no uniform ten-second provider deadline or unbounded convergence polling is added.
 
 ## Inspection and compatibility
 

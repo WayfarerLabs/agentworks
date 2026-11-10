@@ -12,12 +12,12 @@ on `feat/desired-runtime-state`, based on main. No split PR, stack, early merge,
 is authorized. Private implementation commits may be partial; each published handoff is complete for
 its checkpoint and green. The PR remains draft until the complete implementation handoff.
 
-| Stage                   | Signal                                      | Published fix allowance               | Current record                            |
-| ----------------------- | ------------------------------------------- | ------------------------------------- | ----------------------------------------- |
-| FRD                     | Draft plus `review-requested`               | Up to two rounds                      | Converged at `c6337609d`, two rounds used |
-| Complete design         | Draft plus `review-requested`               | Up to two rounds                      | Not yet handed off, zero rounds used      |
-| Complete implementation | Ready                                       | Up to two rounds                      | Not started                               |
-| Closeout                | Final lock in the same PR after convergence | No new feature/fix allowance inferred | Not started                               |
+| Stage                   | Signal                                      | Published fix allowance               | Current record                                 |
+| ----------------------- | ------------------------------------------- | ------------------------------------- | ---------------------------------------------- |
+| FRD                     | Draft plus `review-requested`               | Up to two rounds                      | Converged at `c6337609d`, two rounds used      |
+| Complete design         | Draft plus `review-requested`               | Up to two rounds                      | Initial handoff `f3861bb6`; round one underway |
+| Complete implementation | Ready                                       | Up to two rounds                      | Not started                                    |
+| Closeout                | Final lock in the same PR after convergence | No new feature/fix allowance inferred | Not started                                    |
 
 The FRD convergence reading is PR comment 6762771633. The final report accepted prior corrections;
 its remaining phrase suggestion was independently assessed as optional. The HLA states uniform
@@ -62,18 +62,22 @@ explicit migration and CLI contract, a green handed-off head, and a recorded con
 ## Phase 2: storage, intent, and VM cutover
 
 - [ ] Add the string-compatible desired-runtime enum, per-kind constraints, nullable legacy workload
-      targets, durable VM/console UUIDs, and strict persisted-boundary conversion.
+      targets, durable VM UUIDs, guarded console selection, and strict persisted-boundary
+      conversion.
 - [ ] Implement atomic migration 39, remove old VM flag storage, preserve all current table facts,
       relationships and constraints, and update schema/foreign-key restore sentinels.
-- [ ] Add named expected-UUID database target writers and resource-owned pure intent services.
-      Ensure idempotent writes and no runtime/config/secret work in pure target selection.
+- [ ] Add named target writers, expected-UUID checks for VM/session, and resource-owned pure intent
+      services; select consoles under the family guard. Ensure idempotent writes and no
+      runtime/config/secret work in pure target selection.
 - [ ] Update VM creation/start/stop and every VM activation/read/display consumer to the new target;
       remove the old flag setter, row field, and decision paths. Retain only historical migration
       references and the derived JSON compatibility projection.
 - [ ] Extract runtime-only VM operations usable by reconciliation without changing target. Preserve
       conditional connection repair for provider-running VMs and active holds across guest work.
 - [ ] Close the VM auto-start race using the existing family guard, fresh UUID/target checks, and
-      explicit held-token reuse through all current guarded agent/workspace/session callers.
+      explicit held-token reuse through all current guarded agent/workspace/session callers. Guard
+      hold admission too; release admission-only locking before interactive access. Require bounded
+      same-keeper guest acknowledgement on WSL entry, with complete failure cleanup.
 - [ ] Verify populated and historical migrations, rollback/retry, UUID stability/replacement,
       database restore, row-backed backup serialization, wrong-kind values, and Windows lock
       behavior.
@@ -92,8 +96,13 @@ with the new model while provider contracts remain unchanged.
       intent.
 - [ ] Replace the existing per-session full-service batch launch loop with shared preparation and
       one complete eligible workload resolution. Include safe residual starts and ordinary no-ops.
+- [ ] Route batch stop through non-activating parent observation and prepared stops, including
+      accepted absent no-ops and existing filters/force. Retire all old batch boundary helpers,
+      unused best-effort exports, and the sole Resolver late-repair method.
 - [ ] Separate console observation/target collection from staging cleanup and realization. Add
-      intent/UUID handling, preserve membership independence, and guard definition/member mutations.
+      intent handling and selection under guards, preserve membership independence, and guard
+      definition/member/cascade mutations. Put console delete selection and consent under the same
+      guard and reuse held tokens for nested cleanup.
 - [ ] Retain canonical view identity for healthy and staging-cleanup-only cases; build missing views
       from stored member order, shell panes, and admin-shell configuration with supplied values.
 - [ ] Align the existing admin-shell collector and delivery: the baseline collects VM/admin env but
@@ -112,15 +121,17 @@ existing intended scopes. Refused/no-op paths do not resolve unused workload sec
 ## Phase 4: reconciliation, preview, and operator commands
 
 - [ ] Implement explicit VM/fleet/session/console scopes, strict name-or-all validation, retained
-      UUID selection, pending-adoption blockers, and stopped-parent precedence.
-- [ ] Implement isolated infrastructure credential preparation with invocation-only success/failure
-      caching, shared conditional repair values, and active holds. No new secret backend API or
-      cache survives the invocation.
+      VM/session UUID checks, guarded console selection, adoption blockers, and stopped-parent
+      precedence.
+- [ ] Extend the existing Resolver gate path with invocation-only value-free failure memoization;
+      register gate names only after success. Share seeded successes and conditional repair values
+      while isolating failed families. Add no parallel cache or secret backend API.
 - [ ] Activate all selected running-intent VMs, including both childless VMs and VMs with only
       stopped children, before the workload boundary. Leave idle on-demand VMs off when not needed.
-- [ ] Union eligible workload graph/env/pane requirements on the existing Resolver, seed successful
-      infrastructure values, fail on any required cached infrastructure error without retrying,
-      validate all consumers, and prohibit further source resolution afterward.
+- [ ] Register eligible workload graph/env/pane requirements on that same Resolver. Check required
+      declarations against gate failures inside resolve before any source call, reuse seeded
+      successes, and validate every consumer. Failed boundaries terminate and dispose the
+      invocation; execution and final observation receive no resolution callback.
 - [ ] Execute sessions before console builds and all provider stops after shared secret success;
       isolate independent failures, preserve targets, propagate cancellation, and report partial
       effects.
@@ -130,7 +141,9 @@ existing intended scopes. Refused/no-op paths do not resolve unused workload sec
       target write, or execution; explain conditional guest checks when a VM is off.
 - [ ] Add thin `set-desired-state` and `reconcile` CLI verbs under all three resource groups,
       existing name completions, static state choices, additive inspection target fields, and the
-      derived VM JSON compatibility field. Do not add a separate command-output schema family.
+      derived VM JSON compatibility field. For powered-off observations, map stopped intent to
+      manual, on-demand to idle, and running to null disposition. Add no command-output schema
+      family.
 
 Definition of done: the real CLI can restore a VM scope and fleet, retry one workload, preview
 without mutation, and adopt intent without runtime work. Every action is accounted for and uses
@@ -147,7 +160,8 @@ existing domain authorities, with no generic runnable lifecycle framework.
       collateral.
 - [ ] Document explicit adoption, accepted intent on failure/cancellation, VM on-demand versus
       running behavior, parent precedence, console independence, preview limits, and batch-secret
-      failure changes. Add the implementing commit's breaking-change footer.
+      failure changes, per-family preparation isolation, and contention during secret prompts,
+      console consent, and hold admission. Add the implementing commit's breaking-change footer.
 - [ ] Run the complete implementation's independent project review, complexity pass, and a
       fresh-context generic correctness/security pass at one pinned head in separate worktrees.
       Scale depth to migration, concurrency, secret delivery, and lifecycle behavior; verify
@@ -177,6 +191,8 @@ and require actual evidence or an authorized disposition before claiming converg
 - [ ] Drive pure adoption and dry run; explicit child/console stop; explicit parent stop retaining
       child targets; subsequent VM start/recovery; direct session exit; console staging recovery;
       missing-secret barrier; non-interactive refusal; and reachable unknown/failure cases.
+- [ ] Exercise delayed WSL keeper attachment versus a concurrent stop on the actual Windows/WSL bed,
+      plus hold-entry failure cleanup and diagnostic access without an interactive-body guard.
 - [ ] Record the full command surface reached, each observed pass/failure, unreachable lanes, and
       both workstation and platform coverage. Unit evidence supplements, not replaces, live
       recovery.
@@ -209,12 +225,14 @@ CI, and converged authorized published review. No merge occurs under this plan.
 
 ## Delegate ownership after design convergence
 
-The lead owns architecture, this plan, shared coordination, CLI/completion integration, permanent
-documentation, and final integration. Bounded implementation is delegated in isolated worktrees:
+The lead owns architecture, this plan, shared coordination and Resolver changes, CLI/completion
+integration, permanent documentation, and final integration. Bounded implementation is delegated in
+isolated worktrees:
 
 - Data/VM owner: database models/converters/migration/accessors/backup boundaries, VM intent and
-  runtime helpers/inspection, and explicit guard threading in the existing guarded VM callers.
-- Session owner: session manager launch/stop preparation and execution, batch launch composition,
+  runtime helpers/inspection, explicit guard threading in existing guarded VM callers, and bounded
+  WSL hold acknowledgement.
+- Session owner: session manager launch/stop preparation and execution, batch lifecycle composition,
   session intent and inspection, and their focused tests.
 - Console owner: console lifecycle/definition guards, preparation/execution, pane delivery, console
   intent and inspection, and their focused tests.

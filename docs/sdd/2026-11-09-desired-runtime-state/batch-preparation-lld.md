@@ -30,8 +30,8 @@ smallest focused neighboring modules; preserve public manager entry points and e
 | VM preparation                  | Selected VM UUID/target, bound live VM/site nodes, declaration names, guarded provider context, current power observation, held-active context                                   |
 | Session launch preparation      | Selected session UUID/target, row/workspace/agent/template snapshots, per-session graph, SESSION scope, correct transports, observed status, launch policy, effective env target |
 | Session stop preparation        | Selected identity/target, exact owning transport/socket, read-only status and recovery refusal; no env targets                                                                   |
-| Console realization preparation | Selected console UUID/target, definition/member snapshot, VM target, exact canonical/staging observation, pane targets only when a build is needed                               |
-| Console stop preparation        | Selected identity/target, exact managed names and transport, observed presence; no pane targets                                                                                  |
+| Console realization preparation | Console/target selected under the family guard, definition/member snapshot, VM target, exact canonical/staging observation, pane targets only when a build is needed             |
+| Console stop preparation        | Guarded console/target, exact managed names and transport, observed presence; no pane targets                                                                                    |
 
 Prepared records contain references and observations, not resolved secret values. They are internal
 invocation data and are never serialized. They expose no generic `start`/`stop` protocol. Executors
@@ -51,12 +51,19 @@ no need to change capability signatures or create a generic context-routing laye
 VM scope expands to stored sessions and consoles belonging to that VM. Fleet scope expands selected
 VMs once, then their children. Console membership does not expand session selection: sessions are
 already selected by VM scope, and focused console reconciliation never selects member runtimes.
-Deduplicate by kind/name and verify the captured UUID after acquiring the family guard.
+Deduplicate by kind/name. Retain VM/session UUIDs across guard acquisition. A preliminary focused
+console lookup only locates its family guard; select its row, target, and members after acquisition
+and refuse a changed parent. VM/fleet scopes enumerate consoles under their acquired guards.
 
-Public start/restart/stop performs acceptance before entering runtime execution. The batch
-controller retains every accepted match, including healthy running no-ops, for intent and results.
-It selects runtime actions separately. Restart confirmation retains the existing exact selected
-session UUIDs and authorized-running names; a newly running unconfirmed target is not replaced.
+Public start/restart/stop performs acceptance before entering runtime execution. The
+start/restart/stop batch controller retains every accepted match for intent and results, including
+healthy running start no-ops and absent stop no-ops. It selects runtime actions separately. Restart
+confirmation retains the existing exact selected session UUIDs and authorized-running names; a newly
+running unconfirmed target is not replaced.
+
+Batch stop uses non-activating parent observation and prepared stop execution. It records stopped
+for accepted matches, preserves existing filters and force boundaries, and retains accepted intent
+on later failure. An off parent satisfies guest absence without a hold or activation.
 
 Reconciliation never records a target or requests a fresh conversation. Its session launch policy is
 ordinary best-effort continuation with no implicit force. Existing explicit batch options keep their
@@ -119,22 +126,21 @@ stop-only work can use the already-live guest without that hold. If it goes off 
 re-observe provider power and report the stopped target satisfied only when absence is proved.
 Unknown observation still blocks. A hold justified by another selected running target may be reused.
 
-Use one invocation-owned infrastructure secret cache with success and failure entries keyed by
-declared secret name. Each first request calls the existing authorized complete-resolution path for
-that name. Later requests reuse its value or value-free failure. UserAbort is never converted into a
-cached per-target failure. Known required names are collected before power actions where possible.
+Use one invocation-owned `Resolver` for infrastructure and workload preparation. Existing
+`resolve_gate` already projects a complete singleton result and stores success in its seed mapping.
+Extend it to memoize value-free failure metadata, never traceback-bearing exceptions or partial
+batch values. UserAbort propagates without memoization. Resolve a new gate declaration before
+registering it; register/seed only a successful result. Repeated requests reuse success or failure.
 
-Per-name resolution is deliberate here: a complete batch cannot safely expose its partial values
-when another required credential fails, and the resolver's fail-before-prompt behavior can skip
-otherwise independent credentials. Singleton complete projections preserve that contract and allow
-dependency-specific failures without a new partial-resolution API. This costs more source setup
-across distinct infrastructure names, not repeated prompts for a shared name. The workload union
-below still gets one complete source-first batch.
+Only node-declared gate and repair names may reach this callback; retain the gate reader's repair
+allowlist. Front-load known required requests, then resolve conditional repair names lazily when
+needed. A shared repair name is attempted once; healthy paths never request it. Do not register all
+infrastructure graph declarations on the Resolver before their gate attempts: a failed independent
+VM must not leave an unused declaration that poisons the workload boundary.
 
-Only node-declared gate and repair names may reach the cache callback. The existing gate reader
-still checks each target's allowed repair references. Conditional repair names are not eagerly
-requested on healthy paths. Two VMs needing the same repair key share its one result. If a key is
-also a workload input, its successful infrastructure value seeds the workload resolver.
+Singleton gate projections preserve complete-resolution semantics and independent credential failure
+isolation. Distinct names may repeat source setup; shared names do not repeat resolution. The later
+workload union still gets one complete source-first batch. No backend API changes.
 
 Prepare provider contexts with scoped values, observe power, activate required VMs, and perform
 conditional reconnection/rejoin before workload resolution. Reuse the ordinary explicit-start
@@ -142,27 +148,31 @@ connection path for a provider-running VM whose guest connection needs repair. R
 through final observation, including WSL's keepalive requirements. Record completed infrastructure
 changes even if later workload preparation fails.
 
-No VM stop executes in this phase. Close the cache to new resolution before the workload boundary
-completes; subsequent reads are cache-only. Failed infrastructure targets are excluded from workload
-preparation while independent families continue.
+No VM stop executes in this phase. Failed infrastructure targets are excluded from workload
+preparation while independent families continue. Their memoized failures remain available to the
+same Resolver if an eligible workload later requires the same name.
 
 ## The shared workload boundary
 
 After every eligible target's pre-secret checks:
 
-1. Create one workload `Resolver` with the invocation's existing interaction policy.
-2. Register the union of eligible graphs' secret declarations and all effective session/pane
-   `SecretTarget`s, including transient declarations where current env consumers permit them.
-3. Read the resolver's value-free `registered_names` tuple and intersect it with cached failed
-   infrastructure names. An overlap fails the complete workload barrier from the cached error,
-   without resolving that name again or prompting for other names in a known-doomed batch. An
-   unrelated cached failure has no effect on this union.
-4. Seed applicable successful infrastructure values before resolution. Preserve the resolver's
-   refusal to seed or add unresolved requirements after its boundary.
-5. Resolve once and validate every target's use of the values. Winning-scope env merging and
-   `${agw:...}` context validation retain the current shared renderer and literal-secret rules.
-6. Supply only declared graph values through `ScopedSecrets` and only the relevant composed env to
-   each session or pane. Never deliver the entire credential set as a process environment.
+1. Use the same Resolver that performed infrastructure gate preparation; do not resolve its full
+   boundary during infrastructure preparation.
+2. Register eligible graphs' secret declarations and effective session/pane `SecretTarget`s,
+   including transient declarations where current env consumers permit them.
+3. Inside `Resolver.resolve()`, check required declarations against its gate-failure memo before any
+   source call. A required cached failure fails the complete boundary without retrying it or
+   prompting for other names in a known-doomed batch. Unrelated failed names remain excluded.
+4. Reuse existing seeded successes and resolve all remaining declarations once. Validate every
+   target's use of the values, retaining winning-scope merging and `${agw:...}` context rules.
+5. Supply graph values through `ScopedSecrets` and only the relevant composed env to each session or
+   pane. Never deliver the whole credential set as process environment.
+
+The overlap check belongs inside Resolver; no coordinator cache, `registered_names` query, or seed
+transfer is needed. A failed complete boundary terminates the invocation and disposes the Resolver;
+no executor/final observer receives a resolution callback, and no catch-and-continue path reopens
+it. Successful resolution preserves its existing refusal of later gate calls or unresolved
+additions.
 
 A required workload secret failure prevents every deferred action, including stops and staging
 cleanup on other selected targets. It does not roll back accepted intent or completed VM activation.
@@ -170,16 +180,24 @@ Render those completed effects, mark deferred work blocked or failed honestly, a
 Do not preserve values from an incomplete complete-resolution batch or fall back to resolving each
 failed workload separately.
 
-The existing batch start/restart commands use this same preparation and resolution arrangement, then
-their session executors. They must no longer invoke the whole singular launcher in a loop. The
-singular launcher uses the same domain helpers for one target, preventing separate semantics.
+Existing batch start/restart use this arrangement and session executors rather than calling the
+whole singular launcher in a loop. Batch stop uses the same stop preparation without activation or
+workload env targets. Retire `_batch_vm_boundary_impl`, `_batch_vm_boundary`, the unused
+`_best_effort_batch_vm_boundary`, their exports, and the sole `Resolver.resolve_late_repair` path
+after these callers move. Singular services use the same concrete helpers. Extract focused modules
+rather than extending the already-large lifecycle file.
+
+A stopped parent or failed infrastructure credential blocks its own batch family while independent
+families continue. This changes the old batch boundary's whole-batch refusal and must be documented;
+shared required workload-secret failure still prevents every deferred runtime action.
 
 ## Execution and final observations
 
 Execution receives cached values; it has no resolution callback. Before each consequential action,
-reload the selected UUID, verify parent/target, and re-observe the relevant runtime under the held
-family guard. If the world has changed, skip an already-satisfied action or report failure/blockage;
-do not change intent, adopt a replacement, or open another secret prompt.
+reload VM/session UUIDs or the guarded console definition, verify parent/target, and re-observe the
+relevant runtime under the held family guard. If the world has changed, skip an already-satisfied
+action or report failure/blockage; do not change intent, adopt a replacement, or open another secret
+prompt.
 
 Session execution retains existing ordering: resolve env from supplied values, prepare artifacts and
 harness launch selection, validate application, stage prospective files, tear down only the
@@ -201,14 +219,16 @@ invalidate a console's waiting view.
 After session actions, console actions, and deferred provider stops, use the prepared provider
 contexts and existing direct session/console observers for bounded final checks. These checks cannot
 resolve secrets or activate VMs. Use the existing finite probe limits; an indeterminate result is
-not successful convergence. Do not introduce a sustained monitoring period or retry loop.
+not successful convergence. A target observed absent again after its start is failed. Do not
+introduce a sustained monitoring period or retry loop.
 
 ## Results and cancellation
 
-Use a small immutable per-resource result record: kind/name, selected UUID internally, desired
-target, available domain observation, proposed/performed action, outcome, and a value-free reason.
-The common outcome vocabulary is unchanged/changed/failed/blocked, not a common runtime status enum.
-Preserve domain status meanings and avoid placing command strings or values in records.
+Use a small immutable per-resource result record: kind/name, VM/session UUID internally where
+applicable, desired target, available domain observation, proposed/performed action, outcome, and a
+value-free reason. The common outcome vocabulary is unchanged/changed/failed/blocked, not a common
+runtime status enum. Preserve domain status meanings and avoid placing command strings or values in
+records.
 
 Include successful prerequisite VM activation when a focused workload command caused it. Selected
 pending-adoption resources and stopped-parent running children are blocked. Parent power-off can
