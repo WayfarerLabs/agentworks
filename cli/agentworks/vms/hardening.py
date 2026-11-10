@@ -171,9 +171,14 @@ def apply_vm_hardening(files: Files, log: InitLog) -> None:
 
 
 def _apply_hardening_sysctl(files: Files, log: InitLog) -> None:
-    """Write the sysctl baseline if content differs from desired, then load it with ``sysctl --system``.
+    """Write the sysctl baseline if content differs from desired, then load that file with ``sysctl -p``.
 
-    A load that fails puts the prior baseline back, so the next run retries.
+    Loading only this file means another package's ``sysctl.d`` entry cannot
+    fail the load. A load that fails puts the prior baseline back, so the next
+    run retries. Every key is present on the kernels Agentworks supports
+    (Debian's, WSL2's, which builds in Yama and the BPF syscall); a kernel
+    lacking one fails the load, which warns on each reinit rather than
+    dropping the key silently.
     """
     current = files.read(HARDENING_SYSCTL_PATH, elevated=True)
     desired = HARDENING_SYSCTL_CONTENT.encode()
@@ -183,13 +188,14 @@ def _apply_hardening_sysctl(files: Files, log: InitLog) -> None:
     output.info("Applying sysctl baseline...")
     update_and_apply(
         files,
+        log,
         HARDENING_SYSCTL_PATH,
         desired,
         observed=current,
         mode=0o644,
         parent_mode=0o755,
         apply=lambda: files.access.run(
-            Command(("sysctl", "--system"), elevated=True, deadline=files.deadline), check=True
+            Command(("sysctl", "-p", HARDENING_SYSCTL_PATH), elevated=True, deadline=files.deadline), check=True
         ),
     )
 

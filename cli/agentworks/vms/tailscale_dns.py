@@ -110,6 +110,7 @@ def _ensure_tailscaled_dropin(files: Files, log: InitLog) -> None:
     output.info("Installing tailscaled startup-ordering drop-in...")
     update_and_apply(
         files,
+        log,
         TAILSCALED_DROPIN_PATH,
         desired,
         observed=current,

@@ -412,7 +412,9 @@ def _write_sshd_accept_env(files: Files, log: InitLog) -> None:
     timeout, a failed reload, an interrupt) the prior content is put back,
     or the fragment removed when there was none, conditional on the
     fragment still being the one this run wrote, so the next reinit
-    retries. A steady-state reinit leaves sshd alone. The window where an unvalidated fragment sits at the real path
+    retries; a restore that fails too is warned about with what to do,
+    since a re-run sees nothing to retry. A steady-state reinit leaves sshd
+    alone. The window where an unvalidated fragment sits at the real path
     is bounded by the ``sshd -t`` call and never affects the running sshd,
     unless an unrelated process reloads sshd inside it (a ``dpkg``
     postinst on openssh-server under ``unattended-upgrades``, say); the
@@ -436,9 +438,11 @@ def _write_sshd_accept_env(files: Files, log: InitLog) -> None:
 
     try:
         prior = files.read(path, elevated=True)
-        update_and_apply(files, path, body, observed=prior, mode=0o644, parent_mode=0o755, apply=validate_and_reload)
+        update_and_apply(
+            files, log, path, body, observed=prior, mode=0o644, parent_mode=0o755, apply=validate_and_reload
+        )
     except STEP_FAILURES as error:
-        warn_step(log, "sshd AcceptEnv install failed; re-run 'agw vm reinit' to retry", error)
+        warn_step(log, "sshd AcceptEnv install failed", error)
 
 
 def _install_sudoers_fragment(files: Files, log: InitLog, *, path: str, body: str) -> None:
@@ -453,7 +457,8 @@ def _install_sudoers_fragment(files: Files, log: InitLog, *, path: str, body: st
 
     sudo's /etc/sudoers.d/ loader skips files whose names contain a
     literal '.', so the ``.tmp`` staging file is ignored even if cleanup
-    races mid-init. The staging file is removed on every path.
+    races mid-init. Every path tries to remove it; a removal that fails is
+    warned about on its own and leaves a file sudo ignores.
     """
     staging = path + ".tmp"
     try:

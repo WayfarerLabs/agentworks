@@ -137,6 +137,24 @@ def test_dropin_never_restarts_tailscaled(guest: StepGuest) -> None:
 
 
 @requires_file_program
+def test_a_failed_reload_restores_the_prior_dropin_and_the_next_run_retries(guest: StepGuest) -> None:
+    _dropin().parent.mkdir()
+    _dropin().write_text("[Unit]\nAfter=network.target\n")
+    guest.respond(RELOAD, CommandFailed("box", 1, Result(Completed(1)), streams_logged=True))
+
+    tailscale_dns.apply_tailscaled_dns_fix(guest.files, guest.log)
+
+    assert _dropin().read_text() == "[Unit]\nAfter=network.target\n"
+    guest.access.responses.clear()
+    guest.access.calls.clear()
+
+    tailscale_dns.apply_tailscaled_dns_fix(guest.files, guest.log)
+
+    assert _dropin().read_text() == tailscale_dns.TAILSCALED_DROPIN_CONTENT
+    assert guest.commands() == [RELOAD]
+
+
+@requires_file_program
 def test_a_failed_reload_warns_without_raising(guest: StepGuest) -> None:
     guest.respond(RELOAD, CommandFailed("box", 1, Result(Completed(1)), streams_logged=True))
 

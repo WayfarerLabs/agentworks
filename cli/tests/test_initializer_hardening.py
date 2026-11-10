@@ -19,7 +19,10 @@ from agentworks.execution.results import Completed, Result
 from agentworks.vms import hardening
 from tests.phase_b_support import StepGuest, requires_file_program
 
-RELOAD = Command(("sysctl", "--system"), elevated=True, deadline=60)
+
+def _load() -> Command:
+    """Loading the baseline file alone, at the path the fixture gives it."""
+    return Command(("sysctl", "-p", hardening.HARDENING_SYSCTL_PATH), elevated=True, deadline=60)
 
 
 def _remount(value: int | str) -> Command:
@@ -51,7 +54,7 @@ def test_sysctl_baseline_is_written_and_reloaded_when_missing(guest: StepGuest) 
     assert _sysctl().read_text() == hardening.HARDENING_SYSCTL_CONTENT
     assert stat.S_IMODE(_sysctl().stat().st_mode) == 0o644
     assert stat.S_IMODE(_sysctl().parent.stat().st_mode) == 0o755
-    assert guest.commands() == [RELOAD]
+    assert guest.commands() == [_load()]
 
 
 @requires_file_program
@@ -75,27 +78,27 @@ def test_sysctl_baseline_that_differs_is_rewritten_and_reloaded(guest: StepGuest
     hardening._apply_hardening_sysctl(guest.files, guest.log)
 
     assert _sysctl().read_text() == hardening.HARDENING_SYSCTL_CONTENT
-    assert guest.commands() == [RELOAD]
+    assert guest.commands() == [_load()]
 
 
 @requires_file_program
 def test_a_failed_reload_warns_and_the_fstab_step_still_runs(guest: StepGuest) -> None:
     failed = Result(Completed(1), b"", b"sysctl: cannot stat /proc/sys/x\n")
-    guest.respond(RELOAD, CommandFailed("box", 1, failed, streams_logged=True))
+    guest.respond(_load(), CommandFailed("box", 1, failed, streams_logged=True))
     _fstab().write_text("proc  /proc  proc  defaults,hidepid=1  0  0\n")
 
     hardening.apply_vm_hardening(guest.files, guest.log)
 
     assert len(guest.log.warned) == 1
     assert "cannot stat /proc/sys/x" in guest.log.warned[0]
-    assert guest.commands() == [RELOAD, _remount(1)]
+    assert guest.commands() == [_load(), _remount(1)]
 
 
 @requires_file_program
 def test_a_failed_load_restores_the_prior_baseline_and_the_next_run_retries(guest: StepGuest) -> None:
     _sysctl().parent.mkdir()
     _sysctl().write_text("kernel.dmesg_restrict = 0\n")
-    guest.respond(RELOAD, CommandFailed("box", 1, Result(Completed(1)), streams_logged=True))
+    guest.respond(_load(), CommandFailed("box", 1, Result(Completed(1)), streams_logged=True))
 
     hardening.apply_vm_hardening(guest.files, guest.log)
 
@@ -106,12 +109,12 @@ def test_a_failed_load_restores_the_prior_baseline_and_the_next_run_retries(gues
     hardening._apply_hardening_sysctl(guest.files, guest.log)
 
     assert _sysctl().read_text() == hardening.HARDENING_SYSCTL_CONTENT
-    assert guest.commands() == [RELOAD]
+    assert guest.commands() == [_load()]
 
 
 @requires_file_program
 def test_a_failed_load_of_a_new_baseline_removes_it(guest: StepGuest) -> None:
-    guest.respond(RELOAD, CommandFailed("box", 1, Result(Completed(1)), streams_logged=True))
+    guest.respond(_load(), CommandFailed("box", 1, Result(Completed(1)), streams_logged=True))
 
     hardening.apply_vm_hardening(guest.files, guest.log)
 
@@ -131,7 +134,7 @@ def test_a_linked_sysctl_file_is_refused_with_a_warning_and_its_target_left_alon
 
     assert target.read_text() == "kept\n"
     assert len(guest.log.warned) >= 1
-    assert RELOAD not in guest.commands()
+    assert _load() not in guest.commands()
 
 
 # -- The fstab hidepid edit -----------------------------------------------------------

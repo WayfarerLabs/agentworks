@@ -7,19 +7,22 @@ the step left on disk and which commands it ran, in order.
 
 from __future__ import annotations
 
+import contextlib
+import json
 import os
 import stat
 import subprocess
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
 from agentworks.capabilities.vm_platform.skel import BASHRC, ZSHRC
 from agentworks.execution.errors import CommandFailed, ExecutionIncomplete
-from agentworks.execution.requests import Command
+from agentworks.execution.requests import Command, PythonProgram
 from agentworks.execution.results import Completed, Result, Unknown, UnknownReason
-from agentworks.vms.initializer import shell_env
-from tests.phase_b_support import StepGuest, requires_file_program
+from agentworks.vms.initializer import shell_env, steps
+from tests.phase_b_support import StepGuest, is_file_operation, requires_file_program
 from tests.vm_access_support import Call
 
 pytestmark = requires_file_program
@@ -44,6 +47,17 @@ def guest(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> StepGuest:
 
 def _path(name: str) -> Path:
     return Path(getattr(shell_env, name))
+
+
+def _no_raise() -> contextlib.AbstractContextManager[None]:
+    return contextlib.nullcontext()
+
+
+def _file_operation(request: object) -> tuple[str, str] | None:
+    """``(operation, path)`` for a file operation, or ``None`` for any other request."""
+    if not isinstance(request, PythonProgram) or not is_file_operation(request):
+        return None
+    return request.args[0], str(json.loads(request.args[1])["path"])
 
 
 def _failed(stderr: bytes = b"") -> CommandFailed:
@@ -271,6 +285,114 @@ def test_a_failed_restore_warns_naming_the_fragment_with_the_original_failure(gu
     [warning] = guest.log.warned
     assert str(fragment) in warning
     assert "sshd: bad configuration" in warning
+
+
+def test_an_interrupt_whose_restore_fails_warns_naming_the_fragment_and_propagates(guest: StepGuest) -> None:
+    fragment = _prior_fragment()
+    run_program = guest.access.answer
+    assert run_program is not None
+
+    def another_writer_then_interrupt(call: Call) -> Result | BaseException | None:
+        if call.request == SSHD_TEST:
+            fragment.write_bytes(b"AcceptEnv OTHER\n")
+            return KeyboardInterrupt()
+        return run_program(call)
+
+    guest.access.answer = another_writer_then_interrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        shell_env._write_sshd_accept_env(guest.files, guest.log)
+
+    [warning] = guest.log.warned
+    assert str(fragment) in warning
+
+
+def test_an_interrupt_held_through_a_failed_restore_warns_naming_the_fragment(
+    guest: StepGuest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A Ctrl-C held while the restore ran arrives as it ends, and replaces the step's failure."""
+    fragment = _prior_fragment()
+    run_program = guest.access.answer
+    assert run_program is not None
+
+    @contextlib.contextmanager
+    def delivers_a_held_interrupt() -> Iterator[None]:
+        yield
+        raise KeyboardInterrupt
+
+    def another_writer_during_validation(call: Call) -> Result | BaseException | None:
+        if call.request == SSHD_TEST:
+            fragment.write_bytes(b"AcceptEnv OTHER\n")
+            return _failed(b"sshd: bad configuration\n")
+        return run_program(call)
+
+    guest.access.answer = another_writer_during_validation
+    monkeypatch.setattr(steps, "interrupts_deferred", delivers_a_held_interrupt)
+
+    with pytest.raises(KeyboardInterrupt):
+        shell_env._write_sshd_accept_env(guest.files, guest.log)
+
+    [warning] = guest.log.warned
+    assert str(fragment) in warning
+
+
+def _fragment_write(call: Call) -> bool:
+    operation = _file_operation(call.request)
+    return operation == ("write_if", str(_path("AGENTWORKS_SSHD_ACCEPT_ENV_PATH")))
+
+
+@pytest.mark.parametrize(
+    "lost",
+    [ExecutionIncomplete("box", Result(Unknown(UnknownReason.CONNECTION))), KeyboardInterrupt()],
+    ids=["connection", "interrupt"],
+)
+def test_a_write_that_landed_with_its_outcome_unknown_is_put_back(guest: StepGuest, lost: BaseException) -> None:
+    fragment = _prior_fragment()
+    run_program = guest.access.answer
+    assert run_program is not None
+
+    writes: list[Call] = []
+
+    def land_then_lose(call: Call) -> Result | BaseException | None:
+        outcome = run_program(call)
+        if _fragment_write(call):
+            writes.append(call)
+            if len(writes) == 1:
+                return lost
+        return outcome
+
+    guest.access.answer = land_then_lose
+
+    with pytest.raises(type(lost)) if isinstance(lost, KeyboardInterrupt) else _no_raise():
+        shell_env._write_sshd_accept_env(guest.files, guest.log)
+
+    assert fragment.read_bytes() == b"AcceptEnv LANG\n"
+    assert len(writes) == 2  # the write that landed, then the restore
+    assert guest.commands() == []
+
+
+def test_a_write_that_did_not_land_is_not_reported_as_a_failed_restore(guest: StepGuest) -> None:
+    fragment = _prior_fragment()
+    run_program = guest.access.answer
+    assert run_program is not None
+
+    writes: list[Call] = []
+
+    def lose_before_landing(call: Call) -> Result | BaseException | None:
+        if _fragment_write(call):
+            writes.append(call)
+            if len(writes) == 1:
+                return ExecutionIncomplete("box", Result(Unknown(UnknownReason.CONNECTION)))
+        return run_program(call)
+
+    guest.access.answer = lose_before_landing
+
+    shell_env._write_sshd_accept_env(guest.files, guest.log)
+
+    assert fragment.read_bytes() == b"AcceptEnv LANG\n"
+    assert len(writes) == 2  # the lost write, then the restore that found it had not landed
+    [warning] = guest.log.warned
+    assert str(fragment) not in warning
 
 
 # -- sudoers fragments ------------------------------------------------------------------
