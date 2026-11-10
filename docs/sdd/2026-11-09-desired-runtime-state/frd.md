@@ -52,11 +52,17 @@ Explicit stop expresses stopped intent, including when the runtime is already ab
 start clears an intentional-stop prohibition. Dependency activation of an on-demand VM must not
 silently convert its policy into always running.
 
-Validate the request and obtain any required confirmation before recording its intent. Once the
-operation is accepted, persist intent before attempting runtime changes. A subsequent runtime or
-credential failure must leave the accepted target available for a later reconciliation retry.
-Refused or cancelled requests before acceptance must not alter intent. Report the recorded target
-and actual outcome honestly when execution fails.
+Provide an explicit operator action to select any supported desired state without immediately
+changing runtimes. This includes selecting available-on-demand intent for a new or existing VM, and
+adopting existing resources before reconciliation. Architecture owns the command spelling.
+
+Validate local arguments, resource identities, and requested configuration and obtain any required
+confirmation before recording intent. That is the acceptance boundary. Persist accepted intent
+before attempting runtime changes. Guest checks that require activation belong to subsequent
+execution preparation, not local acceptance. A subsequent runtime, guest-readiness, or credential
+failure must leave the accepted target available for a later reconciliation retry. Refused or
+cancelled requests before acceptance must not alter intent. Report the recorded target and actual
+outcome honestly when execution fails.
 
 Reconciliation applies recorded intent without changing it. Attach, status, describe, reinit,
 console membership edits, and external runtime changes do not independently change running intent.
@@ -96,6 +102,9 @@ VM, stop affected dependents before powering it off.
 
 A focused child reconciliation may activate its on-demand VM. It must respect a stopped VM and must
 not expand into unrelated sibling workload changes.
+
+Focused console reconciliation restores only that console and its required VM, not member session
+runtimes. VM-scoped reconciliation supplies the broader session-before-console restoration order.
 
 ### R5. Safe observation, recovery, and repeatability
 
@@ -139,6 +148,11 @@ runtime-only secrets. Finish required eligibility checks and confirmations befor
 for accepted workload actions. A failed required secret preparation must not leave earlier sessions
 restarted while later sessions are still waiting for credentials.
 
+Failure to prepare any required workload secret aborts workload execution for the entire selected
+batch, even when an independent target's secrets are available. Infrastructure already activated for
+preparation may remain running. R6's independent execution applies after successful shared secret
+preparation; this boundary prevents a partially restarted batch caused by missing secrets.
+
 Infrastructure preparation can precede workload preparation because guest checks need a reachable
 VM. Collect known infrastructure credentials together where possible. Existing conditional Tailscale
 repair credentials may still be acquired when startup proves repair is needed. Complete that
@@ -148,7 +162,7 @@ paths. Reuse already-resolved shared values within the operation.
 
 After the workload preparation boundary, execution must not prompt for further secrets. An
 unexpected new requirement or invalidated plan must stop affected work with an actionable result,
-not begin another interactive resolution between launches. Preserve noninteractive failure and
+not begin another interactive resolution between launches. Preserve non-interactive failure and
 secret-redaction behavior.
 
 ### R8. Existing installations and permanent documentation
@@ -156,9 +170,9 @@ secret-redaction behavior.
 Provide an explicit adoption path for existing sessions and consoles whose intended state cannot be
 recovered from historical runtime records. Do not infer running intent from old PIDs or start
 timestamps, or stopped intent merely from an absent runtime after an outage. Preserve existing VM
-intentional-stop and on-demand behavior during migration. Inspection must make unadopted resources
-visible; fleet reconciliation must report that adoption is required instead of silently changing or
-forgetting them. Explicit start/stop can establish intent for an existing resource.
+intentional-stop and on-demand behavior during migration. Inspection must make resources awaiting
+adoption visible; fleet reconciliation must report that adoption is required instead of silently
+changing or forgetting them. Explicit start/stop can establish intent for an existing resource.
 
 Document adoption, the distinction between external exit and explicit stop, VM and child precedence,
 console independence, preview limitations, batch prompting phases, and partial-run recovery in
@@ -178,7 +192,7 @@ required validation and reviews have actually converged. No merge is authorized 
 
 Demonstrate behavior across all three runnable kinds, intentional and external shutdown, mixed
 desired states, unknown and residual observations, concurrent lifecycle changes, partial failure,
-adoption, dry run, repeated reconciliation, shared secrets, cancellation, and noninteractive use.
+adoption, dry run, repeated reconciliation, shared secrets, cancellation, and non-interactive use.
 Exercise real CLI recovery against a live VM with sessions and named consoles. Report actual
 workstation and platform coverage and any unavailable lanes without implying they passed.
 
