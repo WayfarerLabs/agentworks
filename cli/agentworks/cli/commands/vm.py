@@ -364,13 +364,37 @@ def vm_recover(
 @vm_app.command("reinit")
 def vm_reinit(
     name: Annotated[str, typer.Argument(help="VM name")],
+    admin_template: Annotated[
+        str | None,
+        typer.Option(
+            "--admin-template",
+            help="Re-point the VM's admin user to a different declared admin-template, then reinit to apply it",
+        ),
+    ] = None,
+    admin_spec: Annotated[
+        str | None,
+        typer.Option(
+            "--admin-spec",
+            help=(
+                "Inline JSON admin spec applied after the selected admin template, replacing the stored one; "
+                "'{}' or an exact empty string clears it (whitespace is invalid)"
+            ),
+        ),
+    ] = None,
 ) -> None:
-    """Re-run initialization on a provisioned VM."""
+    """Re-run initialization on a provisioned VM using its stored templates and final specs."""
     interaction = ordinary_tty_interaction_policy()
     from agentworks.config import load_config
     from agentworks.vms.manager import reinit_vm
 
-    reinit_vm(get_db(), load_config(), name, interaction=interaction)
+    reinit_vm(
+        get_db(),
+        load_config(),
+        name,
+        admin_template=admin_template,
+        admin_spec=admin_spec,
+        interaction=interaction,
+    )
 
 
 @vm_app.command("exec", context_settings={"allow_extra_args": True, "allow_interspersed_args": False})

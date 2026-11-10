@@ -411,6 +411,11 @@ class Database:
         self._conn.execute("UPDATE vms SET init_status = ? WHERE name = ?", (status.value, name))
         self._commit_unless_in_tx()
 
+    def update_vm_admin_template(self, name: str, admin_template: str) -> None:
+        """Re-point the VM's stored admin template (``--admin-template`` on ``vm reinit``)."""
+        self._conn.execute("UPDATE vms SET admin_template = ? WHERE name = ?", (admin_template, name))
+        self._commit_unless_in_tx()
+
     def update_vm_tailscale(self, name: str, tailscale_host: str) -> None:
         self._conn.execute("UPDATE vms SET tailscale_host = ? WHERE name = ?", (tailscale_host, name))
         self._commit_unless_in_tx()

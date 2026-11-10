@@ -1054,8 +1054,23 @@ no longer use them. The departures from the tables above, each recorded where it
   `instance_specs.StoredSourceReferenceRefused`, which names the fields and never a value. It and
   `ActivationMapMigrationRequired` share the base `ExplicitReplacementRequired`, which
   `replace_agent_overlay` lets an explicit `--spec` replace or clear; a retain still refuses. Doctor
-  shows its hint. A VM's gets `instance_specs.VM_REFUSED_SOURCE_HINT`, pending a ruling on how a
-  VM's stored admin spec is replaced.
+  shows its hint.
+- `vm reinit --admin-template NAME` and `--admin-spec JSON` (operator ruling 2026-11-10) follow
+  `agent reinit`'s `--update-template` and `--spec`. Omitted, both are retained; a supplied admin
+  spec replaces the stored admin layer, and `''` or `{}` clears it. `--admin-template` must name a
+  declared, enabled admin-template, and the retained admin layer applies on it, as an agent's layer
+  does on its new template. `reinit_vm` holds the VM's native mutation guard throughout (passing it
+  to `run_initialization` as `setup_guard`) and loads declarations only, then resolves both
+  candidate layers and publishes this VM's candidate as a pending live resource before the
+  database's, so a stored layer being superseded is never decoded for it. Every check runs before
+  the re-point (`Database.update_vm_admin_template`) and `instance_specs.replace_vm_admin_overlay`
+  persist in one transaction, ahead of the SSH boundary; both remain if initialization then fails.
+  `replace_vm_admin_overlay` decodes only the stored VM layer (`stored_vm_layer`), which it keeps,
+  so an admin layer that raises `ExplicitReplacementRequired` is superseded unread while a VM layer
+  that does not decode still refuses. The outcome names admin fields only and is rendered when the
+  command settles, before collected setup failures. A refused admin source, or an admin activation
+  list, gets `instance_specs.VM_ADMIN_REPLACEMENT_REMEDY`; a VM layer cannot change after create, so
+  its refusals keep the migrate-or-recreate remedy (no VM-layer field validates a source today).
 - One git sequence for every case (above, "One dotfiles sync"): the ref, or `HEAD`, is fetched and
   checked out detached after any clone, and a failed sync skips the install for the agent too.
 - A bare relative `dotfiles_destination` is a path in the home, and one that is, holds or lies

@@ -16,9 +16,10 @@ authentication may request approval and wait for the configured source timeout.
 An instance spec is an inline JSON object applied as the final layer after a selected template. Use
 `--spec JSON` on `vm create`, `workspace create`, `agent create`, and `session create`. A VM has two
 declarations: `--template` and `--spec` shape the VM, while `--admin-template` and `--admin-spec`
-shape its admin user. `agent reinit` also accepts `--spec JSON` because it is the existing-instance
-command that can change the bound template. No other reinit, repair, start, restart, or copy command
-accepts an instance spec.
+shape its admin user. `agent reinit` also accepts `--spec JSON`, and `vm reinit` accepts
+`--admin-spec JSON`, because they are the existing-instance commands that can change the bound
+template (`--update-template` and `--admin-template`). No other reinit, repair, start, restart, or
+copy command accepts an instance spec, and a VM's own `--spec` layer cannot change after create.
 
 The JSON must be one object written directly on the command line. It cannot be a file path, `null`,
 an array, or multiple JSON values. Duplicate keys, non-finite numbers, unknown fields, and the
@@ -35,11 +36,14 @@ agw vm create build-01 --template dev --spec '{"cpus":8,"memory":16}' \
 agw agent create coder-01 --spec '{"shell":"/bin/bash","mise_activate":true}'
 ```
 
-An omitted `--spec` on `agent reinit` retains the stored instance layer. A supplied object replaces
-the complete prior layer, and `{}` or an empty value clears it. The empty-value shorthand applies
-only to `agent reinit`; create commands still require a JSON object. Template changes and
-instance-spec changes are validated and persisted together before remote convergence. If that remote
-work fails, the new desired state remains stored so a plain `agent reinit NAME` can retry it.
+An omitted `--spec` on `agent reinit`, or `--admin-spec` on `vm reinit`, retains the stored layer. A
+supplied object replaces the complete prior layer, and `{}` or an empty value clears it. The
+empty-value shorthand applies only to these reinit options; create commands still require a JSON
+object. A stored layer this release can no longer use, such as one holding a refused source
+reference, can be replaced or cleared this way, while a plain reinit refuses it. Template changes
+and instance-spec changes are validated and persisted together before remote convergence. If that
+remote work fails, the new desired state remains stored so a plain `agent reinit NAME` or
+`vm reinit NAME` can retry it.
 
 For compound `session create`, `--spec` applies to the new session. `--workspace-spec` is accepted
 only with `--new-workspace`, and `--agent-spec` only with `--new-agent`; each applies to that
@@ -631,26 +635,26 @@ just a vm-site.
 > true long-lived VMs (e.g. Lima, Azure, Proxmox, etc.) if you need a VM that survives independent
 > of your workstation.
 
-| Command                                             | Description                                                    |
-| --------------------------------------------------- | -------------------------------------------------------------- |
-| `agw vm create <name>`                              | Create a new VM (provision + initialize)                       |
-| `agw vm list`                                       | List configured VMs                                            |
-| `agw vm describe <name>`                            | Show VM details, workspaces, and event log                     |
-| `agw vm verify-connection <name>`                   | Test the canonical admin connection without starting the VM    |
-| `agw vm shell <name> [--workspace <ws>]`            | Admin shell on a VM (optionally rooted in a workspace)         |
-| `agw vm shell <name> --platform`                    | A shell through the platform's own channel, without Tailscale  |
-| `agw vm exec <name> [--workspace <ws>] -- <cmd...>` | Run a one-shot command as admin (optionally from a workspace)  |
-| `agw vm start <name>`                               | Start a stopped VM and clear its manual-stop intent            |
-| `agw vm stop <name>`                                | Stop a VM and keep it stopped (no auto-start)                  |
-| `agw vm reinit <name>`                              | Re-run initialization on a provisioned VM                      |
-| `agw vm confirm-release <name>`                     | Observe and explicitly record the live Debian release          |
-| `agw vm delete <name>`                              | Delete a VM (with confirmation)                                |
-| `agw vm backup <name>`                              | Back up a VM: metadata, agents, workspaces, and files          |
-| `agw vm rekey <name>`                               | Assign a new Tailscale auth key to a VM (logout + rejoin)      |
-| `agw vm recover <name>`                             | Repair a VM's SSH access, python3 and Tailscale node           |
-| `agw vm port-forward <name> <ports...>`             | Forward local port(s) to a VM (like kubectl port-forward)      |
-| `agw vm logs <name>`                                | Show SSH logs for a VM                                         |
-| `agw vm import-host-keys (--all \| <name>...)`      | Import VM host keys from `known_hosts` into the host-key store |
+| Command                                                              | Description                                                    |
+| -------------------------------------------------------------------- | -------------------------------------------------------------- |
+| `agw vm create <name>`                                               | Create a new VM (provision + initialize)                       |
+| `agw vm list`                                                        | List configured VMs                                            |
+| `agw vm describe <name>`                                             | Show VM details, workspaces, and event log                     |
+| `agw vm verify-connection <name>`                                    | Test the canonical admin connection without starting the VM    |
+| `agw vm shell <name> [--workspace <ws>]`                             | Admin shell on a VM (optionally rooted in a workspace)         |
+| `agw vm shell <name> --platform`                                     | A shell through the platform's own channel, without Tailscale  |
+| `agw vm exec <name> [--workspace <ws>] -- <cmd...>`                  | Run a one-shot command as admin (optionally from a workspace)  |
+| `agw vm start <name>`                                                | Start a stopped VM and clear its manual-stop intent            |
+| `agw vm stop <name>`                                                 | Stop a VM and keep it stopped (no auto-start)                  |
+| `agw vm reinit <name> [--admin-template <tmpl>] [--admin-spec JSON]` | Re-run initialization on a provisioned VM                      |
+| `agw vm confirm-release <name>`                                      | Observe and explicitly record the live Debian release          |
+| `agw vm delete <name>`                                               | Delete a VM (with confirmation)                                |
+| `agw vm backup <name>`                                               | Back up a VM: metadata, agents, workspaces, and files          |
+| `agw vm rekey <name>`                                                | Assign a new Tailscale auth key to a VM (logout + rejoin)      |
+| `agw vm recover <name>`                                              | Repair a VM's SSH access, python3 and Tailscale node           |
+| `agw vm port-forward <name> <ports...>`                              | Forward local port(s) to a VM (like kubectl port-forward)      |
+| `agw vm logs <name>`                                                 | Show SSH logs for a VM                                         |
+| `agw vm import-host-keys (--all \| <name>...)`                       | Import VM host keys from `known_hosts` into the host-key store |
 
 **Power-state semantics:** a VM that stopped on its own (idle timeout, host reboot) is started
 automatically, on demand, by any command that needs it live. A VM stopped with `agw vm stop` is
@@ -721,7 +725,11 @@ ask again. Non-interactive runs never prompt (a later interactive create still a
 
 `vm reinit` re-runs the initialization phase using the current config without reprovisioning the VM.
 Changes to config (new packages, different install commands, etc.) are picked up automatically. It
-consumes both stored VM and admin instance specs but cannot change or clear either one.
+consumes both stored VM and admin instance specs. `--admin-template <tmpl>` re-points the admin user
+to a different declared admin-template (an unknown name fails before anything is stored), and
+`--admin-spec JSON` replaces the stored admin layer or, as `'{}'` or `''`, clears it; see
+[Instance specs](#instance-specs). Without them both are retained, and the stored VM layer is always
+kept.
 
 Reinit starts with the VM contract's base checks, before it changes anything. A live Debian release
 that differs from the recorded one refuses first, naming `vm confirm-release`. A VM without systemd,

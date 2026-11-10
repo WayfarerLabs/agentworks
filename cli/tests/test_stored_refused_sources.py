@@ -11,7 +11,7 @@ from agentworks.db import DesiredOverlayRecord, VersionedPayload
 from agentworks.doctor import InstanceStateHealthFactType, Status
 from agentworks.doctor_state import check_database
 from agentworks.instance_specs import (
-    VM_REFUSED_SOURCE_HINT,
+    VM_ADMIN_REPLACEMENT_REMEDY,
     ExplicitReplacementRequired,
     OverlayDisposition,
     StoredSourceReferenceRefused,
@@ -84,7 +84,7 @@ def test_a_vm_s_refused_stored_admin_source_gets_the_vm_hint() -> None:
     with pytest.raises(StoredSourceReferenceRefused) as refused:
         decode_stored_overlay(DesiredOverlayRecord("vm", "box", payload, "2026-11-10"))
 
-    assert refused.value.hint == VM_REFUSED_SOURCE_HINT
+    assert refused.value.hint == VM_ADMIN_REPLACEMENT_REMEDY
     assert "admin.dotfiles_source" in str(refused.value)
     assert SECRET not in str(refused.value)
 

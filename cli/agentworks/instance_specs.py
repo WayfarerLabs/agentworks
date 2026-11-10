@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import math
 from contextlib import contextmanager, suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import TYPE_CHECKING, cast
 
@@ -100,15 +100,19 @@ class StoredSourceReferenceRefused(ExplicitReplacementRequired):
     """A stored overlay's source reference fields are ones this release refuses; it names them, never their values."""
 
 
-VM_REFUSED_SOURCE_HINT = (
-    "The stored admin spec holds a source reference this release refuses; "
-    "this release has no command that replaces a VM's stored admin spec."
+VM_ADMIN_REPLACEMENT_REMEDY = (
+    "Use 'agw vm reinit' with --admin-spec containing the complete replacement admin spec, "
+    "or --admin-spec '{}' to clear it."
 )
-"""The hint a VM whose stored layer holds a refused source reference gets: the one place it is worded."""
+"""How an operator supersedes a VM's stored admin layer that needs an explicit replacement."""
 
 
 def _replacement_remedy(instance_kind: str) -> str:
-    """How an operator supersedes a stored overlay of ``instance_kind`` that needs an explicit replacement."""
+    """How an operator supersedes a stored overlay of ``instance_kind`` that needs an explicit replacement.
+
+    A VM's admin layer has its own remedy (``VM_ADMIN_REPLACEMENT_REMEDY``);
+    its VM layer cannot change after create, so that one needs a migration.
+    """
     if instance_kind == "agent":
         return (
             "Use 'agw agent reinit' with --spec containing the complete replacement instance spec, "
@@ -161,20 +165,21 @@ def parse_vm_instance_specs(
         if parsed_vm.payload.value:
             vm_overlay = cast("InstanceOverlay[VMTemplate]", parsed_vm)
 
-    admin = None
-    if admin_spec is not None:
-        raw_admin = _parse_json_object(admin_spec)
-        _refuse_framework_fields("VM admin", raw_admin)
-        from agentworks.vms import instance_overlay as vm_codec
-
-        parsed_admin = vm_codec.decode_admin_overlay(raw_admin)
-        canonical_admin = vm_codec.encode_admin_overlay(parsed_admin)
-        if canonical_admin:
-            admin = parsed_admin
+    admin = None if admin_spec is None else parse_admin_instance_spec(admin_spec)
 
     if vm_overlay is None and admin is None:
         return None
     return _vm_instance_overlays(vm_overlay, admin)
+
+
+def parse_admin_instance_spec(value: str) -> AdminConfig | None:
+    """Parse a VM admin layer from strict inline JSON; ``None`` when it declares no field."""
+    raw_admin = _parse_json_object(value)
+    _refuse_framework_fields("VM admin", raw_admin)
+    from agentworks.vms import instance_overlay as vm_codec
+
+    parsed_admin = vm_codec.decode_admin_overlay(raw_admin)
+    return parsed_admin if vm_codec.encode_admin_overlay(parsed_admin) else None
 
 
 def decode_stored_overlay(
@@ -259,9 +264,10 @@ def decode_stored_vm_overlays(
         raise _unsupported_stored_overlay(record, f"unsupported fields: {', '.join(unknown)}")
     raw_vm = raw.get("vm")
     raw_admin = raw.get("admin")
-    for component in (raw_vm, raw_admin):
-        if isinstance(component, dict):
-            _refuse_stored_activation_list(record, component)
+    if isinstance(raw_vm, dict):
+        _refuse_stored_activation_list(record, raw_vm)
+    if isinstance(raw_admin, dict):
+        _refuse_stored_activation_list(record, raw_admin, vm_admin=True)
     component_unknown: list[str] = []
     if isinstance(raw_vm, dict):
         component_unknown.extend(f"vm.{field}" for field in _unknown_vm_component_fields(raw_vm))
@@ -312,22 +318,30 @@ def decode_stored_vm_overlays(
     if unsupported:
         raise _unsupported_stored_overlay(record, f"unsupported fields: {unsupported[0]}") from unsupported[0]
     if refused and not malformed:
-        raise _refused_sources(record, tuple(refused), VM_REFUSED_SOURCE_HINT)
+        admin_only = all(field.startswith("admin.") for field in refused)
+        hint = VM_ADMIN_REPLACEMENT_REMEDY if admin_only else _replacement_remedy("vm")
+        raise _refused_sources(record, tuple(refused), hint)
     if malformed:
         raise _malformed_stored_overlay(record, str(malformed[0])) from malformed[0]
     return _vm_instance_overlays(vm_overlay, admin)
 
 
-def _refuse_stored_activation_list(record: DesiredOverlayRecord, raw: JsonObject) -> None:
-    """Refuse a saved list whose replacement semantics cannot be preserved by map conversion."""
+def _refuse_stored_activation_list(record: DesiredOverlayRecord, raw: JsonObject, *, vm_admin: bool = False) -> None:
+    """Refuse a saved list whose replacement semantics cannot be preserved by map conversion.
+
+    ``vm_admin`` marks ``raw`` as a VM record's admin layer, which ``vm reinit --admin-spec`` replaces.
+    """
     if not isinstance(raw.get("harness_integrations"), list):
         return
-    remedy = (
-        _replacement_remedy("agent")
-        if record.instance_kind == "agent"
-        else "Back up the state database and explicitly migrate the saved instance spec to activation maps "
-        "before using this resource, or recreate the resource with the new config."
-    )
+    if record.instance_kind == "agent":
+        remedy = _replacement_remedy("agent")
+    elif vm_admin:
+        remedy = VM_ADMIN_REPLACEMENT_REMEDY
+    else:
+        remedy = (
+            "Back up the state database and explicitly migrate the saved instance spec to activation maps "
+            "before using this resource, or recreate the resource with the new config."
+        )
     raise ActivationMapMigrationRequired(
         f"stored {record.instance_kind} {record.instance_name!r} uses the retired harness activation list format",
         entity_kind=record.instance_kind,
@@ -387,6 +401,57 @@ def persist_vm_creation_overlays(
         return None
     db.instance_state.put_desired_overlay("vm", instance_name, overlays.payload)
     return OverlayOutcome(OverlayDisposition.SET, overlays.fields)
+
+
+def replace_vm_admin_overlay(db: Database, instance_name: str, admin: AdminConfig | None) -> OverlayOutcome:
+    """Replace a VM's stored admin layer with ``admin``, or clear it when ``None``, keeping its VM layer.
+
+    This is ``vm reinit --admin-spec``; the caller's outer transaction holds
+    it with any admin-template re-point. Only the VM layer of the stored
+    record is decoded, so an admin layer this release cannot use
+    (``ExplicitReplacementRequired``) is superseded without being read, while
+    a VM layer that does not decode refuses the replacement, since keeping it
+    is part of the decision. The outcome names admin fields only.
+    """
+    prior = db.instance_state.get_desired_overlay("vm", instance_name)
+    vm_overlay = None if prior is None else stored_vm_layer(prior)
+    prior_admin_fields = () if prior is None else _stored_admin_field_names(prior)
+    if admin is None:
+        if not prior_admin_fields:
+            return OverlayOutcome(OverlayDisposition.EXPLICITLY_ABSENT)
+        if vm_overlay is None:
+            db.instance_state.clear_desired_overlay("vm", instance_name)
+        else:
+            db.instance_state.put_desired_overlay("vm", instance_name, _vm_instance_overlays(vm_overlay, None).payload)
+        return OverlayOutcome(OverlayDisposition.CLEARED, prior_admin_fields)
+    overlays = _vm_instance_overlays(vm_overlay, admin)
+    db.instance_state.put_desired_overlay("vm", instance_name, overlays.payload)
+    disposition = OverlayDisposition.REPLACED if prior_admin_fields else OverlayDisposition.SET
+    return OverlayOutcome(disposition, admin_overlay_field_names(admin))
+
+
+def admin_overlay_field_names(admin: AdminConfig) -> tuple[str, ...]:
+    """Name an admin layer's fields as a VM record's outcome reports them."""
+    return tuple(f"admin.{field}" for field in _admin_overlay_fields(admin))
+
+
+def stored_vm_layer(record: DesiredOverlayRecord) -> InstanceOverlay[VMTemplate] | None:
+    """The VM layer of a stored VM record, decoded with every check the whole record gets, its admin layer unread."""
+    value = record.payload.value
+    if record.payload.payload_version == _VM_RECORD_PAYLOAD_VERSION:
+        value = {**value, "admin": {}}
+    vm_only = replace(record, payload=VersionedPayload(record.payload.payload_version, value))
+    return decode_stored_vm_overlays(vm_only).vm
+
+
+def _stored_admin_field_names(record: DesiredOverlayRecord) -> tuple[str, ...]:
+    """Name a stored admin layer's top-level fields without decoding it (payload v1 has no admin layer)."""
+    if record.payload.payload_version != _VM_RECORD_PAYLOAD_VERSION:
+        return ()
+    component = record.payload.value.get("admin")
+    if not isinstance(component, dict):
+        return ()
+    return tuple(sorted(f"admin.{field}" for field in component))
 
 
 def refuse_orphan_creation_state(
@@ -586,7 +651,9 @@ def _decode_legacy_stored_vm_overlay(record: DesiredOverlayRecord) -> VMInstance
             )
         vm = _decode_stored_vm_component(record.payload.value)
     except RefusedSourceFieldsError as error:
-        raise _refused_sources(record, tuple(f"vm.{field}" for field in error.fields), VM_REFUSED_SOURCE_HINT) from None
+        raise _refused_sources(
+            record, tuple(f"vm.{field}" for field in error.fields), _replacement_remedy("vm")
+        ) from None
     except UnsupportedOverlayFieldsError as error:
         raise _unsupported_stored_overlay(record, f"unsupported fields: {error}") from error
     except ValidationError as error:
