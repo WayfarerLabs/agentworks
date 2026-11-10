@@ -18,7 +18,7 @@ from agentworks import output
 from agentworks.execution.access import Admin, Agent
 from agentworks.git_config import ensure_safe_directory_wildcard
 from agentworks.transports import transport
-from agentworks.vms.initializer.steps import STEP_FAILURES
+from agentworks.vms.initializer.steps import STEP_FAILURES, describe_failure
 
 if TYPE_CHECKING:
     from agentworks.agents.templates import ResolvedAgentTemplate
@@ -278,10 +278,10 @@ def create_agent_on_vm(
     # plain selected template.
     if admin_git_force_safe_directory:
         try:
-            ensure_safe_directory_wildcard(agent_target)
+            ensure_safe_directory_wildcard(agent_files)
             output.info("Git safe.directory configured for agent")
-        except Exception as e:
-            output.warn(f"agent git safe.directory setup failed: {e}")
+        except STEP_FAILURES as error:
+            output.warn(f"agent git safe.directory setup failed: {describe_failure(error, logger.sanitize)}")
 
     # Credential reconciliation is unconditional. An empty declared list
     # removes any Agentworks-owned state left by an older template.

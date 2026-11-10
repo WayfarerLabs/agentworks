@@ -560,12 +560,10 @@ def _phase_b_setup(
         # multi-user workspace model where agents access repos owned by admin)
         if admin.git_force_safe_directory:
             try:
-                ensure_safe_directory_wildcard(legacy_target)
+                ensure_safe_directory_wildcard(files)
                 output.info("Git safe.directory wildcard configured")
-            except SSHError as e:
-                msg = f"git safe.directory setup failed: {e}"
-                logger.warning(msg)
-                output.warn(msg)
+            except STEP_FAILURES as error:
+                warn_step(logger, "git safe.directory setup failed", error)
 
         # Non-fatal: git credentials (before dotfiles and mise lockfile for private repos)
         configure_user_git_credentials(
