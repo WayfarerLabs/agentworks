@@ -110,6 +110,17 @@ def test_any_step_failure_of_the_admin_write_leaves_the_identity_unproven(tmp_pa
     assert TEST_SSH_PUBLIC_KEY.split()[1] not in warning
 
 
+def test_the_admin_write_failure_warning_shows_none_of_the_program_s_streams(tmp_path: Path) -> None:
+    guest = StepGuest(local_files=False)
+    failed = Result(Completed(1), stderr=b"Traceback\nstream-only-detail\n")
+    guest.access.default_outcome = CommandFailed("box", 1, failed, streams_logged=True)
+
+    _reconcile_authorized_keys(guest.files, _make_config(tmp_path), "/home/agentworks", guest.log)
+
+    (warning,) = guest.log.warned
+    assert "stream-only-detail" not in warning
+
+
 AGENT_HOME = "/home/agt-foo"
 
 

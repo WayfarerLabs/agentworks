@@ -103,7 +103,8 @@ def _reconcile_authorized_keys(
         try:
             files.write(path, content, mode=0o600, parent_mode=0o700)
         except STEP_FAILURES as error:
-            warn_step(log, "authorized_keys reconciliation failed", error)
+            # The error's own message only: ``write`` logs its streams, and this warning shows none of them.
+            warn(log, f"authorized_keys reconciliation failed: {log.sanitize(str(error))}")
             return AuthorizedKeysUnproven()
         return AuthorizedKeysApplied(prepared.identity, prepared.private_key_ref)
 
