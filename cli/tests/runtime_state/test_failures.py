@@ -23,7 +23,7 @@ from tests.runtime_state.test_composition import REFUSE, seed_session, seed_vm
 from tests.runtime_state.test_composition import runtime as runtime
 
 
-def required_template():
+def required_template() -> ManifestDoc:
     return ManifestDoc(
         "session-template",
         "requires-token",
@@ -83,8 +83,9 @@ def test_accepted_start_retains_running_intent_after_secret_failure(db, make_con
     assert not any(action == "session-start" for action, _ in runtime[2])
 
 
+@pytest.mark.parametrize("control_signal", [UserAbort, KeyboardInterrupt])
 def test_cancellation_retains_accepted_target_and_completed_activation_and_disposes_values(
-    db, make_config, runtime, monkeypatch
+    db, make_config, runtime, monkeypatch, control_signal
 ):
     import agentworks.vms.manager as vms
     from agentworks.secrets import resolve as resolution
@@ -93,7 +94,7 @@ def test_cancellation_retains_accepted_target_and_completed_activation_and_dispo
     seed_vm(db, "box", target=DesiredRuntimeState.ON_DEMAND)
     seed_session(db, "launch", "box", template="requires-token", target=DesiredRuntimeState.STOPPED)
     powers["box"] = VMStatus.STOPPED
-    failure = UserAbort("cancelled at workload boundary")
+    failure = control_signal("cancelled at workload boundary")
     original = resolution.resolve_batch
 
     def cancel(declarations, *args, **kwargs):
@@ -121,7 +122,7 @@ def test_cancellation_retains_accepted_target_and_completed_activation_and_dispo
     monkeypatch.setattr(vms, "prepare_vm_runtime", prepare)
     rendered = []
     monkeypatch.setattr("agentworks.runtime_state._service.render_results", lambda rows, **k: rendered.extend(rows))
-    with pytest.raises(UserAbort) as caught:
+    with pytest.raises((UserAbort, KeyboardInterrupt)) as caught:
         manager.start_session(db, make_config(manifests=[required_template()]), name="launch", interaction=REFUSE)
     assert caught.value is failure
     assert db.get_session("launch").desired_runtime_state is DesiredRuntimeState.RUNNING
@@ -206,3 +207,32 @@ def test_busy_console_family_reports_unselected_target_as_unknown(db, make_confi
         reconcile_console(db, make_config(), name="view", interaction=REFUSE)
     result = next(row for row in rendered if row.kind == "console")
     assert not result.target_known and result.outcome is Outcome.BLOCKED
+
+
+def test_keyboard_interrupt_after_activation_prevents_deferred_provider_stops(db, make_config, runtime, monkeypatch):
+    from agentworks.secrets import resolve as resolution
+
+    seed_vm(db, "work")
+    seed_session(db, "launch", "work", template="requires-token")
+    seed_vm(db, "shutdown", target=DesiredRuntimeState.STOPPED)
+    runtime[0]["work"] = VMStatus.STOPPED
+    failure = KeyboardInterrupt()
+    original = resolution.resolve_batch
+
+    def interrupt(declarations, *args, **kwargs):
+        if any(row.name == "workload-key" for row in declarations):
+            raise failure
+        return original(declarations, *args, **kwargs)
+
+    monkeypatch.setattr(resolution, "resolve_batch", interrupt)
+    rendered = []
+    monkeypatch.setattr("agentworks.runtime_state._service.render_results", lambda rows, **k: rendered.extend(rows))
+    with pytest.raises(KeyboardInterrupt) as caught:
+        reconcile_vm(db, make_config(manifests=[required_template()]), all_vms=True, interaction=REFUSE)
+    assert caught.value is failure
+    assert ("vm-start", "work") in runtime[2]
+    assert not any(action in {"session-start", "vm-stop"} for action, _ in runtime[2])
+    assert any(row.kind == "vm" and row.name == "work" and row.outcome is Outcome.CHANGED for row in rendered)
+    assert any(row.kind == "vm" and row.name == "shutdown" and row.outcome is Outcome.BLOCKED for row in rendered)
+    with native_mutation_guard(db.path, "work"), native_mutation_guard(db.path, "shutdown"):
+        pass

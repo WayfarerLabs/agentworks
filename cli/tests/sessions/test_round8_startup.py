@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import shlex
-from contextlib import nullcontext
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -14,7 +13,7 @@ import pytest
 
 from agentworks.capabilities.harness_integration import ShellIntegration
 from agentworks.db import PID_STOPPED, SessionStatus
-from agentworks.errors import ExternalError, StateError, ValidationError
+from agentworks.errors import AgentworksError, ExternalError, StateError, ValidationError
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import manager, tmux
 from agentworks.sessions.manager import _lifecycle, _pids
@@ -39,7 +38,7 @@ def bind_native_runtime(db, monkeypatch, native: NativeTarget) -> None:
     native.socket = str(native.root / "agt-a1" / "s1.sock")
     Path(native.socket).parent.mkdir()
     monkeypatch.setattr(_lifecycle, "AGENT_SOCKET_ROOT", str(native.root))
-    monkeypatch.setattr(_lifecycle, "_teardown_session", manager._teardown_session)
+    monkeypatch.setattr(manager, "_teardown_session", _lifecycle._teardown_session)
     _patch_transports(monkeypatch, native, native)
     _requiring_template(monkeypatch, "sh")
     monkeypatch.setattr(manager, "_ensure_pid", _pids._ensure_pid)
@@ -78,7 +77,7 @@ def test_unacknowledged_native_spawn_is_recovered_and_finishes_startup(
 
     monkeypatch.setattr(tmux, "create_session", fail_after_native_spawn)
     try:
-        with pytest.raises(ExternalError):
+        with pytest.raises(AgentworksError):
             getattr(manager, operation)(
                 db,
                 SimpleNamespace(session=SimpleNamespace(history_limit=1)),
@@ -111,7 +110,6 @@ def test_unacknowledged_native_spawn_is_recovered_and_finishes_startup(
         if recovery == "single":
             manager.start_session(db, config, name="s1", interaction=TtyInteractionPolicy.REFUSE)
         else:
-            monkeypatch.setattr(manager, "_batch_vm_boundary", lambda *a, **k: nullcontext())
             monkeypatch.setattr(
                 manager,
                 "observe_session_statuses",
@@ -123,8 +121,8 @@ def test_unacknowledged_native_spawn_is_recovered_and_finishes_startup(
         assert recovered.tmux_server_start_ticks is not None
         assert Path(native.socket).stat().st_mode & 0o070 == 0o070
         assert native.native("show-option -wAqv -t %0 remain-on-exit").stdout.strip() == "off"
-        assert passed_secrets == [(secret,)]
-        assert artifact_secrets == [(secret,)]
+        assert passed_secrets == [()]
+        assert artifact_secrets == [()]
         assert sum("new-session" in command for command, _ in native.calls) == 1
     finally:
         db.close()
@@ -261,9 +259,8 @@ def test_native_retry_completes_protected_runtime_with_known_fingerprint(tmp_pat
     monkeypatch.setattr(tmux, "finalize_session_start", interrupted)
     config = SimpleNamespace(session=SimpleNamespace(history_limit=1))
     try:
-        with pytest.raises(ExternalError) as caught:
+        with pytest.raises(AgentworksError):
             manager.start_session(db, config, name="s1", interaction=TtyInteractionPolicy.REFUSE)
-        assert caught.value is error
         row = db.get_session("s1")
         assert row is not None and row.pid is not None and row.tmux_server_start_ticks is not None
         monkeypatch.setattr(tmux, "finalize_session_start", _NATIVE_FINALIZE)

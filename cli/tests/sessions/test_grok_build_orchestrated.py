@@ -242,7 +242,7 @@ def test_restart_reads_uuid_and_detects_before_killing_old_workload(
     def teardown(*args: object, **kwargs: object) -> None:
         events.append("kill")
 
-    monkeypatch.setattr("agentworks.sessions.manager._lifecycle._teardown_session", teardown)
+    monkeypatch.setattr("agentworks.sessions.manager._teardown_session", teardown)
     session_manager.restart_session(
         db,
         SimpleNamespace(session=SimpleNamespace(history_limit=1)),  # type: ignore[arg-type]

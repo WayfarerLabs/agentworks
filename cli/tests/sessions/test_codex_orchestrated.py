@@ -205,7 +205,7 @@ def _restart_stubs(
     def _spy_teardown(*args: object, **kwargs: object) -> None:
         events.append("kill")
 
-    monkeypatch.setattr("agentworks.sessions.manager._lifecycle._teardown_session", _spy_teardown)
+    monkeypatch.setattr("agentworks.sessions.manager._teardown_session", _spy_teardown)
     return db, captured
 
 

@@ -63,7 +63,7 @@ def run_selected(
             results = tuple(invocation.results.values())
             render_results(results)
             require_success(results)
-        except UserAbort:
+        except (UserAbort, KeyboardInterrupt):
             for kind, name in tuple(invocation.results):
                 if (kind, name) not in invocation.completed and not invocation.unavailable(kind, name):
                     invocation.fail(kind, name, "operation cancelled before runtime work completed", blocked=True)

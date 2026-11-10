@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from types import SimpleNamespace
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -19,11 +20,17 @@ from agentworks.sessions.tmux import ProbeStatus, TmuxServerFingerprint
 from tests.conftest import ManifestDoc, stub_vm_ssh_identity
 from tests.console_helpers import create_console_record
 
+if TYPE_CHECKING:
+    from agentworks.db import Database, VMRow
+
+
 REFUSE = TtyInteractionPolicy.REFUSE
 BOOT = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 
 
-def seed_vm(db, name, *, target=DesiredRuntimeState.RUNNING, site="proxmox"):
+def seed_vm(
+    db: Database, name: str, *, target: DesiredRuntimeState = DesiredRuntimeState.RUNNING, site: str = "proxmox"
+) -> VMRow:
     row = db.insert_vm(name, site, name, admin_username="admin", desired_runtime_state=target)
     db.update_vm_tailscale(name, "100.64.0.5")
     db.update_vm_init_status(name, InitStatus.COMPLETE)
@@ -35,7 +42,14 @@ def seed_vm(db, name, *, target=DesiredRuntimeState.RUNNING, site="proxmox"):
     return row
 
 
-def seed_session(db, name, vm, *, template="default", target=DesiredRuntimeState.RUNNING):
+def seed_session(
+    db: Database,
+    name: str,
+    vm: str,
+    *,
+    template: str = "default",
+    target: DesiredRuntimeState = DesiredRuntimeState.RUNNING,
+) -> None:
     db.insert_session(
         name,
         f"ws-{vm}",
@@ -55,7 +69,9 @@ def seed_session(db, name, vm, *, template="default", target=DesiredRuntimeState
 
 @pytest.fixture
 def runtime(monkeypatch):
-    powers, statuses, events = {}, {}, []
+    powers: dict[str, VMStatus] = {}
+    statuses: dict[str, SessionStatus] = {}
+    events: list[tuple[str, str]] = []
     stub_vm_ssh_identity(monkeypatch)
     monkeypatch.setattr(ProxmoxPlatform, "status", lambda self, row, ctx: powers.get(row.name, VMStatus.RUNNING))
 
@@ -204,7 +220,7 @@ def test_dry_run_has_no_native_guard_or_workload_sources(db, make_config, runtim
     assert not (db.path.parent / f".{db.path.name}.native-locks").exists()
 
 
-def unavailable_site():
+def unavailable_site() -> ManifestDoc:
     return ManifestDoc(
         "vm-site",
         "unavailable",

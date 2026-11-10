@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from dataclasses import replace
 from types import SimpleNamespace
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
-from agentworks.capabilities.harness_integration import HarnessLaunchIntent
 from agentworks.db import DesiredRuntimeState, SessionStatus
 from agentworks.errors import StateError, UserAbort, ValidationError
 from agentworks.harness_setup.locking import native_mutation_guard
@@ -23,13 +23,30 @@ from agentworks.sessions.manager._runtime import (
 from .test_create_start_restart_orchestrated import _restart_fixture
 from .test_create_start_restart_orchestrated import _stub_build_registry as _stub_build_registry
 
+if TYPE_CHECKING:
+    from agentworks.config import Config
+    from agentworks.db import Database, SessionRow, VMRow
+    from agentworks.sessions.manager import PreparedSessionLaunch, SessionLaunchDefinition
+
+
+def _session(db: Database) -> SessionRow:
+    session = db.get_session("s1")
+    assert session is not None
+    return session
+
+
+def _vm(db: Database) -> VMRow:
+    vm = db.get_vm("vm1")
+    assert vm is not None
+    return vm
+
 
 def test_pure_setter_preserves_runtime_and_start_identity(tmp_path, monkeypatch):
     db, _ = _restart_fixture(tmp_path, monkeypatch)
-    before = db.get_session("s1")
+    before = _session(db)
     monkeypatch.setattr("agentworks.bootstrap.load_request_registry", lambda *a, **k: pytest.fail("registry loaded"))
     manager.set_session_desired_runtime_state(db, name="s1", state="stopped")
-    after = db.get_session("s1")
+    after = _session(db)
     assert after.desired_runtime_state is DesiredRuntimeState.STOPPED
     assert (after.session_uuid, after.pid, after.boot_id, after.tmux_server_start_ticks, after.last_started_at) == (
         before.session_uuid,
@@ -40,13 +57,13 @@ def test_pure_setter_preserves_runtime_and_start_identity(tmp_path, monkeypatch)
     )
     with pytest.raises(ValidationError):
         manager.set_session_desired_runtime_state(db, name="s1", state="on-demand")
-    assert db.get_session("s1").desired_runtime_state is DesiredRuntimeState.STOPPED
+    assert _session(db).desired_runtime_state is DesiredRuntimeState.STOPPED
     db.close()
 
 
 def test_acceptance_reuses_guard_and_refuses_replaced_uuid(tmp_path, monkeypatch):
     db, _ = _restart_fixture(tmp_path, monkeypatch)
-    selected = db.get_session("s1")
+    selected = _session(db)
     with native_mutation_guard(db.path, "vm1") as guard:
         accepted = accept_session_runtime_state(
             db, selected, state=DesiredRuntimeState.STOPPED, held_native_guard=guard
@@ -59,29 +76,15 @@ def test_acceptance_reuses_guard_and_refuses_replaced_uuid(tmp_path, monkeypatch
                 state=DesiredRuntimeState.RUNNING,
                 held_native_guard=guard,
             )
-    assert db.get_session("s1").desired_runtime_state is DesiredRuntimeState.STOPPED
+    assert _session(db).desired_runtime_state is DesiredRuntimeState.STOPPED
     db.close()
 
 
-def _definition(db, monkeypatch, *, status):
-    session = db.get_session("s1")
-    workspace = db.get_workspace(session.workspace_name)
-    vm = db.get_vm(workspace.vm_name)
+def _definition(db: Database, monkeypatch: pytest.MonkeyPatch, *, status: SessionStatus) -> SessionLaunchDefinition:
+    definition = _launch_definition(db)
     monkeypatch.setattr(manager, "check_session_status", lambda *a, **k: status)
     monkeypatch.setattr(manager, "_ensure_pid", lambda *a, **k: pytest.fail("PID evidence mutated"))
-    return SimpleNamespace(
-        db=db,
-        config=SimpleNamespace(),
-        registry=object(),
-        session=session,
-        workspace=workspace,
-        vm=vm,
-        replace_running=False,
-        force=False,
-        intent=HarnessLaunchIntent.RESUME_OR_NEW,
-        running_restart_authorized=False,
-        env_target=object(),
-    )
+    return definition
 
 
 def test_running_noop_preparation_never_repairs_or_uses_env_targets(tmp_path, monkeypatch):
@@ -105,10 +108,10 @@ def test_ineligible_preparation_never_repairs_or_collects_values(tmp_path, monke
 def test_off_parent_stop_has_no_transport_or_runtime_mutation(tmp_path, monkeypatch):
     db, _ = _restart_fixture(tmp_path, monkeypatch)
     monkeypatch.setattr(manager, "transport", lambda *a, **k: pytest.fail("transport created"))
-    prepared = prepare_session_stop(db, SimpleNamespace(), db.get_session("s1"), parent_off=True)
+    prepared = prepare_session_stop(db, SimpleNamespace(), _session(db), parent_off=True)
     assert prepared.parent_off and prepared.observed_status is SessionStatus.STOPPED
     assert execute_session_stop(prepared) is False
-    assert db.get_session("s1").desired_runtime_state is DesiredRuntimeState.RUNNING
+    assert _session(db).desired_runtime_state is DesiredRuntimeState.RUNNING
     db.close()
 
 
@@ -121,44 +124,54 @@ def test_stop_executor_propagates_cancellation(tmp_path, monkeypatch):
 
     monkeypatch.setattr("agentworks.sessions.manager._lifecycle._teardown_session", cancel)
     with pytest.raises(UserAbort) as caught:
-        manager._execute_stop([(db.get_session("s1"), object(), True)], db=db)
+        manager._execute_stop(
+            [(_session(db), manager.transport(_vm(db), cast("Config", SimpleNamespace())), True)], db=db
+        )
     assert caught.value is failure
     db.close()
 
 
-def _prepare_launch(db, monkeypatch, *, status=SessionStatus.STOPPED, replace_running=False, force=False):
+def _launch_definition(db: Database, *, replace_running: bool = False, force: bool = False) -> SessionLaunchDefinition:
     from agentworks.bootstrap import load_request_registry
     from agentworks.sessions.manager._runtime import prepare_session_definition
     from agentworks.vms.nodes import live_vm_node
 
-    config = SimpleNamespace(session=SimpleNamespace(history_limit=1))
+    config = cast("Config", SimpleNamespace(session=SimpleNamespace(history_limit=1)))
     registry = load_request_registry(config, live_database=db)
-    session = db.get_session("s1")
-    vm = db.get_vm("vm1")
-    definition = prepare_session_definition(
+    return prepare_session_definition(
         db,
         config,
         registry,
-        session,
-        vm_node=live_vm_node(db, config, registry, vm),
+        _session(db),
+        vm_node=live_vm_node(db, config, registry, _vm(db)),
         replace_running=replace_running,
         running_restart_authorized=replace_running,
         force=force,
     )
-    return prepare_session_launch(definition)
+
+
+def _prepare_launch(
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    status: SessionStatus = SessionStatus.STOPPED,
+    replace_running: bool = False,
+    force: bool = False,
+) -> PreparedSessionLaunch:
+    return prepare_session_launch(_launch_definition(db, replace_running=replace_running, force=force))
 
 
 @pytest.mark.parametrize("status", [SessionStatus.STOPPED, SessionStatus.RESIDUAL])
 def test_eligible_preparation_defers_pid_writes_and_keeps_session_scope(tmp_path, monkeypatch, status):
     db, events = _restart_fixture(tmp_path, monkeypatch, status=status)
-    before = db.get_session("s1")
+    before = _session(db)
     monkeypatch.setattr(manager, "_ensure_pid", lambda *a, **k: pytest.fail("PID repair during preparation"))
     prepared = _prepare_launch(db, monkeypatch, status=status)
     assert prepared.observed_status is status and not prepared.noop
     assert len(prepared.secret_targets) == 1
     assert prepared.definition.scope.session == "s1"
     assert prepared.definition.scope.agent == "a1" and not prepared.definition.scope.admin
-    assert db.get_session("s1") == before
+    assert _session(db) == before
     assert "kill" not in events and "tmux_create" not in events
     db.close()
 
@@ -168,13 +181,13 @@ def test_executor_uses_supplied_values_and_preserves_target(tmp_path, monkeypatc
 
     db, events = _restart_fixture(tmp_path, monkeypatch, status=SessionStatus.STOPPED)
     manager.set_session_desired_runtime_state(db, name="s1", state="stopped")
-    selected = db.get_session("s1")
+    selected = _session(db)
     prepared = _prepare_launch(db, monkeypatch)
     monkeypatch.setattr(
         "agentworks.secrets.resolve_for_command", lambda *a, **k: pytest.fail("source reached executor")
     )
     assert execute_session_start(prepared, secret_values={}, graph_secret_values={})
-    after = db.get_session("s1")
+    after = _session(db)
     assert after.session_uuid == selected.session_uuid
     assert after.desired_runtime_state is DesiredRuntimeState.STOPPED
     assert after.pid == 4243 and after.tmux_server_start_ticks == 1
@@ -201,7 +214,7 @@ def test_failed_launch_preparation_preserves_old_runtime_and_target(tmp_path, mo
 
     db, events = _restart_fixture(tmp_path, monkeypatch, status=SessionStatus.RUNNING)
     prepared = _prepare_launch(db, monkeypatch, status=SessionStatus.RUNNING, replace_running=True)
-    before = db.get_session("s1")
+    before = _session(db)
 
     def fail_compile(*args, **kwargs):
         raise ExternalError("artifact preparation failed")
@@ -210,7 +223,7 @@ def test_failed_launch_preparation_preserves_old_runtime_and_target(tmp_path, mo
     monkeypatch.setattr(manager, "_teardown_session", lambda *a, **k: pytest.fail("old runtime killed"))
     with pytest.raises(ExternalError):
         execute_session_start(prepared, secret_values={}, graph_secret_values={})
-    assert db.get_session("s1") == before
+    assert _session(db) == before
     assert "tmux_create" not in events
     db.close()
 
@@ -239,7 +252,7 @@ def test_stage_time_identity_replacement_prevents_teardown_or_spawn(tmp_path, mo
     monkeypatch.setattr(manager, "_teardown_session", lambda *a, **k: pytest.fail("replacement killed"))
     with pytest.raises(StateError):
         execute_session_start(prepared, secret_values={}, graph_secret_values={})
-    assert db.get_session("s1").session_uuid != old_uuid
+    assert _session(db).session_uuid != old_uuid
     assert "tmux_create" not in events
     db.close()
 
@@ -247,12 +260,12 @@ def test_stage_time_identity_replacement_prevents_teardown_or_spawn(tmp_path, mo
 def test_stopped_parent_refuses_launch_before_transport_creation(tmp_path, monkeypatch):
     db, _ = _restart_fixture(tmp_path, monkeypatch)
     definition = _definition(db, monkeypatch, status=SessionStatus.STOPPED)
-    vm = db.get_vm("vm1")
+    vm = _vm(db)
     db.set_vm_desired_runtime_state("vm1", DesiredRuntimeState.STOPPED, expected_vm_uuid=vm.vm_uuid)
     monkeypatch.setattr(manager, "transport", lambda *a, **k: pytest.fail("guest transport created"))
     with pytest.raises(StateError):
         prepare_session_launch(definition)
-    assert db.get_session("s1").desired_runtime_state is DesiredRuntimeState.RUNNING
+    assert _session(db).desired_runtime_state is DesiredRuntimeState.RUNNING
     db.close()
 
 
@@ -261,7 +274,7 @@ def test_interrupted_startup_recovery_collects_no_launch_requirements(tmp_path, 
     from agentworks.sessions.manager._execute import execute_session_start
 
     db, events = _restart_fixture(tmp_path, monkeypatch, status=SessionStatus.RUNNING)
-    selected = db.get_session("s1")
+    selected = _session(db)
     monkeypatch.setattr(tmux, "startup_protection_enabled", lambda *a, **k: True)
     monkeypatch.setattr(
         "agentworks.orchestration.readiness.preflight_all", lambda *a, **k: pytest.fail("launch preflight")
@@ -286,7 +299,7 @@ def test_interrupted_startup_recovery_collects_no_launch_requirements(tmp_path, 
     )
     assert execute_session_start(prepared, secret_values={}, graph_secret_values={})
     assert "recovered" in events and "tmux_create" not in events and "kill" not in events
-    assert db.get_session("s1") == selected
+    assert _session(db) == selected
     db.close()
 
 
@@ -346,7 +359,7 @@ def test_batch_pid_repair_propagates_cancellation(tmp_path, monkeypatch):
 
     monkeypatch.setattr(_pids, "_repair_session_pid", cancel)
     with pytest.raises(UserAbort) as caught:
-        manager.ensure_pids_batch([db.get_session("s1")], db=db, config=SimpleNamespace())
+        manager.ensure_pids_batch([_session(db)], db=db, config=SimpleNamespace())
     assert caught.value is failure
     db.close()
 
@@ -359,7 +372,7 @@ def test_pending_runtime_ownership_probe_propagates_cancellation(tmp_path, monke
 
     db, _ = _restart_fixture(tmp_path, monkeypatch)
     db.set_session_run_id("s1", str(uuid4()))
-    session = db.get_session("s1")
+    session = _session(db)
     pending = replace(session, pid=None)
     failure = UserAbort("cancelled")
 
@@ -367,7 +380,7 @@ def test_pending_runtime_ownership_probe_propagates_cancellation(tmp_path, monke
         raise failure
 
     monkeypatch.setattr(tmux, "capture_tmux_server_fingerprint", cancel)
-    target = manager.transport(db.get_vm("vm1"), SimpleNamespace())
+    target = manager.transport(_vm(db), SimpleNamespace())
     with pytest.raises(UserAbort) as caught:
         _status._pending_launch_is_owned(pending, target=target)
     assert caught.value is failure
@@ -378,7 +391,7 @@ def test_create_below_stopped_parent_refuses_before_activation(tmp_path, monkeyp
     from agentworks.sessions.manager import _create
 
     db, _ = _restart_fixture(tmp_path, monkeypatch)
-    vm = db.get_vm("vm1")
+    vm = _vm(db)
     db.set_vm_desired_runtime_state("vm1", DesiredRuntimeState.STOPPED, expected_vm_uuid=vm.vm_uuid)
     monkeypatch.setattr(_create, "_build_session_graph", lambda *a, **k: pytest.fail("graph activation preparation"))
     with pytest.raises(StateError):
@@ -391,13 +404,13 @@ def test_create_below_stopped_parent_refuses_before_activation(tmp_path, monkeyp
             interaction=TtyInteractionPolicy.REFUSE,
         )
     assert db.get_session("new-session") is None
-    assert db.get_session("s1").desired_runtime_state is DesiredRuntimeState.RUNNING
+    assert _session(db).desired_runtime_state is DesiredRuntimeState.RUNNING
     db.close()
 
 
 def test_local_definition_rejects_canonical_identity_before_guest_or_secret_work(tmp_path, monkeypatch):
     db, _ = _restart_fixture(tmp_path, monkeypatch, status=SessionStatus.STOPPED)
-    selected = db.get_session("s1")
+    selected = _session(db)
     failure = StateError("configured SSH identity is unavailable")
 
     def refuse(*args, **kwargs):
@@ -408,7 +421,7 @@ def test_local_definition_rejects_canonical_identity_before_guest_or_secret_work
     with pytest.raises(StateError) as caught:
         _prepare_launch(db, monkeypatch)
     assert caught.value is failure
-    assert db.get_session("s1") == selected
+    assert _session(db) == selected
     db.close()
 
 
@@ -416,7 +429,7 @@ def test_delete_consent_cannot_adopt_same_name_replacement(tmp_path, monkeypatch
     from agentworks.db import SessionMode
 
     db, _ = _restart_fixture(tmp_path, monkeypatch, status=SessionStatus.STOPPED)
-    selected = db.get_session("s1")
+    selected = _session(db)
 
     def replace_while_confirming(*args, **kwargs):
         db.delete_session("s1")
@@ -437,7 +450,7 @@ def test_delete_consent_cannot_adopt_same_name_replacement(tmp_path, monkeypatch
     )
     with pytest.raises(StateError):
         manager.delete_session(db, SimpleNamespace(), name="s1", interaction=TtyInteractionPolicy.ALLOW)
-    assert db.get_session("s1").session_uuid != selected.session_uuid
+    assert _session(db).session_uuid != selected.session_uuid
     db.close()
 
 
@@ -457,7 +470,7 @@ def test_recovery_only_action_never_widens_after_preparation(tmp_path, monkeypat
     prepared = _prepare_launch(db, monkeypatch, status=SessionStatus.RUNNING, force=force)
     assert prepared.recovered_startup and not prepared.requires_launch
     monkeypatch.setattr("agentworks.secrets.resolve.active_sources", lambda *a, **k: pytest.fail("source reopened"))
-    before = db.get_session("s1")
+    before = _session(db)
     if after_repair:
         monkeypatch.setattr(manager, "check_session_status", lambda *a, **k: SessionStatus.RUNNING)
 
@@ -479,5 +492,5 @@ def test_recovery_only_action_never_widens_after_preparation(tmp_path, monkeypat
     monkeypatch.setattr(tmux, "create_session", lambda *a, **k: pytest.fail("spawned without launch preparation"))
     with pytest.raises(StateError):
         execute_session_start(prepared, secret_values={}, graph_secret_values={})
-    assert db.get_session("s1") == before
+    assert _session(db) == before
     db.close()

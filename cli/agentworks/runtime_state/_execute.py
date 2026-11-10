@@ -20,6 +20,20 @@ def resolve_workload_boundary(invocation: RuntimeInvocation) -> bool:
     import agentworks.sessions.multi_console as consoles
     from agentworks.orchestration.secrets import secret_union
 
+    deferred_vm_stop = any(
+        name in invocation.selection.explicit_vms
+        and context.vm.desired_runtime_state is DesiredRuntimeState.STOPPED
+        and name not in invocation.failed_families
+        for name, context in invocation.contexts.items()
+    )
+    if not (
+        invocation.launches
+        or invocation.stops
+        or invocation.console_starts
+        or invocation.console_stops
+        or deferred_vm_stop
+    ):
+        return True
     try:
         for prepared in invocation.launches.values():
             for name in secret_union(prepared.secret_nodes):

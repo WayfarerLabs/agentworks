@@ -293,7 +293,7 @@ def test_all_excluded_filter_stops_before_batch_runtime_work(
     def unexpected(*_args: object, **_kwargs: object) -> object:
         raise AssertionError("an empty explicit filter must not enter the VM boundary")
 
-    monkeypatch.setattr(session_manager, "_batch_vm_boundary", unexpected)
+    monkeypatch.setattr("agentworks.runtime_state.run_session_batch", unexpected)
 
     session_manager.stop_all_sessions(
         db,
