@@ -259,6 +259,19 @@ def install_run(shell: str, command: str) -> Command:
     return Command((shell, "-lc", command), deadline=INSTALL_COMMAND_DEADLINE)
 
 
+def install_command_paths(
+    command_names: list[str],
+    entries: Mapping[str, SystemInstallCommandEntry | UserInstallCommandEntry],
+) -> list[str]:
+    """The ``PATH`` additions the named install commands declare, in order; an undeclared name adds none.
+
+    They are declarations, not results: a command's paths count whether it
+    ran, was skipped as installed, or failed, so an account's profile can
+    carry them before any of its install commands run.
+    """
+    return [path for name in command_names if (entry := entries.get(name)) is not None for path in entry.path]
+
+
 def _run_install_commands(
     files: Files,
     command_names: list[str],
@@ -268,16 +281,18 @@ def _run_install_commands(
     log: InitLog,
     *,
     label: str = "Install command",
-) -> list[str]:
-    """Run install commands from an install-command entry dict as ``files``' identity. Returns PATH additions.
+) -> None:
+    """Run install commands from an install-command entry dict as ``files``' identity.
 
     Phase B runs the system and user install commands as the admin, and agent
     initialization runs the agent's user install commands as the agent.
 
     Runs without env injection: provisioning is hermetic. Install commands
-    see static identity via the on-disk profile fragments (login-shell
-    sourcing) and have no access to operator env (those reach runtime
-    shells only). A completion test that cannot run counts as not installed.
+    see static identity and the account's declared ``PATH`` entries
+    (:func:`install_command_paths` and mise's shims) via the on-disk profile
+    fragments (login-shell sourcing), and have no access to operator env
+    (those reach runtime shells only). A completion test that cannot run
+    counts as not installed.
     """
     # DRIFT GUARD (Phase 7, recipe use-gate): this runner consumes
     # install-command rows by name and must never run a disabled plugin's row.
@@ -285,10 +300,6 @@ def _run_install_commands(
     # ``_run_agent_install_commands`` (agent create / reinit); the recipe
     # gate lives at each command entry that reaches it (see
     # tests/agents/test_recipe_gate_drift.py's entry table).
-    if not command_names:
-        return []
-
-    path_additions: list[str] = []
     total = len(command_names)
 
     for i, name in enumerate(command_names, 1):
@@ -306,7 +317,6 @@ def _run_install_commands(
                 if status(files.access, Script(test_cmd, Shell.SH, deadline=INSTALL_CHECK_DEADLINE)) == 0:
                     output.info(f"{label} {i}/{total} ({name}): already installed, skipping")
                     log.output(f"{name}: already installed ({test_cmd}), skipping")
-                    path_additions.extend(entry.path)
                     continue
             except STEP_FAILURES as error:
                 # A deadline or a dropped connection: assume not installed, proceed.
@@ -319,6 +329,3 @@ def _run_install_commands(
             files.access.run(install_run(shell, entry.command), check=True)
         except STEP_FAILURES as error:
             warn_step(log, f"{label.lower()} '{name}' failed: {truncated}...", error)
-        path_additions.extend(entry.path)
-
-    return path_additions

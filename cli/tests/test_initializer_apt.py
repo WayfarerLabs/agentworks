@@ -31,6 +31,7 @@ from agentworks.vms.initializer import (
     packages,
 )
 from agentworks.vms.initializer.driver import VMInitializationOperation, _phase_b_setup
+from agentworks.vms.initializer.packages import install_command_paths
 from tests.phase_b_support import StepGuest, requires_file_program
 
 from ._initializer_support import _make_entries, _make_vm_template
@@ -313,14 +314,14 @@ def _tool(**tests: str) -> dict[str, UserInstallCommandEntry]:
     return {"my-tool": UserInstallCommandEntry(name="my-tool", command="run-install", path=["~/.my-tool/bin"], **tests)}
 
 
-def _run(guest: StepGuest, entries: dict, names: list[str] | None = None) -> list[str]:  # type: ignore[type-arg]
-    return _run_install_commands(guest.files, names or list(entries), entries, "zsh", "/home/agentworks", guest.log)
+def _run(guest: StepGuest, entries: dict, names: list[str] | None = None) -> None:  # type: ignore[type-arg]
+    _run_install_commands(guest.files, names or list(entries), entries, "zsh", "/home/agentworks", guest.log)
 
 
-def test_an_install_command_runs_in_the_login_shell_and_returns_its_path() -> None:
+def test_an_install_command_runs_in_the_login_shell() -> None:
     guest = StepGuest(local_files=False)
 
-    assert _run(guest, _make_entries().user_install_commands) == ["~/.user-tool/bin"]
+    _run(guest, _make_entries().user_install_commands)
 
     assert guest.commands() == [_install("zsh", "curl -fsSL https://example.com/install.sh | bash")]
     assert all(not request.env for request in guest.commands())  # hermetic: nothing injected
@@ -329,7 +330,7 @@ def test_an_install_command_runs_in_the_login_shell_and_returns_its_path() -> No
 def test_an_undeclared_install_command_warns_and_runs_nothing() -> None:
     guest = StepGuest(local_files=False)
 
-    assert _run(guest, _make_entries().user_install_commands, ["nonexistent"]) == []
+    _run(guest, _make_entries().user_install_commands, ["nonexistent"])
 
     assert len(guest.log.warned) == 1
     assert guest.access.requests() == []
@@ -338,14 +339,15 @@ def test_an_undeclared_install_command_warns_and_runs_nothing() -> None:
 def test_no_install_commands_means_no_request() -> None:
     guest = StepGuest(local_files=False)
 
-    assert _run(guest, {}, []) == []
+    _run(guest, {}, [])
+
     assert guest.access.requests() == []
 
 
-def test_an_install_command_whose_tests_all_pass_is_skipped_keeping_its_path() -> None:
+def test_an_install_command_whose_tests_all_pass_is_skipped() -> None:
     guest = StepGuest(local_files=False)
 
-    assert _run(guest, _tool(test_exec="my-tool", test_file="~/.my-tool/installed")) == ["~/.my-tool/bin"]
+    _run(guest, _tool(test_exec="my-tool", test_file="~/.my-tool/installed"))
 
     ((check,),) = [guest.commands()]
     assert isinstance(check, Script) and (check.shell, check.deadline, check.elevated) == (Shell.SH, 10, False)
@@ -382,7 +384,7 @@ def test_an_install_command_with_no_test_always_runs() -> None:
     assert guest.commands() == [_install("zsh", "run-install")]
 
 
-def test_a_failed_install_command_warns_keeps_its_path_and_the_next_runs() -> None:
+def test_a_failed_install_command_warns_and_the_next_runs() -> None:
     guest = StepGuest(local_files=False)
     entries = {
         "first": UserInstallCommandEntry(name="first", command="one", path=["/opt/one"]),
@@ -390,10 +392,20 @@ def test_a_failed_install_command_warns_keeps_its_path_and_the_next_runs() -> No
     }
     guest.respond(_install("zsh", "one"), _failed())
 
-    assert _run(guest, entries) == ["/opt/one", "/opt/two"]
+    _run(guest, entries)
 
     assert len(guest.log.warned) == 1
     assert guest.commands() == [_install("zsh", "one"), _install("zsh", "two")]
+
+
+def test_the_declared_paths_are_every_declared_command_s_in_order() -> None:
+    entries = {
+        "first": UserInstallCommandEntry(name="first", command="one", path=["/opt/one", "/opt/shared"]),
+        "second": UserInstallCommandEntry(name="second", command="two", path=["/opt/two"]),
+    }
+
+    assert install_command_paths(["second", "missing", "first"], entries) == ["/opt/two", "/opt/one", "/opt/shared"]
+    assert install_command_paths([], entries) == []
 
 
 # -- The completion test itself, run by /bin/sh ------------------------------------------

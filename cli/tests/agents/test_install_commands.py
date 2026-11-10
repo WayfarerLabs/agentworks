@@ -1,9 +1,7 @@
-"""User install commands run as the agent, on its own access, and the profile fragment they leave."""
+"""User install commands run as the agent, on its own access; its profile is covered by test_agent_home_permissions."""
 
 from __future__ import annotations
 
-import shutil
-import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
@@ -59,7 +57,6 @@ def _run(
         registry=registry,
         agent_tmpl=template,  # type: ignore[arg-type]
         home=str(home),
-        identity_env={"AGENTWORKS_AGENT": "dev"},
     )
 
 
@@ -96,42 +93,3 @@ def test_an_install_with_no_declared_test_always_runs(home: Path) -> None:
 
     assert guest.checks() == []
     assert install_run("bash", "run-agent-install") in guest.access.requests()
-
-
-@requires_file_program
-@pytest.mark.parametrize("shell", ["sh", "bash", "zsh"])
-def test_the_profile_puts_install_paths_ahead_of_mise_s_shims_as_the_admin_s_does(home: Path, shell: str) -> None:
-    shell_path = shutil.which(shell)
-    if shell_path is None:
-        pytest.skip(f"{shell} is unavailable")
-    entries = [
-        UserInstallCommandEntry(name="first", command="install-first", path=["~/.local/bin", "/opt/tools"]),
-        UserInstallCommandEntry(name="second", command="install-second", path=["$HOME/.local/bin"]),
-    ]
-
-    for _ in range(2):
-        _run(AgentGuest(status=1), home, *entries, shell=shell, mise=True)
-
-    result = subprocess.run(
-        [shell_path, "-c", '. "$HOME/.agentworks-profile.sh"; printf "%s\\n" "$PATH" "$AGENTWORKS_AGENT"'],
-        env={"HOME": str(home), "PATH": "/usr/bin:/bin"},
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    shims = f"{home}/.local/share/mise/shims"
-    assert result.stdout.splitlines() == [f"{home}/.local/bin:/opt/tools:{shims}:/usr/bin:/bin", "dev"]
-    profile_line = f". {home}/.agentworks-profile.sh"
-    for name in [".profile", ".bashrc"] + ([".zprofile"] if shell == "zsh" else []):
-        assert (home / name).read_text().splitlines() == [profile_line]
-
-    # Removing the install commands on reinit removes their managed paths; mise's shims stay, as the admin's do.
-    _run(AgentGuest(status=1), home, shell=shell)
-    result = subprocess.run(
-        [shell_path, "-c", '. "$HOME/.agentworks-profile.sh"; printf "%s" "$PATH"'],
-        env={"HOME": str(home), "PATH": "/usr/bin:/bin"},
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    assert result.stdout == f"{shims}:/usr/bin:/bin"

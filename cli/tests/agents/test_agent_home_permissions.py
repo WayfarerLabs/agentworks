@@ -28,6 +28,8 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import shutil
+import subprocess
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -36,6 +38,7 @@ from agentworks.agents import initializer as agent_initializer
 from agentworks.execution.errors import CommandFailed
 from agentworks.execution.requests import Bytes, Command, PythonProgram, Script
 from agentworks.execution.results import Completed, Result
+from tests.conftest import ManifestDoc
 from tests.orchestrated_fixtures import proxmox_site, write_operator_config
 from tests.vm_access_support import AccessRecorder, Admin, Agent, install_access_recorder
 
@@ -64,6 +67,7 @@ def _run_create_on_vm(
     mise_packages: list[str] | None = None,
     mise_lockfile: str | None = None,
     dotfiles_destination: str | None = None,
+    user_install_commands: list[str] | None = None,
 ) -> AccessRecorder:
     """Drive ``create_agent_on_vm`` over a recording access and return it.
 
@@ -93,6 +97,8 @@ def _run_create_on_vm(
         template = dataclasses.replace(template, mise_lockfile=mise_lockfile)
     if dotfiles_destination is not None:
         template = dataclasses.replace(template, dotfiles_destination=dotfiles_destination)
+    if user_install_commands is not None:
+        template = dataclasses.replace(template, user_install_commands=user_install_commands)
     recorder = install_access_recorder(monkeypatch)
 
     def answer(call: Call) -> Result | None:
@@ -127,10 +133,12 @@ def _commands(recorder: AccessRecorder) -> list[tuple[str, ...]]:
     return [request.argv for request in recorder.requests("run") if isinstance(request, Command)]
 
 
-def _profile_writes(recorder: AccessRecorder) -> list[str]:
-    """Contents of every write to the managed profile fragment."""
+def _profile_writes(recorder: AccessRecorder, *, before: Callable[[object], bool] | None = None) -> list[str]:
+    """Contents of every write to the managed profile fragment, or of those before the first ``before`` matches."""
     contents = []
     for request in recorder.requests("run"):
+        if before is not None and before(request):
+            break
         if isinstance(request, PythonProgram) and request.args[0] == "write" and PROFILE_BASENAME in request.args[1]:
             assert isinstance(request.stdin, Bytes)
             contents.append(request.stdin.data.partition(b"\n")[2].decode())
@@ -140,7 +148,10 @@ def _profile_writes(recorder: AccessRecorder) -> list[str]:
 @pytest.fixture
 def config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN201
     monkeypatch.setenv("AW_SECRET_PROXMOX_TOKEN", "pve-token")
-    return write_operator_config(tmp_path, manifests=[proxmox_site()])
+    return write_operator_config(tmp_path, manifests=[proxmox_site(), TOOL])
+
+
+TOOL = ManifestDoc("user-install-command", "tool", {"command": "install-tool", "path": ["~/.local/bin", "/opt/tools"]})
 
 
 def test_create_useradd_forces_private_group(db: Database, config: Any, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -212,13 +223,39 @@ def test_private_primary_group_does_not_warn(
 
 def test_create_writes_umask_027_into_profile(db: Database, config: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     """The managed profile fragment carries ``umask 027`` so files the
-    agent writes outside a workspace default to owner-only. Both of its
-    writes (identity-only, then with PATH) keep the line."""
+    agent writes outside a workspace default to owner-only."""
     recorder = _run_create_on_vm(db, config, monkeypatch, user_exists=False)
 
-    writes = _profile_writes(recorder)
-    assert len(writes) == 2
-    assert all("umask 027" in content for content in writes)
+    (content,) = _profile_writes(recorder)
+    assert "umask 027" in content
+
+
+@pytest.mark.parametrize("shell", ["sh", "bash", "zsh"])
+def test_on_a_first_create_an_install_command_s_profile_holds_mise_s_shims_behind_its_paths(
+    db: Database, config: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, shell: str
+) -> None:
+    """The profile the install command's login shell sources is already complete, as the admin's is."""
+    shell_path = shutil.which(shell)
+    if shell_path is None:
+        pytest.skip(f"{shell} is unavailable")
+    recorder = _run_create_on_vm(db, config, monkeypatch, user_exists=False, user_install_commands=["tool"])
+
+    def runs_the_tool(request: object) -> bool:
+        return isinstance(request, Command) and request.argv[-1] == "install-tool"
+
+    assert any(runs_the_tool(request) for request in recorder.requests("run"))
+    (content,) = _profile_writes(recorder, before=runs_the_tool)
+    profile = tmp_path / "profile.sh"
+    profile.write_text(content)
+    result = subprocess.run(
+        [shell_path, "-c", '. "$1"; printf "%s" "$PATH"', shell, str(profile)],
+        env={"HOME": HOME, "PATH": "/usr/bin:/bin"},
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    # Each entry prepends, so the last declared leads.
+    assert result.stdout == f"/opt/tools:{HOME}/.local/bin:{HOME}/.local/share/mise/shims:/usr/bin:/bin"
 
 
 def test_reinit_reapplies_both_enforcements(db: Database, config: Any, monkeypatch: pytest.MonkeyPatch) -> None:

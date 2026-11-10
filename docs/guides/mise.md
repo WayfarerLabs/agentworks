@@ -137,8 +137,8 @@ for the admin and for every agent:
 4. **Mise install.** It runs with the final config and lockfile, whenever `mise_packages` or
    `mise_lockfile` is set or the home has a config (one your dotfiles supplied counts), and prunes
    on reinit as `mise_prune_on_reinit` says.
-5. **User install commands.** They run after the mise install. Mise's shims are on their `PATH` from
-   the second initialization on; on a first create, call a mise tool through `mise exec`.
+5. **User install commands.** They run after the mise install, with mise's shims on their `PATH`
+   (behind the install commands' own `path` entries), on a first create as on every reinit.
 
 This means:
 

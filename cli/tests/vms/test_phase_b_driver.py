@@ -30,7 +30,7 @@ from agentworks.execution.errors import (
     TrustMissing,
     VMNotReady,
 )
-from agentworks.execution.requests import Command, PythonProgram, Script
+from agentworks.execution.requests import Bytes, Command, PythonProgram, Script
 from agentworks.execution.results import Completed, NotDelivered, NotDeliveredReason, Result, Unknown, UnknownReason
 from agentworks.install_commands import SystemInstallCommandEntry, UserInstallCommandEntry
 from agentworks.sessions.tmux import AGENT_SOCKET_ROOT
@@ -52,6 +52,7 @@ if TYPE_CHECKING:
     from tests.vm_access_support import Call
 
 HOME = "/home/agentworks"
+PROFILE = f"{HOME}/.agentworks-profile.sh"
 
 
 def _file_operation(request: RunRequest) -> tuple[str, str] | None:
@@ -107,7 +108,9 @@ def run_section(db: Database, monkeypatch: pytest.MonkeyPatch) -> Callable[..., 
             "sys-tool": SystemInstallCommandEntry(name="sys-tool", description="", command="install-sys-tool")
         },
         "user-install-command": {
-            "user-tool": UserInstallCommandEntry(name="user-tool", description="", command="install-user-tool")
+            "user-tool": UserInstallCommandEntry(
+                name="user-tool", description="", command="install-user-tool", path=["/opt/user-tool/bin"]
+            )
         },
     }
     registry: Any = MagicMock()
@@ -115,7 +118,11 @@ def run_section(db: Database, monkeypatch: pytest.MonkeyPatch) -> Callable[..., 
     config: Any = MagicMock()
     config.paths.vm_workspaces = "/opt/agentworks/workspaces"
 
-    def run(guest: Guest, admin: AdminConfig | None = None) -> None:
+    def run(
+        guest: Guest,
+        admin: AdminConfig | None = None,
+        operation: driver.VMInitializationOperation = driver.VMInitializationOperation.VM_REINIT,
+    ) -> None:
         log: Any = guest.log
         driver._phase_b_setup(
             db,
@@ -130,7 +137,7 @@ def run_section(db: Database, monkeypatch: pytest.MonkeyPatch) -> Callable[..., 
             "agentworks",
             log,
             debian_release=DebianRelease.TRIXIE,
-            operation=driver.VMInitializationOperation.VM_REINIT,
+            operation=operation,
         )
 
     return run
@@ -221,6 +228,44 @@ def test_the_source_lines_are_ensured_after_the_dotfiles_install(
         index for index, request in enumerate(requests) if _file_operation(request) == ("read", f"{HOME}/.bashrc")
     ]
     assert bashrc and max(bashrc) > install
+
+
+def _written(request: RunRequest) -> str:
+    assert isinstance(request, PythonProgram) and isinstance(request.stdin, Bytes)
+    return request.stdin.data.partition(b"\n")[2].decode()
+
+
+def test_on_a_first_create_the_user_install_commands_profile_holds_mise_s_shims_behind_their_paths(
+    run_section: Callable[..., None],
+) -> None:
+    """The profile the install commands' login shells source is complete before they run, as the agent's is."""
+    guest = Guest()
+
+    run_section(guest, operation=driver.VMInitializationOperation.VM_CREATE)
+
+    requests = guest.access.requests()
+    install = requests.index(install_run("bash", "install-user-tool"))
+    (profile,) = [_written(request) for request in requests[:install] if _is_write_of(PROFILE)(request)]
+    exports = [line for line in profile.splitlines() if line.startswith("export PATH=")]
+    assert exports == [f'export PATH="{HOME}/.local/share/mise/shims:$PATH"', 'export PATH="/opt/user-tool/bin:$PATH"']
+    # Written once, so a steady reinit does not rewrite it after the install commands.
+    assert not any(_is_write_of(PROFILE)(request) for request in requests[install:])
+
+
+def test_the_profile_s_source_line_is_ensured_after_the_user_install_commands(
+    run_section: Callable[..., None],
+) -> None:
+    """An installer that replaces ``~/.profile`` cannot leave it without the profile fragment's line."""
+    guest = Guest()
+
+    run_section(guest)
+
+    requests = guest.access.requests()
+    install = requests.index(install_run("bash", "install-user-tool"))
+    reads = [
+        index for index, request in enumerate(requests) if _file_operation(request) == ("read", f"{HOME}/.profile")
+    ]
+    assert reads and max(reads) > install
 
 
 @pytest.mark.parametrize(

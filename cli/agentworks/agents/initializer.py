@@ -234,11 +234,16 @@ def create_agent_on_vm(
     # sourcing. Integration setup receives operator env through its own runner.
 
     # Write the agent's per-user profile fragment EARLY, before any install
-    # command or dotfiles installer runs, so that AGENTWORKS_AGENT is
-    # visible to them via the login-shell sourcing chain. The fragment gets
-    # rewritten at the end of _run_agent_install_commands with accumulated
-    # PATH entries from user install commands.
+    # command or dotfiles installer runs, so that AGENTWORKS_AGENT and the
+    # declared PATH entries reach them via the login-shell sourcing chain:
+    # mise's shims, then the user install commands' own paths, which take
+    # precedence, as in the admin's profile. The entries are declarations, so
+    # the fragment is complete here and is rewritten on every run, which lets
+    # reinit clear previously set paths.
     from agentworks.env import ResourceContext, per_user_identity_env
+    from agentworks.resources.access import kind_dict
+    from agentworks.vms.initializer.mise import _mise_shims_path
+    from agentworks.vms.initializer.packages import install_command_paths
     from agentworks.vms.sites import site_platform_name
 
     agent_identity_ctx = ResourceContext(
@@ -249,7 +254,12 @@ def create_agent_on_vm(
         agent_name=agent_name,
     )
     agent_identity = per_user_identity_env(agent_identity_ctx)
-    _write_agentworks_profile(agent_files, [], logger, home=home, shell=agent_shell, identity_env=agent_identity)
+    profile_paths = _mise_shims_path(home) + install_command_paths(
+        agent_tmpl.user_install_commands, kind_dict(registry, "user-install-command")
+    )
+    _write_agentworks_profile(
+        agent_files, profile_paths, logger, home=home, shell=agent_shell, identity_env=agent_identity
+    )
 
     # Always write ~/.agentworks-rc.sh -- even when there are no shell
     # hooks to install. The defensive ``_ensure_agentworks_files_sourced``
@@ -309,14 +319,13 @@ def create_agent_on_vm(
 
     _install_agent_mise(agent_files=agent_files, logger=logger, agent_tmpl=agent_tmpl, home=home)
 
-    # User install commands + login-shell PATH profile fragment.
+    # User install commands, which read the profile fragment written above.
     _run_agent_install_commands(
         agent_files=agent_files,
         logger=logger,
         registry=registry,
         agent_tmpl=agent_tmpl,
         home=home,
-        identity_env=agent_identity,
     )
 
     # Defensive final step: re-ensure source lines in case dotfiles
@@ -369,26 +378,19 @@ def _run_agent_install_commands(
     registry: Registry,
     agent_tmpl: ResolvedAgentTemplate,
     home: str,
-    identity_env: dict[str, str],
 ) -> None:
-    """Run user install commands as the agent and rewrite its profile fragment with the accumulated PATH.
+    """Run user install commands as the agent.
 
     The commands run through Phase B's runner (``_run_install_commands``) on
     the agent's own access: a command whose every declared completion test
-    passes is skipped, and a failure warns but does not abort. The profile
-    fragment is rewritten unconditionally (even when there are no install
-    commands and no PATH additions) so that reinit can clear previously set
-    paths. Mise's shims always come first and the install commands' paths
-    after them, so the install commands' paths take precedence, as in the
-    admin's profile.
+    passes is skipped, and a failure warns but does not abort.
 
     Install commands run without any injected environment: provisioning is
-    hermetic. Static identity (``AGENTWORKS_AGENT``, etc.) reaches them
-    through login-shell sourcing of the profile fragment written earlier in
-    phase 2.
+    hermetic. Static identity (``AGENTWORKS_AGENT``, etc.) and the declared
+    ``PATH`` entries, mise's shims among them, reach them through login-shell
+    sourcing of the profile fragment ``create_agent_on_vm`` wrote earlier.
     """
     from agentworks.resources.access import kind_dict
-    from agentworks.vms.initializer.mise import _mise_shims_path
     from agentworks.vms.initializer.packages import _run_install_commands
 
     # DRIFT GUARD (Phase 7, recipe use-gate): this runner consumes
@@ -396,7 +398,7 @@ def _run_agent_install_commands(
     # row. It is reached only via ``create_agent_on_vm``; the recipe gate lives
     # at each command entry that reaches it (see
     # tests/agents/test_recipe_gate_drift.py's entry table).
-    path_additions = _run_install_commands(
+    _run_install_commands(
         agent_files,
         agent_tmpl.user_install_commands,
         kind_dict(registry, "user-install-command"),
@@ -404,14 +406,6 @@ def _run_agent_install_commands(
         home,
         logger,
         label="Agent install command",
-    )
-    _write_agentworks_profile(
-        agent_files,
-        _mise_shims_path(home) + path_additions,
-        logger,
-        home=home,
-        shell=agent_tmpl.shell,
-        identity_env=identity_env,
     )
 
 
@@ -438,7 +432,7 @@ def _install_agent_mise(*, agent_files: Files, logger: InitLog, agent_tmpl: Reso
     the agent's template: the install runs when the template declares
     packages or a lockfile, or the home has a config (its dotfiles may supply
     one), and it runs even when the config write warned. The shims PATH
-    entry is part of the profile fragment (``_run_agent_install_commands``). ``mise install`` / ``mise prune`` run
+    entry is part of the profile fragment (``create_agent_on_vm``). ``mise install`` / ``mise prune`` run
     in a login shell (``{shell} -lc``) so the agent's PATH and any other
     profile-exported env are in scope. No env= injection: provisioning is
     hermetic.

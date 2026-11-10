@@ -1042,12 +1042,21 @@ no longer use them. The departures from the tables above, each recorded where it
   then its user install commands, with mise's shims always on its profile's `PATH` behind the
   install commands' paths (`_write_agent_mise_config`, `_install_agent_mise`). Through v0.19.0 the
   agent ran its install commands, then dotfiles, then mise, so its template's config overwrote the
-  dotfiles', and its shims took precedence over its install commands' paths. On a first create
-  neither account's profile carries the shims yet when its install commands run, and the commands
-  run as `{shell} -lc`, a non-interactive login shell that reads no rc file (the seeded `.bashrc`
-  returns early when not interactive), so the rc fragment's mise activation does not reach them
-  either; only the `test_exec` check runs interactively (`-lic`). They reach mise's tools on a first
-  create only through `mise` itself (`mise exec`), and through the shims from the next reinit on.
+  dotfiles', and its shims took precedence over its install commands' paths.
+- Install commands run as `{shell} -lc`, a non-interactive login shell that reads no rc file (the
+  seeded `.bashrc` returns early when not interactive), so the rc fragment's mise activation never
+  reaches them; only the `test_exec` check runs interactively (`-lic`). What reaches them is the
+  profile, so each account's profile is written complete before its user install commands (Q3
+  ruling): its entries are declarations (`packages.install_command_paths`, every named command's
+  `path` whatever its outcome, plus `_mise_shims_path`), so a first create gives the install
+  commands mise's shims and every declared path, as a reinit does. The admin's profile is written
+  once, after the mise install, and its source line is ensured again after the user install
+  commands, beside the rc fragment written last; the agent's single write stays at the start of its
+  setup, for `AGENTWORKS_AGENT`, and its final `_ensure_agentworks_files_sourced` covers both lines.
+  `_run_install_commands` returns nothing. Through v0.19.0 the admin's profile was written after its
+  user install commands, so on a first create they had neither the shims nor their declared paths;
+  the system install commands, which run earlier in the VM section, still see no profile on a first
+  create.
 - A stored overlay that fails only on source reference fields this release refuses (every
   `errors.RefusedSourceReference`: `dotfiles_source`, `mise_lockfile` and a harness settings
   `source`, all through `sources.check_source_ref`) decodes to

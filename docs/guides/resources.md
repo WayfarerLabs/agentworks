@@ -610,17 +610,19 @@ all must pass before Agentworks skips the command. With no checks, the command a
 A `system-install-command` is VM-wide in scope, but Agentworks executes it as the VM admin user, not
 root. The command must explicitly use `sudo` for each step that needs root privileges. A
 `user-install-command` runs as the admin or agent user whose template selects it and should not
-assume elevation. For either account it runs after that account's dotfiles sync and mise install.
-Mise's shims are on its `PATH` from the second initialization on; on a first create, call a mise
-tool through `mise exec`.
+assume elevation. For either account it runs after that account's dotfiles sync and mise install,
+with mise's shims on its `PATH`.
 
 An install-command's `path` entries persist in the target user's managed `~/.agentworks-profile.sh`.
 User install commands contribute to the selected admin or agent user's profile; system install
-commands contribute to the VM admin's profile. Agentworks rewrites the profile after install
-commands run, including paths from commands skipped by completion checks. Later shells that source
-the profile prepend these directories to `PATH`, and child processes inherit them. A leading `~`
-resolves to the target user's home. Install commands themselves use the login shell's existing
-`PATH`; declaring `path` does not inject those directories into that command.
+commands contribute to the VM admin's profile. Agentworks writes the profile from the declarations
+on every initialization, before that account's user install commands run, including paths from
+commands that fail or are skipped by completion checks. Shells that source the profile prepend these
+directories to `PATH`, after mise's shims, so a declared directory takes precedence over a shim of
+the same name, and child processes inherit them. A leading `~` resolves to the target user's home. A
+user install command's login shell therefore already has every declared directory on `PATH`, its own
+included. System install commands run earlier, before the admin's profile is written: on a first
+create they see none of it, and on reinit they see the previous one.
 
 `test_exec` resolves a command on `PATH` in the target user's login shell. `test_file` and
 `test_dir` check for an existing path; a leading `~` resolves to the target user's home. Declare a
