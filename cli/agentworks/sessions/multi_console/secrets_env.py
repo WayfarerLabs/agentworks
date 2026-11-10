@@ -383,3 +383,39 @@ def _resolve_admin_env(
         vm=resolve_vm(db, registry, vm.name, vm.template).env,
         admin=resolve_admin(db, registry, vm.name, vm.admin_template).env,
     )
+
+
+def _validate_console_build_values(
+    db: Database,
+    registry: Registry,
+    *,
+    console: _ConsoleDefinition,
+    vm: VMRow,
+    members: Sequence[ConsoleSessionRow],
+    values: Mapping[str, str],
+) -> None:
+    """Compose every new console shell environment before runtime mutation."""
+    if console.admin_shell:
+        _mc._resolve_admin_env(db, registry, values=values, vm=vm)
+    for member in members:
+        if not member.shells:
+            continue
+        session = db.get_session(member.session_name)
+        if session is None:
+            raise NotFoundError(
+                f"session '{member.session_name}' not found",
+                entity_kind="session",
+                entity_name=member.session_name,
+            )
+        session_user = _mc._session_linux_user(db, session, vm)
+        for shell in member.shells:
+            use_admin = shell["admin"] or session_user == vm.admin_username
+            _mc._resolve_pane_env(
+                db,
+                registry,
+                values=values,
+                vm=vm,
+                session=session,
+                pane_user=vm.admin_username if use_admin else session_user,
+                is_admin_pane=use_admin,
+            )

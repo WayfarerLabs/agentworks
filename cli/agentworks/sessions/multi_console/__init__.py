@@ -89,6 +89,7 @@ from .secrets_env import (
     _resolve_admin_env,
     _resolve_pane_env,
     _restore_session_secret_targets,
+    _validate_console_build_values,
 )
 from .tmux_build import (
     PreserveEnvMemo,
@@ -169,6 +170,7 @@ from .runtime import (
     prepare_console_reconcile,
     prepare_console_stop,
     set_console_desired_runtime_state,
+    validate_console_values,
 )
 
 __all__ += [
@@ -182,6 +184,8 @@ __all__ += [
     "prepare_console_reconcile",
     "prepare_console_stop",
     "set_console_desired_runtime_state",
+    "validate_console_values",
+    "_validate_console_build_values",
     "guarded_console_selection",
     "_resolve_admin_env",
 ]

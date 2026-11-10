@@ -208,6 +208,21 @@ def _verify_prepared(prepared: PreparedConsoleReconcile | PreparedConsoleStop) -
         raise StateError("console parent VM changed after preparation")
 
 
+def validate_console_values(prepared: PreparedConsoleReconcile, values: Mapping[str, str]) -> None:
+    """Validate every prepared build environment without resolving or mutating."""
+    if prepared.action not in {ConsoleAction.BUILD, ConsoleAction.REPLACE}:
+        return
+    _verify_prepared(prepared)
+    _mc._validate_console_build_values(
+        prepared.db,
+        prepared.registry,
+        console=prepared.console,
+        vm=prepared.vm,
+        members=prepared.members,
+        values=values,
+    )
+
+
 def execute_console_reconcile(prepared: PreparedConsoleReconcile, *, values: Mapping[str, str]) -> bool:
     """Apply a prepared console action using only supplied workload values."""
     from .attach import _teardown_console_staging

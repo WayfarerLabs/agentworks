@@ -116,6 +116,7 @@ def realize_console(
                 resolver.register_targets(prepared.pane_targets, allow_transient_auto_declare=True)
                 resolver.resolve()
                 values = resolver.values
+                _mc.validate_console_values(prepared, values)
                 changed = _mc.execute_console_reconcile(prepared, values=values)
         finally:
             values.clear()

@@ -178,6 +178,14 @@ def create_console(
             resolver.resolve()
             secret_values = resolver.values
             try:
+                _mc._validate_console_build_values(
+                    db,
+                    registry,
+                    console=definition,
+                    vm=vm,
+                    members=definition.members,
+                    values=secret_values,
+                )
                 _mc._teardown_console_tmux(target, name)
                 with db.transaction():
                     db.insert_console(name, vm_name, admin_shell=add_admin_shell)
