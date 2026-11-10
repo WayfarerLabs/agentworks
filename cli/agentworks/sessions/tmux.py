@@ -101,7 +101,7 @@ class CommandOutcome:
         return self.returncode == 0
 
 
-def access_run_command(access: VMAccess, *, deadline: float | None, elevated: bool) -> RunCommand:
+def access_run_command(access: VMAccess, *, deadline: float | None, elevated: bool) -> Callable[..., CommandOutcome]:
     """The tmux probes' ``RunCommand`` over ``access``: each line runs as one ``/bin/sh`` script with its ``env``.
 
     A completion that is not ``Completed`` raises its typed error; with
@@ -430,7 +430,7 @@ def _cleanup_stale_sockets_under(files: Files, dir_path: str, *, owner: str) -> 
             return as_root(f"{guard} && {{ {as_owner}; }}", check=check, env=env)
 
         absent = probe_tmux_server(run_command=probe, socket_path=sock_path) is ProbeStatus.ABSENT
-        if absent and getattr(as_root(f"{socket_guard} && rm -f -- {q_sock}", check=False), "ok", False):
+        if absent and as_root(f"{socket_guard} && rm -f -- {q_sock}", check=False).ok:
             removed += 1
     return removed
 
