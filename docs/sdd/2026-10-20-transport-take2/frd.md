@@ -379,6 +379,15 @@ following links wherever they point), the operator chose:]
 
 > Refuse and warn
 
+### 2026-11-10
+
+[Asked how an operator repairs a VM whose stored admin spec holds a dotfiles source this release
+refuses (a credential in a git URL, or a `user@host:path` remote without `git::`), since no command
+replaces a VM's stored admin spec after `vm create`, with two options (add `vm reinit --admin-spec`,
+mirroring `agent reinit --spec`, or document delete and recreate), the operator answered:]
+
+> Yeah, let's allow for both --admin-template and --admin-spec on vm reinit.
+
 ### Rulings carried forward
 
 These predecessor rulings still hold, quoted from the transport-improv FRD.
