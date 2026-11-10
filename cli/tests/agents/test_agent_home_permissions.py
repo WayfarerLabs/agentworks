@@ -33,6 +33,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from agentworks.agents import initializer as agent_initializer
+from agentworks.execution.errors import CommandFailed
 from agentworks.execution.requests import Bytes, Command, PythonProgram
 from agentworks.execution.results import Completed, Result
 from tests.orchestrated_fixtures import proxmox_site, write_operator_config
@@ -59,7 +60,7 @@ def _run_create_on_vm(
     primary_group: str | None = None,
     shell: str = "/bin/sh",
     before_create: Callable[[AccessRecorder], None] | None = None,
-    dotfiles: Path | None = None,
+    dotfiles: Path | str | None = None,
 ) -> AccessRecorder:
     """Drive ``create_agent_on_vm`` over a recording access and return it.
 
@@ -333,3 +334,33 @@ def test_the_source_lines_are_ensured_after_the_dotfiles_install(
         and json.loads(request.args[1])["path"] == f"{HOME}/.bashrc"
     ]
     assert bashrc_reads and max(bashrc_reads) > install
+
+
+def test_a_failed_git_dotfiles_sync_skips_the_agent_install(
+    db: Database, config: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The agent's dotfiles take the admin's sync: a pull that fails warns and the install never runs."""
+    url = "https://example.com/dots.git"
+    dest = f"{HOME}/.dotfiles"
+
+    def fail_the_pull(recorder: AccessRecorder) -> None:
+        answer = recorder.answer
+
+        def scripted(call: Call) -> Result | BaseException | None:
+            argv = call.request.argv if isinstance(call.request, Command) else ()
+            if argv == ("git", "-C", dest, "remote", "get-url", "origin"):
+                return Result(Completed(0), f"{url}\n".encode())
+            if argv[:4] == ("git", "-C", dest, "pull"):
+                failed = Result(Completed(1), stderr=b"fatal: Not possible to fast-forward\n")
+                return CommandFailed("box", 1, failed, streams_logged=True) if call.options["check"] else failed
+            return answer(call) if answer is not None else None
+
+        recorder.answer = scripted
+
+    recorder = _run_create_on_vm(
+        db, config, monkeypatch, user_exists=False, dotfiles=f"git::{url}", before_create=fail_the_pull
+    )
+
+    commands = _commands(recorder)
+    assert any(argv[:4] == ("git", "-C", dest, "pull") for argv in commands)
+    assert ("bash", "-lc", "./install.sh") not in commands

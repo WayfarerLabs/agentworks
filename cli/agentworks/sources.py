@@ -8,9 +8,9 @@ Supports Terraform-style source references:
 
 Two fetch modes, each run on a managed VM as one identity through its ``Files``:
   - fetch_file: fetches a single file (e.g., mise lockfile)
-  - fetch_dir:  fetches a directory (e.g., dotfiles repo); for git sources,
-    clones the repo to the destination with pull-on-reinit support, and a
-    local directory replaces the destination whole (``upload_tree``)
+  - fetch_dir:  fetches a directory (e.g., dotfiles repo); a git source is
+    cloned to the destination and brought to its ref on reinit, and a local
+    directory replaces the destination whole (``upload_tree``)
 """
 
 from __future__ import annotations
@@ -232,8 +232,8 @@ def _read_local_file(source: SourceRef) -> bytes:
 GIT_FILE_LIMIT = 16 * 1024 * 1024
 """The largest file a git source may supply (a ``mise.lock``, far smaller)."""
 
-GIT_TRANSFER_DEADLINE = 120
-"""Seconds a ``git clone`` or ``git pull`` of a checkout may take."""
+DOTFILES_DEADLINE = 120
+"""Seconds each git command that syncs a dotfiles checkout, and the dotfiles install, may take."""
 
 SHALLOW_CLONE_DEADLINE = 60
 """Seconds the shallow clone a git file source is read from may take."""
@@ -272,9 +272,9 @@ def fetch_dir(source: SourceRef, files: Files, dest: str, *, log: _Output | None
     """Fetch a directory from ``source`` to ``dest`` on the guest, as ``files``' identity.
 
     A local source's tree replaces ``dest`` whole (:func:`upload_tree`). A git
-    source is cloned to ``dest``, or pulled when ``dest`` is already a clone
-    of the same repository; its subpath is ignored. Git follows a link at
-    ``dest``, as it always has.
+    source is cloned to ``dest``, or brought up to date when ``dest`` is
+    already a clone of the same repository (:func:`_fetch_git_dir`); its
+    subpath is ignored. Git follows a link at ``dest``, as it always has.
     """
     if source.kind == "file":
         local_path = Path(source.path).expanduser()
@@ -290,8 +290,18 @@ def fetch_dir(source: SourceRef, files: Files, dest: str, *, log: _Output | None
 
 
 def _fetch_git_dir(source: SourceRef, files: Files, dest: str, *, log: _Output | None) -> None:
-    """Clone a git repo to the destination, or pull if it is already a clone of the same repository."""
+    """Clone ``source`` to ``dest``, or bring an existing clone of the same repository to its ref.
+
+    An existing clone with a ref fetches that ref and checks it out detached,
+    so a changed ref takes effect, a branch advances and a tag works alike;
+    one with no ref fast-forwards its branch. Every git command must succeed:
+    a failure is ``CommandFailed``, so the caller can tell a sync that did not
+    happen from one that did.
+    """
     access = files.access
+
+    def git(*argv: str) -> None:
+        access.run(Command(("git", "-C", dest, *argv), deadline=DOTFILES_DEADLINE), check=True)
 
     def succeeds(argv: tuple[str, ...]) -> bool:
         return access.run(Command(argv, deadline=files.deadline)).require_completed(access.vm_name) == 0
@@ -302,13 +312,17 @@ def _fetch_git_dir(source: SourceRef, files: Files, dest: str, *, log: _Output |
         if remote.require_completed(access.vm_name) != 0 or origin != source.path:
             raise SourceRefError(f"{dest} exists but is a clone of {origin}, not {source.path}")
         if log:
-            log.output(f"Pulling {source.path} in {dest}")
-        access.run(Command(("git", "-C", dest, "pull"), deadline=GIT_TRANSFER_DEADLINE), check=True)
+            log.output(f"Updating {source.path} in {dest} (ref: {source.ref or 'default'})")
+        if source.ref:
+            git("fetch", "origin", source.ref)
+            git("checkout", "--detach", "FETCH_HEAD")
+        else:
+            git("pull", "--ff-only")
         return
     if succeeds(("test", "-d", dest)):
         raise SourceRefError(f"{dest} exists but is not a git repo")
     branch = ("--branch", source.ref) if source.ref else ()
-    access.run(Command(("git", "clone", *branch, source.path, dest), deadline=GIT_TRANSFER_DEADLINE), check=True)
+    access.run(Command(("git", "clone", *branch, "--", source.path, dest), deadline=DOTFILES_DEADLINE), check=True)
     if log:
         log.output(f"Cloned {source.path} to {dest}")
 

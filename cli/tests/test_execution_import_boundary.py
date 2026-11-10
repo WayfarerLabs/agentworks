@@ -86,6 +86,7 @@ MIGRATED_FILES = (
     "sources.py",
     "vms/initializer/__init__.py",
     "vms/initializer/driver.py",
+    "vms/initializer/dotfiles.py",
     "vms/initializer/mise.py",
     "vms/initializer/shell_env.py",
     "vms/initializer/ssh_keys.py",

@@ -309,6 +309,11 @@ place its `authorized_keys`; every later step runs as the agent, which cannot ru
 - **`dotfiles_destination` is checked when the template loads.** It must start with `~/` or `/`, may
   not name the home itself or one of its parents, and may not contain a `.` or `..` component; a
   trailing `/` is dropped, and only its leading `~` is expanded.
+- **A git dotfiles checkout follows its `ref`.** On reinit an existing clone fetches the template's
+  `ref` and checks it out, so a changed `ref` takes effect and a branch or tag alike advances; with
+  no `ref` the clone is fast-forwarded (`git pull --ff-only`). The admin used to pull whatever
+  branch the clone was on. A failed sync now skips the dotfiles install for agents too, as it does
+  for the admin, instead of running it over the previous checkout.
 - **The admin's dotfiles install runs in a login shell,** in the checkout, as the agent's always
   has, with the new layer's environment and fixed `PATH` underneath it.
 - **Git credentials reconcile under bash** for every account, so an admin or agent whose login shell

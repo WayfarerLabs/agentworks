@@ -204,7 +204,7 @@ DEST = "/home/a/.dotfiles"
 IS_CLONE = Command(("test", "-d", f"{DEST}/.git"), deadline=60)
 EXISTS = Command(("test", "-d", DEST), deadline=60)
 ORIGIN = Command(("git", "-C", DEST, "remote", "get-url", "origin"), deadline=60)
-PULL = Command(("git", "-C", DEST, "pull"), deadline=120)
+PULL = Command(("git", "-C", DEST, "pull", "--ff-only"), deadline=120)
 
 
 def test_fetch_dir_clones_into_an_absent_destination() -> None:
@@ -217,17 +217,32 @@ def test_fetch_dir_clones_into_an_absent_destination() -> None:
     assert guest.commands() == [
         IS_CLONE,
         EXISTS,
-        Command(("git", "clone", "--branch", "main", URL, DEST), deadline=120),
+        Command(("git", "clone", "--branch", "main", "--", URL, DEST), deadline=120),
     ]
 
 
-def test_fetch_dir_pulls_a_clone_of_the_same_repository() -> None:
+def test_fetch_dir_fast_forwards_a_clone_of_the_same_repository_with_no_ref() -> None:
     guest = StepGuest(local_files=False)
     guest.respond(ORIGIN, Result(Completed(0), f"{URL}\n".encode()))
 
     fetch_dir(parse_source_ref(f"git::{URL}"), guest.files, DEST)
 
     assert guest.commands() == [IS_CLONE, ORIGIN, PULL]
+
+
+@pytest.mark.parametrize("failing", ["fetch", "checkout"])
+def test_a_failed_fetch_or_checkout_of_the_ref_fails_the_sync(failing: str) -> None:
+    guest = StepGuest(local_files=False)
+    guest.respond(ORIGIN, Result(Completed(0), f"{URL}\n".encode()))
+    fetch = Command(("git", "-C", DEST, "fetch", "origin", "v2"), deadline=120)
+    checkout = Command(("git", "-C", DEST, "checkout", "--detach", "FETCH_HEAD"), deadline=120)
+    failed = fetch if failing == "fetch" else checkout
+    guest.respond(failed, CommandFailed("box", 1, Result(Completed(1)), streams_logged=True))
+
+    with pytest.raises(CommandFailed):
+        fetch_dir(parse_source_ref(f"git::{URL}?ref=v2"), guest.files, DEST)
+
+    assert guest.commands()[-1] == failed
 
 
 @pytest.mark.parametrize("found", ["other-clone", "not-a-clone"])
@@ -243,6 +258,56 @@ def test_fetch_dir_refuses_a_destination_it_did_not_clone(found: str) -> None:
 
     assert PULL not in guest.commands()
     assert not any(isinstance(request, Command) and request.argv[1] == "clone" for request in guest.commands())
+
+
+requires_git = pytest.mark.skipif(shutil.which("git") is None, reason="the checkout tests run git")
+
+
+def _git(repo: Path, *argv: str) -> str:
+    identity = ("-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false")
+    done = subprocess.run(["git", *identity, "-C", str(repo), *argv], capture_output=True, check=True, text=True)
+    return done.stdout.strip()
+
+
+def _commit(repo: Path, content: str) -> str:
+    (repo / "rc").write_text(content)
+    _git(repo, "add", "rc")
+    _git(repo, "commit", "-q", "-m", content)
+    return _git(repo, "rev-parse", "HEAD")
+
+
+@pytest.fixture
+def origin(tmp_path: Path) -> Path:
+    repo = tmp_path / "origin"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _commit(repo, "one")
+    _git(repo, "tag", "v1")
+    return repo
+
+
+@requires_git
+def test_a_changed_tag_ref_takes_effect_on_an_existing_clone(lane: Files, tmp_path: Path, origin: Path) -> None:
+    dest = tmp_path / "home" / ".dotfiles"
+    fetch_dir(SourceRef("git", str(origin), "", "v1"), lane, str(dest))
+    _commit(origin, "two")
+    _git(origin, "tag", "v2")
+
+    fetch_dir(SourceRef("git", str(origin), "", "v2"), lane, str(dest))
+
+    assert (dest / "rc").read_text() == "two"
+    assert _git(dest, "rev-parse", "HEAD") == _git(origin, "rev-parse", "v2")
+
+
+@requires_git
+def test_a_branch_ref_advances_on_an_existing_clone(lane: Files, tmp_path: Path, origin: Path) -> None:
+    dest = tmp_path / "home" / ".dotfiles"
+    fetch_dir(SourceRef("git", str(origin), "", "main"), lane, str(dest))
+    advanced = _commit(origin, "two")
+
+    fetch_dir(SourceRef("git", str(origin), "", "main"), lane, str(dest))
+
+    assert _git(dest, "rev-parse", "HEAD") == advanced
 
 
 # -- The tree upload ----------------------------------------------------------

@@ -32,6 +32,7 @@ from agentworks.git_config import ensure_safe_directory_wildcard
 from agentworks.git_credentials import configure_user_git_credentials
 
 from . import phase_a
+from .dotfiles import sync_dotfiles
 from .mise import (
     MISE_ACTIVATE_LINES,
     _fetch_mise_lockfile,
@@ -562,11 +563,16 @@ def _phase_b_setup(
         )
 
         # Non-fatal: dotfiles (can override mise config, can provide lockfile).
-        # Sync and install are reported separately because a failed sync skips
-        # the install entirely. Saying so is the difference between a warning an
-        # operator can act on and a later failure that looks unrelated to it.
         if admin.dotfiles_source:
-            _sync_dotfiles(files, admin, admin_shell, home, logger)
+            sync_dotfiles(
+                files,
+                source=admin.dotfiles_source,
+                destination=admin.dotfiles_destination,
+                install_cmd=admin.dotfiles_install_cmd,
+                shell=admin_shell,
+                home=home,
+                log=logger,
+            )
 
         # Non-fatal: mise lockfile (after git creds and dotfiles; overrides dotfiles lockfile)
         if admin.mise_lockfile:
@@ -600,45 +606,6 @@ def _phase_b_setup(
         # step (dotfiles install in particular) overwrote a shell rc file
         # in place. A file that already names a fragment is left alone.
         _ensure_agentworks_files_sourced(files, logger, home=home, shell=admin_shell)
-
-
-DOTFILES_INSTALL_DEADLINE = 120
-"""Seconds the dotfiles install command may take."""
-
-
-def _sync_dotfiles(files: Files, admin: AdminConfig, shell: str, home: str, log: InitLog) -> None:
-    """Sync the admin's dotfiles, then run their install command in a login shell in the checkout.
-
-    Sync and install warn separately, because a failed sync skips the install
-    entirely; saying so is the difference between a warning an operator can
-    act on and a later failure that looks unrelated to it.
-    """
-    from agentworks.sources import expand_destination, fetch_dir, parse_source_ref
-
-    assert admin.dotfiles_source is not None
-    log.step("Dotfiles")
-    dest = admin.dotfiles_destination
-    try:
-        dest = expand_destination(dest, home)
-        ref = parse_source_ref(admin.dotfiles_source)
-        output.info(f"Syncing dotfiles from {admin.dotfiles_source}...")
-        fetch_dir(ref, files, dest, log=log)
-    except STEP_FAILURES as error:
-        warn_step(
-            log,
-            f"dotfiles sync failed, so '{admin.dotfiles_install_cmd}' did not run and {dest} still holds its "
-            "previous contents",
-            error,
-        )
-        return
-    output.info(f"Running dotfiles install: {admin.dotfiles_install_cmd}")
-    try:
-        files.access.run(
-            Command((shell, "-lc", admin.dotfiles_install_cmd), cwd=dest, deadline=DOTFILES_INSTALL_DEADLINE),
-            check=True,
-        )
-    except STEP_FAILURES as error:
-        warn_step(log, f"dotfiles install '{admin.dotfiles_install_cmd}' failed in {dest}", error)
 
 
 def _has_mise_config(files: Files, home: str) -> bool:

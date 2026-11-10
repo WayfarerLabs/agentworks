@@ -17,6 +17,7 @@ from agentworks import output
 from agentworks.execution.access import Admin, Agent
 from agentworks.execution.requests import Command, Script, Shell
 from agentworks.git_config import ensure_safe_directory_wildcard
+from agentworks.vms.initializer.dotfiles import sync_dotfiles
 from agentworks.vms.initializer.mise import MISE_ACTIVATE_LINES
 from agentworks.vms.initializer.shell_env import (
     _ensure_agentworks_files_sourced,
@@ -300,9 +301,17 @@ def create_agent_on_vm(
         identity_env=agent_identity,
     )
 
-    # Dotfiles.
+    # Dotfiles: the same sync as the admin's, as the agent.
     if agent_cfg.dotfiles_source:
-        _sync_agent_dotfiles(agent_files, agent_cfg, home, logger)
+        sync_dotfiles(
+            agent_files,
+            source=agent_cfg.dotfiles_source,
+            destination=agent_cfg.dotfiles_destination,
+            install_cmd=agent_cfg.dotfiles_install_cmd,
+            shell=agent_shell,
+            home=home,
+            log=logger,
+        )
 
     # Mise.
     _run_agent_mise_setup(agent_files=agent_files, logger=logger, agent_tmpl=agent_tmpl, home=home)
@@ -348,62 +357,6 @@ def delete_agent_on_vm(
     except STEP_FAILURES as error:
         sanitize = logger.sanitize if logger is not None else str
         output.warn(f"remote cleanup for '{linux_user}' failed: {describe_failure(error, sanitize)}")
-
-
-DOTFILES_DEADLINE = 120
-"""Seconds a dotfiles clone, fetch or pull, or the dotfiles install, may take."""
-
-
-def _sync_agent_dotfiles(files: Files, agent_cfg: ResolvedAgentTemplate, home: str, log: InitLog) -> None:
-    """Sync the agent's dotfiles as the agent, then run their install in a login shell in the checkout.
-
-    A git checkout of the same repository is fetched and checked out at the
-    template's ref, or pulled; a failed checkout or pull warns and the
-    install still runs. A local directory replaces the destination whole
-    (``sources.fetch_dir``). The install runs as ``{shell} -lc`` with the
-    checkout as its working directory, so it sees static identity
-    (``AGENTWORKS_AGENT`` via the profile fragment written earlier this
-    phase) and the agent's PATH. Provisioning is hermetic: no operator env
-    is injected. Any step failure warns, and the install is skipped when
-    the sync failed.
-    """
-    from agentworks.sources import SourceRefError, expand_destination, fetch_dir, parse_source_ref
-
-    assert agent_cfg.dotfiles_source is not None
-    output.info(f"Syncing agent dotfiles from {agent_cfg.dotfiles_source}...")
-    access = files.access
-
-    def run(argv: tuple[str, ...], deadline: float | None = files.deadline) -> int:
-        return _status(access, Command(argv, deadline=deadline))
-
-    try:
-        ref = parse_source_ref(agent_cfg.dotfiles_source)
-        dest = expand_destination(agent_cfg.dotfiles_destination, home)
-        if ref.kind != "git":
-            fetch_dir(ref, files, dest, log=log)
-        elif run(("test", "-d", f"{dest}/.git")) != 0:
-            branch = ("--branch", ref.ref) if ref.ref else ()
-            access.run(Command(("git", "clone", *branch, ref.path, dest), deadline=DOTFILES_DEADLINE), check=True)
-        else:
-            remote = access.run(Command(("git", "-C", dest, "remote", "get-url", "origin"), deadline=files.deadline))
-            if (
-                remote.require_completed(access.vm_name) != 0
-                or remote.stdout.decode("utf-8", "replace").strip() != ref.path
-            ):
-                raise SourceRefError(f"dotfiles destination {dest} exists but is a different repo")
-            output.detail("Dotfiles already cloned, pulling latest...")
-            if ref.ref:
-                run(("git", "-C", dest, "fetch"), DOTFILES_DEADLINE)
-                if run(("git", "-C", dest, "checkout", ref.ref)) != 0:
-                    output.warn(f"dotfiles checkout of '{ref.ref}' failed, skipping")
-            elif run(("git", "-C", dest, "pull"), DOTFILES_DEADLINE) != 0:
-                output.warn("dotfiles pull failed (local changes?), skipping")
-
-        output.info(f"Running agent dotfiles install: {agent_cfg.dotfiles_install_cmd}")
-        install = (agent_cfg.shell, "-lc", agent_cfg.dotfiles_install_cmd)
-        access.run(Command(install, cwd=dest, deadline=DOTFILES_DEADLINE), check=True)
-    except STEP_FAILURES as error:
-        output.warn(f"agent dotfiles failed: {describe_failure(error, log.sanitize)}")
 
 
 def _run_agent_install_commands(
