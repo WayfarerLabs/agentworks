@@ -16,7 +16,25 @@ from tests._consoles_support import _seed_sessions, _seed_vm, _stub_build_regist
 from tests.console_helpers import create_console_record
 
 if TYPE_CHECKING:
-    from agentworks.db import Database
+    from agentworks.db import ConsoleRow, Database, SessionRow, VMRow
+
+
+def _console(db: Database) -> ConsoleRow:
+    row = db.get_console("con")
+    assert row is not None
+    return row
+
+
+def _vm(db: Database) -> VMRow:
+    row = db.get_vm("vm1")
+    assert row is not None
+    return row
+
+
+def _session(db: Database) -> SessionRow:
+    row = db.get_session("alpha")
+    assert row is not None
+    return row
 
 
 @pytest.mark.parametrize(
@@ -42,7 +60,7 @@ def test_prepare_classifies_without_mutation(db: Database, monkeypatch, canonica
             db,
             registry,
             console=console,
-            vm=db.get_vm("vm1"),
+            vm=_vm(db),
             target=target,
             held_native_guard=guard,
         )
@@ -68,7 +86,7 @@ def test_unknown_never_collects_or_changes_runtime(db: Database, monkeypatch, ca
             db,
             registry,
             console=console,
-            vm=db.get_vm("vm1"),
+            vm=_vm(db),
             target=object(),
             held_native_guard=guard,
         )
@@ -90,7 +108,7 @@ def test_cleanup_only_preserves_canonical_and_requires_live_guard(db: Database, 
             db,
             registry,
             console=console,
-            vm=db.get_vm("vm1"),
+            vm=_vm(db),
             target=object(),
             held_native_guard=guard,
         )
@@ -105,13 +123,13 @@ def test_intent_is_local_kind_strict_and_preserves_members(db: Database):
     _seed_vm(db)
     _seed_sessions(db, ["alpha"])
     create_console_record(db, name="con", vm_name="vm1", session_specs=["alpha"])
-    session = db.get_session("alpha")
+    session = _session(db)
     mc.set_console_desired_runtime_state(db, name="con", state="stopped")
-    assert db.get_console("con").desired_runtime_state is DesiredRuntimeState.STOPPED
-    assert db.get_session("alpha") == session
+    assert _console(db).desired_runtime_state is DesiredRuntimeState.STOPPED
+    assert _session(db) == session
     with pytest.raises(ValidationError):
         mc.set_console_desired_runtime_state(db, name="con", state="on-demand")
-    assert db.get_console("con").desired_runtime_state is DesiredRuntimeState.STOPPED
+    assert _console(db).desired_runtime_state is DesiredRuntimeState.STOPPED
 
 
 def test_delete_consent_holds_family_guard_and_nested_reuses_it(db: Database, monkeypatch):
@@ -172,7 +190,7 @@ def test_admin_only_env_is_literal_delivered_and_redacted(db: Database, tmp_path
             db,
             registry,
             console=console,
-            vm=db.get_vm("vm1"),
+            vm=_vm(db),
             target=target,
             held_native_guard=guard,
         )
@@ -212,8 +230,8 @@ def test_failed_build_cleanup_cannot_mask_cancellation(db: Database, tmp_path, m
             Target(),
             db,
             registry,
-            db.get_console("con"),
-            db.get_vm("vm1"),
+            _console(db),
+            _vm(db),
             values={},
             layout="tiled",
         )
@@ -238,7 +256,7 @@ def test_stop_off_parent_accepts_without_transport_activation_or_hold(db: Databa
     monkeypatch.setattr("agentworks.vms.manager.runtime.activate_vm_runtime", lambda *a, **kw: pytest.fail("activated"))
     monkeypatch.setattr("agentworks.transports.transport", lambda *a, **kw: pytest.fail("constructed transport"))
     mc.stop_console(db, _StubConfig(), name="con", interaction=TtyInteractionPolicy.REFUSE)
-    assert db.get_console("con").desired_runtime_state is DesiredRuntimeState.STOPPED
+    assert _console(db).desired_runtime_state is DesiredRuntimeState.STOPPED
     assert calls == ["clear"]
 
 
@@ -253,13 +271,13 @@ def test_start_acceptance_survives_infrastructure_failure(db: Database, fake_tar
     monkeypatch.setattr(lifecycle, "preflight_console_vm", lambda *a, **kw: object())
 
     def fail(*a, **kw):
-        assert db.get_console("con").desired_runtime_state is DesiredRuntimeState.RUNNING
+        assert _console(db).desired_runtime_state is DesiredRuntimeState.RUNNING
         raise error_type("failed")
 
     monkeypatch.setattr("agentworks.vms.manager.runtime.prepare_vm_runtime", fail)
     with pytest.raises(error_type):
         mc.start_console(db, _StubConfig(), name="con", interaction=TtyInteractionPolicy.REFUSE)
-    assert db.get_console("con").desired_runtime_state is DesiredRuntimeState.RUNNING
+    assert _console(db).desired_runtime_state is DesiredRuntimeState.RUNNING
 
 
 def test_start_below_stopped_parent_records_child_running_without_activation(db: Database, fake_target, monkeypatch):
@@ -269,7 +287,7 @@ def test_start_below_stopped_parent_records_child_running_without_activation(db:
     _seed_vm(db, with_tailscale=True)
     create_console_record(db, name="con", vm_name="vm1", session_specs=[], add_admin_shell=True)
     mc.set_console_desired_runtime_state(db, name="con", state="stopped")
-    vm = db.get_vm("vm1")
+    vm = _vm(db)
     db.set_vm_desired_runtime_state("vm1", DesiredRuntimeState.STOPPED, expected_vm_uuid=vm.vm_uuid)
     monkeypatch.setattr(lifecycle, "preflight_console_vm", lambda *a, **kw: object())
     monkeypatch.setattr(
@@ -277,8 +295,8 @@ def test_start_below_stopped_parent_records_child_running_without_activation(db:
     )
     with pytest.raises(StateError):
         mc.start_console(db, _StubConfig(), name="con", interaction=TtyInteractionPolicy.REFUSE)
-    assert db.get_console("con").desired_runtime_state is DesiredRuntimeState.RUNNING
-    assert db.get_vm("vm1").desired_runtime_state is DesiredRuntimeState.STOPPED
+    assert _console(db).desired_runtime_state is DesiredRuntimeState.RUNNING
+    assert _vm(db).desired_runtime_state is DesiredRuntimeState.STOPPED
 
 
 def test_known_preflight_refusal_preserves_console_target(db: Database, fake_target, monkeypatch):
@@ -288,7 +306,7 @@ def test_known_preflight_refusal_preserves_console_target(db: Database, fake_tar
     _seed_vm(db, with_tailscale=True)
     create_console_record(db, name="con", vm_name="vm1", session_specs=[], add_admin_shell=True)
     mc.set_console_desired_runtime_state(db, name="con", state="stopped")
-    before = db.get_console("con")
+    before = _console(db)
 
     def refuse(*a, **kw):
         raise StateError("known policy conflict")
@@ -296,7 +314,7 @@ def test_known_preflight_refusal_preserves_console_target(db: Database, fake_tar
     monkeypatch.setattr(lifecycle, "preflight_console_vm", refuse)
     with pytest.raises(StateError):
         mc.start_console(db, _StubConfig(), name="con", interaction=TtyInteractionPolicy.REFUSE)
-    assert db.get_console("con") == before
+    assert _console(db) == before
 
 
 def test_focused_selection_refuses_reparent_before_guarded_reread(db: Database, monkeypatch):
@@ -316,7 +334,7 @@ def test_focused_selection_refuses_reparent_before_guarded_reread(db: Database, 
     monkeypatch.setattr("agentworks.harness_setup.locking.native_mutation_guard", changing_parent)
     with pytest.raises(StateError):
         mc.set_console_desired_runtime_state(db, name="con", state="stopped")
-    assert db.get_console("con").desired_runtime_state is DesiredRuntimeState.RUNNING
+    assert _console(db).desired_runtime_state is DesiredRuntimeState.RUNNING
 
 
 @pytest.mark.parametrize("power_state", ["stopped", "unknown"])
@@ -346,7 +364,7 @@ def test_stop_guest_disappearance_requires_conclusive_provider_off(db: Database,
     else:
         with pytest.raises(ConnectivityError):
             mc.stop_console(db, _StubConfig(), name="con", interaction=TtyInteractionPolicy.REFUSE)
-    assert db.get_console("con").desired_runtime_state is DesiredRuntimeState.STOPPED
+    assert _console(db).desired_runtime_state is DesiredRuntimeState.STOPPED
 
 
 def test_noop_start_preserves_canonical_panes_and_independent_member_intent(
@@ -359,11 +377,11 @@ def test_noop_start_preserves_canonical_panes_and_independent_member_intent(
 
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["alpha"])
-    session = db.get_session("alpha")
+    session = _session(db)
     db.set_session_desired_runtime_state(
         "alpha", DesiredRuntimeState.STOPPED, expected_session_uuid=session.session_uuid
     )
-    session = db.get_session("alpha")
+    session = _session(db)
     create_console_record(db, name="con", vm_name="vm1", session_specs=["alpha"])
     mc.set_console_desired_runtime_state(db, name="con", state="stopped")
     model = TmuxModel()
@@ -373,5 +391,5 @@ def test_noop_start_preserves_canonical_panes_and_independent_member_intent(
     monkeypatch.setattr(mc, "_console_build_secret_targets", lambda *a, **kw: pytest.fail("collected pane secrets"))
     mc.start_console(db, _StubConfig(), name="con", interaction=TtyInteractionPolicy.REFUSE)
     assert model._sessions == before
-    assert db.get_console("con").desired_runtime_state is DesiredRuntimeState.RUNNING
-    assert db.get_session("alpha") == session
+    assert _console(db).desired_runtime_state is DesiredRuntimeState.RUNNING
+    assert _session(db) == session

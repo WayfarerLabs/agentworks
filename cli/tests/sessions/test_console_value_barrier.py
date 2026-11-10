@@ -41,12 +41,12 @@ def test_valid_line_secret_and_bad_pane_context_preserve_all_runtimes(
         add_admin_shell=admin_shell,
     )
     config = _StubConfig()
-    config.admin = AdminConfig.model_validate(
+    admin = AdminConfig.model_validate(
         {
             "env": {"TOKEN": {"secret": "pane-key"}, "LOCATION": "${agw:session_name}"},
         }
     )
-    monkeypatch.setattr("agentworks.vms.admin_templates.resolve_live_template", lambda *a: config.admin)
+    monkeypatch.setattr("agentworks.vms.admin_templates.resolve_live_template", lambda *a: admin)
     model = TmuxModel()
     model.seed_session("aw-console-con", "old")
     model.seed_session("aw-console-build+con", "partial")

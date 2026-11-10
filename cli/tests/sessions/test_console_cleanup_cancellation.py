@@ -71,7 +71,9 @@ def test_build_cleanup_preserves_failure_priority_and_never_publishes(
     assert target.cleanup_attempted
     assert not model.has_session("aw-console-con")
     assert not any("rename-session" in command for command in target.commands)
-    assert db.get_console("con").last_started_at is None
+    console = db.get_console("con")
+    assert console is not None
+    assert console.last_started_at is None
     assert target.logger is None
 
 
@@ -123,4 +125,6 @@ def test_log_close_preserves_failure_priority_and_restores_transport_logger(
     assert target.logger is None
     assert not model.has_session("aw-console-con")
     assert not any("rename-session" in command for command in target.commands)
-    assert db.get_console("con").last_started_at is None
+    console = db.get_console("con")
+    assert console is not None
+    assert console.last_started_at is None
