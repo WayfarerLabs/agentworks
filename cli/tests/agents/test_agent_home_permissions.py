@@ -28,10 +28,12 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from agentworks.agents import initializer as agent_initializer
+from agentworks.execution.requests import Command, PythonProgram
 from tests.orchestrated_fixtures import proxmox_site, write_operator_config
-from tests.vm_access_support import route_vm_access_to_target
+from tests.vm_access_support import AccessRecorder, route_vm_access_to_target
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
     from agentworks.db import Database
@@ -74,6 +76,7 @@ class _RecordingTransport:
         shell: str = "/bin/sh",
     ) -> None:
         self.runs: list[tuple[str, bool]] = []
+        self.recorder: AccessRecorder | None = None
         self.writes: list[tuple[str, str, str | None]] = []
         self._user_exists = user_exists
         self._primary_group = primary_group or LINUX_USER
@@ -95,10 +98,6 @@ class _RecordingTransport:
             if not self._user_exists:
                 return _Result(ok=False, returncode=2)
             return _Result(stdout=f"{LINUX_USER}:x:1001:1001::{HOME}:{self._shell}")
-        if cmd.startswith("mktemp"):
-            # _reconcile_authorized_keys stages into a mktemp path and
-            # raises on an empty one, so hand back a plausible path.
-            return _Result(stdout="/tmp/agw-ak.abcdef")
         return _Result()
 
     def write_file(self, path: str, content: str, *, mode: str | None = None) -> _Result:
@@ -133,7 +132,7 @@ def _run_create_on_vm(
     monkeypatch.setattr(agent_initializer, "transport", lambda *a, **k: admin)
     monkeypatch.setattr("agentworks.transports.transport_for_user", lambda *a, **k: agent)
     # The socket helpers run on the admin's access, whose commands reach the same admin double.
-    route_vm_access_to_target(monkeypatch, admin)
+    admin.recorder = route_vm_access_to_target(monkeypatch, admin)
 
     agent_initializer.create_agent_on_vm(
         vm,
@@ -152,14 +151,6 @@ def _run_create_on_vm(
 def _profile_writes(agent: _RecordingTransport) -> list[str]:
     """Contents of every write to the managed profile fragment."""
     return [content for path, content, _mode in agent.writes if path.endswith(PROFILE_BASENAME)]
-
-
-def _first_run_index(admin: _RecordingTransport, predicate) -> int:  # noqa: ANN001
-    """Index of the first recorded admin ``run`` whose command matches."""
-    for i, (cmd, _sudo) in enumerate(admin.runs):
-        if predicate(cmd):
-            return i
-    return -1
 
 
 @pytest.fixture
@@ -199,13 +190,17 @@ def test_chmod_ordered_after_user_creation_and_before_ssh_stage(
     reorder that moved the chmod ahead of user creation, a real runtime
     failure, cannot pass on presence alone."""
     admin, _agent = _run_create_on_vm(db, config, monkeypatch, user_exists=False)
+    assert admin.recorder is not None
+    requests = admin.recorder.requests("run")
 
-    user_create = _first_run_index(admin, lambda c: c.startswith(("useradd", "usermod -s")))
-    chmod = _first_run_index(admin, lambda c: c.startswith(f"chmod 0750 {HOME}"))
-    ssh_stage = _first_run_index(admin, lambda c: f"{HOME}/.ssh" in c or c.startswith("mktemp"))
+    def first(matches: Callable[[Any], bool]) -> int:
+        return next(index for index, request in enumerate(requests) if matches(request))
 
-    assert user_create != -1 and chmod != -1 and ssh_stage != -1
-    assert user_create < chmod < ssh_stage
+    user_create = first(lambda r: isinstance(r, Command) and r.argv[0] in ("useradd", "usermod"))
+    chmod = first(lambda r: isinstance(r, Command) and r.argv == ("chmod", "0750", HOME))
+    ssh_placement = first(lambda r: isinstance(r, PythonProgram) and f"{HOME}/.ssh" in r.args[1])
+
+    assert user_create < chmod < ssh_placement
 
 
 def test_shared_primary_group_warns(

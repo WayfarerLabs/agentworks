@@ -241,7 +241,7 @@ def run_initialization(
                     failures=setup_failures,
                 )
             # Terminal guest mutation follows every integration's setup.
-            authorized_keys = _reconcile_authorized_keys(legacy_target, config, home, logger)
+            authorized_keys = _reconcile_authorized_keys(files, config, home, logger)
         except Exception as e:
             with db.transaction():
                 db.update_vm_init_status(vm_name, InitStatus.FAILED)

@@ -1,11 +1,7 @@
-"""Shared builders for the ``test_initializer_*`` shards.
+"""Shared config builders for the ``test_initializer_*`` shards.
 
-``test_initializer.py`` grew past 1200 lines covering several unrelated
-areas of ``agentworks.vms.initializer`` (apt/install-command wiring, SSH
-host-key preservation, the SVE mask reconcile, claude plugin install, and
-VM hardening). It was split into sibling files grouped by theme; this
-module holds the config and legacy ``Transport`` builders those shards
-share; the steps on ``VMAccess`` use ``tests/phase_b_support.py``.
+The shards cover ``agentworks.vms.initializer`` by theme; the steps they
+drive run over ``tests/phase_b_support.py``'s recording access.
 """
 
 from __future__ import annotations
@@ -82,38 +78,3 @@ def _make_vm_template(*, apt_packages: list[str] | None = None, apt: list[str] |
     vm_template.apt = apt or []
     vm_template.apt_packages = apt_packages or []
     return vm_template
-
-
-def _make_reconcile_target(*, mktemp_path: str = "/tmp/agw-ak.AAAAAA") -> MagicMock:
-    """``Transport`` mock that returns a known mktemp path; logs run calls."""
-    target = MagicMock()
-    run_log: list[str] = []
-    write_log: list[tuple[str, str]] = []
-    target.run_log = run_log
-    target.write_log = write_log
-
-    def run_side_effect(cmd: str, **kwargs):  # noqa: ANN001 -- mock side_effect
-        run_log.append(cmd)
-        result = MagicMock()
-        result.returncode = 0
-        result.ok = True
-        result.stderr = ""
-        result.stdout = mktemp_path if cmd.startswith("mktemp") else ""
-        return result
-
-    target.run.side_effect = run_side_effect
-    target.write_file.side_effect = lambda path, content, **kw: write_log.append((path, content))
-    return target
-
-
-def _make_keys_config(tmp_path) -> MagicMock:
-    from tests.ssh_fixtures import write_test_ssh_keypair
-
-    private = tmp_path / "id_ed25519"
-    write_test_ssh_keypair(private)
-    primary = tmp_path / "id_ed25519.pub"
-    config = MagicMock()
-    config.operator.ssh_public_key = primary
-    config.operator.ssh_private_key = private
-    config.operator.extra_ssh_public_keys = []
-    return config

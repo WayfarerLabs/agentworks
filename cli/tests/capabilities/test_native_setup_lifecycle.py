@@ -13,6 +13,9 @@ from agentworks.capabilities.harness_integration.kinds import HarnessIntegration
 from agentworks.capabilities.harness_integration.shell import ShellIntegration
 from agentworks.env.entry import EnvEntry
 from agentworks.errors import ExternalError, StateError
+from agentworks.execution.errors import CommandFailed
+from agentworks.execution.requests import Command, Script
+from agentworks.execution.results import Completed, Result
 from agentworks.harness_setup.inputs import SetupInputs
 from agentworks.harness_setup.lifecycle import prepare_agent_setup, prepare_vm_setup, prepare_workspace_setup
 from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
@@ -250,33 +253,34 @@ def test_fresh_owner_buffers_setup_until_atomic_row_commit(
 
 
 @pytest.mark.parametrize("existing", ["user", "home", "race", "absent"])
-def test_exclusive_agent_user_refuses_native_residue_and_races(vm, monkeypatch, existing):
-    target = Mock(spec=Transport)
-    commands = []
+def test_exclusive_agent_user_refuses_native_residue_and_races(vm, existing, vm_access_recorder):
+    useradd = Command(("useradd", "-m", "-U", "-s", "/bin/bash", "agt-a"), elevated=True)
 
-    def run(command, **kwargs):
-        commands.append(command)
-        if command.startswith("getent"):
-            return SimpleNamespace(ok=existing == "user")
-        if command.startswith("test"):
-            return SimpleNamespace(ok=existing == "home")
-        if existing == "race":
-            raise RuntimeError("useradd: name taken")
-        return SimpleNamespace(ok=True)
+    def answer(call):
+        request = call.request
+        if isinstance(request, Command) and request.argv[:2] == ("getent", "passwd"):
+            return Result(Completed(0 if existing == "user" else 2))
+        if isinstance(request, Script):
+            return Result(Completed(0 if existing == "home" else 1))
+        if request == useradd and existing == "race":
+            return CommandFailed(vm.name, 9, Result(Completed(9)), streams_logged=True)
+        return None
 
-    target.run.side_effect = run
-    monkeypatch.setattr("agentworks.agents.initializer.transport", lambda *a, **k: target)
+    vm_access_recorder.answer = answer
     if existing in {"user", "home"}:
         with pytest.raises(StateError):
             create_new_agent_user(vm, MagicMock(), "agt-a", shell="bash", logger=Mock())
-        assert not any(command.startswith("useradd") for command in commands)
+        assert useradd not in vm_access_recorder.requests("run")
     elif existing == "race":
-        with pytest.raises(RuntimeError):
+        with pytest.raises(CommandFailed):
             create_new_agent_user(vm, MagicMock(), "agt-a", shell="bash", logger=Mock())
     else:
         create_new_agent_user(vm, MagicMock(), "agt-a", shell="bash", logger=Mock())
-        assert commands[-1] == "useradd -m -U -s /bin/bash agt-a"
-    assert not any(command.startswith("userdel") for command in commands)
+        assert vm_access_recorder.requests("run")[-1] == useradd
+    assert all(request.elevated for request in vm_access_recorder.requests("run"))
+    assert not any(
+        isinstance(request, Command) and request.argv[0] == "userdel" for request in vm_access_recorder.requests("run")
+    )
 
 
 def test_failed_exclusive_creation_never_arms_realizer_rollback(db, registry, vm, native, monkeypatch):

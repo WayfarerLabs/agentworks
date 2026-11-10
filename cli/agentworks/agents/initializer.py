@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 import agentworks.execution as execution
 from agentworks import output
 from agentworks.execution.access import Admin, Agent
+from agentworks.execution.requests import Command, Script, Shell
 from agentworks.git_config import ensure_safe_directory_wildcard
 from agentworks.transports import transport
 from agentworks.vms.initializer.steps import STEP_FAILURES, describe_failure
@@ -24,8 +25,9 @@ if TYPE_CHECKING:
     from agentworks.agents.templates import ResolvedAgentTemplate
     from agentworks.config import Config
     from agentworks.db import VMRow
+    from agentworks.execution.access import VMAccess
     from agentworks.execution.files import Files
-    from agentworks.execution.requests import AccountShell
+    from agentworks.execution.requests import AccountShell, RunRequest
     from agentworks.git_credentials import CredentialRequest
     from agentworks.install_commands import UserInstallCommandEntry
     from agentworks.resources import Registry
@@ -51,23 +53,23 @@ def create_new_agent_user(
 
     from agentworks.errors import StateError
 
-    target = transport(vm, config, logger=logger)
+    admin = execution.vm_access(vm, config, Admin(), log=logger.record)
     home = f"/home/{linux_user}"
-    if (
-        target.run(f"getent passwd {shlex.quote(linux_user)}", sudo=True, check=False).ok
-        or target.run(
-            f"test -e {shlex.quote(home)} || test -L {shlex.quote(home)}",
-            sudo=True,
-            check=False,
-        ).ok
-    ):
+    account = Command(("getent", "passwd", linux_user), elevated=True)
+    home_entry = Script(f"test -e {shlex.quote(home)} || test -L {shlex.quote(home)}", Shell.SH, elevated=True)
+    if _status(admin, account) == 0 or _status(admin, home_entry) == 0:
         raise StateError(
             f"cannot create agent: unowned user or home already exists for '{linux_user}'",
             entity_kind="agent",
             entity_name=linux_user,
             hint="Choose another agent name or remove the unowned native account and home first.",
         )
-    target.run(f"useradd -m -U -s {shlex.quote(f'/bin/{shell}')} {shlex.quote(linux_user)}", sudo=True)
+    admin.run(Command(("useradd", "-m", "-U", "-s", f"/bin/{shell}", linux_user), elevated=True), check=True)
+
+
+def _status(access: VMAccess, request: RunRequest) -> int:
+    """Run ``request`` and return the guest's exit status; an outcome that is not a completion raises."""
+    return access.run(request).require_completed(access.vm_name)
 
 
 def create_agent_on_vm(
@@ -120,7 +122,8 @@ def create_agent_on_vm(
     from agentworks.transports import transport_for_user
     from agentworks.vms.initializer import _reconcile_authorized_keys
 
-    admin_target = transport(vm, config, logger=logger)
+    admin = execution.vm_access(vm, config, Admin(), log=logger.record)
+    admin_files = admin.files()
 
     home = f"/home/{linux_user}"
 
@@ -150,18 +153,18 @@ def create_agent_on_vm(
     # GID 100), a bare ``useradd`` plus 0750 would GRANT every other agent
     # group read+execute on this home, an inversion of the goal. We do
     # not assume a clean Debian image (see capabilities/vm_platform/README).
-    passwd_entry = admin_target.run(f"getent passwd {linux_user}", sudo=True, check=False)
-    if not passwd_entry.ok:
-        admin_target.run(f"useradd -m -U -s {shell_path} {linux_user}", sudo=True)
+    passwd_entry = admin.run(Command(("getent", "passwd", linux_user), elevated=True))
+    if passwd_entry.require_completed(vm.name) != 0:
+        admin.run(Command(("useradd", "-m", "-U", "-s", shell_path, linux_user), elevated=True), check=True)
         output.info(f"Created agent user '{linux_user}' on VM '{vm.name}'")
     else:
         # ``getent passwd`` line is colon-delimited with the login shell
         # last; the leading fields (name, gecos, home) never contain a
         # colon, so the final field is the shell. Take the first line in
         # case NSS ever returns more than one entry for the name.
-        current_shell = passwd_entry.stdout.strip().splitlines()[0].rsplit(":", 1)[-1]
+        current_shell = passwd_entry.stdout.decode("utf-8", "replace").strip().splitlines()[0].rsplit(":", 1)[-1]
         if current_shell != shell_path:
-            admin_target.run(f"usermod -s {shell_path} {linux_user}", sudo=True)
+            admin.run(Command(("usermod", "-s", shell_path, linux_user), elevated=True), check=True)
             output.info(f"Fixed agent user '{linux_user}' on VM '{vm.name}': shell {current_shell} -> {shell_path}")
         else:
             output.info(f"Agent user '{linux_user}' already exists on VM '{vm.name}'")
@@ -174,10 +177,10 @@ def create_agent_on_vm(
     # world-readable $HOME undercuts the isolation. With the private
     # primary group enforced above, 0750 is effectively owner-only.
     # Idempotent: a no-op when already 0750, so it also fixes pre-existing
-    # agents on reinit. Kept in phase 1 on the admin transport: this runs
-    # before authorized_keys is installed, so the agent's own SSH session
-    # does not exist yet.
-    admin_target.run(f"chmod 0750 {home}", sudo=True)
+    # agents on reinit. Kept in phase 1 on the admin's access: this runs
+    # before authorized_keys is installed, so the agent's own access does
+    # not work yet.
+    admin.run(Command(("chmod", "0750", home), elevated=True), check=True)
 
     # Post-condition guard: verify the primary group really is private.
     # ``-U`` enforces this on the create path, but reinit, pre-existing
@@ -187,11 +190,12 @@ def create_agent_on_vm(
     # the drift is surfaced with a fix hint rather than silently defeating
     # isolation: a hard fail here could block a legitimately custom setup
     # or a partial-state reinit, and ``-U`` already covers fresh creates.
-    primary_group = admin_target.run(f"id -gn {linux_user}", sudo=True, check=False)
-    if primary_group.ok and primary_group.stdout.strip() != linux_user:
+    primary_group = admin.run(Command(("id", "-gn", linux_user), elevated=True))
+    group_name = primary_group.stdout.decode("utf-8", "replace").strip()
+    if primary_group.require_completed(vm.name) == 0 and group_name != linux_user:
         output.warn(
             f"agent '{linux_user}' primary group is "
-            f"'{primary_group.stdout.strip()}', not a private per-user group; "
+            f"'{group_name}', not a private per-user group; "
             f"its home ({home}) cannot be made private and may be readable by "
             f"other members of that group. Fix on the VM with "
             f"'sudo groupadd {linux_user} && sudo usermod -g {linux_user} {linux_user}' "
@@ -204,23 +208,16 @@ def create_agent_on_vm(
     # been reinited since the socket feature was added. The per-agent
     # dir won't exist for a brand-new agent, so we suppress the
     # "missing" warning; misconfiguration of an existing dir still warns.
-    admin_files = execution.vm_access(vm, config, Admin(), log=logger.record).files()
     ensure_agent_socket_root(admin_files, vm.admin_username)
     ensure_agent_socket_dir(admin_files, linux_user, warn_if_missing=False)
     removed = cleanup_stale_sockets(admin_files, linux_user)
     if removed:
         output.detail(f"Cleaned up {output.count(removed, 'stale socket')}")
 
-    # Reconcile authorized_keys via stage-and-install. The only admin work
-    # that lands content INTO the agent's home; everything below is the
-    # agent writing to its own home over its own SSH session.
-    _reconcile_authorized_keys(
-        admin_target,
-        config,
-        home=home,
-        logger=logger,
-        owner=linux_user,
-    )
+    # Reconcile authorized_keys as root, with the agent as owner. The only
+    # admin work that lands content INTO the agent's home; everything below
+    # is the agent writing to its own home over its own access.
+    _reconcile_authorized_keys(admin_files, config, home=home, log=logger, owner=linux_user)
 
     # -- Phase 2: self-configure (agent) ----------------------------------
 
