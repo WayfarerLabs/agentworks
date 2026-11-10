@@ -109,6 +109,19 @@ def test_one_unmatched_marker_warns_and_appends_leaving_the_rest_alone(
     assert len(warnings) == 1
 
 
+def test_an_end_marker_inside_a_line_does_not_pair_with_a_begin_marker(guest: StepGuest, warnings: list[str]) -> None:
+    """Only a line starting with a marker counts, as for the removal, so nothing after the begin marker is lost."""
+    zprofile = _path("AGENTWORKS_ZPROFILE_PATH")
+    zprofile.parent.mkdir()
+    before = f"{BEGIN}\nexport OPERATOR=1\necho 'see {END}'\n"
+    zprofile.write_text(before)
+
+    shell_env._write_agentworks_identity_profile(guest.files, {"AGENTWORKS_VM": "vm-1"}, guest.log)
+
+    assert zprofile.read_text() == f"{before}{BEGIN}\nexport AGENTWORKS_VM=vm-1\n{END}\n"
+    assert len(warnings) == 1
+
+
 def test_a_zprofile_that_already_holds_the_block_is_not_rewritten(guest: StepGuest) -> None:
     shell_env._write_agentworks_identity_profile(guest.files, {"AGENTWORKS_VM": "vm-1"}, guest.log)
     zprofile = _path("AGENTWORKS_ZPROFILE_PATH")
@@ -303,6 +316,22 @@ def test_a_rejected_sudoers_fragment_never_reaches_its_real_path(guest: StepGues
     assert not any(command.argv[0] == "mv" for command in guest.commands())  # type: ignore[union-attr]
     assert guest.commands()[-1] == Command(("rm", "-f", "--", staging), elevated=True, deadline=60)
     assert len(guest.log.warned) == 1
+
+
+def test_a_failed_staging_cleanup_keeps_the_rejection_and_is_reported_beside_it(guest: StepGuest) -> None:
+    real = str(_path("AGENTWORKS_SUDOERS_ENV_KEEP_PATH"))
+    staging = real + ".tmp"
+    guest.respond(Command(("visudo", "-cf", staging), elevated=True, deadline=60), _failed(b"syntax error\n"))
+    guest.respond(
+        Command(("rm", "-f", "--", staging), elevated=True, deadline=60),
+        ExecutionIncomplete("box", Result(Unknown(UnknownReason.CONNECTION))),
+    )
+
+    shell_env._write_sudoers_env_keep(guest.files, guest.log)
+
+    cleanup, rejection = guest.log.warned
+    assert staging in cleanup
+    assert "syntax error" in rejection
 
 
 # -- /etc/skel seeds ----------------------------------------------------------------------

@@ -299,6 +299,13 @@ def _write_skel_seeds(files: Files, log: InitLog) -> None:
         warn_step(log, "skel seed write failed; re-run 'agw vm reinit' to retry", error)
 
 
+def _identity_markers(current: str) -> tuple[bool, bool]:
+    """Whether ``current`` has a line starting with the identity block's begin marker, and one with its end."""
+    lines = current.splitlines()
+    begin, end = f"{_ZSH_IDENTITY_MARKER}-begin", f"{_ZSH_IDENTITY_MARKER}-end"
+    return any(line.startswith(begin) for line in lines), any(line.startswith(end) for line in lines)
+
+
 def with_identity_block(current: str | None, block: str) -> str:
     """``/etc/zsh/zprofile`` holding ``block`` as its identity block, from its ``current`` content.
 
@@ -308,12 +315,13 @@ def with_identity_block(current: str | None, block: str) -> str:
     removes it, and the block is appended. With one marker, or none, the
     block is appended and the rest is left alone: deleting from an orphan
     begin marker would run to the end of the file and take unrelated
-    content with it. A last line with no newline gets one before the block.
+    content with it. A marker counts only at the start of a line, the rule
+    the removal uses. A last line with no newline gets one before the block.
     """
     if current is None:
         return block
     begin, end = f"{_ZSH_IDENTITY_MARKER}-begin", f"{_ZSH_IDENTITY_MARKER}-end"
-    if begin in current and end in current:
+    if all(_identity_markers(current)):
         kept: list[str] = []
         inside = False
         for line in current.splitlines(keepends=True):
@@ -367,7 +375,7 @@ def _write_agentworks_identity_profile(files: Files, identity_env: dict[str, str
         observed = files.read(AGENTWORKS_ZPROFILE_PATH, elevated=True)
         # surrogateescape keeps any byte that is not UTF-8 exactly as it was.
         current = None if observed is None else observed.decode("utf-8", "surrogateescape")
-        if current is not None and ((f"{marker}-begin" in current) != (f"{marker}-end" in current)):
+        if current is not None and len(set(_identity_markers(current))) == 2:
             output.warn(
                 f"{AGENTWORKS_ZPROFILE_PATH} has unmatched "
                 "agentworks-identity markers; leaving them in place "
@@ -433,7 +441,7 @@ def _write_sshd_accept_env(files: Files, log: InitLog) -> None:
         warn_step(log, "sshd AcceptEnv install failed; re-run 'agw vm reinit' to retry", error)
 
 
-def _install_sudoers_fragment(files: Files, *, path: str, body: str) -> None:
+def _install_sudoers_fragment(files: Files, log: InitLog, *, path: str, body: str) -> None:
     """Install one sudoers.d/ fragment via stage -> validate -> promote.
 
     A broken sudoers fragment can lock the operator out of sudo entirely,
@@ -457,8 +465,12 @@ def _install_sudoers_fragment(files: Files, *, path: str, body: str) -> None:
     finally:
         # On the success path the mv already moved the file, so this is a
         # no-op; on a failure it keeps .tmp files from accumulating. Its
-        # outcome is not read, so it cannot hide the failure that brought us here.
-        files.access.run(Command(("rm", "-f", "--", staging), elevated=True, deadline=files.deadline))
+        # status is not read, and a request that fails is warned about here,
+        # so it never replaces the failure that brought us here.
+        try:
+            files.access.run(Command(("rm", "-f", "--", staging), elevated=True, deadline=files.deadline))
+        except STEP_FAILURES as error:
+            warn_step(log, f"removing the sudoers staging file {staging} failed", error)
 
 
 def _write_sudoers_env_keep(files: Files, log: InitLog) -> None:
@@ -482,7 +494,7 @@ def _write_sudoers_env_keep(files: Files, log: InitLog) -> None:
         f'Defaults env_keep += "{" ".join(AGENTWORKS_SUDOERS_ENV_KEEP_PATTERNS)}"\n'
     )
     try:
-        _install_sudoers_fragment(files, path=AGENTWORKS_SUDOERS_ENV_KEEP_PATH, body=body)
+        _install_sudoers_fragment(files, log, path=AGENTWORKS_SUDOERS_ENV_KEEP_PATH, body=body)
     except STEP_FAILURES as error:
         warn_step(log, "sudoers env_keep install failed; re-run 'agw vm reinit' to retry", error)
 
@@ -514,7 +526,7 @@ def _write_sudoers_console_setenv(files: Files, log: InitLog, admin_user: str) -
         f"Defaults:{admin_user} setenv\n"
     )
     try:
-        _install_sudoers_fragment(files, path=AGENTWORKS_SUDOERS_CONSOLE_SETENV_PATH, body=body)
+        _install_sudoers_fragment(files, log, path=AGENTWORKS_SUDOERS_CONSOLE_SETENV_PATH, body=body)
     except STEP_FAILURES as error:
         warn_step(log, "sudoers console setenv install failed; re-run 'agw vm reinit' to retry", error)
 
