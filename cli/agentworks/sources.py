@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 from agentworks import output
-from agentworks.errors import ExternalError, StateError, ValueFreeError
+from agentworks.errors import ExternalError, RefusedSourceReference, StateError, ValueFreeError
 from agentworks.execution.errors import CommandFailed, PathRefusal, PathRefused
 from agentworks.execution.files import guest_path
 from agentworks.execution.requests import Bytes, Command, Script, Shell
@@ -150,7 +150,7 @@ def _parse_git_source(url_str: str, default_filename: str) -> SourceRef:
     return SourceRef(kind="git", path=url_str, subpath=subpath, ref=ref)
 
 
-class SourceRefFormError(ValueFreeError):
+class SourceRefFormError(RefusedSourceReference):
     """A configured source reference that does not parse; the message names the accepted forms, never the value."""
 
 
@@ -166,7 +166,8 @@ def check_source_ref(value: str, *, field: str) -> str:
     except SourceRefError:
         raise SourceRefFormError(
             f"{field} must be a local path, file::<path>, or git:: and an https:// or git@ URL holding no user "
-            "name or token, with an optional //<subpath> and ?ref=<branch, tag or full commit hash>"
+            "name or token, with an optional //<subpath> and ?ref=<branch, tag or full commit hash>",
+            field=field,
         ) from None
     return value
 

@@ -1042,6 +1042,14 @@ no longer use them. The departures from the tables above, each recorded where it
   then its user install commands, with mise's shims always on its profile's `PATH`
   (`_write_agent_mise_config`, `_install_agent_mise`). Through v0.19.0 the agent ran its install
   commands, then dotfiles, then mise, so its template's config overwrote the dotfiles'.
+- A stored overlay that fails only on source reference fields this release refuses (every
+  `errors.RefusedSourceReference`: `dotfiles_source`, `mise_lockfile` and a harness settings
+  `source`, all through `sources.check_source_ref`) decodes to
+  `instance_specs.StoredSourceReferenceRefused`, which names the fields and never a value. It and
+  `ActivationMapMigrationRequired` share the base `ExplicitReplacementRequired`, which
+  `replace_agent_overlay` lets an explicit `--spec` replace or clear; a retain still refuses. Doctor
+  shows its hint. A VM's gets `instance_specs.VM_REFUSED_SOURCE_HINT`, pending a ruling on how a
+  VM's stored admin spec is replaced.
 - One git sequence for every case (above, "One dotfiles sync"): the ref, or `HEAD`, is fetched and
   checked out detached after any clone, and a failed sync skips the install for the agent too.
 - A bare relative `dotfiles_destination` is a path in the home, and one that is, holds or lies

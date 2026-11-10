@@ -77,6 +77,19 @@ class ValueFreeError(ValueError):
     """
 
 
+class RefusedSourceReference(ValueFreeError):
+    """A source reference field this release refuses; ``field`` names it, and no part of the value is kept.
+
+    A stored overlay that fails only on such fields was valid when it was
+    saved, so its decode asks for an explicit replacement instead of calling
+    the record malformed (``instance_specs``).
+    """
+
+    def __init__(self, message: str, *, field: str) -> None:
+        super().__init__(message)
+        self.field = field
+
+
 class StateError(AgentworksError):
     """Entity exists but is not in a state that supports this operation.
 

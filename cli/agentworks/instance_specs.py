@@ -11,7 +11,11 @@ from typing import TYPE_CHECKING, cast
 
 from agentworks.db.instance_state import InstanceKind, JsonObject, VersionedPayload
 from agentworks.errors import StateError, ValidationError
-from agentworks.instance_overlay_codec import OVERLAY_EXCLUDED_FIELDS, UnsupportedOverlayFieldsError
+from agentworks.instance_overlay_codec import (
+    OVERLAY_EXCLUDED_FIELDS,
+    RefusedSourceFieldsError,
+    UnsupportedOverlayFieldsError,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -84,8 +88,46 @@ class UnsupportedStoredOverlayError(StateError):
     """Stored desired state was written for a declaration schema this release cannot read."""
 
 
-class ActivationMapMigrationRequired(UnsupportedStoredOverlayError):
+class ExplicitReplacementRequired(UnsupportedStoredOverlayError):
+    """Stored desired state holds a value this release retired; an explicit replacement or clear supersedes it."""
+
+
+class ActivationMapMigrationRequired(ExplicitReplacementRequired):
     """A saved activation list needs an explicit replacement with map semantics."""
+
+
+class StoredSourceReferenceRefused(ExplicitReplacementRequired):
+    """A stored overlay's source reference fields are ones this release refuses; it names them, never their values."""
+
+
+VM_REFUSED_SOURCE_HINT = (
+    "The stored admin spec holds a source reference this release refuses; "
+    "this release has no command that replaces a VM's stored admin spec."
+)
+"""The hint a VM whose stored layer holds a refused source reference gets: the one place it is worded."""
+
+
+def _replacement_remedy(instance_kind: str) -> str:
+    """How an operator supersedes a stored overlay of ``instance_kind`` that needs an explicit replacement."""
+    if instance_kind == "agent":
+        return (
+            "Use 'agw agent reinit' with --spec containing the complete replacement instance spec, "
+            "or --spec '{}' to clear it."
+        )
+    return (
+        "Back up the state database and explicitly migrate the saved instance spec "
+        "before using this resource, or recreate the resource with the new config."
+    )
+
+
+def _refused_sources(record: DesiredOverlayRecord, fields: tuple[str, ...], hint: str) -> StoredSourceReferenceRefused:
+    return StoredSourceReferenceRefused(
+        f"stored {record.instance_kind} {record.instance_name!r} instance spec holds a source reference this "
+        f"release refuses ({', '.join(fields)})",
+        entity_kind=record.instance_kind,
+        entity_name=record.instance_name,
+        hint=hint,
+    )
 
 
 def parse_instance_spec(instance_kind: InstanceKind, value: str) -> InstanceOverlay[BaseModel]:
@@ -172,6 +214,8 @@ def decode_stored_overlay(
             separators=(",", ":"),
         )
         parsed = parse_instance_spec(record.instance_kind, encoded)
+    except RefusedSourceFieldsError as error:
+        raise _refused_sources(record, error.fields, _replacement_remedy(record.instance_kind)) from None
     except UnsupportedOverlayFieldsError as error:
         raise UnsupportedStoredOverlayError(
             f"stored {record.instance_kind} {record.instance_name!r} instance spec uses unsupported fields: {error}",
@@ -230,6 +274,7 @@ def decode_stored_vm_overlays(
     vm_overlay: InstanceOverlay[VMTemplate] | None = None
     admin: AdminConfig | None = None
     unsupported: list[ValidationError] = []
+    refused: list[str] = []
     malformed: list[ValidationError] = []
 
     if not isinstance(raw_vm, dict):
@@ -237,6 +282,8 @@ def decode_stored_vm_overlays(
     else:
         try:
             vm_overlay = _decode_stored_vm_component(raw_vm)
+        except RefusedSourceFieldsError as error:
+            refused.extend(f"vm.{field}" for field in error.fields)
         except UnsupportedOverlayFieldsError as error:
             unsupported.append(error)
         except ValidationError as error:
@@ -253,6 +300,8 @@ def decode_stored_vm_overlays(
             parsed_admin = vm_codec.decode_admin_overlay(raw_admin)
             if vm_codec.encode_admin_overlay(parsed_admin):
                 admin = parsed_admin
+        except RefusedSourceFieldsError as error:
+            refused.extend(f"admin.{field}" for field in error.fields)
         except UnsupportedOverlayFieldsError as error:
             unsupported.append(error)
         except ValidationError as error:
@@ -262,6 +311,8 @@ def decode_stored_vm_overlays(
     # schema may make a sibling shape valid, so this release cannot repair it.
     if unsupported:
         raise _unsupported_stored_overlay(record, f"unsupported fields: {unsupported[0]}") from unsupported[0]
+    if refused and not malformed:
+        raise _refused_sources(record, tuple(refused), VM_REFUSED_SOURCE_HINT)
     if malformed:
         raise _malformed_stored_overlay(record, str(malformed[0])) from malformed[0]
     return _vm_instance_overlays(vm_overlay, admin)
@@ -272,8 +323,7 @@ def _refuse_stored_activation_list(record: DesiredOverlayRecord, raw: JsonObject
     if not isinstance(raw.get("harness_integrations"), list):
         return
     remedy = (
-        "Use 'agw agent reinit' with --spec containing the complete replacement instance spec, "
-        "or --spec '{}' to clear it."
+        _replacement_remedy("agent")
         if record.instance_kind == "agent"
         else "Back up the state database and explicitly migrate the saved instance spec to activation maps "
         "before using this resource, or recreate the resource with the new config."
@@ -384,7 +434,7 @@ def replace_agent_overlay(
         try:
             with suppress(LegacyClaudeContextRequired):
                 decode_stored_overlay(prior)
-        except ActivationMapMigrationRequired:
+        except ExplicitReplacementRequired:
             if not supplied:
                 raise
     if not supplied:
@@ -535,6 +585,8 @@ def _decode_legacy_stored_vm_overlay(record: DesiredOverlayRecord) -> VMInstance
                 entity_kind="vm",
             )
         vm = _decode_stored_vm_component(record.payload.value)
+    except RefusedSourceFieldsError as error:
+        raise _refused_sources(record, tuple(f"vm.{field}" for field in error.fields), VM_REFUSED_SOURCE_HINT) from None
     except UnsupportedOverlayFieldsError as error:
         raise _unsupported_stored_overlay(record, f"unsupported fields: {error}") from error
     except ValidationError as error:

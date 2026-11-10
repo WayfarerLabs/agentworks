@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, cast
 from pydantic import ValidationError as PydanticValidationError
 
 from agentworks.declared_resource import DeclaredResource
-from agentworks.errors import ValidationError, ValueFreeError
+from agentworks.errors import RefusedSourceReference, ValidationError, ValueFreeError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -35,6 +35,14 @@ composition belongs to the selected template.
 
 class UnsupportedOverlayFieldsError(ValidationError):
     """An overlay uses declaration fields this release does not understand."""
+
+
+class RefusedSourceFieldsError(ValidationError):
+    """An overlay fails only on source reference fields this release refuses; ``fields`` names them."""
+
+    def __init__(self, message: str, *, fields: tuple[str, ...], entity_kind: str, entity_name: str | None) -> None:
+        super().__init__(message, entity_kind=entity_kind, entity_name=entity_name)
+        self.fields = fields
 
 
 def decode_overlay_model[T: BaseModel](
@@ -91,12 +99,23 @@ def value_safe_model_validation_error(
         any(item["type"] == "extra_forbidden" and len(item["loc"]) == 1 for item in errors)
         or any(types == {"extra_forbidden"} for types in errors_by_parent.values())
     )
-    error_type = UnsupportedOverlayFieldsError if unsupported else ValidationError
-    return error_type(
-        f"{label}: {'; '.join(details)}",
-        entity_kind=entity_kind,
-        entity_name=entity_name,
-    )
+    if unsupported:
+        return UnsupportedOverlayFieldsError(
+            f"{label}: {'; '.join(details)}", entity_kind=entity_kind, entity_name=entity_name
+        )
+    refused = [_cause(item) for item in errors]
+    if refused and all(isinstance(cause, RefusedSourceReference) for cause in refused):
+        fields = tuple(dict.fromkeys(cast("RefusedSourceReference", cause).field for cause in refused))
+        return RefusedSourceFieldsError(
+            f"{label}: {'; '.join(details)}", fields=fields, entity_kind=entity_kind, entity_name=entity_name
+        )
+    return ValidationError(f"{label}: {'; '.join(details)}", entity_kind=entity_kind, entity_name=entity_name)
+
+
+def _cause(item: object) -> object:
+    """The exception a value or assertion error item carries, if any."""
+    context = item.get("ctx") if isinstance(item, dict) else None
+    return context.get("error") if isinstance(context, dict) else None
 
 
 def encode_overlay_model(model: BaseModel, instance_kind: str) -> JsonObject:

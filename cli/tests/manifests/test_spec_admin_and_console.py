@@ -10,6 +10,8 @@ derived from it.
 
 from __future__ import annotations
 
+import pytest
+
 from agentworks.schema import iter_field_docs
 from agentworks.sessions.layouts import AW_SESSION_VERTICAL_LAYOUT, VALID_TMUX_LAYOUTS
 from agentworks.sessions.template import NamedConsoleConfig
@@ -102,7 +104,11 @@ def test_a_bad_mise_install_before_says_what_it_accepts() -> None:
 
 
 def test_a_bad_mise_lockfile_carries_the_source_refs_own_message() -> None:
-    assert "mise_lockfile is invalid: " in rejection("admin-template", "default", {"mise_lockfile": "::nope"})
+    from agentworks.sources import SourceRefFormError, check_source_ref
+
+    with pytest.raises(SourceRefFormError) as refused:
+        check_source_ref("::nope", field="mise_lockfile")
+    assert str(refused.value) in rejection("admin-template", "default", {"mise_lockfile": "::nope"})
 
 
 def test_an_unknown_admin_key_names_the_fields_that_are_valid() -> None:

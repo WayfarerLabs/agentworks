@@ -86,7 +86,6 @@ class MiseSettingsErrorKind(StrEnum):
     """Stable categories for mise model-validation failures."""
 
     PACKAGE_SYNTAX = "package-syntax"
-    LOCKFILE = "lockfile"
     INSTALL_BEFORE = "install-before"
 
 
@@ -111,7 +110,7 @@ def check_mise_settings(packages: list[str], lockfile: str | None, install_befor
     ``ValueError`` nor an ``AssertionError``, so a ``ConfigError`` here
     would escape ``model_validate`` and bypass the error bridge.
     """
-    from agentworks.sources import SourceRefError, parse_source_ref
+    from agentworks.sources import check_source_ref
 
     for package in packages:
         name, separator, version = package.rpartition("@")
@@ -129,10 +128,7 @@ def check_mise_settings(packages: list[str], lockfile: str | None, install_befor
             )
 
     if lockfile is not None:
-        try:
-            parse_source_ref(lockfile, default_filename="mise.lock")
-        except SourceRefError as exc:
-            raise MiseSettingsError(MiseSettingsErrorKind.LOCKFILE, f"mise_lockfile is invalid: {exc}") from exc
+        check_source_ref(lockfile, field="mise_lockfile")
 
     if _MISE_DURATION_RE.fullmatch(install_before):
         return

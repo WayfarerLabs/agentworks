@@ -317,6 +317,12 @@ place its `authorized_keys`; every later step runs as the agent, which cannot ru
   name or token, such as `https://user:token@github.com/...`, is refused when the template loads,
   without echoing it; declare a `git-credential` resource for the host instead. A subpath with an
   empty or `.` component is refused too, as one with `..` was.
+- **Replace a stored agent spec whose source reference is now refused.** An agent created or
+  reinitialized with `--spec` holding a source reference this release refuses (a `git::https://` URL
+  with a user name or token in it, or a remote written without `git::`) keeps that spec stored, and
+  `agw agent reinit <name>` without `--spec` refuses it, naming the field but not the value.
+  Supersede it with `agw agent reinit <name> --spec '<complete replacement spec>'`, or clear it with
+  `--spec '{}'`; `agw doctor` names the same repair.
 - **A remote written without `git::` is refused.** A source reference (`dotfiles_source`,
   `mise_lockfile`, an artifact's `source`, a harness settings `source`) holding `://` or `::`, or
   whose first path component holds a colon that is not a Windows drive letter (as in
