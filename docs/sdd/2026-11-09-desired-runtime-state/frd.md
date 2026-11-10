@@ -45,6 +45,11 @@ Unexpected disappearance, external shutdown, and a session exiting normally leav
 Only explicit management actions change intent. There is no completed-job policy, automatic
 retirement, retry daemon, or background controller in this effort.
 
+Replace the existing VM intent bookkeeping with this model, including a schema migration. Retire the
+`operator_stopped` storage and its separate decision logic rather than retaining two intent
+authorities. VM lifecycle commands, activation gates, inspection, and reconciliation must all use
+the same durable desired-state contract.
+
 ### R2. Lifecycle commands maintain intent
 
 Creation with an initial start, explicit start, and explicit restart express running intent.
@@ -180,6 +185,11 @@ permanent product documentation. Keep command reference, help, completion, and r
 content synchronized with the implementation. Current behavior must be understandable without
 reading this SDD.
 
+Migrate an existing VM's recorded intentional stop to stopped intent, and its existing permission
+for on-demand activation to available-on-demand intent. Do not infer always-running intent from
+historical power observations. Update database accessors and every VM intent consumer in the same
+feature so the migration leaves no partially converted VM lifecycle path.
+
 ### R9. Delivery and validation
 
 Deliver requirements, the remaining design artifacts, the entire implementation, validation, and the
@@ -234,3 +244,10 @@ The operator accepted desired runtime state and explicit reconciliation for VMs,
 consoles, including shared batch secret preparation. The operator clarified that runtime exit is not
 terminal and authorized one PR with FRD, design, implementation, and lock checkpoints under the
 review budgets in R9. `Reconcile` is the selected operation name.
+
+### 2026-11-09: replace existing VM intent logic
+
+> And btw, we should replace the existing VM logic to make it fully consistent with this. That
+> includes migrating schema, etc.
+
+R1 and R8 require one desired-state authority and migration of the existing VM intent semantics.
