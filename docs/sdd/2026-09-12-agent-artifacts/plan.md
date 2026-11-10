@@ -12,16 +12,16 @@ PR 871.
 
 - [x] Read the complete report, verify the guard/render ordering in all three integrations, and
       preserve its actual native, workstation, cleanup and packaging scope.
-- [ ] Render each integration's extra-argument vector once per start, validate those effective
+- [x] Render each integration's extra-argument vector once per start, validate those effective
       values and emit the same values without another interpolation pass. Preserve literal
       replacement data, token boundaries and pre-teardown refusal.
-- [ ] Make workspace exclusion retirement best effort during owning deletion, consistent with
+- [x] Make workspace exclusion retirement best effort during owning deletion, consistent with
       framework R9. Preserve safe current-metadata-only I/O and diagnose unresolved leftovers
       without introducing a new parent-deletion prerequisite or changing VM deletion.
-- [ ] Correct exclusion ownership through the supported old/new rehome lifecycle without trusting
+- [x] Correct exclusion ownership through the supported old/new rehome lifecycle without trusting
       arbitrary saved sources, running facets or adding a workspace reinit. Preserve other owners
       and operator content; use existing applied state.
-- [ ] Align the permanent integration-author contract and deletion/rehome teaching with the approved
+- [x] Align the permanent integration-author contract and deletion/rehome teaching with the approved
       native-file carriers and actual implementation.
 - [ ] Complete the integrated required gates and independent project, Muntz and correctness lanes;
       publish one exact green ready handoff without `review-requested`.
@@ -42,6 +42,30 @@ pre-allocation VM row needed manual disposal after absence proof; this is not su
 acceptance. The actual-main Typer comparison corroborates separate issue 880, outside this
 correction. No Transport/provider redesign, model-inference gate or workspace-mode implementation is
 added. Both guests and their children were independently verified absent by the testing session.
+
+### Implementation checkpoint
+
+Worker `b61487e6`, integrated as `6258b4e3`, rebuilds one typed transient argument tuple at each
+start. Guards and command quoting consume that same tuple; the existing quote helper remains
+available through a small render helper. The new regressions failed with eight failures before
+correction; the frozen focused selection passed 536 tests, full mypy passed over 942 files, and
+touched-file Ruff/format passed. Actual shell/fake-executable token observations and restart-manager
+controls establish quoting and pre-staging/runtime preservation, not native tool interpretation.
+
+Worker `61fe7851`, integrated as `3a87e296`, makes deletion cleanup best effort and binds rehome's
+old-source authority to the actual old row. Original claims survive long enough to retire copied
+pairs. Full, nested and linked-repository copies, both old-directory modes, other-owner/foreign-path
+preservation and native metadata/write faults passed through actual local Git, copy, Database and
+file-publisher boundaries. Twenty-six selected regressions fail against the original `b8c03be5`
+product; the restored frozen selection passes 137 tests. Focused Ruff, format and mypy passed. Two
+initial rehome directory checks now quote their operands, matching the actual target-with-space
+control. Noncrux VM, ACL/system ownership and final system cleanup remain disclosed fixture seams.
+
+Original failures remain in the worker receipts: the first lifecycle runs used an owned proof root
+with inherited group/default ACL conditions, then passed unchanged product guards after that root
+was corrected; new test annotations and formatting were corrected after their initial failures. The
+lead's first file-lint run failed only on source-archive terminology, then passed after ordinary
+wording. Complete integrated gates and the three private review lanes remain pending.
 
 ## Native delivery feedback, round 1 of 3, 2026-11-09
 

@@ -381,8 +381,9 @@ Agentworks does not edit shared `.gitignore`, hide whole native directories or c
 Supported workspace rehome uses its known old/new owner paths to retire the old associations, remove
 copied old pairs and establish exclusions for the copied managed files where possible. Generic
 application still refuses another owner's saved source. Git metadata failures warn and do not
-prevent core rehome. This does not rerun workspace facets or refresh their native setup records;
-existing workspaces have no harness reinit operation.
+prevent core rehome. If old retirement fails and the old directory is deliberately retained, that
+unmanaged copy can retain exclusions. This does not rerun workspace facets or relocate general
+native setup records; existing workspaces have no harness reinit operation.
 
 Elevated native file operations share a fixed allowlist: `/etc/claude-code`, `/etc/codex` and
 `/opt/agentworks/artifacts`. Reads, writes and cleanup outside those trees are refused, including
