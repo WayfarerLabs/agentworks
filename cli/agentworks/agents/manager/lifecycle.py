@@ -337,7 +337,7 @@ def delete_agent(
 
     from agentworks.harness_setup.locking import native_mutation_guard
 
-    with native_mutation_guard(db.path, vm.name) as guard:
+    with native_mutation_guard(db.path, vm.name, held=None if vm_node is None else vm_node.held_native_guard) as guard:
         from agentworks.ssh import SSHLogger
 
         ssh_logger = SSHLogger(vm.name, "agent-delete")

@@ -149,6 +149,11 @@ class LiveVMNode:
         return self._row
 
     @property
+    def held_native_guard(self) -> NativeMutationGuard | None:
+        """The explicit operation token shared with nested lifecycle cleanup."""
+        return self._held_native_guard
+
+    @property
     def site(self) -> VMSiteNode:
         """The vm-site node this VM's row points at; dependents reach
         the held platform instance through it (the site HOLDS the

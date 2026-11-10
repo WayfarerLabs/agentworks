@@ -81,7 +81,9 @@ def delete_workspace(
 
     from agentworks.harness_setup.locking import native_mutation_guard
 
-    with native_mutation_guard(db.path, ws.vm_name) as guard:
+    with native_mutation_guard(
+        db.path, ws.vm_name, held=None if vm_node is None else vm_node.held_native_guard
+    ) as guard:
         # Create SSH logger for VM operations
         import contextlib
 
