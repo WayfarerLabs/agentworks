@@ -728,9 +728,8 @@ def test_auto_start_rechecks_power_with_family_guard(db, monkeypatch):
     monkeypatch.setattr(platform, "status", status)
     ensure_active(node, _no_resolve)
     assert platform.start_calls == 0
-    with native_mutation_guard(db.path, vm.name):
-        with pytest.raises(NativeSetupBusyError):
-            node.auto_start(cast("SecretReader", object()))
+    with native_mutation_guard(db.path, vm.name), pytest.raises(NativeSetupBusyError):
+        node.auto_start(cast("SecretReader", object()))
     assert platform.start_calls == 0
 
 
@@ -744,15 +743,13 @@ def test_hold_admission_is_guarded_but_interactive_body_is_unlocked(db, monkeypa
 
     @contextlib.contextmanager
     def delayed_attachment(row, *, config):
-        with pytest.raises(NativeSetupBusyError):
-            with native_mutation_guard(db.path, vm.name):
-                pytest.fail("stop admitted before keeper attachment")
+        with pytest.raises(NativeSetupBusyError), native_mutation_guard(db.path, vm.name):
+            pytest.fail("stop admitted before keeper attachment")
         yield
 
     monkeypatch.setattr(platform, "vm_active", delayed_attachment)
-    with node.hold_active():
-        with native_mutation_guard(db.path, vm.name):
-            pass
+    with node.hold_active(), native_mutation_guard(db.path, vm.name):
+        pass
 
 
 @pytest.mark.windows
@@ -763,9 +760,8 @@ def test_stopped_live_guest_access_skips_booting_hold_and_admission_can_be_busy(
     db.set_vm_desired_runtime_state(vm.name, Target.STOPPED, expected_vm_uuid=vm.vm_uuid)
     platform = _GatePlatform()
     node, _ = _node(db, platform, vm)
-    with native_mutation_guard(db.path, vm.name):
-        with pytest.raises(NativeSetupBusyError), node.hold_active():
-            pytest.fail("live diagnostic skipped guarded admission")
+    with native_mutation_guard(db.path, vm.name), pytest.raises(NativeSetupBusyError), node.hold_active():
+        pytest.fail("live diagnostic skipped guarded admission")
     with node.hold_active():
         pass
     assert platform.holds == 0
@@ -782,9 +778,8 @@ def test_explicit_guard_token_reuses_outer_operation_for_auto_start_and_hold(db,
         node = LiveVMNode(db, cast("Config", object()), cast("Registry", object()), vm, site, held_native_guard=guard)
         monkeypatch.setattr(vm_manager, "_tailscale_rejoin_required", lambda *a, **k: False)
         node.auto_start(cast("SecretReader", object()))
-        with node.hold_active():
-            with pytest.raises(NativeSetupBusyError), native_mutation_guard(db.path, vm.name):
-                pytest.fail("outer operation guard released")
+        with node.hold_active(), pytest.raises(NativeSetupBusyError), native_mutation_guard(db.path, vm.name):
+            pytest.fail("outer operation guard released")
     assert platform.start_calls == 1
     assert platform.holds == 2
     with pytest.raises(StateError), node.hold_active():

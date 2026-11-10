@@ -76,7 +76,11 @@ def prepare_vm_runtime(
     values = {name: resolve_secret(name) for name in names}
     ops_ctx = RunContext(config=config, operation_scope=scope, secrets=ScopedSecrets(values, names))
     context = VMRuntimeContext(db, config, vm, vm_node, ops_ctx, VMStatus.UNKNOWN, _provider_values=values)
-    context.observed_status = observe_vm_runtime(context)
+    try:
+        context.observed_status = observe_vm_runtime(context)
+    except BaseException:
+        context.clear_values()
+        raise
     return context
 
 

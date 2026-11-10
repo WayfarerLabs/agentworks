@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.capabilities.vm_platform.tailscale_join import TAILSCALE_JOIN_STDIN_COMMAND
+from agentworks.db import DesiredRuntimeState as Target
 from agentworks.db import VMStatus
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
@@ -44,7 +45,9 @@ def _seed_vm(db: Database, *, operator_stopped: bool = False) -> None:
     db.insert_vm("box", site="proxmox", hostname="box")
     db.update_vm_tailscale("box", "100.64.0.9")
     if operator_stopped:
-        db.set_operator_stopped("box", True)
+        db.set_vm_desired_runtime_state(
+            "box", Target.STOPPED, expected_vm_uuid=next(vm.vm_uuid for vm in db.list_vms() if vm.name == "box")
+        )
 
 
 def _reachable(monkeypatch: pytest.MonkeyPatch, value: bool) -> None:
@@ -529,7 +532,7 @@ def test_port_forward_stopped_vm_gates_then_forwards(
 
     assert vm_manager.port_forward_vm(db, config, "box", ["8080"], interaction=TtyInteractionPolicy.REFUSE) == 0
 
-    assert events == ["status", "start", "tailscale"]  # the gate ran
+    assert events == ["status", "status", "start", "tailscale"]  # the gate ran
     assert resolve_counter == [["proxmox-token"]]
     assert len(tunnel.argv) == 1
 
@@ -666,7 +669,7 @@ def test_backup_stopped_vm_gates_then_backs_up(
 
     backup_dir = vm_backup.backup_vm(db, backup_env, "box", interaction=TtyInteractionPolicy.REFUSE)
 
-    assert gate_events == ["status", "start", "tailscale"]  # the gate ran
+    assert gate_events == ["status", "status", "start", "tailscale"]  # the gate ran
     assert resolve_counter == [["proxmox-token"]]
     assert (backup_dir / "manifest.json").exists()
 

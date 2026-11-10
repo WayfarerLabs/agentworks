@@ -246,7 +246,7 @@ def test_grant_stopped_vm_gate_burst_seeds_the_whole_union(
         db, config, agent_name="a1", workspace_names=["ws1"], interaction=TtyInteractionPolicy.REFUSE
     )
 
-    assert events == ["status", "start", "tailscale"]  # the gate ran
+    assert events == ["status", "status", "start", "tailscale"]  # the gate ran
     assert resolve_counter == [["proxmox-token"]]
     assert db.has_any_grant("a1", "ws1")
 
@@ -296,7 +296,7 @@ def test_revoke_stopped_vm_gate_burst_seeds_the_whole_union(
         db, config, agent_name="a1", workspace_names=["ws1"], interaction=TtyInteractionPolicy.REFUSE
     )
 
-    assert events == ["status", "start", "tailscale"]
+    assert events == ["status", "status", "start", "tailscale"]
     assert resolve_counter == [["proxmox-token"]]
     assert not db.has_any_grant("a1", "ws1")
 
@@ -336,7 +336,7 @@ def test_delete_stopped_vm_gate_burst_seeds_the_whole_union(
 
     agent_manager.delete_agent(db, config, name="a1", yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
-    assert events == ["status", "start", "tailscale"]
+    assert events == ["status", "status", "start", "tailscale"]
     assert resolve_counter == [["proxmox-token"]]
     assert db.get_agent("a1") is None
 

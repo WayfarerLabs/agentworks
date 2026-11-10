@@ -332,7 +332,7 @@ def test_create_stopped_vm_gate_resolves_once_and_seeds_the_boundary(
     agent_manager.create_agent(db, config, name="dev", vm_name="box", interaction=TtyInteractionPolicy.REFUSE)
 
     assert resolve_counter == [["proxmox-token"], ["git-token-gh"]]
-    assert events == ["status", "start", "tailscale"]  # the gate ran
+    assert events == ["status", "status", "start", "tailscale"]  # the gate ran
     assert mutation["credential_passwords"] == {"gh": "ghtok"}
     row = db.get_agent("dev")
     assert row is not None and row.linux_user == "agt-dev"
@@ -371,7 +371,7 @@ def test_reinit_stopped_vm_gate_resolves_once_and_seeds_the_boundary(
     agent_manager.reinit_agent(db, config, name="dev", interaction=TtyInteractionPolicy.REFUSE)
 
     assert resolve_counter == [["proxmox-token"], ["git-token-gh"]]
-    assert events == ["status", "start", "tailscale"]
+    assert events == ["status", "status", "start", "tailscale"]
     assert mutation["credential_passwords"] == {"gh": "ghtok"}
     assert mutation["agent_name"] == "dev"
     assert any("reinitialized" in m for m in captured_output.info)

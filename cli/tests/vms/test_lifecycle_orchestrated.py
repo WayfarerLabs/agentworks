@@ -8,8 +8,8 @@ from collections.abc import Iterator
 import pytest
 
 from agentworks.bootstrap import load_request_registry
+from agentworks.db import Database, VMRow, VMStatus
 from agentworks.db import DesiredRuntimeState as Target
-from agentworks.db import VMStatus
 from agentworks.errors import ConnectivityError, StateError, UserAbort, ValidationError
 from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
@@ -19,10 +19,12 @@ from agentworks.vms import manager
 from agentworks.vms.manager.runtime import activate_vm_runtime, execute_vm_stop, observe_vm_runtime, prepare_vm_runtime
 
 
-def _seed(db, target=Target.ON_DEMAND):
+def _seed(db: Database, target: Target = Target.ON_DEMAND) -> VMRow:
     vm = db.insert_vm("box", "proxmox", "box", desired_runtime_state=target)
     db.update_vm_tailscale("box", "100.64.0.9")
-    return db.get_vm(vm.name)
+    row = db.get_vm(vm.name)
+    assert row is not None
+    return row
 
 
 @pytest.fixture
@@ -73,7 +75,11 @@ def _prepared(db, config, vm) -> Iterator[tuple]:
             interaction=Policy.REFUSE,
             held_native_guard=guard,
         )
-        yield context, resolver
+        try:
+            yield context, resolver
+        finally:
+            context.clear_values()
+            resolver.close()
 
 
 def test_preparation_only_observes_and_execution_uses_supplied_values(db, make_config, platform, resolve_counter):
@@ -242,3 +248,34 @@ def test_pure_setter_never_loads_registry_or_runtime(db, monkeypatch):
     assert db.get_vm("box").vm_uuid == vm.vm_uuid
     with pytest.raises(ValidationError):
         manager.set_vm_desired_runtime_state(db, name="box", state="invalid")
+
+
+@pytest.mark.parametrize("action", [manager.start_vm, manager.stop_vm])
+def test_provider_failure_preserves_accepted_target(db, make_config, platform, monkeypatch, action):
+    config = make_config()
+    _, state = platform
+    state[0] = VMStatus.STOPPED if action is manager.start_vm else VMStatus.RUNNING
+    _seed(db)
+    error = ConnectivityError("provider unavailable")
+
+    def fail(*args):
+        raise error
+
+    monkeypatch.setattr(ProxmoxPlatform, "start" if action is manager.start_vm else "stop", fail)
+    with pytest.raises(ConnectivityError) as caught:
+        action(db, config, "box", interaction=Policy.REFUSE)
+    assert caught.value is error
+    assert db.get_vm("box").desired_runtime_state is (Target.RUNNING if action is manager.start_vm else Target.STOPPED)
+
+
+@pytest.mark.parametrize("action", [manager.start_vm, manager.stop_vm])
+def test_explicit_unknown_power_policy_is_preserved(db, make_config, platform, action):
+    config = make_config()
+    events, state = platform
+    state[0] = VMStatus.UNKNOWN
+    _seed(db)
+    db.record_vm_started("box")
+    action(db, config, "box", interaction=Policy.REFUSE)
+    assert ("start" if action is manager.start_vm else "stop") in events
+    if action is manager.start_vm:
+        assert db.get_vm("box").last_started_at is None

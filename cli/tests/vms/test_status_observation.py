@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from agentworks.db import DesiredRuntimeState as Target
 from agentworks.db import VMStatus
 from agentworks.errors import ConnectivityError
 from agentworks.secrets.policy import TtyInteractionPolicy
@@ -16,21 +17,23 @@ from agentworks.vms.manager._status import observe_vm_statuses, project_vm_statu
 
 
 @pytest.mark.parametrize(
-    ("status", "operator_stopped", "expected"),
+    ("status", "desired_runtime_state", "expected"),
     [
-        (VMStatus.RUNNING, False, ("running", None)),
-        (VMStatus.STOPPED, True, ("stopped", "manual")),
-        (VMStatus.STOPPED, False, ("stopped", "idle")),
-        (VMStatus.DEALLOCATED, True, ("deallocated", "manual")),
-        (VMStatus.UNKNOWN, False, ("unknown", None)),
+        (VMStatus.RUNNING, Target.RUNNING, ("running", None)),
+        (VMStatus.STOPPED, Target.STOPPED, ("stopped", "manual")),
+        (VMStatus.STOPPED, Target.ON_DEMAND, ("stopped", "idle")),
+        (VMStatus.DEALLOCATED, Target.STOPPED, ("deallocated", "manual")),
+        (VMStatus.UNKNOWN, Target.RUNNING, ("unknown", None)),
+        (VMStatus.STOPPED, Target.RUNNING, ("stopped", None)),
+        (VMStatus.DEALLOCATED, Target.RUNNING, ("deallocated", None)),
     ],
 )
 def test_vm_status_projection(
     status: VMStatus,
-    operator_stopped: bool,
+    desired_runtime_state: Target,
     expected: tuple[str, str | None],
 ) -> None:
-    assert project_vm_status(status, operator_stopped=operator_stopped) == expected
+    assert project_vm_status(status, desired_runtime_state=desired_runtime_state) == expected
 
 
 def test_plain_vm_listing_never_calls_status_observer(
@@ -56,7 +59,9 @@ def test_vm_listing_joins_requested_status_without_changing_order(
 ) -> None:
     db.insert_vm("alpha", site="site-a", hostname="alpha")
     db.insert_vm("beta", site="site-b", hostname="beta")
-    db.set_operator_stopped("beta", True)
+    db.set_vm_desired_runtime_state(
+        "beta", Target.STOPPED, expected_vm_uuid=next(vm.vm_uuid for vm in db.list_vms() if vm.name == "beta")
+    )
     monkeypatch.setattr(
         inspect,
         "observe_vm_statuses",
@@ -93,7 +98,7 @@ def test_vm_listing_status_column_follows_explicit_render_request(
     observed = inspect.VMListing(vms=(replace(plain.vms[0], observed_status="running"),))
     inspect.render_vm_listing(observed, include_status=True)
     assert "STATUS" in captured_output.info[0]
-    assert captured_output.info[2].index("running") == captured_output.info[0].index("STATUS")
+    assert captured_output.info[2].rindex("running") == captured_output.info[0].index("STATUS")
 
 
 def test_vm_listing_only_caps_name_column(
@@ -126,9 +131,9 @@ def test_vm_observer_isolates_dispatched_failure_and_serializes_shared_site(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     rows = [
-        SimpleNamespace(name="alpha", site="one", operator_stopped=False),
-        SimpleNamespace(name="beta", site="one", operator_stopped=False),
-        SimpleNamespace(name="gamma", site="two", operator_stopped=False),
+        SimpleNamespace(name="alpha", site="one", desired_runtime_state=Target.RUNNING),
+        SimpleNamespace(name="beta", site="one", desired_runtime_state=Target.RUNNING),
+        SimpleNamespace(name="gamma", site="two", desired_runtime_state=Target.RUNNING),
     ]
     calls: list[str] = []
 
@@ -188,8 +193,8 @@ def test_vm_observer_shared_registry_failure_leaves_complete_unknown_mapping(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     rows = [
-        SimpleNamespace(name="alpha", site="one", operator_stopped=False),
-        SimpleNamespace(name="beta", site="two", operator_stopped=False),
+        SimpleNamespace(name="alpha", site="one", desired_runtime_state=Target.RUNNING),
+        SimpleNamespace(name="beta", site="two", desired_runtime_state=Target.RUNNING),
     ]
     monkeypatch.setattr(
         "agentworks.bootstrap.load_request_registry",

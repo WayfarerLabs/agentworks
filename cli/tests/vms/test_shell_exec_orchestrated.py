@@ -311,7 +311,7 @@ def test_shell_stopped_vm_gate_burst_then_boundary_burst(
 
     assert vm_manager.shell_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE) == 0
 
-    assert events == ["status", "start", "tailscale"]  # the gate ran
+    assert events == ["status", "status", "start", "tailscale"]  # the gate ran
     assert resolve_counter == [["proxmox-token"], ["vm-env-secret"]]
     assert len(target.interactive_calls) == 1
 
@@ -383,7 +383,7 @@ def test_exec_stopped_vm_gate_burst_then_boundary_burst(
     rc = vm_manager.exec_vm(db, config, "box", ["echo", "hi"], interaction=TtyInteractionPolicy.REFUSE)
 
     assert rc == 0
-    assert events == ["status", "start", "tailscale"]
+    assert events == ["status", "status", "start", "tailscale"]
     assert resolve_counter == [["proxmox-token"], ["vm-env-secret"]]
 
 

@@ -12,8 +12,11 @@ import pytest
 
 from agentworks.db import (
     LATEST_VERSION,
+    ConsoleRow,
     Database,
     SessionMode,
+    SessionRow,
+    VMRow,
     create_manual_backup,
     restore_backup,
     validate_restore_source,
@@ -42,7 +45,8 @@ def test_fresh_targets_uuids_and_json_are_stable(db: Database) -> None:
     assert str(UUID(vm.vm_uuid)) == vm.vm_uuid
     assert db.get_vm("box") == vm
     db.set_vm_desired_runtime_state("box", Target.ON_DEMAND, expected_vm_uuid=vm.vm_uuid)
-    assert db.get_vm("box").vm_uuid == vm.vm_uuid
+    current = db.get_vm("box")
+    assert current is not None and current.vm_uuid == vm.vm_uuid
 
 
 @pytest.mark.parametrize("kind", ["vm", "session", "console"])
@@ -50,28 +54,34 @@ def test_intent_only_writes_and_idempotence(db: Database, kind: str) -> None:
     vm, session, console = _family(db)
     if kind == "vm":
 
-        def read():
-            return db.get_vm("box")
+        def read() -> VMRow | SessionRow | ConsoleRow:
+            row = db.get_vm("box")
+            assert row is not None
+            return row
 
-        def write(state):
+        def write(state: Target) -> None:
             return db.set_vm_desired_runtime_state("box", state, expected_vm_uuid=vm.vm_uuid)
     elif kind == "session":
         db._conn.execute("UPDATE sessions SET updated_at = '2000-01-01', last_started_at = 'start'")
         db._conn.commit()
 
-        def read():
-            return db.get_session("run")
+        def read() -> VMRow | SessionRow | ConsoleRow:
+            row = db.get_session("run")
+            assert row is not None
+            return row
 
-        def write(state):
+        def write(state: Target) -> None:
             return db.set_session_desired_runtime_state("run", state, expected_session_uuid=session.session_uuid)
     else:
         db._conn.execute("UPDATE consoles SET updated_at = '2000-01-01', last_started_at = 'start'")
         db._conn.commit()
 
-        def read():
-            return db.get_console("view")
+        def read() -> VMRow | SessionRow | ConsoleRow:
+            row = db.get_console("view")
+            assert row is not None
+            return row
 
-        def write(state):
+        def write(state: Target) -> None:
             return db.set_console_desired_runtime_state("view", state)
 
     before = asdict(read())
@@ -177,8 +187,10 @@ def test_populated_migration_preserves_facts_relationships_and_restore(tmp_path:
     before = _legacy(path)
     database = Database(path)
     assert [r.desired_runtime_state for r in database.list_vms()] == [Target.ON_DEMAND, Target.STOPPED]
-    assert database.get_session("run").desired_runtime_state is None
-    assert database.get_console("view").desired_runtime_state is None
+    migrated_session = database.get_session("run")
+    migrated_console = database.get_console("view")
+    assert migrated_session is not None and migrated_session.desired_runtime_state is None
+    assert migrated_console is not None and migrated_console.desired_runtime_state is None
     identities = [r.vm_uuid for r in database.list_vms()]
     assert len(set(identities)) == 2
     database.close()
@@ -196,7 +208,8 @@ def test_populated_migration_preserves_facts_relationships_and_restore(tmp_path:
     restore_backup(backup, restored_path)
     restored = Database(restored_path)
     assert [r.vm_uuid for r in restored.list_vms()] == identities
-    assert restored.get_session("run").session_uuid == before["sessions"][0]["session_uuid"]
+    restored_session = restored.get_session("run")
+    assert restored_session is not None and restored_session.session_uuid == before["sessions"][0]["session_uuid"]
     assert restored.list_console_sessions("view")[0].position == 0
     restored.close()
 

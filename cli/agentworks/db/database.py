@@ -321,16 +321,12 @@ class Database:
         # SQLite-recommended pattern is to disable FKs around the rebuild
         # and run a foreign_key_check at the end to confirm consistency.
         #
-        # Each version commits as a durable checkpoint (schema_version
-        # row included): sqlite3 auto-commits DDL anyway, so a
-        # transactional whole-run guard was never real, but WITHOUT
-        # the per-version commit, a failure in version N+1 rolled back
-        # version N's schema_version INSERT while N's DDL survived, and
-        # the retry re-ran N's DDL into duplicate-column errors. With
-        # the checkpoint, retry resumes at the failed version. A
-        # failure INSIDE one version can still leave that version
-        # partially applied (the documented residual; per-version
-        # pre-DDL validation in Python steps minimizes it).
+        # Each version commits a durable checkpoint with its schema_version row.
+        # Historical SQL steps may execute DDL before an implicit transaction
+        # starts. Python steps that require an atomic rebuild begin an explicit
+        # transaction, which also includes the runner's foreign-key check and
+        # version insert. Failure rolls that transaction back before restoring
+        # foreign-key enforcement; retry resumes from the last committed version.
         self._conn.commit()
         self._conn.execute("PRAGMA foreign_keys = OFF")
         try:

@@ -77,7 +77,7 @@ def start_vm(
         finally:
             if context is not None:
                 context.clear_values()
-            del resolver
+            resolver.close()
         if context.started:
             output.info(f"VM '{name}' started")
         else:
@@ -121,7 +121,7 @@ def stop_vm(
         finally:
             if context is not None:
                 context.clear_values()
-            del resolver
+            resolver.close()
         if changed:
             output.result(f"VM '{name}' stopped")
         else:
