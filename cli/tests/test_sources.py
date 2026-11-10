@@ -528,19 +528,22 @@ def test_upload_tree_sends_the_local_tree_as_one_unelevated_script_with_its_two_
         }
 
 
-def test_a_tree_with_a_read_only_directory_is_replaced_on_every_upload(lane: Files, tmp_path: Path) -> None:
-    """The previous tree's read-only directory is made writable to remove it, upload after upload."""
+@pytest.mark.parametrize("mode", [0o555, 0o444], ids=["read-only", "unsearchable"])
+def test_a_tree_with_a_locked_directory_is_replaced_on_every_upload(lane: Files, tmp_path: Path, mode: int) -> None:
+    """A directory in the previous tree that its owner cannot write or search is opened up to remove it."""
     dest = tmp_path / "home" / ".dotfiles"
-    for generation in range(3):
-        local = _tree(tmp_path / f"local-{generation}", {"locked/rc": f"{generation}".encode(), "top": b"t"})
-        (local / "locked").chmod(0o555)
+    try:
+        for generation in range(3):
+            local = _tree(tmp_path / f"local-{generation}", {"locked/rc": f"{generation}".encode(), "top": b"t"})
 
-        upload_tree(lane, local, str(dest))
+            upload_tree(lane, local, str(dest))
 
-        assert _contents(dest) == {"locked/rc": f"{generation}".encode(), "top": b"t"}
-        assert _siblings(dest) == []
-    for directory in (path for path in tmp_path.rglob("*") if path.is_dir()):
-        directory.chmod(0o755)
+            assert _contents(dest) == {"locked/rc": f"{generation}".encode(), "top": b"t"}
+            assert _siblings(dest) == []
+            # As an installer might leave it, for the next upload to replace.
+            (dest / "locked").chmod(mode)
+    finally:
+        subprocess.run(["chmod", "-R", "u+rwx", "--", str(tmp_path)], check=False)
 
 
 @pytest.mark.parametrize("planted", ["link", "file"])

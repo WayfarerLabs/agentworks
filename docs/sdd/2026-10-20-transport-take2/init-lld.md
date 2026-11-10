@@ -893,8 +893,9 @@ which `visudo` and `sshd -t` reject, asserting the real path never receives the 
 prior content is restored; I64 by `test_authorized_keys.py` moved (mode, owner, each `STEP_FAILURES`
 type on the admin's write giving the unproven outcome, the agent's failure raising); I65 and I66 by
 `cli/tests/agents/test_agent_home_permissions.py` and `test_create_reinit_orchestrated.py` moved;
-I67 by `test_initializer_workspaces_dir.py`'s order test; I68 by the driver's dotfiles tests; I69
-and I70 by `cli/tests/agents/test_install_commands.py` and `test_initializer_apt.py`; I71 by
+I67 by `test_initializer_workspaces_dir.py`'s order test; I68 by `tests/vms/test_dotfiles.py` and
+`test_agent_home_permissions.py::test_a_failed_git_dotfiles_sync_skips_the_agent_install`; I69 and
+I70 by `cli/tests/agents/test_install_commands.py` and `test_initializer_apt.py`; I71 by
 `test_git_config.py`; I72 by `test_git_credential_scoping.py` and the recording test above; I73 by
 `test_tailscale_dns.py`; I74 by its regression test (`dc1dce8eb`); I75 by
 `cli/tests/sessions/test_native_socket_cleanup.py` over `access_run_command`, whose `runuser` shim
@@ -1028,11 +1029,11 @@ no longer use them. The departures from the tables above, each recorded where it
   operation log.
 - `ensure_directory` converges with `owner` or `group`, either one.
 - `UPLOAD_TREE_SCRIPT` moves an `old` sibling back only when it is a directory and not a link, and
-  removes anything else there; it makes each sibling writable (never through a link) before removing
-  it, and every removal is best effort, so a tree with read-only directories is replaced on every
-  upload and `restore` always reaches its rename. The git file source requires `mktemp`'s output to
-  be a guest path under its staging prefix before using it, and reads its staging removal's
-  completion and status, warning when it fails.
+  removes anything else there; it makes each sibling writable and searchable (never through a link)
+  before removing it, and every removal is best effort, so a tree with read-only directories is
+  replaced on every upload and `restore` always reaches its rename. The git file source requires
+  `mktemp`'s output to be a guest path under its staging prefix before using it, and reads its
+  staging removal's completion and status, warning when it fails.
 - One git sequence for every case (above, "One dotfiles sync"): the ref, or `HEAD`, is fetched and
   checked out detached after any clone, and a failed sync skips the install for the agent too.
 - A bare relative `dotfiles_destination` is a path in the home, and one that is, holds or lies
