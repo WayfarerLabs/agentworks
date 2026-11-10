@@ -123,19 +123,25 @@ def test_our_guest_is_operated_on(fake: FakeProxmoxAPI) -> None:
     assert [op for op in fake.ops() if op in _ADDRESSING] == ["start_vm", "guest_agent_exec", "stop_vm"]
 
 
-def test_an_api_failure_reads_as_unknown_status_but_refuses_a_start(fake: FakeProxmoxAPI) -> None:
-    """Status degrades on an outage; an operation that would address the VMID cannot confirm it, so it raises."""
+def test_an_api_failure_reads_as_unknown_status_but_refuses_a_start_or_a_root_script(fake: FakeProxmoxAPI) -> None:
+    """Status degrades on an outage; an operation that would address the VMID cannot confirm it, so it raises.
+
+    A root script's check that fails well inside its deadline raises the API's error, not the deadline's refusal.
+    """
     fake.holder = "vm1"
     outage = ProxmoxAPIError("Proxmox API failed: connection refused")
-    fake.status_errors = [outage, outage]
+    fake.status_errors = [outage, outage, outage]
     fake.in_use_error = outage
     platform = _platform()
 
     assert platform.status(ROW, RunContext()) is VMStatus.UNKNOWN
     with pytest.raises(ProxmoxAPIError):
         platform.start(ROW, RunContext())
+    with pytest.raises(ProxmoxAPIError):
+        platform.run_as_root(ROW, RunContext(), b"true", 30)
 
     assert "start_vm" not in fake.ops()
+    assert "guest_agent_exec" not in fake.ops()
 
 
 def test_the_identity_check_spends_the_root_scripts_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
