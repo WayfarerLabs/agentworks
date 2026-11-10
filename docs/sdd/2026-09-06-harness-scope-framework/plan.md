@@ -1,5 +1,32 @@
 # Harness Scope Framework: Implementation Plan
 
+## Native delivery feedback, round 2 of 3, 2026-11-10
+
+PR 871's
+[complete report](https://github.com/WayfarerLabs/agentworks/pull/871#issuecomment-6755957164) at
+`b8c03be5` satisfies the operator's report gate for the second authorized round. The
+[companion plan](../2026-09-12-agent-artifacts/plan.md#native-delivery-feedback-round-2-of-3-2026-11-10)
+owns the implementation batch and validation record. Draft is verified before changes; refreshed
+main remains `438c4546`.
+
+- [x] Assess the exact-head report and retained evidence without inventing model, native-version or
+      provider coverage requirements.
+- [ ] Restore framework R9's no-deletion-prerequisite contract while safely retiring known shared
+      exclusions where possible. Correct supported rehome through the verified owning lifecycle;
+      preserve native association and file-safety boundaries.
+- [ ] Complete the companion's effective-argument guards and permanent author-contract correction,
+      then validate and hand off the exact combined change through all three private lanes.
+- [ ] Reconcile corrected-head acceptance against R1-R16 and the companion's R1-R10, finish actual
+      remaining promotion and create both locks. The separate workspace-mode PR is not a gate.
+
+The earlier framework reconciliation retains its unchanged-API and live-vertical evidence. The
+post-handoff audit found a current R9 contradiction: known artifact cleanup can veto workspace
+deletion even though this FRD and permanent native-setup/idempotency/DB guides forbid that
+prerequisite. This round corrects behavior against the retained contract rather than documenting a
+new refusal exception. The author-contract inconsistencies belong to the companion's current
+native-file carriers. Neither discovery reopens the merged PR 862 correction or transfers closeout
+ownership.
+
 ## Native delivery feedback, round 1 of 3, 2026-11-09
 
 PR 871's [final report](https://github.com/WayfarerLabs/agentworks/pull/871#issuecomment-6752844405)

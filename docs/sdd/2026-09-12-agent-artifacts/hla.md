@@ -517,12 +517,19 @@ ownership does not provide worktree-specific Git behavior. Grok skips ignored ru
 verified compatible skill representation or report unsupported discovery instead of claiming
 success.
 
-Workspace deletion retires known unchanged exclusion associations before removing their directory
-and applied state, because shared Git metadata can survive that directory. Incomplete known cleanup
-retains the owner and evidence for retry. Unreadable historical native setup evidence keeps the
-existing best-effort deletion fallback with a warning. Whole-VM deletion gains no guest-cleanup
-prerequisite. Git-relative lookup avoids physical/lexical path comparisons; only Git's current
-independently resolved metadata path can authorize writes, including after a Git-directory move.
+Workspace deletion attempts known unchanged exclusion retirement before removing its directory and
+applied state, because shared Git metadata can survive that directory. Unresolved native cleanup
+warns and preserves foreign or ambiguous bytes without vetoing the existing parent-deletion
+lifecycle. Generic application retains retry evidence while the owner remains. Whole-VM deletion
+gains no guest-cleanup prerequisite. Git-relative lookup avoids physical/lexical path comparisons;
+only Git's current independently resolved metadata path can authorize writes, including after a
+Git-directory move.
+
+Supported rehome supplies the actual old/new owner relation under its existing mutation guard. It
+can retire verified old associations and copied old pairs, then establish exclusions for the copied
+managed files. Generic application never trusts a different saved source merely because a pair
+exists. Git failures warn without becoming a rehome prerequisite. This bounded metadata operation
+does not rerun workspace facets, reacquire artifacts or relocate general native setup state.
 
 Registering an agent persona makes a definition available; choosing it as the primary persona is a
 separate native launch behavior. Claude supports that selection. Codex's existing primary `agent`
@@ -536,13 +543,15 @@ fixed locations: `~/.agentworks-artifacts/user/` for the actual user and
 ancestor-index pointers or retransmitting handled payloads. Publication and discoverability fulfill
 shell delivery; shell does not claim to load rules into model context.
 
-Across integrations, hints may be combined into a single context fragment. Rules remain
-always-context guidance within their applicability. Standard skills retain their package and
+Across integrations, hints may be combined into a single context fragment. Rules remain standing
+guidance within their applicability, delivered through native rule files or generated required-read
+skills. Automatic body loading is not universal. Standard skills retain their package and
 progressive discovery semantics. Native policy that prevents promised discovery or loading must be
 diagnosed; mere file existence is not a substitute for the documented delivery contract. Native
-launch overrides that replace or disable the artifact carrier must be rejected before teardown; for
-example, raw arguments must not silently replace composed developer instructions. Each adapter owns
-conflict checks for its generated native options.
+launch overrides that replace or disable the artifact carrier must be rejected before teardown.
+Render the effective extra-argument vector once, validate it and emit those same values without a
+second interpolation pass. For example, a templated flag must not disable the generated skill
+plugin. Each adapter owns conflict checks for its generated native options.
 
 ## Inspection and worked behavior
 

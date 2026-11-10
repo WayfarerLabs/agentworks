@@ -335,16 +335,18 @@ Native-name conflicts in enabled session delivery leave the identified inputs te
 The shared session pipeline rerenders complete files and arguments for the remaining inputs and
 repeats validation; removing one proposal can expose another collision with retained native content.
 A supported namespace can resolve an earlier setup collision. Malformed inputs, invalid native
-responses, transport failures and unsafe filesystem publication remain hard errors. Raw argument
-override conflicts are still checked for enabled new session delivery. Ancestor-only discovery
-problems are reported rather than enforced as session prerequisites. Disabled session inputs do not
-introduce restrictions on native launch arguments. Outer native placement and its safety/ownership
-checks remain in place. Core emits final unhandled warnings after full output validation and stores
-the deferrals so inspection does not claim success. Setup-facet domain and transport failures retain
-their sanitized reason and focused remediation in incomplete state and the command's failure list.
-Independent setup and owner bookkeeping continue before the terminal error summary; these failures
-are not recast as unexplained SSH failures. Persistence failures and cancellation still abort.
-Session preparation errors retain their existing fail-before-teardown behavior.
+responses, transport failures and unsafe filesystem publication remain hard errors. Render the
+extra-argument vector once per start, check its effective override conflicts for enabled new
+delivery, and emit those same values with shell quoting and no further interpolation. Ancestor-only
+discovery problems are reported rather than enforced as session prerequisites. Disabled session
+inputs do not introduce restrictions on native launch arguments. Outer native placement and its
+safety/ownership checks remain in place. Core emits final unhandled warnings after full output
+validation and stores the deferrals so inspection does not claim success. Setup-facet domain and
+transport failures retain their sanitized reason and focused remediation in incomplete state and the
+command's failure list. Independent setup and owner bookkeeping continue before the terminal error
+summary; these failures are not recast as unexplained SSH failures. Persistence failures and
+cancellation still abort. Session preparation errors retain their existing fail-before-teardown
+behavior.
 
 An ancestor-only check still returns its native root for discovery-path diagnostics. A missing
 ancestor-only target produces an advisory warning; a missing target needed for new delivery remains
@@ -372,15 +374,28 @@ checkpoint. Marker and pattern recognition requires whole-line boundaries. Modif
 including prefixed annotations, retain their bytes and cleanup evidence rather than splicing
 unrelated lines. Metadata-only tracked-file queries disable Git's filesystem monitor locally.
 
-Before destructive workspace directory/group/record removal, reconcile known artifact exclusion
-claims with no desired files and checkpoint the remaining ordinary native setup state. Failure or
-modified pairs retain the workspace and cleanup evidence for retry. Unreadable historical setup
-state retains the existing warning/best-effort parent-deletion fallback; non-exclusion claims do not
-create another teardown engine. Missing-VM cleanup and whole-VM deletion retain their existing
-behavior. Git can share info/exclude across linked working trees; the same untracked relative path
-in another worktree is then ignored too. This native repository-level effect is explicitly
-disclosed, not presented as per-worktree isolation. Do not introduce another Git settings or
-reference-count engine to hide that limitation.
+Before destructive workspace directory/group/record removal, attempt known artifact exclusion
+retirement with no desired files through ordinary native setup state. Unresolved native cleanup
+warns and preserves ambiguous or foreign bytes without preventing the existing core deletion.
+Generic application retains incomplete ownership evidence while the owner remains; deleting that
+owner removes its state through the ordinary database transaction. Unknown historical state warns,
+and saved destinations never authorize fallback I/O. Non-exclusion claims do not create another
+teardown engine. Missing-VM cleanup and whole-VM deletion retain their existing behavior.
+
+Rehome uses its actual old WorkspaceRow and requested new path under the existing mutation guard.
+After a successful copy and before the row update/old-directory removal, retire verified
+old-location pairs and copied old pairs and establish the new-source exclusions for rebased
+confirmed files. Validate any prior source and Git prefix against that actual old owner, not an
+arbitrary stored claim. Each location's current Git metadata authorizes I/O. Generic reconciliation
+retains its strict current-owner source check. Native cleanup failures warn without blocking core
+rehome; shared persistence, cancellation and unexpected internal failures retain their existing
+behavior. This adds no facet rerun, general native-state relocation, workspace reinit or
+crash-atomic copy protocol.
+
+Git can share info/exclude across linked working trees; the same untracked relative path in another
+worktree is then ignored too. This native repository-level effect is explicitly disclosed, not
+presented as per-worktree isolation. Do not introduce another Git settings or reference-count engine
+to hide that limitation.
 
 ## Evidence and acceptance
 

@@ -1,5 +1,48 @@
 # Agent artifacts: implementation plan
 
+## Native delivery feedback, round 2 of 3, 2026-11-10
+
+The [complete report](https://github.com/WayfarerLabs/agentworks/pull/871#issuecomment-6755957164)
+at `b8c03be5` arrived before this round began. The
+[critical reading and batch](https://github.com/WayfarerLabs/agentworks/pull/871#issuecomment-6755998854)
+include its rendered-argument counterexample, Muntz's deletion/rehome findings and the permanent
+author-contract contradictions found during the wait. Draft is verified before source changes;
+refreshed main remains `438c4546`. This is round 2 of the operator's three-round allowance on
+PR 871.
+
+- [x] Read the complete report, verify the guard/render ordering in all three integrations, and
+      preserve its actual native, workstation, cleanup and packaging scope.
+- [ ] Render each integration's extra-argument vector once per start, validate those effective
+      values and emit the same values without another interpolation pass. Preserve literal
+      replacement data, token boundaries and pre-teardown refusal.
+- [ ] Make workspace exclusion retirement best effort during owning deletion, consistent with
+      framework R9. Preserve safe current-metadata-only I/O and diagnose unresolved leftovers
+      without introducing a new parent-deletion prerequisite or changing VM deletion.
+- [ ] Correct exclusion ownership through the supported old/new rehome lifecycle without trusting
+      arbitrary saved sources, running facets or adding a workspace reinit. Preserve other owners
+      and operator content; use existing applied state.
+- [ ] Align the permanent integration-author contract and deletion/rehome teaching with the approved
+      native-file carriers and actual implementation.
+- [ ] Complete the integrated required gates and independent project, Muntz and correctness lanes;
+      publish one exact green ready handoff without `review-requested`.
+- [ ] Wait for the next actual integration report before the remaining authorized round. Finish the
+      joint requirement and promotion audit and both locks only after corrected-head acceptance.
+
+The report independently passed all 12 required gates, including 11,480 non-integration tests with
+11 skips, 160 Python and 103 Node website tests. Linux and Windows remote-Lima observations
+establish safe shared-Git retirement, literal supporting-file publication/catalog exposure,
+binary-byte preservation and the reported Shell lifecycle. The report's duplicate-marker deletion
+refusal is a measurement, not adoption of a policy contradicting framework R9.
+
+Its Claude rendered-flag case proves actual native catalog suppression; the corresponding Codex and
+Grok failure ordering is source/adversarial evidence only. No native supporting-file Read or real
+model turn completed in that run. The separate `818ccee9` Read proof retains its own attribution.
+Windows binary preservation does not establish executable intent for a real PE file. The pending
+pre-allocation VM row needed manual disposal after absence proof; this is not supported-cleanup
+acceptance. The actual-main Typer comparison corroborates separate issue 880, outside this
+correction. No Transport/provider redesign, model-inference gate or workspace-mode implementation is
+added. Both guests and their children were independently verified absent by the testing session.
+
 ## Native delivery feedback, round 1 of 3, 2026-11-09
 
 The
@@ -22,7 +65,7 @@ independent of earlier merged PR budgets.
       changing VM deletion or adding a new ownership mechanism.
 - [x] Complete setup collision coverage, Claude selection simplification, filesystem-renderer
       naming, public identity-alias validation and legacy-section teaching.
-- [ ] Run the required gates and independent project, Muntz and correctness lanes on the combined
+- [x] Run the required gates and independent project, Muntz and correctness lanes on the combined
       correction; publish an exact green ready handoff with scoped evidence and limitations.
 - [ ] Wait for the next actual integration report, up to six hours, before another authorized round.
       Finish both acceptance audits and locks only after retained requirements are proved.

@@ -1,6 +1,45 @@
 # Acceptance reconciliation
 
-## Current disposition, 2026-11-09
+## Current disposition, 2026-11-10
+
+The
+[complete PR 871 report](https://github.com/WayfarerLabs/agentworks/pull/871#issuecomment-6755957164)
+tested exact `b8c03be50934193b53ffe0953879037ecf42dca5` against main `438c4546`. All 12 required
+gates passed, including 11,480 non-integration tests with 11 skips. Linux and Windows Server 2025
+remote-Lima lanes independently checked creation-time shared Git claims, literal supporting files,
+native catalogs, binary bytes and representative Shell lifecycle. Frozen wheel and source archive
+builds passed, including an independent rebuild without Git. This is scoped evidence, not acceptance
+of the pending correction or both locks.
+
+R5/R7 remain incomplete: the actual Claude 2.1.321 rendered-argument case suppressed Skill/catalog
+discovery despite managed files remaining present. Raw `extra_args` were guarded before context
+rendering in all three integrations; Codex/Grok native effects were not measured. Round 2 renders
+once and guards/emits the same effective vector.
+
+R8 also remains incomplete. Normal exact-pair retirement passed the live retest, but independently
+reproduced missing-metadata deletion and supported-rehome failures remain. Framework R9 forbids
+native applied-state deletion prerequisites; the report's duplicate-pair refusal does not supersede
+that contract. Correct safe best-effort parent cleanup and owner-bound rehome without accepting
+arbitrary saved sources or following historical destinations.
+
+R10 retains the current gate/report evidence, but the permanent integration-author contract still
+describes private-only carriers and a removed Grok option. Align it with the approved native-home
+packages and corrected lifecycle. The remaining plan-item inventory and requirement reconciliation
+are preparation, not completed closeout.
+
+No native supporting-file Read or real model turn completed in this run; the separate corrected
+`818ccee9` Read observation below keeps its own scope. Windows binary-byte preservation does not
+establish PE executable intent. Immediate native `--version` exit does not certify persistent Codex
+startup. The pre-allocation pending VM row required manual disposal after absence proof; that is not
+supported cleanup. The actual-main comparison confirms the separate Typer issue 880. No new
+model-inference, every-platform/version or provider-redesign requirement is added.
+
+The testing session independently verified both guests and children absent, current entity tables
+empty with integrity/FK checks, generated keys/trust cleanup and bounded private-value scans. These
+observations retain their tested head and do not certify later changes. Both SDD locks remain
+pending corrected-head acceptance and final promotion.
+
+## Retained disposition, 2026-11-09
 
 The
 [final PR 871 report](https://github.com/WayfarerLabs/agentworks/pull/871#issuecomment-6752844405)

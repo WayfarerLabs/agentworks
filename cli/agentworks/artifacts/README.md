@@ -370,13 +370,19 @@ Confirmed workspace artifact files receive exact repository-local exclusions in 
 that metadata. An exclusion also ignores an unrelated untracked file at the same repository-relative
 path in another worktree sharing it. Ordinary applied state records ownership of each marked pattern
 pair. Updates/removal retire only unchanged owned pairs; unrelated exclusions and operator
-modifications remain. Workspace deletion retires known pairs before removing its directory and
-ownership records. If that cleanup cannot finish safely, deletion retains the workspace and evidence
-for retry. Resolve the reported conflict, then retry the deletion. Unreadable native setup evidence
-cannot identify the pairs; that limitation warns while ordinary workspace deletion continues.
-Whole-VM deletion does not require guest artifact cleanup. Tracked artifact files stay tracked and
-visible, with a warning. Exclusions cannot conceal tracked changes. Agentworks does not edit shared
-`.gitignore`, hide whole native directories or change index flags.
+modifications remain. Workspace deletion attempts known retirement before removing its directory and
+ownership records. Missing metadata, unreadable evidence, modified pairs or native cleanup failures
+warn about unresolved exclusions while ordinary parent deletion continues. Inspect the reported
+current metadata path for leftovers; deletion does not certify their removal. Cleanup never follows
+an arbitrary saved destination. Whole-VM deletion does not require guest artifact cleanup. Tracked
+artifact files stay tracked and visible, with a warning. Exclusions cannot conceal tracked changes.
+Agentworks does not edit shared `.gitignore`, hide whole native directories or change index flags.
+
+Supported workspace rehome uses its known old/new owner paths to retire the old associations, remove
+copied old pairs and establish exclusions for the copied managed files where possible. Generic
+application still refuses another owner's saved source. Git metadata failures warn and do not
+prevent core rehome. This does not rerun workspace facets or refresh their native setup records;
+existing workspaces have no harness reinit operation.
 
 Elevated native file operations share a fixed allowlist: `/etc/claude-code`, `/etc/codex` and
 `/opt/agentworks/artifacts`. Reads, writes and cleanup outside those trees are refused, including
@@ -458,6 +464,11 @@ runtime files survive failed preparation and retire safely after teardown. Diffe
 is preserved; modified obsolete files retain cleanup evidence. Staging and cleanup validate every
 exact session-owned skill package before using its native skills parent as a filesystem publication
 boundary. HOME itself is never a broad publication boundary for these session files.
+
+Native artifact guards inspect the effective `extra_args` after context rendering. The integration
+emits those same argument values with shell quoting; replacement text is not interpolated again. A
+conflicting flag remains an error before old-runtime teardown, including when a template expression
+supplies the flag name.
 
 Selecting a native persona and delivering its definition are separate operations. If a managed
 persona definition remains unhandled, an explicit integration `agent` selection still applies. The
@@ -608,8 +619,8 @@ must be retained while the package is still requested. Generated instruction sec
 their explicit replaceable-section contract.
 
 `git_excludes.py` owns exact Git exclusion associations through ordinary native setup claims.
-`harness_setup/cleanup.py` retires known workspace associations before destructive owner cleanup,
-recording partial progress in that same state.
+`harness_setup/cleanup.py` attempts known workspace retirement and rehome through that same state,
+warning about unresolved native cleanup without adding a parent-deletion prerequisite.
 
 `session.py` prepares the launch context, stages a new private run before old-runtime teardown, then
 retires obsolete owned files after teardown. No artifact bookkeeping changes VM deletion.

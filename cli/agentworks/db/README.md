@@ -133,9 +133,10 @@ unavailable evidence and are preserved for a compatible release.
 
 Owner deletion uses the existing parent lifecycle and removes its applied state in the same database
 transaction. Native records do not add cleanup prerequisites or change backend failure handling. The
-VM-family mutation guard prevents parent deletion from racing setup; it is separate from the
-database transaction. See [harness facets](../../../docs/guides/harness-facets.md) for operating
-guidance.
+workspace lifecycle can use those records for best-effort retirement of exact shared Git exclusions;
+unresolved native cleanup warns without vetoing ordinary deletion. The VM-family mutation guard
+prevents parent deletion from racing setup; it is separate from the database transaction. See
+[harness facets](../../../docs/guides/harness-facets.md) for operating guidance.
 
 `clear_applied_slice` removes only one supplied registered key for one typed owner. It rejects
 caller-authored strings and keys registered for a different owner kind, treats an already absent key

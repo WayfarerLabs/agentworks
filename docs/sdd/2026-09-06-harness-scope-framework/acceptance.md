@@ -1,9 +1,29 @@
 # Acceptance reconciliation
 
-## Current disposition, 2026-11-09
+## Current disposition, 2026-11-10
 
 The companion's
-[current acceptance disposition](../2026-09-12-agent-artifacts/acceptance.md#current-disposition-2026-11-09)
+[current disposition](../2026-09-12-agent-artifacts/acceptance.md#current-disposition-2026-11-10)
+records the complete PR 871 report at `b8c03be5`, including representative native-file lifecycle,
+all required gates and the remaining rendered-argument defect. R7/R12/R16 remain transferred to that
+effort, with their original attribution retained below.
+
+The post-handoff audit also found a present R9 contradiction: known artifact exclusion cleanup can
+block workspace deletion, although this FRD and permanent lifecycle guides forbid native-state
+deletion prerequisites. Supported rehome can drop old-source ownership while leaving shared
+exclusions. These current counterexamples prevent claiming final framework acceptance until the
+bounded correction and its evidence are complete. The earlier unchanged-API, actual-user, native
+settings and prerequisite proofs remain valid at their recorded heads; neither a new universal
+vertical nor workspace modes are added as gates.
+
+Round 2 owns those lifecycle corrections and permanent author-contract alignment in the companion
+plan. Both locks remain pending final requirement reconciliation and accepted corrected-head
+evidence.
+
+## Retained disposition, 2026-11-09
+
+The companion's
+[retained acceptance disposition](../2026-09-12-agent-artifacts/acceptance.md#retained-disposition-2026-11-09)
 records PR 871's full independent report at `1ecffc5c`: current multi-session/native-file evidence,
 two material artifact defects and the exact coverage limits. R7/R12/R16 remain transferred to that
 effort. Existing framework proofs below retain their tested-head attribution; they do not certify
