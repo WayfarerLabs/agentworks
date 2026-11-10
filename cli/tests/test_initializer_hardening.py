@@ -92,6 +92,33 @@ def test_a_failed_reload_warns_and_the_fstab_step_still_runs(guest: StepGuest) -
 
 
 @requires_file_program
+def test_a_failed_load_restores_the_prior_baseline_and_the_next_run_retries(guest: StepGuest) -> None:
+    _sysctl().parent.mkdir()
+    _sysctl().write_text("kernel.dmesg_restrict = 0\n")
+    guest.respond(RELOAD, CommandFailed("box", 1, Result(Completed(1)), streams_logged=True))
+
+    hardening.apply_vm_hardening(guest.files, guest.log)
+
+    assert _sysctl().read_text() == "kernel.dmesg_restrict = 0\n"
+    guest.access.responses.clear()
+    guest.access.calls.clear()
+
+    hardening._apply_hardening_sysctl(guest.files, guest.log)
+
+    assert _sysctl().read_text() == hardening.HARDENING_SYSCTL_CONTENT
+    assert guest.commands() == [RELOAD]
+
+
+@requires_file_program
+def test_a_failed_load_of_a_new_baseline_removes_it(guest: StepGuest) -> None:
+    guest.respond(RELOAD, CommandFailed("box", 1, Result(Completed(1)), streams_logged=True))
+
+    hardening.apply_vm_hardening(guest.files, guest.log)
+
+    assert not _sysctl().exists()
+
+
+@requires_file_program
 def test_a_linked_sysctl_file_is_refused_with_a_warning_and_its_target_left_alone(
     guest: StepGuest, tmp_path: Path
 ) -> None:

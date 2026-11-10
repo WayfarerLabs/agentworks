@@ -61,21 +61,22 @@ layer.
 
 ### Fully idempotent
 
-| Step                   | Notes                                                                                  |
-| ---------------------- | -------------------------------------------------------------------------------------- |
-| Apt sources            | Key downloaded if missing; source list rewritten, and apt refreshed, only on a change  |
-| SSH host key preserve  | cloud-init drop-in written so host keys survive stop/start                             |
-| Shell                  | Overwritten from config                                                                |
-| SSH authorized keys    | Overwritten from config                                                                |
-| Git credentials        | Complete desired list rebuilt; empty removes Agentworks-owned credential/routing state |
-| Dotfiles (git source)  | `git pull` if already cloned, fresh clone if not                                       |
-| Mise packages          | Installed if missing, pruned if removed (when `mise_prune_on_reinit = true`)           |
-| Mise activation        | Overwritten from config (disabled comment written when off)                            |
-| PATH additions         | Overwritten from config                                                                |
-| Tailscale DNS          | Startup-ordering drop-in rewritten only when content differs                           |
-| sshd AcceptEnv         | Drop-in rewritten, validated and sshd reloaded only when its content differs           |
-| sudoers env_keep       | Fragment overwritten, staged and `visudo -cf` validated before promotion               |
-| sudoers console setenv | Same; scoped to the VM's admin user                                                    |
+| Step                   | Notes                                                                                                                                                                                                  |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Apt sources            | Key downloaded if missing; source list rewritten, and apt refreshed, only on a change                                                                                                                  |
+| SSH host key preserve  | cloud-init drop-in written so host keys survive stop/start                                                                                                                                             |
+| Shell                  | Overwritten from config                                                                                                                                                                                |
+| SSH authorized keys    | Overwritten from config                                                                                                                                                                                |
+| Git credentials        | Complete desired list rebuilt; empty removes Agentworks-owned credential/routing state                                                                                                                 |
+| Dotfiles (git source)  | `git pull` if already cloned, fresh clone if not                                                                                                                                                       |
+| Mise packages          | Installed if missing, pruned if removed (when `mise_prune_on_reinit = true`)                                                                                                                           |
+| Mise activation        | Overwritten from config (disabled comment written when off)                                                                                                                                            |
+| PATH additions         | Overwritten from config                                                                                                                                                                                |
+| VM hardening           | Sysctl baseline rewritten, and loaded, only when content differs; a failed load puts the prior baseline back. The `/proc` line in `/etc/fstab` is edited only when it has no `hidepid`, or `hidepid=0` |
+| Tailscale DNS          | Startup-ordering drop-in rewritten, and systemd reloaded, only when content differs; a failed reload puts the prior drop-in back                                                                       |
+| sshd AcceptEnv         | Drop-in rewritten, validated and sshd reloaded only when its content differs; any failure puts the prior drop-in back, so the next reinit retries                                                      |
+| sudoers env_keep       | Fragment overwritten, staged and `visudo -cf` validated before promotion                                                                                                                               |
+| sudoers console setenv | Same; scoped to the VM's admin user                                                                                                                                                                    |
 
 ### Additive only
 

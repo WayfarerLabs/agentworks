@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.execution.requests import Command
-from agentworks.vms.initializer.steps import STEP_FAILURES, warn_step
+from agentworks.vms.initializer.steps import STEP_FAILURES, update_and_apply, warn_step
 
 if TYPE_CHECKING:
     from agentworks.execution.files import Files
@@ -163,15 +163,27 @@ def apply_vm_hardening(files: Files, log: InitLog) -> None:
 
 
 def _apply_hardening_sysctl(files: Files, log: InitLog) -> None:
-    """Write the sysctl baseline if content differs from desired; reload only if it was written."""
+    """Write the sysctl baseline if content differs from desired, then load it with ``sysctl --system``.
+
+    A load that fails puts the prior baseline back, so the next run retries.
+    """
     current = files.read(HARDENING_SYSCTL_PATH, elevated=True)
     desired = HARDENING_SYSCTL_CONTENT.encode()
     if current == desired:
         output.info("Sysctl baseline already applied; no change.")
         return
     output.info("Applying sysctl baseline...")
-    files.update(HARDENING_SYSCTL_PATH, desired, observed=current, mode=0o644, parent_mode=0o755, elevated=True)
-    files.access.run(Command(("sysctl", "--system"), elevated=True, deadline=files.deadline), check=True)
+    update_and_apply(
+        files,
+        HARDENING_SYSCTL_PATH,
+        desired,
+        observed=current,
+        mode=0o644,
+        parent_mode=0o755,
+        apply=lambda: files.access.run(
+            Command(("sysctl", "--system"), elevated=True, deadline=files.deadline), check=True
+        ),
+    )
 
 
 def _apply_hardening_fstab(files: Files, log: InitLog) -> None:

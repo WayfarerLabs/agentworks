@@ -20,6 +20,7 @@ from agentworks.execution.requests import Command
 from agentworks.execution.results import Completed, Result, Unknown, UnknownReason
 from agentworks.vms.initializer import shell_env
 from tests.phase_b_support import StepGuest, requires_file_program
+from tests.vm_access_support import Call
 
 pytestmark = requires_file_program
 
@@ -188,6 +189,75 @@ def test_a_rejected_new_sshd_fragment_is_removed_and_never_reloaded(guest: StepG
     assert not fragment.exists()
     assert guest.commands() == [SSHD_TEST]
     assert len(guest.log.warned) == 1
+
+
+def _prior_fragment() -> Path:
+    fragment = _path("AGENTWORKS_SSHD_ACCEPT_ENV_PATH")
+    fragment.parent.mkdir()
+    fragment.write_bytes(b"AcceptEnv LANG\n")
+    return fragment
+
+
+def test_a_timeout_during_sshd_t_restores_the_prior_content(guest: StepGuest) -> None:
+    fragment = _prior_fragment()
+    guest.respond(SSHD_TEST, ExecutionIncomplete("box", Result(Unknown(UnknownReason.DEADLINE))))
+
+    shell_env._write_sshd_accept_env(guest.files, guest.log)
+
+    assert fragment.read_bytes() == b"AcceptEnv LANG\n"
+    assert guest.commands() == [SSHD_TEST]
+    assert len(guest.log.warned) == 1
+
+
+def test_a_failed_reload_restores_the_prior_content_and_the_next_run_retries(guest: StepGuest) -> None:
+    fragment = _prior_fragment()
+    guest.respond(SSHD_RELOAD, _failed(b"Failed to reload ssh.service\n"))
+
+    shell_env._write_sshd_accept_env(guest.files, guest.log)
+
+    assert fragment.read_bytes() == b"AcceptEnv LANG\n"
+    assert len(guest.log.warned) == 1
+    guest.access.responses.clear()
+    guest.access.calls.clear()
+
+    shell_env._write_sshd_accept_env(guest.files, guest.log)
+
+    assert fragment.read_bytes().endswith(b"AcceptEnv *\n")
+    assert guest.commands() == [SSHD_TEST, SSHD_RELOAD]
+    assert len(guest.log.warned) == 1
+    # A non-zero status from either is a failure, not an outcome to read.
+    assert all(call.options["check"] for call in guest.access.calls if call.request in (SSHD_TEST, SSHD_RELOAD))
+
+
+def test_an_interrupt_during_validation_restores_the_prior_content_and_propagates(guest: StepGuest) -> None:
+    fragment = _prior_fragment()
+    guest.respond(SSHD_TEST, KeyboardInterrupt())
+
+    with pytest.raises(KeyboardInterrupt):
+        shell_env._write_sshd_accept_env(guest.files, guest.log)
+
+    assert fragment.read_bytes() == b"AcceptEnv LANG\n"
+
+
+def test_a_failed_restore_warns_naming_the_fragment_with_the_original_failure(guest: StepGuest) -> None:
+    fragment = _prior_fragment()
+    run_program = guest.access.answer
+    assert run_program is not None
+
+    def another_writer_during_validation(call: Call) -> Result | BaseException | None:
+        if call.request == SSHD_TEST:
+            fragment.write_bytes(b"AcceptEnv OTHER\n")
+            return _failed(b"sshd: bad configuration\n")
+        return run_program(call)
+
+    guest.access.answer = another_writer_during_validation
+
+    shell_env._write_sshd_accept_env(guest.files, guest.log)
+
+    assert fragment.read_bytes() == b"AcceptEnv OTHER\n"
+    [warning] = guest.log.warned
+    assert str(fragment) in warning
+    assert "sshd: bad configuration" in warning
 
 
 # -- sudoers fragments ------------------------------------------------------------------

@@ -54,7 +54,7 @@ from typing import TYPE_CHECKING
 from agentworks import output
 from agentworks.errors import StateError
 from agentworks.execution.requests import Command
-from agentworks.vms.initializer.steps import STEP_FAILURES, status, warn_step
+from agentworks.vms.initializer.steps import STEP_FAILURES, status, update_and_apply, warn_step
 
 if TYPE_CHECKING:
     from agentworks.execution.files import Files
@@ -98,8 +98,9 @@ def _ensure_tailscaled_dropin(files: Files, log: InitLog) -> None:
     """Install/refresh the tailscaled startup-ordering drop-in.
 
     Writes only when content differs; runs ``daemon-reload`` only when
-    the file was actually rewritten. A missing drop-in directory is created
-    root-owned 0755 with the file.
+    the file was actually rewritten, and a reload that fails puts the prior
+    drop-in back, so the next run retries. A missing drop-in directory is
+    created root-owned 0755 with the file.
     """
     current = files.read(TAILSCALED_DROPIN_PATH, elevated=True)
     desired = TAILSCALED_DROPIN_CONTENT.encode()
@@ -107,8 +108,17 @@ def _ensure_tailscaled_dropin(files: Files, log: InitLog) -> None:
         output.info("tailscaled drop-in already installed; no change.")
         return
     output.info("Installing tailscaled startup-ordering drop-in...")
-    files.update(TAILSCALED_DROPIN_PATH, desired, observed=current, mode=0o644, parent_mode=0o755, elevated=True)
-    files.access.run(Command(("systemctl", "daemon-reload"), elevated=True, deadline=files.deadline), check=True)
+    update_and_apply(
+        files,
+        TAILSCALED_DROPIN_PATH,
+        desired,
+        observed=current,
+        mode=0o644,
+        parent_mode=0o755,
+        apply=lambda: files.access.run(
+            Command(("systemctl", "daemon-reload"), elevated=True, deadline=files.deadline), check=True
+        ),
+    )
 
 
 # Probe target for the libc DNS check. Stable A record, frequently cached on

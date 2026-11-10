@@ -14,17 +14,15 @@ edits. Neither writes through a link.
 
 from __future__ import annotations
 
-import hashlib
 import shlex
 from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.capabilities.vm_platform.skel import BASHRC, ZSHRC
-from agentworks.execution.errors import CommandFailed
 from agentworks.execution.requests import Command
 from agentworks.ssh import SSHError, SSHLogger
 
-from .steps import STEP_FAILURES, warn_step
+from .steps import STEP_FAILURES, update_and_apply, warn_step
 
 if TYPE_CHECKING:
     from agentworks.execution.files import Files
@@ -401,11 +399,12 @@ def _write_sshd_accept_env(files: Files, log: InitLog) -> None:
     ``Include /etc/ssh/sshd_config.d/*.conf`` directive in
     ``/etc/ssh/sshd_config``), so the snippet cannot be validated in
     isolation. The fragment is written only when its content differs from
-    what was read, then validated; on rejection the prior content is put
-    back (or the fragment removed when there was none), conditional on the
-    fragment still being the one this run wrote. sshd is reloaded only
-    after a write that validated, so a steady-state reinit leaves sshd
-    alone. The window where an unvalidated fragment sits at the real path
+    what was read, then validated and sshd reloaded; it counts as applied
+    only once both succeed. On any failure after the write (a rejection, a
+    timeout, a failed reload, an interrupt) the prior content is put back,
+    or the fragment removed when there was none, conditional on the
+    fragment still being the one this run wrote, so the next reinit
+    retries. A steady-state reinit leaves sshd alone. The window where an unvalidated fragment sits at the real path
     is bounded by the ``sshd -t`` call and never affects the running sshd,
     unless an unrelated process reloads sshd inside it (a ``dpkg``
     postinst on openssh-server under ``unattended-upgrades``, say); the
@@ -423,22 +422,13 @@ def _write_sshd_accept_env(files: Files, log: InitLog) -> None:
     )
     path = AGENTWORKS_SSHD_ACCEPT_ENV_PATH
 
+    def validate_and_reload() -> None:
+        files.access.run(Command(("sshd", "-t"), elevated=True, deadline=files.deadline), check=True)
+        files.access.run(Command(("systemctl", "reload", "ssh"), elevated=True, deadline=files.deadline), check=True)
+
     try:
         prior = files.read(path, elevated=True)
-        if not files.update(path, body, observed=prior, mode=0o644, parent_mode=0o755, elevated=True):
-            return
-        try:
-            files.access.run(Command(("sshd", "-t"), elevated=True, deadline=files.deadline), check=True)
-        except CommandFailed:
-            written = hashlib.sha256(body).hexdigest()
-            if prior is None:
-                files.remove_if(path, expected=written, elevated=True)
-            else:
-                files.write_if(path, prior, expected=written, mode=0o644, parent_mode=0o755, elevated=True)
-            raise
-        files.access.run(
-            Command(("systemctl", "reload", "ssh"), elevated=True, deadline=files.deadline)
-        ).require_completed(files.access.vm_name)
+        update_and_apply(files, path, body, observed=prior, mode=0o644, parent_mode=0o755, apply=validate_and_reload)
     except STEP_FAILURES as error:
         warn_step(log, "sshd AcceptEnv install failed; re-run 'agw vm reinit' to retry", error)
 
