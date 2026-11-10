@@ -275,16 +275,15 @@ def vm_rekey(
     wait_for_share: Annotated[
         bool, typer.Option("--wait-for-share", help="Wait for operator to share VM back to their tailnet")
     ] = False,
-    ignore_env: Annotated[
+    secret: Annotated[
+        str | None,
+        typer.Option("--secret", help="Resolve the replacement auth key from this declared secret."),
+    ] = None,
+    prompt: Annotated[
         bool,
         typer.Option(
-            "--ignore-env",
-            help=(
-                "Skip the env-var backend for the Tailscale auth-key secret "
-                "and prompt for the new value. Masks AW_SECRET_TAILSCALE_AUTH_KEY "
-                "(or the operator-typed backend_mappings.env-var override) so the "
-                "resolver's prompt backend takes over."
-            ),
+            "--prompt",
+            help="Prompt for the replacement auth key instead of using a configured secret source.",
         ),
     ] = False,
 ) -> None:
@@ -298,7 +297,8 @@ def vm_rekey(
         load_config(),
         name,
         wait_for_share=wait_for_share,
-        ignore_env=ignore_env,
+        secret=secret,
+        prompt=prompt,
         interaction=interaction,
     )
 
