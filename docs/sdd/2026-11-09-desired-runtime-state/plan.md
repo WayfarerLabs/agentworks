@@ -65,20 +65,20 @@ explicit migration and CLI contract, a green handed-off head, and a recorded con
 
 ## Phase 2: storage, intent, and VM cutover
 
-- [ ] Add the string-compatible desired-runtime enum, per-kind constraints, nullable legacy workload
+- [x] Add the string-compatible desired-runtime enum, per-kind constraints, nullable legacy workload
       targets, durable VM UUIDs, guarded console selection, and strict persisted-boundary
       conversion.
-- [ ] Implement atomic migration 39, remove old VM flag storage, preserve all current table facts,
+- [x] Implement atomic migration 39, remove old VM flag storage, preserve all current table facts,
       relationships and constraints, and update schema/foreign-key restore sentinels.
-- [ ] Add named target writers, expected-UUID checks for VM/session, and resource-owned pure intent
+- [x] Add named target writers, expected-UUID checks for VM/session, and resource-owned pure intent
       services; select consoles under the family guard. Ensure idempotent writes and no
       runtime/config/secret work in pure target selection.
-- [ ] Update VM creation/start/stop and every VM activation/read/display consumer to the new target;
+- [x] Update VM creation/start/stop and every VM activation/read/display consumer to the new target;
       remove the old flag setter, row field, and decision paths. Retain only historical migration
       references and the derived JSON compatibility projection.
-- [ ] Extract runtime-only VM operations usable by reconciliation without changing target. Preserve
+- [x] Extract runtime-only VM operations usable by reconciliation without changing target. Preserve
       conditional connection repair for provider-running VMs and active holds across guest work.
-- [ ] Close the VM auto-start race using the existing family guard, fresh UUID/target checks, and
+- [x] Close the VM auto-start race using the existing family guard, fresh UUID/target checks, and
       explicit held-token reuse through all current guarded agent/workspace/session callers. Guard
       hold admission too; release admission-only locking before interactive access. Require bounded
       same-keeper guest acknowledgement on WSL entry, with complete failure cleanup.
@@ -129,7 +129,7 @@ existing intended scopes. Refused/no-op paths do not resolve unused workload sec
 - [ ] Implement explicit VM/fleet/session/console scopes, strict name-or-all validation, retained
       VM/session UUID checks, guarded console selection, adoption blockers, and stopped-parent
       precedence.
-- [ ] Extend the existing Resolver gate path with invocation-only value-free failure memoization;
+- [x] Extend the existing Resolver gate path with invocation-only value-free failure memoization;
       register gate names only after success. Share seeded successes and conditional repair values
       while isolating failed families. Add no parallel cache or secret backend API.
 - [ ] Activate all selected running-intent VMs, including both childless VMs and VMs with only
@@ -145,7 +145,7 @@ existing intended scopes. Refused/no-op paths do not resolve unused workload sec
       including a nonzero aggregate result when selected targets remain incomplete.
 - [ ] Implement dry run with no activation, repair, workload source preview/resolution, staging,
       target write, or execution; explain conditional guest checks when a VM is off.
-- [ ] Add thin `set-desired-state` and `reconcile` CLI verbs under all three resource groups,
+- [x] Add thin `set-desired-state` and `reconcile` CLI verbs under all three resource groups,
       existing name completions, static state choices, additive inspection target fields, and the
       derived VM JSON compatibility field. For powered-off observations, map stopped intent to
       manual, on-demand to idle, and running to null disposition. Add no command-output schema
@@ -157,18 +157,18 @@ existing domain authorities, with no generic runnable lifecycle framework.
 
 ## Phase 5: permanent collateral and private quality
 
-- [ ] Promote the surviving contract into `docs/guides/desired-runtime-state.md`, runnable-status
+- [x] Promote the surviving contract into `docs/guides/desired-runtime-state.md`, runnable-status
       guidance, command reference, package/root operational guidance as needed, and the
       orchestration README. Explain batch versus per-target compositions and their separate
       readiness contexts.
-- [ ] Update retained management teaching and completions with the same commands and safe scope
+- [x] Update retained management teaching and completions with the same commands and safe scope
       guidance. Verify sample config/schema need no new target option; update any outdated
       collateral.
 - [ ] Document explicit adoption, accepted intent on failure/cancellation, VM on-demand versus
       running behavior, parent precedence, console independence, preview limits, and batch-secret
       failure changes, per-family preparation isolation, and contention during secret prompts,
       console consent, and hold admission. Add the implementing commit's breaking-change footer.
-- [ ] Explain that live WSL guests with stopped intent receive no idle protection during access or
+- [x] Explain that live WSL guests with stopped intent receive no idle protection during access or
       management commands and may stop mid-command. Show explicit on-demand/running selection as
       permitting normal holds and activation, rather than a keepalive-only switch.
 - [ ] Run the complete implementation's independent project review, complexity pass, and a
@@ -178,6 +178,20 @@ existing domain authorities, with no generic runnable lifecycle framework.
 - [ ] Run required Python lint/format/type/test and typer-isolation gates, file-quality linters,
       locked-SDD and rulesync checks, website Python/Node tests, and deterministic double builds on
       real exit codes. Add meaningful Windows-marked coverage for host-sensitive changes.
+
+Implementation checkpoint, 2026-11-10: the schema and VM cutover, shared Resolver changes, six CLI
+verbs, and permanent guidance are present in this PR. Independent whole-feature project and
+complexity reviews at `3b4a5fe5a` found bounded-observation, preview, and repeated-preparation
+issues; the fixes are being integrated before handoff. The generic correctness re-review at
+`43c6c0443` passed 130 focused tests and ten scratch checks, including evidence-only checkpoint
+recovery after the shared secret barrier and exact cancellation propagation. A legacy-agent
+transport report was refuted against the persisted socket constraint and prompted no change.
+
+The second full-suite triage had 11,563 passes, 63 failures, and 11 skips. Remaining session and
+artifact tests are being checked for actual regressions and adapted to accepted intent, aggregate
+results, the shared Resolver boundary, and fresh final observations. Full implementation validation,
+the final common-head private reviews, publication, and live evidence remain open. Local CLI process
+checks used isolated state and exercised setters and inspection; they did not exercise a provider.
 
 Definition of done: no material private finding remains; permanent docs describe shipped behavior
 without relying on SDD paths; required gates are green and evidence names the exact tested head.
