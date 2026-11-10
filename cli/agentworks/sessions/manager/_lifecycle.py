@@ -584,6 +584,7 @@ def start_session(
     resume_only: bool = False,
     interaction: TtyInteractionPolicy,
 ) -> None:
+    intent = _requested_launch_intent(force_new=force_new, resume_only=resume_only)
     from agentworks.runtime_state import run_session_batch
 
     run_session_batch(
@@ -592,7 +593,7 @@ def start_session(
         [_mgr._require_session(db, name)],
         operation="start",
         force=force,
-        intent=_requested_launch_intent(force_new=force_new, resume_only=resume_only),
+        intent=intent,
         running_restart_authorized=frozenset(),
         interaction=interaction,
     )

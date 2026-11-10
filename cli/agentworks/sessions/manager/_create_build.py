@@ -379,6 +379,7 @@ def _build_session_graph(
     )
 
     return SessionGraph(
+        held_native_guard=held_native_guard,
         vm_node=vm_node,
         agent_node=agent_node,
         session_node=session_node,

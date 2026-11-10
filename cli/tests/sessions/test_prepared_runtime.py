@@ -288,3 +288,19 @@ def test_interrupted_startup_recovery_collects_no_launch_requirements(tmp_path, 
     assert "recovered" in events and "tmux_create" not in events and "kill" not in events
     assert db.get_session("s1") == selected
     db.close()
+
+
+def test_guest_preparation_does_not_predict_missing_graph_credentials(tmp_path, monkeypatch):
+    from agentworks.orchestration.secrets import secret_union
+    from agentworks.sessions.nodes import LiveSessionNode
+
+    db, _ = _restart_fixture(tmp_path, monkeypatch, status=SessionStatus.STOPPED)
+    monkeypatch.setattr("agentworks.secrets.resolve.active_sources", lambda *a, **k: pytest.fail("source preview"))
+    monkeypatch.setattr(
+        "agentworks.orchestration.secrets.require_predicted_refs", lambda *a, **k: pytest.fail("prediction")
+    )
+    monkeypatch.setattr(LiveSessionNode, "secret_refs", lambda self: ("unavailable-workload-credential",))
+    prepared = _prepare_launch(db, monkeypatch)
+    assert secret_union(prepared.secret_nodes) == ("unavailable-workload-credential",)
+    assert len(prepared.secret_targets) == 1
+    db.close()

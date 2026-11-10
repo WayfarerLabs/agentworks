@@ -38,7 +38,7 @@ from pathlib import Path
 import pytest
 
 from agentworks import output
-from agentworks.db import Database
+from agentworks.db import Database, InitStatus
 
 from .conftest import stub_build_registry, stub_vm_gates
 
@@ -57,11 +57,10 @@ def _seed_two_vms(tmp_path: Path) -> Database:
     cross-VM mismatch tests.
     """
     db = Database(tmp_path / "test.db")
-    db._conn.execute(
-        "INSERT INTO vms (name, site, hostname, admin_username, tailscale_host, init_status) VALUES "
-        "('vm-A', 'lima', 'h', 'admin', '100.64.0.1', 'complete'),"
-        "('vm-B', 'lima', 'h', 'admin', '100.64.0.2', 'complete')"
-    )
+    for name, address in (("vm-A", "100.64.0.1"), ("vm-B", "100.64.0.2")):
+        db.insert_vm(name, "lima", "h", admin_username="admin")
+        db.update_vm_tailscale(name, address)
+        db.update_vm_init_status(name, InitStatus.COMPLETE)
     db._conn.execute(
         "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) VALUES "
         "('ws-A', 'vm-A', '/home/me/ws-A', 'ws-ws-A'),"
@@ -76,10 +75,9 @@ def _seed_two_vms(tmp_path: Path) -> Database:
 def _seed_one_vm(tmp_path: Path) -> Database:
     """Single VM with one workspace."""
     db = Database(tmp_path / "test.db")
-    db._conn.execute(
-        "INSERT INTO vms (name, site, hostname, admin_username, tailscale_host, init_status) "
-        "VALUES ('vm1', 'lima', 'h', 'admin', '100.64.0.5', 'complete')"
-    )
+    db.insert_vm("vm1", "lima", "h", admin_username="admin")
+    db.update_vm_tailscale("vm1", "100.64.0.5")
+    db.update_vm_init_status("vm1", InitStatus.COMPLETE)
     db._conn.execute(
         "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "
         "VALUES ('ws1', 'vm1', '/home/me/ws1', 'ws-ws1')"

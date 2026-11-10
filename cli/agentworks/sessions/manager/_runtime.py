@@ -259,7 +259,6 @@ def prepare_session_launch(
     """Classify eligibility and preflight this session without writing evidence."""
     from agentworks.capabilities.base import RunContext
     from agentworks.harness_setup.readiness import require_setup_ready
-    from agentworks.orchestration.readiness import preflight_all
     from agentworks.sessions.tmux import startup_protection_enabled
 
     db, config, session = definition.db, definition.config, definition.session
@@ -315,17 +314,14 @@ def prepare_session_launch(
             )
     target = _mgr._build_session_target(current, vm=definition.vm, config=config, db=db, admin_target=admin_target)
     if not recovered_startup or definition.replace_running:
-        preflight_all(
-            definition.nodes,
-            RunContext(
-                config=config,
-                operation_scope=definition.scope,
-                admin_target=admin_target,
-                agent_target=None if current.agent_name is None else target,
-            ),
-            registry=definition.registry,
-            interaction=interaction,
+        context = RunContext(
+            config=config,
+            operation_scope=definition.scope,
+            admin_target=admin_target,
+            agent_target=None if current.agent_name is None else target,
         )
+        for node in definition.nodes:
+            node.preflight(context)
         require_setup_ready(
             db,
             definition.registry,

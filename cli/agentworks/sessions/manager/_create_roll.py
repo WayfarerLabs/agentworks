@@ -84,6 +84,7 @@ def _realize_ephemerals(
                     setup_values=secret_values,
                     overlay=graph.workspace_overlay,
                     defer_overlay_report=True,
+                    held_native_guard=graph.held_native_guard,
                 )
             except BaseException:
                 if db.get_workspace(plan.workspace_name) is not None:
@@ -119,6 +120,7 @@ def _realize_ephemerals(
                     setup_values=secret_values,
                     overlay=graph.agent_overlay,
                     defer_overlay_report=True,
+                    held_native_guard=graph.held_native_guard,
                 )
             except BaseException:
                 if db.get_agent(plan.agent_name) is not None:
@@ -249,7 +251,7 @@ def _start_session_slice(
     mode_label = f"agent: {resolved_agent_name}" if resolved_agent_name else "admin"
     from agentworks.harness_setup.locking import native_mutation_guard
 
-    with native_mutation_guard(db.path, vm.name), output.section("Starting Session"):
+    with native_mutation_guard(db.path, vm.name, held=graph.held_native_guard), output.section("Starting Session"):
         output.info(
             f"Starting session '{name}' on workspace '{workspace_name}' ({mode_label}, template: {template.name})..."
         )
