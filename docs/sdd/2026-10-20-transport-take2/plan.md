@@ -565,6 +565,13 @@ Definition of done: create and reinit run entirely on the new transport.
 
 ## Slice 7: Workspaces, sessions and backup (HLA D7; PR C)
 
+- [ ] Write `sessions-lld.md`. It covers:
+  - `detached.py` (launch, observe, interrupt, download) with `FromFile` and `ToFile`, and the
+    `observation` option's rule for dispatching again;
+  - each workspace, session, console and backup request it moves, with its bound;
+  - session environment in the request, and every pane path's terminal handover (HLA D8);
+  - the env-newline refusals, the console's env carry across sudo and the legacy probe it deletes;
+  - the incident audit of the entry points this slice moves.
 - [ ] Implement `detached.py`, and the `FromFile` and `ToFile` input and sink.
 - [ ] Add the `observation` request option (a caller's declaration that a request only reads, so it
       may be dispatched again after `NotDelivered` or `Unknown`) with its first callers,
