@@ -98,12 +98,13 @@ The actual consuming workload receives values through ordinary env configuration
 `MCP_DOCS_TOKEN: {secret: docs-token}`. Direct `{secret: ...}` inside the MCP definition is
 rejected: acquired content does not join a second secret dependency graph. Env references remain
 names in canonical JSON, captures, digests and native definitions. Existing eager secret resolution
-supplies the normal integration execution environment and redaction boundary. Outer application
-validates representation, not the existence of a future user's variables. A workspace registration
-may intentionally reference that user's runtime env. Session-local delivery can check names against
-its actual launch env and leave missing bindings unhandled. Already-handled outer entries retain
-native runtime binding/error behavior, with no Agentworks launch gate or implicit repair. Never dump
-a variable's value.
+supplies declared env and its redaction boundary. All facets validate representation only; a
+workspace registration may intentionally reference a future user's variables. Session preparation
+also lacks a complete native environment: `$SHELL -lic` startup runs after its env map is captured.
+Do not infer missing bindings from that map, inspect profiles or add a separate probe. Native
+clients resolve references in their real process environment and report failures normally. Keep this
+distinct from registration, with no new Agentworks launch gate or implicit repair. Never dump a
+variable's value.
 
 Claude/Grok receive supported native interpolation strings. Codex receives same-name `env_vars`,
 `env_http_headers` and `bearer_token_env_var`, with public literals in its literal maps. Never emit

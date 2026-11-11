@@ -75,6 +75,12 @@ session-carrier experiment; missing documentation for a flag is not proof that n
 These paths are relative to `cli/agentworks`. Research read actual current source rather than
 inferring behavior from predecessor plans.
 
+An additional check at `07feb4a4` confirmed that `artifacts/session.py:123-131` copies only the
+Agentworks-composed env, while `sessions/tmux.py:618-642` later executes the workload through
+`$SHELL -lic`. Guest startup exports can supply or change MCP variables after preparation. An absent
+map key is not evidence of a missing native binding, and a separate probe would run a different
+process at another time. Preserve native runtime resolution instead.
+
 ## Refuted assumptions and open proof
 
 Do not rely on universal env-string interpolation, config-only native removal, read-only native

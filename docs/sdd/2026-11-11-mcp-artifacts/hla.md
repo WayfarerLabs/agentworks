@@ -81,14 +81,14 @@ runtime forwarding/interpolation, without putting resolved values into config ov
 content, ownership records or diagnostics.
 
 The small portable grammar supports same-name stdio forwarding, a complete HTTP header value from
-env and bearer authorization from env. It does not introduce a shell/template language. Outer facets
-validate representation and retain unresolved names; absence from their own setup env says nothing
-about a future user's runtime env. It does not defer a valid workspace registration. For
-session-local inputs, the actual managed-launch env permits missing-name diagnostics. The native
-client owns runtime binding errors for already-handled outer registrations; no new upstream launch
-gate or probe is introduced. Unrepresentable definitions remain wholly unhandled. Native provider
-credential restrictions and externally launched processes retain their limits. Dedicated MCP env
-names are the recommended operator path.
+env and bearer authorization from env. It does not introduce a shell/template language. Every facet
+validates representation and retains unresolved names. The prepared env map is not a complete native
+environment, even for session-local inputs: the guest interactive login shell runs afterward and can
+add or change exports. Missing map keys therefore do not defer a valid registration or prompt an
+environment probe. Native clients resolve references and report runtime binding errors normally.
+Unrepresentable definitions remain wholly unhandled. No upstream launch gate is introduced. Native
+provider credential restrictions and externally launched processes retain their limits. Dedicated
+MCP env names are the recommended operator path.
 
 ## Native placement
 

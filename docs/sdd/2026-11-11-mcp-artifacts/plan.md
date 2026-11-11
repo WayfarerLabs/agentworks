@@ -71,10 +71,10 @@ acceptance completes phase 1 only; the OAuth tasks remain owed.
       including suppressed initial contributions and original file-existence decisions.
 - [ ] Add Claude/Codex/Grok user and workspace translation and explicit VM deferral. Every adapter
       must apply or defer the new type; test against silent handled-but-omitted behavior.
-- [ ] Translate unresolved env/header/bearer references to actual native primitives. Outer setup
-      cannot require future-user values; test a project definition later bound by each actual user.
-      Session-local missing names and unsupported representations defer whole entries. Preserve
-      native trust/approval/auth state.
+- [ ] Translate unresolved env/header/bearer references to native primitives. Test bindings from
+      declared env and guest startup exports, including a project definition bound by each actual
+      user. Never infer absence from the partial prepared map or add an environment/profile probe.
+      Unsupported representations defer whole entries. Preserve native trust/approval/auth state.
 - [ ] Publish Shell canonical JSON and indexes at all existing scope locations, with no new
       deferrals or server execution.
 - [ ] Verify interruption/retry, other-owner preservation, activation removal and ordinary parent

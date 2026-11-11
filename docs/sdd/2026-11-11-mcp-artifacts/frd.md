@@ -67,11 +67,12 @@ Credential-bearing phase-1 values use references to variables supplied through t
 consuming environment and secret mechanism. Preserve references through acquisition, propagation,
 capture and applied-state records. Never resolve them into those records, inspection output, process
 arguments or diagnostics. Native runtime interpolation/forwarding is the ordinary delivery path.
-Outer setup preserves references without requiring the environment of an unknown future consumer; a
-workspace definition can use a variable each actual user supplies later. An unrepresentable binding
-is explicitly deferred. For session-local inputs, a missing variable in the actual managed-launch
-environment warns and leaves that entry unhandled. Previously registered outer connections retain
-the native client's runtime binding/error behavior, without a new Agentworks launch gate or probe.
+Every facet validates representation and preserves references for the actual native environment. A
+workspace definition can use a variable each user supplies later. Even at session preparation,
+Agentworks' env map is incomplete: guest login profiles can add or change values before native
+execution. Map absence must not produce a synthetic missing-binding warning or deferral. The native
+client owns runtime binding errors through its ordinary output. An unrepresentable definition is
+explicitly deferred; no new environment probe, profile inspection or launch gate is introduced.
 Public literal values remain supported; operators must not author credentials as literal content.
 
 ### R5. Defining-scope placement and routing

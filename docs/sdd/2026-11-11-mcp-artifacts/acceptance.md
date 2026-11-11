@@ -20,6 +20,9 @@ R11 belongs to phase 2: require native OAuth configuration and the agreed explic
 actual authenticated MCP access, actual-user credential isolation, remote flow/cancellation,
 advertised refresh/logout and independent credential cleanup.
 
+Include a session binding supplied only by guest startup exports and record native missing-ref
+behavior without synthetic prepared-map refusal. Preparation does not know the final process env.
+
 Run all standard gates, required private project/Muntz reviews and the independent PR integration
 pipeline. Code-heavy implementation also receives the generic correctness/security lane. Exercise
 the actual command surface, including failure and removal paths, rather than only direct helpers.
