@@ -207,6 +207,7 @@ def _rehome_vm(
 
         ssh_logger = SSHLogger(vm.name, "workspace-rehome")
         target = transport(vm, config, logger=ssh_logger)
+        admin = execution.vm_access(vm, config, Admin(), log=ssh_logger.record)
         ws_group = ws.linux_group
 
         # Shell-quote paths once up front; both are interpolated into many shell
@@ -260,7 +261,6 @@ def _rehome_vm(
                 # (warn and continue, exactly as before): the rsync copy already
                 # succeeded, so a later repair converges the tree.
                 try:
-                    admin = execution.vm_access(vm, config, Admin(), log=ssh_logger.record)
                     apply_workspace_acls(admin.files(), new_path)
                 except (SSHError, CommandFailed, ExecutionIncomplete, RequestRefused) as e:
                     output.warn(f"ACL setup failed: {e}")
@@ -305,9 +305,7 @@ def _rehome_vm(
                 # still authorizes their source, then establish the new pairs.
                 from agentworks.harness_setup.cleanup import rehome_workspace_excludes
 
-                rehome_workspace_excludes(
-                    db, ws, new_path, execution.vm_access(vm, config, Admin(), log=ssh_logger.record)
-                )
+                rehome_workspace_excludes(db, ws, new_path, admin)
 
                 # Update database
                 db.update_workspace_path(ws_name, new_path)

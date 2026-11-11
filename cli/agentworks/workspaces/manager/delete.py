@@ -177,13 +177,10 @@ def delete_workspace(
                             hint="Resolve the stuck sessions manually before retrying.",
                         )
                 if vm is not None:
-                    import agentworks.execution as execution
-                    from agentworks.execution.access import Admin
                     from agentworks.harness_setup.cleanup import cleanup_workspace_excludes
+                    from agentworks.sessions.manager import _identity_access
 
-                    cleanup_workspace_excludes(
-                        db, ws, lambda: execution.vm_access(vm, config, Admin(), log=ssh_logger.record)
-                    )
+                    cleanup_workspace_excludes(db, ws, lambda: _identity_access(vm, config, None, logger=ssh_logger))
                 if vm is not None and target is not None:
                     from agentworks.artifacts.session import cleanup_session_artifacts
                     from agentworks.harness_setup.state import read_native_setup
