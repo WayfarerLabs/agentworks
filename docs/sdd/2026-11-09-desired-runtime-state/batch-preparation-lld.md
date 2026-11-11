@@ -274,3 +274,41 @@ Execution rebuilds and revalidates its plan rather than consuming preview text.
   observations never authorize implicit force or replacement.
 - Mid-operation cancellation leaves accepted targets and completed infrastructure facts truthful,
   releases guards, and allows a fresh invocation to retry without duplicating healthy runtimes.
+
+## Current-main bulk stop composition
+
+The internal operation distinguishes named `stop` from public bulk `stop-all`; both accept stopped
+intent. Selection size cannot distinguish a filtered bulk command selecting one session. This adds
+no public grammar or parallel start/restart/reconciliation.
+
+Bulk preparation uses main's admin transport and sudo route from the beginning, avoiding an unused
+direct-agent SSH probe. Keep raw repair candidates through the shared secret boundary, then perform
+permitted identity repair and fresh status observation on the caller thread before strict unknown
+refusal. Checkpoint-only evidence is neither a completed stop nor concurrency eligibility.
+Unresolved actionable unknown refuses every destructive bulk teardown. Ordinary per-target
+preparation failures retain main's permitted sibling handling; repair conflicts and database writer
+failures escape before submission. Reconciliation keeps its independent isolation and evidence-only
+checkpoint behavior.
+
+Complete dedicated plans use main's existing executor once across selected VMs. Each gets a distinct
+bounded transport; workers receive no database, output, resolver or activation authority. Collision
+checks and the complete-future-map submission gate precede remote mutation. Incomplete dedicated and
+legacy work stays serial afterward. Preserve non-activating stop-only observation, including WSL
+hold admission, with guards and database lifetime through all execution and draining.
+
+The observer runs immediately after successful stopped CAS, before removing its future from pending,
+inside interruption/retry handling. It only updates invocation results and completed names on the
+caller thread and tolerates repeated notification. Handle `UserAbort` before ordinary exceptions; an
+observer failure after successful persistence is not a failed database commit. Never infer success
+from submission or missing failure names when an exception escapes.
+
+Parent-off completion compares the original prepared runtime snapshot after existing
+session/parent/target checks. Do not construct expected state from the latest row to hide an
+intervening run or fingerprint change. Main's stopped CAS provides exact same-run idempotence and
+preserves desired intent.
+
+Coverage must prove bulk overlap, filtered-one bulk versus named stop, strict unknown plus healthy
+sibling with zero destructive commands, an actual prepared session stop behind mixed secret failure,
+valid admin access without direct-agent access, stale snapshot/writer refusal and truthful completed
+sibling results through first/repeated interruption. Retain incoming submission/collision/drain
+tests and original off-parent, intent and reconciliation-isolation cases.

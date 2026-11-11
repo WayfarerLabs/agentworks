@@ -50,3 +50,11 @@ also directed GCP suspend/resume recovery in the same PR. All three private revi
 non-overlapping root confirmation. Exact final-head CI, ready handoff and the associated separate
 integration result remain required. Earlier completion claims do not mark this follow-up complete or
 establish live GCP validation.
+
+The round-two ready handoff at `863c499aa` had green CI and clean final private delta reviews.
+Completed integration preflight 6787498628 then found main at `07feb4a45` and stopped on four
+conflicts before gates or native tests. The operator explicitly authorized one supplemental round
+and continued monitoring. Its main teardown integration and deterministic test clock are in
+development under the follow-up plan. New validation, handoff, actual integration evidence and
+feedback disposition remain required; the goal remains active. This historical lock does not mark
+the supplemental work complete.

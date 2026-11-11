@@ -150,3 +150,16 @@ checks, file quality, rulesync, locked SDDs, typer isolation, 160 Python and 103
 and both deterministic double-build variants. Exact final-head CI, ready publication and the new
 separate integration report remain pending. No new live GCP result is established by unit tests or
 earlier reports.
+
+## Supplemental integration preflight
+
+Round-two CI 42960165124 passed all ten jobs at `863c499aa`; all three final SDD delta reviews were
+clean. Completed separate preflight 6787498628 compared that head with freshly fetched main
+`07feb4a45` and reproduced four conflicts. It stopped before gates, wheel build, delegated review
+and live testing, touching no integration operator state. It establishes no fresh native GCP or
+combined teardown result. Earlier evidence retains its exact head attribution.
+
+The operator authorized one supplemental round. Its main teardown integration and deterministic GCP
+test-clock correction require new combined gates, three private lanes, exact-head CI, ready handoff
+and the associated integration report. Those remain pending; publication alone does not complete
+monitoring or disposition.

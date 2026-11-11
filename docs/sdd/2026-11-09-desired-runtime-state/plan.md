@@ -12,12 +12,12 @@ on `feat/desired-runtime-state`, based on main. No split PR, stack, early merge,
 is authorized. Private implementation commits may be partial; each published handoff is complete for
 its checkpoint and green. The PR remains draft until the complete implementation handoff.
 
-| Stage                   | Signal                                      | Published fix allowance               | Current record                            |
-| ----------------------- | ------------------------------------------- | ------------------------------------- | ----------------------------------------- |
-| FRD                     | Draft plus `review-requested`               | Up to two rounds                      | Converged at `c6337609d`, two rounds used |
-| Complete design         | Draft plus `review-requested`               | Up to two rounds                      | Converged at `32a176600`; two rounds used |
-| Complete implementation | Ready                                       | Up to two rounds                      | Round two active after main integration   |
-| Closeout                | Final lock in the same PR after convergence | No new feature/fix allowance inferred | Lock and closeout checks completed        |
+| Stage                   | Signal                                      | Published fix allowance                                  | Current record                            |
+| ----------------------- | ------------------------------------------- | -------------------------------------------------------- | ----------------------------------------- |
+| FRD                     | Draft plus `review-requested`               | Up to two rounds                                         | Converged at `c6337609d`, two rounds used |
+| Complete design         | Draft plus `review-requested`               | Up to two rounds                                         | Converged at `32a176600`; two rounds used |
+| Complete implementation | Ready                                       | Two original rounds plus one explicit supplemental round | Supplemental round active                 |
+| Closeout                | Final lock in the same PR after convergence | No new feature/fix allowance inferred                    | Lock and closeout checks completed        |
 
 The FRD convergence reading is PR comment 6762771633. The final report accepted prior corrections;
 its remaining phrase suggestion was independently assessed as optional. The HLA states uniform
@@ -447,7 +447,7 @@ CLI. No live GCP pass is claimed by the source implementation or its behavioral 
       read-only preview and preacceptance regressions.
 - [x] Complete the combined candidate's required gates and independent project, complexity and
       generic correctness/security reviews at one pinned head; resolve material private findings.
-- [ ] Publish a complete green round-two handoff to PR #885, naming the spent allowance and GCP
+- [x] Publish a complete green round-two handoff to PR #885, naming the spent allowance and GCP
       direction, then wait for its associated separate integration report before any further
       iteration. Record every result and remaining limit before claiming follow-up convergence.
 
@@ -475,3 +475,44 @@ Markdown and 477 spelling inputs after correcting the new SDD spelling. Typer is
 locked-SDD checks, 160 Python and 103 Node website tests, and deterministic double builds at both
 site bases all returned zero. Exact final-head CI, ready publication and the associated separate
 integration report remain required.
+
+The round-two handoff was published at `863c499aa` in comment 6787227335 with all ten CI jobs green
+in run 42960165124. All three final SDD delta reviews were clean. Completed separate preflight
+6787498628 found main had advanced to `07feb4a45` and stopped on four conflicts before gates, wheel
+build, delegated review or native tests. This is not fresh GCP validation. Clean delta review
+6787472615 confirmed both prior material corrections and proposed an optional deterministic test
+clock. Critical reading 6787501750 assessed that and inherited stop-transition behavior.
+
+## 2026-11-11: authorized supplemental main integration
+
+The operator explicitly authorized one more feedback round and required the goal to remain active
+through monitoring and disposition. Comment 6787360629 records that authenticated direction. The
+original two implementation rounds remain spent; this is one additional round, not a standing
+allowance. No PR merge is authorized.
+
+Supplemental round one of one starts in comment 6788141928 after the actual associated report and
+more than one hour after ready. The frozen batch is review 6787472615, preflight 6787498628 and the
+non-finding Copilot quota notice; no inline threads were open. The PR was verified draft at
+`863c499aa`. Fresh main is `07feb4a4538ed26b7e82918d120bebac33438769`.
+
+Main adds #776's parallel batch stop, conditional runtime completion and PID-repair fencing. The
+database conflict is imports only; no new schema migration is needed. Factual scouts and private
+project/complexity design scrutiny identified automatic-merge seams beyond the four markers. The
+lead owns integration decisions in the [architecture](hla.md) and
+[batch design](batch-preparation-lld.md); one isolated owner implements code, tests and matching
+permanent collateral. The incoming locked SDD remains untouched.
+
+- [ ] Integrate current main and all four conflicts, preserving intent/secret boundaries and main's
+      native teardown, conditional writes and public bulk concurrency.
+- [ ] Correct the GCP transition test's clock without changing production activation; retain the
+      deliberate inherited stop-transition policy.
+- [ ] Verify named versus filtered bulk stop, admin routing, strict bulk unknown refusal, original
+      snapshot fencing, off-parent behavior, secret barriers and truthful interrupted completion.
+      Obtain all three private lanes and required gates at one pinned candidate.
+- [ ] Publish the complete green supplemental handoff, wait for its actual associated integration
+      report and critically dispose of feedback before claiming convergence or finishing.
+
+This uses the one supplemental allowance. Later feedback belongs to a later batch and creates no new
+round. Keep the goal active through monitoring and disposition. The open follow-up cleanup item
+covers all remaining and new task resources. Four finished worker/scout trees and three subordinate
+branches were retired after round two; review trees and two new factual scout trees remain.

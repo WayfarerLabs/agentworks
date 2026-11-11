@@ -176,3 +176,22 @@ Permanent documentation lives in `docs/guides/desired-runtime-state.md`, the com
 runnable-status guidance, and the orchestration README. No permanent artifact links to this SDD. The
 [migration strategy](migration-strategy.md) defines the one-cutover schema and caller migration. The
 [research](prior-art-research.md) explains terminology and mechanisms deliberately not adopted.
+
+## Current-main parallel stop integration
+
+The supplemental integration retains the prepared controller as lifecycle composition and main's
+session teardown module as native teardown and conditional persistence authority. An internal
+`stop-all` operation distinguishes public bulk stop from named stop even when a filter selects one
+row. It selects stopped intent; no public command or desired-state value is added.
+
+Only public bulk stop uses the existing bounded concurrent dedicated teardown engine. It preserves
+main's admin route, strict actionable-unknown refusal, collision/submission gates, caller-thread
+persistence/output and serial compatibility work afterward. Named stop, start/restart and
+reconciliation retain synchronous ordering; reconciliation retains independent-family failure
+handling. Stop-only work neither activates an off parent nor opens a hold that could boot it.
+
+Destructive work follows complete workload preparation. Guards and the writable database remain
+owned through interruption draining and reconciliation. A narrow caller-thread observer records
+success only after conditional stopped persistence, before the future leaves pending. Recording is
+idempotent for interrupted retries. Cancellation, including `UserAbort`, remains control flow and
+must not become a persistence warning or permission to run subsequent serial work.
