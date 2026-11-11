@@ -69,3 +69,14 @@ frozen Typer 0.27.3 lock. The refused empty-batch mutation smoke was not retried
 This closeout changes only SDD tracking and this record. Its ordinary documentation reviews and
 checks precede the final ready handoff; no further material source fix or self-merge is authorized.
 The artifact lock takes effect when this work lands on main.
+
+## Subsequent Main Integration
+
+The operator requested merge-conflict resolution after this closeout. Main `834eb7156` is now
+integrated by merge `2416f45cd`. The transport factory retains main's VM host-key trust binding and
+this effort's explicit retry setting. Teardown remains on the existing transport API; this task
+does not migrate it to the new execution API or reopen the completed feature feedback rounds.
+
+The earlier verification above remains evidence for its named implementation head. Fresh gates,
+installed-package checks, private delta review and a new ready handoff cover this integration;
+their outcomes are recorded in the plan and handoff rather than attributed to the earlier wheel.

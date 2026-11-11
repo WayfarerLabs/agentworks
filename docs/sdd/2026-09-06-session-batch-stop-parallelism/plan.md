@@ -459,6 +459,22 @@ permanent guidance retain the validated implementation bytes.
 - Live evidence verifies runtime and database state, not elapsed time alone.
 - No material correctness, security, complexity, or integration finding remains.
 
+## Post-closeout Main Integration
+
+The operator subsequently requested resolution of merge conflicts. This authorizes compatibility
+work for main `834eb7156`, including the transport core, native artifact delivery and shell-template
+compatibility changes; it does not reopen the completed feedback budget or authorize unrelated
+feature work. The sole textual conflict is the transport factory's imports. Resolution must retain
+both main's VM host-key trust binding and this effort's explicit teardown retry policy. The existing
+transport API remains in use; migrating teardown to the new execution API is outside this task.
+
+Earlier validation above remains attributed to its recorded heads. The newly combined result needs
+fresh validation and a separate ready handoff; it is not byte-identical to the earlier wheel.
+
+- [ ] Merge the pinned main tip, review automatic merges, and retain trust and teardown invariants.
+- [ ] Run fresh local gates, installed-package checks and independent private delta reviews.
+- [ ] Publish the combined head, verify hosted checks and restore ready status with a scoped handoff.
+
 ## Residual Work Deliberately Deferred
 
 - Parallel start/restart orchestration is tracked by issue #778 and requires its own SDD if
