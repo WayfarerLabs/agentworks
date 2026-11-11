@@ -59,8 +59,8 @@ cases. Their coverage is not exchanged or inflated.
 
 Current closeout implementation is `5bc9823e`; documentation correction `aba5250a` changes only
 Markdown. Full frozen CLI validation returned **12,084 passed, 34 skipped**, exit 0; full mypy
-checked 971 files. Ruff/format and exact CI Typer isolation passed. A focused conformance readback
-returned 168 passed and 26 explicit noninteractive sh/dash startup-file skips; it overlaps the full
+checked 971 files. Ruff/format and exact CI Typer isolation passed. A focused conformance check
+returned 168 passed and 26 explicit non-interactive sh/dash startup-file skips; it overlaps the full
 suite. Website Python/Node tests, both deterministic double builds/diffs, Rulesync and lock checks
 passed. File lint initially failed on one format and one spelling issue; both were corrected and the
 complete lint replay returned 0. The original failures remain recorded.

@@ -23,7 +23,7 @@ partial candidates are not relabeled as accepted releases.
 
 Permanent homes are the harness facet/native setup/idempotency/migration guides and capability,
 integration and database READMEs. The SDD directory is not required to operate or extend the
-framework. Artifact R7/R12/R16 were transferred and completed by the companion artifact effort; MCP
+framework. Framework R7/R12/R16 were transferred and completed by the companion artifact effort; MCP
 support and single-session workspace modes are subsequent separate efforts.
 
 The documented native cleanup, settings-retention, concurrency and platform limits remain. This lock
