@@ -115,9 +115,9 @@ planned. OAuth workflow preference remains a phase-2 question.
 - [x] Update artifact and integration READMEs/guides, sample config, examples, schema teaching and
       release/upgrade notes with actual supported mechanisms, limits, native formatting changes and
       downgrade behavior. Permanent teaching must stand alone without this SDD.
-- [ ] Run the full frozen CLI/repository/website gates and installed wheel/source archive checks,
+- [x] Run the full frozen CLI/repository/website gates and installed wheel/source archive checks,
       standalone guide renders and source/package parity on the complete candidate.
-- [ ] Run independent pinned project, Muntz and generic correctness/security reviews for code; fix
+- [x] Run independent pinned project, Muntz and generic correctness/security reviews for code; fix
       material findings and revalidate the actual final delta before public handoff.
 - [ ] Hand off the complete green pushed head with integration emphasis from
       [acceptance](acceptance.md), then mark ready without `review-requested`.
@@ -260,3 +260,8 @@ CI independently reported those same spelling words; its website and Windows job
 original logs are retained. The spelling is corrected with these records, and the unchanged website
 is being replayed independently before the final handoff. No browser source or timing policy is
 changed by this effort.
+
+The final record delta is limited to this SDD's HLA/plan, including the historical checkpoint
+framing clarification. The handoff records its exact pushed green head and CI separately. The
+remaining unchecked registration tasks track independent integration evidence, not a claim that
+OAuth or the overall SDD is done. No `locked.md` is added.
