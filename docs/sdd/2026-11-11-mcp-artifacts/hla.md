@@ -143,9 +143,12 @@ acknowledgment ledger or readiness gate is introduced.
 
 User/workspace setup captures, prepares env and invokes integrations as today. Reinit reconciles
 entries and retires removed owned effects; independent facets continue after recoverable failures.
-Session setup uses existing prospective-run/private-file ownership so a failed replacement cannot
-retire a working runtime. Restart/resume repeats the chosen invocation-only additions. Cleanup never
-restores old whole documents or deletes native credential caches.
+Session setup stages prospective-run private files before teardown. A refusal or staging failure
+before teardown preserves the working runtime and its effects. After confirmed teardown, a native
+launch failure retains accurate retry/cleanup state without claiming rollback of the old runtime.
+Keep artifact/run-ID commit after teardown and preserve conditional runtime reconciliation errors.
+Restart/resume repeats the chosen invocation-only additions. Cleanup never restores old whole
+documents or deletes native credential caches.
 
 `agw artifact show` projects declaration, capture, original owner, native identity, destination and
 recorded handling. It shows no connection body and never invokes native inventory that may connect

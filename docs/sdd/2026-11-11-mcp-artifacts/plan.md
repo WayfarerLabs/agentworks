@@ -7,6 +7,11 @@ integration and delivery; draft requirements are in [frd.md](frd.md). Tool filte
 OAuth is phase 2 of this same SDD under the operator's clarification; phase 1 rejects its fields.
 The source baseline is `834eb715`.
 
+The checkpoint was refreshed onto main `07feb4a4` after session batch teardown PR 776 merged.
+Artifact/setup/native/env/secret seams are unchanged; current restart still stages prospective
+artifacts before teardown and commits the new run only afterward. Preserve that ordering and its
+conditional runtime-state checks.
+
 Use the initial branch/PR for the complete registration phase. First publish one coherent SDD-only
 draft with FRD, HLA, this plan, research, LLD, migration and acceptance together; apply
 `review-requested` for that checkpoint. Do not merge the checkpoint or claim implementation. Count
@@ -31,7 +36,7 @@ acceptance completes phase 1 only; the OAuth tasks remain owed.
 - [x] Draft the complete SDD set against current source and primary native/Rulesync references.
 - [x] Resolve the canonical subset, source/inline shape, credential-reference grammar and
       scope/ownership boundaries together across FRD, HLA and LLD.
-- [ ] Run independent project and Muntz reviews in separate pinned worktrees; incorporate material
+- [x] Run independent project and Muntz reviews in separate pinned worktrees; incorporate material
       findings without widening the charter.
 - [ ] Run applicable repository/website gates and exact-head CI; publish the draft checkpoint with
       `sdd:mcp-artifacts` and `review-requested`.
@@ -84,8 +89,10 @@ acceptance completes phase 1 only; the OAuth tasks remain owed.
       honest unsupported disposition and bring any acceptance scope question to the operator.
 - [ ] Preserve all existing artifact workaround selection and native argv validation. Do not replace
       other MCP sources, expose credentials in argv or write shared catalogs for isolation.
-- [ ] Prove failed restart leaves the working runtime/effects intact, successful replacement retires
-      only obsolete run files, and delete/name reuse does not affect another session.
+- [ ] Prove pre-teardown refusal/staging failures preserve the working runtime/effects. For launch
+      failure after confirmed teardown, retain accurate retry/cleanup state without rollback claims.
+      Successful replacement retires only obsolete run files, and delete/name reuse does not affect
+      another session.
 
 ## Inspection, collateral and validation
 
