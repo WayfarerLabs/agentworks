@@ -228,17 +228,17 @@ def create_agent_on_vm(
     # Provisioning is hermetic: no operator env from [agent_templates.*.env]
     # or [vm_templates.*.env] is injected into the agent's install runners.
     # Static identity (AGENTWORKS_VM via /etc/profile.d/, AGENTWORKS_AGENT
-    # via the per-user ~/.agentworks-profile.sh we write BELOW before the
-    # install commands run) reaches the runners through login-shell
-    # sourcing. Integration setup receives operator env through its own runner.
+    # via the per-user ~/.agentworks-profile.sh written below, before the
+    # dotfiles installer, mise and the install commands run) reaches them
+    # through login-shell sourcing. Integration setup receives operator env
+    # through its own runner.
 
-    # Write the agent's per-user profile fragment EARLY, before any install
-    # command or dotfiles installer runs, so that AGENTWORKS_AGENT and the
-    # declared PATH entries reach them via the login-shell sourcing chain:
-    # mise's shims, then the user install commands' own paths, which take
-    # precedence, as in the admin's profile. The entries are declarations, so
-    # the fragment is complete here and is rewritten on every run, which lets
-    # reinit clear previously set paths.
+    # Write the agent's per-user profile fragment first, as the admin's is, so
+    # that AGENTWORKS_AGENT and the declared PATH entries reach every later
+    # login shell: mise's shims, with the user install commands' own paths
+    # ahead of them on PATH. The entries are declarations, so the fragment is
+    # complete here, written once per run, which lets reinit clear previously
+    # set paths.
     from agentworks.env import ResourceContext, per_user_identity_env
     from agentworks.resources.access import kind_dict
     from agentworks.vms.initializer.mise import _mise_shims_path
@@ -260,11 +260,10 @@ def create_agent_on_vm(
         agent_files, profile_paths, logger, home=home, shell=agent_shell, identity_env=agent_identity
     )
 
-    # Always write ~/.agentworks-rc.sh -- even when there are no shell
-    # hooks to install. The defensive ``_ensure_agentworks_files_sourced``
-    # step at the end of setup adds a ``. ~/.agentworks-rc.sh`` line to
-    # the agent's .bashrc/.zshrc unconditionally; if the file doesn't
-    # exist, every interactive login hits "No such file or directory".
+    # Always write ~/.agentworks-rc.sh, even when there are no shell hooks to
+    # install: the writer and both ``_ensure_agentworks_files_sourced`` passes
+    # below add a ``. ~/.agentworks-rc.sh`` line to the agent's .bashrc/.zshrc
+    # unconditionally, so a missing file would break every interactive login.
     snippet = MISE_ACTIVATE_LINES if agent_tmpl.mise_activate else "# mise activation disabled"
     _write_agentworks_rc(agent_files, [snippet], logger, home=home, shell=agent_shell)
 
@@ -275,9 +274,10 @@ def create_agent_on_vm(
     # via scp.
 
     # The admin's order from here on (docs/guides/mise.md): the mise config,
-    # dotfiles, the mise lockfile and install, then the user install commands,
-    # which may depend on mise's tools. Dotfiles may override the config, and
-    # an explicit lockfile overrides the dotfiles'.
+    # git credentials, dotfiles, the mise lockfile and install, the source
+    # lines again, the user install commands, which may depend on mise's
+    # tools, and a last pass over the source lines. Dotfiles may override the
+    # config, and an explicit lockfile overrides the dotfiles'.
     if agent_tmpl.mise_packages:
         _write_mise_config(agent_files, agent_tmpl.mise_packages, agent_tmpl.mise_install_before, home, logger)
 
@@ -347,9 +347,8 @@ def create_agent_on_vm(
         label="Agent install command",
     )
 
-    # Defensive final step: re-ensure source lines in case dotfiles
-    # install (or any other later step) overwrote a shell rc file in
-    # place. A file that already names a fragment is left alone.
+    # Last pass: an install command can replace a shell rc file too. A file
+    # that already names a fragment is left alone.
     _ensure_agentworks_files_sourced(agent_files, logger, home=home, shell=agent_shell)
 
 

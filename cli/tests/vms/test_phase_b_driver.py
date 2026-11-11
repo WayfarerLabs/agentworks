@@ -255,8 +255,8 @@ def test_on_a_first_create_the_user_install_commands_profile_holds_mise_s_shims_
 def test_the_admin_writes_its_fragments_first_and_ensures_their_lines_around_its_install_commands(
     run_section: Callable[..., None], tmp_path: Path
 ) -> None:
-    """The agent's order: the fragments before the dotfiles install, whose login shell reads them; their
-    source lines again after it and mise, before the user install commands; and a final pass after those."""
+    """The fragments come before the dotfiles install, whose login shell reads them; their source lines
+    again after it and mise, before the user install commands; and a final pass after those."""
     guest = Guest()
 
     run_section(guest, _local_dotfiles(tmp_path))

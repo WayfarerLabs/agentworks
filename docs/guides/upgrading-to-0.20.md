@@ -327,9 +327,11 @@ place its `authorized_keys`; every later step runs as the agent, which cannot ru
   `agw vm reinit <name> --admin-spec '<complete replacement admin spec>'`, or clear it with
   `--spec '{}'` or `--admin-spec '{}'`; `agw doctor` names the same repair. `vm reinit` now takes
   `--admin-template` and `--admin-spec`, as `agent reinit` takes `--update-template` and `--spec`.
-  The describe commands' `instance_state` reports such a spec, and a saved harness activation list,
-  as unavailable with reason `replacement-required` and issue `instance-spec-replacement-required`;
-  an activation list used to read `unsupported-version` and `instance-spec-unsupported`.
+  While a record awaits its replacement, inspection output (`resource show`, a resource graph's
+  `used_by`, `secret show`) leaves out the references that owner's stored spec makes. The describe
+  commands' `instance_state` reports such a spec, and a saved harness activation list, as
+  unavailable with reason `replacement-required` and issue `instance-spec-replacement-required`; an
+  activation list used to read `unsupported-version` and `instance-spec-unsupported`.
 - **A remote written without `git::` is refused.** A source reference (`dotfiles_source`,
   `mise_lockfile`, an artifact's `source`, a harness settings `source`) holding `://` or `::`, or
   whose first path component holds a colon that is not a Windows drive letter (as in
@@ -377,7 +379,8 @@ place its `authorized_keys`; every later step runs as the agent, which cannot ru
   - The admin's find them on a first create too, where they used to only from the next reinit. An
     admin install command or check that looks up a tool mise also provides can now find mise's on a
     first create.
-  - The admin's dotfiles installer and mise install see the profile on a first create as well.
+  - The admin's dotfiles installer and mise install see the profile on a first create as well,
+    including its `umask 027`, as they already did on reinit.
 - **A missing login shell warns.** Setting the admin's login shell to one that is not installed
   fails the shell configuration step with a warning, instead of running `usermod` with an empty
   shell.
