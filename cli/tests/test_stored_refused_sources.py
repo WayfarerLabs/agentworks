@@ -33,19 +33,25 @@ SETTINGS: JsonObject = {
         "codex": {"settings": {"source": f"u:{SECRET}@example.com:settings.json", "strategy": "replace"}}
     }
 }
+PARTIAL_SETTINGS: JsonObject = {
+    "harness_integrations": {"codex": {"settings": {"source": f"u:{SECRET}@example.com:settings.json"}}}
+}
+"""A layer that sets only the source, inheriting the rest of its settings from its template."""
 REFUSED: list[JsonObject] = [
     {"dotfiles_source": f"git::https://u:{SECRET}@example.com/dots.git"},
     {"dotfiles_source": f"https://u:{SECRET}@example.com/dots.git"},
     {"dotfiles_source": f"user:{SECRET}@example.com:me/dots.git"},
     {"mise_lockfile": f"git::https://{SECRET}@example.com/locks.git//mise.lock"},
     SETTINGS,
+    PARTIAL_SETTINGS,
 ]
-IDS = ["credentialed-git", "bare-url", "bare-scp", "lockfile", "harness-settings"]
+IDS = ["credentialed-git", "bare-url", "bare-scp", "lockfile", "harness-settings", "partial-harness-settings"]
 FIELDS = [
     "dotfiles_source",
     "dotfiles_source",
     "dotfiles_source",
     "mise_lockfile",
+    "harness_integrations.codex.settings.source",
     "harness_integrations.codex.settings.source",
 ]
 
@@ -102,7 +108,9 @@ def test_agent_reinit_clears_or_replaces_a_refused_stored_source_but_a_retain_re
 
 
 @pytest.mark.parametrize(
-    ("value", "field"), [(REFUSED[0], FIELDS[0]), (SETTINGS, FIELDS[-1])], ids=["dotfiles", "settings"]
+    ("value", "field"),
+    [(REFUSED[0], FIELDS[0]), (SETTINGS, FIELDS[-1]), (PARTIAL_SETTINGS, FIELDS[-1])],
+    ids=["dotfiles", "settings", "partial-settings"],
 )
 def test_a_vm_s_refused_stored_admin_source_gets_the_vm_hint(value: JsonObject, field: str) -> None:
     payload = VersionedPayload(2, {"vm": {}, "admin": value})

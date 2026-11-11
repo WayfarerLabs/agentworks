@@ -1068,9 +1068,11 @@ no longer use them. The departures from the tables above, each recorded where it
   `source` through `_refused_activation_sources`. The codec keeps an activation's config opaque and
   the registry validates it per integration when it publishes the owner, where a refused settings
   `source` would be a config error with no repair, so the decode validates each seated integration's
-  config itself and classifies a failure that is only refused sources. Only an agent's, a
-  workspace's and a VM admin layer's activations can hold one (no VM-facet config has a source), so
-  a VM record's refusal always carries `VM_ADMIN_REPLACEMENT_REMEDY`. It and
+  config itself and classifies a failure that is only refused sources
+  (`instance_overlay_codec.refused_source_fields`, which for a layer ignores `missing` fields its
+  template may supply, so a layer setting only `settings.source` is still classified). Only an
+  agent's, a workspace's and a VM admin layer's activations can hold one (no VM-facet config has a
+  source), so a VM record's refusal always carries `VM_ADMIN_REPLACEMENT_REMEDY`. It and
   `ActivationMapMigrationRequired` share the base `ExplicitReplacementRequired`, which
   `replace_agent_overlay` lets an explicit `--spec` replace or clear; a retain still refuses. Doctor
   shows its hint, and the describe commands' `instance_state` reports any

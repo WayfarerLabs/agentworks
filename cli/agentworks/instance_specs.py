@@ -15,7 +15,7 @@ from agentworks.instance_overlay_codec import (
     OVERLAY_EXCLUDED_FIELDS,
     RefusedSourceFieldsError,
     UnsupportedOverlayFieldsError,
-    value_safe_model_validation_error,
+    refused_source_fields,
 )
 
 if TYPE_CHECKING:
@@ -157,9 +157,11 @@ def _refused_activation_sources(
     validates it against its integration when it publishes the owner. A
     source the release now refuses, such as a harness settings ``source``,
     would surface there as a config error with no repair, so the decode
-    classifies it first. Any other config failure is left to that
-    validation, as before. Only seated integrations are checked; every
-    command seats them when it loads its registry, before any decode.
+    classifies it first. A stored layer may omit what its template
+    supplies, so a missing field does not count against it. Any other
+    config failure is left to that validation, as before. Only seated
+    integrations are checked; every command seats them when it loads its
+    registry, before any decode.
     """
     from pydantic import ValidationError as PydanticValidationError
 
@@ -179,11 +181,7 @@ def _refused_activation_sources(
             cause = error.__cause__
             if not isinstance(cause, PydanticValidationError):
                 continue
-            classified = value_safe_model_validation_error(
-                cause, "stored activation", entity_kind=owner[0], classify_unsupported=False
-            )
-            if isinstance(classified, RefusedSourceFieldsError):
-                fields.extend(f"harness_integrations.{name}.{field}" for field in classified.fields)
+            fields.extend(f"harness_integrations.{name}.{field}" for field in refused_source_fields(cause, layer=True))
     return fields
 
 

@@ -24,6 +24,8 @@ from tests.conftest import seed_vm_trust, stub_vm_ssh_identity
 from tests.vm_access_support import install_access_recorder
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from agentworks.db import Database, VMRow
     from agentworks.db.instance_state import JsonObject
     from tests.conftest import CapturedOutput
@@ -162,4 +164,51 @@ def test_deleting_the_refused_vm_deletes_its_backend_and_removes_it(
     assert db.get_vm("box") is None
     assert db.instance_state.get_desired_overlay("vm", "box") is None
     assert captured_output.warnings == []
+    assert SECRET not in str(captured_output.lines)
+
+
+def test_a_layer_setting_only_a_refused_settings_source_is_published_identity_only(
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    captured_output: CapturedOutput,
+) -> None:
+    """The layer inherits the rest of its settings from its template, so its own validation also misses them."""
+    from agentworks.bootstrap import load_request_registry
+    from tests.conftest import ManifestDoc
+    from tests.orchestrated_fixtures import proxmox_site, write_operator_config
+
+    settings = tmp_path / "settings.json"
+    settings.write_text("{}")
+    base = {"harness_integrations": {"codex": {"settings": {"source": str(settings), "strategy": "replace"}}}}
+    monkeypatch.setenv("AW_SECRET_PROXMOX_TOKEN", "pve-token")
+    config = write_operator_config(
+        tmp_path,
+        '[plugins]\nsystem = ["proxmox", "codex"]\n',
+        manifests=[
+            proxmox_site(),
+            ManifestDoc("agent-template", "default", base),
+            ManifestDoc("admin-template", "default", base),
+        ],
+    )
+    partial: JsonObject = {
+        "harness_integrations": {"codex": {"settings": {"source": f"u:{SECRET}@example.com:settings.json"}}}
+    }
+    _vm(db, "box")
+    _vm(db, "other", admin=partial)
+    _agent(db, "a1", layer=partial)
+
+    registry = load_request_registry(config, live_database=db)
+
+    assert {(ref.kind, ref.name) for ref in registry.lookup("agent", "a1").outbound} == {
+        ("vm", "box"),
+        ("agent-template", "default"),
+    }
+    assert {(ref.kind, ref.name) for ref in registry.lookup("vm", "other").outbound} == {
+        ("vm-site", "proxmox"),
+        ("vm-template", "default"),
+        ("admin-template", "default"),
+    }
+    with pytest.raises(StoredSourceReferenceRefused):
+        _reinit_agent(db, config, "a1")
     assert SECRET not in str(captured_output.lines)

@@ -10,7 +10,7 @@ from agentworks.declared_resource import DeclaredResource
 from agentworks.errors import SourceRefFormError, ValidationError, ValueFreeError
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
 
     from pydantic import BaseModel
 
@@ -67,6 +67,29 @@ def decode_overlay_model[T: BaseModel](
         ) from None
 
 
+def refused_source_fields(error: PydanticValidationError, *, layer: bool = False) -> tuple[str, ...]:
+    """The path of each refused source field when every failure is one (``SourceRefFormError``), else ``()``.
+
+    ``layer`` reads ``error`` as a partial layer's, which may omit what its
+    base supplies, so its ``missing`` failures do not count.
+    """
+    paths: list[str] = []
+    for item in error.errors(include_url=False, include_context=True, include_input=False):
+        if layer and item["type"] == "missing":
+            continue
+        cause = _cause(item)
+        if not isinstance(cause, SourceRefFormError):
+            return ()
+        paths.append(".".join([*(str(part) for part in item["loc"][:-1] if part != "name"), cause.field]))
+    return tuple(dict.fromkeys(paths))
+
+
+def _cause(item: Mapping[str, object]) -> object:
+    """The exception a value or assertion error item carries, if any."""
+    context = item.get("ctx")
+    return context.get("error") if isinstance(context, dict) else None
+
+
 def value_safe_model_validation_error(
     error: PydanticValidationError,
     label: str,
@@ -80,17 +103,10 @@ def value_safe_model_validation_error(
     errors = error.errors(include_url=False, include_context=True, include_input=False)
     details = []
     errors_by_parent: dict[tuple[object, ...], set[str]] = {}
-    # The path of each refused source field, or None once any failure is something else.
-    refused: list[str] | None = []
     for item in errors:
         location = ".".join(str(part) for part in item["loc"] if part != "name") or "<root>"
         message = item["msg"]
-        context = item.get("ctx")
-        cause = context.get("error") if isinstance(context, dict) else None
-        if refused is not None and isinstance(cause, SourceRefFormError):
-            refused.append(".".join([*(str(part) for part in item["loc"][:-1] if part != "name"), cause.field]))
-        else:
-            refused = None
+        cause = _cause(item)
         if item["type"] in {"value_error", "assertion_error"}:
             if isinstance(cause, ValueFreeError):
                 message = str(cause)
@@ -109,10 +125,11 @@ def value_safe_model_validation_error(
         return UnsupportedOverlayFieldsError(
             f"{label}: {'; '.join(details)}", entity_kind=entity_kind, entity_name=entity_name
         )
+    refused = refused_source_fields(error)
     if refused:
         return RefusedSourceFieldsError(
             f"{label}: {'; '.join(details)}",
-            fields=tuple(dict.fromkeys(refused)),
+            fields=refused,
             entity_kind=entity_kind,
             entity_name=entity_name,
         )
