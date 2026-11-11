@@ -242,10 +242,10 @@ source prefixes so later cleanup can reconstruct the create-time allow independe
 not store the VM's external IPv4.
 
 Starting a GCE VM resumes a suspended instance and starts a terminated instance. If shutdown or
-suspension is still in progress, Agentworks waits for it to settle before choosing the operation. An
-instance that is already running needs no power operation. Each read verifies the stored provider
-instance ID; a same-name replacement is never started or resumed. Power operations preserve the VM's
-identity and initialization state.
+suspension is still in progress, Agentworks waits within the power-state timeout for it to settle
+before choosing the operation. An instance that is already running needs no power operation. Each
+read verifies the stored provider instance ID; operation responses must match the expected request
+and provider target. Power operations preserve the VM's identity and initialization state.
 
 If Google Cloud reports insufficient zonal instance capacity, Agentworks treats that completed
 operation as a definitive failure, names the selected zone, and rolls back the partial create. Retry

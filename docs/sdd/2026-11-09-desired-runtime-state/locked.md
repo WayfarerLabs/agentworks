@@ -28,8 +28,8 @@ tests, permanent guidance and actual reports, including platform and fault-injec
 [plan.md](plan.md) records completed work and final closeout checks. Closeout changes only these SDD
 records; the tested application and permanent documentation remain unchanged.
 
-No material finding or implementation work remains open. No PR merge is authorized or performed by
-this effort. The SDD lock becomes binding when this PR lands on main.
+At the original closeout, no material finding or implementation work remained open. No PR merge is
+authorized or performed by this effort. The SDD lock becomes binding when this PR lands on main.
 
 ## 2026-11-11: current-main integration follow-up
 
@@ -40,3 +40,11 @@ artifact and compatibility integrations are resolved and independently reviewed.
 [follow-up plan](plan.md#2026-11-11-operator-directed-current-main-integration) tracks new checks,
 handoff, separate integration evidence and cleanup. The integrated head requires fresh validation
 before its completion can be claimed. No new feature policy or PR merge is authorized.
+
+The main-integration handoff at `dbbbd31cc` received green CI and completed integration
+report 6786419851. Its fresh Linux/Windows-to-Lima recovery and artifact results retain that head's
+attribution. The report confirmed an R6 preview blocker omission. The final original implementation
+feedback round, two of two, corrects that omission and protects Console preacceptance. The operator
+also directed GCP suspend/resume recovery in the same PR. The combined corrective candidate is in
+development; its reviews, gates, ready handoff and separate integration result remain required.
+Earlier completion claims do not mark this follow-up complete or establish live GCP validation.

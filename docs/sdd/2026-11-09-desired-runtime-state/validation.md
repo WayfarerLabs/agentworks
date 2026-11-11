@@ -105,8 +105,21 @@ The operator-directed current-main integration follows the completed SDD-only cl
 execution, artifact delivery and compatibility code. The reports above remain evidence about their
 original tested heads. Combined-source gates and all three independent review lanes passed, with
 12,325 tests and 34 skips in the corrected root run. The final delta at `101071778` is independently
-clean. Exact final-head CI and a completed separate integration report remain required before
-convergence; no new native pass or unchanged-artifact equivalence is claimed.
+clean. CI run 42947972175 passed all ten jobs at the handed-off `dbbbd31cc` head. Completed separate
+integration report 6786419851 passed all twelve gates with 12,325 tests and 34 skips. Its actual
+Linux and Windows Server 2025 workstation campaigns against remote Lima recovered desired sessions
+and ordered named consoles after a new boot, retained identities on healthy repetition, and verified
+missing-trust refusal, genuine host-key import, pure setters, provider/off-parent stops and native
+artifact retention. The report's independent controller/SQLite probe reproduced the missing-trust
+preview defect; the current corrective head requires fresh validation before convergence.
+
+The report's model health attempt reached the first-party API through the installed Claude session
+but failed with insufficient credit, exit 1 and zero reported cost. It proves no successful model
+conversation, OAuth or interactive response. Independent cleanup removed its three Lima fixtures and
+Windows campaign root, checked empty entity/event tables and integrity/foreign keys, and audited
+native resources and captured process births. Linux/model credential scans and exported local
+Windows evidence were clear; no remote Windows private-key scan is claimed. Offline tailnet metadata
+may remain. Migration, WSL and cloud evidence above remains attributed to earlier heads.
 
 Independent verification also reproduced an incoming-main host-key import metadata race:
 `vms/manager/host_keys.py` retains a VM row/address, then writes trust by name without a family
@@ -116,3 +129,14 @@ establish a full public-create/native campaign or a compromised ready VM. Import
 code are byte-identical to main `834eb7156`, and the conflict resolution introduces no new caller.
 This is recorded for the SSH trust/import owner as an upstream discovery outside this follow-up; no
 production fix or broader trust-import contract change is included.
+
+## 2026-11-11 corrective candidate
+
+The final authorized implementation feedback round adds preview's read-only trust prerequisite
+before provider credentials/observation and a real Console preacceptance regression. The
+operator-directed GCP correction dispatches native resume for suspended instances and waits for
+known stopping/suspending transitions before deciding, preserving numeric identity checks and
+operation verification. Behavioral tests cover request/operation identity, ownership replacement,
+timeouts, cancellation and unchanged stored intent. Root combined gates, all three private review
+lanes, exact-head CI and the new separate integration report are pending. No new live GCP result is
+established by unit tests or earlier reports.

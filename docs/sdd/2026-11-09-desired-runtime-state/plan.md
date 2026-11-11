@@ -16,7 +16,7 @@ its checkpoint and green. The PR remains draft until the complete implementation
 | ----------------------- | ------------------------------------------- | ------------------------------------- | ----------------------------------------- |
 | FRD                     | Draft plus `review-requested`               | Up to two rounds                      | Converged at `c6337609d`, two rounds used |
 | Complete design         | Draft plus `review-requested`               | Up to two rounds                      | Converged at `32a176600`; two rounds used |
-| Complete implementation | Ready                                       | Up to two rounds                      | Converged at `452eb0622`; one round used  |
+| Complete implementation | Ready                                       | Up to two rounds                      | Round two active after main integration   |
 | Closeout                | Final lock in the same PR after convergence | No new feature/fix allowance inferred | Lock and closeout checks completed        |
 
 The FRD convergence reading is PR comment 6762771633. The final report accepted prior corrections;
@@ -375,7 +375,7 @@ attribution and do not validate the new integration.
       trust, artifact, compatibility, CLI and documentation seams against both contracts.
 - [x] Exercise combined behavior with focused tests and required gates. Obtain independent project,
       complexity and generic correctness reviews at one pinned candidate head.
-- [ ] Publish the complete green candidate to the same PR with a scoped ready handoff; wait for its
+- [x] Publish the complete green candidate to the same PR with a scoped ready handoff; wait for its
       associated separate integration report before any further iteration. Record actual results and
       coverage limits without converting previous reports into fresh evidence.
 - [ ] Retire this follow-up's owned worktrees, subordinate branch, caches and temporary outputs;
@@ -408,3 +408,51 @@ reviews were clean at `101071778`, each verifying the 30 affected tests. Product
 unchanged from the earlier clean review head; the corrections retain actual trust enforcement and
 every original fixture assertion. Fresh exact-head CI must still pass before publication, and the
 new live report remains pending.
+
+That candidate was published at `dbbbd31cc` in PR comment 6785541656 at 02:51:06 UTC, with all ten
+CI jobs green in run 42947972175. The completed separate report, comment 6786419851 at 03:47:03 UTC,
+passed all twelve gates with 12,325 tests and 34 skips. Linux and Windows Server 2025 workstations
+recovered desired sessions and ordered named consoles on remote Lima after a new boot, preserved
+identities on repetition, and verified trust refusal/import and native artifact retention. The
+report also independently reproduced the preview trust blocker described below. The model health
+call failed for insufficient API credit; no successful model conversation is established. Cleanup
+was independently audited, with no remote Windows private-key scan claimed and possible offline
+tailnet metadata retained. Earlier migration, WSL and cloud results retain their original heads.
+
+## 2026-11-11: final implementation feedback round and GCP resume
+
+The operator's GCP follow-up authorizes correction of the existing platform activation path in this
+same PR. The remaining original implementation feedback allowance covers round two of two. Its
+frozen batch is review 6785968262, integration report 6786419851 and the non-finding Copilot quota
+notice; no inline thread was open. Critical readings are comments 6786145253 and 6786538784. The
+actual integration report arrived before the collection window ended at 03:51:06 UTC. The PR was
+returned to draft before source changes. No further original fix allowance or merge is inferred.
+
+The accepted R6 correction makes preview check the same local host-key prerequisite as apply before
+provider credentials or observation when the selected intent requires a running VM. A shared
+predicate keeps that decision aligned while preserving provider-only stop, off-parent child stop and
+idle on-demand exceptions. A real-boundary Console regression protects refusal before intent
+acceptance; no production Console rewrite is needed. The optional shared predicate and short
+defensive-boundary rationale are included. Other suggested boundary coverage remains optional.
+
+GCP activation resumes a native suspended instance, starts a terminated instance and preserves the
+running no-op. Known stopping/suspending states settle through the existing bounded, numeric-ID
+checking poller before dispatch. Resume uses the existing request UUID, operation target/type
+verification, operation wait, running-state poll and cancellation semantics. The IAM guide includes
+the resume permission. This changes no desired-state vocabulary, global status taxonomy, schema or
+CLI. No live GCP pass is claimed by the source implementation or its behavioral tests.
+
+- [x] Integrate the disjoint GCP adapter and reconciliation/test corrections from their owning
+      workers, with permanent GCP guidance and meaningful ownership, timeout, cancellation,
+      nonmutation and preacceptance regressions.
+- [ ] Complete the combined candidate's required gates and independent project, complexity and
+      generic correctness/security reviews at one pinned head; resolve material private findings.
+- [ ] Publish a complete green round-two handoff to PR #885, naming the spent allowance and GCP
+      direction, then wait for its associated separate integration report before any further
+      iteration. Record every result and remaining limit before claiming follow-up convergence.
+
+The lead retains architecture, SDD ownership, integration and handoff. The two isolated owners
+changed only their assigned GCP or reconciliation/test files. New material feedback after this round
+requires an authenticated disposition when the existing authority does not cover it; it cannot
+become optional merely because the original two-round allowance is spent. The preceding follow-up
+cleanup item also covers these workers, review trees and temporary outputs.
