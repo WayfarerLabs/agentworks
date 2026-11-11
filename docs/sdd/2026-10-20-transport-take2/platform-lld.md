@@ -500,16 +500,21 @@ minutes rather than after the repair's 600. Then, unless the pinging left none o
 (which raises `ChannelUnreachable` the same way), one `guest_agent_exec` of `["/bin/bash", "-s"]`
 with `input-data`, then `guest_agent_exec_status` every two seconds until it reports exit or the
 deadline passes. Each request's wait is bounded by what remains of the deadline, at most the API's
-30-second `REQUEST_TIMEOUT_SECONDS`. A poll carries only the PID, so a failed one is asked again at
-the next interval; only polls that keep failing for `STATUS_RETRY_SECONDS` (30 s) give up, as they
-do for an agent that restarted and lost the PID. Dispatch and status failures raise
-`ConnectivityError` with no stdin in the message (`transport.py:69-123`), except an HTTP 401 or 403,
-which raises `TokenRejectedError` at once; a status failure of either kind says the script may still
-be running, and a status failure from the API adds the API's own error text (an agent that restarted
-mid-script answers `Agent error: PID <pid> does not exist`), since that request carries only the
-PID. A dispatch failure adds none, since its request carries the script. A `_TruncatedQGAOutput`
-report raises `ConnectivityError` saying the script exited with its output cut short. No failure
-chains the API error, whose request quotes the script. `create` waits for cloud-init through it
+30-second `REQUEST_TIMEOUT_SECONDS`. A socket timeout bounds connecting and each wait for data, not
+a whole response, so an API that keeps a response arriving can carry one request past the deadline;
+the `run_as_root` contract states the same limit for any channel over an HTTP API. The API is the
+site's own server, and enforcing a whole-response bound would mean replacing `urllib`, and the proxy
+support that comes with it, or reaching into private socket attributes. A poll carries only the PID,
+so a failed one is asked again at the next interval; only polls that keep failing for
+`STATUS_RETRY_SECONDS` (30 s) give up, as they do for an agent that restarted and lost the PID.
+Dispatch and status failures raise `ConnectivityError` with no stdin in the message
+(`transport.py:69-123`), except an HTTP 401 or 403, which raises `TokenRejectedError` at once; a
+status failure of either kind says the script may still be running, and a status failure from the
+API adds the API's own error text (an agent that restarted mid-script answers
+`Agent error: PID <pid> does not exist`), since that request carries only the PID. A dispatch
+failure adds none, since its request carries the script. A `_TruncatedQGAOutput` report raises
+`ConnectivityError` saying the script exited with its output cut short. No failure chains the API
+error, whose request quotes the script. `create` waits for cloud-init through it
 (`cloud-init status --wait --long`, the cloud bootstrap's readiness command, 420 s, which covers the
 agent ping's 120 and cloud-init's 300, status 2 a warning, and any other failure quoting
 cloud-init's last lines as the cloud bootstrap does; a channel failure is asked again within that

@@ -381,7 +381,10 @@ class VMPlatform(Capability):
         The channel works without the VM's Tailscale state. Write ``script``,
         close stdin, and return everything the channel printed on each
         stream when it ends or ``deadline`` seconds pass; stop waiting at the
-        deadline and never claim the guest command stopped. Run it once:
+        deadline and never claim the guest command stopped. A channel that
+        reaches the guest through an HTTP API bounds each socket wait by what
+        remains, which is as far as a socket timeout reaches: a response that
+        keeps arriving can carry one request past the deadline. Run it once:
         never retry, parse the output or report an exit code (``RawRun`` has
         no field for one, because no channel's status is trusted; core reads
         the status from markers in the streams). ``script`` can carry a
