@@ -600,6 +600,11 @@ Definition of done: no workspace, session or backup module imports a legacy modu
       who never imported.
 - [ ] Search for remaining users of the `AcceptEnv` fragment. If none remain, stop writing it and
       supersede ADR 0014; otherwise record what still needs it in that ADR.
+- [ ] Settle when `run_as_root`'s `deadline` starts. Proxmox counts it from the call, so its agent
+      wait spends it; the clouds start it at dispatch, after opening the route, reading the address
+      and waiting for SSH, none of which the deadline bounds (`public_ssh.py`). Choose one reading
+      and make the clouds match, or state in the contract that the wait before dispatch has its own
+      bound. Raised by #866's round 8 review.
 - [ ] Confirm by search that no core code builds its own `ssh` or `scp` command line outside
       `agentworks.execution` and platforms' private access.
 - [ ] Take the optional items from the delta review of PR B's round 5, which had no rounds left:
