@@ -118,6 +118,7 @@ def reconcile_workspace_excludes(
     group: str,
     report_incomplete: Callable[[str], None],
     prior_workspace: str | None = None,
+    shared_paths: Sequence[str] = (),
 ) -> None:
     """Own only our exact marker/pattern pairs, preserving all unrelated lines.
 
@@ -129,7 +130,7 @@ def reconcile_workspace_excludes(
     """
     prior = tuple(claim for claim in claims if claim.role == GIT_EXCLUDE_ROLE)
     workspace = native_path(workspace)
-    paths = tuple(file.path for file in files if not file.generated_section)
+    paths = tuple(file.path for file in files if not file.generated_section) + tuple(shared_paths)
     if not paths and not prior:
         return
     if any(not path.startswith(workspace + "/") for path in paths):

@@ -35,6 +35,8 @@ class SetupInvocation:
     artifacts: ArtifactInputs = field(default_factory=ArtifactInputs)
     environment: Mapping[str, str] = field(default_factory=dict, repr=False)
     secrets: Mapping[str, str] = field(default_factory=dict, repr=False)
+    # Unavailable ancestor routing must not retire its previously applied effects.
+    retain_artifact_origins: frozenset[str] = field(default_factory=frozenset, repr=False)
 
 
 @dataclass(frozen=True, kw_only=True)

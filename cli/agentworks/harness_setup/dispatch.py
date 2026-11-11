@@ -291,6 +291,18 @@ def run_setup(
                     raise _SetupInfrastructureFailure(error) from error
 
             scoped_secrets = {ref.name: invocation.secrets[ref.name] for ref in integration.config_secret_refs()}
+            retained_origins = (
+                frozenset(
+                    origin for file in current.artifact_files for origin in file.origins if origin not in local_origins
+                )
+                | frozenset(
+                    claim.source
+                    for claim in current.claims
+                    if claim.source is not None and claim.source not in local_origins
+                )
+                if routing.retain_previous
+                else frozenset()
+            )
             call = replace(
                 invocation,
                 prior=previous,
@@ -298,6 +310,7 @@ def run_setup(
                 report_incomplete=report_incomplete,
                 secrets=scoped_secrets,
                 artifacts=artifacts,
+                retain_artifact_origins=retained_origins,
             )
             try:
                 if isinstance(call, VMSetupInvocation):
@@ -316,14 +329,7 @@ def run_setup(
                     roots=roots,
                     group=call.linux_group if isinstance(call, WorkspaceSetupInvocation) else "",
                     root=isinstance(call, VMSetupInvocation),
-                    retain_origins=frozenset(
-                        origin
-                        for file in current.artifact_files
-                        for origin in file.origins
-                        if origin not in local_origins
-                    )
-                    if routing.retain_previous
-                    else frozenset(),
+                    retain_origins=retained_origins,
                 )
                 if isinstance(call, WorkspaceSetupInvocation):
                     reconcile_workspace_excludes(
@@ -335,6 +341,7 @@ def run_setup(
                         checkpoint,
                         group=call.linux_group,
                         report_incomplete=report_incomplete,
+                        shared_paths=application.shared_paths,
                     )
             except _SetupInfrastructureFailure as error:
                 raise error.original from None
