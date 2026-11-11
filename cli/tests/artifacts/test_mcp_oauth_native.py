@@ -206,7 +206,10 @@ def test_oauth_foreign_or_modified_table_is_preserved_during_update_and_withdraw
     document = read(path, tool)
     entry = table(table(document, key), mcp_native_name(item))
     # Same-table confidential material is an external edit, never public ownership.
-    entry["client_secret" if tool == "codex" else "operator_field"] = "private-fixture-value"
+    if tool == "codex":
+        table(entry, "oauth")["client_secret"] = "private-fixture-value"
+    else:
+        entry["operator_field"] = "private-fixture-value"
     write(path, document, tool)
     baseline = path.read_bytes()
     checkpoints.clear()
