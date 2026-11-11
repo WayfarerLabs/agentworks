@@ -10,7 +10,7 @@ from agentworks.capabilities.base import RunContext
 from agentworks.debian import DebianSupport, classify_release
 from agentworks.execution import trust
 
-from ._helpers import _mask_env_var_backend_for, _vm_scope
+from ._helpers import _vm_scope
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -290,23 +290,29 @@ def _auth_key_boundary(
     config: Config,
     vm: VMRow,
     *,
-    ignore_env: bool = False,
+    secret: str | None = None,
+    prompt: bool = False,
     interaction: TtyInteractionPolicy,
 ) -> tuple[LiveVMNode, Resolver, RunContext, str]:
-    """The composition root of a command whose planned op spends the VM template's
-    Tailscale auth key (``vm rekey``, ``agw vm recover``).
+    """The composition root of a command whose planned op spends a Tailscale auth
+    key (``vm rekey``, ``agw vm recover``).
 
     The walk roots the VM-template node beside the live VM node, so the auth
     key is in the union: the sweep predicts it can resolve over the template's
     declaration, and it resolves in the ONE boundary pass with the site's
     secrets (proxmox's API token), in a single prompt session. The template
     node roots first, so template readiness precedes the platform preflight.
-    ``ignore_env`` masks the env-var backend for the auth key across both the
-    preflight and the resolve, so the prompt backend takes over. Returns the
-    live node, the resolver (whose cache a later gate serves), the op-start
-    context and the line-safe auth key.
+    ``secret`` names a declared secret that replaces the template's key for
+    this call only (the persisted template is untouched); ``prompt`` routes the
+    key alone to terminal entry, bypassing its configured sources, while every
+    other secret resolves normally. The caller rejects the two together.
+    Returns the live node, the resolver (whose cache a later gate serves), the
+    op-start context and the line-safe auth key.
     """
+    from dataclasses import replace
+
     from agentworks.bootstrap import load_request_registry
+    from agentworks.errors import NotFoundError
     from agentworks.orchestration.readiness import preflight_all
     from agentworks.orchestration.secrets import secret_union
     from agentworks.orchestration.walk import walk
@@ -315,25 +321,33 @@ def _auth_key_boundary(
     from agentworks.vms.templates import resolve_live_template
 
     registry = load_request_registry(config, live_database=db)
-    resolver = Resolver(config, registry, interaction=interaction)
-    vm_node = live_vm_node(db, config, registry, vm)
     template = resolve_live_template(db, registry, vm.name, vm.template)
+    if secret is not None:
+        try:
+            registry.lookup("secret", secret)
+        except KeyError:
+            raise NotFoundError(
+                f"secret {secret!r} is not in the resource registry",
+                entity_kind="secret",
+                entity_name=secret,
+                hint="check `agw secret list` for declared and auto-declared names",
+            ) from None
+        template = replace(template, tailscale_auth_key=secret)
+    auth_key_name = template.tailscale_auth_key
+    prompt_names = frozenset((auth_key_name,)) if prompt else frozenset()
+    resolver = Resolver(config, registry, interaction=interaction, prompt_names=prompt_names)
+    vm_node = live_vm_node(db, config, registry, vm)
     nodes = walk(vm_template_node(template), vm_node)
     for secret_name in secret_union(nodes):
         resolver.register_name(secret_name)
-    # A cache hit: the key is in the union already, and this only fetches the
-    # declaration the env-var mask needs.
-    declaration = resolver.register_name(template.tailscale_auth_key)
     scope = _vm_scope(db, vm.name)
-    with _mask_env_var_backend_for(declaration, masked=ignore_env):
-        preflight_all(
-            nodes,
-            RunContext(config=config, operation_scope=scope),
-            registry=registry,
-            interaction=interaction,
-        )
-        resolver.resolve()
-    auth_key = require_tailscale_auth_key(
-        resolver.get(template.tailscale_auth_key), secret_name=template.tailscale_auth_key
+    preflight_all(
+        nodes,
+        RunContext(config=config, operation_scope=scope),
+        registry=registry,
+        interaction=interaction,
+        prompt_names=prompt_names,
     )
+    resolver.resolve()
+    auth_key = require_tailscale_auth_key(resolver.get(auth_key_name), secret_name=auth_key_name)
     return vm_node, resolver, _platform_ops_ctx(config, scope, vm_node, resolver), auth_key

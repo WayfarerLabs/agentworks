@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -172,3 +173,52 @@ def test_false_mapping_has_no_candidate(monkeypatch: pytest.MonkeyPatch) -> None
     )["forced"]
     assert preview.status is PreviewStatus.BLOCKED
     assert preview.reason == "no-candidate"
+
+
+# A command run through the real entry point: it starts a child that lists the probe variables it
+# inherited, then resolves both secrets through the env-var source.
+CHILD_ENVIRONMENT = """
+import json, subprocess, sys
+import typer
+from agentworks import cli
+from agentworks.capabilities.secret_backend import TtyInteractionAccess
+from agentworks.cli._entry import main
+from agentworks.secrets import SecretDecl
+from agentworks.secrets.resolve import resolve_batch
+from tests.test_secrets_env_var import _source
+
+app = typer.Typer()
+
+@app.command()
+def probe() -> None:
+    listing = "import json, os; print(json.dumps(sorted(name for name in os.environ if 'PROBE' in name)))"
+    child = subprocess.run([sys.executable, "-c", listing], capture_output=True, text=True, check=True)
+    decls = [
+        SecretDecl(name="probe", description="conventional"),
+        SecretDecl(name="mapped", description="mapped", backend_mappings={"env-var": "PROBE_MAPPED"}),
+    ]
+    batch = resolve_batch(decls, [_source()], tty_access=TtyInteractionAccess.DISABLED, interaction_broker=None)
+    print(json.dumps({"child": json.loads(child.stdout), "resolved": batch.complete_or_raise()}))
+
+cli.app = app
+main()
+"""
+
+
+@pytest.mark.windows
+def test_no_child_inherits_a_carrier_and_the_backend_still_reads_it() -> None:
+    """A long-lived child (Lima's host agent) kept a carrier it inherited for as long as it ran."""
+    result = subprocess.run(
+        [sys.executable, "-c", CHILD_ENVIRONMENT],
+        cwd=Path(__file__).resolve().parents[1],
+        env={**os.environ, "AW_SECRET_PROBE": "carried", "PROBE_MAPPED": "the operator's own"},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {
+        "child": ["PROBE_MAPPED"],
+        "resolved": {"probe": "carried", "mapped": "the operator's own"},
+    }

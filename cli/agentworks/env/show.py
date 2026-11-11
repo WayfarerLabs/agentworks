@@ -18,7 +18,9 @@ from typing import TYPE_CHECKING, Literal
 from agentworks import output
 from agentworks.env.identity import ResourceContext, per_context_identity_env
 from agentworks.env.merge import effective_env
+from agentworks.env.render import render_plaintext
 from agentworks.errors import ValidationError
+from agentworks.interpolation import runtime_values
 from agentworks.secrets.outcomes import format_outcome
 from agentworks.secrets.policy import require_exact_tty_interaction_policy
 
@@ -121,7 +123,9 @@ def show_env(
         admin=admin_env,
         agent=agent_env,
         session=session_env,
+        identity_keys=identity_env.keys(),
     )
+    plaintext = render_plaintext(user_env_merged, runtime_values(resource_ctx), legacy_keys=session_env or {})
     user_provenance = _per_key_provenance(
         vm=vm_env,
         workspace=workspace_env,
@@ -156,7 +160,10 @@ def show_env(
             continue
         entry = user_env_merged[key]
         scope = user_provenance[key]
-        rendered, is_secret = _render_value(entry, values, errors, reveal_secrets)
+        if entry.secret is None:
+            rendered, is_secret = plaintext[key], False
+        else:
+            rendered, is_secret = _render_secret(entry.secret, values, errors, reveal_secrets), True
         rows.append(
             ResolvedEnvRow(
                 key=key,
@@ -476,27 +483,18 @@ def _reveal_values(
     return safe_values, errors
 
 
-def _render_value(
-    entry: EnvEntry,
+def _render_secret(
+    name: str,
     values: dict[str, str],
     errors: dict[str, str],
     reveal_secrets: bool,
-) -> tuple[str, bool]:
-    """Return ``(rendered_value, is_secret)`` for one EnvEntry.
-
-    Plaintext entries render as their value verbatim. Secret entries
-    render as ``<from secret: NAME>`` by default; ``reveal_secrets``
-    shows the pre-resolved value (or its inline error) from
-    ``_reveal_values``.
-    """
-    if entry.secret is not None:
-        if not reveal_secrets:
-            return f"<from secret: {entry.secret}>", True
-        if entry.secret in errors:
-            return f"<error: {errors[entry.secret]}>", True
-        return values[entry.secret], True
-    assert entry.value is not None  # EnvEntry invariant
-    return entry.value, False
+) -> str:
+    """Render a redacted secret reference or its explicitly resolved outcome."""
+    if not reveal_secrets:
+        return f"<from secret: {name}>"
+    if name in errors:
+        return f"<error: {errors[name]}>"
+    return values[name]
 
 
 def _print_table(

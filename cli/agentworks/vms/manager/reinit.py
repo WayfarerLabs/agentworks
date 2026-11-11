@@ -21,6 +21,7 @@ from agentworks.db import SYSTEM_SLUG_KEY, InitStatus, ProvisioningStatus
 from agentworks.errors import StateError
 from agentworks.execution.access import Admin, Agent
 from agentworks.harness_setup.outcomes import SetupFailure, raise_setup_failures
+from agentworks.linux_users import managed_home
 from agentworks.vms import contract
 
 from ._helpers import _require_vm
@@ -355,7 +356,7 @@ def reinit_vm(
                         dict.fromkeys((*git_redactions, *(resolver.values.values() if setup_inputs else ())))
                     ),
                 )
-                home = f"/home/{vm.admin_username}"
+                home = managed_home(vm.admin_username)
 
                 # try/finally ensures the SSH logger is closed exactly once,
                 # AFTER any warning output. Matches the pattern used by agent

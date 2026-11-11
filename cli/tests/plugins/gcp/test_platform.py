@@ -686,6 +686,34 @@ def test_an_interrupt_during_the_routes_delete_waits_for_it(monkeypatch: pytest.
     assert set(firewalls.resources) == {result.platform_metadata["deny_rule"]}
 
 
+def test_a_second_interrupt_during_a_failed_opens_cleanup_waits_for_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ctrl-C while the rule's insert settles, then again during the cleanup: the rule is still deleted.
+
+    The open's own failure runs the route's cleanup inside its ``__enter__``,
+    so holding interrupts only over the context manager's exit would not cover it.
+    """
+    platform, cache = gce_platform(monkeypatch, gce_guest())
+    result = platform.create(gce_request(), gce_ctx())
+    vm = _vm(result.platform_metadata)
+    platform.close_provisioning_access(vm, gce_ctx())
+    firewalls = cache.firewalls
+    firewalls.insert_wait_failures = [KeyboardInterrupt("first")]
+    delete = firewalls.delete
+
+    def interrupted_delete(**kwargs: Any) -> Any:
+        signal.raise_signal(signal.SIGINT)
+        return delete(**kwargs)
+
+    monkeypatch.setattr(firewalls, "delete", interrupted_delete)
+    yielded = False
+
+    with pytest.raises(KeyboardInterrupt), platform._transient_route(vm, gce_ctx()):
+        yielded = True
+
+    assert not yielded
+    assert set(firewalls.resources) == {result.platform_metadata["deny_rule"]}
+
+
 def test_transient_route_close_failure_warns_and_retains_only_its_exact_rule(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

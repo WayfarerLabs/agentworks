@@ -76,7 +76,9 @@ follows, in full:
 
 - Run `/bin/bash -s` as root through the platform's channel, write `script` to its stdin, close it,
   and return everything the channel printed on each stream when it ends or `deadline` seconds pass.
-  Stop waiting at the deadline; never claim the guest command stopped.
+  Stop waiting at the deadline; never claim the guest command stopped. A channel that reaches the
+  guest through an HTTP API bounds each socket wait by what remains, so a response that keeps
+  arriving can carry one request past the deadline.
 - Run it once. Never retry, never parse the output, never report an exit code: `RawRun` has no field
   for one, because no channel's status is trusted (WSL passes raw wait statuses through, per the
   salvage message, and an ssh 255 cannot be told from a guest 255).
@@ -389,6 +391,19 @@ caller judges the outcome by its own status. `generate_bootstrap_script` loses i
 `tailscale_auth_key` parameter and step 7 (`bootstrap_script.py:236-247`), so no generated script
 can hold the key: I10 holds by construction, and the staging files go.
 
+**The bootstrap runs once per VM.** Lima runs its system provisioners on every boot, so each
+`vm start` ran the bootstrap again: it reset the admin's `.bashrc` and `.zshrc` to the seed
+(dropping init's source lines and the operator's edits, against `skel.py`'s one-time policy),
+appended the create-time key that `vm recover` or `vm reinit` had replaced, and ran
+`apt-get dist-upgrade` with `--force-confnew`. GCE already wrapped the same payload in a durable
+success marker because its `startup-script` runs on every boot too. That wrapper moves into
+`bootstrap_script.run_once_script(script, *, stem)`, which keeps `<stem>.sh` and the marker
+`<stem>.complete` (GCE's paths are unchanged) and refuses a payload holding its heredoc delimiter as
+a line. Lima's provision step uses it with its own stem, `/var/lib/agentworks/lima-bootstrap`; the
+payload itself is unchanged, and the platforms that run it once already (WSL2, Proxmox, cloud-init's
+per-instance `runcmd` on AWS and Azure) do not wrap it. A Lima VM created before this keeps its old
+provision step; the 0.20 upgrade guide says so.
+
 **The bootstrap's output against the 1 MiB capture.** Its package steps run `apt-get -qq`
 (`bootstrap_script.py:114-117`) and every other step prints one marker line. No create log exists
 under this account's `~/.config/agentworks/logs` (`ssh.py:89`), and other accounts' logs on this
@@ -483,11 +498,19 @@ script, so asking again is safe; a token rejection raises `TokenRejectedError` a
 `ProxmoxAPIError` means not yet (anything else the client raises is a bug and propagates), and no
 answer within `AGENT_WAIT_SECONDS` (120 s) or the deadline, whichever comes first, raises
 `ChannelUnreachable` saying no script was dispatched, so a VM with no agent fails in about two
-minutes rather than after the repair's 600. Then one `guest_agent_exec` of `["/bin/bash", "-s"]`
-with `input-data`, with whatever remains of the deadline, then `guest_agent_exec_status` every two
-seconds until it reports exit or the deadline passes. A poll carries only the PID, so a failed one
-is asked again at the next interval; only polls that keep failing for `STATUS_RETRY_SECONDS` (30 s)
-give up, as they do for an agent that restarted and lost the PID. Dispatch and status failures raise
+minutes rather than after the repair's 600. Then, unless the pinging left none of the deadline
+(which raises `ChannelUnreachable` the same way), one `guest_agent_exec` of `["/bin/bash", "-s"]`
+with `input-data`, then `guest_agent_exec_status` every two seconds until it reports exit or the
+deadline passes. Each request's wait is bounded by what remains of the deadline, at most the API's
+30-second `REQUEST_TIMEOUT_SECONDS`. A socket timeout bounds the TCP connect and each wait for data,
+not name resolution or a whole response, so an API that keeps a response arriving can carry one
+request past the deadline; the `run_as_root` contract states the same limit for any channel over an
+HTTP API. The operator's [2026-11-11 ruling](./frd.md#2026-11-11) keeps that limit documented rather
+than enforced: the API is the site's own server, and a whole-response bound would mean replacing
+`urllib` and the proxy support that comes with it, reaching into private socket attributes, or
+abandoning a worker thread at the deadline. A poll carries only the PID, so a failed one is asked
+again at the next interval; only polls that keep failing for `STATUS_RETRY_SECONDS` (30 s) give up,
+as they do for an agent that restarted and lost the PID. Dispatch and status failures raise
 `ConnectivityError` with no stdin in the message (`transport.py:69-123`), except an HTTP 401 or 403,
 which raises `TokenRejectedError` at once; a status failure of either kind says the script may still
 be running, and a status failure from the API adds the API's own error text (an agent that restarted
@@ -523,7 +546,14 @@ gone guest with a hint naming `agw vm delete`, so delete's logout, which reads `
 then goes through the root channel, never reaches another guest. `teardown.remove_guest` stops and
 deletes a confirmed guest and returns once a destroy task completes; a failed delete counts as done
 only when `/cluster/nextid` says the VMID is free. A rollback whose clone lost its VMID to another
-create finds the winner's name there and leaves it untouched.
+create finds the winner's name there and leaves it untouched. A caller with a budget passes
+`find_guest` its expiry: each read's wait is bounded by what remains of it, at most
+`REQUEST_TIMEOUT_SECONDS`, and a budget spent before a read asks nothing more and leaves the
+identity unknown (`ProxmoxAPIError`). `status` gives the whole check 10 s and reads an API failure
+as unknown. The root channel's check spends the script's own deadline, and the guest agent is handed
+the same expiry instant (`guest_agent.run_as_root_until`), not a duration it would restart later; a
+check the deadline runs out on, an API failure it cut short included, raises `ChannelUnreachable`
+with nothing dispatched.
 
 ### AWS, Azure and GCP
 
@@ -761,9 +791,9 @@ updated row with `RECONNECT`, replacing the in-place repointing of a legacy tran
   (`_require_known_power_state`), rather than calling it not running.
 - A failed or unknown script raises naming the script, its status and the log, with the hint
   `agw vm recover NAME`. A rekey script whose channel raises `ChannelUnreachable` never ran, so the
-  error propagates at once, after the channel's own hint (a restart, on a cloud), with a rerun of
-  `agw vm rekey NAME` once the VM answers: recover's channel is the same one, so it could not do
-  better.
+  error propagates at once, after the channel's own hint (a restart, on a cloud), with the same
+  `agw vm rekey NAME` command again, with every option given, once the VM answers: recover's channel
+  is the same one, so it could not do better.
 - A final wait that returns `False` raises `VMNotAnswering`, whose hint names `agw vm recover NAME`,
   as `vm start` does; the new address is recorded first, since the old one died with the logout.
 - The per-step progress lines become one line before the call ("about a minute").

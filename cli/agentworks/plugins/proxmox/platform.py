@@ -28,8 +28,9 @@ from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
 from agentworks.errors import ConnectivityError, ProvisioningError, StateError
 from agentworks.execution import root_script
+from agentworks.execution.root_script import ChannelUnreachable
 from agentworks.plugins.proxmox import guest_agent
-from agentworks.plugins.proxmox.api import REQUEST_TIMEOUT_SECONDS, ProxmoxAPI, ProxmoxAPIError
+from agentworks.plugins.proxmox.api import ProxmoxAPI, ProxmoxAPIError
 from agentworks.plugins.proxmox.identity import Gone, find_guest
 from agentworks.plugins.proxmox.teardown import (
     remove_guest,
@@ -49,6 +50,8 @@ if TYPE_CHECKING:
 BOOTSTRAP_DEADLINE_SECONDS = 600
 CLOUD_INIT_DEADLINE_SECONDS = guest_agent.AGENT_WAIT_SECONDS + 300
 """The guest agent's wait, then cloud-init's own 300 s: the one root-channel call draws on both."""
+STATUS_DEADLINE_SECONDS = 10.0
+"""How long ``status`` may spend confirming the guest and reading its state before it reads as unknown."""
 
 
 class ProxmoxConfig(AgwModel):
@@ -462,22 +465,20 @@ class ProxmoxPlatform(VMPlatform):
             return False
         return any(entry.get("name") == backend_name for entry in existing)
 
-    def _find_guest(
-        self, vm: VMRow, ctx: RunContext, *, timeout: float = REQUEST_TIMEOUT_SECONDS
-    ) -> dict[str, Any] | Gone:
-        """What holds the row's VMID: our guest's ``status/current`` answer, or :class:`Gone`."""
+    def _find_guest(self, vm: VMRow, ctx: RunContext, *, expires: float | None = None) -> dict[str, Any] | Gone:
+        """What holds the row's VMID: our guest's ``status/current`` answer, or :class:`Gone`, by ``expires``."""
         return find_guest(
             self._api(ctx),
             self._vm_node(vm),
             self._vmid(vm),
             vm_name=vm.name,
             names=_clone_names(vm),
-            timeout=timeout,
+            expires=expires,
         )
 
-    def _guest(self, vm: VMRow, ctx: RunContext, *, timeout: float = REQUEST_TIMEOUT_SECONDS) -> dict[str, Any]:
+    def _guest(self, vm: VMRow, ctx: RunContext, *, expires: float | None = None) -> dict[str, Any]:
         """Our guest's ``status/current`` answer; a guest that is gone refuses, naming ``agw vm delete``."""
-        found = self._find_guest(vm, ctx, timeout=timeout)
+        found = self._find_guest(vm, ctx, expires=expires)
         if isinstance(found, Gone):
             raise found.refusal()
         return found
@@ -516,7 +517,7 @@ class ProxmoxPlatform(VMPlatform):
         # A guest that is gone, or whose identity a token cannot audit,
         # refuses; only an API failure reads as UNKNOWN.
         try:
-            result = self._guest(vm, ctx, timeout=10)
+            result = self._guest(vm, ctx, expires=time.monotonic() + STATUS_DEADLINE_SECONDS)
         except ProxmoxAPIError:
             return VMStatus.UNKNOWN
         pve_status = result.get("status", "")
@@ -532,9 +533,28 @@ class ProxmoxPlatform(VMPlatform):
         return f"{vmid}@{node}"
 
     def run_as_root(self, vm: VMRow, ctx: RunContext, script: bytes, deadline: float) -> RawRun:
-        """Run ``script`` as root through the QEMU Guest Agent, which needs no guest sshd, once the guest is ours."""
-        self._guest(vm, ctx)
-        return guest_agent.run_as_root(self._api(ctx), self._vm_node(vm), self._vmid(vm), script, deadline)
+        """Run ``script`` as root through the QEMU Guest Agent, which needs no guest sshd, once the guest is ours.
+
+        The identity check spends the same ``deadline`` the script runs under,
+        no wait of it outlasting what remains. A check that spends all of it,
+        including one whose API failure the deadline cut short, raises
+        ``ChannelUnreachable`` with nothing dispatched, as the guest agent's
+        own wait does.
+        """
+        expires = time.monotonic() + deadline
+        try:
+            self._guest(vm, ctx, expires=expires)
+        except ProxmoxAPIError:
+            # A failure at the deadline is the deadline's, refused below like a check that spent it.
+            if time.monotonic() < expires:
+                raise
+        if time.monotonic() >= expires:
+            raise ChannelUnreachable(
+                f"confirming that Proxmox VMID {self._vmid(vm)} is VM '{vm.name}' took the whole "
+                f"{deadline:g}-second deadline, so no script was dispatched",
+                hint="Check that the Proxmox API is answering promptly, then run the command again.",
+            )
+        return guest_agent.run_as_root_until(self._api(ctx), self._vm_node(vm), self._vmid(vm), script, expires)
 
     # -- Helpers ---------------------------------------------------------------
 

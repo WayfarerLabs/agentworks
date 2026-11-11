@@ -362,9 +362,13 @@ spec:
   `agw resource explain harness-integration/<name>` documents one integration's config field by
   field. That is the reference; what follows is what an operator wants to know beyond the fields
   themselves.
-- Command strings support the `{{session_name}}` and `{{workspace_name}}` variables. This holds
-  wherever an integration takes a command or raw arguments (`shell`'s `command` and
-  `resume_command`, the `extra_args` escape hatch on `claude-code`, `codex`, and `grok-build`).
+- Shell `command` and `resume_command` fields and native `extra_args` support `${agw:NAME}`
+  references, including `${agw:session_name}` and `${agw:workspace_dir}`. Native extra arguments
+  render before shell quoting; prompt, profile, and model fields remain literal. See the
+  [runtime context reference](../arch/runtime-context.md) for names, availability, and quoting.
+  Shell command fields and session-scope plaintext env temporarily accept two deprecated brace
+  aliases; the reference documents their replacements and removal release. Use the namespaced form
+  in new definitions.
 - The integration-plus-config pair inherits as a unit. A child restating the same integration uses
   that integration's config model to merge with the parent: objects and mappings recursively merge
   by key, lists append unequal items and deduplicate equal items, and incoming scalars replace prior

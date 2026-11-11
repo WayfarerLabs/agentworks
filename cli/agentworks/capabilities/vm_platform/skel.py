@@ -2,8 +2,8 @@
 
 Two consumers share the constants in this module:
 
-- ``vms/bootstrap_script.py`` writes ``~admin/.bashrc`` and
-  ``~admin/.zshrc`` once at provision time, before init runs. Once
+- ``capabilities/vm_platform/bootstrap_script.py`` writes ``~admin/.bashrc``
+  and ``~admin/.zshrc`` once at provision time, before init runs. Once
   written, agentworks never refreshes them: operator edits in the
   admin's home survive every subsequent reinit.
 - ``agentworks.vms.initializer`` writes ``/etc/skel/.bashrc`` and

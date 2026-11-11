@@ -20,11 +20,15 @@ from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import ProvisionRequest
 from agentworks.capabilities.vm_platform.bootstrap_script import (
     REBOOT_SENTINEL_PATH,
+    generate_bootstrap_script,
+    run_once_script,
 )
+from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
 from agentworks.capabilities.vm_platform.lima import (
     _REBOOT_CLEAR_MARKER,
     _REBOOT_PENDING_MARKER,
     _TAILSCALED_WAIT_PAYLOAD,
+    LIMA_BOOTSTRAP_STEM,
     LimaPlatform,
 )
 from agentworks.capabilities.vm_platform.lima_host import LimaCommandFailed, LimaHost
@@ -278,3 +282,40 @@ def test_a_tailscaled_that_never_becomes_active_rolls_back_before_the_key_is_sen
     assert guest.payloads == [_TAILSCALED_WAIT_PAYLOAD]
     assert b"AGW_SECRET" not in guest.scripts[0]
     assert "limactl delete --force myvm" in ran
+
+
+def test_lima_runs_the_bootstrap_once_although_it_provisions_on_every_boot(
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: object,
+) -> None:
+    """Lima runs every system provisioner on every boot, so the bootstrap's step is run-once gated.
+
+    Ungated, each ``vm start`` reset the admin's ``.bashrc`` and ``.zshrc`` to
+    the seed, dropping init's source lines and the operator's edits, re-added
+    a replaced key, and upgraded packages with ``--force-confnew``.
+    """
+    submitted: list[str] = []
+    install_at_run_process(monkeypatch, FakeGuest())
+    monkeypatch.setattr(LimaPlatform, "_ensure_limactl", lambda self: None)
+    monkeypatch.setattr(LimaPlatform, "_instance_exists", lambda self, name: False)
+    monkeypatch.setattr(LimaPlatform, "_create_local", lambda self, name, lima_yaml: submitted.append(lima_yaml))
+    monkeypatch.setattr(
+        LimaHost,
+        "run",
+        lambda self, command, **_kw: f"{_REBOOT_CLEAR_MARKER}\n" if REBOOT_SENTINEL_PATH in command else "",
+    )
+    request = _request()
+
+    LimaPlatform("lima", {"placement": {"mode": "local"}}).create(request, RunContext())
+
+    bootstrap = generate_bootstrap_script(
+        admin_username=request.admin_username,
+        ssh_public_key=request.ssh_public_key,
+        provisioning_packages=PROVISIONING_PACKAGES,
+        hostname=request.hostname,
+        swap=request.swap_gib,
+    )
+    provision = cast("dict[str, Any]", yaml.safe_load(submitted[0]))["provision"]
+    assert [step["script"] for step in provision if step["mode"] == "system"][-1] == run_once_script(
+        bootstrap, stem=LIMA_BOOTSTRAP_STEM
+    )

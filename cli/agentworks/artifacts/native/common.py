@@ -61,10 +61,10 @@ def select_session_artifacts(
                 else f"No supported session workaround for artifact type {item.content.type.value}"
             )
             deferred.append(ArtifactDeferral(input_id=item.identity, destination="session", reason=reason))
-    return _select_inputs(inputs, selected), tuple(deferred)
+    return select_inputs(inputs, selected), tuple(deferred)
 
 
-def _select_inputs(inputs: ArtifactInputs, selected: set[str]) -> ArtifactInputs:
+def select_inputs(inputs: ArtifactInputs, selected: set[str]) -> ArtifactInputs:
     return ArtifactInputs(
         local=inputs.local.select(selected) if inputs.local is not None else None,
         deferred={owner: group.select(selected) for owner, group in inputs.deferred.items()},
@@ -127,6 +127,16 @@ def defer_setup_conflicts(
 
     while application.files:
         try:
+            identities: dict[str, tuple[str, ...]] = {}
+            for file in application.files:
+                if file.native_identity is not None:
+                    prior = identities.setdefault(file.native_identity, file.origins)
+                    if set(prior) != set(file.origins):
+                        raise NativeArtifactConflictError(
+                            f"multiple artifacts claim native identity '{file.native_identity}'",
+                            (file.native_identity,),
+                            hint="Rename the conflicting artifact before retrying setup.",
+                        )
             probe(application.files)
             return application
         except NativeArtifactConflictError as error:
@@ -157,10 +167,12 @@ def defer_setup_conflicts(
     return application
 
 
-def _name_conflicts(inputs: ArtifactInputs) -> tuple[tuple[ArtifactInput, ...], ...]:
+def _name_conflicts(
+    inputs: ArtifactInputs, types: tuple[ArtifactType, ...] = (ArtifactType.SKILL, ArtifactType.AGENT)
+) -> tuple[tuple[ArtifactInput, ...], ...]:
     names: dict[tuple[ArtifactType, str], list[ArtifactInput]] = {}
     for item in inputs.items():
-        if item.content.type in (ArtifactType.SKILL, ArtifactType.AGENT):
+        if item.content.type in types:
             names.setdefault((item.content.type, item.content.name), []).append(item)
     return tuple(tuple(items) for items in names.values() if len(items) > 1)
 
@@ -182,7 +194,7 @@ def render_setup_artifacts(
         invocation.report_incomplete(reason)
         rejected.update((item.identity, reason) for item in items)
     selected = {item.identity for item in invocation.artifacts.items() if item.identity not in rejected}
-    application = render(_select_inputs(invocation.artifacts, selected))
+    application = render(select_inputs(invocation.artifacts, selected))
     return replace(
         application,
         deferred=(
@@ -201,11 +213,13 @@ def _setup_deferral_destination(invocation: SetupInvocation) -> ArtifactFacet:
     return "user" if isinstance(invocation, VMSetupInvocation) else "session"
 
 
-def validate_names(inputs: ArtifactInputs) -> None:
+def validate_names(
+    inputs: ArtifactInputs, *, types: tuple[ArtifactType, ...] = (ArtifactType.SKILL, ArtifactType.AGENT)
+) -> None:
     """Reject colliding native names at the integration input boundary."""
     from agentworks.artifacts.native.probe import NativeArtifactConflictError
 
-    conflicts = _name_conflicts(inputs)
+    conflicts = _name_conflicts(inputs, types)
     if conflicts:
         raise NativeArtifactConflictError(
             "; ".join(_name_conflict_reason(items) for items in conflicts),
@@ -228,12 +242,6 @@ def persona_options(item: ArtifactInput, integration: str, allowed: Mapping[str,
         if isinstance(value, list) and any(not isinstance(element, str) for element in value):
             raise ConfigError(f"agent '{item.content.name}': native option '{key}' must contain strings")
     return dict(options)
-
-
-def context_text(inputs: tuple[ArtifactInput, ...], configured: str | None = None) -> str:
-    parts = [configured] if configured is not None else []
-    parts.extend(item.content.text for item in inputs if item.content.type in (ArtifactType.HINT, ArtifactType.RULE))
-    return "\n\n".join(parts)
 
 
 def reject_flags(extra_args: Sequence[str], forbidden: set[str], integration: str) -> None:
@@ -330,11 +338,14 @@ def prepare_session_delivery(
         return render(None), None
     root: str | None = None
     rejected: dict[str, str] = {}
+    plan: NativeSessionArtifacts | None = None
     while True:
         selected = {item.identity for item in context.inputs.items() if item.identity not in rejected}
-        current = replace(context, inputs=_select_inputs(context.inputs, selected))
+        current = replace(context, inputs=select_inputs(context.inputs, selected))
+        plan = None
         try:
             plan = render(current)
+            validate_ancestor_names(current, plan.application)
             if plan.application.files or plan.argv:
                 if access is None:
                     raise StateError("artifact delivery requires the actual native launch target")
@@ -352,10 +363,17 @@ def prepare_session_delivery(
         except NativeArtifactConflictError as error:
             for identity in error.identities:
                 parts = identity.split(":")
+                origins = {
+                    origin
+                    for file in (() if plan is None else plan.application.files)
+                    if file.native_identity == identity
+                    for origin in file.origins
+                }
                 matching = tuple(
                     item
                     for item in current.inputs.items()
-                    if item.content.type.value == parts[0] and item.content.name == parts[-1]
+                    if item.origin_identity in origins
+                    or (item.content.type.value == parts[0] and item.content.name == parts[-1])
                 )
                 if not matching:
                     raise StateError("native name conflict does not identify a selected session input") from error
@@ -365,6 +383,7 @@ def prepare_session_delivery(
                 raise StateError("native name conflict does not identify a selected session input") from error
             continue
         break
+    assert plan is not None
     plan = replace(
         plan,
         application=replace(

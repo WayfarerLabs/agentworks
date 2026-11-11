@@ -15,7 +15,7 @@ from agentworks.db import PID_STOPPED, SessionMode, SessionStatus
 from agentworks.errors import AgentworksError, ExternalError, StateError
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import manager, tmux
-from agentworks.sessions.manager import _lifecycle
+from agentworks.sessions.manager import _teardown
 from tests.vm_access_support import files_over_target
 
 from .test_create_start_restart_orchestrated import _create_stubs, _restart_fixture
@@ -208,7 +208,7 @@ def test_unacknowledged_recovery_requires_exact_attempt_and_stable_server(tmp_pa
 def test_failed_admin_launch_recovers_after_boot_absence(tmp_path, monkeypatch, native, old_null_address, operation):
     db = _create_stubs(tmp_path, monkeypatch, [])
     bind_native_runtime(db, monkeypatch, native)
-    monkeypatch.setattr(_lifecycle, "ADMIN_SOCKET_ROOT", str(native.root))
+    monkeypatch.setattr(_teardown, "ADMIN_SOCKET_ROOT", str(native.root))
     # The namespaced owner path must agree with the fixture VM admin user.
     vm = db.get_vm("vm1")
     assert vm is not None
@@ -358,7 +358,7 @@ def test_old_admin_stopped_null_address_becomes_addressable_after_native_absence
 ):
     db = _create_stubs(tmp_path, monkeypatch, [])
     bind_native_runtime(db, monkeypatch, native)
-    monkeypatch.setattr(_lifecycle, "ADMIN_SOCKET_ROOT", str(native.root))
+    monkeypatch.setattr(_teardown, "ADMIN_SOCKET_ROOT", str(native.root))
     native.socket = str(native.root / "admin" / "s1.sock")
     Path(native.socket).parent.mkdir()
     monkeypatch.setattr(tmux, "create_session", lambda *a, **k: launch(native, "sleep 30", launch_options=k))

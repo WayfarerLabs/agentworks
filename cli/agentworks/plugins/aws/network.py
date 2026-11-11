@@ -48,6 +48,7 @@ from typing import TYPE_CHECKING, Any
 
 from agentworks import output
 from agentworks.errors import AgentworksError, AuthorizationError, ProvisioningError, TokenRejectedError
+from agentworks.interrupts import interrupts_deferred
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -239,8 +240,9 @@ def poke_ssh_allow(ec2: Any, security_group_id: str, prefixes: Sequence[str]) ->
     Dry-runs every exact matching revoke before any authorize. Then authorizes
     one prefix at a time so overlap with a concurrent route does not prevent
     non-overlapping prefixes from being added. Duplicate tuples are tolerated.
-    If an actual authorize fails partway through, all planned tuples are
-    revoked best-effort before the typed failure propagates.
+    If an actual authorize fails partway through, or is interrupted, all
+    planned tuples are revoked best-effort before the failure propagates, with
+    interrupts held until the revoke is done.
     """
     _check_ssh_revoke_permissions(ec2, security_group_id, prefixes)
     output.info(f"Opening SSH route (allow scoped to {', '.join(prefixes)})...")
@@ -256,11 +258,14 @@ def poke_ssh_allow(ec2: Any, security_group_id: str, prefixes: Sequence[str]) ->
                     continue
                 raise
     except KeyboardInterrupt:
-        remove_ssh_allow(ec2, security_group_id, prefixes)
+        # The route's own finally never runs for a poke that did not return, so this revoke is held too.
+        with interrupts_deferred():
+            remove_ssh_allow(ec2, security_group_id, prefixes)
         raise
     except Exception as exc:
         failure = wrap_ec2_error(exc)
-        remove_ssh_allow(ec2, security_group_id, prefixes)
+        with interrupts_deferred():
+            remove_ssh_allow(ec2, security_group_id, prefixes)
         raise failure from exc
 
 

@@ -701,6 +701,12 @@ def non_interactive() -> bool:
 
 
 _suppress_deprecations: bool = False
+_warned_deprecations: ContextVar[frozenset[str]] = ContextVar("warned_deprecations", default=frozenset())
+
+
+def reset_deprecation_warning_scope() -> None:
+    """Begin a fresh request's keyed deprecation-warning aggregation."""
+    _warned_deprecations.set(frozenset())
 
 
 def set_suppress_deprecations(value: bool) -> None:
@@ -719,7 +725,13 @@ def deprecations_suppressed() -> bool:
     return _suppress_deprecations
 
 
-def deprecation(message: str) -> None:
-    """Emit one suppressible compatibility warning."""
-    if not deprecations_suppressed():
-        warn(message)
+def deprecation(message: str, *, key: str | None = None) -> None:
+    """Emit a suppressible compatibility warning, once per request if keyed."""
+    if deprecations_suppressed():
+        return
+    if key is not None:
+        warned = _warned_deprecations.get()
+        if key in warned:
+            return
+        _warned_deprecations.set(warned | {key})
+    warn(message)

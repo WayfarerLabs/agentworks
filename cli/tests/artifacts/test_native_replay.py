@@ -22,8 +22,8 @@ pytestmark = requires_posix_shell
     [
         ("claude", "ClaudeCodeIntegration", "session-agent-definitions", "user"),
         ("codex", "CodexIntegration", "session-agent-config", "user"),
-        ("grok", "GrokBuildIntegration", "session-agent-definitions", "user"),
-        ("grok", "GrokBuildIntegration", "session-agent-definitions", "workspace"),
+        ("grok", "GrokBuildIntegration", "session-home-skills", "user"),
+        ("grok", "GrokBuildIntegration", "session-home-skills", "workspace"),
     ],
 )
 @pytest.mark.parametrize("prior_state", ["matching", "renamed", "competing"])
@@ -81,7 +81,6 @@ def test_inactive_facet_replays_known_persona_without_reusing_old_policy_paths(
                 inputs,
                 skills_root=str(home / ".agents/skills"),
                 agents_root=str(native_root / "agents"),
-                instructions_path=str(native_root / "AGENTS.md"),
             )
         if tool == "claude":
             return claude_adapter.outer_artifacts(inputs, str(placement_root))
@@ -97,11 +96,11 @@ def test_inactive_facet_replays_known_persona_without_reusing_old_policy_paths(
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(file.data)
     settings = (
-        {"claudeMdExcludes": ["**/rules/agentworks-rule-unrelated.md"]}
+        {"claudeMdExcludes": [unrelated_files[0].path]}
         if tool == "claude"
         else {"subagents": {"toggle": {"unrelated": False}}}
         if tool == "grok"
-        else {}
+        else {"skills": {"config": [{"path": unrelated_files[0].path, "enabled": False}]}}
     )
     probe(tmp_path, tool=tool, identities=(), settings=settings)
     if tool == "codex":
@@ -188,18 +187,17 @@ def test_inactive_facet_replays_known_persona_without_reusing_old_policy_paths(
     assert warnings
     assert {path: Path(path).read_bytes() for path in retained} == retained
     if tool == "grok":
-        assert result.artifacts.files == ()
         assert integration._artifact_plan.argv == ()
-        assert {item.input_id for item in result.artifacts.deferred} == {item.identity for item in inputs.items()}
+        assert {item.input_id for item in result.artifacts.deferred} == {
+            item.identity for item in inputs.items() if item.content.type is ArtifactType.AGENT
+        }
         assert all(item.destination == "session" for item in result.artifacts.deferred)
-        assert requests
-        for request in requests:
-            assert set(request["paths"]) == set(retained)
-            assert set(request["entries"]) == {file.path for file in all_files if file.native_identity}
-            assert set(request["identities"]) == {file.native_identity for file in all_files if file.native_identity}
-            assert request["proposed"] == {}
+        request = next(request for request in requests if set(request["paths"]) == set(retained))
+        assert set(request["entries"]) == {file.path for file in all_files if file.native_identity}
+        assert set(request["identities"]) == {file.native_identity for file in all_files if file.native_identity}
+        assert request["proposed"] == {}
         return
-    if prior_state == "competing":
+    if prior_state == "competing" and tool == "codex":
         assert inputs.local is not None
         assert {item.input_id for item in result.artifacts.deferred} == {
             item.identity for item in inputs.items() if item.identity != persona.identity
@@ -210,7 +208,7 @@ def test_inactive_facet_replays_known_persona_without_reusing_old_policy_paths(
         request for request in reversed(requests) if set(request["paths"]) == {file.path for file in proposed}
     )
     assert set(selected_request["entries"]) == {
-        file.path for file in (*earlier.files, *proposed) if file.native_identity
+        file.path for file in ((*earlier.files, *proposed) if tool == "codex" else proposed) if file.native_identity
     }
     assert set(selected_request["paths"]) == {file.path for file in proposed}
     assert set(selected_request["identities"]) == {file.native_identity for file in proposed if file.native_identity}

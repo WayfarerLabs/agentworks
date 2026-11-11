@@ -342,6 +342,7 @@ class PendingVMNode:
         db: Database,
         name: str,
         debian_release: DebianRelease,
+        hostname: str,
         template: VMTemplateNode,
         site: VMSiteNode,
         credentials: tuple[GitCredentialNode, ...],
@@ -349,6 +350,7 @@ class PendingVMNode:
         self._db = db
         self._name = name
         self._debian_release = debian_release
+        self._hostname = hostname
         self._template = template
         self._site = site
         self._credentials = credentials
@@ -369,6 +371,7 @@ class PendingVMNode:
 
     def preflight(self, ctx: RunContext) -> None:
         self._site.platform.validate_create_release(self._debian_release)
+        self._site.platform.validate_create_hostname(self._hostname)
 
     def runup(self, ctx: RunContext) -> None: ...
 
@@ -465,6 +468,7 @@ def pending_vm_node(
     db: Database,
     name: str,
     debian_release: DebianRelease,
+    hostname: str,
     template: VMTemplateNode,
     site: VMSiteNode,
     credentials: tuple[GitCredentialNode, ...],
@@ -474,4 +478,4 @@ def pending_vm_node(
     with (the resolved template, the chosen site, the admin template's
     declared credentials), and every edge holder shares those same
     objects (one object per node)."""
-    return PendingVMNode(db, name, debian_release, template, site, credentials)
+    return PendingVMNode(db, name, debian_release, hostname, template, site, credentials)

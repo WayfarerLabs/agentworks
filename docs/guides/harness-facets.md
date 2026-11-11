@@ -197,8 +197,11 @@ behavior.
 
 Session environment retains its existing precedence: session over actual user, over workspace, over
 VM. It is not produced by merging setup configs. Environment values follow their own merge rules;
-artifact handling does not consume or reroute those values. The pipeline is core environment and
-artifacts, then harness integration. Features and automatic hint emission are future work.
+artifact handling does not consume or reroute those values. Launched workloads also receive
+`AGENTWORKS_SESSION_UUID` and `AGENTWORKS_RUN_ID`, identifying their managed logical session and
+current run independently of the reusable session display name and native conversation ID. The
+pipeline is core environment and artifacts, then harness integration. Features and automatic hint
+emission are future work.
 
 ## Artifact handling across facets
 
@@ -226,12 +229,14 @@ The same captured VM inputs remain available to every actual user; one user's ha
 consume another's inputs. Admin and agent users remain separate. With neither VM nor user
 activation, those inputs reach the session through user passthrough.
 
-Claude applies VM instructions, skills and agents in its managed locations. Codex applies VM skills
-and defers other types to user. Grok defers VM inputs to user. Shell applies all VM types under
-`/opt/agentworks/artifacts`. Workspace-owned bundles remain useful independently: their workspace
-facet handles them in project locations or passes them to each consuming session. Workspace
-placement is shared with other users of that workspace, so session-only content belongs in the
-private session directory under the actual user's home. The
+Claude applies VM guidance skills, skills and agents in its managed locations. Codex applies VM
+skills and guidance skills, and defers personas to user. Grok defers VM inputs to user. Shell
+applies all VM types under `/opt/agentworks/artifacts`. Workspace-owned bundles remain useful
+independently: their workspace facet handles them in project locations or passes them to each
+consuming session. Workspace placement is shared with other users of that workspace. Session-only
+content stays under the actual user's home: private session/run files or an explicitly enabled
+best-effort native skill workaround. Home-skill catalogs can be shared by that user's sessions;
+metadata states intended applicability. The
 [two concurrent Shell sessions example](../../cli/agentworks/artifacts/README.md#two-concurrent-sessions)
 uses an existing workspace and distinct private run paths, with inspection and teardown commands.
 

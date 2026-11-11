@@ -17,6 +17,7 @@ from agentworks import output
 from agentworks.execution.access import Admin, Agent
 from agentworks.execution.requests import Command, Script, Shell
 from agentworks.git_config import ensure_safe_directory_wildcard
+from agentworks.linux_users import managed_home
 from agentworks.vms.home_layout import MANAGED
 from agentworks.vms.initializer.dotfiles import sync_dotfiles
 from agentworks.vms.initializer.mise import MISE_ACTIVATE_LINES, _write_mise_config, install_mise
@@ -57,7 +58,7 @@ def create_new_agent_user(
     from agentworks.errors import StateError
 
     admin = execution.vm_access(vm, config, Admin(), log=logger.record)
-    home = f"/home/{linux_user}"
+    home = managed_home(linux_user)
     account = Command(("getent", "passwd", linux_user), elevated=True)
     home_entry = Script(f"test -e {shlex.quote(home)} || test -L {shlex.quote(home)}", Shell.SH, elevated=True)
     if status(admin, account) == 0 or status(admin, home_entry) == 0:
@@ -127,7 +128,7 @@ def create_agent_on_vm(
     admin = execution.vm_access(vm, config, Admin(), log=logger.record)
     admin_files = admin.files()
 
-    home = f"/home/{linux_user}"
+    home = managed_home(linux_user)
 
     agent_shell = agent_tmpl.shell
 

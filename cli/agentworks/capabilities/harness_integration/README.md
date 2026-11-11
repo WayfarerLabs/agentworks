@@ -84,12 +84,14 @@ explicit deferrals, never recaptures an ancestor, and reports unknown handling w
 Before `start`, core calls `prepare_artifacts` with the immutable `SessionArtifactContext` available
 on the session binding. This includes completed environment, actual home, prospective session/run
 IDs, grouped remaining inputs and ancestor file ownership metadata. Return the session application
-in `HarnessStart.artifacts`. Core warns about unhandled inputs after validating the full result and
-restricts session file publication to that run's private directory under the actual user's home.
-First-party session facets default to no artifact delivery. Their typed `enabled_workarounds` config
-lists specific delivery opt-ins, with an empty default and replacement inheritance. A recognized
-compatibility name need not have a verified carrier: Grok accepts `session-agent-definitions` but
-returns its private session personas unhandled in every launch mode. Return an explicit deferral for
+in `HarnessStart.artifacts`. Core warns about unhandled inputs after validating the full result.
+Private files belong to the run directory under the actual user's home. An explicitly enabled
+native-home workaround can also publish narrowly validated, session-owned skill packages in that
+user's native discovery directory; the publication boundary covers exact packages, not all of HOME.
+Catalog visibility is shared with other sessions of that user, and applicability is best effort.
+First-party native session facets default to no artifact delivery. Their typed `enabled_workarounds`
+config lists specific delivery opt-ins, with an empty default and replacement inheritance. Grok
+accepts `session-home-skills`; session personas remain unhandled. Return an explicit deferral for
 each disabled or unsupported input, including its relevant workaround in the reason when one exists.
 Filter disabled inputs before applying delivery-specific validation or compatibility probes. Keep
 unsafe paths, conflicting ownership, malformed results and invalid configuration as errors. Do not
@@ -101,8 +103,8 @@ then validate that remaining delivery. A namespace that resolves the collision m
 at the receiving facet; an earlier deferral is not a permanent refusal. Hard failures in input,
 transport or private filesystem publication remain errors of the running facet.
 
-Generated literal argv values must use `quote_literal_argv` so artifact text is not interpreted as
-Agentworks template substitutions. Native conversation IDs remain integration-owned.
+Generated literal argv values use ordinary shell quoting. Only fields declared as templates are
+rendered, before command assembly. Native conversation IDs remain integration-owned.
 
 And note that regardless of integration, all sessions run inside the standard tmux session. This
 provides both access to stdin/stdout/stderr for interactivity as well as the persistent execution
@@ -212,15 +214,15 @@ session facet. Its session implementation:
 - **MUST NOT** do anything in its workspace or agent that would interfere with other sessions or
   running processes (beyond normal file modification, which is part of the workspace contract)
   whether under its own user or a different user: it must not kill or signal processes it did not
-  start, mutate shared user state, touch another session's tmux, mutate shared tool or system
+  start, change shared login state, touch another session's tmux, mutate shared tool or system
   config, hold exclusive locks, or delete files it does not own.
-- **MUST** keep its effects session-scoped: it may set up state for this one session (for example, a
-  session-local env var), but **MUST NOT** cause effects that persist to the whole user, the
-  workspace, or the machine, such as an auth flow that writes shared login state or a workspace-wide
-  plugin install. A session-local secret (say, for auth) belongs in that session's environment,
-  never baked into the launch command, where it would leak into process listings and terminal
-  scrollback. Broader effects belong to explicitly selected setup facets (see
-  [A Note on Scope](#a-note-on-scope)).
+- **MUST** keep its effects owned by this session. Shared login, plugin installation and general
+  user/workspace/machine configuration belong to explicitly selected setup facets. The artifact
+  contract above permits explicitly enabled, narrowly owned native-home packages; their shared
+  catalog visibility and best-effort applicability must be disclosed. A session-local secret (say,
+  for auth) belongs in that session's environment, never baked into the launch command, where it
+  would leak into process listings and terminal scrollback. Broader effects belong to explicitly
+  selected setup facets (see [A Note on Scope](#a-note-on-scope)).
 - **SHOULD** surface its launch decision (resumed, started fresh, adopted by discovery, or handed to
   the operator to disambiguate) to the operator, both in the command's output and as the pane's
   first visible line. Every distinct decision needs its own wording: "something happened" is not a
@@ -509,11 +511,11 @@ unsupported intent leaves the managed tmux runtime and integration-owned state i
 #### Operation: Returning the Launch Decision
 
 - The return value is a `HarnessStartResult`, not an execution. `HarnessStart(command, note)` is the
-  implemented result: the session manager wraps the command (template-var substitution, then the
-  tmux pane's `$SHELL -lic 'cd <dir> && exec <command>'`) and runs it. Empty string means "just the
-  login shell". `HarnessStartNotImplemented` reports that the integration does not implement that
-  intent; every intent may produce it. Any other return shape is a contract error, not an
-  unsupported intent.
+  implemented result: the session manager passes the command to the tmux pane's
+  `$SHELL -lic 'cd <dir> && exec <command>'` wrapper and runs it, without further interpolation.
+  Empty string means "just the login shell". `HarnessStartNotImplemented` reports that the
+  integration does not implement that intent; every intent may produce it. Any other return shape is
+  a contract error, not an unsupported intent.
 - Core passes a `HarnessLaunchIntent`: `CREATE` for `session create`, `RESUME_ONLY` for an explicit
   `--resume-only`, `FORCE_NEW` for an explicit `--force-new`, and `RESUME_OR_NEW` for an ordinary
   `session start` or `session restart`. Core obtains and validates the result before teardown.
@@ -578,9 +580,15 @@ The surrounding wiring supplies the following behavior and debugging boundaries:
   node's composed `preflight` / `runup` on create; the existing-session launch path builds no runup
   context (its only readiness pass is the pre-kill preflight sweep), and on both paths only the op
   context carries secrets. An integration cannot depend on runup firing before `start`.
-- **Substitution stays outside:** the returned string is passed through `{{session_name}}` /
-  `{{workspace_name}}` substitution at the call site. The resulting constraints appear under
-  "Building the pane command" below.
+- **Context binding and rendering:** before preflight, the manager binds the invocation's planned
+  facts and launch intent through `prepare_context`. Shell preflight checks that its selected
+  `command` or `resume_command` renders, including when a pending target defers the required-command
+  probe. This precedes workload/env secret resolution; the VM activation gate may need its own
+  credentials before remote preflight. The checks cover rendering and declared-command availability;
+  execution determines command behavior. During launch selection, shell renders the selected field
+  again from its declaration and native integrations render structured extra arguments before
+  quoting. Returned commands receive no further interpolation. See
+  [runtime context and interpolation](../../../../docs/arch/runtime-context.md).
 - **Display:** `session list` / `session describe` show the resolved integration name by
   re-resolving the template read-only (no instance is built, no gate runs);
   `resource list --kind harness-integration` inventories rows,
@@ -643,17 +651,18 @@ sessions. Five rules, each earned:
   and `exec` takes one simple command: with a bare `echo ...; exec tool ...` the shell would `exec`
   the `echo` and nothing after the `;` would ever run. Return `sh -c '<inner>'` with the inner
   `shlex.quote`d, and `exec` the tool inside it so the pane process becomes the tool.
-- **`shlex.quote` every generated token.** Build an argv token list, quote each, and space-join.
-  Never interpolate raw values into shell syntax.
-- **Generated pieces must not emit `{{word}}`.** The call-site substitution raises on unknown
-  `{{word}}` tokens and substitutes known ones over the entire returned string. Operator-authored
-  slices (shell's commands, `extra_args` elements) carry `{{session_name}}` semantics on purpose.
-  Free-form workload fields are literal harness input, so integrations use the shared argv quoting
-  seam that hides doubled opening braces from manager substitution while the target shell
-  reconstructs the exact token. Single braces (`${VAR}`, JSON) are untouched.
+- **Quote generated argv data.** Build a token list and use `shlex.quote` for each generated or
+  modeled argument, preserving literal profile names, model values, settings, and workload input.
+- **Render declared template fields in the integration.** Render designated `extra_args` once
+  against the bound context with `self.render_context_argv`. Validate the effective vector and emit
+  those same values with ordinary shell quoting. `self.quote_context_argv` combines rendering and
+  quoting when the caller does not need to inspect the rendered value. A workspace path containing
+  an apostrophe remains one argument, and namespace-looking replacement data is not interpreted
+  twice. Shell renders its selected command field as operator-authored source with ordinary shell
+  quoting responsibilities. The manager never interpolates returned commands.
 - **Model the common flags; leave the rest to `extra_args`.** A small optional vocabulary
-  (`permission_mode`, `model`, `reasoning_effort`, workload inputs, and session preferences) plus a
-  verbatim `extra_args` list emitted after generated options keeps the integration useful without
+  (`permission_mode`, `model`, `reasoning_effort`, workload inputs, and session preferences) plus an
+  explicit `extra_args` list emitted after generated options keeps the integration useful without
   chasing the tool's whole flag surface. Session-local tool settings share one generated
   `--settings` JSON argument. Append `extra_args` after the managed options for deterministic
   ordering, but let the upstream tool define repeated-flag behavior. If Claude, Codex, or Grok also
@@ -684,14 +693,14 @@ sessions. Five rules, each earned:
 
 #### Integration-Owned Files on the Launch Target
 
-Some integrations need a file on the target that is theirs rather than the tool's: a helper script
-the tool invokes, a small piece of state the tool reports into. Put it under
+For session-invariant helpers and native identity recorders, integrations use
 **`~/.agentworks/<integration-name>/`** on the launch target (`codex` established this with
-`~/.agentworks/codex/`), never in the tool's own config dir (that is shared user state the scope
-rule forbids mutating) and never in the workspace (every session there would see it).
+`~/.agentworks/codex/`). Keep these helpers out of shared native configuration and workspace
+directories. Artifact publication follows its separate contract above: private run files and
+explicitly enabled, UUID-owned native-home packages use core's guarded publisher and ordinary
+applied state.
 
-Three rules make a per-user file legitimate under the session-scoped effects rule
-([A Note on Scope](#a-note-on-scope)):
+These helper rules preserve the session-scoped effects rule ([A Note on Scope](#a-note-on-scope)):
 
 - **Rewrite it identically on every launch.** If two sessions of the same user would write the same
   bytes, neither can change what the other's file does, and an Agentworks upgrade cannot leave a
@@ -705,11 +714,12 @@ Three rules make a per-user file legitimate under the session-scoped effects rul
 - **Version anything the tool holds a path to.** `codex`'s recorder is `record-thread-v1.sh`: a
   future recorder taking different arguments becomes `-v2`, so an upgrade mid-session cannot reshape
   the contract of a script a running tool is about to invoke.
-- **Per-SESSION files are keyed by session name, so treat their contents as suspect.** A session
-  name is reusable: a deleted session's file outlives it and the next namesake finds it. Decide
-  explicitly when such a file may be trusted. Codex fingerprints the old recorder value on a
-  forced-fresh launch and refuses to bind that same value afterward, because "the file exists" never
-  means "it belongs to this session".
+- **Legacy recorders keyed by session name have reusable addresses.** A deleted session's file can
+  outlive it and the next namesake can find it. Decide explicitly when such a file may be trusted.
+  Codex fingerprints the old recorder value on a forced-fresh launch and refuses to bind that same
+  value afterward, because "the file exists" never means "it belongs to this session". Artifact
+  ownership instead uses the core-provided stable session UUID and changing run ID; it does not
+  reuse the recorder's naming convention.
 
 #### Probing the Launch Target
 

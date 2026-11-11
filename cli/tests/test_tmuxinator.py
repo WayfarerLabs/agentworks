@@ -6,6 +6,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import pytest
 
@@ -61,29 +62,33 @@ def test_generate_config_with_sessions() -> None:
     shutil.which("tmux") is None or shutil.which("zsh") is None,
     reason="tmux and zsh are required",
 )
-def test_generated_wrapper_does_not_match_a_session_name_prefix(tmp_path: Path) -> None:
-    socket_path = str(tmp_path / "tmux.sock")
-    subprocess.run(
-        ["tmux", "-S", socket_path, "new-session", "-d", "-s", "foobar", "sleep 30"],
-        check=True,
-    )
-    try:
-        session = SessionRow(
-            name="foo",
-            workspace_name="ws",
-            template="default",
-            mode="admin",
-            created_at="",
-            updated_at="",
-            socket_path=socket_path,
+def test_generated_wrapper_does_not_match_a_session_name_prefix() -> None:
+    # Keep the owned socket below the native Unix path-length limit.
+    with TemporaryDirectory(prefix="agw-r1-tmux-prefix-", dir="/tmp") as directory:
+        root = Path(directory)
+        socket_path = str(root / "tmux.sock")
+        subprocess.run(
+            ["tmux", "-S", socket_path, "new-session", "-d", "-s", "foobar", "sleep 30"],
+            check=True,
         )
-        config = generate_config("ws", "/tmp/ws", sessions=[session])
-        wrapper = next(line.strip().removeprefix("- ") for line in config.splitlines() if "while tmux" in line)
-        probe = wrapper.removeprefix("unset TMUX; while ").split(" 2>/dev/null;", maxsplit=1)[0]
-        result = subprocess.run(["zsh", "-f", "-c", probe], check=False)
-        assert result.returncode == 1
-    finally:
-        subprocess.run(["tmux", "-S", socket_path, "kill-server"], check=False)
+        try:
+            session = SessionRow(
+                name="foo",
+                workspace_name="ws",
+                template="default",
+                mode="admin",
+                created_at="",
+                updated_at="",
+                socket_path=socket_path,
+            )
+            config = generate_config("ws", "/tmp/ws", sessions=[session])
+            wrapper = next(line.strip().removeprefix("- ") for line in config.splitlines() if "while tmux" in line)
+            probe = wrapper.removeprefix("unset TMUX; while ").split(" 2>/dev/null;", maxsplit=1)[0]
+            result = subprocess.run(["zsh", "-f", "-c", probe], check=False)
+            assert result.returncode == 1
+        finally:
+            subprocess.run(["tmux", "-S", socket_path, "kill-server"], check=False)
+    assert not root.exists()
 
 
 def test_generate_config_admin_window_first() -> None:

@@ -327,8 +327,8 @@ def classify(
     ``host_key_failed`` and ``auth_failed`` say what ssh's own log holds; they
     type only ssh's 255 with no start marker, the host key first.
 
-    An abandoned stream is one whose consumer left, so the client closed it
-    unread. An abandoned stdout stands in for the ``end`` line; the stderr
+    An abandoned stream is one whose consumer left, so the client discards
+    it. An abandoned stdout stands in for the ``end`` line; the stderr
     trailer still decides. A departed consumer without a trailer is
     ``Unknown(CONSUMER_LEFT)``.
     """

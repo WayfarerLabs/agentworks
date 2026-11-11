@@ -350,7 +350,14 @@ def test_config_secret_registration_and_delivery_share_actual_owner(db, vm, nati
         )
         resolver = Mock()
         inputs.register(resolver, registry)
-        resolver.register_targets.assert_called_once_with([inputs.target])
+        from agentworks.secrets.orchestration import compute_needed_secrets
+
+        resolver.register_targets.assert_called_once()
+        registered_targets = resolver.register_targets.call_args.args[0]
+        assert [
+            decl.name
+            for decl in compute_needed_secrets(registered_targets, registry, allow_transient_auto_declare=True)
+        ] == ["env-secret"]
         resolver.register_name.assert_called_once_with("config-secret")
         with native_mutation_guard(db.path, vm.name) as guard:
             apply_agent_setup(
@@ -493,3 +500,109 @@ def test_vm_and_admin_setup_follow_core_before_terminal_checkpoint(
     assert records[0].component == "vm" and records[0].complete == ("vm" not in failed_components)
     assert records[1].component == "admin" and records[1].complete == ("admin" not in failed_components)
     assert db.get_vm(vm.name).init_status == (InitStatus.PARTIAL if failed_components else InitStatus.COMPLETE).value
+
+
+@pytest.mark.parametrize("component", ["vm", "admin", "agent", "workspace", "session"])
+@pytest.mark.parametrize("key", ["AGENTWORKS_VM", "AGENTWORKS_SESSION", "AGENTWORKS_CUSTOM"])
+@pytest.mark.parametrize("entry", [EnvEntry("${agw:session_name}"), EnvEntry({"secret": "ignored"})])
+def test_setup_identity_filter_precedes_validation_resolution_and_rendering(
+    tmp_path, registry, monkeypatch, component, key, entry
+):
+    import hashlib
+
+    from agentworks.config import Config, DefaultsConfig, OperatorConfig, PathsConfig, SessionConfig
+    from agentworks.env.identity import ResourceContext, agentworks_identity_env
+    from agentworks.interpolation import runtime_values
+    from agentworks.secrets.policy import TtyInteractionPolicy
+    from agentworks.secrets.resolver import Resolver
+
+    scope = {key: entry, "CONFIG": EnvEntry("${agw:user_home_dir}/config")}
+    target = SecretTarget(
+        vm=scope if component == "vm" else {},
+        admin=scope if component == "admin" else None,
+        agent=scope if component == "agent" else None,
+        workspace=scope if component == "workspace" else None,
+        session=scope if component == "session" else None,
+    )
+    inputs = SetupInputs("vm", "box", "vm", {}, target)
+    context = ResourceContext(vm_name="box", platform="lima", site="local", user="admin")
+    inputs.environment_target.validate_context(runtime_values(context))
+
+    def unexpected_resolution(*args, **kwargs):
+        pytest.fail("Ignored setup identity must not reach a provider or prompt")
+
+    monkeypatch.setattr("agentworks.secrets.resolve.resolve_batch", unexpected_resolution)
+    config = Config(
+        operator=OperatorConfig(tmp_path / "id.pub", tmp_path / "id"),
+        paths=PathsConfig(),
+        defaults=DefaultsConfig(),
+        source_path=tmp_path / "config.toml",
+        session=SessionConfig(),
+    )
+    resolver = Resolver(config, registry, interaction=TtyInteractionPolicy.REFUSE)
+    inputs.register(resolver, registry)
+    resolver.resolve()
+    assert resolver.values == {}
+    assert inputs.environment(resolver.values, context) == {
+        "CONFIG": "/home/admin/config",
+        **agentworks_identity_env(context),
+    }
+    assert inputs.target is target
+    assert scope[key] is entry
+    declaration = inputs.declaration("shell", CapabilityConfig())
+    captured_entry = (
+        {"secret": entry.secret} if entry.secret else {"sha256": hashlib.sha256(entry.value.encode()).hexdigest()}
+    )
+    captured_env = declaration["env"]
+    assert isinstance(captured_env, dict)
+    captured_scope = captured_env[component]
+    assert isinstance(captured_scope, dict)
+    assert captured_scope[key] == captured_entry
+
+
+def test_setup_projection_preserves_winning_plaintext_and_validation():
+    from agentworks.env.identity import ResourceContext
+    from agentworks.errors import ValidationError
+    from agentworks.interpolation import runtime_values
+
+    context = ResourceContext(vm_name="box", platform="lima", site="local", user="admin")
+    target = SecretTarget(vm={"CONFIG": EnvEntry("${agw:session_name}")})
+    inputs = SetupInputs("vm", "box", "vm", {}, target)
+    with pytest.raises(ValidationError):
+        inputs.environment_target.validate_context(runtime_values(context))
+    with pytest.raises(ValidationError):
+        inputs.environment({}, context)
+    inputs = SetupInputs("vm", "box", "vm", {}, SecretTarget(vm=target.vm, admin={"CONFIG": EnvEntry("winner")}))
+    inputs.environment_target.validate_context(runtime_values(context))
+    assert inputs.environment({}, context)["CONFIG"] == "winner"
+
+
+def test_lifecycle_early_validation_uses_setup_identity_policy(db, registry, vm, monkeypatch):
+    selected = {"shell": CapabilityConfig()}
+    parent = resolve_vm({})
+    parent.env = {"AGENTWORKS_VM": EnvEntry("${agw:session_name}")}
+    parent.harness_integrations = selected
+    monkeypatch.setattr("agentworks.vms.templates.resolve_live_template", lambda *args: parent)
+    user_env = {"AGENTWORKS_CUSTOM": EnvEntry({"secret": "ignored"})}
+    system, admin = prepare_vm_setup(
+        db, registry, name=vm.name, template=parent, admin=AdminConfig(env=user_env, harness_integrations=selected)
+    )
+    agent = prepare_agent_setup(
+        db,
+        registry,
+        vm=vm,
+        name="agent",
+        template=ResolvedAgentTemplate("default", env=user_env, harness_integrations=selected),
+    )
+    project = prepare_workspace_setup(
+        db,
+        registry,
+        vm=vm,
+        name="project",
+        template=ResolvedTemplate("default", env=user_env, harness_integrations=selected),
+        root="/work/project",
+    )
+    assert agent is not None and project is not None
+    assert all(inputs.environment_target.vm == {} for inputs in (system, admin, agent, project))
+    assert system.target.vm == parent.env
+    assert admin.target.admin == user_env and agent.target.agent == user_env and project.target.workspace == user_env

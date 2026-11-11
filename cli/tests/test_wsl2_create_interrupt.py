@@ -25,7 +25,9 @@ touches the network.
 
 from __future__ import annotations
 
+import configparser
 import json
+import shlex
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -40,9 +42,9 @@ from agentworks.capabilities.vm_platform import ProvisionRequest, RetainedProvis
 from agentworks.capabilities.vm_platform.tailscale_join import JOIN_FRAGMENT
 from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 from agentworks.debian import DebianRelease
-from agentworks.errors import StateError
+from agentworks.errors import StateError, ValidationError
 from tests._root_channel_fakes import ADDRESS, FakeGuest, install_at_run_process
-from tests.conftest import provisioning_trust_for_tests
+from tests.conftest import provisioning_trust_for_tests, requires_posix_shell
 
 if TYPE_CHECKING:
     from tests.conftest import CapturedOutput
@@ -138,6 +140,36 @@ def _wire(
     monkeypatch.setattr(wsl2, "run_bootstrap", lambda *args, **kwargs: None)
     calls.guest = install_at_run_process(monkeypatch, FakeGuest())
     return calls
+
+
+@requires_posix_shell
+def test_the_distro_keeps_its_vms_hostname_in_wsl_conf(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Without ``[network] hostname`` WSL names the guest after the Windows computer at every start."""
+    calls = _wire(monkeypatch)
+    request = _request()
+
+    WSL2Platform("wsl2", {}).create(request, RunContext())
+
+    (write,) = [c for kind, c in calls.events if kind == "wsl" and "/etc/wsl.conf" in c]
+    command = write.split(" bash -c ", 1)[1]
+    written = tmp_path / "wsl.conf"
+    subprocess.run(["bash", "-c", command.replace("/etc/wsl.conf", shlex.quote(str(written)))], check=True)
+    conf = configparser.ConfigParser()
+    conf.read(written)
+    assert conf["network"]["hostname"] == request.hostname
+    assert conf["user"]["default"] == request.admin_username
+    assert conf["boot"]["systemd"] == "true"
+
+
+@pytest.mark.parametrize("hostname", ["vm_1", "team--vm1"])
+def test_a_hostname_wsl_would_rename_is_refused(hostname: str) -> None:
+    with pytest.raises(ValidationError) as caught:
+        WSL2Platform("wsl2", {}).validate_create_hostname(hostname)
+    assert caught.value.hint
+
+
+def test_a_hostname_wsl_keeps_is_accepted() -> None:
+    WSL2Platform("wsl2", {}).validate_create_hostname("team-vm1")
 
 
 def _assert_teardown_ran(calls: _Calls) -> None:

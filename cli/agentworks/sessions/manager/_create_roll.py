@@ -324,8 +324,8 @@ def _start_session_slice(
             # the runup readiness ctx above (targets), plus the scoped
             # secrets (the session node's declared union, empty for the
             # built-in shell harness_integration; ScopedSecrets never delivers).
-            # Template-var substitution lifts OUT of the harness_integration and
-            # wraps its returned string. The op runs BEFORE the insert
+            # The integration renders its declared template fields before
+            # returning the completed command. The op runs BEFORE the insert
             # so a freshly minted harness_integration_state (claude-code's session
             # id) lands with the new row; it does only read-only work
             # (a login-shell string for shell, a find probe for
@@ -337,21 +337,21 @@ def _start_session_slice(
                 agent_access=agent_access,
                 secrets=ScopedSecrets(secret_values, session_node.secret_refs()),
             )
+            template_values = _mgr._session_context_values(db, vm, ws, name, mode, resolved_agent_name)
+            session_node.harness_integration.prepare_context(template_values, intent=HarnessLaunchIntent.CREATE)
             harness_start = require_implemented_start(
                 session_node.harness_integration.start(start_ctx, intent=HarnessLaunchIntent.CREATE),
                 intent=HarnessLaunchIntent.CREATE,
                 harness_integration_name=template.harness_integration,
                 session_name=name,
             )
+            command = harness_start.command
             artifact_application = validate_session_application(
                 harness_start.artifacts, prepared_artifacts.context, integration=template.harness_integration
             )
             if artifact_application.artifacts_dir is not None:
                 session_env["AGENTWORKS_ARTIFACTS_DIR"] = artifact_application.artifacts_dir
-            command = _mgr._substitute_template_vars(
-                harness_start.command,
-                {"session_name": name, "workspace_name": workspace_name},
-            )
+
             if harness_start.note is not None:
                 output.detail(harness_start.note)
 
@@ -388,7 +388,12 @@ def _start_session_slice(
                 artifact_application,
             )
             commit_session_artifacts(
-                db, name, template.harness_integration, agent_access or admin_access, prepared_artifacts
+                db,
+                name,
+                template.harness_integration,
+                agent_access or admin_access,
+                prepared_artifacts,
+                artifact_application,
             )
             deploy_restricted_config(run_command, history_limit=config.session.history_limit)
             # Pick the SSH transport for tmux operations:

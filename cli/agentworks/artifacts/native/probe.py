@@ -120,7 +120,7 @@ for path in paths:
                 if any(fnmatch.fnmatchcase(p, os.path.expanduser(pattern)) for p in rule_paths):
                     problems.append('native-discovery-exclusions')
             if request['session_plugin'] and any(
-                value is False and name.split('@')[0] == 'agentworks-artifacts'
+                value is False and name.split('@')[0] in request['plugin_names']
                 for name, value in document.get('enabledPlugins', {}).items()
             ):
                 problems.append('native-plugin-policy')
@@ -318,7 +318,8 @@ if tool == 'grok' and workspace and request['paths']:
     result = subprocess.run(['git', '-C', workspace, 'rev-parse', '--show-toplevel'], capture_output=True, text=True)
     if result.returncode == 0:
         for path in request['paths']:
-            if not path.startswith(workspace.rstrip('/') + '/'):
+            if not any(path.startswith(workspace.rstrip('/') + suffix)
+                       for suffix in ('/.grok/rules/', '/.claude/rules/')):
                 continue
             ignored = subprocess.run(['git', '-C', workspace, 'check-ignore', '--no-index', '--', path],
                                      capture_output=True)
@@ -435,6 +436,9 @@ def probe_native(
         "entries": {**recognized_entries, **entries},
         "proposed": _proposed_sizes(files, tool),
         "session_plugin": session_plugin,
+        "plugin_names": tuple(
+            dict.fromkeys(identity.split(":")[1] for identity in identities if identity.count(":") > 1)
+        ),
         "workspace_only": workspace_only,
         "vm_only": vm_only,
         "identities": identities,

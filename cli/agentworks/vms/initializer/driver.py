@@ -30,6 +30,7 @@ from agentworks.execution.access import Admin
 from agentworks.execution.requests import Command
 from agentworks.git_config import ensure_safe_directory_wildcard
 from agentworks.git_credentials import configure_user_git_credentials
+from agentworks.linux_users import managed_home
 from agentworks.vms.home_layout import ADMIN_MANAGED
 
 from . import phase_a
@@ -143,7 +144,7 @@ def bootstrap_vm(
     vm = db.get_vm(vm_name)
     assert vm is not None, f"VM '{vm_name}' missing from DB after Phase A"
     access = execution.vm_access(vm, config, Admin(), log=logger.record)
-    return access, f"/home/{admin_username}", release
+    return access, managed_home(admin_username), release
 
 
 def run_initialization(

@@ -7,6 +7,7 @@ import functools
 import json
 import os
 import platform
+import re
 import shlex
 import subprocess
 import sys
@@ -30,7 +31,7 @@ from agentworks.capabilities.vm_platform.tailscale_join import (
 )
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
-from agentworks.errors import ExternalError, StateError
+from agentworks.errors import ExternalError, StateError, ValidationError
 from agentworks.execution import root_script, ssh_process
 from agentworks.programs import resolve_program
 from agentworks.schema import AgwModel
@@ -303,6 +304,21 @@ _blob_opener = urllib.request.build_opener(_StripAuthRedirectHandler)
 
 class WSLCommandFailed(ExternalError):
     """A ``wsl.exe`` command exited non-zero; the message quotes what it printed."""
+
+
+# The hostnames WSL keeps as given: its init cleans ``network.hostname`` to
+# alphanumerics joined by single hyphens (dropping underscores and collapsing
+# repeated hyphens), and the guest would then disagree with ``vms.hostname``.
+_WSL_HOSTNAME_RE = re.compile(r"[a-z0-9]+(-[a-z0-9]+)*")
+
+
+def _wsl_conf(admin_username: str, hostname: str) -> str:
+    """The distro's ``/etc/wsl.conf``: the default user, systemd, and the hostname.
+
+    Without ``[network] hostname`` WSL names the guest after the Windows
+    computer at every distro start, and a later Tailscale join takes that name.
+    """
+    return f"[user]\ndefault={admin_username}\n\n[boot]\nsystemd=true\n\n[network]\nhostname={hostname}\n"
 
 
 def _wsl(args: list[str], *, check: bool = True, timeout: int = 300) -> str:
@@ -691,6 +707,25 @@ class WSL2Platform(VMPlatform):
         # every platform); wsl2's anchor needs only the distro name.
         return _keepalive(self._distro_name(vm))
 
+    def validate_create_hostname(self, hostname: str) -> None:
+        """Refuse a hostname WSL would rename (``_WSL_HOSTNAME_RE``), which the guest would then not carry.
+
+        A VM name may hold underscores and a system slug consecutive hyphens;
+        core composes the hostname from both, and no command changes the slug.
+        """
+        if _WSL_HOSTNAME_RE.fullmatch(hostname):
+            return
+        if "_" in hostname:
+            hint = "Pick a VM name without underscores."
+        else:
+            hint = "This install's system slug has consecutive hyphens, so it cannot be part of a WSL2 hostname."
+        raise ValidationError(
+            f"WSL2 would rename the VM's hostname '{hostname}': it keeps only lowercase letters and digits "
+            "joined by single hyphens",
+            entity_kind="vm",
+            hint=hint,
+        )
+
     def create(self, request: ProvisionRequest, ctx: RunContext) -> ProvisionResult:
         image_tag = code_owned_release_value(
             _DEBIAN_OCI_TAGS,
@@ -842,7 +877,7 @@ class WSL2Platform(VMPlatform):
                     ]
                 )
 
-                # Configure wsl.conf: default user + systemd
+                # Configure wsl.conf: default user, systemd and the hostname
                 output.info("Enabling systemd...")
                 _wsl(
                     [
@@ -853,8 +888,7 @@ class WSL2Platform(VMPlatform):
                         "--",
                         "bash",
                         "-c",
-                        f"printf '[user]\\ndefault={shlex.quote(admin_username)}"
-                        f"\\n\\n[boot]\\nsystemd=true\\n' > /etc/wsl.conf",
+                        f"printf '%s' {shlex.quote(_wsl_conf(admin_username, request.hostname))} > /etc/wsl.conf",
                     ]
                 )
 

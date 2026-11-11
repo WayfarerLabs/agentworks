@@ -638,3 +638,147 @@ def test_a_workspace_layer_needing_replacement_warns_with_its_own_repair_and_use
     warnings = [warning for warning in captured_output.warnings if str(refused.value) in warning]
     assert len(warnings) == 2
     assert all(refused.value.hint is not None and refused.value.hint in warning for warning in warnings)
+
+
+def test_show_plaintext_matches_execution_with_live_instance_context(db: Database, tmp_path: Path) -> None:
+    from agentworks.env import ResourceContext, compose_env
+    from agentworks.env.entry import EnvEntry
+
+    source = {
+        "CONFIG": "${agw:user_home_dir}/.config/tool",
+        "PROJECT": "${agw:workspace_dir}",
+        "LABEL": "${agw:agent_name}/${agw:session_name}",
+        "LITERAL": "$${agw:user_name}",
+    }
+    config = load_config(
+        _write_config(tmp_path, vm_template=ManifestDoc("vm-template", "default", {"env": source})), warn_issues=False
+    )
+    _seed_db(db, with_agent=True, with_session=True)
+    rows = show_env(db, config, session_name="s1", interaction=TtyInteractionPolicy.REFUSE)
+    actual = {row.key: row.rendered_value for row in rows}
+    expected = compose_env(
+        values={},
+        vm={key: EnvEntry(value) for key, value in source.items()},
+        ctx=ResourceContext(
+            vm_name="vm-1",
+            platform="lima",
+            site="lima-local",
+            user="aw-claude",
+            agent_name="claude",
+            workspace_name="ws-a",
+            workspace_dir="/home/agentworks/ws-a",
+            session_name="s1",
+            session_kind="agent",
+        ),
+    )
+    assert actual == expected
+    assert all(row.scope == "vm" for row in rows if row.key in source)
+
+
+@pytest.mark.parametrize("entry", ["${agw:agent_name}", "${agw:unknown}", {"secret": "ignored"}])
+def test_admin_preview_discards_identity_collisions_before_render_or_reveal(
+    db: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, entry: str | dict[str, str]
+) -> None:
+    config = load_config(
+        _write_config(
+            tmp_path,
+            vm_template=ManifestDoc(
+                "vm-template", "default", {"env": {"AGENTWORKS_SESSION_KIND": entry, "AGENTWORKS_WORKSPACE": entry}}
+            ),
+        ),
+        warn_issues=False,
+    )
+    _seed_db(db)
+    db.insert_session("admin-s", "ws-a", "default", SessionMode.ADMIN)
+
+    def unexpected_reveal(*args: object, **kwargs: object) -> None:
+        pytest.fail("An ignored secret must not reach resolution")
+
+    monkeypatch.setattr("agentworks.secrets.resolve.resolve_partial_for_reveal", unexpected_reveal)
+    rows = show_env(db, config, session_name="admin-s", reveal_secrets=True, interaction=TtyInteractionPolicy.REFUSE)
+    actual = {row.key: row for row in rows}
+    assert actual["AGENTWORKS_SESSION_KIND"] == ResolvedEnvRow("AGENTWORKS_SESSION_KIND", "admin", "identity", False)
+    assert actual["AGENTWORKS_WORKSPACE"] == ResolvedEnvRow("AGENTWORKS_WORKSPACE", "ws-a", "identity", False)
+
+
+def test_session_legacy_preview_matches_execution_after_inheritance_and_stored_overlays(
+    db: Database,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.env import EnvEntry, ResourceContext, compose_env
+    from agentworks.sessions.templates import resolve_live_template
+
+    opaque = "opaque:{{session_name}}/${agw:session_name}"
+    monkeypatch.setenv("AW_SECRET_LEGACY_TOKEN", opaque)
+    vm_env = {"VM_LITERAL": "{{session_name}}/{{workspace_name}}"}
+    config = load_config(
+        _write_config(
+            tmp_path,
+            settings='[secret_config]\nsources = ["env-var"]\n',
+            vm_template=ManifestDoc("vm-template", "default", {"env": vm_env}),
+            manifests=[
+                ManifestDoc(
+                    "session-template",
+                    "parent",
+                    {
+                        "inherits": ["default"],
+                        "env": {
+                            "INHERITED": "{{session_name}}/{{workspace_name}}",
+                            "OVERRIDDEN": "{{workspace_name}}",
+                            "SECRET": {"secret": "legacy-token"},
+                        },
+                    },
+                ),
+                ManifestDoc(
+                    "session-template",
+                    "child",
+                    {"inherits": ["parent"], "env": {"OVERRIDDEN": "modern-${agw:session_name}"}},
+                ),
+                ManifestDoc("secret", "legacy-token", description="public fixture"),
+            ],
+        ),
+        warn_issues=False,
+    )
+    _seed_db(db, with_agent=True, with_session=True)
+    db._conn.execute("UPDATE sessions SET template = 'child' WHERE name = 's1'")
+    db._conn.commit()
+    db.instance_state.put_desired_overlay(
+        "session", "s1", VersionedPayload(1, {"env": {"INSTANCE": "${{session_name}}/${agw:workspace_name}"}})
+    )
+    overlay_before = db.instance_state.get_desired_overlay("session", "s1")
+
+    redacted = show_env(db, config, session_name="s1", interaction=TtyInteractionPolicy.REFUSE)
+    assert next(row for row in redacted if row.key == "SECRET").is_secret
+    assert opaque not in repr(redacted)
+    rows = show_env(db, config, session_name="s1", reveal_secrets=True, interaction=TtyInteractionPolicy.REFUSE)
+    actual = {row.key: row.rendered_value for row in rows}
+    from agentworks.bootstrap import build_registry
+
+    session_env = resolve_live_template(db, build_registry(config), "s1", "child").env
+    expected = compose_env(
+        values={"legacy-token": opaque},
+        vm={key: EnvEntry(value) for key, value in vm_env.items()},
+        session=session_env,
+        ctx=ResourceContext(
+            vm_name="vm-1",
+            platform="lima",
+            site="lima-local",
+            user="aw-claude",
+            agent_name="claude",
+            workspace_name="ws-a",
+            workspace_dir="/home/agentworks/ws-a",
+            session_name="s1",
+            session_kind="agent",
+        ),
+    )
+
+    assert actual == expected
+    assert actual["INHERITED"] == "s1/ws-a"
+    assert actual["OVERRIDDEN"] == "modern-s1"
+    assert actual["INSTANCE"] == "$s1/ws-a"
+    assert actual["VM_LITERAL"] == "{{session_name}}/{{workspace_name}}"
+    assert actual["SECRET"] == opaque
+    assert {row.scope for row in rows if row.key in session_env} == {"session"}
+    assert next(row for row in rows if row.key == "VM_LITERAL").scope == "vm"
+    assert db.instance_state.get_desired_overlay("session", "s1") == overlay_before

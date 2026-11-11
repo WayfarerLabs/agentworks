@@ -10,13 +10,13 @@ import pytest
 from agentworks.errors import ConnectivityError, TokenRejectedError
 from agentworks.execution.root_script import ChannelUnreachable, RawRun
 from agentworks.plugins.proxmox import guest_agent
-from agentworks.plugins.proxmox.api import ProxmoxAPIError
+from agentworks.plugins.proxmox.api import REQUEST_TIMEOUT_SECONDS, ProxmoxAPIError
 
 SCRIPT = b"{\nAGW_SECRET=tskey-auth-private\n(\ntrue\n)\n}\n"
 
 
 class FakeAPI:
-    """Records each QGA call; ``statuses`` are the exec-status answers in order."""
+    """Records each QGA call and the timeout each request was given; ``statuses`` are the exec-status answers."""
 
     def __init__(
         self,
@@ -30,9 +30,11 @@ class FakeAPI:
         self.ping_count = 0
         self.execs: list[tuple[list[str], str | None]] = []
         self.polls = 0
+        self.timeouts: list[float | None] = []
 
     def guest_agent_ping(self, node: str, vmid: int, *, timeout: float | None = None) -> None:
         """Answers once ``pings`` (each failure in turn, ``None`` for an answer) runs out."""
+        self.timeouts.append(timeout)
         self.ping_count += 1
         failure = self.pings.pop(0) if self.pings else None
         if failure is not None:
@@ -41,6 +43,7 @@ class FakeAPI:
     def guest_agent_exec(
         self, node: str, vmid: int, *, command: list[str], input_data: str | None = None, timeout: float | None = None
     ) -> int:
+        self.timeouts.append(timeout)
         self.execs.append((command, input_data))
         if self.dispatch is not None:
             raise self.dispatch
@@ -49,6 +52,7 @@ class FakeAPI:
     def guest_agent_exec_status(
         self, node: str, vmid: int, *, pid: int, timeout: float | None = None
     ) -> dict[str, Any]:
+        self.timeouts.append(timeout)
         self.polls += 1
         answer = self.statuses.pop(0) if self.statuses else {"exited": False}
         if isinstance(answer, BaseException):
@@ -81,7 +85,7 @@ def test_the_script_is_the_input_of_one_bash_s_and_the_streams_come_back() -> No
 
 
 def test_the_deadline_returns_empty_streams_without_dispatching_again(monkeypatch: pytest.MonkeyPatch) -> None:
-    clock = iter([0.0, 0.0, 0.0, 100.0, 100.0])
+    clock = iter([0.0, 0.0, 0.0, 0.0, 100.0, 100.0])  # the deadline, the agent wait, the ping, the dispatch, then polls
     monkeypatch.setattr("agentworks.plugins.proxmox.guest_agent.time.monotonic", lambda: next(clock))
     api = FakeAPI([])
 
@@ -89,6 +93,27 @@ def test_the_deadline_returns_empty_streams_without_dispatching_again(monkeypatc
 
     assert (raw.stdout, raw.stderr) == (b"", b"")
     assert len(api.execs) == 1
+
+
+@pytest.mark.parametrize(("deadline", "timeout"), [(600, REQUEST_TIMEOUT_SECONDS), (5, 5)])
+def test_no_request_outlasts_the_deadline_or_the_request_timeout(deadline: float, timeout: float) -> None:
+    api = FakeAPI([{"exited": True, "exitcode": 0}])
+
+    run(api, deadline=deadline)
+
+    assert api.timeouts == [timeout] * 3  # the ping, the dispatch and the poll
+
+
+def test_an_agent_that_answers_as_the_deadline_passes_gets_nothing_dispatched(monkeypatch: pytest.MonkeyPatch) -> None:
+    clock = itertools.chain([0.0, 0.0, 0.0], itertools.repeat(100.0))
+    monkeypatch.setattr("agentworks.plugins.proxmox.guest_agent.time.monotonic", lambda: next(clock))
+    api = FakeAPI([])
+
+    with pytest.raises(ChannelUnreachable):
+        run(api, deadline=5)
+
+    assert api.ping_count == 1
+    assert api.execs == []
 
 
 @pytest.mark.parametrize(

@@ -78,6 +78,7 @@ class LocalFixtureTransport(Transport):
             "ALL_PROXY": "http://127.0.0.1:9",
             "GIT_CONFIG_NOSYSTEM": "1",
             "GIT_CONFIG_GLOBAL": "/dev/null",
+            "GIT_CEILING_DIRECTORIES": str(root.resolve()),
             "GIT_TERMINAL_PROMPT": "0",
         }
         self.logger = None

@@ -85,6 +85,7 @@ def test_secret_target_pre_create_parity_with_session_secret_target(tmp_path: Pa
     from agentworks.secrets import compute_needed_secrets
     from agentworks.sessions.manager import (
         _resolve_template,
+        _session_context_values,
         _session_secret_target,
         _session_secret_target_pre_create,
     )
@@ -115,7 +116,14 @@ def test_secret_target_pre_create_parity_with_session_secret_target(tmp_path: Pa
         db,
         registry,
         name="s1",
-        workspace_name="ws1",
+        context=_session_context_values(
+            db,
+            vm,
+            ws,
+            "s1",
+            SessionMode.AGENT if mode == "agent" else SessionMode.ADMIN,
+            "agt1" if mode == "agent" else None,
+        ),
         vm=vm,
         session_template=session_template,
         new_workspace=False,

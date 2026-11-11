@@ -6,17 +6,21 @@ has none running yet; a ping carries no script, so asking again is safe. The
 pinging stops at ``AGENT_WAIT_SECONDS`` or the script's deadline, whichever
 comes first, so a VM with no agent at all fails in about two minutes. Then
 one ``exec`` dispatches the script as ``input-data`` (limited to 65,536
-characters), with whatever remains of the deadline, then
+characters), unless the pinging left none of the deadline, then
 ``exec-status`` is polled every two seconds until the guest reports an exit
-or the deadline passes. A poll carries only the PID, so a failed one is asked
-again, since one missed answer says nothing of the script; polls that keep
-failing for ``STATUS_RETRY_SECONDS`` give up (a guest agent that restarted
-mid-script no longer knows the PID). QGA has no cancellation endpoint: at the
-deadline the result is empty, so the outcome is unknown, and nothing is
-dispatched again. No message holds the script, because it can carry a
-secret: a failed dispatch, whose request carries the script, says nothing of
-the provider's error, while a status failure, whose request carries only the
-PID, quotes it, since it says why.
+or the deadline passes. Each request's wait is bounded by what remains of
+the deadline, at most the API's ``REQUEST_TIMEOUT_SECONDS``: a socket
+timeout bounds the TCP connect and each wait for data, not name resolution
+or a whole response, so an API that keeps a response arriving can carry one
+request past the deadline. A poll carries only the PID, so a failed one is
+asked again, since one missed answer says nothing of the script; polls that
+keep failing for ``STATUS_RETRY_SECONDS`` give up (a guest agent that
+restarted mid-script no longer knows the PID). QGA has no
+cancellation endpoint: at the deadline the result is empty, so the outcome
+is unknown, and nothing is dispatched again. No message holds the script,
+because it can carry a secret: a failed dispatch, whose request carries the
+script, says nothing of the provider's error, while a status failure, whose
+request carries only the PID, quotes it, since it says why.
 """
 
 from __future__ import annotations
@@ -27,7 +31,7 @@ from typing import TYPE_CHECKING, cast
 from agentworks.errors import AgentworksError, ConnectivityError, TokenRejectedError
 from agentworks.execution import ssh_process
 from agentworks.execution.root_script import ChannelUnreachable, RawRun
-from agentworks.plugins.proxmox.api import ProxmoxAPIError, _TruncatedQGAOutput
+from agentworks.plugins.proxmox.api import REQUEST_TIMEOUT_SECONDS, ProxmoxAPIError, _TruncatedQGAOutput
 
 if TYPE_CHECKING:
     from agentworks.plugins.proxmox.api import ProxmoxAPI
@@ -41,7 +45,16 @@ _ROOT_SHELL = ["/bin/bash", "-s"]
 
 
 def run_as_root(api: ProxmoxAPI, node: str, vmid: int, script: bytes, deadline: float) -> RawRun:
-    """Run ``script`` through QGA once and return what the guest reported, or empty streams at the deadline.
+    """Run ``script`` through QGA once, with ``deadline`` seconds from now; see :func:`run_as_root_until`."""
+    return run_as_root_until(api, node, vmid, script, time.monotonic() + deadline)
+
+
+def run_as_root_until(api: ProxmoxAPI, node: str, vmid: int, script: bytes, expires: float) -> RawRun:
+    """Run ``script`` through QGA once and return what the guest reported, or empty streams at ``expires``.
+
+    ``expires`` is on ``time.monotonic()``'s clock, so a caller that has
+    already spent part of its budget passes the same instant it started
+    from, and no time passes uncounted between the two.
 
     A dispatch failure, or status polls failing for ``STATUS_RETRY_SECONDS``,
     raises ``ConnectivityError`` saying how far the request got, and never
@@ -49,21 +62,26 @@ def run_as_root(api: ProxmoxAPI, node: str, vmid: int, script: bytes, deadline: 
     failure from the API adds the API's own error text, since that request
     carries only the PID. The API refusing the site's token (401 or 403) is a
     ``TokenRejectedError`` instead, since no connection problem explains it.
-    A guest agent that does not answer its ping by the deadline raises
-    ``ChannelUnreachable`` before anything is dispatched.
+    A guest agent that does not answer its ping in time to dispatch by the
+    deadline raises ``ChannelUnreachable`` before anything is dispatched.
     """
     where = f"{vmid}@{node}"
     text = script.decode("utf-8")
     if len(text) > INPUT_DATA_LIMIT:
         raise ConnectivityError(f"a root script for Proxmox VM {where} exceeds QGA's {INPUT_DATA_LIMIT} characters")
-    start = time.monotonic()
-    expires = start + deadline
-    _await_agent(api, node, vmid, where, min(expires, start + AGENT_WAIT_SECONDS))
+    _await_agent(api, node, vmid, where, min(expires, time.monotonic() + AGENT_WAIT_SECONDS))
+    remaining = expires - time.monotonic()
+    if remaining <= 0:
+        raise ChannelUnreachable(
+            f"the QEMU guest agent of Proxmox VM {where} answered only as the deadline passed, so no script was"
+            " dispatched",
+            hint="Check that the Proxmox API is answering promptly, then run the command again.",
+        )
     # Each failure is raised after its handler, so the original is not even the context.
     failure: AgentworksError | None = None
     try:
         pid = api.guest_agent_exec(
-            node, vmid, command=list(_ROOT_SHELL), input_data=text, timeout=max(expires - time.monotonic(), 0.1)
+            node, vmid, command=list(_ROOT_SHELL), input_data=text, timeout=min(REQUEST_TIMEOUT_SECONDS, remaining)
         )
     except Exception as error:
         failure = _token_rejected(
@@ -78,7 +96,7 @@ def run_as_root(api: ProxmoxAPI, node: str, vmid: int, script: bytes, deadline: 
             return RawRun(b"", b"")
         status: dict[str, object] | None = None
         try:
-            status = api.guest_agent_exec_status(node, vmid, pid=pid, timeout=remaining)
+            status = api.guest_agent_exec_status(node, vmid, pid=pid, timeout=min(REQUEST_TIMEOUT_SECONDS, remaining))
         except _TruncatedQGAOutput:
             failure = ConnectivityError(
                 f"Proxmox QGA reported that the script on VM {where} (PID {pid}) exited, with its output cut short"
@@ -118,7 +136,7 @@ def _await_agent(api: ProxmoxAPI, node: str, vmid: int, where: str, expires: flo
     while (remaining := expires - time.monotonic()) > 0:
         failure: AgentworksError | None = None
         try:
-            api.guest_agent_ping(node, vmid, timeout=remaining)
+            api.guest_agent_ping(node, vmid, timeout=min(REQUEST_TIMEOUT_SECONDS, remaining))
             return
         except ProxmoxAPIError as error:
             failure = _token_rejected(

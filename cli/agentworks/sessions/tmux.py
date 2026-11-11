@@ -909,7 +909,12 @@ def create_session(
     pane_cmd = _pane_command(command, q_path)
     launch_env = dict(env or {})
     if session_uuid is not None and run_id is not None:
-        launch_env.update(_AGW_SESSION_UUID=session_uuid, _AGW_RUN_ID=run_id)
+        launch_env.update(
+            _AGW_SESSION_UUID=session_uuid,
+            _AGW_RUN_ID=run_id,
+            AGENTWORKS_SESSION_UUID=session_uuid,
+            AGENTWORKS_RUN_ID=run_id,
+        )
     env_flags = _tmux_env_flags(launch_env)
 
     # Per-session socket setup. The admin path uses the simpler shape (no
@@ -982,7 +987,7 @@ def create_session(
     # acknowledgement cannot establish whether the server was created.
     if before_spawn is not None:
         before_spawn()
-    result = run_command(cmd, env=env)
+    result = run_command(cmd, env=launch_env if launch_env else env)
     try:
         pid = _parse_pid(getattr(result, "stdout", "") or "", context="after session create")
     except RuntimeError:

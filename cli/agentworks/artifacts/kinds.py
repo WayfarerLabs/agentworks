@@ -26,8 +26,10 @@ class _ArtifactBundleKind:
         title="Artifact bundles",
         overview="""
         An artifact-bundle declares hints, rules, skills, and agents (agent personas)
-        in four maps keyed by canonical artifact name. Hints provide small pieces of setup context; rules are always
-        loaded into context. Skills use the standard Agent Skills directory format.
+        in four maps keyed by canonical artifact name. Hints provide small pieces of setup context.
+        Rules provide standing guidance through native rule files or generated required-read skills;
+        availability does not prove that a model loaded or obeyed them. Skills use the standard
+        Agent Skills directory format.
 
         Select bundles through `artifacts.bundles` on VM, admin, agent, workspace, or
         session declarations. An omitted list inherits; a supplied list replaces the

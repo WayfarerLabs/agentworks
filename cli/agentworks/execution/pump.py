@@ -177,15 +177,16 @@ class PipeSession:
     session ends when the process exits and its pipes go quiet, at end of
     file, at the deadline or at an output limit.
 
-    A write that fails to the client's stdin is the consumer ending early, not a
-    failure: the session stops sending and keeps reading. A sink that raises
+    A write that fails to the client's stdin is the consumer ending early, not
+    a failure: the session stops sending and keeps reading. A sink that raises
     an error for which :func:`agentworks.output.consumer_left` holds is the
-    consumer of that stream leaving. The session closes its read end of that stream of the
-    client's, so ssh sees ``EPIPE`` as it did when it held the operator's
-    streams. A departed stdout makes ssh close the channel when the guest next
-    writes, and the session keeps pumping stderr until then, so a quiet payload
-    still reports its status. ssh does not end the channel for a departed
-    stderr, and the status travels on stderr, so :meth:`pump` returns
+    consumer of that stream leaving. The session discards the next chunk of
+    that stream and then closes its read end, so ssh's write after that one
+    fails with ``EPIPE``, as it did when it held the operator's streams; the
+    read end stays open until then because ssh drops the stderr, status
+    included, that follows a failed write to its stdout (``execution-lld.md``
+    has the mechanism and its one edge). ssh does not end the channel for a
+    departed stderr, and the status travels on stderr, so :meth:`pump` returns
     :attr:`StopReason.STDERR_CONSUMER_LEFT` once stdout has nothing held for a
     slow consumer and the trailer has not already arrived (with it in hand,
     stdout is pumped to its end and the status stands), and ending the session
@@ -323,7 +324,9 @@ class PipeSession:
         payload = stream_filter.feed(chunk) if chunk else stream_filter.finish()
         if not chunk:
             self._eof[which] = True
-        if payload:
+        if payload and which in self._abandoned:
+            self._close_unread(which)
+        elif payload:
             self._deliver(which, payload)
         return True
 
@@ -335,11 +338,12 @@ class PipeSession:
         except OSError as error:
             if not consumer_left(error):
                 raise
-            self._abandon(which)
+            # Closed only when the guest writes again, so a quiet payload's closing line does not meet a
+            # closed read end.
+            self._abandoned.add(which)
 
-    def _abandon(self, which: str) -> None:
+    def _close_unread(self, which: str) -> None:
         """Stop reading ``which`` and close the client's read end of it, so ssh sees ``EPIPE``."""
-        self._abandoned.add(which)
         self._eof[which] = True
         proc = self._proc
         assert proc is not None
@@ -350,12 +354,12 @@ class PipeSession:
 
     @property
     def stdout_abandoned(self) -> bool:
-        """Whether the stdout consumer left, so the client's stdout was closed unread."""
+        """Whether the stdout consumer left, so the client's stdout is discarded."""
         return "out" in self._abandoned
 
     @property
     def stderr_abandoned(self) -> bool:
-        """Whether the stderr consumer left, so the client's stderr was closed unread."""
+        """Whether the stderr consumer left, so the client's stderr is discarded."""
         return "err" in self._abandoned
 
     def _offer_again(self, which: str) -> bool:

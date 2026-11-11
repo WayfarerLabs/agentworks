@@ -185,13 +185,12 @@ def setup_workspace(
 ) -> None:
     """Publish one fixed project role; workspace setup never installs plugins."""
     claims = list(invocation.prior.claims if invocation.prior else ())
-    if any(claim.role != "settings" for claim in claims):
-        raise StateError("workspace native setup contains unsupported ownership claims")
+    preserved = tuple(claim for claim in claims if claim.role != "settings")
     mapping = None if config is None else config.settings
     if mapping is None:
-        if claims:
+        if len(preserved) != len(claims):
             output.info("Removed settings mapping; native settings and their current values are retained.")
-            invocation.checkpoint(())
+            invocation.checkpoint(preserved)
         return
     prepared = prepare_settings(mapping, format=_format(tool))
     root = guest_path(invocation.root) + ("/.claude" if tool == "claude" else "/.codex")
@@ -200,8 +199,8 @@ def setup_workspace(
     initial = files.read(destination)
     plan = _MappingPlan.build(prepared, initial, destination)
     plan.publish(files, destination, current=initial, group=invocation.linux_group)
-    if claims:
-        invocation.checkpoint(())
+    if len(preserved) != len(claims):
+        invocation.checkpoint(preserved)
 
 
 def _is_directory(files: Files, path: str) -> bool:
@@ -274,8 +273,7 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
     mapping = None if config is None else config.settings
     prepared = None if mapping is None else prepare_settings(mapping, format=_format(tool))
     claims = list(invocation.prior.claims if invocation.prior else ())
-    if any(claim.role not in ("settings", "plugin", "marketplace") for claim in claims):
-        raise StateError("user native setup contains unsupported ownership claims")
+    preserved = tuple(claim for claim in claims if claim.role not in ("settings", "plugin", "marketplace"))
     override = "CLAUDE_CONFIG_DIR" if tool == "claude" else "CODEX_HOME"
     root = guest_path(
         invocation.environment.get(override) or (invocation.home + ("/.claude" if tool == "claude" else "/.codex"))
@@ -283,8 +281,8 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
     if mapping is None and any(claim.role == "settings" for claim in claims):
         output.info("Removed settings mapping; native settings and their current values are retained.")
     native_claims = [claim for claim in claims if claim.role in ("plugin", "marketplace")]
-    if native_claims != claims:
-        invocation.checkpoint(tuple(native_claims))
+    if len(native_claims) + len(preserved) != len(claims):
+        invocation.checkpoint((*preserved, *native_claims))
     claims = native_claims.copy()
     if config is None and native_claims:
         roots = {guest_path(claim.destination) for claim in native_claims}
@@ -396,7 +394,7 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
             updated = [item for item in claims if (item.role, item.identifier) != (role, identifier)]
             if claim is not None:
                 updated.append(claim)
-            invocation.checkpoint(tuple(updated))
+            invocation.checkpoint((*preserved, *updated))
             claims = updated
             if force and claim is not None:
                 # These calls follow validated native mutations, not adoption.

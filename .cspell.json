@@ -39,6 +39,7 @@
     "buildx",
     "bundleable",
     "burstable",
+    "cffi",
     "checkip",
     "chokepoint",
     "chowned",
@@ -251,6 +252,7 @@
     "workstream",
     "workstreams",
     "worktree",
+    "worktrees",
     "xdist"
   ],
   "ignoreRegExpList": ["`[^`\\r\\n]+`"],

@@ -1,5 +1,25 @@
 # Agent artifacts: prior-art research
 
+## Literal guidance carrier, 2026-11-09
+
+Claude documents
+[skill-body command preprocessing](https://code.claude.com/docs/en/skills#inject-dynamic-context),
+[supporting files](https://code.claude.com/docs/en/skills#add-supporting-files) and
+[deduplication of identical rendered invocations](https://code.claude.com/docs/en/skills#skill-content-lifecycle).
+The independent
+[native comparison](https://github.com/WayfarerLabs/agentworks/pull/871#issuecomment-6733959485) at
+`1ecffc5c` confirms that rendering literal rule text as a skill changes its interpretation when
+native command permission is supplied. It establishes preprocessing, not a permission bypass.
+
+The selected correction uses fixed navigation to a literal supporting file. A deterministic content
+revision changes that entrypoint when its data changes; this is a design response to documented
+deduplication, not a separately measured cache claim. A
+[bounded fixture experiment](https://github.com/WayfarerLabs/agentworks/pull/871#issuecomment-6734297569)
+observed actual Claude 2.1.319 Read results preserving Rule/Hint inline command and variable forms,
+while an unchanged authored skill retained native processing. No real inference was used; fenced
+commands and actual corrected product bytes still need verification. The native LLD records the
+implementation response without creating another artifact format.
+
 ## Status and terminology decision
 
 Research for the initial HLA, checked 2026-09-12 and 2026-09-13. It covers terminology, existing
@@ -26,8 +46,10 @@ needed.
 
 Decision: use standard Agent Skills content, preserving the whole package during acquisition and
 normalization. Do not invent a parallel skill document format. Text normalization to Unix LF must
-preserve binary supporting assets. The artifact rule definition has different loading semantics:
-rule guidance is always loaded into context wherever it applies; skills disclose content as needed.
+preserve binary supporting assets. The original artifact rule definition required automatic context
+insertion. The 2026-11-08 ruling instead defines standing guidance through appropriate native
+delivery, including generated guidance skills. Skill bodies still disclose content as needed;
+neither delivery form guarantees obedience.
 
 ### Claude Code supports primary and delegated use of a definition
 
@@ -177,9 +199,9 @@ pretending it is unchanged. Session personas can use `--agents` JSON, avoiding p
 persona-field omissions. The subagent documentation cited above establishes primary and delegated
 use, but does not make every native option portable.
 
-Session rules/hints in the current adapter use an appended prompt file, whereas native `CLAUDE.md`
-is delivered as a user message and ordinary skill bodies load into the conversation on invocation.
-Those native mechanisms do not justify changing system-prompt recording. The
+Session rules/hints in the predecessor adapter used an appended prompt file, whereas native
+`CLAUDE.md` is delivered as a user message and ordinary skill bodies load into the conversation on
+invocation. Those native mechanisms do not justify changing system-prompt recording. The
 [CLI reference](https://code.claude.com/docs/en/cli-reference#system-prompt-flags-in-resumed-conversations)
 documents that before 2.1.265, supplied prompt flags already disabled recording; the explicit
 snapshot-off adjustment is therefore limited to the opted-in appended-session-prompt method on newer
@@ -224,8 +246,10 @@ The [CLI reference](https://docs.x.ai/build/cli/reference) documents additive `-
 [CLI source](https://github.com/xai-org/grok-build/blob/37949780c144e37df692e3d669051a21fec24f20/crates/codegen/xai-grok-pager/src/app/cli.rs)
 exposes top-level `--agent` and `--agents`, but the inspected `--plugin-dir` declaration belongs to
 the ACP subcommand. Broad plugin documentation alone does not establish private skill loading in the
-interactive command Agentworks launches. The HLA leaves interactive session skills unsupported until
-that exact entry point is proven, and requires native verification of persona injection.
+interactive command Agentworks launches. The predecessor HLA left interactive session skills
+unsupported pending proof of that exact entry point. The current correction uses explicitly enabled
+ordinary-home skills instead, with honest shared-catalog semantics. Native persona availability
+remains a separate verification obligation.
 
 ## Remaining native verification and detailed design
 
@@ -277,3 +301,47 @@ configuration certification. Research used documentation and source; it made no 
 | [Agent Skills specification](https://agentskills.io/specification)  | Primary standard; skill package structure and loading model.            |
 | [Claude Code subagents](https://code.claude.com/docs/en/sub-agents) | Primary product documentation; primary and delegated use.               |
 | [Codex subagents](https://developers.openai.com/codex/subagents)    | Primary product documentation; custom definitions for spawned sessions. |
+
+## Current native catalog observations, 2026-11-08
+
+Bounded local Codex 0.167.0 probes found exact project skill discovery before and after an exact
+Git-resolved local exclusion. A skill-enable selector did not import a private root. The app-server
+extra-root API added/removed private catalog entries in two cycles; this does not establish a TUI
+loader. Four native invocations requested no model turns.
+
+Grok 1.0.77 exposes native `inspect --json`. In a trusted real Git project, the exact project skill
+name, description and source path remained available after exact SKILL.md exclusion. The positive
+project control required ordinary native trust; untrusted omissions were excluded from that verdict.
+A session-qualified home skill appeared for two different managed UUID/run environments sharing one
+HOME, demonstrating shared catalog metadata. Eight native invocations used no HTTP, listeners or
+inference. These observations prove discovery, not body loading, resume refresh or model adherence.
+
+A separate three-invocation Grok check likewise retained an exact renderer-style project agent name,
+description and source path before exclusion and in two excluded catalogs, with a home agent
+positive and absent negative. This is agent availability evidence, not child instruction
+consumption. Both fixture trees were deleted, all native processes reaped and root independently
+verified their absence. No real provider, model or operator state was used.
+
+A later bounded same-ID interactive-resume check used successful synthetic seeds for Codex 0.167.0
+and Grok 1.0.77. After replacing home skill A with a differently named B, Codex included B metadata
+in a new developer message; Grok retained A and omitted B throughout the request, including tool
+metadata. Old history was not counted as current discovery. Four native invocations used exactly
+eight loopback requests, including GETs, and no real inference. This motivates Grok's stable
+session-owned entry and current private index rather than per-run native catalog names. The entry's
+first introduction into an older conversation still needs a fresh conversation or manual read.
+
+At actual renderer revision `a3e5175d`, Claude Code 2.1.319 registered the private plugin as enabled
+with session scope and exact path, absent without its flag. A later successful synthetic seed and
+genuine interactive same-ID resume selected plugin B and exposed its current rule/hint/skill/persona
+metadata in a new request block while retaining A history. Both fixture plugins existed before the
+seed, but only A was selected then and B markers were absent. Three native invocations, including a
+discarded PTY negotiation attempt, used two loopback requests and no real inference. This proves
+metadata availability, not child invocation or obedience.
+
+At fixed Grok renderer revision `4d8bbf57`, changed private runs produced identical stable entry
+bytes and paths. A successfully seeded native conversation retained that address; genuine
+interactive same-ID resume and explicit native slash invocation loaded the exact generated entry
+body into the request. Two native invocations used six loopback requests, including GETs. Current B
+files/env and removal of private A were measured, but no native index-read tool ran. The observation
+establishes entry availability; consumption of the current index and autonomous adherence remain
+distinct.

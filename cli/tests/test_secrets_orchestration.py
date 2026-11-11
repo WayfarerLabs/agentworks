@@ -219,7 +219,7 @@ def test_secret_references_invariant_under_value_substitution(
 ) -> None:
     """Callers may hand pre- or post-substitution env dicts to
     SecretTarget. The computed SecretDecl union is invariant because
-    _substitute_template_vars_in_env only rewrites EnvEntry.value
+    Plaintext interpolation only reads EnvEntry.value
     (plaintext), never EnvEntry.secret (the reference name). This is
     load-bearing for Phase 6.2 wiring, which builds targets from
     un-substituted template env dicts."""
@@ -235,7 +235,7 @@ def test_secret_references_invariant_under_value_substitution(
 
     pre_subst = {
         "API": EnvEntry({"secret": "api"}),
-        "GREETING": EnvEntry({"value": "hello {{session_name}}"}),
+        "GREETING": EnvEntry({"value": "hello ${agw:session_name}"}),
     }
     post_subst = {
         "API": EnvEntry({"secret": "api"}),
@@ -470,3 +470,120 @@ def test_label_round_trips() -> None:
         label="agent-bootstrap",
     )
     assert target.label == "agent-bootstrap"
+
+
+@pytest.mark.parametrize("entry", [EnvEntry("${agw:agent_name}"), EnvEntry({"secret": "ignored"})])
+def test_identity_collisions_do_not_validate_collect_or_resolve(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, entry: EnvEntry
+) -> None:
+    from agentworks.interpolation import context_values
+    from agentworks.secrets.orchestration import validate_target_values
+
+    config = load_config(_write_config(tmp_path), warn_issues=False)
+    registry = build_registry(config)
+    target = SecretTarget(
+        vm={
+            "AGENTWORKS_WORKSPACE": entry,
+            "AGENTWORKS_WORKSPACE_DIR": entry,
+            "AGENTWORKS_SESSION": entry,
+            "AGENTWORKS_SESSION_KIND": entry,
+        },
+        workspace={},
+        session={},
+    )
+    target.validate_context(context_values(vm_name="vm", user="admin", workspace_name="ws", session_name="s"))
+    assert compute_needed_secrets([target], registry) == []
+    validate_target_values([target], {})
+
+    def unexpected_resolve(*args: object, **kwargs: object) -> None:
+        pytest.fail("An ignored secret must not reach resolution")
+
+    monkeypatch.setattr("agentworks.secrets.resolve.resolve_batch", unexpected_resolve)
+    assert resolve_for_command([target], config, registry, interaction=TtyInteractionPolicy.REFUSE) == {}
+
+
+@pytest.mark.parametrize(
+    "key", ["AGENTWORKS_WORKSPACE", "AGENTWORKS_SESSION_KIND", "AGENTWORKS_VM", "AGENTWORKS_CUSTOM"]
+)
+def test_absent_identity_context_does_not_discard_authored_entries(tmp_path: Path, key: str) -> None:
+    from agentworks.interpolation import context_values
+
+    config = load_config(_write_config(tmp_path), warn_issues=False)
+    target = SecretTarget(vm={key: EnvEntry("${agw:agent_name}")})
+    with pytest.raises(ValidationError):
+        target.validate_context(context_values(vm_name="vm", user="admin"))
+    target = SecretTarget(vm={key: EnvEntry({"secret": "still-needed"})})
+    needed = compute_needed_secrets([target], build_registry(config), allow_transient_auto_declare=True)
+    assert [decl.name for decl in needed] == ["still-needed"]
+
+
+def test_session_legacy_context_validation_needs_no_secret_values_and_preserves_field_identity() -> None:
+    from agentworks.interpolation import context_values
+
+    target = SecretTarget(
+        vm={"VM_LITERAL": EnvEntry("{{workspace_name}}")},
+        session={
+            "SESSION_LABEL": EnvEntry("{{workspace_name}}"),
+            "SECRET": EnvEntry({"secret": "unavailable"}),
+        },
+        label="session=work",
+    )
+
+    with pytest.raises(ValidationError) as caught:
+        target.validate_context(context_values(vm_name="box", user="operator", session_name="work"))
+
+    assert caught.value.entity_kind == "template"
+    assert caught.value.entity_name == "session=work.env.SESSION_LABEL"
+
+
+def test_session_validation_execution_and_shell_share_one_legacy_warning(warnings: list[str]) -> None:
+    from agentworks.capabilities.base import RunContext
+    from agentworks.capabilities.harness_integration import HarnessLaunchIntent, HarnessStart, ShellIntegration
+    from agentworks.env import ResourceContext, compose_env
+    from agentworks.interpolation import runtime_values
+
+    ctx = ResourceContext(
+        vm_name="box", platform="lima", site="local", user="operator", workspace_name="project", session_name="work"
+    )
+    target = SecretTarget(
+        vm={"VM_LITERAL": EnvEntry("{{session_name}}")},
+        session={
+            "LABEL": EnvEntry("{{session_name}}/{{workspace_name}}"),
+            "AGENTWORKS_SESSION": EnvEntry("{{workspace_name}}"),
+            "SECRET": EnvEntry({"secret": "credential"}),
+        },
+    )
+
+    target.validate_context(runtime_values(ctx))
+    assert len(warnings) == 1
+    out = compose_env(values={"credential": "{{workspace_name}}"}, ctx=ctx, vm=target.vm, session=target.session)
+
+    assert out["LABEL"] == "work/project"
+    assert out["VM_LITERAL"] == "{{session_name}}"
+    assert out["SECRET"] == "{{workspace_name}}"
+    integration = ShellIntegration(
+        "fixture",
+        {"command": "{{session_name}}/{{workspace_name}}"},
+        session_name="work",
+        vm_name="box",
+        workspace_name="project",
+        workspace_path="/srv/project",
+        target=None,
+        admin=True,
+        state={},
+    )
+    integration.prepare_context(runtime_values(ctx), intent=HarnessLaunchIntent.CREATE)
+    launch = integration.start(RunContext(), intent=HarnessLaunchIntent.CREATE)
+    assert isinstance(launch, HarnessStart)
+    assert launch.command == "work/project"
+    assert len(warnings) == 1
+
+
+def test_empty_session_scope_does_not_enable_legacy_lower_scope_validation(warnings: list[str]) -> None:
+    from agentworks.interpolation import context_values
+
+    target = SecretTarget(vm={"VM_LITERAL": EnvEntry("{{workspace_name}}")}, session={})
+
+    target.validate_context(context_values(vm_name="box", user="operator", session_name="work"))
+
+    assert warnings == []

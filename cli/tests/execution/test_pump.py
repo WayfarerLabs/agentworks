@@ -222,7 +222,7 @@ ENDLESS = (
 
 @pytest.mark.parametrize("stream", ["out", "err"])
 def test_an_endless_writer_whose_consumer_leaves_ends_with_the_consumer_left(stream: str) -> None:
-    """Closing the client's read end is what ends the writer: the child only stops on ``EPIPE``."""
+    """A departed stdout's writer stops on ``EPIPE`` once its read end closes; a departed stderr's, with the session."""
     leaving = leaving_session(
         ENDLESS.format(stream=stream),
         **{"stdout" if stream == "out" else "stderr": leaving_sink(3)},
@@ -240,12 +240,17 @@ def test_an_endless_writer_whose_consumer_leaves_ends_with_the_consumer_left(str
 
 
 def test_a_quiet_payload_whose_stdout_consumer_leaves_still_reports_its_own_status() -> None:
+    """The child plays ssh: once a write to its stdout fails, it writes none of the stderr still to come.
+
+    That is OpenSSH's client, which stops writing a channel's stderr once both
+    directions are closed, so the end marker must not meet a closed read end.
+    """
     script = (
         "start(); out.write(b'hello'); out.flush(); time.sleep(.5)\n"
         "try:\n"
         "    out.write(P + b'end\\n'); out.flush()\n"
         "except OSError:  # BrokenPipeError on POSIX, EINVAL on Windows\n"
-        "    pass\n"
+        "    sys.exit(0)\n"
         "err.write(P + b'exit 4\\n'); err.flush()\n"
     )
     leaving = leaving_session(script, stdout=leaving_sink(1))

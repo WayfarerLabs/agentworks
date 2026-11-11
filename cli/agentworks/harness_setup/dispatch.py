@@ -11,6 +11,7 @@ from pydantic import ValidationError
 
 from agentworks import output
 from agentworks.artifacts.application import ArtifactDeferral
+from agentworks.artifacts.git_excludes import reconcile_workspace_excludes
 from agentworks.artifacts.model import ArtifactInputs
 from agentworks.artifacts.publication import ROOT_FILE_DIRECTORIES, publish_artifacts, validate_application
 from agentworks.artifacts.reporting import report_applied, report_deferrals
@@ -326,6 +327,18 @@ def run_setup(
                     if routing.retain_previous
                     else frozenset(),
                 )
+                if isinstance(call, WorkspaceSetupInvocation):
+                    reconcile_workspace_excludes(
+                        call.access,
+                        call.root,
+                        name,
+                        publication.files,
+                        current.claims,
+                        checkpoint,
+                        group=call.linux_group,
+                        report_incomplete=report_incomplete,
+                        redactions=call.redactions,
+                    )
             except _SetupInfrastructureFailure as error:
                 raise error.original from None
             except (ConfigError, StateError, ExternalError, ConnectivityError) as error:

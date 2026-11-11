@@ -430,6 +430,40 @@ Line numbers in this slice are at `60d347220`, the platform LLD's baseline.
       Tailscale.
 - [ ] Live evidence on Windows: current-directory decoys for `op`, `git`, `code`, `taskkill` and the
       legacy `ssh` and `scp` are never started.
+- [ ] Live evidence for round 5:
+  - on local Lima from macOS, a VM created by this round keeps an operator's edit to the admin's
+    `.bashrc` and init's source lines across `vm stop` then `vm start`, and across a `vm recover` of
+    the stopped VM, and a key `vm recover` replaced does not come back after a restart;
+  - the OS hostname and the tailnet node name still equal `vms.hostname` after a Lima `vm stop` then
+    `vm start`;
+  - the Apple-vz SVE restart path on Lima: a first boot that fails before its restart leaves no
+    bootstrap marker and runs the bootstrap again;
+  - the Remote Lima wrapper kill gets its own process group under macOS's `/bin/bash`;
+  - a WSL2 distro keeps `vms.hostname` (kernel hostname, `/etc/hostname` and the Tailscale DNS name)
+    across `vm stop` then `vm start`, or `wsl --terminate`, which also shows the `wsl.conf` content
+    with real newlines passing through `wsl.exe`'s command line intact;
+  - on GCP, a stop and start after this round still finds the startup wrapper's marker and leaves
+    the guest unchanged;
+  - after a local Lima `vm create` with `AW_SECRET_TAILSCALE_AUTH_KEY` set, no `limactl` process
+    left running on the workstation has an `AW_SECRET_` variable in its environment;
+  - a frozen install on Windows with Python 3.15 resolves cffi 2.1.1 from its cp315 wheel.
+- [ ] Live evidence for round 6: on Proxmox, behind a proxy that delays each API answer, the
+      missing-host-key `vm recover` path's root script stops within its deadline, each identity read
+      and guest-agent request given at most what remains of it, and refuses with nothing dispatched
+      when the identity check spends it.
+- [x] Round 7 (the round 6 integration report): the platform hands the guest agent the identity
+      check's own expiry rather than the time remaining, so a delay at the handoff cannot extend the
+      deadline, and a rekey refused before dispatch suggests rerunning it with its own `--secret`,
+      `--prompt` and `--wait-for-share`. The round 6 delta review's optional items ride along: a
+      test pins the 30-second cap under a long budget, and the docstrings say each wait is bounded.
+- [ ] Live evidence for rounds 7 and 8: on Proxmox, a rekey refused before dispatch (the guest agent
+      not answering) asks for the same `agw vm rekey NAME` command again, with every option given,
+      and a guest agent reached near the deadline sends nothing past it.
+- [x] Round 8 (the round 7 integration report): a rekey refused before dispatch asks for the same
+      command again, with every option given, rather than rebuilding one that could drop a global
+      option such as `--non-interactive`. The `run_as_root` contract, the guest agent and the
+      platform LLD state the HTTP channel's limit: each socket wait is bounded, not a whole
+      response.
 
 Definition of done: core reaches a native channel only through `run_as_root` or `native_shell`, and
 no platform's private access imports a legacy module.

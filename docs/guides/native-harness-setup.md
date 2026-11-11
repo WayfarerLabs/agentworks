@@ -198,6 +198,10 @@ its contained native files; removing an agent home or workspace directory remove
 plugins inside it. There is no separate native plugin retirement step before parent deletion. Setup
 applied-state records, including unreadable or unknown versions, do not add deletion prerequisites.
 The existing database deletion removes the owner's records and any affected child records together.
+Workspace deletion attempts to retire exact owned artifact exclusions because shared Git metadata
+can survive the workspace directory. Unresolved cleanup warns and preserves foreign or ambiguous
+bytes without preventing the normal deletion. A warning does not certify that shared exclusions were
+removed.
 
 A VM whose backend cannot be deleted, a site that cannot be bound included, keeps its local state
 unless `--force` is passed, which removes it anyway; see `vm delete` in the command reference. Agent
@@ -214,12 +218,13 @@ local row alone does not prove provider removal.
 
 Setup and parent deletion share a VM-family mutation guard so they cannot race. This serializes
 mutating operations on the same VM, including owners without harness activations; contention refuses
-with retry guidance. It does not require native applied-state record discovery before parent
-deletion.
+with retry guidance. Unavailable native applied-state evidence does not prevent parent deletion.
 
-Rehome moves project settings with the workspace and holds the same guard across the move. Setup
-records do not block rehome. Their old destination makes readiness stale until owning setup runs
-successfully at the new destination; rehome itself does not run harness setup.
+Rehome moves project settings with the workspace and holds the same guard across the move. It uses
+the known old/new owner paths to reconcile artifact exclusions where safe, warning about unresolved
+shared metadata. Setup records do not block rehome. General native setup records retain their old
+destinations and can become stale; rehome does not rerun facets, and existing workspaces have no
+harness reinit operation. Session restart does not repair that workspace setup.
 
 The VM description's initialization field records the last initialization run. It is separate from
 per-integration lifecycle evidence: a run can finish while a native entry is skipped. Read the

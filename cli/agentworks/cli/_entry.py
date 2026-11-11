@@ -48,6 +48,7 @@ def main() -> None:
     # (or any other module-level import of `app`) would bind the name to the
     # original Typer instance and silently ignore the monkeypatch.
     from agentworks import cli as _cli
+    from agentworks.capabilities.secret_backend.env_var import withhold_carriers
     from agentworks.errors import (
         AgentworksError,
         AlreadyExistsError,
@@ -62,6 +63,8 @@ def main() -> None:
     )
     from agentworks.output import error, set_handler
 
+    # Before anything can start a child process: none inherits a secret carrier.
+    withhold_carriers()
     _reconfigure_std_streams()
     set_handler(TyperHandler())
 

@@ -176,7 +176,7 @@ has started.
   quoted `*` now reaches the guest as `*`, as on macOS and Linux, where the shell decides. Expand a
   pattern yourself (PowerShell's `Get-ChildItem`, for example) where you relied on `agw` doing it,
   and write `$HOME\...` (PowerShell) or `%USERPROFILE%\...` (cmd) instead of `~` in a path such as
-  `database restore`'s.
+  `database restore`'s or `vm import-host-keys --known-hosts`'s.
 - **Exit statuses.** `vm exec` and `agent exec` still run the command line under the account shell,
   so a command that cannot start exits 127 or 126 with the shell's message, as before. A missing
   workspace directory exits 125 with one line from `agw`. A command that exits 255 is no longer
@@ -452,6 +452,24 @@ before they resolve the auth key.
   process within seconds, so it cannot be relied on to finish: end the command with Ctrl-C or
   Ctrl-Break instead, and delete a rule a closed window left behind from the VM's firewall in the
   provider's console.
+- **A Lima VM's create-time bootstrap runs once.** Lima runs its provisioning on every boot, and a
+  Lima VM created before 0.20 runs Agentworks' bootstrap again at each start: it resets the admin's
+  `.bashrc` and `.zshrc` to the seed, which drops your edits and the lines `vm reinit` adds, puts
+  back the key it was created with if you replaced it, and upgrades packages, taking each upgraded
+  package's new configuration files over any you changed (`/etc/skel/.bashrc` among them). A Lima VM
+  created by 0.20 runs it at create only. Recreate an older Lima VM to stop the reruns; until then,
+  `agw vm reinit NAME` after a start restores the lines it adds and removes a replaced key again,
+  but not your own edits.
+- **A WSL2 VM keeps its own hostname.** WSL names a distro after the Windows computer at every start
+  unless `/etc/wsl.conf` names it, and a later Tailscale join takes that name too. A WSL2 VM created
+  by 0.20 has `hostname` set under `[network]` there; one created before does not. Add it yourself
+  (the hostname is in `agw vm describe NAME --output json`) and restart the distro with
+  `wsl --terminate`, or recreate the VM. WSL still renames a VM whose hostname has an underscore,
+  since it keeps only letters, digits and single hyphens, so such a VM keeps drifting until it is
+  recreated under a name without underscores. `vm create` on WSL2 now refuses such a hostname before
+  it does anything: one with an underscore, or with consecutive hyphens from the system slug. A slug
+  cannot be changed, so an install whose slug has consecutive hyphens cannot create WSL2 VMs, and
+  its existing ones keep drifting.
 - **Output nobody reads no longer fails a command.** When the reader of `agw`'s output has gone (a
   pipe into `head` that has exited, `2>&1 | tee create.log` in a closed window, or the closed
   terminal itself), the rest of that output is dropped and the command carries on to the end, a
@@ -526,6 +544,10 @@ and make the changes below. The docstrings in
 [`cli/agentworks/capabilities/vm_platform/base.py`](../../cli/agentworks/capabilities/vm_platform/base.py)
 state the full contract, and the
 [vm-platform README](../../cli/agentworks/capabilities/vm_platform/README.md) its obligations.
+
+An optional hook is new as well: core calls `validate_create_hostname(hostname)` with the hostname
+it composed for a new VM before any secret resolves. Override it to refuse a hostname your backend
+would change; the default accepts every hostname.
 
 ### A root channel replaces the native transport
 

@@ -8,7 +8,6 @@ imports neither ``sessions`` nor ``orchestration``.
 
 from __future__ import annotations
 
-import shlex
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
 
@@ -22,26 +21,15 @@ from agentworks.capabilities.harness_integration import (
     HarnessStart,
     HarnessStartNotImplemented,
     ShellIntegration,
-    quote_literal_argv,
     require_implemented_start,
 )
 from agentworks.capabilities.harness_integration.shell import ShellConfig
 from agentworks.errors import ConfigError, StateError
 from agentworks.schema import RefOwner, merge_model
-from tests.vm_access_support import command_check_access
+from tests.vm_access_support import command_check_access, presence_check
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
-
-
-@pytest.mark.parametrize(
-    "value",
-    ["", "plain", "{{session_name}}", "before {{component}} after", "{{{triple}}}", "quote ' and newline\n"],
-)
-def test_quote_literal_argv_hides_template_syntax_and_reconstructs_exact_value(value: str) -> None:
-    encoded = quote_literal_argv(value)
-    assert "{{" not in encoded
-    assert shlex.split(encoded) == [value]
 
 
 def _harness_integration(
@@ -502,3 +490,204 @@ def test_capability_imports_neither_sessions_nor_orchestration() -> None:
         check=False,
     )
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("intent", [HarnessLaunchIntent.CREATE, HarnessLaunchIntent.RESUME_OR_NEW])
+def test_shell_renders_only_its_selected_command_once(intent: HarnessLaunchIntent) -> None:
+    integration = _harness_integration(
+        {
+            "command": "fresh ${agw:workspace_dir} $${agw:unknown}",
+            "resume_command": "resume ${agw:workspace_dir} $${agw:unknown}",
+        }
+    )
+    integration.prepare_context({"workspace_dir": "/srv/path ${agw:user_name}"}, intent=intent)
+    result = integration.start(RunContext(), intent=intent)
+    assert isinstance(result, HarnessStart)
+    action = "fresh" if intent.starts_fresh else "resume"
+    assert result.command == f"{action} /srv/path ${{agw:user_name}} ${{agw:unknown}}"
+
+
+def test_shell_does_not_validate_an_unselected_command() -> None:
+    integration = _harness_integration({"command": "fresh", "resume_command": "${agw:unknown}"})
+    result = integration.start(RunContext(), intent=HarnessLaunchIntent.CREATE)
+    assert isinstance(result, HarnessStart)
+    assert result.command == "fresh"
+
+
+@pytest.mark.parametrize(
+    "intent",
+    [HarnessLaunchIntent.CREATE, HarnessLaunchIntent.RESUME_OR_NEW, HarnessLaunchIntent.FORCE_NEW],
+)
+def test_preflight_renders_only_the_command_selected_by_the_launch_intent(intent: HarnessLaunchIntent) -> None:
+    integration = _harness_integration(
+        {
+            "command": "${agw:workspace_dir}" if intent.starts_fresh else "${agw:unknown}",
+            "resume_command": "${agw:unknown}" if intent.starts_fresh else "${agw:workspace_dir}",
+        }
+    )
+    integration.prepare_context({"workspace_dir": "/path ${agw:literal}"}, intent=intent)
+    probe = command_check_access()
+    integration.preflight(RunContext(operation_scope=_session_scope(), admin_access=probe))
+    assert probe.requests() == []
+    result = integration.start(RunContext(), intent=intent)
+    assert isinstance(result, HarnessStart)
+    assert result.command == "/path ${agw:literal}"
+
+
+@pytest.mark.parametrize("preflight", [False, True])
+@pytest.mark.parametrize(
+    ("intent", "resume_command", "field"),
+    [
+        (HarnessLaunchIntent.CREATE, "resume", "command"),
+        (HarnessLaunchIntent.FORCE_NEW, "resume", "command"),
+        (HarnessLaunchIntent.RESUME_OR_NEW, "${agw:unknown}", "resume_command"),
+        (HarnessLaunchIntent.RESUME_OR_NEW, "", "command"),
+    ],
+)
+def test_selected_template_error_identifies_owning_field(
+    intent: HarnessLaunchIntent, resume_command: str, field: str, preflight: bool
+) -> None:
+    from agentworks.errors import ValidationError
+
+    integration = _harness_integration(
+        {"command": "${agw:unknown}" if field == "command" else "fresh", "resume_command": resume_command}
+    )
+    integration.prepare_context({}, intent=intent)
+    with pytest.raises(ValidationError) as exc:
+        if preflight:
+            integration.preflight(RunContext(operation_scope=_session_scope(), admin_access=command_check_access()))
+        else:
+            integration.start(RunContext(), intent=intent)
+    assert exc.value.entity_kind == "template"
+    assert exc.value.entity_name == f"session=s1.{field}"
+
+
+def test_pending_target_defers_required_commands_but_not_template_validation() -> None:
+    from agentworks.errors import ValidationError
+
+    integration = _harness_integration(
+        {"command": "${agw:unknown}", "required_commands": ["tool"]},
+        target=SimpleNamespace(name="dev", realized=False),
+        admin=False,
+    )
+    integration.prepare_context({}, intent=HarnessLaunchIntent.CREATE)
+    probe = command_check_access()
+    with pytest.raises(ValidationError):
+        integration.preflight(RunContext(operation_scope=_session_scope(agent="dev", admin=False), agent_access=probe))
+    assert probe.requests() == []
+
+
+def test_preflight_checks_required_commands_without_executing_or_parsing_shell_source() -> None:
+    command = "if deliberately incomplete; ( ${agw:workspace_dir}"
+    integration = _harness_integration({"command": command, "required_commands": ["rg"]})
+    integration.prepare_context({"workspace_dir": "/srv/work"}, intent=HarnessLaunchIntent.CREATE)
+    probe = command_check_access()
+    integration.preflight(RunContext(operation_scope=_session_scope(), admin_access=probe))
+    # Any request but a presence check fails the fake, so this is everything that ran.
+    assert [presence_check(request) for request in probe.requests()] == ["rg"]
+
+
+def test_resume_only_remains_unsupported_without_validating_unused_shell_commands() -> None:
+    integration = _harness_integration({"command": "${agw:unknown}", "resume_command": "${agw:unknown}"})
+    integration.prepare_context({}, intent=HarnessLaunchIntent.RESUME_ONLY)
+    integration.preflight(RunContext(operation_scope=_session_scope(), admin_access=command_check_access()))
+    assert isinstance(
+        integration.start(RunContext(), intent=HarnessLaunchIntent.RESUME_ONLY), HarnessStartNotImplemented
+    )
+
+
+def test_broader_scope_does_not_validate_a_session_command() -> None:
+    integration = _harness_integration({"command": "${agw:unknown}"})
+    integration.prepare_context({}, intent=HarnessLaunchIntent.CREATE)
+    integration.preflight(RunContext(operation_scope=OperationScope(level=ScopeLevel.SYSTEM)))
+
+
+def test_setup_shell_readiness_needs_no_session_binding() -> None:
+    integration = ShellIntegration.for_setup(owner_kind="vm", owner_name="box", facet="vm", config={})
+    integration.preflight(RunContext(operation_scope=OperationScope(level=ScopeLevel.VM, vm="box")))
+
+
+@pytest.mark.parametrize(
+    ("intent", "resume_command", "expected"),
+    [
+        (HarnessLaunchIntent.CREATE, "resume {{workspace_name}}", "fresh work project"),
+        (HarnessLaunchIntent.FORCE_NEW, "resume {{workspace_name}}", "fresh work project"),
+        (HarnessLaunchIntent.RESUME_OR_NEW, "resume {{workspace_name}}", "resume project"),
+        (HarnessLaunchIntent.RESUME_OR_NEW, "", "fresh work project"),
+    ],
+)
+def test_legacy_shell_fields_keep_selection_and_warn_once(
+    intent: HarnessLaunchIntent, resume_command: str, expected: str, warnings: list[str]
+) -> None:
+    from agentworks.bootstrap import begin_request_warning_scope
+
+    config = {"command": "fresh {{session_name}} ${agw:workspace_name}", "resume_command": resume_command}
+    for _ in range(2):
+        integration = _harness_integration(config)
+        integration.prepare_context({"session_name": "work", "workspace_name": "project"}, intent=intent)
+        integration.preflight(RunContext(operation_scope=_session_scope(), admin_access=command_check_access()))
+        result = integration.start(RunContext(), intent=intent)
+        assert isinstance(result, HarnessStart)
+        assert result.command == expected
+    assert len(warnings) == 1
+    begin_request_warning_scope()
+    integration.start(RunContext(), intent=intent)
+    assert len(warnings) == 2
+
+
+def test_shell_does_not_warn_for_unselected_legacy_fields(warnings: list[str]) -> None:
+    integration = _harness_integration({"command": "fresh", "resume_command": "resume {{session_name}}"})
+    integration.prepare_context({}, intent=HarnessLaunchIntent.CREATE)
+    integration.preflight(RunContext(operation_scope=_session_scope(), admin_access=command_check_access()))
+    integration.start(RunContext(), intent=HarnessLaunchIntent.CREATE)
+    assert warnings == []
+
+
+def test_shell_legacy_warning_is_suppressible_and_omits_command_data(warnings: list[str]) -> None:
+    from agentworks import output
+
+    secret = "private-command-and-replacement"
+    integration = _harness_integration({"command": secret + " {{session_name}}"})
+    integration.prepare_context({"session_name": secret}, intent=HarnessLaunchIntent.CREATE)
+    output.set_suppress_deprecations(True)
+    result = integration.start(RunContext(), intent=HarnessLaunchIntent.CREATE)
+    assert isinstance(result, HarnessStart)
+    assert result.command == f"{secret} {secret}"
+    assert warnings == []
+    output.set_suppress_deprecations(False)
+    integration.start(RunContext(), intent=HarnessLaunchIntent.CREATE)
+    assert len(warnings) == 1
+    assert secret not in warnings[0]
+
+
+def test_shell_mixed_replacements_do_not_rescan_either_syntax(warnings: list[str]) -> None:
+    integration = _harness_integration({"command": "${{session_name}} ${agw:workspace_name}"})
+    integration.prepare_context(
+        {"session_name": "{{workspace_name}}", "workspace_name": "${agw:session_name}"},
+        intent=HarnessLaunchIntent.CREATE,
+    )
+    result = integration.start(RunContext(), intent=HarnessLaunchIntent.CREATE)
+    assert isinstance(result, HarnessStart)
+    assert result.command == "${{workspace_name}} ${agw:session_name}"
+    assert len(warnings) == 1
+
+
+def test_shell_shares_the_legacy_warning_with_other_consumers(warnings: list[str]) -> None:
+    from agentworks.interpolation_compat import warn_legacy_placeholders
+
+    warn_legacy_placeholders()
+    integration = _harness_integration({"command": "{{session_name}}"})
+    integration.prepare_context({"session_name": "work"}, intent=HarnessLaunchIntent.CREATE)
+    result = integration.start(RunContext(), intent=HarnessLaunchIntent.CREATE)
+    assert isinstance(result, HarnessStart)
+    assert result.command == "work"
+    assert len(warnings) == 1
+
+
+def test_shell_does_not_warn_for_legacy_text_inserted_as_data(warnings: list[str]) -> None:
+    integration = _harness_integration({"command": "${agw:session_name}"})
+    integration.prepare_context({"session_name": "{{workspace_name}}"}, intent=HarnessLaunchIntent.CREATE)
+    result = integration.start(RunContext(), intent=HarnessLaunchIntent.CREATE)
+    assert isinstance(result, HarnessStart)
+    assert result.command == "{{workspace_name}}"
+    assert warnings == []

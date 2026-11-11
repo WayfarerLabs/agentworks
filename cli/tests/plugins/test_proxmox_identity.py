@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import contextlib
 import math
+import time
 from functools import partial
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
@@ -19,8 +20,12 @@ from agentworks.capabilities.base import RunContext
 from agentworks.db import VMStatus
 from agentworks.errors import StateError
 from agentworks.execution import root_script
-from agentworks.plugins.proxmox.api import ProxmoxAPIError
-from agentworks.plugins.proxmox.platform import ProxmoxPlatform
+from agentworks.execution.root_script import ChannelUnreachable, RawRun
+from agentworks.plugins.proxmox import guest_agent
+from agentworks.plugins.proxmox import platform as proxmox_platform
+from agentworks.plugins.proxmox.api import REQUEST_TIMEOUT_SECONDS, ProxmoxAPIError
+from agentworks.plugins.proxmox.identity import find_guest
+from agentworks.plugins.proxmox.platform import STATUS_DEADLINE_SECONDS, ProxmoxPlatform
 from tests._proxmox_fakes import NEWID, PROXMOX_CONFIG, FakeProxmoxAPI
 
 if TYPE_CHECKING:
@@ -119,16 +124,160 @@ def test_our_guest_is_operated_on(fake: FakeProxmoxAPI) -> None:
     assert [op for op in fake.ops() if op in _ADDRESSING] == ["start_vm", "guest_agent_exec", "stop_vm"]
 
 
-def test_an_api_failure_reads_as_unknown_status_but_refuses_a_start(fake: FakeProxmoxAPI) -> None:
-    """Status degrades on an outage; an operation that would address the VMID cannot confirm it, so it raises."""
+def test_an_api_failure_reads_as_unknown_status_but_refuses_a_start_or_a_root_script(fake: FakeProxmoxAPI) -> None:
+    """Status degrades on an outage; an operation that would address the VMID cannot confirm it, so it raises.
+
+    A root script's check that fails well inside its deadline raises the API's error, not the deadline's refusal.
+    """
     fake.holder = "vm1"
     outage = ProxmoxAPIError("Proxmox API failed: connection refused")
-    fake.status_errors = [outage, outage]
+    fake.status_errors = [outage, outage, outage]
     fake.in_use_error = outage
     platform = _platform()
 
     assert platform.status(ROW, RunContext()) is VMStatus.UNKNOWN
     with pytest.raises(ProxmoxAPIError):
         platform.start(ROW, RunContext())
+    with pytest.raises(ProxmoxAPIError):
+        platform.run_as_root(ROW, RunContext(), b"true", 30)
 
     assert "start_vm" not in fake.ops()
+    assert "guest_agent_exec" not in fake.ops()
+
+
+def test_the_identity_check_spends_the_root_scripts_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    now = [1000.0]
+    passed: list[float] = []
+
+    def slow_check(self: ProxmoxPlatform, vm: VMRow, ctx: RunContext, *, expires: float) -> dict[str, object]:
+        now[0] += 20
+        return {}
+
+    monkeypatch.setattr(proxmox_platform, "time", SimpleNamespace(monotonic=lambda: now[0]))
+    monkeypatch.setattr(ProxmoxPlatform, "_guest", slow_check)
+    monkeypatch.setattr(ProxmoxPlatform, "_api", lambda self, ctx: None)
+    monkeypatch.setattr(
+        guest_agent,
+        "run_as_root_until",
+        lambda api, node, vmid, script, expires: passed.append(expires) or RawRun(b"", b""),
+    )
+
+    _platform().run_as_root(ROW, RunContext(), b"true", 30)
+
+    # The guest agent gets the instant the deadline ends, not a duration it would start again later.
+    assert passed == [1030]
+    with pytest.raises(ChannelUnreachable):
+        _platform().run_as_root(ROW, RunContext(), b"true", 20)
+    assert passed == [1030]
+
+
+def test_no_guest_agent_request_outlasts_the_deadline_the_identity_check_began(
+    monkeypatch: pytest.MonkeyPatch, fake: FakeProxmoxAPI
+) -> None:
+    """Time passing between the identity check and the guest agent counts: no request ends after the deadline."""
+    now = [1000.0]
+    requests: list[tuple[str, float]] = []
+    deadline_ends: list[float] = []
+
+    def tick() -> float:
+        now[0] += 0.05  # every reading of the clock takes a little time, as scheduling does
+        return now[0]
+
+    def nearly_spent(self: ProxmoxPlatform, vm: VMRow, ctx: RunContext, *, expires: float) -> dict[str, object]:
+        deadline_ends.append(expires)
+        now[0] = expires - 0.5
+        return {}
+
+    def recording(name: str, answer: object) -> object:
+        def call(*args: object, timeout: float, **kwargs: object) -> object:
+            requests.append((name, now[0] + timeout))
+            return answer
+
+        return call
+
+    monkeypatch.setattr(time, "monotonic", tick)
+    monkeypatch.setattr(time, "sleep", lambda seconds: now.__setitem__(0, now[0] + seconds))
+    monkeypatch.setattr(ProxmoxPlatform, "_guest", nearly_spent)
+    monkeypatch.setattr(fake, "guest_agent_ping", recording("ping", None))
+    monkeypatch.setattr(fake, "guest_agent_exec", recording("exec", 7))
+    monkeypatch.setattr(fake, "guest_agent_exec_status", recording("status", {"exited": False}))
+
+    with contextlib.suppress(ChannelUnreachable):
+        _platform().run_as_root(ROW, RunContext(), b"true", 10)
+
+    assert requests
+    assert all(ends <= deadline_ends[0] for _, ends in requests), (deadline_ends, requests)
+
+
+SLOW_READ_SECONDS = 16.0
+
+
+class SlowIdentityReads(FakeProxmoxAPI):
+    """An API whose identity reads each answer after ``SLOW_READ_SECONDS`` on ``clock``, about a guest the token
+    cannot audit; a read given a shorter timeout fails when it runs out, as a socket does."""
+
+    def __init__(self, clock: list[float]) -> None:
+        super().__init__()
+        self.clock = clock
+        self.holder = "outside-the-pool"
+        self.auditable = False
+        self.timeouts: list[float | None] = []
+
+    def _wait(self, timeout: float | None) -> None:
+        self.timeouts.append(timeout)
+        assert timeout is not None
+        self.clock[0] += min(timeout, SLOW_READ_SECONDS)
+        if timeout < SLOW_READ_SECONDS:
+            raise ProxmoxAPIError("Proxmox API GET failed: timed out")
+
+    def vm_status(self, node: str, vmid: int, *, timeout: float | None = None) -> dict[str, object]:
+        self._wait(timeout)
+        return super().vm_status(node, vmid, timeout=timeout)
+
+    def vmid_in_use(self, vmid: int, *, timeout: float | None = None) -> bool:
+        self._wait(timeout)
+        return super().vmid_in_use(vmid, timeout=timeout)
+
+
+@pytest.fixture
+def slow(monkeypatch: pytest.MonkeyPatch) -> SlowIdentityReads:
+    api = SlowIdentityReads([1000.0])
+    monkeypatch.setattr(time, "monotonic", lambda: api.clock[0])
+    monkeypatch.setattr(ProxmoxPlatform, "_api", lambda self, ctx: api)
+    return api
+
+
+def test_the_identity_check_and_its_fallback_share_the_root_scripts_deadline(slow: SlowIdentityReads) -> None:
+    """Two slow identity reads cannot outlast a deadline shorter than both: the second gets what remains."""
+    with pytest.raises(ChannelUnreachable):
+        _platform().run_as_root(ROW, RunContext(), b"true", 20)
+
+    assert slow.clock[0] - 1000.0 <= 20
+    assert slow.timeouts == [20, 4]
+    assert "guest_agent_exec" not in slow.ops()
+
+
+def test_a_long_deadline_still_caps_each_identity_read_at_the_request_timeout(slow: SlowIdentityReads) -> None:
+    """A 600-second budget does not let one read wait 600 seconds: each gets at most the request timeout."""
+    with pytest.raises(StateError):
+        _platform().run_as_root(ROW, RunContext(), b"true", 600)
+
+    assert slow.timeouts == [REQUEST_TIMEOUT_SECONDS, REQUEST_TIMEOUT_SECONDS]
+
+
+def test_status_bounds_the_whole_identity_check(slow: SlowIdentityReads) -> None:
+    """A status read that spends the budget leaves no time for the fallback, so the state is unknown at once."""
+    assert _platform().status(ROW, RunContext()) is VMStatus.UNKNOWN
+
+    assert slow.clock[0] - 1000.0 <= STATUS_DEADLINE_SECONDS
+    assert slow.timeouts == [STATUS_DEADLINE_SECONDS]
+
+
+def test_a_spent_budget_asks_the_api_nothing(fake: FakeProxmoxAPI) -> None:
+    """The identity is unknown, as when the fallback has no time left, and no request gets a timeout it cannot use."""
+    fake.holder = "vm1"
+
+    with pytest.raises(ProxmoxAPIError):
+        find_guest(fake, "pve1", NEWID, vm_name="vm1", names=("vm1",), expires=time.monotonic())  # type: ignore[arg-type]
+
+    assert fake.identity_timeouts == []

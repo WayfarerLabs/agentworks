@@ -271,11 +271,15 @@ stderr after the marker; the terminal half takes neither.
 **Spawning.** One `spawn(argv, ...)` in `ssh_process.py` runs
 `subprocess.Popen(argv, stdin=PIPE, stdout=PIPE, stderr=PIPE, bufsize=0)` (the forward passes no
 pipes) with the proof's Windows environment strip (`_io.py:104-114`, at `fd1256b1f`), and maps a
-failure of the resolved client to start to `ClientUnsupported`. The pump lives in `pump.py`. The
-pump is the proof's single-threaded loop (`_io.py:32-205`): non-blocking pipes (supported on Windows
-pipes from Python 3.12), 64 KiB chunks, a 10 ms sleep when nothing moved, the deadline, then kill
-and a 0.5 s reap, and cleanup on `BaseException`. It is argv-agnostic, which is what lets the
-conformance suite run it against a local shell.
+failure of the resolved client to start to `ClientUnsupported`. No child, this one or any other the
+workstation starts, inherits the `env-var` secret backend's `AW_SECRET_` carriers: the entry point
+moves them out of `os.environ` before anything spawns (`env_var.withhold_carriers`), and only that
+backend reads them afterwards. A long-lived child kept one otherwise; the live run found the auth
+key's carrier in local Lima's host agent after a create. The pump lives in `pump.py`. The pump is
+the proof's single-threaded loop (`_io.py:32-205`): non-blocking pipes (supported on Windows pipes
+from Python 3.12), 64 KiB chunks, a 10 ms sleep when nothing moved, the deadline, then kill and a
+0.5 s reap, and cleanup on `BaseException`. It is argv-agnostic, which is what lets the conformance
+suite run it against a local shell.
 
 - **Who uses it.** `run`, `stream` and the parking connection of an attach reuse the one pump. The
   terminal half (inherited stdio, `subprocess` wait) and the forward (no pipes) do not. The parking
@@ -292,20 +296,25 @@ conformance suite run it against a local shell.
   with no stdin passes `None` and the pipe closes right after the request. The thread outlives the
   call blocked in a read; `stream` is the last thing a command does. A stdout consumer that leaves
   (`| head`, quitting `less`) gets the semantics ssh gave it when ssh held the operator's stdout.
-  The client closes its read end of ssh's stdout, so ssh sees `EPIPE`, and keeps pumping stderr
-  until the channel ends: a writer that keeps writing takes `SIGPIPE` and the channel closes, while
-  a quiet payload runs to its end. A stderr consumer that leaves, with no trailer yet, ends the
-  request once held stdout is delivered, and ending the session kills the client after its
-  one-second natural-exit wait, which ends the guest's writer: ssh only discards stderr after a
-  failed write and keeps the channel up, and the status travels on stderr, so nothing more could be
-  learned. With the trailer already in hand, stdout is pumped to its end marker and the result is
-  `Completed(N)`. When stdout was abandoned and the stderr trailer still arrives, the result is the
-  guest's own `Completed(N)`; otherwise it is `Unknown(CONSUMER_LEFT)`, which `stream` alone reports
-  as 141, the status of a writer killed by `SIGPIPE`. `stream_to_operator` flushes both streams once
-  as it returns, and that flush is how a departure it did not see earlier is detected: a stream
-  whose consumer has gone is pointed at the null device (`output.tolerating_dead_sink`), so
-  interpreter shutdown cannot fail on the bytes left in its buffer. That flush tries both streams
-  and never replaces a failure already in flight.
+  The client discards the next chunk the guest writes to that stream and then closes its read end of
+  it, so ssh sees `EPIPE` on the write after that one, and keeps pumping stderr until the channel
+  ends: a writer that keeps writing takes `SIGPIPE` and the channel closes, while a quiet payload
+  runs to its end. Once ssh's write to its stdout fails, the OpenSSH client writes none of the
+  stderr it receives after that, so a quiet payload's end marker must not meet a closed read end,
+  and kept open it does not. A guest that writes once more after its consumer left and then goes
+  quiet has closed the read end, so its end marker is ssh's failed write: the trailer survives only
+  when it reaches ssh in the same batch, and otherwise the result is `Unknown(CONSUMER_LEFT)`. A
+  stderr consumer that leaves, with no trailer yet, ends the request once held stdout is delivered,
+  and ending the session kills the client after its one-second natural-exit wait, which ends the
+  guest's writer: ssh only discards stderr after a failed write and keeps the channel up, and the
+  status travels on stderr, so nothing more could be learned. With the trailer already in hand,
+  stdout is pumped to its end marker and the result is `Completed(N)`. When stdout was abandoned and
+  the stderr trailer still arrives, the result is the guest's own `Completed(N)`; otherwise it is
+  `Unknown(CONSUMER_LEFT)`, which `stream` alone reports as 141, the status of a writer killed by
+  `SIGPIPE`. `stream_to_operator` flushes both streams once as it returns, and that flush is how a
+  departure it did not see earlier is detected: a stream whose consumer has gone is pointed at the
+  null device (`output.tolerating_dead_sink`), so interpreter shutdown cannot fail on the bytes left
+  in its buffer. That flush tries both streams and never replaces a failure already in flight.
 - **Binary stdio.** Callers pass `sys.stdout.buffer` and `sys.stderr.buffer` (the text layer's
   `newline="\n"` at `cli/_entry.py:38` does not apply), after flushing the text layer (I2).
   `stream_to_operator(access, request)` in `access.py` is that wiring, flush, raw stdin and binary

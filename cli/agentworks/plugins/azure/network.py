@@ -54,6 +54,7 @@ from agentworks.capabilities.vm_platform.ssh_exposure import (
     operator_ssh_prefixes,
 )
 from agentworks.errors import AgentworksError, AuthorizationError, ProvisioningError
+from agentworks.interrupts import interrupts_deferred
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -341,7 +342,9 @@ def poke_ssh_allow(network: NetworkManagementClient, rg: str, name: str, prefixe
     server-side even though the client-side wait failed, and only this
     function knows the nonce name, so the cleanup cannot be left to the
     caller's exit path. An interrupt during the create removes the rule
-    the same way and propagates.
+    the same way and propagates. Each of those removals holds interrupts
+    until it is done, since the route's own exit never runs for a poke
+    that did not return.
     """
     from uuid import uuid4
 
@@ -358,12 +361,14 @@ def poke_ssh_allow(network: NetworkManagementClient, rg: str, name: str, prefixe
                 _allow_ssh_rule(rule_name, prefixes, priority),
             ).result()
         except Exception as exc:
-            remove_ssh_allow(network, rg, name, rule_name, prefixes)
+            with interrupts_deferred():
+                remove_ssh_allow(network, rg, name, rule_name, prefixes)
             last_exc = exc
             continue
         except BaseException:
             # An interrupt mid-create: the rule may exist, and only this name finds it.
-            remove_ssh_allow(network, rg, name, rule_name, prefixes)
+            with interrupts_deferred():
+                remove_ssh_allow(network, rg, name, rule_name, prefixes)
             raise
         return rule_name
     assert last_exc is not None  # the loop only falls through via the except arm
@@ -398,8 +403,11 @@ def remove_ssh_allow(
     bootstrap, returned by the poke), so it is always named.
 
     The removal waits at most ``_RULE_REMOVAL_TIMEOUT_SECONDS`` for Azure,
-    since its callers defer interrupts around it; an operation still running
-    then is an outcome nobody saw, so it warns that the rule may remain.
+    since a caller that holds interrupts around it (``interrupts_deferred``:
+    the poke's own cleanup, the route's exit, ``close_provisioning_access_or_warn``)
+    makes the operator wait that long; an operation still running then is an
+    outcome nobody saw, so it warns that the rule may remain. This function
+    does not hold interrupts itself.
     """
     from azure.core.exceptions import ResourceNotFoundError
 

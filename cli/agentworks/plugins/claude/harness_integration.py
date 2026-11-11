@@ -36,6 +36,7 @@ from typing import TYPE_CHECKING, Annotated, ClassVar, Literal
 from pydantic import Field
 
 from agentworks.artifacts.application import ArtifactApplication
+from agentworks.artifacts.model import ArtifactType
 from agentworks.artifacts.native.common import (
     NativeSessionArtifacts,
     defer_setup_conflicts,
@@ -51,14 +52,13 @@ from agentworks.capabilities.harness_integration.base import (
     HarnessIntegration,
     HarnessLaunchIntent,
     HarnessStart,
-    quote_literal_argv,
     require_commands,
 )
 from agentworks.errors import StateError
 from agentworks.execution.requests import Script, Shell
 from agentworks.plugins._harness_native.native import setup_user, setup_workspace
 from agentworks.plugins._harness_native.native_config import NativeUserConfig, NativeWorkspaceConfig
-from agentworks.plugins.claude.artifacts import outer_artifacts, session_artifacts, session_prompt_snapshot
+from agentworks.plugins.claude.artifacts import outer_artifacts, session_artifacts
 from agentworks.schema import AgwModel, MergeStrategy
 from agentworks.topics import TopicProse
 
@@ -145,17 +145,19 @@ class ClaudeCodeConfig(AgwModel):
     override. A child template's value replaces its parent's."""
 
     enabled_workarounds: Annotated[
-        list[Literal["session-prompt", "session-skill-plugin", "session-agent-definitions"]], MergeStrategy.REPLACE
+        list[Literal["session-skill-plugin", "session-agent-definitions"]], MergeStrategy.REPLACE
     ] = Field(default_factory=list)
     """Explicitly enabled session artifact carriers. An authored list replaces inherited opt-ins."""
 
     extra_args: Annotated[list[str], MergeStrategy.REPLACE] = Field(default_factory=list)
-    """Appended verbatim after every generated CLI option, so it can carry
+    """Appended after every generated CLI option, so it can carry
     any flag this integration does not model. Claude uses the last
     ``--settings`` occurrence, so a raw one here replaces all generated
     session settings. On a fresh launch with an initial input, only the
     ``--`` prompt separator and prompt value follow these option tokens. A
-    child template's declared list replaces its parent's."""
+    child template's declared list replaces its parent's. Context references such as
+    ${agw:workspace_dir} render before each argument is shell-quoted; replacement
+    contents are literal data."""
 
 
 # The transcript's config root. ``CLAUDE_CONFIG_DIR`` is the CLI's own
@@ -202,10 +204,10 @@ class ClaudeCodeIntegration(HarnessIntegration):
 
         Artifact bundles activated at a user or workspace facet publish native rules,
         skills and agent personas. Session artifacts are optional and unhandled by
-        default. `enabled_workarounds` can opt into `session-prompt` for rules/hints,
-        `session-skill-plugin` for skills in a private `agentworks-artifacts:` plugin,
-        and `session-agent-definitions` for personas. The prompt workaround refreshes
-        appended guidance on resume when Claude's version is known. Raw arguments
+        default. `session-skill-plugin` delivers rules, hints and skills through a
+        private native plugin; `session-agent-definitions` adds personas to that plugin.
+        Generated guidance skills request reading before work; publication does not
+        guarantee model cooperation or replace old conversation content. Raw arguments
         that disable or replace active artifact carriers are rejected.
         """,
     )
@@ -214,6 +216,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
     # HarnessStart note. None until the op runs (nothing decided yet).
     _resumed: bool | None = None
     _artifact_plan: NativeSessionArtifacts = NativeSessionArtifacts()
+    _rendered_extra_args: tuple[str, ...] = ()
 
     @classmethod
     def config_for(cls, facet: Facet | None = None) -> type[BaseModel] | None:
@@ -232,9 +235,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
             if self.retiring
             else render_setup_artifacts(
                 invocation,
-                lambda inputs: outer_artifacts(
-                    inputs, "/etc/claude-code/.claude", instructions_path="/etc/claude-code/CLAUDE.md"
-                ),
+                lambda inputs: outer_artifacts(inputs, "/etc/claude-code/.claude", guidance_as_skills=True),
             )
         )
         if plan.files:
@@ -376,6 +377,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
         intent: HarnessLaunchIntent = HarnessLaunchIntent.RESUME_OR_NEW,
     ) -> HarnessStart:
         """Choose the requested fresh, strict-resume, or fallback policy."""
+        self._rendered_extra_args = tuple(self.render_context_argv(token) for token in self.config.extra_args)
         artifact_context = self._session_binding.artifact_context
         access = ctx.admin_access() if self._admin else ctx.agent_access()
         self._artifact_plan, native_root = prepare_session_delivery(
@@ -385,8 +387,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
             context=artifact_context,
             render=lambda prepared: session_artifacts(
                 prepared,
-                configured=self.config.append_system_prompt,
-                extra_args=self.config.extra_args,
+                extra_args=self._rendered_extra_args,
                 enabled_workarounds=self.config.enabled_workarounds,
             ),
             workspace=self._workspace_path,
@@ -397,11 +398,6 @@ class ClaudeCodeIntegration(HarnessIntegration):
                 (native_root, f"{self._workspace_path}/.claude", "/etc/claude-code/.claude"),
                 files=("/etc/claude-code/CLAUDE.md",),
             )
-            if access is not None and "--append-system-prompt-file" in self._artifact_plan.argv:
-                self._artifact_plan = replace(
-                    self._artifact_plan,
-                    argv=self._artifact_plan.argv + session_prompt_snapshot(access, artifact_context.environment),
-                )
         command = self._resume_or_launch(ctx, intent=intent)
         if intent is HarnessLaunchIntent.FORCE_NEW:
             note = "Fresh Claude Code session requested. Starting a new one without resuming prior state..."
@@ -439,23 +435,38 @@ class ClaudeCodeIntegration(HarnessIntegration):
             msg = f"agentworks harness integration (claude-code): starting new session {self._session_name}"
         parts = [shlex.quote(token) for token in (*identity, "--name", self._session_name, *self._managed_flags())]
         if self.config.agent is not None:
-            parts += ["--agent", quote_literal_argv(self.config.agent)]
-        if (
-            self.config.append_system_prompt is not None
-            and "--append-system-prompt-file" not in self._artifact_plan.argv
-        ):
-            parts += ["--append-system-prompt", quote_literal_argv(self.config.append_system_prompt)]
-        parts += [quote_literal_argv(token) for token in self._artifact_plan.argv]
-        parts += [shlex.quote(token) for token in self.config.extra_args]
+            selected_agent = self.config.agent
+            context = self._session_binding.artifact_context
+            selected_origins = (
+                {
+                    item.origin_identity
+                    for item in context.inputs.items()
+                    if item.content.type is ArtifactType.AGENT and item.content.name == selected_agent
+                }
+                if context is not None
+                else set()
+            )
+            delivered = {
+                file.native_identity.removeprefix("agent:")
+                for file in self._artifact_plan.application.files
+                if file.native_identity is not None
+                and file.native_identity.startswith("agent:")
+                and selected_origins.intersection(file.origins)
+            }
+            selected_agent = next(iter(delivered), selected_agent)
+            parts += ["--agent", shlex.quote(selected_agent)]
+        if self.config.append_system_prompt is not None:
+            parts += ["--append-system-prompt", shlex.quote(self.config.append_system_prompt)]
+        parts += [shlex.quote(token) for token in self._artifact_plan.argv]
+        parts += [shlex.quote(token) for token in self._rendered_extra_args]
         if not resume and (prompt := self._fresh_prompt()) is not None:
-            parts += ["--", quote_literal_argv(prompt)]
+            parts += ["--", shlex.quote(prompt)]
         argv = " ".join(parts)
         # A single ``sh -c`` so the whole thing survives the ``exec``
         # wrapping the tmux pane applies (``exec`` takes one simple
         # command): the login shell execs this sh, which echoes then
-        # execs claude, so the pane becomes Claude. The message and the
-        # generated argv carry no ``{{word}}`` tokens, so the core
-        # template-var substitution does not mangle them.
+        # execs claude, so the pane becomes Claude. The manager consumes
+        # this completed command without further interpolation.
         inner = f"echo {shlex.quote(msg)}; exec claude {argv}"
         return f"sh -c {shlex.quote(inner)}"
 
