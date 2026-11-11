@@ -100,7 +100,7 @@ def resolve_mcp_user_path(tool: MCPTool, runner: Transport, *, home: str, enviro
 
 
 def user_mcp_location(
-    layout: NativeUserLayout | None, invocation: UserSetupInvocation, *, retiring: bool
+    layout: NativeUserLayout, invocation: UserSetupInvocation, *, retiring: bool
 ) -> tuple[str | None, bool, tuple[ArtifactDeferral, ...]]:
     """Resolve current-role authority, preserving prior claims when it is unavailable."""
     items = tuple(item for item in invocation.artifacts.items() if item.content.type is ArtifactType.MCP_SERVER)
@@ -108,8 +108,6 @@ def user_mcp_location(
         tuple(claim for claim in invocation.prior.claims if claim.role == MCP_CLAIM_ROLE) if invocation.prior else ()
     )
     try:
-        if layout is None:
-            raise ConfigError("Native user configuration location is unknown")
         return _user_mcp_path(layout, invocation.home), False, ()
     except ConfigError:
         reason = "Native MCP config location could not be resolved safely; existing MCP ownership is retained."
@@ -203,19 +201,11 @@ def _table(document: SettingsObject, key: str) -> SettingsObject:
 def _shared_paths(
     invocation: UserSetupInvocation | WorkspaceSetupInvocation, claims: tuple[NativeClaim, ...], *, destination: str
 ) -> tuple[str, ...]:
-    return (
-        tuple(
-            sorted(
-                {
-                    claim.destination
-                    for claim in claims
-                    if claim.role == MCP_CLAIM_ROLE and claim.destination == destination
-                }
-            )
-        )
-        if isinstance(invocation, WorkspaceSetupInvocation)
-        else ()
-    )
+    if isinstance(invocation, WorkspaceSetupInvocation) and any(
+        claim.role == MCP_CLAIM_ROLE and claim.destination == destination for claim in claims
+    ):
+        return (destination,)
+    return ()
 
 
 def apply_mcp(

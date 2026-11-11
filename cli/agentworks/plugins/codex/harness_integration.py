@@ -494,7 +494,7 @@ class CodexIntegration(HarnessIntegration):
         layout = user_layout("codex", invocation)
         if layout is None:
             if self.retiring:
-                setup_user("codex", None, invocation, skip_mcp=True)
+                setup_user("codex", None, invocation, native_root=None, skip_mcp=True)
             return unavailable_user_artifacts(invocation, retiring=self.retiring)
         root = layout.root
         plan = (

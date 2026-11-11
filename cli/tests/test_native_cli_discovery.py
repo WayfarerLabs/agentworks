@@ -14,10 +14,9 @@ import pytest
 from agentworks.errors import ConnectivityError, ExternalError
 from agentworks.harness_setup.model import NativeClaim
 from agentworks.native_files import NativeFiles
-from agentworks.plugins._harness_native.native import setup_user
 from agentworks.plugins._harness_native.native_cli import NativeCLI, NativeTool
 from agentworks.plugins._harness_native.native_config import NativeUserConfig
-from tests.native_setup_fixtures import LocalFixtureTransport, invocation, market_fixture
+from tests.native_setup_fixtures import LocalFixtureTransport, invocation, market_fixture, setup_fixture_user
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="local execution of Linux guest setup helpers")
 
@@ -109,7 +108,7 @@ def test_real_marketplace_discovery_reuses_user_login_tool_under_isolated_home(
         'export PATH="$HOME/.local/bin:/usr/bin:/bin"\nprintf x >> "$HOME/profile-runs"\n'
     )
     claims: list[tuple[NativeClaim, ...]] = []
-    setup_user(
+    setup_fixture_user(
         tool, NativeUserConfig(marketplaces=[str(market)], plugins=["one@fixture-market"]), invocation(target, claims)
     )
     observed = [json.loads(line) for line in observations.read_text().splitlines()]
@@ -120,8 +119,7 @@ def test_real_marketplace_discovery_reuses_user_login_tool_under_isolated_home(
             assert item["HOME"].startswith(str(target.root / "tmp"))
             assert item["CODEX_HOME"] == item["HOME"] + "/.codex"
             assert item["CLAUDE_CONFIG_DIR"] == item["HOME"] + "/.claude"
-    # Setup observes the layout once; all native commands share one executable/PATH resolution.
-    assert (target.home / "profile-runs").read_text() == "xx"
+    assert (target.home / "profile-runs").read_text() == "x"
     assert {claim.role for claim in claims[-1]} == {"marketplace", "plugin"}
     assert not list((target.root / "tmp").iterdir())
 

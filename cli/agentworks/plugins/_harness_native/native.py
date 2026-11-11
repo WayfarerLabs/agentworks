@@ -14,8 +14,7 @@ from typing import TYPE_CHECKING
 from agentworks import output
 from agentworks.artifacts.application import ArtifactApplication
 from agentworks.artifacts.model import ArtifactInputs
-from agentworks.artifacts.native.layout import resolve_user_layout
-from agentworks.artifacts.native.mcp import apply_mcp, user_mcp_location
+from agentworks.artifacts.native.mcp import apply_mcp
 from agentworks.capabilities.harness_integration.settings import (
     PreparedSettings,
     SettingsFormat,
@@ -39,7 +38,6 @@ from agentworks.plugins._harness_native.native_cli import (
 )
 
 if TYPE_CHECKING:
-    from agentworks.artifacts.application import ArtifactDeferral
     from agentworks.capabilities.harness_integration.setup import UserSetupInvocation, WorkspaceSetupInvocation
     from agentworks.plugins._harness_native.native_config import NativeUserConfig, NativeWorkspaceConfig
 
@@ -276,18 +274,11 @@ def setup_user(
     config: NativeUserConfig | None,
     invocation: UserSetupInvocation,
     *,
-    native_root: str | None = None,
+    native_root: str | None,
     mcp_destination: str | None = None,
     skip_mcp: bool = False,
 ) -> ArtifactApplication:
     """Reconcile actual-user native associations using confirmed prior claims."""
-    location_deferred: tuple[ArtifactDeferral, ...] = ()
-    if native_root is None and (config is not None or not skip_mcp):
-        layout = resolve_user_layout(tool, invocation.runner, home=invocation.home, environment=invocation.environment)
-        native_root = layout.root
-        current_mcp, location_skip, location_deferred = user_mcp_location(layout, invocation, retiring=config is None)
-        mcp_destination = mcp_destination or current_mcp
-        skip_mcp = skip_mcp or location_skip
     mapping = None if config is None else config.settings
     if config is None:
         invocation = replace(invocation, artifacts=ArtifactInputs())
@@ -307,7 +298,7 @@ def setup_user(
             raise StateError("native retirement requires one recorded config home; ownership evidence was retained")
         root = roots.pop()
     if root is None:
-        return ArtifactApplication(deferred=location_deferred)
+        return ArtifactApplication()
     root = native_path(root)
     destination = root + "/" + _filename(tool)
     if not skip_mcp and mcp_destination is None:
@@ -324,9 +315,9 @@ def setup_user(
                 settings_plan = _MappingPlan.build(prepared, initial, destination)
                 settings_plan.publish(files, destination, current=initial)
         if skip_mcp:
-            return ArtifactApplication(deferred=location_deferred)
+            return ArtifactApplication()
         assert mcp_destination is not None
-        application = apply_mcp(
+        return apply_mcp(
             tool,
             invocation,
             destination=mcp_destination,
@@ -335,7 +326,6 @@ def setup_user(
             if joint_mapping and prepared is not None
             else None,
         )
-        return replace(application, deferred=(*application.deferred, *location_deferred))
     with NativeFiles(invocation.runner) as files:
         initial = files.read(destination)
         plan = None if mapping is None or prepared is None else _MappingPlan.build(prepared, initial, destination)
@@ -705,9 +695,9 @@ def setup_user(
         else:
             overlays = ()
         if skip_mcp:
-            return ArtifactApplication(deferred=location_deferred)
+            return ArtifactApplication()
         assert mcp_destination is not None
-        application = apply_mcp(
+        return apply_mcp(
             tool,
             invocation,
             destination=mcp_destination,
@@ -724,4 +714,3 @@ def setup_user(
             if joint_mapping and plan is not None
             else None,
         )
-        return replace(application, deferred=(*application.deferred, *location_deferred))

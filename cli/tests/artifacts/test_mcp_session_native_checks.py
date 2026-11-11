@@ -22,7 +22,7 @@ from agentworks.plugins.codex import artifacts as codex
 from tests.artifacts._fixtures import received
 from tests.artifacts.test_mcp_session_delivery import mcp
 from tests.artifacts.test_native_delivery import artifact, context
-from tests.native_setup_fixtures import LocalFixtureTransport
+from tests.native_setup_fixtures import LocalFixtureTransport, setup_fixture_user
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="local Linux guest filesystem execution")
 
@@ -363,7 +363,6 @@ def test_mcp_only_user_application_needs_no_native_cli_probe(db, target, monkeyp
 def test_unknown_retirement_role_skips_mcp_io_and_retains_claims(target, monkeypatch):
     from agentworks.artifacts.native.layout import resolve_user_layout
     from agentworks.artifacts.native.mcp import apply_mcp, user_mcp_location
-    from agentworks.plugins._harness_native.native import setup_user
     from tests.native_setup_fixtures import invocation, record
 
     item = mcp()
@@ -383,7 +382,7 @@ def test_unknown_retirement_role_skips_mcp_io_and_retains_claims(target, monkeyp
         pytest.fail("unverified native MCP role attempted config I/O")
 
     monkeypatch.setattr(NativeFiles, "__enter__", forbid_io)
-    setup_user("codex", None, retired, mcp_destination=destination, skip_mcp=skip)
+    setup_fixture_user("codex", None, retired, mcp_destination=destination, skip_mcp=skip)
     assert current.exists() and checkpoints[-1] == old
 
 
@@ -392,7 +391,6 @@ def test_unknown_mcp_role_preserves_confirmed_claims_through_plugin_progress_and
 
     from agentworks.artifacts.native.mcp import apply_mcp
     from agentworks.capabilities.harness_integration.settings import SettingsMapping, parse_settings
-    from agentworks.plugins._harness_native.native import setup_user
     from agentworks.plugins._harness_native.native_cli import NativeMarket, NativePlugin, identity
     from agentworks.plugins._harness_native.native_config import NativeUserConfig
     from tests.native_setup_fixtures import invocation, record
@@ -427,7 +425,7 @@ def test_unknown_mcp_role_preserves_confirmed_claims_through_plugin_progress_and
             item.content, metadata_json=json.dumps({"type": "stdio", "command": "changed", "args": [], "env": {}})
         ),
     )
-    setup_user(
+    setup_fixture_user(
         "codex",
         NativeUserConfig(
             settings=SettingsMapping(source=str(source), strategy="merge-overwrite"), plugins=["one@fixture"]

@@ -22,7 +22,7 @@ from agentworks.db import VMRow
 from agentworks.errors import ConfigError, ExternalError, StateError
 from agentworks.harness_setup.model import NativeClaim
 from agentworks.native_files import _DENIED_PATH, _FILE_PROGRAM, _UNSUITABLE_PATH, NativeFiles
-from agentworks.plugins._harness_native.native import setup_user, setup_workspace
+from agentworks.plugins._harness_native.native import setup_workspace
 from agentworks.plugins._harness_native.native_cli import NativeCLI, NativeTool
 from agentworks.plugins._harness_native.native_config import NativeUserConfig, NativeWorkspaceConfig
 from tests.native_setup_fixtures import (
@@ -30,6 +30,7 @@ from tests.native_setup_fixtures import (
     invocation,
     market_fixture,
     record,
+    setup_fixture_user,
 )
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="local execution of Linux guest setup helpers")
@@ -161,11 +162,11 @@ def test_settings_only_replace_repairs_invalid_document_and_retirement_retains_i
     source.write_bytes(b"answer = 42\n" if tool == "codex" else b'{"answer": 42}')
     config = NativeUserConfig(settings=SettingsMapping(source=str(source), strategy="replace"))
     claims: list[tuple[NativeClaim, ...]] = []
-    setup_user(tool, config, invocation(transport, claims))
+    setup_fixture_user(tool, config, invocation(transport, claims))
     assert not any(claims)
     provisioned = destination.read_bytes()
     source.unlink()
-    setup_user(tool, None, invocation(transport, claims, prior=record((), tool)))
+    setup_fixture_user(tool, None, invocation(transport, claims, prior=record((), tool)))
     assert not any(claims)
     assert destination.read_bytes() == provisioned
 
@@ -179,17 +180,17 @@ def test_actual_native_lifecycle_and_checkpointed_idempotency(
     monkeypatch.setattr("agentworks.plugins._harness_native.native.output.info", reports.append)
     claims: list[tuple[NativeClaim, ...]] = []
     config = NativeUserConfig(marketplaces=[str(market)], plugins=["one@fixture-market"])
-    setup_user(tool, config, invocation(transport, claims))
+    setup_fixture_user(tool, config, invocation(transport, claims))
     assert [claim.role for claim in claims[-1]] == ["marketplace", "plugin"]
     assert len(reports) == 2
     assert "fixture-market" in reports[0] and "one@fixture-market" in reports[1]
     assert all(tool in report and str(market) not in report for report in reports)
     current = claims[-1]
     checkpoint_count = len(claims)
-    setup_user(tool, config, invocation(transport, claims, prior=record(current, tool)))
+    setup_fixture_user(tool, config, invocation(transport, claims, prior=record(current, tool)))
     assert len(claims) == checkpoint_count
     assert len(reports) == 2
-    setup_user(tool, None, invocation(transport, claims, prior=record(current, tool)))
+    setup_fixture_user(tool, None, invocation(transport, claims, prior=record(current, tool)))
     assert claims[-1] == ()
     assert len(reports) == 4
     assert "one@fixture-market" in reports[2] and "fixture-market" in reports[3]
@@ -201,11 +202,11 @@ def test_identical_unowned_native_setup_is_adopted(transport: LocalFixtureTransp
     market = market_fixture(transport, tool)
     config = NativeUserConfig(marketplaces=[str(market)], plugins=["one@fixture-market"])
     claims: list[tuple[NativeClaim, ...]] = []
-    setup_user(tool, config, invocation(transport, claims))
+    setup_fixture_user(tool, config, invocation(transport, claims))
     settings = transport.home / (".codex/config.toml" if tool == "codex" else ".claude/settings.json")
     before = settings.read_bytes()
     adopted: list[tuple[NativeClaim, ...]] = []
-    setup_user(tool, config, invocation(transport, adopted))
+    setup_fixture_user(tool, config, invocation(transport, adopted))
     assert adopted[-1] == claims[-1]
     assert settings.read_bytes() == before
 
@@ -253,7 +254,7 @@ def test_mapping_conflict_precedes_real_native_writes(transport: LocalFixtureTra
         settings=SettingsMapping(source=str(source), strategy="replace"),
     )
     with pytest.raises(ConfigError):
-        setup_user(tool, config, invocation(transport, []))
+        setup_fixture_user(tool, config, invocation(transport, []))
     root = transport.home / (".codex" if tool == "codex" else ".claude")
     assert not root.exists()
     assert not list((transport.root / "tmp").iterdir())
@@ -275,7 +276,7 @@ def test_replacement_keeps_explicit_plugins_and_captured_source(
 
     monkeypatch.setattr(NativeCLI, "install", change_source_after_install)
     claims: list[tuple[NativeClaim, ...]] = []
-    setup_user(
+    setup_fixture_user(
         tool,
         NativeUserConfig(
             marketplaces=[str(market)],
@@ -311,7 +312,7 @@ def test_skip_existing_does_not_block_explicit_install(transport: LocalFixtureTr
         else b'{"enabledPlugins":{"one@fixture-market":false}}'
     )
     claims: list[tuple[NativeClaim, ...]] = []
-    setup_user(
+    setup_fixture_user(
         tool,
         NativeUserConfig(
             marketplaces=[str(market)],
@@ -331,7 +332,7 @@ def test_mapping_discards_legacy_settings_claims_from_applied_state_and_preserve
     market = market_fixture(transport, tool)
     initial: list[tuple[NativeClaim, ...]] = []
     config = NativeUserConfig(marketplaces=[str(market)], plugins=["one@fixture-market"])
-    setup_user(tool, config, invocation(transport, initial))
+    setup_fixture_user(tool, config, invocation(transport, initial))
     destination = transport.home / ".codex/config.toml"
     content = serialize_settings(parse_settings(destination.read_bytes(), format="toml"), format="toml")
     destination.write_bytes(content)
@@ -350,7 +351,7 @@ def test_mapping_discards_legacy_settings_claims_from_applied_state_and_preserve
     source = transport.root / "settings-source"
     source.write_bytes(b"")
     checkpoints: list[tuple[NativeClaim, ...]] = []
-    setup_user(
+    setup_fixture_user(
         tool,
         NativeUserConfig(
             marketplaces=[str(market)],
@@ -377,10 +378,10 @@ def test_failed_plugin_step_retains_retryable_marketplace_prefix(
 
     monkeypatch.setattr(NativeCLI, "install", fail_install)
     with pytest.raises(ExternalError):
-        setup_user(tool, config, invocation(transport, claims))
+        setup_fixture_user(tool, config, invocation(transport, claims))
     assert [claim.role for claim in claims[-1]] == ["marketplace"]
     monkeypatch.setattr(NativeCLI, "install", original)
-    setup_user(tool, config, invocation(transport, claims, prior=record(claims[-1], tool)))
+    setup_fixture_user(tool, config, invocation(transport, claims, prior=record(claims[-1], tool)))
     assert {claim.role for claim in claims[-1]} == {"marketplace", "plugin"}
 
 
@@ -398,7 +399,7 @@ def test_checkpoint_failure_stops_before_next_native_mutation(
 
     ctx = replace(ctx, checkpoint=reject_checkpoint)
     with pytest.raises(OSError):
-        setup_user(tool, NativeUserConfig(marketplaces=[str(market)], plugins=["one@fixture-market"]), ctx)
+        setup_fixture_user(tool, NativeUserConfig(marketplaces=[str(market)], plugins=["one@fixture-market"]), ctx)
     with NativeFiles(transport) as files:
         root = str(transport.home / (".codex" if tool == "codex" else ".claude"))
         cli = NativeCLI(tool, files, home=str(transport.home), config_root=root)
@@ -410,7 +411,7 @@ def test_checkpoint_failure_stops_before_next_native_mutation(
 def test_claude_project_dependency_retains_only_its_marketplace(transport: LocalFixtureTransport, strategy) -> None:
     market = market_fixture(transport, "claude")
     claims: list[tuple[NativeClaim, ...]] = []
-    setup_user(
+    setup_fixture_user(
         "claude",
         NativeUserConfig(marketplaces=[str(market)], plugins=["one@fixture-market"]),
         invocation(transport, claims),
@@ -435,7 +436,7 @@ def test_claude_project_dependency_retains_only_its_marketplace(transport: Local
     previous_user_bytes = None
     previous_user_inode = None
     for _ in range(2):
-        setup_user(
+        setup_fixture_user(
             "claude",
             config,
             replace(
@@ -499,7 +500,7 @@ def test_codex_mapping_preserves_unrelated_plugin_and_market_fields(transport: L
         '[marketplaces.fixture-market]\ncustom = "fixture-market-extra"\n'
     )
     claims: list[tuple[NativeClaim, ...]] = []
-    setup_user(
+    setup_fixture_user(
         "codex",
         NativeUserConfig(
             marketplaces=[str(market)],
@@ -518,7 +519,7 @@ def test_codex_mapping_preserves_unrelated_plugin_and_market_fields(transport: L
     destination = transport.home / ".codex/config.toml"
     destination.write_bytes(serialize_settings(document, format="toml"))
     source.write_text(source.read_text().replace("fixture-extra", "updated-extra"))
-    setup_user(
+    setup_fixture_user(
         "codex",
         NativeUserConfig(
             marketplaces=[str(market)],
@@ -540,14 +541,14 @@ def test_mapping_merge_does_not_reintroduce_removed_owned_plugin(
 ) -> None:
     market = market_fixture(transport, tool)
     claims: list[tuple[NativeClaim, ...]] = []
-    setup_user(
+    setup_fixture_user(
         tool,
         NativeUserConfig(marketplaces=[str(market)], plugins=["one@fixture-market"]),
         invocation(transport, claims),
     )
     source = transport.root / "source"
     source.write_bytes(b'model_reasoning_effort="low"\n' if tool == "codex" else b'{"alwaysThinkingEnabled":false}')
-    setup_user(
+    setup_fixture_user(
         tool,
         NativeUserConfig(
             marketplaces=[str(market)], settings=SettingsMapping(source=str(source), strategy="merge-overwrite")
@@ -577,7 +578,7 @@ def test_malformed_existing_settings_prevents_plugin_reconciliation(
     source = transport.root / "source"
     source.write_bytes(b"" if tool == "codex" else b"{}")
     with pytest.raises(ConfigError):
-        setup_user(
+        setup_fixture_user(
             tool,
             NativeUserConfig(
                 marketplaces=[str(market)],
@@ -593,7 +594,7 @@ def test_malformed_existing_settings_prevents_plugin_reconciliation(
 def test_claude_uninstall_preserves_plugin_persistent_data(transport: LocalFixtureTransport) -> None:
     market = market_fixture(transport, "claude")
     claims: list[tuple[NativeClaim, ...]] = []
-    setup_user(
+    setup_fixture_user(
         "claude",
         NativeUserConfig(marketplaces=[str(market)], plugins=["one@fixture-market"]),
         invocation(transport, claims),
@@ -601,7 +602,7 @@ def test_claude_uninstall_preserves_plugin_persistent_data(transport: LocalFixtu
     data = transport.home / ".claude/plugins/data/one@fixture-market/state.txt"
     data.parent.mkdir(parents=True)
     data.write_bytes(b"fixture-user-data")
-    setup_user("claude", None, invocation(transport, claims, prior=record(claims[-1], "claude")))
+    setup_fixture_user("claude", None, invocation(transport, claims, prior=record(claims[-1], "claude")))
     assert data.read_bytes() == b"fixture-user-data"
 
 
@@ -610,7 +611,7 @@ def test_requested_owned_disabled_plugin_is_enabled(transport: LocalFixtureTrans
     market = market_fixture(transport, tool)
     config = NativeUserConfig(marketplaces=[str(market)], plugins=["one@fixture-market"])
     claims: list[tuple[NativeClaim, ...]] = []
-    setup_user(tool, config, invocation(transport, claims))
+    setup_fixture_user(tool, config, invocation(transport, claims))
     destination = transport.home / (".codex/config.toml" if tool == "codex" else ".claude/settings.json")
     format = "toml" if tool == "codex" else "json"
     document = parse_settings(destination.read_bytes(), format=format)
@@ -627,7 +628,7 @@ def test_requested_owned_disabled_plugin_is_enabled(transport: LocalFixtureTrans
     destination.write_bytes(serialize_settings(document, format=format))
     prior = record(claims[-1], tool)
     count = len(claims)
-    setup_user(tool, config, invocation(transport, claims, prior=prior))
+    setup_fixture_user(tool, config, invocation(transport, claims, prior=prior))
     assert len(claims) == count + 1
     with NativeFiles(transport) as files:
         cli = NativeCLI(tool, files, home=str(transport.home), config_root=str(destination.parent))
@@ -638,7 +639,7 @@ def test_codex_missing_marketplace_keeps_unobservable_plugin_cleanup_pending(tra
     market = market_fixture(transport, "codex")
     config = NativeUserConfig(marketplaces=[str(market)], plugins=["one@fixture-market"])
     claims: list[tuple[NativeClaim, ...]] = []
-    setup_user("codex", config, invocation(transport, claims))
+    setup_fixture_user("codex", config, invocation(transport, claims))
     prior = record(claims[-1], "codex")
     with NativeFiles(transport) as files:
         cli = NativeCLI("codex", files, home=str(transport.home), config_root=str(transport.home / ".codex"))
@@ -646,7 +647,9 @@ def test_codex_missing_marketplace_keeps_unobservable_plugin_cleanup_pending(tra
     before = (transport.home / ".codex/config.toml").read_bytes()
     count = len(claims)
     incomplete: list[str] = []
-    setup_user("codex", None, replace(invocation(transport, claims, prior=prior), report_incomplete=incomplete.append))
+    setup_fixture_user(
+        "codex", None, replace(invocation(transport, claims, prior=prior), report_incomplete=incomplete.append)
+    )
     assert incomplete
     assert len(claims) == count + 1
     assert [claim.role for claim in claims[-1]] == ["plugin"]
@@ -719,13 +722,13 @@ def test_mapping_merges_current_changes_during_plugin_install(
         destination.write_bytes(serialize_settings(document, format=format))
 
     monkeypatch.setattr(NativeCLI, "install", concurrent_edit)
-    setup_user(tool, config, invocation(transport, claims))
+    setup_fixture_user(tool, config, invocation(transport, claims))
     assert {claim.role for claim in claims[-1]} == {"marketplace", "plugin"}
     assert b"preserve" in destination.read_bytes()
     if tool == "codex":
         assert b"2026-09-11T00:00:00Z" in destination.read_bytes()
     monkeypatch.setattr(NativeCLI, "install", original)
-    setup_user(tool, config, invocation(transport, claims, prior=record(claims[-1], tool)))
+    setup_fixture_user(tool, config, invocation(transport, claims, prior=record(claims[-1], tool)))
     assert b"preserve" in destination.read_bytes()
     assert parse_settings(destination.read_bytes(), format=format)["mapped"] is True
 
@@ -736,7 +739,7 @@ def test_retirement_uses_recorded_override_root_without_current_env(transport, t
     override_root = transport.root / "custom-native-home"
     key = "CODEX_HOME" if tool == "codex" else "CLAUDE_CONFIG_DIR"
     claims: list[tuple[NativeClaim, ...]] = []
-    setup_user(
+    setup_fixture_user(
         tool,
         NativeUserConfig(marketplaces=[str(market)], plugins=["one@fixture-market"]),
         invocation(transport, claims, env={key: str(override_root)}),
@@ -745,7 +748,7 @@ def test_retirement_uses_recorded_override_root_without_current_env(transport, t
     default_file = transport.home / (".codex/config.toml" if tool == "codex" else ".claude/settings.json")
     default_file.parent.mkdir(exist_ok=True)
     default_file.write_bytes(b"unrelated-default-settings")
-    setup_user(tool, None, invocation(transport, claims, prior=record(claims[-1], tool)))
+    setup_fixture_user(tool, None, invocation(transport, claims, prior=record(claims[-1], tool)))
     assert claims[-1] == ()
     assert default_file.read_bytes() == b"unrelated-default-settings"
 
@@ -762,7 +765,7 @@ def test_codex_mapping_cannot_add_unrequested_source_identity(transport: LocalFi
         settings=SettingsMapping(source=str(source), strategy="merge-overwrite"),
     )
     with pytest.raises(ConfigError):
-        setup_user("codex", config, invocation(transport, claims))
+        setup_fixture_user("codex", config, invocation(transport, claims))
     assert claims == []
     assert not (transport.home / ".codex").exists()
 
@@ -770,7 +773,9 @@ def test_codex_mapping_cannot_add_unrequested_source_identity(transport: LocalFi
 def test_codex_relative_source_named_local_does_not_match_source_type(transport: LocalFixtureTransport) -> None:
     market = market_fixture(transport, "codex")
     claims: list[tuple[NativeClaim, ...]] = []
-    setup_user("codex", NativeUserConfig(marketplaces=[str(market)], plugins=["one"]), invocation(transport, claims))
+    setup_fixture_user(
+        "codex", NativeUserConfig(marketplaces=[str(market)], plugins=["one"]), invocation(transport, claims)
+    )
     local = transport.home / "local"
     shutil.copytree(market, local)
     manifest = local / ".agents/plugins/marketplace.json"
@@ -778,7 +783,7 @@ def test_codex_relative_source_named_local_does_not_match_source_type(transport:
     data["name"] = "other-market"
     manifest.write_text(json.dumps(data))
     updated: list[tuple[NativeClaim, ...]] = []
-    setup_user(
+    setup_fixture_user(
         "codex",
         NativeUserConfig(marketplaces=["local"], plugins=["one@other-market"]),
         invocation(transport, updated, prior=record(claims[-1], "codex")),
@@ -788,7 +793,7 @@ def test_codex_relative_source_named_local_does_not_match_source_type(transport:
         ("plugin", "one@other-market"),
     }
     repeated: list[tuple[NativeClaim, ...]] = []
-    setup_user(
+    setup_fixture_user(
         "codex",
         NativeUserConfig(marketplaces=["local"], plugins=["one@other-market"]),
         invocation(transport, repeated, prior=record(updated[-1], "codex")),
@@ -812,7 +817,7 @@ def test_settings_publication_refuses_changes_after_final_snapshot(transport, mo
 
     monkeypatch.setattr(NativeFiles, "publish", concurrent_edit)
     with pytest.raises(StateError):
-        setup_user(
+        setup_fixture_user(
             "claude",
             NativeUserConfig(settings=SettingsMapping(source=str(source), strategy="replace")),
             invocation(transport, []),
@@ -824,13 +829,13 @@ def test_marketplace_only_repeat_does_not_read_available_catalog(transport, monk
     market = market_fixture(transport, "codex")
     config = NativeUserConfig(marketplaces=[str(market)])
     claims: list[tuple[NativeClaim, ...]] = []
-    setup_user("codex", config, invocation(transport, claims))
+    setup_fixture_user("codex", config, invocation(transport, claims))
 
     def unexpected_catalog(self):
         pytest.fail("no plugin selector needs catalog resolution")
 
     monkeypatch.setattr(NativeCLI, "available", unexpected_catalog)
-    setup_user("codex", config, invocation(transport, claims, prior=record(claims[-1], "codex")))
+    setup_fixture_user("codex", config, invocation(transport, claims, prior=record(claims[-1], "codex")))
 
 
 @pytest.mark.parametrize("operation", ["directory", "read", "fingerprint"])

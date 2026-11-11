@@ -48,6 +48,44 @@ def forbid(*args: object, **kwargs: object) -> None:
     pytest.fail("operation outside this test's native capability boundary")
 
 
+@pytest.mark.parametrize("tool,class_name", TOOLS)
+@pytest.mark.parametrize("newline", [False, True])
+def test_profile_banner_does_not_hide_the_observed_native_layout(target, monkeypatch, tool, class_name, newline):
+    module = import_module(f"agentworks.plugins.{tool}.harness_integration")
+    root = target.home / "profile-root"
+    profile(target, tool, root)
+    with (target.home / ".profile").open("a") as file:
+        file.write("printf 'banner\\n'\n" if newline else "printf banner\n")
+    monkeypatch.setattr(module, "probe_native", forbid)
+    monkeypatch.setattr("agentworks.plugins._harness_native.native.NativeCLI", forbid)
+    config = {}
+    if tool != "grok":
+        source = target.root / "settings-source"
+        source.write_bytes(serialize_settings({"selected": "profile"}, format="json" if tool == "claude" else "toml"))
+        config = {"settings": {"source": str(source), "strategy": "merge-overwrite"}}
+    item = server()
+    checkpoints: list[tuple[NativeClaim, ...]] = []
+    reports: list[str] = []
+    call = replace(
+        invocation(target, checkpoints),
+        artifacts=received(item) if tool == "grok" else received(),
+        report_incomplete=reports.append,
+    )
+    integration = getattr(module, class_name).for_setup(
+        owner_kind="agent", owner_name="fixture", facet="user", config=config
+    )
+    result = integration.user_init(call)
+    path = root / ("settings.json" if tool == "claude" else "config.toml")
+    assert not reports and not result.deferred and path.is_file()
+    document = parse_settings(path.read_bytes(), format="json" if tool == "claude" else "toml")
+    if tool == "grok":
+        assert checkpoints[-1][0].destination == str(path)
+        entries = document["mcp_servers"]
+        assert isinstance(entries, dict) and mcp_native_name(item) in entries
+    else:
+        assert document["selected"] == "profile"
+
+
 @pytest.mark.parametrize("tool,class_name", TOOLS[:2])
 @pytest.mark.parametrize("mapped_environment", [False, True])
 def test_settings_keep_profile_root_before_add_withdraw_and_following_reinit(
@@ -67,7 +105,6 @@ def test_settings_keep_profile_root_before_add_withdraw_and_following_reinit(
         owner_kind="agent", owner_name="fixture", facet="user", config=config
     )
     monkeypatch.setattr(module, "probe_native", forbid)
-    monkeypatch.setattr("agentworks.plugins._harness_native.native.resolve_user_layout", forbid)
     monkeypatch.setattr("agentworks.plugins._harness_native.native.NativeCLI", forbid)
     checkpoints: list[tuple[NativeClaim, ...]] = []
     previous: tuple[NativeClaim, ...] = ()
@@ -110,7 +147,6 @@ def test_artifact_discovery_cannot_resample_a_different_native_root(target, monk
 
     monkeypatch.setattr(module, "user_layout", selected)
     monkeypatch.setattr(module, "probe_native", check)
-    monkeypatch.setattr("agentworks.plugins._harness_native.native.resolve_user_layout", forbid)
     item = artifact(ArtifactType.AGENT)
     integration = getattr(module, class_name).for_setup(
         owner_kind="agent", owner_name="fixture", facet="user", config={}
@@ -147,7 +183,6 @@ def test_plugin_progress_settings_and_mcp_use_the_same_verified_root(target, mon
     cli.install.side_effect = install
     constructor = Mock(return_value=cli)
     monkeypatch.setattr("agentworks.plugins._harness_native.native.NativeCLI", constructor)
-    monkeypatch.setattr("agentworks.plugins._harness_native.native.resolve_user_layout", forbid)
     monkeypatch.setattr(module, "probe_native", forbid)
     integration = getattr(module, class_name).for_setup(
         owner_kind="agent",

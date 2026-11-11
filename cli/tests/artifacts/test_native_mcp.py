@@ -25,11 +25,11 @@ from agentworks.capabilities.harness_integration.setup import WorkspaceSetupInvo
 from agentworks.errors import ExternalError, StateConflictError, StateError, UserAbort
 from agentworks.harness_setup.model import NativeClaim
 from agentworks.native_files import NativeFilePathError, NativeFiles
-from agentworks.plugins._harness_native.native import setup_user, setup_workspace
+from agentworks.plugins._harness_native.native import setup_workspace
 from agentworks.plugins._harness_native.native_cli import NativeMarket, NativePlugin, identity
 from agentworks.plugins._harness_native.native_config import NativeUserConfig, NativeWorkspaceConfig
 from tests.artifacts._fixtures import received
-from tests.native_setup_fixtures import LocalFixtureTransport, invocation, record
+from tests.native_setup_fixtures import LocalFixtureTransport, invocation, record, setup_fixture_user
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="executes Linux guest file helpers")
 
@@ -246,13 +246,13 @@ def test_joint_codex_mapping_unmasks_withdrawn_native_key_in_one_pass(transport,
     path = transport.home / ".codex/config.toml"
     claims: list[tuple[NativeClaim, ...]] = []
     call = replace(invocation(transport, claims), artifacts=received(item))
-    setup_user("codex", NativeUserConfig(), call)
+    setup_fixture_user("codex", NativeUserConfig(), call)
     if missing:
         path.unlink()
     source = transport.root / "mapping.toml"
     write(source, {"mcp_servers": {name: {"command": "source-owned", "args": []}}})
     config = NativeUserConfig(settings=SettingsMapping(source=str(source), strategy=strategy))
-    result = setup_user("codex", config, replace(call, artifacts=received(), prior=record(claims[-1], "codex")))
+    result = setup_fixture_user("codex", config, replace(call, artifacts=received(), prior=record(claims[-1], "codex")))
     document = read(path)
     if strategy == "skip-existing" and not missing:
         assert name not in table(document, "mcp_servers")
@@ -270,12 +270,12 @@ def test_joint_codex_mapping_desired_key_obeys_actual_policy(transport, strategy
     claims: list[tuple[NativeClaim, ...]] = []
     call = replace(invocation(transport, claims), artifacts=received(item))
     if existing:
-        setup_user("codex", NativeUserConfig(), call)
+        setup_fixture_user("codex", NativeUserConfig(), call)
         call = replace(call, prior=record(claims[-1], "codex"))
     source = transport.root / "mapping.toml"
     write(source, {"mcp_servers": {name: {"command": "source-owned", "args": []}}})
     config = NativeUserConfig(settings=SettingsMapping(source=str(source), strategy=strategy))
-    result = setup_user("codex", config, call)
+    result = setup_fixture_user("codex", config, call)
     mapping_wins = not existing or strategy in ("replace", "merge-overwrite")
     assert bool(result.deferred) is mapping_wins
     assert table(table(read(path), "mcp_servers"), name)["command"] == ("source-owned" if mapping_wins else "server")
@@ -286,7 +286,7 @@ def test_claude_user_role_and_config_override_are_independent_of_settings(transp
     item = server()
     custom = transport.home / "custom-claude"
     call = replace(invocation(transport, claims, env={"CLAUDE_CONFIG_DIR": str(custom)}), artifacts=received(item))
-    setup_user("claude", NativeUserConfig(), call)
+    setup_fixture_user("claude", NativeUserConfig(), call)
     assert (custom / ".claude.json").exists()
     assert not (custom / "settings.json").exists()
     assert claims[-1][0].destination == str(custom / ".claude.json")
@@ -300,10 +300,14 @@ def test_mapping_only_skip_existing_preserves_bytes_and_replace_repairs_invalid_
     source.write_text('model = "mapped"\n')
     call = invocation(transport, [])
     baseline = path.read_bytes()
-    setup_user("codex", NativeUserConfig(settings=SettingsMapping(source=str(source), strategy="skip-existing")), call)
+    setup_fixture_user(
+        "codex", NativeUserConfig(settings=SettingsMapping(source=str(source), strategy="skip-existing")), call
+    )
     assert path.read_bytes() == baseline
     path.write_text("malformed = [\n")
-    setup_user("codex", NativeUserConfig(settings=SettingsMapping(source=str(source), strategy="replace")), call)
+    setup_fixture_user(
+        "codex", NativeUserConfig(settings=SettingsMapping(source=str(source), strategy="replace")), call
+    )
     assert read(path) == {"model": "mapped"}
 
 
@@ -327,7 +331,7 @@ def test_plugin_progress_is_preserved_in_later_mcp_checkpoint(transport, monkeyp
     monkeypatch.setattr("agentworks.plugins._harness_native.native.NativeCLI", Mock(return_value=cli))
     claims: list[tuple[NativeClaim, ...]] = []
     item = server()
-    setup_user(
+    setup_fixture_user(
         "codex",
         NativeUserConfig(plugins=["one@fixture"]),
         replace(invocation(transport, claims), artifacts=received(item)),
@@ -367,10 +371,10 @@ def test_skip_existing_still_installs_and_retires_mcp_entries(transport):
     claims: list[tuple[NativeClaim, ...]] = []
     item = server()
     call = replace(invocation(transport, claims), artifacts=received(item))
-    setup_user("codex", config, call)
+    setup_fixture_user("codex", config, call)
     assert read(path)["foreign"] is True and "source" not in read(path)
     assert mcp_native_name(item) in table(read(path), "mcp_servers")
-    setup_user("codex", config, replace(call, artifacts=received(), prior=record(claims[-1], "codex")))
+    setup_fixture_user("codex", config, replace(call, artifacts=received(), prior=record(claims[-1], "codex")))
     assert claims[-1] == ()
     assert read(path) == {"foreign": True, "mcp_servers": {}}
 
@@ -411,7 +415,7 @@ def test_shared_document_is_observed_and_published_once(transport, monkeypatch):
     monkeypatch.setattr(NativeFiles, "read", reading)
     monkeypatch.setattr(NativeFiles, "publish", publishing)
     config = NativeUserConfig(settings=SettingsMapping(source=str(source), strategy="merge-overwrite"))
-    setup_user("codex", config, replace(invocation(transport, []), artifacts=received(server())))
+    setup_fixture_user("codex", config, replace(invocation(transport, []), artifacts=received(server())))
     assert observed == published == [str(path)]
 
 
@@ -423,7 +427,7 @@ def test_explicit_replacement_can_repair_malformed_config_with_mcp_inputs(transp
     source.write_text('model = "mapped"\n')
     claims: list[tuple[NativeClaim, ...]] = []
     item = server()
-    result = setup_user(
+    result = setup_fixture_user(
         "codex",
         NativeUserConfig(settings=SettingsMapping(source=str(source), strategy="replace")),
         replace(invocation(transport, claims), artifacts=received(item)),
@@ -480,7 +484,7 @@ def test_explicit_mapping_takeover_releases_modified_obsolete_claim_in_one_pass(
     name = mcp_native_name(item)
     claims: list[tuple[NativeClaim, ...]] = []
     call = replace(invocation(transport, claims), artifacts=received(item))
-    setup_user("codex", NativeUserConfig(), call)
+    setup_fixture_user("codex", NativeUserConfig(), call)
     previous = record(claims[-1], "codex")
     document = read(path)
     table(table(document, "mcp_servers"), name)["command"] = "operator-modified"
@@ -502,7 +506,7 @@ def test_explicit_mapping_takeover_releases_modified_obsolete_claim_in_one_pass(
         claims.clear()
         reasons.clear()
         reports.clear()
-        result = setup_user("codex", config, retire)
+        result = setup_fixture_user("codex", config, retire)
         assert not result.deferred
         assert bool(reasons) is not takeover
         current = claims[-1] if claims else retire.prior.claims
@@ -560,7 +564,7 @@ def test_required_mapping_without_mcp_still_propagates_guarded_path_refusals(tra
     source = transport.root / "mapping.toml"
     source.write_text('theme = "mapped"\n')
     with pytest.raises(NativeFilePathError):
-        setup_user(
+        setup_fixture_user(
             "codex",
             NativeUserConfig(settings=SettingsMapping(source=str(source), strategy="replace")),
             invocation(transport, []),

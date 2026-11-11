@@ -44,7 +44,7 @@ override = os.environ.get(request['variable'])
 root = override or home + '/' + request['default']
 path = ((override + '/.claude.json' if override else home + '/.claude.json')
         if request['tool'] == 'claude' else root + '/config.toml')
-print('AGW_NATIVE_USER_LAYOUT=' + json.dumps({'root': root, 'mcp_path': path}))
+print('\nAGW_NATIVE_USER_LAYOUT=' + json.dumps({'root': root, 'mcp_path': path}))
 """
 
 

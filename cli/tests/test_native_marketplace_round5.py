@@ -13,10 +13,9 @@ from agentworks.capabilities.harness_integration.settings import SettingsMapping
 from agentworks.errors import ExternalError
 from agentworks.harness_setup.model import NativeClaim
 from agentworks.native_files import NativeFiles
-from agentworks.plugins._harness_native.native import setup_user
 from agentworks.plugins._harness_native.native_cli import NativeCLI
 from agentworks.plugins._harness_native.native_config import NativeUserConfig
-from tests.native_setup_fixtures import LocalFixtureTransport, invocation, market_fixture, record
+from tests.native_setup_fixtures import LocalFixtureTransport, invocation, market_fixture, record, setup_fixture_user
 from tests.test_native_convergence import copied_market
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="local execution of Linux guest setup helpers")
@@ -32,9 +31,9 @@ def test_claude_file_marketplace_converges_repeats_and_retires(transport):
     source = str(market / ".claude-plugin/marketplace.json")
     claims: list[tuple[NativeClaim, ...]] = []
     initial = NativeUserConfig(marketplaces=[source], plugins=["one@fixture-market"])
-    setup_user("claude", initial, invocation(transport, claims))
+    setup_fixture_user("claude", initial, invocation(transport, claims))
     desired = NativeUserConfig(marketplaces=[source], plugins=["two@fixture-market"])
-    setup_user("claude", desired, invocation(transport, claims, prior=record(claims[-1], "claude")))
+    setup_fixture_user("claude", desired, invocation(transport, claims, prior=record(claims[-1], "claude")))
     root = transport.home / ".claude"
     with NativeFiles(transport) as files:
         cli = NativeCLI("claude", files, home=str(transport.home), config_root=str(root))
@@ -42,9 +41,9 @@ def test_claude_file_marketplace_converges_repeats_and_retires(transport):
         assert json.loads(markets[0].source)["source"] == {"source": "file", "path": source}
         assert {item.identifier for item in cli.plugins(markets)} == {"two@fixture-market"}
     before = (root / "settings.json").read_bytes()
-    setup_user("claude", desired, invocation(transport, claims, prior=record(claims[-1], "claude")))
+    setup_fixture_user("claude", desired, invocation(transport, claims, prior=record(claims[-1], "claude")))
     assert (root / "settings.json").read_bytes() == before
-    setup_user("claude", None, invocation(transport, claims, prior=record(claims[-1], "claude")))
+    setup_fixture_user("claude", None, invocation(transport, claims, prior=record(claims[-1], "claude")))
     assert claims[-1] == ()
     with NativeFiles(transport) as files:
         assert NativeCLI("claude", files, home=str(transport.home), config_root=str(root)).markets() == ()
@@ -60,7 +59,7 @@ def test_unrelated_claude_file_marketplace_does_not_block_independent_setup(tran
     independent = copied_market(market, "claude", name="independent")
     claims: list[tuple[NativeClaim, ...]] = []
     incomplete: list[str] = []
-    setup_user(
+    setup_fixture_user(
         "claude",
         NativeUserConfig(marketplaces=[str(independent)], plugins=["two@independent"]),
         replace(invocation(transport, claims), report_incomplete=incomplete.append),
@@ -81,7 +80,7 @@ def test_new_marketplace_survives_ambiguous_plugin_protection_and_later_retireme
     market = market_fixture(transport, tool)
     second = copied_market(market, tool, name="second-market")
     claims: list[tuple[NativeClaim, ...]] = []
-    setup_user(tool, NativeUserConfig(marketplaces=[str(market)]), invocation(transport, claims))
+    setup_fixture_user(tool, NativeUserConfig(marketplaces=[str(market)]), invocation(transport, claims))
     format = "json" if tool == "claude" else "toml"
     source = transport.root / "settings-source"
     source.write_bytes(serialize_settings({"mapped": True}, format=format))
@@ -91,7 +90,7 @@ def test_new_marketplace_survives_ambiguous_plugin_protection_and_later_retireme
         settings=None if strategy is None else SettingsMapping(source=str(source), strategy=strategy),
     )
     incomplete: list[str] = []
-    setup_user(
+    setup_fixture_user(
         tool,
         config,
         replace(invocation(transport, claims, prior=record(claims[-1], tool)), report_incomplete=incomplete.append),
@@ -113,14 +112,14 @@ def test_new_marketplace_survives_ambiguous_plugin_protection_and_later_retireme
         return original_add(cli, source)
 
     monkeypatch.setattr(NativeCLI, "add_market", track_add)
-    setup_user(
+    setup_fixture_user(
         tool,
         config,
         replace(invocation(transport, claims, prior=record(claims[-1], tool)), report_incomplete=incomplete.append),
     )
     assert not registered
     assert (destination.read_bytes(), destination.stat().st_ino) == before
-    setup_user(tool, None, invocation(transport, claims, prior=record(claims[-1], tool)))
+    setup_fixture_user(tool, None, invocation(transport, claims, prior=record(claims[-1], tool)))
     assert claims[-1] == ()
     with NativeFiles(transport) as files:
         assert NativeCLI(tool, files, home=str(transport.home), config_root=str(root)).markets() == ()
