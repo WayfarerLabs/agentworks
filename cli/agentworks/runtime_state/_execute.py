@@ -98,7 +98,7 @@ def execute_deferred_work(invocation: RuntimeInvocation) -> None:
             if prepared_stop.checkpoint_only:
                 invocation.fail("session", name, error, blocked=True)
             else:
-                _guest_stop_failure(invocation, "session", name, prepared_stop.vm.name, error)
+                invocation.fail("session", name, error)
     for name, prepared_console in invocation.console_starts.items():
         try:
             changed = consoles.execute_console_reconcile(prepared_console, values=invocation.values)

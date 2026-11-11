@@ -594,25 +594,19 @@ def execute_concurrent_dedicated_teardowns(
                     pending.remove(future)
                     continue
                 plan = future_plans[future]
-                try:
-                    future.result()
-                except UserAbort as exc:
-                    if primary_error is None:
-                        primary_error = exc
+                # A worker's stored exception is data. A caller interruption while
+                # retrieving it must leave successful work pending for reconciliation.
+                worker_error = future.exception()
+                if worker_error is not None:
                     pending.remove(future)
-                    _enter_reconciliation(tuple(pending), exc)
-                    continue
-                except Exception as exc:
-                    failures.append((plan.session_name, str(exc)))
-                    pending.remove(future)
-                    output.warn(f"Session '{plan.session_name}' failed to stop: {exc}")
-                    continue
-                except BaseException as exc:
-                    if primary_error is None:
-                        primary_error = exc
-                    pending.remove(future)
-                    output.warn(f"Session '{plan.session_name}' teardown aborted: {exc}")
-                    _enter_reconciliation(tuple(pending), exc)
+                    if isinstance(worker_error, Exception) and not isinstance(worker_error, UserAbort):
+                        failures.append((plan.session_name, str(worker_error)))
+                        output.warn(f"Session '{plan.session_name}' failed to stop: {worker_error}")
+                    else:
+                        if primary_error is None:
+                            primary_error = worker_error
+                        output.warn(f"Session '{plan.session_name}' teardown aborted: {worker_error}")
+                        _enter_reconciliation(tuple(pending), worker_error)
                     continue
 
                 completion_step = "persist stopped state"

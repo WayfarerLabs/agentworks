@@ -159,12 +159,18 @@ def execute_public_stops(invocation: RuntimeInvocation) -> None:
                         invocation.db, invocation.config, current, force=invocation.force
                     )
                     invocation.stops[name] = prepared
-                changed = sessions.execute_session_stop(prepared)
-                _completed(invocation, name, changed=changed)
             except (UserAbort, StateConflictError, DatabaseDriverError):
                 raise
             except Exception as error:
                 _guest_stop_failure(invocation, "session", name, prepared.vm.name, error)
+                continue
+            try:
+                changed = sessions.execute_session_stop(prepared)
+                _completed(invocation, name, changed=changed)
+            except UserAbort:
+                raise
+            except Exception as error:
+                invocation.fail("session", name, error)
         return
 
     legacy = {
@@ -239,11 +245,11 @@ def execute_public_stops(invocation: RuntimeInvocation) -> None:
 
     failures = execute_concurrent_dedicated_teardowns(plans, db=invocation.db, on_stopped=stopped)
     for name, failure_reason in failures:
-        _guest_stop_failure(invocation, "session", name, invocation.stops[name].vm.name, StateError(failure_reason))
+        invocation.fail("session", name, failure_reason)
     for prepared in serial:
         name = prepared.session.name
+        current = _selected_session(invocation, prepared.session)
         try:
-            current = _selected_session(invocation, prepared.session)
             if prepared.parent_off:
                 changed = sessions.execute_session_stop(prepared)
             else:
@@ -258,9 +264,8 @@ def execute_public_stops(invocation: RuntimeInvocation) -> None:
                 )
                 changed = True
             _completed(invocation, name, changed=changed)
-        except (UserAbort, StateConflictError, DatabaseDriverError):
+        except UserAbort:
             raise
         except Exception as error:
-            _guest_stop_failure(invocation, "session", name, prepared.vm.name, error)
-            if invocation.operation == "stop-all" and invocation.unavailable("session", name):
-                output.warn(f"Session '{name}' failed to stop: {error}")
+            invocation.fail("session", name, error)
+            output.warn(f"Session '{name}' failed to stop: {error}")
