@@ -65,7 +65,7 @@ planned. OAuth workflow preference remains a phase-2 question.
 
 ## Native entry application
 
-- [ ] Resolve native-home roles and use existing guarded file APIs and normal setup invocation.
+- [x] Resolve native-home roles and use existing guarded file APIs and normal setup invocation.
       Implement bounded MCP entry reconciliation with existing parsers, claims, fingerprints,
       checkpoints and expected-content publication; no parallel state or whole-document ownership.
 - [x] Implement deterministic original-owner-qualified native identities, adoption, owned
@@ -76,12 +76,13 @@ planned. OAuth workflow preference remains a phase-2 question.
       settings strategy and diagnosing conflicting explicit values before canonical mutation. Test
       canonical withdrawal with a still-authored mapped key under all four strategies in one pass,
       including suppressed initial contributions and original file-existence decisions.
-- [ ] Add Claude/Codex/Grok user and workspace translation and explicit VM deferral. Every adapter
+- [x] Add Claude/Codex/Grok user and workspace translation and explicit VM deferral. Every adapter
       must apply or defer the new type; test against silent handled-but-omitted behavior.
 - [ ] Translate unresolved env/header/bearer references to native primitives. Test bindings from
       declared env and guest startup exports, including a project definition bound by each actual
-      user. Never infer binding absence from the partial prepared map or probe credentials/profile-file contents.
-      Unsupported representations defer whole entries. Preserve native trust/approval/auth state.
+      user. Never infer binding absence from the partial prepared map or probe
+      credentials/profile-file contents. Unsupported representations defer whole entries. Preserve
+      native trust/approval/auth state.
 - [x] Publish Shell canonical JSON and indexes at all existing scope locations, with no new
       deferrals or server execution.
 - [ ] Verify interruption/retry, other-owner preservation, activation removal and ordinary parent
@@ -95,12 +96,12 @@ planned. OAuth workflow preference remains a phase-2 question.
 
 ## Opt-in session delivery
 
-- [ ] Add and test Claude private MCP config and Codex invocation-only per-server overrides using
+- [x] Add and test Claude private MCP config and Codex invocation-only per-server overrides using
       existing prospective-run/files lifecycle. Defaults remain explicit terminal warnings.
-- [ ] Evaluate the documented Grok private plugin candidate with the real harness. Implement and
+- [x] Evaluate the documented Grok private plugin candidate with the real harness. Implement and
       advertise its workaround only after fresh/resumed/neighbor-session proof; otherwise retain an
       honest unsupported disposition and bring any acceptance scope question to the operator.
-- [ ] Preserve all existing artifact workaround selection and native argv validation. Do not replace
+- [x] Preserve all existing artifact workaround selection and native argv validation. Do not replace
       other MCP sources, expose credentials in argv or write shared catalogs for isolation.
 - [ ] Prove pre-teardown refusal/staging failures preserve the working runtime/effects. For launch
       failure after confirmed teardown, retain accurate retry/cleanup state without rollback claims.
@@ -111,7 +112,7 @@ planned. OAuth workflow preference remains a phase-2 question.
 
 - [x] Extend safe placement/claim inspection and per-type applying/deferring output, preserving
       offline behavior and existing small-list truncation. Do not add secret/source/native probes.
-- [ ] Update artifact and integration READMEs/guides, sample config, examples, schema teaching and
+- [x] Update artifact and integration READMEs/guides, sample config, examples, schema teaching and
       release/upgrade notes with actual supported mechanisms, limits, native formatting changes and
       downgrade behavior. Permanent teaching must stand alone without this SDD.
 - [ ] Run the full frozen CLI/repository/website gates and installed wheel/source archive checks,
@@ -145,6 +146,31 @@ regressions passed 31. The first new rehome run had two failures from an incorre
 expectation; comparing with the original recorded digest corrected that test. No product change was
 needed for those failures. Repeated moves retain package roots, skips, fingerprints and the actual
 new destination identity. File-only predecessor rehome semantics remain unchanged.
+
+Permanent collateral in `f92ec9bf3` adds fifth-type authoring and examples, native roles,
+conservative session options, cleanup/Git/rehome teaching and downgrade/OAuth boundaries. Ten
+example manifests and selected inline/source capture, four isolated guide renders and 68 retained
+guide/sample tests passed in that lane. An initial package-relative link and guide-frontmatter wrap
+were corrected before that result. The lead's shared dictionary adds the protocol term Streamable.
+
+[Local native smoke evidence](acceptance.md#local-native-smoke-evidence) records real stdio/HTTP
+connections and tool discovery for each client's user registration, actual reference expansion and
+workspace trust/discovery limits. The lead independently verified cleanup. No managed-session or
+OAuth acceptance is inferred from it.
+
+Native adapters and conservative session carriers are integrated in `7768a8fc9`; `ffec8fd32` adds
+the real-profile-based Codex deferral. Targeted selections passed 184 tests (one skip) and 162
+profile/carrier/harness tests respectively. Fixed native-role discovery is independent of the old
+skill/persona probe and only observes HOME/native-home variables. Current-role authority partitions
+old claims without following stored paths; unknown roles retain claims and skip MCP I/O while
+independent settings/plugin work continues. Explicit profiles leave only optional MCP unhandled.
+
+A lead boundary check distinguished known guarded-filesystem refusals from internal `StateError` and
+persistence failures. A first new directory-config case failed because the file helper wrapped the
+descriptor before classifying a non-regular inode. Checking `fstat` first honors its existing
+non-regular-file status; the typed path refusal makes optional MCP inspection advisory while other
+state failures still propagate. The corrected selection passed 121 tests with one skip. No native
+file authority, symlink following or Transport API was broadened.
 
 These are local implementation observations. Combined full gates, full-PR private reviews, installed
 package checks and independent integration acceptance remain unchecked below and above. They do not

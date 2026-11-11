@@ -213,12 +213,13 @@ workflow belongs to phase 2.
 - Claude: `session-mcp-config` writes a private JSON file under the current session/run directory
   and appends `--mcp-config` with that file. Do not add `--strict-mcp-config` or replace other
   sources. Existing explicit conflicting native flags need a clear unhandled reason.
-- Codex: `session-mcp-overrides` supplies typed invocation-only `-c` overrides for each derived server
-  table. Encode literal values with the TOML serializer; env bindings remain variable names. Do not
-  write the project/user config or replace the entire `mcp_servers` table.
-- Grok: evaluate `session-mcp-plugin` using one private MCP-bearing plugin and `--plugin-dir`. Prove
-  native loading, naming, additive flags and resume isolation before enabling this option. If it
-  cannot meet that contract, report unsupported with no shared-catalog fallback.
+- Codex: `session-mcp-overrides` supplies typed invocation-only `-c` overrides for each derived
+  server table. Encode literal values with the TOML serializer; env bindings remain variable names.
+  Do not write the project/user config or replace the entire `mcp_servers` table.
+- Grok: the private MCP-bearing plugin candidate remains unsupported. Actual stable 1.0.77 rejects
+  the root `--plugin-dir` flag, including with `--help`. Do not advertise `session-mcp-plugin` or
+  use a shared-catalog fallback. A future supported binary needs independent fresh/resume/isolation
+  proof before that workaround is introduced.
 - Shell: canonical JSON files join the existing private session index; no native workaround or
   server launch is needed.
 
@@ -227,13 +228,16 @@ server table. They cannot clear stale fields from a differing same-named native 
 selected session carrier is rendered, read only the fixed native user/project MCP roles and compare
 that selected derived key. Equal entries are safe; differing or unreadable native entries defer that
 MCP item with a value-free reason. This is a registration conflict check, not native CLI inventory,
-credential discovery or an environment-binding probe. Preserve independent legacy delivery.
+credential discovery or an environment-binding probe. Preserve independent legacy delivery. Explicit
+modeled/raw Codex profiles defer this workaround: profile overlays can introduce the same
+incompatible merge, and this phase does not inspect their precedence. Ordinary native profiles
+remain usable.
 
 Resolve Claude's actual user MCP role separately from its rules/settings root. Without a native
-override it is `$HOME/.claude.json`; with explicit `CLAUDE_CONFIG_DIR` it is the `.claude.json` under
-that directory. A wrapper-synthesized rules root is not evidence that an override was present. Use
-the workload's existing login environment to observe only HOME and the native-home variable, never
-credential variables or profile-file content.
+override it is `$HOME/.claude.json`; with explicit `CLAUDE_CONFIG_DIR` it is the `.claude.json`
+under that directory. A wrapper-synthesized rules root is not evidence that an override was present.
+Use the workload's existing login environment to observe only HOME and the native-home variable,
+never credential variables or profile-file content.
 
 No MCP session carrier runs by default. Preserve unrelated artifact delivery when selecting MCP
 inputs, and explicitly handle/defer MCP in every adapter so omission cannot mean applied.

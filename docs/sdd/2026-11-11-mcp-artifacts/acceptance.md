@@ -1,8 +1,9 @@
 # MCP artifacts: acceptance matrix
 
-This is a prospective test contract. No row claims completion. Record exact source, native version,
-platform, command/mode, observed result, limitations and independently checked cleanup when each row
-is exercised. The separate integration-test session owns its backend and resource budget.
+The matrix is the complete acceptance contract; observations below cover only the named slices.
+Record exact source, native version, platform, command/mode, observed result, limitations and
+independently checked cleanup when each row is exercised. The separate integration-test session owns
+its backend and resource budget.
 
 | Requirements | Evidence required                                                                                                                                                             |
 | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -45,3 +46,27 @@ operation. Phase-2 OAuth evidence cannot be replaced by bearer-token or registra
 Before a final lock after both phases, reconcile every FRD requirement with observed evidence or
 obtain an explicit scope ruling. Promote surviving contracts into permanent guides and READMEs. The
 lock cannot ride the initial artifact-only checkpoint.
+
+## Local native smoke evidence
+
+At source `b25baecc837fda30dce4afd36cacce7d784a2735`, Linux aarch64, isolated fixture homes used
+actual `apply_mcp` output and owned deterministic stdio/loopback HTTP servers. No operator
+credentials, external endpoint, OAuth, model turn or paid call was used.
+
+| Native client | Version | User stdio and HTTP observation                                           | Workspace observation                                                                                                      |
+| ------------- | ------- | ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Claude Code   | 2.1.319 | `mcp get` connected; server received initialization and tool discovery    | `.mcp.json` discovered; native approval remained pending, with no connection claim                                         |
+| Codex         | 0.167.0 | App-server initialize and `mcpServerStatus/list` returned the canary tool | Trusted project registration loaded by `mcp list`; global status RPC without a thread did not prove project tool discovery |
+| Grok          | 1.0.77  | `mcp doctor --json` reported the successful handshake and one tool        | Project table discovered; untrusted execution refused; explicit fixture `--trust` connected and discovered one tool        |
+
+Independent server receipts observed same-name stdio env forwarding and actual HTTP bearer/header
+reference expansion to public canaries for all three clients. Generated configs/claims retained
+references rather than those values. These observations establish those native primitives, not
+Agentworks VM provisioning, actual managed-session start/resume, missing-binding behavior, OAuth or
+model cooperation.
+
+The lead read the commands and measured receipts and independently checked that the runtime and
+temporary directories were empty, no owned process remained and the loopback port refused a
+connection after cleanup. Eleven fixture homes were removed. Source-scoped logs and reproduction
+scripts remain in the lead's ignored proof area. Full independent PR integration acceptance is still
+owed before phase-1 completion.

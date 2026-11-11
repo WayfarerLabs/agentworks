@@ -226,6 +226,36 @@ def test_user_role_outside_home_is_refused_without_reading_it(target, tool, vari
     assert not (target.root / "external-native").exists()
 
 
+@pytest.mark.parametrize("suffix", ["/../external", "//nested"])
+def test_malformed_native_home_defers_mcp_without_reading_a_config(target, suffix):
+    target.environment["CODEX_HOME"] = str(target.home) + suffix
+    result = session_mcp_conflicts(
+        "codex", target, received(mcp()), home=str(target.home), environment={}, workspace=str(target.home / "project")
+    )
+    assert set(result) == {mcp().identity}
+    assert not any("AGW_NATIVE_STAGING" in command for command in target.commands)
+
+
+@pytest.mark.parametrize("kind", ["symlink", "directory"])
+def test_unsuitable_existing_config_is_an_advisory_mcp_deferral(target, kind):
+    config = target.home / ".codex/config.toml"
+    config.parent.mkdir()
+    sentinel = target.root / "operator-config.toml"
+    sentinel.write_text('[mcp_servers.operator]\ncommand = "private-command"\n')
+    if kind == "symlink":
+        config.symlink_to(sentinel)
+    else:
+        config.mkdir()
+    before = sentinel.read_bytes()
+    result = session_mcp_conflicts(
+        "codex", target, received(mcp()), home=str(target.home), environment={}, workspace=str(target.home / "project")
+    )
+    assert set(result) == {mcp().identity}
+    assert "private-command" not in repr(result)
+    assert sentinel.read_bytes() == before
+    assert config.is_symlink() if kind == "symlink" else config.is_dir()
+
+
 def test_saved_mcp_path_is_never_io_authority_and_independent_current_entries_still_apply(target, monkeypatch):
     from pathlib import Path
 

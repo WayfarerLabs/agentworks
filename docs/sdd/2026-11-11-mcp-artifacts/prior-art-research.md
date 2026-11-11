@@ -2,10 +2,11 @@
 
 ## Summary and evidence limits
 
-Research date: 2026-11-11 UTC. Repository source: `834eb715`. This is static source and primary
-documentation research, not a native connection, authentication, model, resume or cleanup result.
-The design adopts named server definitions and native integration boundaries; acceptance must prove
-the advertised paths independently.
+Research date: 2026-11-11 UTC. Repository source: `834eb715`. The initial research used static
+source and primary documentation. Bounded later observations are recorded separately below; they do
+not establish authentication, managed-session resume or model behavior. The design adopts named
+server definitions and native integration boundaries; acceptance must prove the advertised paths
+independently.
 
 ## Rulesync and the protocol
 
@@ -95,3 +96,28 @@ proposed. A failed candidate remains unsupported with a clear warning.
 All external links above are primary project/specification sources. Rulesync's pinned schema is
 strong evidence for its syntax; native manuals are strong evidence for supported knobs, with runtime
 composition and interoperability deliberately left to acceptance.
+
+## Bounded implementation observations
+
+Isolated 2026-11-11 Linux aarch64 checks used Claude 2.1.319, Codex 0.167.0 and Grok 1.0.77. The
+[acceptance record](acceptance.md#local-native-smoke-evidence) separately records actual owned
+stdio/loopback connections, reference expansion, workspace trust limits and independent cleanup.
+
+Codex CLI override path components must be unquoted: quoting `mcp_servers` makes a literal unknown
+root key. A correctly encoded per-server inline TOML table preserves unrelated servers and dotted
+header keys, with env names unresolved. It still deep-merges lower native fields. A baseline stdio
+entry plus an HTTP invocation override produced the native `url is not supported for stdio` error.
+The same incompatible merge was observed with a current native profile-file overlay. The
+implementation therefore checks selected fixed-role keys and defers MCP for explicit profiles,
+without adding a profile-precedence engine. Correctly unquoted `mcp get` overrides do work; the
+initial quoted-root failure is not evidence that that subcommand ignores all overrides.
+
+Grok's installed stable 1.0.77 rejected root `--plugin-dir` with help, version and MCP subcommands;
+baseline inspect succeeded. Public main/docs mentioning a flag do not prove that installed stable
+supports it. Its private session plugin remains unadvertised, with no home/project fallback.
+
+These command/config checks used owned homes, no inherited auth, no model/paid request and no
+external MCP endpoint. The separate Codex config/read cases did not initiate connections. Their
+failed first encodings are retained alongside corrected receipts; fixture homes/plugin directories
+were removed and checked independently. Fresh and genuine resumed managed sessions remain an
+independent integration obligation.

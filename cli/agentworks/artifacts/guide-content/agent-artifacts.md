@@ -39,9 +39,10 @@ support sections below before authorizing setup or native authentication.
 Native-home overrides for user artifact files must stay beneath that user's `HOME`. For example,
 `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, or `GROK_HOME` can select another directory there. A user
 artifact plan that would write outside `HOME` is refused before that integration changes settings or
-plugins. Session files use their private run directory and, when explicitly enabled, narrowly owned
-native helper packages beneath `HOME`. Codex/Grok home-skill discovery is shared with other sessions
-of that user.
+plugins. Shared MCP registrations use a separate native role check: an unavailable or out-of-home
+role leaves those MCP entries unhandled while independent setup continues. Session files use their
+private run directory and, when explicitly enabled, narrowly owned native helper packages beneath
+`HOME`. Codex/Grok home-skill discovery is shared with other sessions of that user.
 
 Native preflight conservatively refuses relevant restrictions for new delivery in the configuration
 files it inspects. Restrictions affecting existing ancestor placement warn without blocking session

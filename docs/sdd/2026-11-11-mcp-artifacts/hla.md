@@ -92,14 +92,15 @@ MCP env names are the recommended operator path.
 
 ## Native placement
 
-The placements below are documented candidates for implementation and acceptance, not live claims.
+The table records implementation roles; the acceptance record separately bounds actual native
+evidence.
 
-| Integration | VM                    | User                     | Workspace                    | Session, explicit opt-in                            |
-| ----------- | --------------------- | ------------------------ | ---------------------------- | --------------------------------------------------- |
-| Claude Code | Defer to user         | Native user MCP document | Project `.mcp.json`          | Private MCP config plus invocation flag             |
-| Codex       | Defer to user         | Native user config table | Trusted project config table | Invocation-only config overrides                    |
-| Grok        | Defer to user         | Native user config table | Native project config table  | Private MCP-bearing plugin, subject to native proof |
-| Shell       | Canonical files/index | Canonical files/index    | Canonical files/index        | Private canonical files/index                       |
+| Integration | VM                    | User                     | Workspace                    | Session, explicit opt-in                             |
+| ----------- | --------------------- | ------------------------ | ---------------------------- | ---------------------------------------------------- |
+| Claude Code | Defer to user         | Native user MCP document | Project `.mcp.json`          | Private MCP config plus invocation flag              |
+| Codex       | Defer to user         | Native user config table | Trusted project config table | Invocation-only config overrides                     |
+| Grok        | Defer to user         | Native user config table | Native project config table  | Unhandled; tested stable rejects private plugin flag |
+| Shell       | Canonical files/index | Canonical files/index    | Canonical files/index        | Private canonical files/index                        |
 
 Use the actual native home and current owner destinations, under existing guarded file APIs. Do not
 guess a root/global registration or write configuration into arbitrary filesystem locations. Session

@@ -21,9 +21,9 @@ from agentworks.capabilities.harness_integration.settings import (
     serialize_settings,
 )
 from agentworks.capabilities.harness_integration.setup import UserSetupInvocation, WorkspaceSetupInvocation
-from agentworks.errors import ConfigError, ConnectivityError, ExternalError
+from agentworks.errors import ConfigError, ConnectivityError, ExternalError, StateError
 from agentworks.harness_setup.model import NativeClaim
-from agentworks.native_files import NativeFiles, native_path
+from agentworks.native_files import NativeFilePathError, NativeFiles, native_path
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -143,7 +143,10 @@ def resolve_mcp_user_path(tool: MCPTool, runner: Transport, *, home: str, enviro
         path = None
     if not isinstance(path, str):
         raise ExternalError("Native MCP config location could not be resolved")
-    path = native_path(path)
+    try:
+        path = native_path(path)
+    except StateError:
+        raise ConfigError("Native MCP config location must be an absolute normalized path") from None
     if not path.startswith(native_path(home).rstrip("/") + "/"):
         raise ConfigError("User MCP config placement outside HOME is unsupported")
     return path
@@ -223,7 +226,7 @@ def session_mcp_conflicts(
                         conflicts[item.identity] = (
                             "An existing native MCP entry differs; invocation delivery leaves it unchanged."
                         )
-    except (ConfigError, ConnectivityError, ExternalError):
+    except (ConfigError, ConnectivityError, ExternalError, NativeFilePathError):
         return {
             item.identity: "Native MCP configuration could not be checked safely; invocation delivery is deferred."
             for item in items

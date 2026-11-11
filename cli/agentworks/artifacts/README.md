@@ -371,6 +371,11 @@ serialization. Shared documents are not whole-file artifact ownership. See
 [native setup](https://github.com/WayfarerLabs/agentworks/blob/main/docs/guides/native-harness-setup.md#mcp-registrations)
 for mapping interaction and credential cleanup.
 
+Codex session MCP overrides remain unhandled with an explicit modeled or raw native profile. Native
+profile overlays can introduce same-named fields that deep-merge with an invocation override; this
+workaround does not inspect profile precedence. Use authorized user/workspace registration for that
+case. Ordinary profile selection and unrelated artifact delivery continue.
+
 MCP registration is the initial phase. OAuth-specific configuration and its explicit authentication
 workflow are planned for phase 2; current artifact definitions reject those fields. Native clients
 can still perform their own independent authentication. Tool filters remain unsupported.
@@ -610,9 +615,10 @@ exact session-owned skill package before using its native skills parent as a fil
 boundary. HOME itself is never a broad publication boundary for these session files.
 
 Native artifact guards inspect the effective `extra_args` after context rendering. The integration
-emits those same argument values with shell quoting; replacement text is not interpolated again. A
-conflicting flag remains an error before old-runtime teardown, including when a template expression
-supplies the flag name.
+emits those same argument values with shell quoting; replacement text is not interpolated again. For
+guidance, skills and personas, a conflicting flag remains an error before old-runtime teardown,
+including when a template expression supplies the flag name. A conflicting MCP carrier flag leaves
+the affected MCP inputs unhandled and permits independent delivery and launch.
 
 Selecting a native persona and delivering its definition are separate operations. If a managed
 persona definition remains unhandled, an explicit integration `agent` selection still applies. The
