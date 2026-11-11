@@ -30,3 +30,13 @@ records; the tested application and permanent documentation remain unchanged.
 
 No material finding or implementation work remains open. No PR merge is authorized or performed by
 this effort. The SDD lock becomes binding when this PR lands on main.
+
+## 2026-11-11: current-main integration follow-up
+
+The operator requested resolution of new conflicts after main advanced to
+`834eb715666d2d8539874a042484bf9da60fdb00`. The prior implementation and closeout results above
+remain attributed to their original heads. The unmerged PR is draft while its lifecycle, trust,
+artifact and compatibility integrations are resolved and independently reviewed. The
+[follow-up plan](plan.md#2026-11-11-operator-directed-current-main-integration) tracks new checks,
+handoff, separate integration evidence and cleanup. The integrated head requires fresh validation
+before its completion can be claimed. No new feature policy or PR merge is authorized.

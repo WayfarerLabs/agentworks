@@ -97,3 +97,11 @@ Supplied-key scans reported zero matches, including decoded archives, with zero 
 management tools, access and other lanes were preserved. The initial admission observation timeout
 and a cleanup-helper assumption were corrected in the test harness with original evidence retained;
 neither established a product defect.
+
+## 2026-11-11 integration status
+
+The operator-directed current-main integration follows the completed SDD-only closeout at
+`ad4600df8`. It changes the combination of desired-state lifecycle with main's newer trust,
+execution, artifact delivery and compatibility code. The reports above remain evidence about their
+original tested heads. Fresh combined-head gates, independent review and a completed separate
+integration report are pending; no new native pass or unchanged-artifact equivalence is claimed.

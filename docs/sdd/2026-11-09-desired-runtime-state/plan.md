@@ -360,3 +360,34 @@ branch and reports exact heads. Required private review lanes receive their own 
 The tester owns its live inventory and cleanup evidence. Unreached platform or fault cells remain
 qualified in validation rather than assumed passes. New material design decisions return to the
 lead; requirements or scope changes beyond the charter return to the operator.
+
+## 2026-11-11: operator-directed current-main integration
+
+After the completed closeout at `ad4600df8`, the operator asked this session to address PR #885's
+new conflicts. Main advanced to `834eb715666d2d8539874a042484bf9da60fdb00`, adding SSH trust and
+execution changes, native artifact delivery, session liveness handling, and temporary Shell
+placeholder compatibility. Ten content conflicts were reproduced. This follow-up preserves both sets
+of behavior under the existing requirements; it authorizes no new feature or PR merge. The earlier
+completed checkboxes remain historical records. Earlier live reports retain their tested-head
+attribution and do not validate the new integration.
+
+- [x] Integrate current main, resolve the ten conflicts, and verify automatically merged lifecycle,
+      trust, artifact, compatibility, CLI and documentation seams against both contracts.
+- [ ] Exercise combined behavior with focused tests and required gates. Obtain independent project,
+      complexity and generic correctness reviews at one pinned candidate head.
+- [ ] Publish the complete green candidate to the same PR with a scoped ready handoff; wait for its
+      associated separate integration report before any further iteration. Record actual results and
+      coverage limits without converting previous reports into fresh evidence.
+- [ ] Retire this follow-up's owned worktrees, subordinate branch, caches and temporary outputs;
+      preserve the feature branch, PR and unrelated resources.
+
+Merge `5e9b8e90f` combines the prior PR head and the stated main commit. It preserves early SSH
+trust refusal before explicit VM start acceptance and secret interaction, adds the same fence to
+known reconciliation activation and its consequential runtime helper, and leaves provider-only
+observation/stop independent of SSH. Console provider preflight remains local; guest-required
+consumers enforce the SSH boundary, including both live-parent stop observations. Prepared session
+execution passes the complete artifact application so stable native entries survive restart. The
+existing public restart tests cover file and ownership retention; no duplicate assertion-only test
+was added. Focused composition/regression verification passed 174 cases, including all remaining
+failures from the preceding impacted run. Root full-suite and independent review results are still
+required before the ready handoff.
