@@ -180,6 +180,16 @@ def _needs_running_guest(invocation: RuntimeInvocation, vm_name: str) -> bool:
     )
 
 
+def _needs_running_vm(invocation: RuntimeInvocation, vm_name: str) -> bool:
+    target = invocation.vms[vm_name].desired_runtime_state
+    return (
+        vm_name in invocation.selection.explicit_vms
+        and target is DesiredRuntimeState.RUNNING
+        or target is not DesiredRuntimeState.STOPPED
+        and _needs_running_guest(invocation, vm_name)
+    )
+
+
 def _block_family(invocation: RuntimeInvocation, vm_name: str, error: Exception | str) -> None:
     invocation.failed_families.add(vm_name)
     invocation.ensure_vm_result(vm_name)
@@ -213,13 +223,7 @@ def prepare_infrastructure(invocation: RuntimeInvocation) -> None:
         if not eligible:
             continue
         try:
-            needs_activation = (
-                name in invocation.selection.explicit_vms
-                and vm.desired_runtime_state is DesiredRuntimeState.RUNNING
-                or vm.desired_runtime_state is not DesiredRuntimeState.STOPPED
-                and _needs_running_guest(invocation, name)
-            )
-            if needs_activation:
+            if _needs_running_vm(invocation, name):
                 from agentworks.execution import trust
 
                 trust.require_record(name)
@@ -253,14 +257,7 @@ def prepare_infrastructure(invocation: RuntimeInvocation) -> None:
     for name, context in invocation.contexts.items():
         if name in invocation.failed_families:
             continue
-        vm = invocation.vms[name]
-        running = (
-            name in invocation.selection.explicit_vms
-            and vm.desired_runtime_state is DesiredRuntimeState.RUNNING
-            or vm.desired_runtime_state is not DesiredRuntimeState.STOPPED
-            and _needs_running_guest(invocation, name)
-        )
-        if not running:
+        if not _needs_running_vm(invocation, name):
             continue
         try:
             changed = vms.activate_vm_runtime(context, resolve_secret=infrastructure_reader(invocation, context.node))

@@ -15,7 +15,7 @@ from ._models import Outcome, RuntimeInvocation, RuntimeResult, render_results, 
 from ._prepare import (
     OFF,
     _block_family,
-    _needs_running_guest,
+    _needs_running_vm,
     infrastructure_reader,
     prepare_local_workloads,
     session_vm_name,
@@ -141,13 +141,16 @@ def preview_selected(
 
 
 def _observe_providers(invocation: RuntimeInvocation) -> None:
-
     import agentworks.vms.manager as vms
+    from agentworks.execution import trust
 
     for name, vm in invocation.vms.items():
         if name in invocation.failed_families:
             continue
         try:
+            wants_running = _needs_running_vm(invocation, name)
+            if wants_running:
+                trust.require_record(name)
             context = vms.prepare_vm_runtime(
                 invocation.db,
                 invocation.config,
@@ -161,12 +164,6 @@ def _observe_providers(invocation: RuntimeInvocation) -> None:
             if power is VMStatus.UNKNOWN:
                 _block_family(invocation, name, "provider power observation is unknown")
                 continue
-            wants_running = (
-                name in invocation.selection.explicit_vms
-                and vm.desired_runtime_state is DesiredRuntimeState.RUNNING
-                or vm.desired_runtime_state is not DesiredRuntimeState.STOPPED
-                and _needs_running_guest(invocation, name)
-            )
             changed = (
                 wants_running
                 and power in OFF

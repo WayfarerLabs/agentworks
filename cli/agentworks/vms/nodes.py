@@ -271,6 +271,7 @@ class LiveVMNode:
                     entity_name=row.name,
                     hint=f"start it with: agw vm start {row.name}",
                 )
+            # Persisted trust may have changed since the command's preflight.
             trust.require_record(row.name)
             platform = self._site.platform
             ctx = self._gate_ops_ctx(gate_secrets)

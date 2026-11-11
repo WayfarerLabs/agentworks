@@ -394,3 +394,36 @@ def test_noop_start_preserves_canonical_panes_and_independent_member_intent(
     assert model._sessions == before
     assert _console(db).desired_runtime_state is DesiredRuntimeState.RUNNING
     assert _session(db) == session
+
+
+@pytest.mark.parametrize("parent_target", [DesiredRuntimeState.STOPPED, DesiredRuntimeState.RUNNING])
+def test_missing_host_record_refuses_console_start_before_accepting_intent(
+    db: Database, make_config, monkeypatch, parent_target
+):
+    from agentworks.execution import trust
+    from agentworks.execution.errors import TrustMissing
+    from agentworks.plugins.proxmox.platform import ProxmoxPlatform
+    from agentworks.secrets.policy import TtyInteractionPolicy
+    from tests.runtime_state.test_composition import seed_vm
+
+    seed_vm(db, "vm1", target=parent_target)
+    _seed_sessions(db, ["alpha"])
+    create_console_record(db, name="con", vm_name="vm1", session_specs=["alpha"])
+    db.set_console_desired_runtime_state("con", DesiredRuntimeState.STOPPED)
+    trust.remove("vm1")
+    before = (_vm(db), _console(db), _session(db), db.list_console_sessions("con"), db._conn.total_changes)
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("locally refused start reached a resolver, provider or guest")
+
+    monkeypatch.setattr("agentworks.secrets.resolver.Resolver.__init__", forbidden)
+    monkeypatch.setattr("agentworks.transports.transport", forbidden)
+    for name in ("status", "start", "stop", "vm_active"):
+        monkeypatch.setattr(ProxmoxPlatform, name, forbidden)
+
+    with pytest.raises(TrustMissing):
+        mc.start_console(db, make_config(), name="con", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert (_vm(db), _console(db), _session(db), db.list_console_sessions("con"), db._conn.total_changes) == before
+    with native_mutation_guard(db.path, "vm1"):
+        pass
