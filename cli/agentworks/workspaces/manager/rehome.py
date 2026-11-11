@@ -298,9 +298,9 @@ def _rehome_vm(
 
                 # Retire old-location and copied Git pairs while the old row
                 # still authorizes their source, then establish the new pairs.
-                from agentworks.harness_setup.cleanup import rehome_workspace_excludes
+                from agentworks.harness_setup.cleanup import rehome_workspace_artifacts
 
-                rehome_workspace_excludes(db, ws, new_path, target)
+                rehome_workspace_artifacts(db, ws, new_path, target)
 
                 # Update database
                 db.update_workspace_path(ws_name, new_path)

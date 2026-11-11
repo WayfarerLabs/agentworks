@@ -349,7 +349,12 @@ def prepare_session_delivery(
         try:
             plan = render(current)
             validate_ancestor_names(current, plan.application)
-            if plan.application.files or plan.argv:
+            deferred = {item.input_id for item in plan.application.deferred}
+            legacy_delivery = not current.inputs or any(
+                item.content.type is not ArtifactType.MCP_SERVER and item.identity not in deferred
+                for item in current.inputs.items()
+            )
+            if legacy_delivery and (plan.application.files or plan.argv):
                 if runner is None:
                     raise StateError("artifact delivery requires the actual native launch target")
                 root = probe_native(
