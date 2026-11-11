@@ -8,10 +8,12 @@ and reported without preventing independent entries from converging.
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from agentworks import output
+from agentworks.artifacts.model import ArtifactInputs
+from agentworks.artifacts.native.mcp import apply_mcp
 from agentworks.capabilities.harness_integration.settings import (
     PreparedSettings,
     SettingsFormat,
@@ -35,6 +37,7 @@ from agentworks.plugins._harness_native.native_cli import (
 )
 
 if TYPE_CHECKING:
+    from agentworks.artifacts.application import ArtifactApplication
     from agentworks.capabilities.harness_integration.setup import UserSetupInvocation, WorkspaceSetupInvocation
     from agentworks.plugins._harness_native.native_config import NativeUserConfig, NativeWorkspaceConfig
 
@@ -131,8 +134,21 @@ class _MappingPlan:
         removed: tuple[tuple[str, str], ...] = (),
         protected: tuple[tuple[str, str], ...] = (),
     ) -> None:
+        content, _ = self.render(destination, current=current, overlays=overlays, removed=removed, protected=protected)
+        if content is not None and content != current:
+            files.publish(destination, content, expected=_hash(current), group=group)
+
+    def render(
+        self,
+        destination: str,
+        *,
+        current: bytes | None,
+        overlays: tuple[tuple[tuple[str, str], SettingsValue], ...] = (),
+        removed: tuple[tuple[str, str], ...] = (),
+        protected: tuple[tuple[str, str], ...] = (),
+    ) -> tuple[bytes | None, SettingsObject]:
         if self.skipped:
-            return
+            return current, {}
         # Keep the initial skip decision even when plugin commands create the file.
         result = self.prepared.apply(
             None if self.prepared.strategy == "skip-existing" else current, destination_path=destination
@@ -156,32 +172,39 @@ class _MappingPlan:
         contributions = self.prepared.contributions(current, destination_path=destination)
         retained = tuple((key, name) for key, name in protected if name not in _table(contributions, key))
         _preserve_entries(document, native, retained)
-        content = serialize_settings(document, format=self.prepared.format)
-        if content != current:
-            files.publish(destination, content, expected=_hash(current), group=group)
+        return serialize_settings(document, format=self.prepared.format), contributions
 
 
 def setup_workspace(
     tool: NativeTool, config: NativeWorkspaceConfig | None, invocation: WorkspaceSetupInvocation
-) -> None:
+) -> ArtifactApplication:
     """Publish one fixed project role; workspace setup never installs plugins."""
     claims = list(invocation.prior.claims if invocation.prior else ())
     preserved = tuple(claim for claim in claims if claim.role != "settings")
+    if config is None:
+        invocation = replace(invocation, artifacts=ArtifactInputs())
     mapping = None if config is None else config.settings
-    if mapping is None:
-        if len(preserved) != len(claims):
-            output.info("Removed settings mapping; native settings and their current values are retained.")
-            invocation.checkpoint(preserved)
-        return
-    prepared = prepare_settings(mapping, format=_format(tool))
+    prepared = None if mapping is None else prepare_settings(mapping, format=_format(tool))
     root = native_path(invocation.root) + ("/.claude" if tool == "claude" else "/.codex")
     destination = root + "/" + _filename(tool)
+    if len(preserved) != len(claims):
+        if mapping is None:
+            output.info("Removed settings mapping; native settings and their current values are retained.")
+        invocation.checkpoint(preserved)
     with NativeFiles(invocation.runner) as files:
-        initial = files.read(destination)
-        plan = _MappingPlan.build(prepared, initial, destination)
-        plan.publish(files, destination, current=initial, group=invocation.linux_group)
-        if len(preserved) != len(claims):
-            invocation.checkpoint(preserved)
+        initial = files.read(destination) if prepared is not None else None
+        plan = None if prepared is None else _MappingPlan.build(prepared, initial, destination)
+        if tool == "claude" and plan is not None:
+            plan.publish(files, destination, current=initial, group=invocation.linux_group)
+    return apply_mcp(
+        tool,
+        invocation,
+        destination=native_path(invocation.root) + "/.mcp.json" if tool == "claude" else destination,
+        claims=preserved,
+        map_document=(lambda current: plan.render(destination, current=current))
+        if tool == "codex" and plan is not None
+        else None,
+    )
 
 
 def _owned(claim: NativeClaim | None, source: str | None) -> bool:
@@ -239,9 +262,13 @@ def _check_contributions(
             raise ConfigError("mapped settings still request a native association removed from explicit setup")
 
 
-def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: UserSetupInvocation) -> None:
+def setup_user(
+    tool: NativeTool, config: NativeUserConfig | None, invocation: UserSetupInvocation
+) -> ArtifactApplication:
     """Reconcile actual-user native associations using confirmed prior claims."""
     mapping = None if config is None else config.settings
+    if config is None:
+        invocation = replace(invocation, artifacts=ArtifactInputs())
     prepared = None if mapping is None else prepare_settings(mapping, format=_format(tool))
     claims = list(invocation.prior.claims if invocation.prior else ())
     preserved = tuple(claim for claim in claims if claim.role not in ("settings", "plugin", "marketplace"))
@@ -261,18 +288,34 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
             raise StateError("native retirement requires one recorded config home; ownership evidence was retained")
         root = roots.pop()
     destination = root + "/" + _filename(tool)
+    mcp_destination = (
+        native_path(invocation.environment["CLAUDE_CONFIG_DIR"]) + "/.claude.json"
+        if tool == "claude" and invocation.environment.get("CLAUDE_CONFIG_DIR")
+        else native_path(invocation.home) + "/.claude.json"
+        if tool == "claude"
+        else destination
+    )
     if any(claim.destination != root for claim in native_claims):
         raise StateError("native config home differs from existing ownership claims; clean up the previous home first")
     sources = [] if config is None else config.marketplaces
     requested = [] if config is None else config.plugins
     if not native_claims and not sources and not requested:
-        if prepared is None or mapping is None:
-            return
-        with NativeFiles(invocation.runner) as files:
-            initial = files.read(destination)
-            settings_plan = _MappingPlan.build(prepared, initial, destination)
-            settings_plan.publish(files, destination, current=initial)
-        return
+        settings_plan = None
+        if prepared is not None:
+            with NativeFiles(invocation.runner) as files:
+                initial = files.read(destination)
+                settings_plan = _MappingPlan.build(prepared, initial, destination)
+                if tool == "claude":
+                    settings_plan.publish(files, destination, current=initial)
+        return apply_mcp(
+            tool,
+            invocation,
+            destination=mcp_destination,
+            claims=(*preserved, *claims),
+            map_document=(lambda current: settings_plan.render(destination, current=current))
+            if tool == "codex" and settings_plan is not None
+            else None,
+        )
     with NativeFiles(invocation.runner) as files:
         initial = files.read(destination)
         plan = None if mapping is None or prepared is None else _MappingPlan.build(prepared, initial, destination)
@@ -630,11 +673,31 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
                 for selector in selectors
                 if selector not in blocked_plugins
             )
-            plan.publish(
-                files,
-                destination,
-                current=current,
-                overlays=overlays,
-                removed=removed_keys,
-                protected=tuple(sorted(protected)),
+            if tool == "claude":
+                plan.publish(
+                    files,
+                    destination,
+                    current=current,
+                    overlays=overlays,
+                    removed=removed_keys,
+                    protected=tuple(sorted(protected)),
+                )
+        else:
+            overlays = ()
+        return apply_mcp(
+            tool,
+            invocation,
+            destination=mcp_destination,
+            claims=(*preserved, *claims),
+            map_document=(
+                lambda current: plan.render(
+                    destination,
+                    current=current,
+                    overlays=overlays,
+                    removed=removed_keys,
+                    protected=tuple(sorted(protected)),
+                )
             )
+            if tool == "codex" and plan is not None
+            else None,
+        )
