@@ -535,3 +535,42 @@ qualification is not a waiver or a production change made for the old harness.
 Root combined gates, three independent source reviews, exact-head CI and the new ready handoff and
 associated integration report remain required. The owner's focused and static results are not live
 validation, and the goal remains active.
+
+### Private adversarial corrections
+
+All ten CI jobs passed at `9c38dff93`, but private source review found material gaps before handoff.
+Project review passed 338 focused tests. Complexity review passed 431 and demonstrated five public
+controller/SQLite failures where parent-off fallback erased worker, stopped-write, observer or
+stale-runtime completion errors. The cold correctness lane passed 314 focused tests and reproduced
+lost reconciliation after a real caller SIGINT while retrieving a successful future. That engine gap
+is inherited from main, relevant to the modified completion contract, and not an observer-only
+regression. These findings remain inside the same private round.
+
+- [x] Preserve authoritative execution/completion errors as failed outcomes even after parent
+      shutdown, without losing sibling successes or weakening pre-dispatch repair refusal.
+- [x] Distinguish stored worker failure from caller interruption during completed-future retrieval;
+      retain successful futures for stopped CAS/observer reconciliation and drain before rethrow.
+- [x] Retain last-known session fingerprints on provider-OFF observation, preserving original
+      snapshot checks and guest-free inactive reporting, then verify safe same-memory resume.
+
+The owner produced `cce3268a6` for the first two corrections with 1,357 impacted tests and full
+static checks passing; it is included in the later combined correction below. A separate scout then
+confirmed the suspension concern through source and four local model probes: named, bulk and generic
+OFF stop cleared a retained fingerprint. Same-memory resume then became unknown with no existing
+automatic recovery despite retained run/socket tags. The Console control retained ownership and
+reconciled safely. Provider/native fingerprint edges were simulated; this is not live GCP evidence.
+
+The lead ruled that OFF should preserve last-known native evidence until actual guest absence or
+teardown is verified. Project contract scrutiny confirmed compatibility with R4, R5 and R6 and no
+operator requirement amendment. The correction uses existing fields/states, not a new provider or
+power policy. Permanent teaching and the owned response artifacts must distinguish inactivity from
+proof of process death. Native GCP and the final combined candidate still require fresh validation.
+
+The combined corrections are integrated at `afe92857f`. The owner passed 1,365 impacted tests, Ruff
+lint/format for 1,046 files, strict mypy for 1,011 files, file quality and locked-SDD checks. The
+preserved-memory model drives all three actual session stop compositions with real status and native
+teardown/CAS authorities behind modeled transport/fingerprint edges. OFF preserves the row except
+accepted target/timestamp; same-boot resume safely stops without force. Changed ownership refuses,
+while new-boot recovery, peer preservation and healthy repeats pass. Console, provider power APIs,
+global statuses and schema are unchanged. New independent delta reviews, root gates, exact-head CI
+and the subsequent actual integration report remain required; the goal stays active.

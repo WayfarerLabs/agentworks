@@ -174,3 +174,27 @@ boundary qualification, not full public acceptance inside an artificial read tra
 
 Independent source reviews, required root gates, final CI and the new associated integration report
 remain pending. No fresh native GCP, bulk teardown or recovery pass is established by these tests.
+
+Private source review at `9c38dff93` identified authoritative-error suppression and an inherited
+caller-SIGINT result-retrieval gap despite green CI. Five public controller/SQLite probes confirmed
+error suppression; the cold lane used actual SIGINT with a successful native future and observed
+neither stopped persistence nor completion notification. The owner's corrective head `cce3268a6`
+passed 1,357 impacted cases; final integration and independent review remain pending.
+
+A separate source/model investigation confirmed that clearing session fingerprints solely because
+the VM is OFF blocks ordinary automatic recovery across memory-preserving suspension. All three
+session stop compositions became unknown on preserved-memory resume; a Console control retained
+ownership and stopped safely after resume. These four probes used real controller/SQLite/Resolver
+paths with provider, transport and matched fingerprint edges simulated. They establish a local model
+defect, not a native GCP campaign. Google's
+[suspend/resume guide](https://docs.cloud.google.com/compute/docs/instances/suspend-resume-instance)
+confirms that guest memory is saved and restored. Fingerprint retention and its final combined
+validation are in progress without a new status or schema.
+
+The combined corrected source at `afe92857f` passed 1,365 impacted tests and full static/file checks
+in its isolated implementation tree. All three session stop compositions retain exact fingerprints
+while OFF without guest access or runtime writes; the model then proves safe matching resume,
+refusal on changed native ticks, new-boot recovery and healthy repetition. Authoritative completion
+errors remain failed after parent shutdown, and real caller-interrupt regressions preserve stopped
+reconciliation. Independent final reviews, root gates, CI and native validation of the new handoff
+remain pending. No model result is a live GCP pass.

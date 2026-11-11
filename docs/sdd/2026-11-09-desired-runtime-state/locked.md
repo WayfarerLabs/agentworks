@@ -63,3 +63,9 @@ Implementation merge `d7260da42` is integrated with passing impacted/static chec
 The complete combined candidate still requires independent source review, root gates, final CI,
 ready publication and its actual integration result. Monitoring and feedback disposition remain part
 of the active effort.
+
+Private adversarial review then found stop-error suppression, an inherited caller-interruption gap
+and session evidence loss across suspension. Corrections at `afe92857f` retain authoritative errors,
+completed-future reconciliation and last-known fingerprints while the parent is inactive. The owner
+passed 1,365 impacted tests and full static checks. Final independent review, root gates, CI, ready
+publication and actual integration evidence remain required; the goal remains active.

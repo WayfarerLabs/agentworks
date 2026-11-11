@@ -196,6 +196,13 @@ and synchronous teardown. Repair conflicts and database writer failures escape b
 destructive dispatch. Off-parent stops skip repair, guest status and transport construction.
 Reconciliation keeps its read-only preparation before workload resolution.
 
+An off parent establishes current inactivity, not native process death: suspension may preserve
+guest memory. Guest-free stop revalidates the original session snapshot and retains its last-known
+runtime fingerprint. It performs no runtime-state write and reports runtime work unchanged; accepted
+intent can independently count as changed. Verified native absence or teardown remains the authority
+for stopped-state CAS. This uses existing states and fields, preserving safe ownership on a later
+resume without changing VM power policy.
+
 Destructive work follows complete workload preparation. Guards and the writable database remain
 owned through interruption draining and reconciliation. A narrow caller-thread observer records
 success only after conditional stopped persistence, before the future leaves pending. Recording is

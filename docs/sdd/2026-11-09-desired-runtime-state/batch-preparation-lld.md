@@ -310,11 +310,20 @@ from submission or missing failure names when an exception escapes.
 
 Parent-off completion compares the original prepared runtime snapshot after existing
 session/parent/target checks. Do not construct expected state from the latest row to hide an
-intervening run or fingerprint change. Main's stopped CAS provides exact same-run idempotence and
-preserves desired intent.
+intervening run or fingerprint change. Provider OFF establishes an inactive observation, not proof
+that the stored native process died. Retain PID, boot ID, start ticks, socket and run identity and
+return runtime changed=False without guest access or runtime writes. Intent acceptance can still
+count as a change. A same-memory resume can then use that evidence for ordinary safe teardown;
+existing new-boot absence logic handles an actual shutdown. Native verified absence or teardown
+continues to use main's exact stopped CAS. No new status, provider capability or schema is needed.
 
 Coverage must prove bulk overlap, filtered-one bulk versus named stop, strict unknown plus healthy
 sibling with zero destructive commands, an actual prepared session stop behind mixed secret failure,
 valid admin access without direct-agent access, stale snapshot/writer refusal and truthful completed
 sibling results through first/repeated interruption. Retain incoming submission/collision/drain
 tests and original off-parent, intent and reconciliation-isolation cases.
+
+Preserved-memory cases must cover named stop, bulk stop and generic reconciliation while OFF,
+followed by same-boot resume and safe stopping without force. Snapshot changes must still refuse,
+healthy peers remain intact, and true shutdown/new-boot recovery must stay safe. Console ownership
+is retained by its existing definition/native metadata path and needs no matching data patch.
