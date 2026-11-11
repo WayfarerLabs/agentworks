@@ -506,7 +506,7 @@ permanent collateral. The incoming locked SDD remains untouched.
       native teardown, conditional writes and public bulk concurrency.
 - [x] Correct the GCP transition test's clock without changing production activation; retain the
       deliberate inherited stop-transition policy.
-- [ ] Verify named versus filtered bulk stop, admin routing, strict bulk unknown refusal, original
+- [x] Verify named versus filtered bulk stop, admin routing, strict bulk unknown refusal, original
       snapshot fencing, off-parent behavior, secret barriers and truthful interrupted completion.
       Obtain all three private lanes and required gates at one pinned candidate.
 - [ ] Publish the complete green supplemental handoff, wait for its actual associated integration
@@ -606,3 +606,23 @@ older-code scratch replay was stopped while waiting on its synthetic queue and i
 completed regression proof. The independent public-controller probes established the defect. Final
 independent review, root gates, exact-head CI and the associated integration report remain pending.
 This is still the same private supplemental round.
+
+### Supplemental verification before handoff
+
+All three independent lanes are clean at `efe9919a5926e06f57fe7f6d8ed93387c80fcd51`: project review
+passed 86 focused tests; complexity passed 105 and both original failure-receiver probes; cold
+correctness passed 100 and an independent double-receiver-failure probe. All experiments were
+restored and processes stopped before the root full suite. No material private finding remains.
+
+The root full suite at unchanged `efe9919a5` returned zero: 12,611 passed and 34 skipped in 297.98
+seconds. All twelve required local gates passed, including 1,048-file Ruff formatting, strict mypy
+across 1,013 files, file quality, rulesync, locked-SDD guard, typer isolation, 160 Python and 103
+Node website tests, and both deterministic double-build variants. CI 42982591220 passed all ten jobs
+on that exact candidate. Fresh main remains `07feb4a45`; ancestry and merge-tree checks returned
+zero.
+
+This evidence-only update changes no application, test or permanent teaching bytes. Its final CI and
+private documentation check precede ready publication. The actual associated integration report,
+critical feedback disposition and owned-resource cleanup remain open. Native GCP suspension/resume
+and the combined teardown behavior have not received a new live pass in this round. The supplemental
+allowance is spent; monitoring remains active after handoff.

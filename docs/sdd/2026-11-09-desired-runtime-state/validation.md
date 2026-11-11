@@ -216,3 +216,21 @@ checks. Controlled queue fixtures now fail within a bounded caller-thread watchd
 leaves work pending; the watchdog must not fire on passing code. An older-code synthetic-queue
 replay was stopped, not passed or counted as a completed failure proof. New private reviews, root
 gates, CI and native validation remain pending.
+
+## Supplemental final local verification
+
+The complete candidate `efe9919a5926e06f57fe7f6d8ed93387c80fcd51` passed all three private lanes.
+Project review passed 86 focused tests; complexity passed 105 plus both original failure-receiver
+probes; cold correctness passed 100 plus a double-receiver-failure probe. All lanes restored
+experiments and stopped their test processes before root confirmation.
+
+At that unchanged head, the non-overlapping root suite returned zero with 12,611 passed and 34
+skipped in 297.98 seconds. All twelve required local gates returned zero. These include strict
+static/file checks, typer isolation, rulesync, locked SDDs, 160 Python and 103 Node website tests
+and deterministic double builds at both site bases. Exact-head CI 42982591220 passed all ten jobs.
+Fresh main `07feb4a45` remains an ancestor and merges without conflicts.
+
+The following evidence-only SDD update requires its own green CI before ready handoff. Earlier
+native results keep their original tested-head attribution. No fresh native GCP or combined teardown
+pass is inferred from these local checks. The new ready-triggered integration report and feedback
+disposition remain required; publication does not finish the active effort.
