@@ -654,8 +654,11 @@ def execute_concurrent_dedicated_teardowns(
                         failures.append((plan.session_name, str(exc)))
                         output.warn(f"Session '{plan.session_name}' failed to record completed teardown: {exc}")
                         continue
+                    if primary_error is None:
+                        primary_error = exc
                     pending.remove(future)
                     output.warn(f"Session '{plan.session_name}' failed to record teardown failure: {exc}")
+                    _enter_reconciliation(tuple(pending), exc)
                     continue
                 except BaseException as exc:
                     if primary_error is None:

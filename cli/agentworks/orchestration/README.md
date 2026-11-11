@@ -191,6 +191,9 @@ both success and failure without repeating native work or a completed persistenc
 guards and the writable database remain owned until all submitted work drains. Stop-only paths do
 not acquire a hold that could boot an off VM.
 
+If a failure notification itself fails, the coordinator cancels queued work, drains submitted
+teardown work and propagates the reporting error, retaining any earlier primary exception.
+
 The shared prepared-stop helper validates the original session/runtime snapshot, parent route and
 desired target before returning for an off parent. That path retains every runtime fingerprint field
 and reports no runtime change. An inactive provider observation can include suspended memory;
