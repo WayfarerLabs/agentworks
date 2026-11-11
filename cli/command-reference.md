@@ -978,6 +978,15 @@ intact. Normal lifecycle preparation may already have persisted observed PID, bo
 facts. The built-in `shell` integration does not implement `--resume-only` because an arbitrary
 shell command cannot prove that it resumed harness state.
 
+Batch stop overlaps teardown for dedicated sessions whose persisted runtime identity is complete,
+with at most eight teardown operations active at once. Incomplete dedicated rows and older
+shared-server rows retain serial teardown after the concurrent work drains. Per-session outcomes
+identify the session and may appear in completion order. If concurrent work is quiet for five
+seconds, Agentworks reports completed, active, and queued counts. Ctrl-C cancels work that has not
+started, then waits for bounded in-flight teardown and reconciles every completed result before
+exiting as interrupted. Successful siblings remain stopped when another session fails; the command
+still ends with an aggregate error for any failed session.
+
 Maintainers: [Session status internals](../docs/guides/session-status.md) documents the persisted
 PID and boot-ID model, read-only live status derivation, lifecycle repair, and the safety boundary
 for `--force`.

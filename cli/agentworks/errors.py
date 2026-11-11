@@ -76,6 +76,13 @@ class StateError(AgentworksError):
     """
 
 
+class StateConflictError(StateError):
+    """Persisted state no longer matches the snapshot an operation prepared.
+
+    Callers must not continue with that stale selection after this failure.
+    """
+
+
 class MigrationBlockedError(StateError):
     """A migration refused an unmet precondition before changing schema.
 

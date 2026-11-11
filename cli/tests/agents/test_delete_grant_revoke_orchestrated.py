@@ -531,7 +531,10 @@ def test_delete_choreography_end_to_end_standalone(
             ),
         ),
     )
-    monkeypatch.setattr("agentworks.sessions.manager._prove_stored_runtime_absent", lambda *args, **kwargs: True)
+    monkeypatch.setattr(
+        "agentworks.sessions.manager._teardown._prove_plan_runtime_absent",
+        lambda plan: True,
+    )
 
     agent_manager.delete_agent(db, config, name="a1", force=True, yes=True, interaction=TtyInteractionPolicy.REFUSE)
 

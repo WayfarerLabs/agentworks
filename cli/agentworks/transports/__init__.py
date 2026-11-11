@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING
 
 from agentworks.errors import StateError
 from agentworks.execution.trust import TrustBinding, TrustMode
+from agentworks.ssh import SSH_DEFAULT_RETRIES
 from agentworks.transports.base import ExecTransport, Transport
 from agentworks.transports.lima import LimaTransport
 from agentworks.transports.remote_lima import RemoteLimaTransport
@@ -66,6 +67,7 @@ def transport_for_user(
     *,
     user: str,
     default_timeout: int | None = None,
+    retries: int = SSH_DEFAULT_RETRIES,
     logger: SSHLogger | None = None,
 ) -> Transport:
     """Build an ``SSHTransport`` for ``user`` on this VM via Tailscale.
@@ -103,6 +105,7 @@ def transport_for_user(
         user=user,
         identity_file=config.operator.ssh_private_key,
         default_timeout=default_timeout,
+        retries=retries,
         logger=logger,
     )
 
@@ -112,6 +115,7 @@ def transport(
     config: Config,
     *,
     default_timeout: int | None = None,
+    retries: int = SSH_DEFAULT_RETRIES,
     logger: SSHLogger | None = None,
 ) -> Transport:
     """Canonical admin transport for a VM (Tailscale SSH).
@@ -125,6 +129,7 @@ def transport(
         config,
         user=vm.admin_username,
         default_timeout=default_timeout,
+        retries=retries,
         logger=logger,
     )
 

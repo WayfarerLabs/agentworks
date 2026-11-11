@@ -55,6 +55,25 @@ class SessionStatus(Enum):
 # Distinct from NULL (never checked / pre-enhancement).
 PID_STOPPED = -1
 
+
+def _validate_session_runtime_fields(
+    *, pid: int | None, boot_id: str | None, tmux_server_start_ticks: int | None
+) -> None:
+    """Validate the desired persisted runtime shape at the database write boundary."""
+    if pid is not None and pid != PID_STOPPED and pid <= 0:
+        raise ValueError(f"invalid runtime PID: {pid}")
+    if (
+        pid is not None
+        and pid > 0
+        and (boot_id is None or tmux_server_start_ticks is None or tmux_server_start_ticks <= 0)
+    ):
+        raise ValueError("a live runtime requires boot ID and positive process start time")
+    if pid == PID_STOPPED and (boot_id is not None or tmux_server_start_ticks is not None):
+        raise ValueError("a stopped runtime cannot retain a process fingerprint")
+    if pid is None and tmux_server_start_ticks is not None:
+        raise ValueError("an unknown runtime cannot retain process start time")
+
+
 # Settings-table keys (install-level identity). Defined next to the accessors'
 # owner so consumers (vms.manager, ssh_config) share one spelling
 # without a layering inversion. (A retired key may linger as an orphan
@@ -178,6 +197,31 @@ class SessionRow:
     session_uuid: str = field(default_factory=lambda: str(uuid4()))
     # Prospective managed launch identity; legacy rows have no recorded run.
     run_id: str | None = None
+
+
+@dataclass(frozen=True)
+class SessionRuntimeSnapshot:
+    """Immutable persisted identity for a conditional runtime update, not native authority."""
+
+    name: str
+    session_uuid: str
+    run_id: str | None
+    socket_path: str | None
+    pid: int | None
+    boot_id: str | None
+    tmux_server_start_ticks: int | None
+
+    @classmethod
+    def from_session(cls, session: SessionRow) -> SessionRuntimeSnapshot:
+        return cls(
+            name=session.name,
+            session_uuid=session.session_uuid,
+            run_id=session.run_id,
+            socket_path=session.socket_path,
+            pid=session.pid,
+            boot_id=session.boot_id,
+            tmux_server_start_ticks=session.tmux_server_start_ticks,
+        )
 
 
 class ShellEntry(TypedDict):
