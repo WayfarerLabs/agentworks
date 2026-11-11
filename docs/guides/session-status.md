@@ -48,6 +48,21 @@ fingerprints retain their authority without requiring that metadata. A row missi
 time cannot gain destructive authority merely by observing a live PID on the same boot.
 Indeterminate or mismatched live identity fails closed without adopting or killing the server.
 
+During teardown, completing an incomplete fingerprint writes only if the original session, run,
+socket, and runtime fields still match. Preparation then rereads that identity and captures the
+native fingerprint afresh before destruction. A concurrent replacement cannot be adopted or
+overwritten by that upgrade.
+
+Mutating PID repair likewise copies the original session, run, and nullable runtime fields before
+native observations. Learning a boot, recovering a fingerprint, and recording absence use
+conditional writes with the existing runtime-shape validation. A changed or removed row produces a
+conflict without overwriting it or announcing successful repair. Batch preparation stops on that
+conflict before status or teardown proceeds. A failed repair database write also stops preparation
+and preserves its original driver error, including a stale SQLite snapshot inside an enclosing
+transaction; ordinary unrecoverable or unreachable repairs retain their existing refusal behavior.
+This is a persistence fence, not whole-command serialization: another command can still change a row
+after a successful repair and before the next refetch or phase.
+
 A provably absent runtime can be recorded as stopped. Older failed admin rows with no socket address
 can recover after exact-session absence, dedicated-server absence and evidence that the old runtime
 cannot survive; unrelated sessions on the default server do not prevent that repair. Recovery uses
@@ -78,13 +93,39 @@ any operator-added sessions, windows, or panes on that dedicated server. Older s
 use an exact-name `kill-session` and verify that exact session is absent. Agentworks never signals a
 stored numeric PID.
 
+`agw session stop --all` runs complete-fingerprint dedicated teardown operations concurrently, with
+a fixed ceiling of eight active sessions. Each worker owns one fresh transport and performs only
+remote identity validation, tmux teardown, absence proof, and exact socket cleanup. The invoking
+thread retains database and output ownership, persists verified results before announcing success,
+and runs incomplete dedicated or shared-server compatibility work serially after the concurrent
+lane. A failure in one session does not cancel its siblings.
+
+Before submission, an actionable unknown runtime refuses the entire destructive batch. Stopped
+intent accepted by the command remains recorded for retry. Safe PID repair and fresh observation
+precede that decision after shared workload preparation; a failed repair write prevents status or
+teardown from continuing with stale identity. Named stop remains synchronous, and an off parent is
+never activated solely to stop its children.
+
+Named and batch teardown share the same remote protocol for complete-fingerprint runtimes. Every
+teardown stopped-state update, including incomplete-runtime recovery, stopped-row socket cleanup,
+and legacy exact-session teardown, compares the original session, run, and nullable runtime fields
+copied before remote observations. A changed identity causes a conflict instead of overwriting the
+newer state. Recording incomplete or absent identity for persistence does not authorize native
+cleanup or make a row eligible for parallel teardown.
+
+An interrupt cancels teardown that has not started but cannot terminate a running worker safely.
+Agentworks visibly drains bounded in-flight work, persists every verified result, and then exits as
+interrupted. During a quiet concurrent wait it reports completed, active, and queued counts every
+five seconds.
+
 `--force` is intentionally narrow. It permits stale dedicated-socket cleanup only after the stored
 boot/PID/start-time fingerprint proves the old server process is absent. It does not turn unknown
 transport state, missing identity, PID reuse, or a matching live process into cleanup authority.
 
 The implementation is split between `cli/agentworks/sessions/manager/_status.py` (status
 derivation), `cli/agentworks/sessions/manager/_pids.py` (repair),
-`cli/agentworks/sessions/manager/_lifecycle.py` (command policy), and
+`cli/agentworks/sessions/manager/_lifecycle.py` (command policy),
+`cli/agentworks/sessions/manager/_teardown.py` (dedicated teardown and batch coordination), and
 `cli/agentworks/sessions/tmux.py` (exact tmux operations and fingerprint capture). The central
-regression suites are `cli/tests/test_session_liveness.py` and
-`cli/tests/sessions/test_singular_batch_orchestrated.py`.
+regression suites are `cli/tests/test_session_liveness.py`,
+`cli/tests/sessions/test_singular_batch_orchestrated.py`, and the focused batch teardown tests.

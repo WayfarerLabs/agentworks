@@ -7,10 +7,11 @@ from typing import TYPE_CHECKING
 
 import agentworks.sessions.manager as _mgr
 from agentworks import output
-from agentworks.db import PID_STOPPED, SessionMode
+from agentworks.db import PID_STOPPED, DatabaseDriverError, SessionMode, SessionRuntimeSnapshot
 from agentworks.errors import (
     ConnectivityError,
     NotFoundError,
+    StateConflictError,
     StateError,
     UserAbort,
 )
@@ -107,6 +108,7 @@ def _repair_session_pid(
         require_socket_path,
     )
 
+    expected = SessionRuntimeSnapshot.from_session(session)
     sock = session.socket_path
     if sock is None:
         presence = probe_tmux_session(
@@ -146,8 +148,8 @@ def _repair_session_pid(
             if session.pid != PID_STOPPED and session.boot_id is None:
                 boot_id = _mgr._get_boot_id(target)
                 if boot_id is not None:
-                    db.update_session_runtime(
-                        session.name, socket_path=None, pid=None, boot_id=boot_id, tmux_server_start_ticks=None
+                    db.compare_and_set_session_runtime_repair(
+                        expected, socket_path=None, pid=None, boot_id=boot_id, tmux_server_start_ticks=None
                     )
                 raise StateError(
                     f"session '{session.name}' has no recorded launch identity",
@@ -192,8 +194,8 @@ def _repair_session_pid(
                     )
                 )
             ):
-                db.update_session_runtime(
-                    session.name,
+                db.compare_and_set_session_runtime_repair(
+                    expected,
                     socket_path=sock,
                     pid=fingerprint.pid,
                     boot_id=observed_boot_id,
@@ -226,8 +228,8 @@ def _repair_session_pid(
         if session.boot_id is None:
             boot_id = _mgr._get_boot_id(target)
             if boot_id is not None:
-                db.update_session_runtime(
-                    session.name,
+                db.compare_and_set_session_runtime_repair(
+                    expected,
                     socket_path=sock,
                     pid=None,
                     boot_id=boot_id,
@@ -247,8 +249,8 @@ def _repair_session_pid(
                 hint="Investigate the tmux server manually.",
             )
 
-    db.update_session_runtime(
-        session.name,
+    db.compare_and_set_session_runtime_repair(
+        expected,
         socket_path=sock,
         pid=PID_STOPPED,
         boot_id=None,
@@ -310,8 +312,6 @@ def _prove_stored_runtime_absent(
     sudo: bool = False,
 ) -> bool:
     """Prove the stored process incarnation absent without signaling its PID."""
-    from agentworks.sessions.tmux import ProbeStatus, probe_process_start_ticks
-
     if session.boot_id is None:
         raise StateError(
             f"session '{session.name}' lacks the stored identity required to prove runtime absence",
@@ -320,46 +320,72 @@ def _prove_stored_runtime_absent(
         )
     stored_boot_id = _validated_stored_boot_id(session)
     stored_ticks = _validated_stored_start_ticks(session)
+    return _prove_runtime_absent(
+        session_name=session.name,
+        stored_pid=session.pid,
+        stored_boot_id=stored_boot_id,
+        stored_start_ticks=stored_ticks,
+        target=target,
+        sudo=sudo,
+    )
+
+
+def _prove_runtime_absent(
+    *,
+    session_name: str,
+    stored_pid: int | None,
+    stored_boot_id: str,
+    stored_start_ticks: int | None,
+    target: Transport,
+    sudo: bool = False,
+) -> bool:
+    """Prove one validated process incarnation absent from primitive fields."""
+    from agentworks.sessions.tmux import ProbeStatus, probe_process_start_ticks
+
     current_boot = _mgr._get_boot_id(target)
     if current_boot is None:
         raise ConnectivityError(
-            f"could not read the VM boot identity for session '{session.name}'",
+            f"could not read the VM boot identity for session '{session_name}'",
             entity_kind="session",
-            entity_name=session.name,
+            entity_name=session_name,
         )
     if current_boot != stored_boot_id:
         return True
 
-    if session.pid is None or session.pid <= 0:
+    if stored_pid is None or stored_pid <= 0:
         raise StateError(
-            f"session '{session.name}' has an uncertain launch from the current VM boot",
+            f"session '{session_name}' has an uncertain launch from the current VM boot",
             entity_kind="session",
-            entity_name=session.name,
+            entity_name=session_name,
             hint="Stop and start its VM, then retry this operation to prove the old workload is gone.",
         )
 
-    pid_presence = _mgr._pid_presence(session.pid, target=target, sudo=sudo)
+    pid_presence = _mgr._pid_presence(stored_pid, target=target, sudo=sudo)
     if pid_presence is ProbeStatus.ABSENT:
         return True
     if pid_presence is ProbeStatus.UNKNOWN:
         raise ConnectivityError(
-            f"could not determine whether the stored process for session '{session.name}' exists",
+            f"could not determine whether the stored process for session '{session_name}' exists",
             entity_kind="session",
-            entity_name=session.name,
+            entity_name=session_name,
         )
-    if stored_ticks is None:
+    if stored_start_ticks is None:
         return False
 
-    ticks = probe_process_start_ticks(session.pid, target=target, sudo=sudo)
+    ticks = probe_process_start_ticks(stored_pid, target=target, sudo=sudo)
     if ticks.status is ProbeStatus.ABSENT:
-        return _mgr._pid_presence(session.pid, target=target, sudo=sudo) is ProbeStatus.ABSENT
+        return _mgr._pid_presence(stored_pid, target=target, sudo=sudo) is ProbeStatus.ABSENT
     if ticks.status is ProbeStatus.UNKNOWN or ticks.value is None:
+        # The process may exit between the presence probe and the stat read.
+        # Require an explicit absence fact rather than treating unreadable stat as absence.
+        if _mgr._pid_presence(stored_pid, target=target, sudo=sudo) is ProbeStatus.ABSENT:
+            return True
         raise StateError(
-            f"could not verify the stored process start time for session '{session.name}'",
+            f"could not verify the stored process start time for session '{session_name}'",
             entity_kind="session",
-            entity_name=session.name,
+            entity_name=session_name,
         )
-    return ticks.value != stored_ticks
+    return ticks.value != stored_start_ticks
 
 
 def _needs_repair(session: SessionRow) -> bool:
@@ -429,6 +455,8 @@ def ensure_pids_batch(
             try:
                 if _repair_session_pid(session, target=target, db=db, announce=announce):
                     repaired_names.add(session.name)
+            except (StateConflictError, DatabaseDriverError):
+                raise
             except (ConnectivityError, StateError) as exc:
                 if announce:
                     output.warn(str(exc))

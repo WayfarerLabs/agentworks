@@ -116,6 +116,27 @@ def test_off_parent_stop_records_proven_absence_without_transport(tmp_path, monk
     db.close()
 
 
+@pytest.mark.parametrize("already_stopped", [False, True])
+def test_off_parent_stop_cannot_overwrite_an_intervening_run(tmp_path, monkeypatch, already_stopped):
+    from uuid import uuid4
+
+    from agentworks.db import PID_STOPPED, SessionRuntimeSnapshot
+
+    db, _ = _restart_fixture(tmp_path, monkeypatch)
+    prepared = prepare_session_stop(db, SimpleNamespace(), _session(db), parent_off=True)
+    db._conn.execute("UPDATE sessions SET run_id = ? WHERE name = ?", (str(uuid4()), "s1"))
+    db._conn.commit()
+    if already_stopped:
+        db.update_session_runtime(
+            "s1", socket_path=_session(db).socket_path, pid=PID_STOPPED, boot_id=None, tmux_server_start_ticks=None
+        )
+    before = SessionRuntimeSnapshot.from_session(_session(db))
+    with pytest.raises(StateError):
+        execute_session_stop(prepared)
+    assert SessionRuntimeSnapshot.from_session(_session(db)) == before
+    db.close()
+
+
 @pytest.mark.parametrize("control_signal", [UserAbort, KeyboardInterrupt])
 def test_prepared_stop_propagates_cancellation_without_marking_runtime_stopped(tmp_path, monkeypatch, control_signal):
     db, _ = _restart_fixture(tmp_path, monkeypatch)

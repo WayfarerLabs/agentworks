@@ -26,6 +26,7 @@ from agentworks.db.models import (
     _canonical_session_identity,
     _canonical_vm_identity,
     _runtime_state,
+    _validate_session_runtime_fields,
 )
 
 if TYPE_CHECKING:
@@ -46,6 +47,7 @@ if TYPE_CHECKING:
         ProvisioningStatus,
         SessionMode,
         SessionRow,
+        SessionRuntimeSnapshot,
         ShellEntry,
         VMEventRow,
         VMRow,
@@ -990,18 +992,7 @@ class Database:
         tmux_server_start_ticks: int | None,
     ) -> None:
         """Persist a runtime fingerprint or the boot of an uncertain launch."""
-        if pid is not None and pid != _db.PID_STOPPED and pid <= 0:
-            raise ValueError(f"invalid runtime PID: {pid}")
-        if (
-            pid is not None
-            and pid > 0
-            and (boot_id is None or tmux_server_start_ticks is None or tmux_server_start_ticks <= 0)
-        ):
-            raise ValueError("a live runtime requires boot ID and positive process start time")
-        if pid == _db.PID_STOPPED and (boot_id is not None or tmux_server_start_ticks is not None):
-            raise ValueError("a stopped runtime cannot retain a process fingerprint")
-        if pid is None and tmux_server_start_ticks is not None:
-            raise ValueError("an unknown runtime cannot retain process start time")
+        _validate_session_runtime_fields(pid=pid, boot_id=boot_id, tmux_server_start_ticks=tmux_server_start_ticks)
         self._conn.execute(
             "UPDATE sessions SET socket_path = ?, pid = ?, boot_id = ?, "
             "tmux_server_start_ticks = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') "
@@ -1009,6 +1000,131 @@ class Database:
             (socket_path, pid, boot_id, tmux_server_start_ticks, name),
         )
         self._commit_unless_in_tx()
+
+    def _update_session_runtime_if_unchanged(
+        self,
+        expected: SessionRuntimeSnapshot,
+        *,
+        socket_path: str | None,
+        pid: int | None,
+        boot_id: str | None,
+        tmux_server_start_ticks: int | None,
+    ) -> bool:
+        """Replace runtime fields only while all original persisted identity fields match."""
+        result = self._conn.execute(
+            "UPDATE sessions SET socket_path = ?, pid = ?, boot_id = ?, tmux_server_start_ticks = ?, "
+            "updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') "
+            "WHERE name = ? AND session_uuid = ? AND run_id IS ? AND socket_path IS ? "
+            "AND pid IS ? AND boot_id IS ? AND tmux_server_start_ticks IS ?",
+            (
+                socket_path,
+                pid,
+                boot_id,
+                tmux_server_start_ticks,
+                expected.name,
+                expected.session_uuid,
+                expected.run_id,
+                expected.socket_path,
+                expected.pid,
+                expected.boot_id,
+                expected.tmux_server_start_ticks,
+            ),
+        )
+        self._commit_unless_in_tx()
+        return result.rowcount == 1
+
+    def compare_and_set_session_runtime_repair(
+        self,
+        expected: SessionRuntimeSnapshot,
+        *,
+        socket_path: str | None,
+        pid: int | None,
+        boot_id: str | None,
+        tmux_server_start_ticks: int | None,
+    ) -> None:
+        """Record a validated repair only while its original persisted snapshot matches."""
+        _validate_session_runtime_fields(pid=pid, boot_id=boot_id, tmux_server_start_ticks=tmux_server_start_ticks)
+        if not self._update_session_runtime_if_unchanged(
+            expected,
+            socket_path=socket_path,
+            pid=pid,
+            boot_id=boot_id,
+            tmux_server_start_ticks=tmux_server_start_ticks,
+        ):
+            from agentworks.errors import StateConflictError
+
+            raise StateConflictError(
+                f"session '{expected.name}' identity changed before its runtime could be repaired",
+                entity_kind="session",
+                entity_name=expected.name,
+                hint="Inspect the current session runtime before retrying.",
+            )
+
+    def complete_session_runtime_identity(
+        self,
+        expected: SessionRuntimeSnapshot,
+        *,
+        boot_id: str,
+        tmux_server_start_ticks: int,
+    ) -> None:
+        """Persist observed identity only while its original runtime snapshot still holds."""
+        if not self._update_session_runtime_if_unchanged(
+            expected,
+            socket_path=expected.socket_path,
+            pid=expected.pid,
+            boot_id=boot_id,
+            tmux_server_start_ticks=tmux_server_start_ticks,
+        ):
+            from agentworks.errors import StateError
+
+            raise StateError(
+                f"session '{expected.name}' identity changed before its runtime could be completed",
+                entity_kind="session",
+                entity_name=expected.name,
+                hint="Inspect the current session runtime before retrying.",
+            )
+
+    def compare_and_set_session_stopped(
+        self,
+        expected: SessionRuntimeSnapshot,
+    ) -> None:
+        """Clear one runtime only when its original persisted identity matches.
+
+        Durable session, managed-run, and runtime identities are a
+        cross-process boundary. A zero-row update is accepted only when an
+        interrupted prior attempt already committed the exact desired stopped
+        state for all three; every other mismatch stays untouched and fails
+        closed.
+        """
+        if self._update_session_runtime_if_unchanged(
+            expected,
+            socket_path=expected.socket_path,
+            pid=_db.PID_STOPPED,
+            boot_id=None,
+            tmux_server_start_ticks=None,
+        ):
+            return
+
+        session = self.get_session(expected.name)
+        if (
+            session is not None
+            and session.session_uuid == expected.session_uuid
+            and session.run_id == expected.run_id
+            and session.socket_path == expected.socket_path
+            and session.pid == _db.PID_STOPPED
+            and session.boot_id is None
+            and session.tmux_server_start_ticks is None
+        ):
+            return
+
+        from agentworks.errors import StateError
+
+        raise StateError(
+            f"session '{expected.name}' runtime identity changed before stopped state could be persisted",
+            entity_kind="session",
+            entity_name=expected.name,
+            hint="Inspect the current session runtime before retrying.",
+        )
 
     def record_session_started(self, name: str) -> None:
         """Record a successful managed tmux creation."""

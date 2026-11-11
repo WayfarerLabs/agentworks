@@ -5,7 +5,8 @@ from __future__ import annotations
 from contextlib import ExitStack
 from typing import TYPE_CHECKING
 
-from agentworks.errors import UserAbort
+from agentworks.db import DatabaseDriverError
+from agentworks.errors import StateConflictError, UserAbort
 
 from ._execute import execute_deferred_work, final_observations, resolve_workload_boundary
 from ._models import RuntimeInvocation, render_results, require_success
@@ -63,6 +64,12 @@ def run_selected(
             results = tuple(invocation.results.values())
             render_results(results)
             require_success(results)
+        except (StateConflictError, DatabaseDriverError) as error:
+            for kind, name in tuple(invocation.results):
+                if (kind, name) not in invocation.completed and not invocation.unavailable(kind, name):
+                    invocation.fail(kind, name, error, blocked=True)
+            render_results(tuple(invocation.results.values()))
+            raise
         except (UserAbort, KeyboardInterrupt):
             for kind, name in tuple(invocation.results):
                 if (kind, name) not in invocation.completed and not invocation.unavailable(kind, name):

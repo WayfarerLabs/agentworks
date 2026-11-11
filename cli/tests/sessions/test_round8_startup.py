@@ -16,7 +16,7 @@ from agentworks.db import PID_STOPPED, SessionStatus
 from agentworks.errors import AgentworksError, ExternalError, StateError, ValidationError
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import manager, tmux
-from agentworks.sessions.manager import _lifecycle, _pids
+from agentworks.sessions.manager import _lifecycle, _pids, _teardown
 from agentworks.status_observation import GUEST_OBSERVATION_ATTEMPTS, GUEST_OBSERVATION_TIMEOUT_SECONDS
 
 from .test_create_start_restart_orchestrated import BOOT_ID, _patch_transports, _requiring_template, _restart_fixture
@@ -37,7 +37,7 @@ pytestmark = pytest.mark.skipif(os.name != "posix", reason="uses Linux guest run
 def bind_native_runtime(db, monkeypatch, native: NativeTarget) -> None:
     native.socket = str(native.root / "agt-a1" / "s1.sock")
     Path(native.socket).parent.mkdir()
-    monkeypatch.setattr(_lifecycle, "AGENT_SOCKET_ROOT", str(native.root))
+    monkeypatch.setattr(_teardown, "AGENT_SOCKET_ROOT", str(native.root))
     monkeypatch.setattr(manager, "_teardown_session", _lifecycle._teardown_session)
     _patch_transports(monkeypatch, native, native)
     _requiring_template(monkeypatch, "sh")

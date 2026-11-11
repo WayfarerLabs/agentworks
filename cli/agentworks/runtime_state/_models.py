@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 
 type Kind = Literal["vm", "session", "console"]
 type ResourceKey = tuple[Kind, str]
-type SessionOperation = Literal["start", "restart", "stop"]
+type SessionOperation = Literal["start", "restart", "stop", "stop-all"]
 
 
 class Outcome(StrEnum):

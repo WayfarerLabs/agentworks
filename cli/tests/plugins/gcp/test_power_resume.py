@@ -115,14 +115,18 @@ def test_power_transition_settles_before_dispatch(
     ready = compute_v1.Instance(compute_v1.Instance.to_dict(original))
     ready.status = settled
     sleep_calls: list[float] = []
+    elapsed = 0.0
 
     def finish_transition(seconds: float) -> None:
+        nonlocal elapsed
+        elapsed += seconds
         assert not cache.instances.start_requests
         assert not cache.instances.resume_requests
         sleep_calls.append(seconds)
         cache.instances.resource = ready
 
     monkeypatch.setattr("agentworks.plugins.gcp.instance.time.sleep", finish_transition)
+    monkeypatch.setattr("agentworks.plugins.gcp.instance.time.monotonic", lambda: elapsed)
     platform.start(vm, _ctx())
 
     assert sleep_calls == [2.0]

@@ -39,7 +39,7 @@ def prepare_local_workloads(invocation: RuntimeInvocation) -> None:
             vm_name = session_vm_name(invocation, session)
             target = (
                 DesiredRuntimeState.STOPPED
-                if invocation.operation == "stop"
+                if invocation.operation in {"stop", "stop-all"}
                 else DesiredRuntimeState.RUNNING
                 if invocation.operation is not None
                 else session.desired_runtime_state
@@ -93,7 +93,7 @@ def prepare_local_workloads(invocation: RuntimeInvocation) -> None:
             vm = invocation.vms[vm_name]
             target = (
                 DesiredRuntimeState.STOPPED
-                if invocation.operation == "stop"
+                if invocation.operation in {"stop", "stop-all"}
                 else DesiredRuntimeState.RUNNING
                 if invocation.operation is not None
                 else session.desired_runtime_state
@@ -320,6 +320,9 @@ def prepare_guest_workloads(invocation: RuntimeInvocation) -> None:
                     if prepared.requires_launch
                     else "recover-startup",
                 )
+            elif invocation.operation in {"stop", "stop-all"}:
+                # Explicit stop repairs through admin access after the secret barrier.
+                invocation.record("session", name, action="stop")
             elif (
                 vm_name in invocation.selection.explicit_vms
                 and vm.desired_runtime_state is DesiredRuntimeState.STOPPED

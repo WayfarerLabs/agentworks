@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING
 
 import agentworks.sessions.manager as _mgr
 from agentworks.capabilities.harness_integration import HarnessLaunchIntent
-from agentworks.db import PID_STOPPED, DesiredRuntimeState, SessionMode, SessionStatus
-from agentworks.errors import BrokenStateError, NotFoundError, StateError
+from agentworks.db import PID_STOPPED, DesiredRuntimeState, SessionMode, SessionRuntimeSnapshot, SessionStatus
+from agentworks.errors import BrokenStateError, NotFoundError, StateConflictError, StateError
 
 from ._runtime_observation import (
     can_checkpoint_session,
@@ -253,7 +253,7 @@ def prepare_session_launch(definition: SessionLaunchDefinition) -> PreparedSessi
     from agentworks.sessions.tmux import startup_protection_enabled
 
     db, config, session = definition.db, definition.config, definition.session
-    from agentworks.sessions.manager._lifecycle import _validated_socket_path
+    from agentworks.sessions.manager._teardown import _validated_socket_path
 
     current = require_session_launch_identity(definition)
     if current.workspace_name != definition.workspace.name:
@@ -421,14 +421,17 @@ def execute_session_stop(prepared: PreparedSessionStop) -> bool:
     if session.desired_runtime_state != prepared.session.desired_runtime_state:
         raise StateError("session target changed before teardown", entity_kind="session", entity_name=session.name)
     if prepared.parent_off:
-        from ._lifecycle import _mark_stopped
-
         changed = (
             session.pid != PID_STOPPED or session.boot_id is not None or session.tmux_server_start_ticks is not None
         )
-        if changed:
-            _mark_stopped(prepared.db, session)
+        expected = SessionRuntimeSnapshot.from_session(prepared.session)
+        if changed or SessionRuntimeSnapshot.from_session(session) != expected:
+            prepared.db.compare_and_set_session_stopped(expected)
         return changed
+    if SessionRuntimeSnapshot.from_session(session) != SessionRuntimeSnapshot.from_session(prepared.session):
+        raise StateConflictError(
+            "session runtime changed before teardown", entity_kind="session", entity_name=session.name
+        )
     if prepared.checkpoint_only:
         assert prepared.admin_target is not None
         checkpoint_session_identity(prepared.db, session, vm=vm, admin_target=prepared.admin_target)

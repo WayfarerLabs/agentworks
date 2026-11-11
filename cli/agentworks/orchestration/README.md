@@ -148,7 +148,7 @@ workload boundary, `resolve()` checks required names against those failures befo
 call. An unrelated infrastructure credential failure stays local to its dependent VM family, while a
 required workload-secret failure prevents every deferred runtime action.
 
-Each prepared session retains its own graph, SESSION scope, admin transport, and owning user
+Each prepared session launch retains its own graph, SESSION scope, admin transport, and owning user
 transport. A SYSTEM sweep would skip real harness command checks, and one session's context cannot
 stand in for another's. Prepared runtime helpers call each node's source-free `preflight` with the
 right context; they do not predict workload secrets separately for each candidate. Per-candidate
@@ -175,6 +175,20 @@ provider and workload value copies, closes the Resolver, and releases holds and 
 clears owned values and refuses later reads or source calls, including when preparation never
 reached the workload boundary. Final observations are bounded checks of the current domain states,
 not an automatic retry loop or an uptime guarantee.
+
+Explicit named and bulk stops retain their selected rows through the shared boundary. Safe
+caller-thread PID repair then precedes status and teardown. Named stop retains its owning-user
+transport; bulk stop uses admin access with the existing sudo policy and does not require unused
+direct-agent SSH readiness. Only public bulk stop selects the dedicated teardown coordinator, with
+strict actionable-unknown refusal and serial compatibility work afterward. Reconciliation retains
+its independent-family behavior and read-only preparation.
+
+The native teardown coordinator owns its existing collision, submission, timeout and drain policy.
+It conditionally persists stopped evidence before notifying the invocation of a completed target.
+The notification runs on the caller thread and is idempotent across interrupted reconciliation, so
+completed siblings remain completed when cancellation eventually propagates. Family guards and the
+writable database remain owned until all submitted work drains. Stop-only paths do not acquire a
+hold that could boot an off VM.
 
 ## The Readiness Fold and Enablement
 

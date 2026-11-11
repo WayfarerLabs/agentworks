@@ -106,6 +106,12 @@ Stopping a VM uses its platform's ordinary stop policy and retains child targets
 needs no activation solely to stop its children; the result identifies that the guest was not
 inspected.
 
+Named session stop stays synchronous. Bulk session stop runs complete-fingerprint dedicated runtimes
+concurrently and handles incomplete or shared-server compatibility work serially afterward. An
+actionable unknown runtime refuses destructive bulk teardown before any session is stopped; accepted
+stopped intent remains available for retry. Reconciliation keeps independent-target recovery rather
+than applying that public bulk-stop refusal to unrelated families.
+
 ## Secrets, failure, and cancellation
 
 Reconciliation and batch session start/restart finish eligible workload checks and collect required

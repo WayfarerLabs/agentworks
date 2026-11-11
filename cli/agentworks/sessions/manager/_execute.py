@@ -14,8 +14,8 @@ from agentworks.orchestration.secrets import ScopedSecrets
 from agentworks.sessions.manager._lifecycle import (
     _mark_runtime_unknown,
     _redacted_launch_errors,
-    _validated_socket_path,
 )
+from agentworks.sessions.manager._teardown import _validated_socket_path
 from agentworks.ssh import SSHLogger
 
 if TYPE_CHECKING:

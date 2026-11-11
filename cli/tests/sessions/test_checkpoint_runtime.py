@@ -12,7 +12,7 @@ from agentworks.db import PID_STOPPED, SessionMode, SessionStatus
 from agentworks.errors import StateError
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import manager, tmux
-from agentworks.sessions.manager import _lifecycle
+from agentworks.sessions.manager import _teardown
 from tests.sessions.test_create_start_restart_orchestrated import _create_stubs
 from tests.sessions.test_create_start_restart_orchestrated import _stub_build_registry as _stub_build_registry
 from tests.sessions.test_native_startup import _NATIVE_CAPTURE, launch
@@ -27,7 +27,7 @@ def test_checkpoint_then_changed_boot_observation_enables_safe_ordinary_start(
 ):
     db = _create_stubs(tmp_path, monkeypatch, [])
     bind_native_runtime(db, monkeypatch, native)
-    monkeypatch.setattr(_lifecycle, "ADMIN_SOCKET_ROOT", str(native.root))
+    monkeypatch.setattr(_teardown, "ADMIN_SOCKET_ROOT", str(native.root))
     native.socket = str(native.root / "admin" / "s1.sock")
     Path(native.socket).parent.mkdir(exist_ok=True)
     db.insert_session("s1", "ws1", "claude", SessionMode.ADMIN, socket_path=None if null_address else native.socket)
@@ -68,7 +68,7 @@ def test_checkpoint_refuses_present_or_unknown_native_server_without_writing_ide
 ):
     db = _create_stubs(tmp_path, monkeypatch, [])
     bind_native_runtime(db, monkeypatch, native)
-    monkeypatch.setattr(_lifecycle, "ADMIN_SOCKET_ROOT", str(native.root))
+    monkeypatch.setattr(_teardown, "ADMIN_SOCKET_ROOT", str(native.root))
     native.socket = str(native.root / "admin" / "s1.sock")
     Path(native.socket).parent.mkdir(exist_ok=True)
     null_address = "default" in obstruction

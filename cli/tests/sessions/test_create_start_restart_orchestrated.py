@@ -31,7 +31,7 @@ from agentworks.artifacts.declarations import ArtifactsConfig
 from agentworks.bootstrap import build_registry as _real_build_registry
 from agentworks.bootstrap import load_request_registry as _real_load_request_registry
 from agentworks.capabilities.harness_integration import HarnessLaunchIntent, HarnessStart, ShellIntegration
-from agentworks.db import Database, InitStatus, SessionMode, SessionStatus
+from agentworks.db import Database, InitStatus, SessionMode, SessionRuntimeSnapshot, SessionStatus
 from agentworks.errors import AgentworksError, NotFoundError, StateError, UserAbort, ValidationError
 from agentworks.secrets.orchestration import (
     resolve_for_command as _real_resolve_for_command,
@@ -241,9 +241,7 @@ def _restart_fixture(
     def teardown(session, **kwargs):
         events.append("kill")
         runtime_status[0] = SessionStatus.STOPPED
-        from agentworks.sessions.manager._lifecycle import _mark_stopped
-
-        _mark_stopped(db, session)
+        db.compare_and_set_session_stopped(SessionRuntimeSnapshot.from_session(session))
 
     def launch(*args, **kwargs):
         result = _acknowledged_launch(events, "/run/agentworks/agent-tmux-sockets/agt-a1/s1.sock", **kwargs)

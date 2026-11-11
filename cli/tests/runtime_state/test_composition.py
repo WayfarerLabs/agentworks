@@ -167,9 +167,30 @@ def test_repeated_session_reconcile_preserves_healthy_runtime_identity(db, make_
 
 
 def test_workload_secret_failure_blocks_all_tmux_and_provider_stops(db, make_config, runtime, monkeypatch):
-    powers, _, events = runtime
+    powers, statuses, events = runtime
     seed_vm(db, "launch")
     seed_session(db, "work", "launch", template="requires-token")
+    seed_session(db, "stop-me", "launch", target=DesiredRuntimeState.STOPPED)
+    db.update_session_runtime(
+        "stop-me", socket_path=db.get_session("stop-me").socket_path, pid=4243, boot_id=BOOT, tmux_server_start_ticks=1
+    )
+    statuses["stop-me"] = SessionStatus.RUNNING
+    before_stop = db.get_session("stop-me")
+    prepared_stops = []
+    prepare_stop = manager.prepare_session_stop
+
+    def prepare(*args, **kwargs):
+        prepared = prepare_stop(*args, **kwargs)
+        prepared_stops.append(prepared)
+        return prepared
+
+    monkeypatch.setattr(manager, "prepare_session_stop", prepare)
+    monkeypatch.setattr(
+        manager, "_build_session_target", lambda *a, **k: manager.transport(db.get_vm("launch"), object())
+    )
+    monkeypatch.setattr(
+        manager, "_teardown_session", lambda *a, **k: pytest.fail("session stopped before shared secrets")
+    )
     seed_vm(db, "shutdown", target=DesiredRuntimeState.STOPPED)
     powers["shutdown"] = VMStatus.RUNNING
     create_console_record(db, name="view", vm_name="launch", session_specs=[], add_admin_shell=True)
@@ -193,6 +214,10 @@ def test_workload_secret_failure_blocks_all_tmux_and_provider_stops(db, make_con
         reconcile_vm(db, config, all_vms=True, interaction=REFUSE)
     assert not any(action in {"session-start", "vm-stop"} for action, _ in events)
     assert powers["shutdown"] is VMStatus.RUNNING
+    assert db.get_session("stop-me") == before_stop
+    assert len(prepared_stops) == 1
+    assert prepared_stops[0].session.name == "stop-me"
+    assert prepared_stops[0].observed_status is SessionStatus.RUNNING
 
 
 def test_off_child_stop_never_enters_guest_or_hold(db, make_config, runtime, monkeypatch):

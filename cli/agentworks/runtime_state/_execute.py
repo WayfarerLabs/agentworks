@@ -28,6 +28,7 @@ def resolve_workload_boundary(invocation: RuntimeInvocation) -> bool:
     )
     if not (
         invocation.launches
+        or invocation.operation in {"stop", "stop-all"}
         or invocation.stops
         or invocation.console_starts
         or invocation.console_stops
@@ -78,7 +79,11 @@ def execute_deferred_work(invocation: RuntimeInvocation) -> None:
             raise
         except Exception as error:
             invocation.fail("session", name, error)
-    for name, prepared_stop in invocation.stops.items():
+    if invocation.operation in {"stop", "stop-all"}:
+        from ._session_stop import execute_public_stops
+
+        execute_public_stops(invocation)
+    for name, prepared_stop in () if invocation.operation in {"stop", "stop-all"} else invocation.stops.items():
         try:
             changed = sessions.execute_session_stop(prepared_stop)
             invocation.record(
