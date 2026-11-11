@@ -190,6 +190,12 @@ completed siblings remain completed when cancellation eventually propagates. Fam
 writable database remain owned until all submitted work drains. Stop-only paths do not acquire a
 hold that could boot an off VM.
 
+The shared prepared-stop helper validates the original session/runtime snapshot, parent route and
+desired target before returning for an off parent. That path retains every runtime fingerprint field
+and reports no runtime change. An inactive provider observation can include suspended memory;
+retaining evidence permits the ordinary native identity checks after resume. Native teardown and
+verified absence continue to use the existing conditional runtime-persistence authorities.
+
 ## The Readiness Fold and Enablement
 
 Distinct from the per-command lifecycle above, and far cheaper than it, is a second question: **can

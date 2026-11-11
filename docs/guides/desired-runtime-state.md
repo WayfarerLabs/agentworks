@@ -106,6 +106,13 @@ Stopping a VM uses its platform's ordinary stop policy and retains child targets
 needs no activation solely to stop its children; the result identifies that the guest was not
 inspected.
 
+While a parent is off, session stop and stopped-target reconciliation retain the last known runtime
+fingerprint. Platforms can preserve guest memory during suspension, so the stored PID, boot and
+process start time remain useful ownership evidence after resume. The current result reports the
+session inactive without clearing that evidence. Once the VM is reachable, reconcile again to stop a
+surviving runtime whose desired state is stopped. A real shutdown followed by a new boot uses the
+existing absence and recovery checks.
+
 Named session stop stays synchronous. Bulk session stop runs complete-fingerprint dedicated runtimes
 concurrently and handles incomplete or shared-server compatibility work serially afterward. An
 actionable unknown runtime refuses destructive bulk teardown before any session is stopped; accepted

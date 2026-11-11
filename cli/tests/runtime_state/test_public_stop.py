@@ -200,13 +200,14 @@ def test_off_parent_explicit_stop_never_opens_transport_repairs_observes_guest_o
     seed_vm(db, "box", target=DesiredRuntimeState.STOPPED)
     _running(db, statuses, "work", "box")
     powers["box"] = VMStatus.STOPPED
+    before = SessionRuntimeSnapshot.from_session(db.get_session("work"))
     for method in ["transport", "ensure_pids_batch", "observe_session_statuses", "_build_session_target"]:
         monkeypatch.setattr(manager, method, lambda *a, **k: pytest.fail("off parent reached guest work"))
     if bulk:
         manager.stop_all_sessions(db, make_config(), interaction=REFUSE)
     else:
         manager.stop_session(db, make_config(), name="work", interaction=REFUSE)
-    assert db.get_session("work").pid == PID_STOPPED
+    assert SessionRuntimeSnapshot.from_session(db.get_session("work")) == before
     assert db.get_session("work").desired_runtime_state is DesiredRuntimeState.STOPPED
     assert not events
 

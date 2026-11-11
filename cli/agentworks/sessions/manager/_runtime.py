@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 import agentworks.sessions.manager as _mgr
 from agentworks.capabilities.harness_integration import HarnessLaunchIntent
-from agentworks.db import PID_STOPPED, DesiredRuntimeState, SessionMode, SessionRuntimeSnapshot, SessionStatus
+from agentworks.db import DesiredRuntimeState, SessionMode, SessionRuntimeSnapshot, SessionStatus
 from agentworks.errors import BrokenStateError, NotFoundError, StateConflictError, StateError
 
 from ._runtime_observation import (
@@ -416,22 +416,22 @@ def execute_session_stop(prepared: PreparedSessionStop) -> bool:
     session = _require_selected_session(prepared.db, prepared.session.name, prepared.session.session_uuid)
     workspace = _mgr._require_workspace(prepared.db, session.workspace_name)
     vm = _mgr._require_vm_for_workspace(prepared.db, workspace)
-    if vm.vm_uuid != prepared.vm.vm_uuid or workspace.name != prepared.workspace.name:
+    if (
+        vm.vm_uuid != prepared.vm.vm_uuid
+        or vm.name != prepared.vm.name
+        or workspace.name != prepared.workspace.name
+        or workspace.vm_name != prepared.workspace.vm_name
+    ):
         raise StateError("session parent changed before teardown", entity_kind="session", entity_name=session.name)
     if session.desired_runtime_state != prepared.session.desired_runtime_state:
         raise StateError("session target changed before teardown", entity_kind="session", entity_name=session.name)
-    if prepared.parent_off:
-        changed = (
-            session.pid != PID_STOPPED or session.boot_id is not None or session.tmux_server_start_ticks is not None
-        )
-        expected = SessionRuntimeSnapshot.from_session(prepared.session)
-        if changed or SessionRuntimeSnapshot.from_session(session) != expected:
-            prepared.db.compare_and_set_session_stopped(expected)
-        return changed
     if SessionRuntimeSnapshot.from_session(session) != SessionRuntimeSnapshot.from_session(prepared.session):
         raise StateConflictError(
             "session runtime changed before teardown", entity_kind="session", entity_name=session.name
         )
+    if prepared.parent_off:
+        # Inactive power is not proof of process death: suspended memory may resume.
+        return False
     if prepared.checkpoint_only:
         assert prepared.admin_target is not None
         checkpoint_session_identity(prepared.db, session, vm=vm, admin_target=prepared.admin_target)

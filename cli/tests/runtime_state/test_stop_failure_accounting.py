@@ -136,8 +136,9 @@ def test_parent_shutdown_does_not_hide_named_or_serial_execution_failure(
 
 
 @pytest.mark.parametrize("operation", ["named", "bulk", "reconcile"])
-def test_off_parent_stopped_cas_conflict_remains_failed_and_preserves_new_run(
-    db, make_config, runtime, monkeypatch, operation
+@pytest.mark.parametrize("change", ["run", "fingerprint"])
+def test_off_parent_execution_revalidates_original_identity_without_writing_runtime(
+    db, make_config, runtime, monkeypatch, operation, change
 ):
     powers, statuses, _ = runtime
     seed_vm(db, "box", target=DesiredRuntimeState.STOPPED)
@@ -149,15 +150,28 @@ def test_off_parent_stopped_cas_conflict_remains_failed_and_preserves_new_run(
     powers["box"] = VMStatus.STOPPED
     before = db.get_session("bad")
     replacement_run = str(uuid4())
-    original_cas = db.compare_and_set_session_stopped
+    good_before = SessionRuntimeSnapshot.from_session(db.get_session("good")) if operation == "bulk" else None
+    original_execute = manager.execute_session_stop
 
-    def cas(expected):
-        if expected.name == "bad":
+    def execute(prepared):
+        if prepared.session.name == "bad":
             with closing(Database(db.path)) as other:
-                other.set_session_run_id("bad", replacement_run)
-        original_cas(expected)
+                if change == "run":
+                    other.set_session_run_id("bad", replacement_run)
+                else:
+                    other.update_session_runtime(
+                        "bad",
+                        socket_path=before.socket_path,
+                        pid=before.pid + 1,
+                        boot_id=before.boot_id,
+                        tmux_server_start_ticks=before.tmux_server_start_ticks + 1,
+                    )
+        return original_execute(prepared)
 
-    monkeypatch.setattr(db, "compare_and_set_session_stopped", cas)
+    monkeypatch.setattr(manager, "execute_session_stop", execute)
+    monkeypatch.setattr(
+        db, "compare_and_set_session_stopped", lambda *args: pytest.fail("OFF observation wrote runtime")
+    )
     rendered = []
     monkeypatch.setattr("agentworks.runtime_state._service.render_results", lambda rows: rendered.extend(rows))
     with pytest.raises(StateError):
@@ -171,9 +185,13 @@ def test_off_parent_stopped_cas_conflict_remains_failed_and_preserves_new_run(
     outcomes = {row.name: row.outcome for row in rendered if row.kind == "session"}
     assert outcomes["bad"] is Outcome.FAILED
     current = db.get_session("bad")
-    assert current.run_id == replacement_run
-    assert current.pid == before.pid and current.session_uuid == before.session_uuid
+    assert current.session_uuid == before.session_uuid
+    if change == "run":
+        assert current.run_id == replacement_run and current.pid == before.pid
+    else:
+        assert current.pid == before.pid + 1
+        assert current.tmux_server_start_ticks == before.tmux_server_start_ticks + 1
     assert current.desired_runtime_state is DesiredRuntimeState.STOPPED
     if operation == "bulk":
         assert outcomes["good"] is Outcome.CHANGED
-        assert db.get_session("good").pid == PID_STOPPED
+        assert SessionRuntimeSnapshot.from_session(db.get_session("good")) == good_before
