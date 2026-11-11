@@ -328,8 +328,8 @@ Claude translates client ID and callback port to `oauth.clientId` and `oauth.cal
 scopes to a space-separated `oauth.scopes` string. Codex uses `oauth.client_id` and
 `oauth.callback_port`, with the scopes list at the server level. Absent options remain absent; the
 native client selects its callback host/path and credential storage. A fixed port does not specify a
-complete callback URL. Codex callback behavior with only these public artifact options still needs
-native verification.
+complete callback URL. Callback URI and issuer compatibility depend on the provider; use the URI the
+native client displays.
 
 Grok accepts `{}` as an ordinary URL registration using native defaults. Any explicit public OAuth
 option defers that whole entry, preserving its prior native entry and claim while independent

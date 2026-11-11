@@ -198,12 +198,12 @@ remaining authentication task. Do not auto-login, retry through reinit or broade
 scope. Changed endpoint/client options may require authenticating again; a stable managed name does
 not prove the provider grant is still appropriate.
 
-Claude and Codex public options have native translation support. Codex callback behavior using only
-these public artifact options still needs native verification; rendering a port is not evidence of a
-successful login. Grok `{}` uses ordinary URL registration, but explicit public options defer the
-whole entry and leave prior claims/native bytes intact. Successful Grok MCP OAuth has not been
-established in bounded native checks; consult the installed native interface without assuming that
-Grok lacks OAuth or inventing a login command. Shell only publishes canonical data.
+Claude and Codex public options have native translation support. Callback URI and issuer
+compatibility depend on the provider. Use the URI the native client displays; a fixed port does not
+choose the callback host or path. Grok `{}` uses ordinary URL registration, but explicit public
+options defer the whole entry and leave prior claims/native bytes intact. Successful Grok MCP OAuth
+has not been established in bounded native checks; consult the installed native interface without
+assuming that Grok lacks OAuth or inventing a login command. Shell only publishes canonical data.
 
 Session carriers forward public OAuth fields, but successful native authentication against their
 invocation-only definitions has not been verified. This guide supplies no session-only login
