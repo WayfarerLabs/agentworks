@@ -456,13 +456,14 @@ Line numbers in this slice are at `60d347220`, the platform LLD's baseline.
       deadline, and a rekey refused before dispatch suggests rerunning it with its own `--secret`,
       `--prompt` and `--wait-for-share`. The round 6 delta review's optional items ride along: a
       test pins the 30-second cap under a long budget, and the docstrings say each wait is bounded.
-- [ ] Live evidence for round 7: on Proxmox, a rekey refused before dispatch (the guest agent not
-      answering) names `agw vm rekey NAME --secret SECRET --wait-for-share` when it was run with
-      those options, and a guest agent reached near the deadline sends nothing past it.
+- [ ] Live evidence for rounds 7 and 8: on Proxmox, a rekey refused before dispatch (the guest agent
+      not answering) asks for the same `agw vm rekey NAME` command again, with every option given,
+      and a guest agent reached near the deadline sends nothing past it.
 - [x] Round 8 (the round 7 integration report): a rekey refused before dispatch asks for the same
       command again, with every option given, rather than rebuilding one that could drop a global
-      option such as `--non-interactive`. The `run_as_root` contract, the guest agent and this LLD
-      state the HTTP channel's limit: each socket wait is bounded, not a whole response.
+      option such as `--non-interactive`. The `run_as_root` contract, the guest agent and the
+      platform LLD state the HTTP channel's limit: each socket wait is bounded, not a whole
+      response.
 
 Definition of done: core reaches a native channel only through `run_as_root` or `native_shell`, and
 no platform's private access imports a legacy module.

@@ -76,7 +76,9 @@ follows, in full:
 
 - Run `/bin/bash -s` as root through the platform's channel, write `script` to its stdin, close it,
   and return everything the channel printed on each stream when it ends or `deadline` seconds pass.
-  Stop waiting at the deadline; never claim the guest command stopped.
+  Stop waiting at the deadline; never claim the guest command stopped. A channel that reaches the
+  guest through an HTTP API bounds each socket wait by what remains, so a response that keeps
+  arriving can carry one request past the deadline.
 - Run it once. Never retry, never parse the output, never report an exit code: `RawRun` has no field
   for one, because no channel's status is trusted (WSL passes raw wait statuses through, per the
   salvage message, and an ssh 255 cannot be told from a guest 255).
@@ -500,21 +502,22 @@ minutes rather than after the repair's 600. Then, unless the pinging left none o
 (which raises `ChannelUnreachable` the same way), one `guest_agent_exec` of `["/bin/bash", "-s"]`
 with `input-data`, then `guest_agent_exec_status` every two seconds until it reports exit or the
 deadline passes. Each request's wait is bounded by what remains of the deadline, at most the API's
-30-second `REQUEST_TIMEOUT_SECONDS`. A socket timeout bounds connecting and each wait for data, not
-a whole response, so an API that keeps a response arriving can carry one request past the deadline;
-the `run_as_root` contract states the same limit for any channel over an HTTP API. The API is the
-site's own server, and enforcing a whole-response bound would mean replacing `urllib`, and the proxy
-support that comes with it, or reaching into private socket attributes. A poll carries only the PID,
-so a failed one is asked again at the next interval; only polls that keep failing for
-`STATUS_RETRY_SECONDS` (30 s) give up, as they do for an agent that restarted and lost the PID.
-Dispatch and status failures raise `ConnectivityError` with no stdin in the message
-(`transport.py:69-123`), except an HTTP 401 or 403, which raises `TokenRejectedError` at once; a
-status failure of either kind says the script may still be running, and a status failure from the
-API adds the API's own error text (an agent that restarted mid-script answers
-`Agent error: PID <pid> does not exist`), since that request carries only the PID. A dispatch
-failure adds none, since its request carries the script. A `_TruncatedQGAOutput` report raises
-`ConnectivityError` saying the script exited with its output cut short. No failure chains the API
-error, whose request quotes the script. `create` waits for cloud-init through it
+30-second `REQUEST_TIMEOUT_SECONDS`. A socket timeout bounds the TCP connect and each wait for data,
+not name resolution or a whole response, so an API that keeps a response arriving can carry one
+request past the deadline; the `run_as_root` contract states the same limit for any channel over an
+HTTP API. The operator's [2026-11-11 ruling](./frd.md#2026-11-11) keeps that limit documented rather
+than enforced: the API is the site's own server, and a whole-response bound would mean replacing
+`urllib` and the proxy support that comes with it, reaching into private socket attributes, or
+abandoning a worker thread at the deadline. A poll carries only the PID, so a failed one is asked
+again at the next interval; only polls that keep failing for `STATUS_RETRY_SECONDS` (30 s) give up,
+as they do for an agent that restarted and lost the PID. Dispatch and status failures raise
+`ConnectivityError` with no stdin in the message (`transport.py:69-123`), except an HTTP 401 or 403,
+which raises `TokenRejectedError` at once; a status failure of either kind says the script may still
+be running, and a status failure from the API adds the API's own error text (an agent that restarted
+mid-script answers `Agent error: PID <pid> does not exist`), since that request carries only the
+PID. A dispatch failure adds none, since its request carries the script. A `_TruncatedQGAOutput`
+report raises `ConnectivityError` saying the script exited with its output cut short. No failure
+chains the API error, whose request quotes the script. `create` waits for cloud-init through it
 (`cloud-init status --wait --long`, the cloud bootstrap's readiness command, 420 s, which covers the
 agent ping's 120 and cloud-init's 300, status 2 a warning, and any other failure quoting
 cloud-init's last lines as the cloud bootstrap does; a channel failure is asked again within that
@@ -788,9 +791,9 @@ updated row with `RECONNECT`, replacing the in-place repointing of a legacy tran
   (`_require_known_power_state`), rather than calling it not running.
 - A failed or unknown script raises naming the script, its status and the log, with the hint
   `agw vm recover NAME`. A rekey script whose channel raises `ChannelUnreachable` never ran, so the
-  error propagates at once, after the channel's own hint (a restart, on a cloud), with a rerun of
-  `agw vm rekey NAME` once the VM answers: recover's channel is the same one, so it could not do
-  better.
+  error propagates at once, after the channel's own hint (a restart, on a cloud), with the same
+  `agw vm rekey NAME` command again, with every option given, once the VM answers: recover's channel
+  is the same one, so it could not do better.
 - A final wait that returns `False` raises `VMNotAnswering`, whose hint names `agw vm recover NAME`,
   as `vm start` does; the new address is recorded first, since the old one died with the logout.
 - The per-step progress lines become one line before the call ("about a minute").

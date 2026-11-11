@@ -10,11 +10,12 @@ characters), unless the pinging left none of the deadline, then
 ``exec-status`` is polled every two seconds until the guest reports an exit
 or the deadline passes. Each request's wait is bounded by what remains of
 the deadline, at most the API's ``REQUEST_TIMEOUT_SECONDS``: a socket
-timeout bounds connecting and each wait for data, not a whole response, so
-an API that keeps a response arriving can carry one request past the
-deadline. A poll carries only the PID, so a failed one is asked again, since one missed answer says
-nothing of the script; polls that keep failing for ``STATUS_RETRY_SECONDS`` give up (a
-guest agent that restarted mid-script no longer knows the PID). QGA has no
+timeout bounds the TCP connect and each wait for data, not name resolution
+or a whole response, so an API that keeps a response arriving can carry one
+request past the deadline. A poll carries only the PID, so a failed one is
+asked again, since one missed answer says nothing of the script; polls that
+keep failing for ``STATUS_RETRY_SECONDS`` give up (a guest agent that
+restarted mid-script no longer knows the PID). QGA has no
 cancellation endpoint: at the deadline the result is empty, so the outcome
 is unknown, and nothing is dispatched again. No message holds the script,
 because it can carry a secret: a failed dispatch, whose request carries the
