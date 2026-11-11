@@ -98,6 +98,12 @@ MIGRATED_FILES = (
     "artifacts/git_excludes.py",
     "artifacts/session_paths.py",
     "harness_setup/cleanup.py",
+    "git_credentials/credential.py",
+    "git_credentials/nodes.py",
+    "git_credentials/state.py",
+    "vms/admin.py",
+    "agents/template.py",
+    "vms/home_layout.py",
 )
 
 
