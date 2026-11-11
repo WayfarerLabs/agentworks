@@ -95,6 +95,9 @@ MIGRATED_FILES = (
     "git_credentials/reconcile.py",
     "agents/initializer.py",
     "harness_setup/lifecycle.py",
+    "artifacts/git_excludes.py",
+    "artifacts/session_paths.py",
+    "harness_setup/cleanup.py",
 )
 
 
