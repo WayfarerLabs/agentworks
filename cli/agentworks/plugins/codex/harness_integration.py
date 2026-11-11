@@ -111,7 +111,6 @@ from typing import TYPE_CHECKING, Annotated, ClassVar, Literal, NamedTuple
 from pydantic import Field
 
 from agentworks.artifacts.application import ArtifactApplication
-from agentworks.artifacts.model import ArtifactType
 from agentworks.artifacts.native.common import (
     NativeSessionArtifacts,
     defer_setup_conflicts,
@@ -132,7 +131,7 @@ from agentworks.capabilities.harness_integration.base import (
 from agentworks.errors import StateError
 from agentworks.plugins._harness_native.native import setup_user, setup_workspace
 from agentworks.plugins._harness_native.native_config import NativeUserConfig, NativeWorkspaceConfig
-from agentworks.plugins.codex.artifacts import guidance_path, outer_artifacts, session_artifacts, vm_artifacts
+from agentworks.plugins.codex.artifacts import outer_artifacts, session_artifacts, vm_artifacts
 from agentworks.plugins.codex.recorder import home_word, notify_value_word, provision_fragment, thread_tail
 from agentworks.schema import AgwModel, MergeStrategy
 from agentworks.topics import TopicProse
@@ -240,7 +239,7 @@ class CodexConfig(AgwModel):
     ``config.toml`` a newer codex wrote."""
 
     enabled_workarounds: Annotated[
-        list[Literal["session-developer-instructions", "session-agent-config"]], MergeStrategy.REPLACE
+        list[Literal["session-home-skills", "session-agent-config"]], MergeStrategy.REPLACE
     ] = Field(default_factory=list)
     """Explicitly enabled session artifact carriers. An authored list replaces inherited opt-ins."""
 
@@ -427,14 +426,12 @@ class CodexIntegration(HarnessIntegration):
         Ships as the opt-in `codex` system plugin, and needs the `codex` CLI on the
         session's target.
 
-        The VM facet publishes machine-wide skills. User and workspace facets publish
-        standard skills, native agent personas, and generated instruction sections in
-        the selected `AGENTS.md` or `AGENTS.override.md`. Session artifacts remain
-        unhandled by default.
-        `enabled_workarounds` can opt into `session-developer-instructions` for
-        rules/hints and `session-agent-config` for delegated personas. Private session
-        skills have no supported workaround; activate an outer facet for native skill
-        placement. Primary `agent` selection remains prompt-mediated.
+        The VM facet publishes machine skills and generated guidance skills. User and
+        workspace facets also publish supported native personas. Session artifacts are unhandled by default.
+        `session-home-skills` publishes session-qualified rules, hints and skills in the
+        shared user skill catalog: applicability through UUID/run metadata is best effort.
+        `session-agent-config` supplies private delegated-persona configuration. Primary
+        `agent` selection remains prompt-mediated. Model cooperation is not guaranteed.
         """,
     )
 
@@ -453,6 +450,7 @@ class CodexIntegration(HarnessIntegration):
     # conversation than last time.
     _dropped_stale: bool = False
     _artifact_plan: NativeSessionArtifacts = NativeSessionArtifacts()
+    _rendered_extra_args: tuple[str, ...] = ()
 
     @classmethod
     def config_for(cls, facet: Facet | None = None) -> type[BaseModel] | None:
@@ -508,11 +506,6 @@ class CodexIntegration(HarnessIntegration):
                     inputs,
                     skills_root=f"{invocation.home}/.agents/skills",
                     agents_root=f"{root}/agents",
-                    instructions_path=(
-                        guidance_path(invocation.runner, root)
-                        if any(item.content.type in (ArtifactType.HINT, ArtifactType.RULE) for item in inputs.items())
-                        else f"{root}/AGENTS.md"
-                    ),
                 ),
             )
         )
@@ -548,11 +541,6 @@ class CodexIntegration(HarnessIntegration):
                     inputs,
                     skills_root=f"{invocation.root}/.agents/skills",
                     agents_root=f"{invocation.root}/.codex/agents",
-                    instructions_path=(
-                        guidance_path(invocation.runner, invocation.root)
-                        if any(item.content.type in (ArtifactType.HINT, ArtifactType.RULE) for item in inputs.items())
-                        else f"{invocation.root}/AGENTS.md"
-                    ),
                 ),
             )
         )
@@ -619,6 +607,7 @@ class CodexIntegration(HarnessIntegration):
         asymmetry to apologize for: a fresh launch resumes nothing, while its
         effective workload config may provide initial input.
         """
+        self._rendered_extra_args = tuple(self.render_context_argv(token) for token in self.config.extra_args)
         artifact_context = self._session_binding.artifact_context
         runner = ctx.admin_target() if self._admin else ctx.agent_target()
         self._artifact_plan, native_root = prepare_session_delivery(
@@ -628,8 +617,7 @@ class CodexIntegration(HarnessIntegration):
             context=artifact_context,
             render=lambda prepared: session_artifacts(
                 prepared,
-                configured=self.config.developer_instructions,
-                extra_args=self.config.extra_args,
+                extra_args=self._rendered_extra_args,
                 enabled_workarounds=self.config.enabled_workarounds,
             ),
             workspace=self._workspace_path,
@@ -1033,13 +1021,11 @@ class CodexIntegration(HarnessIntegration):
         """
         parts = [shlex.quote(token) for token in (*head, *self._managed_flags())]
         parts += ["-c", notify_value_word(self._session_name)]
-        if self.config.developer_instructions is not None and not any(
-            token.startswith("developer_instructions=") for token in self._artifact_plan.argv
-        ):
+        if self.config.developer_instructions is not None:
             value = _toml_basic_string(self.config.developer_instructions)
             parts += ["-c", shlex.quote(f"developer_instructions={value}")]
         parts += [shlex.quote(token) for token in self._artifact_plan.argv]
-        parts += [self.quote_context_argv(token) for token in self._extra_arg_tokens()]
+        parts += [shlex.quote(token) for token in self._rendered_extra_args]
         if fresh and (prompt := self._fresh_prompt()) is not None:
             parts += ["--", shlex.quote(prompt)]
         return " ".join(parts)
@@ -1155,10 +1141,6 @@ class CodexIntegration(HarnessIntegration):
         elif isinstance(self.config.web_search, str):
             tokens += ["-c", f"{_WEB_SEARCH_KEY}={_toml_basic_string(self.config.web_search)}"]
         return tokens
-
-    def _extra_arg_tokens(self) -> list[str]:
-        """``extra_args`` as raw option tokens after generated options."""
-        return list(self.config.extra_args)
 
     def _recorded_thread_id(self, transport: Transport) -> str | None:
         """The uuid the notify recorder last wrote for this session, or

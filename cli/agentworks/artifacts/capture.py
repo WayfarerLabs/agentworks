@@ -228,7 +228,7 @@ def rule_content(
 ) -> ArtifactContent:
     """Validate rule metadata from authored frontmatter or a persisted inline record."""
     if metadata.keys() - {"description"}:
-        raise SourceRefError("rule frontmatter accepts only description; rules are always loaded")
+        raise SourceRefError("rule frontmatter accepts only description")
     description = metadata.get("description", "")
     if (
         not isinstance(description, str)

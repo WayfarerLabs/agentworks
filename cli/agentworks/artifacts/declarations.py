@@ -71,7 +71,7 @@ class HintArtifactSpec(_TextArtifactSpec):
 
 
 class RuleArtifactSpec(_TextArtifactSpec):
-    """Always-loaded Markdown instructions with optional description-only YAML frontmatter."""
+    """Standing Markdown guidance with optional description-only YAML frontmatter."""
 
 
 class SkillArtifactSpec(_ArtifactSpec):

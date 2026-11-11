@@ -443,14 +443,23 @@ def test_existing_socket_is_untouched_when_server_probe_is_indeterminate(
     assert not any(command.startswith("rm -f ") or "new-session" in command for command in calls)
 
 
+@pytest.mark.parametrize("managed_identity", [False, True])
 def test_admin_create_session_passes_env_to_run_command(
     spy_target: _SpyTarget,
+    managed_identity: bool,
 ) -> None:
     """Admin-mode create_session: env reaches the SSH layer via run_command's
     env kwarg (SetEnv on the wire) AND is embedded in the tmux new-session -e
     flags."""
     spy_run = _SpyRunCommand()
     env = {"AGENTWORKS_SESSION": "s1", "EDITOR": "nvim"}
+    if managed_identity:
+        env.update(AGENTWORKS_SESSION_UUID="operator-override", AGENTWORKS_RUN_ID="operator-override")
+    expected = dict(env)
+    if managed_identity:
+        expected.update(
+            _AGW_SESSION_UUID="uuid", _AGW_RUN_ID="run", AGENTWORKS_SESSION_UUID="uuid", AGENTWORKS_RUN_ID="run"
+        )
 
     create_session(
         session_name="s1",
@@ -462,13 +471,17 @@ def test_admin_create_session_passes_env_to_run_command(
         admin_username="agentworks",
         is_admin=True,
         env=env,
+        session_uuid="uuid" if managed_identity else None,
+        run_id="run" if managed_identity else None,
     )
 
     new_session_calls = [c for c in spy_run.calls if "new-session" in c[0]]
     assert len(new_session_calls) == 1
     cmd, passed_env = new_session_calls[0]
     # SetEnv side: env passed straight through to run_command.
-    assert passed_env == env
+    assert passed_env == expected
+    for name, value in expected.items():
+        assert f"-e {name}={value}" in cmd
     # tmux -e side: per-pair flags embedded in the command.
     assert " -e AGENTWORKS_SESSION=s1" in cmd
     assert " -e EDITOR=nvim" in cmd

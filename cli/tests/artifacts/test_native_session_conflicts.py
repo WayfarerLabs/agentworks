@@ -112,7 +112,7 @@ def launch(
 
 def assert_persona_carriers(tool: str, plan: NativeSessionArtifacts, expected: set[str]) -> None:
     files = {
-        file.native_identity.removeprefix("agent:"): file.path
+        file.native_identity.rsplit(":", 1)[-1]: file.path
         for file in plan.application.files
         if file.native_identity is not None and file.native_identity.startswith("agent:")
     }
@@ -123,8 +123,8 @@ def assert_persona_carriers(tool: str, plan: NativeSessionArtifacts, expected: s
         for name in expected:
             assert json.loads(overrides[f"agents.{name}.config_file"]) == files[name]
     else:
-        definitions = json.loads(plan.argv[plan.argv.index("--agents") + 1])
-        assert set(definitions) == expected
+        assert "--plugin-dir" in plan.argv
+        assert {Path(path).stem for path in files.values()} == expected
 
 
 @pytest.mark.parametrize("tool,class_name", TOOLS)
@@ -177,16 +177,19 @@ def test_setup_operator_collision_is_reconsidered_at_session_without_blocking_ot
     assert result.command == "fixture-launch"
     assert existing.read_text() == body
     if tool == "grok":
-        assert {item.input_id for item in plan.application.deferred} == {bad.identity, good.identity}
-        assert plan.application.files == ()
-        assert plan.argv == ("--rules", guidance.content.text)
-        assert warnings.called
+        assert {item.input_id for item in plan.application.deferred} == {
+            good.identity,
+            *({bad.identity} if artifact_type is ArtifactType.AGENT else set()),
+        }
+        assert any(guidance.origin_identity in file.origins for file in plan.application.files)
+        if artifact_type is ArtifactType.SKILL:
+            assert any(bad.origin_identity in file.origins for file in plan.application.files)
+        assert not plan.argv
         return
     assert any(good.origin_identity in file.origins for file in plan.application.files)
-    if tool == "claude" and artifact_type is ArtifactType.SKILL:
+    if tool == "claude" or artifact_type is ArtifactType.SKILL:
         assert not plan.application.deferred
         assert any(bad.origin_identity in file.origins for file in plan.application.files)
-        assert "--plugin-dir" in plan.argv
     else:
         assert {item.input_id for item in plan.application.deferred} == {bad.identity}
         assert all(item.destination == "session" for item in plan.application.deferred)
@@ -215,7 +218,6 @@ def test_session_persona_delivery_keeps_unhandled_origins_and_independent_guidan
                 received(outer),
                 skills_root=str(home / ".agents/skills"),
                 agents_root=str(native / "agents"),
-                instructions_path=str(native / "AGENTS.md"),
             ).files
             if tool == "codex"
             else adapter.outer_artifacts(received(outer), str(native)).files
@@ -226,7 +228,7 @@ def test_session_persona_delivery_keeps_unhandled_origins_and_independent_guidan
             path.write_bytes(file.data)
         ancestors = tuple(owned(file) for file in files)
         inputs = received(bad, good, guidance)
-        rejected = {bad.identity}
+        rejected = set() if tool == "claude" else {bad.identity}
     else:
         inputs = received(outer, bad, good, guidance)
         rejected = {outer.identity, bad.identity}
@@ -236,13 +238,19 @@ def test_session_persona_delivery_keeps_unhandled_origins_and_independent_guidan
     assert result.command == "fixture-launch"
     if tool == "grok":
         rejected = {item.identity for item in inputs.items() if item.content.type is ArtifactType.AGENT}
-        assert result.artifacts.files == ()
-        assert plan.argv == ("--rules", guidance.content.text)
+        assert any(guidance.origin_identity in file.origins for file in result.artifacts.files)
+        assert plan.argv == ()
     assert {item.input_id for item in result.artifacts.deferred} == rejected
     assert all(item.destination == "session" for item in result.artifacts.deferred)
     if tool != "grok":
         assert any(good.origin_identity in file.origins for file in result.artifacts.files)
-        assert_persona_carriers(tool, plan, {good.content.name})
+        assert_persona_carriers(
+            tool,
+            plan,
+            {good.content.name, bad.content.name}
+            if tool == "claude" and conflict == "ancestor"
+            else {good.content.name},
+        )
 
 
 @pytest.mark.parametrize("tool,class_name", TOOLS)

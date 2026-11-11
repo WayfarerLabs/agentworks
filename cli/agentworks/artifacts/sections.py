@@ -16,8 +16,7 @@ def replace_section(existing: bytes, body: bytes | None) -> bytes:
     """Preserve external bytes, replacing any valid section regardless of its contents.
 
     A missing section is appended for application and left alone for retirement.
-    Retirement leaves an empty delimiter pair as the insertion anchor, so a
-    later application preserves the position and all surrounding bytes.
+    Retirement removes the owned delimiters as well as their body.
     Delimiters are whole lines; ambiguity never authorizes a best-effort rewrite.
     """
     if body is not None and (BEGIN in body or END in body):
@@ -37,5 +36,7 @@ def replace_section(existing: bytes, body: bytes | None) -> bytes:
         or starts[0].start() >= ends[0].start()
     ):
         raise MalformedSectionError("Agentworks section delimiters are incomplete, repeated, or out of order")
-    replacement = BEGIN + b"\n" + (b"" if body is None else body.rstrip(b"\n") + b"\n") + END
+    if body is None:
+        return existing[: starts[0].start()] + existing[ends[0].end() :]
+    replacement = BEGIN + b"\n" + body.rstrip(b"\n") + b"\n" + END
     return existing[: starts[0].start()] + replacement + existing[ends[0].end() :]

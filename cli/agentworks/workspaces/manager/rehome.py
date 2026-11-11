@@ -173,7 +173,7 @@ def _rehome_vm(
         target = transport(vm, config)
 
         # Verify source exists
-        src_check = target.run(f"test -d {old_path}", check=False, timeout=10)
+        src_check = target.run(f"test -d {shlex.quote(old_path)}", check=False, timeout=10)
         if not src_check.ok:
             raise StateError(
                 f"source directory {old_path} does not exist on VM",
@@ -182,7 +182,7 @@ def _rehome_vm(
             )
 
         # Verify target does not exist
-        dst_check = target.run(f"test -d {new_path}", check=False, timeout=10)
+        dst_check = target.run(f"test -d {shlex.quote(new_path)}", check=False, timeout=10)
         if dst_check.ok:
             raise StateError(
                 f"target directory {new_path} already exists on VM",
@@ -295,6 +295,12 @@ def _rehome_vm(
                     )
                 else:
                     remove_config(target, ws_name, new_path)
+
+                # Retire old-location and copied Git pairs while the old row
+                # still authorizes their source, then establish the new pairs.
+                from agentworks.harness_setup.cleanup import rehome_workspace_excludes
+
+                rehome_workspace_excludes(db, ws, new_path, target)
 
                 # Update database
                 db.update_workspace_path(ws_name, new_path)

@@ -236,9 +236,11 @@ declarations and stored overlays.
 
 Setup and parent deletion share a VM-family mutation guard. Parent deletion uses the existing core
 lifecycle and clears setup records in its database transaction; it does not first uninstall native
-plugins or interpret applied-state records. Rehome moves project settings with the workspace and
-does not require applied-state record relocation. Readiness still checks whether recorded setup
-matches the current destination.
+plugins. Workspace deletion attempts exact owned Git-exclusion retirement through existing state;
+unresolved cleanup warns without adding a deletion prerequisite. Rehome uses the known old/new owner
+paths to reconcile those exclusions where safe. It moves project settings without rerunning facets
+or relocating general native setup records. Readiness still checks whether recorded setup matches
+the current destination. Existing workspaces have no harness reinit operation.
 
 [Harness facets](harness-facets.md) explains configuration, owning scopes, environment composition,
 and required versus recommended session prerequisites.

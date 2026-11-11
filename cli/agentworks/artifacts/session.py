@@ -18,6 +18,7 @@ from agentworks.artifacts.application import (
 )
 from agentworks.artifacts.publication import publish_artifacts, validate_application
 from agentworks.artifacts.reporting import report_applied, report_deferrals
+from agentworks.artifacts.session_paths import session_publication_roots
 from agentworks.artifacts.state import CapturedArtifacts, capture_owner, write_capture
 from agentworks.errors import StateError
 from agentworks.harness_setup.inputs import SetupInputs
@@ -156,8 +157,13 @@ def validate_session_application(
     ancestors = {item.path.casefold() for item in context.ancestor_files}
     if any(item.path.casefold() in ancestors for item in result.files):
         raise StateError("session artifacts conflict with an ancestor artifact destination")
-    if any(not item.path.startswith(context.directory + "/") for item in result.files):
-        raise StateError("session artifact publication must use its private run directory")
+    session_publication_roots(
+        result.files,
+        home=context.home,
+        session_uuid=context.session_uuid,
+        directory=context.directory,
+        run_id=context.run_id,
+    )
     report_deferrals(
         context.inputs, integration=integration, owner="session facet", deferred=result.deferred, terminal=True
     )
@@ -175,6 +181,12 @@ def stage_session_artifacts(
     """Publish the prospective run while retaining files the old runtime can use."""
     context = prepared.context
     state = read_native_setup(db, "session", name)
+    session_publication_roots(
+        (file for record in state.records for file in record.artifact_files),
+        home=context.home,
+        session_uuid=context.session_uuid,
+        directory=f"{context.home}/.agentworks-artifacts/session/{context.session_uuid}",
+    )
     if not context.inputs and not application.files and not state.records and not prepared.unavailable_reasons:
         return
     previous = next((item for item in state.records if item.integration == integration), None)
@@ -205,12 +217,21 @@ def stage_session_artifacts(
 
     def checkpoint(files: tuple[OwnedArtifactFile, ...]) -> None:
         nonlocal state, current
-        current = current.model_copy(update={"artifact_files": (*retained, *files)})
+        owned = {file.path: file for file in retained}
+        owned.update((file.path, file) for file in files)
+        current = current.model_copy(update={"artifact_files": tuple(owned.values())})
         state = replace_setup_record(state, current)
         write_native_setup(db, "session", name, state, operation="session-prepare")
 
     checkpoint(())
-    published = publish_artifacts(runner, application.files, (), checkpoint, roots=(context.directory,))
+    roots = session_publication_roots(
+        application.files,
+        home=context.home,
+        session_uuid=context.session_uuid,
+        directory=context.directory,
+        run_id=context.run_id,
+    )
+    published = publish_artifacts(runner, application.files, (), checkpoint, roots=roots)
     if published.skipped:
         current = current.model_copy(update={"skipped": published.skipped})
         state = replace_setup_record(state, current)
@@ -237,12 +258,22 @@ def commit_session_artifacts(
     integration: str,
     runner: Transport,
     prepared: PreparedSessionArtifacts,
+    application: ArtifactApplication,
 ) -> None:
     """After old runtime teardown, retire obsolete runs and record the new inputs."""
     context = prepared.context
     state = read_native_setup(db, "session", name)
+    roots = session_publication_roots(
+        (file for record in state.records for file in record.artifact_files),
+        home=context.home,
+        session_uuid=context.session_uuid,
+        directory=f"{context.home}/.agentworks-artifacts/session/{context.session_uuid}",
+    )
+    desired = {file.path for file in application.files}
     for record in tuple(state.records):
-        keep = tuple(item for item in record.artifact_files if item.path.startswith(context.directory + "/"))
+        keep = tuple(
+            item for item in record.artifact_files if item.path in desired and record.integration == integration
+        )
         obsolete = tuple(item for item in record.artifact_files if item not in keep)
 
         def checkpoint(
@@ -260,7 +291,7 @@ def commit_session_artifacts(
             (),
             obsolete,
             checkpoint,
-            roots=(f"{context.home}/.agentworks-artifacts/session/{context.session_uuid}",),
+            roots=roots,
         )
         updated = record.model_copy(
             update={
@@ -286,6 +317,12 @@ def cleanup_session_artifacts(db: Database, session: SessionRow, runner: Transpo
     if not any(item.artifact_files for item in state.records):
         return
     home = _session_artifact_home(runner)
+    roots = session_publication_roots(
+        (file for record in state.records for file in record.artifact_files),
+        home=home,
+        session_uuid=session.session_uuid,
+        directory=f"{home}/.agentworks-artifacts/session/{session.session_uuid}",
+    )
     for record in tuple(state.records):
 
         def checkpoint(files: tuple[OwnedArtifactFile, ...], record: SetupRecord = record) -> None:
@@ -298,7 +335,7 @@ def cleanup_session_artifacts(db: Database, session: SessionRow, runner: Transpo
             (),
             record.artifact_files,
             checkpoint,
-            roots=(f"{home}/.agentworks-artifacts/session/{session.session_uuid}",),
+            roots=roots,
         )
         if remaining.files:
             raise StateError("modified session artifacts remain; inspect them before deleting their ownership record")
