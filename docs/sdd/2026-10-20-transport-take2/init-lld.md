@@ -1037,26 +1037,30 @@ no longer use them. The departures from the tables above, each recorded where it
   replaced on every upload and `restore` always reaches its rename. The git file source requires
   `mktemp`'s output to be a guest path under its staging prefix before using it, and reads its
   staging removal's completion and status, warning when it fails.
-- The agent follows the admin's order: its mise config (when `mise_packages` is set), dotfiles, mise
-  lockfile and install (when packages, a lockfile or a config in the home, `mise._has_mise_config`),
-  then its user install commands, with mise's shims always on its profile's `PATH` behind the
-  install commands' paths (`_write_agent_mise_config`, `_install_agent_mise`). Through v0.19.0 the
-  agent ran its install commands, then dotfiles, then mise, so its template's config overwrote the
+- Both accounts take one order: the profile and rc fragments, the mise config (when `mise_packages`
+  is set), git credentials, dotfiles, the mise lockfile and install (`mise.install_mise`, which runs
+  when there are packages, a lockfile or a config in the home, `mise._has_mise_config`),
+  `_ensure_agentworks_files_sourced`, the user install commands (`packages._run_install_commands`,
+  which `create_agent_on_vm` calls directly), and `_ensure_agentworks_files_sourced` again. The
+  admin's fragments are written right after `_setup_workspaces_directory`. Through v0.19.0 the agent
+  ran its install commands, then dotfiles, then mise, so its template's config overwrote the
   dotfiles', and its shims took precedence over its install commands' paths.
 - Install commands run as `{shell} -lc`, a non-interactive login shell that reads no rc file (the
   seeded `.bashrc` returns early when not interactive), so the rc fragment's mise activation never
   reaches them; only the `test_exec` check runs interactively (`-lic`). What reaches them is the
-  profile, so each account's profile is written complete before its user install commands (Q3
-  ruling): its entries are declarations (`packages.install_command_paths`, every named command's
-  `path` whatever its outcome, plus `_mise_shims_path`), so a first create gives the install
-  commands mise's shims and every declared path, as a reinit does. The admin's profile is written
-  once, after the mise install, and its source line is ensured again after the user install
-  commands, beside the rc fragment written last; the agent's single write stays at the start of its
-  setup, for `AGENTWORKS_AGENT`, and its final `_ensure_agentworks_files_sourced` covers both lines.
+  profile, so each account's profile is written complete before anything that runs a login shell
+  (lead ruling on Q3): its entries are declarations (`packages.install_command_paths`, every named
+  command's `path` whatever its outcome, plus `_mise_shims_path`), so a first create gives the
+  dotfiles installer, mise and the install commands mise's shims and every declared path, as a
+  reinit does. A dotfiles installer can replace `~/.profile` or an rc file, so the source lines are
+  ensured again before the user install commands, and once more after them. Mise's shims come after
+  the system install commands' paths and before the user install commands' paths, so a user install
+  command's directory takes precedence over a shim and a shim over a system install command's.
   `_run_install_commands` returns nothing. Through v0.19.0 the admin's profile was written after its
-  user install commands, so on a first create they had neither the shims nor their declared paths;
-  the system install commands, which run earlier in the VM section, still see no profile on a first
-  create.
+  user install commands, so on a first create they had neither the shims nor their declared paths,
+  and an agent's install commands, which ran after an identity-only profile write, had neither on
+  create or reinit. The system install commands, which run earlier in the VM section, still see no
+  profile on a first create.
 - A stored overlay that fails only on source reference fields this release refuses (every
   `errors.SourceRefFormError`, raised by `sources.check_source_ref`, which `sources` re-exports)
   decodes to `instance_specs.StoredSourceReferenceRefused`, whose `fields` names them and never a
@@ -1115,8 +1119,9 @@ no longer use them. The departures from the tables above, each recorded where it
   never read as a local file. An existing clone's origin is read with
   `git config --get remote.origin.url`, as configured, since `remote get-url` applies `insteadOf`.
 - A directory at a write's fixed temporary name is `PathRefused(UNSUITABLE)` and left alone.
-- The admin's final `_ensure_agentworks_files_sourced` pass is gone: its fragment writers run after
-  the dotfiles install and every install command and ensure their own lines. Agent setup keeps it.
+- Each account's fragment writers ensure their own source lines, and
+  `_ensure_agentworks_files_sourced` runs again before the user install commands and at the end, for
+  the admin as for every agent (above, the shared order).
 - The admin's `authorized_keys` warning carries the error's message only, since `write` logs its
   streams.
 - `remove_from_workspace_group` and agent delete's first two requests read no status but require a

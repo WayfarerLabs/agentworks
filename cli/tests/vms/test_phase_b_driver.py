@@ -252,20 +252,26 @@ def test_on_a_first_create_the_user_install_commands_profile_holds_mise_s_shims_
     assert not any(_is_write_of(PROFILE)(request) for request in requests[install:])
 
 
-def test_the_profile_s_source_line_is_ensured_after_the_user_install_commands(
-    run_section: Callable[..., None],
+def test_the_admin_writes_its_fragments_first_and_ensures_their_lines_around_its_install_commands(
+    run_section: Callable[..., None], tmp_path: Path
 ) -> None:
-    """An installer that replaces ``~/.profile`` cannot leave it without the profile fragment's line."""
+    """The agent's order: the fragments before the dotfiles install, whose login shell reads them; their
+    source lines again after it and mise, before the user install commands; and a final pass after those."""
     guest = Guest()
 
-    run_section(guest)
+    run_section(guest, _local_dotfiles(tmp_path))
 
     requests = guest.access.requests()
+    profile = next(index for index, request in enumerate(requests) if _is_write_of(PROFILE)(request))
+    rc = next(index for index, request in enumerate(requests) if _is_write_of(f"{HOME}/.agentworks-rc.sh")(request))
+    dotfiles = requests.index(Command(("bash", "-lc", "./install.sh"), cwd=f"{HOME}/.dotfiles", deadline=120))
     install = requests.index(install_run("bash", "install-user-tool"))
     reads = [
         index for index, request in enumerate(requests) if _file_operation(request) == ("read", f"{HOME}/.profile")
     ]
-    assert reads and max(reads) > install
+    assert profile < rc < dotfiles < install
+    assert any(dotfiles < index < install for index in reads)
+    assert max(reads) > install
 
 
 @pytest.mark.parametrize(

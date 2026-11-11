@@ -616,13 +616,15 @@ with mise's shims on its `PATH`.
 An install-command's `path` entries persist in the target user's managed `~/.agentworks-profile.sh`.
 User install commands contribute to the selected admin or agent user's profile; system install
 commands contribute to the VM admin's profile. Agentworks writes the profile from the declarations
-on every initialization, before that account's user install commands run, including paths from
-commands that fail or are skipped by completion checks. Shells that source the profile prepend these
-directories to `PATH`, after mise's shims, so a declared directory takes precedence over a shim of
-the same name, and child processes inherit them. A leading `~` resolves to the target user's home. A
-user install command's login shell therefore already has every declared directory on `PATH`, its own
-included. System install commands run earlier, before the admin's profile is written: on a first
-create they see none of it, and on reinit they see the previous one.
+early in every initialization of that account, before its dotfiles sync and its user install
+commands, including paths from commands that fail or are skipped by completion checks. Shells that
+source the profile prepend these directories to `PATH`, and child processes inherit them. A user
+install command's directories come after mise's shims, so they take precedence over a shim of the
+same name; for the admin, the system install commands' directories come before the shims, so a shim
+takes precedence over them. A leading `~` resolves to the target user's home. A user install
+command's login shell therefore already has every declared directory on `PATH`, its own included.
+System install commands run earlier, before the admin's profile is written: on a first create they
+see none of it, and on reinit they see the previous one.
 
 `test_exec` resolves a command on `PATH` in the target user's login shell. `test_file` and
 `test_dir` check for an existing path; a leading `~` resolves to the target user's home. Declare a

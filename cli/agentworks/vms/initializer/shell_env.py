@@ -116,10 +116,9 @@ def _ensure_agentworks_files_sourced(files: Files, log: InitLog, *, home: str, s
 
     The fragment writers ensure their own source lines when they run, but a
     dotfiles install, or any later step that replaces a shell rc file, can
-    remove them. Agent setup writes its fragments before its dotfiles and
-    mise, so it ends with this; the admin's rc writer runs after every such
-    step, and its profile, written before the user install commands, has its
-    line ensured again after them. A file that already names a fragment is
+    remove them. Both accounts write their fragments before their dotfiles
+    and mise, run this again before their user install commands, whose login
+    shells read the profile, and end with it. A file that already names a fragment is
     left alone, so this is a no-op in the common case. ``home`` is the
     account's literal home directory and ``shell`` its login shell, which
     selects the zsh files (:func:`source_files`).

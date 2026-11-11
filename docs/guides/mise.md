@@ -140,6 +140,10 @@ for the admin and for every agent:
 5. **User install commands.** They run after the mise install, with mise's shims on their `PATH`
    (behind the install commands' own `path` entries), on a first create as on every reinit.
 
+The profile that carries the shims is written before the first step, so the dotfiles installer and
+the mise install see it too. If your dotfiles installer replaces `~/.profile`, Agentworks adds its
+source line back before the user install commands.
+
 This means:
 
 - If your dotfiles provide a complete `~/.config/mise/config.toml`, you can omit `mise_packages`.

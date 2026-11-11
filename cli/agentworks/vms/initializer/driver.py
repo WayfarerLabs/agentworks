@@ -30,17 +30,15 @@ from agentworks.execution.access import Admin
 from agentworks.execution.requests import Command
 from agentworks.git_config import ensure_safe_directory_wildcard
 from agentworks.git_credentials import configure_user_git_credentials
-from agentworks.vms.home_layout import ADMIN_MANAGED, AGENTWORKS_PROFILE
+from agentworks.vms.home_layout import ADMIN_MANAGED
 
 from . import phase_a
 from .dotfiles import sync_dotfiles
 from .mise import (
     MISE_ACTIVATE_LINES,
-    _fetch_mise_lockfile,
-    _has_mise_config,
     _mise_shims_path,
-    _run_mise_install,
     _write_mise_config,
+    install_mise,
 )
 from .packages import (
     _configure_apt_sources,
@@ -51,7 +49,7 @@ from .packages import (
     install_command_paths,
 )
 from .shell_env import (
-    _ensure_fragment_sourced,
+    _ensure_agentworks_files_sourced,
     _harden_admin_home,
     _set_login_shell,
     _write_agentworks_identity_profile,
@@ -524,6 +522,20 @@ def _phase_b_setup(
         # helper that documents and enforces the order (see #254).
         _setup_workspaces_directory(files, config, logger)
 
+        # Non-fatal: the profile and rc fragments, written early as the agent's
+        # are, so every later login shell (the dotfiles installer, mise, the user
+        # install commands) reads them. The profile's entries are declarations,
+        # so it is complete here: mise's shims, with the install commands' own
+        # paths taking precedence over them.
+        profile_paths = (
+            install_command_paths(vm_template.system_install_commands, system_install_commands)
+            + _mise_shims_path(home)
+            + install_command_paths(admin.user_install_commands, user_install_commands)
+        )
+        _write_agentworks_profile(files, profile_paths, logger, home=home, shell=admin_shell)
+        rc_snippets = [MISE_ACTIVATE_LINES] if admin.mise_activate else ["# mise activation disabled"]
+        _write_agentworks_rc(files, rc_snippets, logger, home=home, shell=admin_shell)
+
         # Non-fatal: mise config (written before dotfiles so dotfiles can override)
         if admin.mise_packages:
             _write_mise_config(files, admin.mise_packages, admin.mise_install_before, home, logger)
@@ -559,25 +571,22 @@ def _phase_b_setup(
                 log=logger,
             )
 
-        # Non-fatal: mise lockfile (after git creds and dotfiles; overrides dotfiles lockfile)
-        if admin.mise_lockfile:
-            _fetch_mise_lockfile(files, admin.mise_lockfile, home, logger)
-
-        # Non-fatal: mise install (after config + dotfiles + lockfile are all settled)
-        prune = admin.mise_prune_on_reinit
-        if admin.mise_packages or admin.mise_lockfile or _has_mise_config(files, home):
-            _run_mise_install(files, admin_shell, home, admin.mise_allow_unlocked, logger, prune=prune)
-
-        # Non-fatal: shell profile (PATH exports sourced at login). Its entries
-        # are declarations, so it is written complete before the user install
-        # commands, whose login shells read it: mise's shims reach them on a
-        # first create too, and the install commands' own paths take precedence.
-        profile_paths = (
-            install_command_paths(vm_template.system_install_commands, system_install_commands)
-            + _mise_shims_path(home)
-            + install_command_paths(admin.user_install_commands, user_install_commands)
+        # Non-fatal: the mise lockfile and install (after git creds and dotfiles;
+        # an explicit lockfile overrides the dotfiles').
+        install_mise(
+            files,
+            packages=admin.mise_packages,
+            lockfile=admin.mise_lockfile,
+            allow_unlocked=admin.mise_allow_unlocked,
+            prune=admin.mise_prune_on_reinit,
+            shell=admin_shell,
+            home=home,
+            log=logger,
         )
-        _write_agentworks_profile(files, profile_paths, logger, home=home, shell=admin_shell)
+
+        # A dotfiles installer can replace an rc file, so the fragments' source
+        # lines are ensured again before the install commands' login shells.
+        _ensure_agentworks_files_sourced(files, logger, home=home, shell=admin_shell)
 
         # Non-fatal: user install commands for admin user (may depend on mise tools)
         _run_install_commands(
@@ -590,10 +599,5 @@ def _phase_b_setup(
             label="User install command",
         )
 
-        # Non-fatal: shell rc (interactive shell hooks like mise activate). It
-        # comes last, after the dotfiles install and every install command, so
-        # the source line it ensures survives an installer that replaced an rc
-        # file; the profile's source line is ensured again for the same reason.
-        rc_snippets = [MISE_ACTIVATE_LINES] if admin.mise_activate else ["# mise activation disabled"]
-        _write_agentworks_rc(files, rc_snippets, logger, home=home, shell=admin_shell)
-        _ensure_fragment_sourced(files, logger, home=home, shell=admin_shell, fragment=AGENTWORKS_PROFILE)
+        # An install command can replace an rc file too.
+        _ensure_agentworks_files_sourced(files, logger, home=home, shell=admin_shell)

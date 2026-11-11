@@ -367,11 +367,17 @@ place its `authorized_keys`; every later step runs as the agent, which cannot ru
     what the dotfiles installed and mise's tools. The profile always carries mise's shims on `PATH`,
     behind the install commands' own `PATH` entries, as the admin's does; an install command's
     directory now takes precedence over a mise shim of the same name, where the shims used to win.
-- **Every account's profile is written before its user install commands.** On a first create, the
-  admin's and each agent's user install commands, and their `test_exec` checks, now find mise's
-  shims and every declared install-command `path` on their login shell's `PATH`, as they already did
-  on reinit. An admin install command or check that looks up a tool mise also provides can now find
-  mise's on a first create.
+- **Every account's profile and rc fragments are written first.** Each account's profile, with
+  mise's shims and every declared install-command `path`, and its rc fragment are written before its
+  dotfiles sync, and their source lines are ensured again after the dotfiles install and the mise
+  install, before the user install commands, and at the end.
+  - An agent's user install commands and their `test_exec` checks now find mise's shims and their
+    declared paths on their login shell's `PATH`, on create and reinit alike; at v0.19.0 they found
+    neither.
+  - The admin's find them on a first create too, where they used to only from the next reinit. An
+    admin install command or check that looks up a tool mise also provides can now find mise's on a
+    first create.
+  - The admin's dotfiles installer and mise install see the profile on a first create as well.
 - **A missing login shell warns.** Setting the admin's login shell to one that is not installed
   fails the shell configuration step with a warning, instead of running `usermod` with an empty
   shell.

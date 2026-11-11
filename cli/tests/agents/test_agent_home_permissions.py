@@ -349,14 +349,14 @@ def test_the_profile_fragment_is_written_before_the_install_commands_run(
 ) -> None:
     """Install commands see ``AGENTWORKS_AGENT`` only through the profile fragment, so it comes first."""
     profile_writes_seen: list[int] = []
-    run_install_commands = agent_initializer._run_agent_install_commands
+    from agentworks.vms.initializer.packages import _run_install_commands as run_install_commands
 
     def watch(recorder: AccessRecorder) -> None:
-        def record_order(**kwargs: Any) -> None:
+        def record_order(*args: Any, **kwargs: Any) -> None:
             profile_writes_seen.append(len(_profile_writes(recorder)))
-            run_install_commands(**kwargs)
+            run_install_commands(*args, **kwargs)
 
-        monkeypatch.setattr(agent_initializer, "_run_agent_install_commands", record_order)
+        monkeypatch.setattr("agentworks.agents.initializer._run_install_commands", record_order)
 
     _run_create_on_vm(db, config, monkeypatch, user_exists=False, before_create=watch)
 
@@ -412,23 +412,31 @@ def test_a_failed_git_dotfiles_sync_skips_the_agent_install(
     assert ("bash", "-lc", "./install.sh") not in commands
 
 
-def test_the_agent_follows_the_admin_s_mise_dotfiles_and_install_command_order(
+def _file_op(request: object, operation: str, path: str) -> bool:
+    return (
+        isinstance(request, PythonProgram)
+        and request.args[0] == operation
+        and json.loads(request.args[1])["path"] == path
+    )
+
+
+def _written(request: object) -> str:
+    assert isinstance(request, PythonProgram) and isinstance(request.stdin, Bytes)
+    return request.stdin.data.partition(b"\n")[2].decode()
+
+
+def _runs_the_tool(request: object) -> bool:
+    return isinstance(request, Command) and request.argv[-1] == "install-tool"
+
+
+def test_the_agent_follows_the_admin_s_fragment_mise_dotfiles_and_install_command_order(
     db: Database, config: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """The documented order (docs/guides/mise.md), as the admin's: mise config, dotfiles, mise
-    lockfile, mise install, then the user install commands, which may depend on mise's tools."""
+    """The documented order (docs/guides/mise.md), as the admin's: the profile and rc fragments, the
+    mise config, dotfiles, the mise lockfile and install, the source lines again, the user install
+    commands, which may depend on mise's tools, and a final pass over the source lines."""
     (tmp_path / "dots").mkdir()
     (tmp_path / "mise.lock").write_text("[tools]\n")
-    install_commands_at: list[int] = []
-    run_install_commands = agent_initializer._run_agent_install_commands
-
-    def watch(recorder: AccessRecorder) -> None:
-        def record_position(**kwargs: Any) -> None:
-            install_commands_at.append(len(recorder.requests("run")))
-            run_install_commands(**kwargs)
-
-        monkeypatch.setattr(agent_initializer, "_run_agent_install_commands", record_position)
-
     recorder = _run_create_on_vm(
         db,
         config,
@@ -437,26 +445,80 @@ def test_the_agent_follows_the_admin_s_mise_dotfiles_and_install_command_order(
         dotfiles=tmp_path / "dots",
         mise_packages=["jq@1"],
         mise_lockfile=str(tmp_path / "mise.lock"),
-        before_create=watch,
+        user_install_commands=["tool"],
     )
     requests = recorder.requests("run")
 
     def first(predicate: Callable[[Any], bool]) -> int:
         return next(index for index, request in enumerate(requests) if predicate(request))
 
-    def writes(name: str) -> Callable[[Any], bool]:
-        return lambda r: (
-            isinstance(r, PythonProgram)
-            and r.args[0] == "write"
-            and json.loads(r.args[1])["path"] == f"{HOME}/.config/mise/{name}"
-        )
-
-    config_write = first(writes("config.toml"))
+    profile = first(lambda r: _file_op(r, "write", f"{HOME}/{PROFILE_BASENAME}"))
+    rc = first(lambda r: _file_op(r, "write", f"{HOME}/.agentworks-rc.sh"))
+    config_write = first(lambda r: _file_op(r, "write", f"{HOME}/.config/mise/config.toml"))
     tree_upload = first(lambda r: isinstance(r, Script) and "AGW_TREE_DEST" in r.env)
-    lockfile = first(writes("mise.lock"))
+    lockfile = first(lambda r: _file_op(r, "write", f"{HOME}/.config/mise/mise.lock"))
     install = first(lambda r: isinstance(r, Command) and r.argv[-1].startswith("mise install"))
-    (install_commands,) = install_commands_at
-    assert config_write < tree_upload < lockfile < install < install_commands
+    tool = first(_runs_the_tool)
+    profile_line_reads = [index for index, r in enumerate(requests) if _file_op(r, "read", f"{HOME}/.profile")]
+    assert profile < rc < config_write < tree_upload < lockfile < install < tool
+    assert any(install < index < tool for index in profile_line_reads)
+    assert max(profile_line_reads) > tool
+
+
+def test_an_install_command_s_login_shell_still_reads_the_profile_after_dotfiles_replace_dot_profile(
+    db: Database, config: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A dotfiles installer that replaces ``~/.profile`` gets its source line back before the install commands."""
+    bash = shutil.which("bash")
+    if bash is None:
+        pytest.skip("bash is unavailable")
+    (tmp_path / "dots").mkdir()
+    replaced = b"# the dotfiles' own profile\n"
+
+    def replace_dot_profile(recorder: AccessRecorder) -> None:
+        answer = recorder.answer
+        installed: list[bool] = []
+
+        def scripted(call: Call) -> Result | BaseException | None:
+            if call.request == Command(("bash", "-lc", "./install.sh"), cwd=f"{HOME}/.dotfiles", deadline=120):
+                installed.append(True)
+            elif installed and _file_op(call.request, "read", f"{HOME}/.profile"):
+                return Result(Completed(0), replaced)
+            return answer(call) if answer is not None else None
+
+        recorder.answer = scripted
+
+    recorder = _run_create_on_vm(
+        db,
+        config,
+        monkeypatch,
+        user_exists=False,
+        dotfiles=tmp_path / "dots",
+        user_install_commands=["tool"],
+        before_create=replace_dot_profile,
+    )
+    requests = recorder.requests("run")
+    tool = next(index for index, request in enumerate(requests) if _runs_the_tool(request))
+    (fragment,) = _profile_writes(recorder, before=_runs_the_tool)
+    restored = [
+        _written(request)
+        for request in requests[:tool]
+        if _file_op(request, "write_if", f"{HOME}/.profile") and _written(request).startswith(replaced.decode())
+    ]
+    assert restored
+
+    home = tmp_path / "agent-home"
+    home.mkdir()
+    (home / PROFILE_BASENAME).write_text(fragment.replace(HOME, str(home)))
+    (home / ".profile").write_text(restored[-1].replace(HOME, str(home)))
+    result = subprocess.run(
+        [bash, "-lc", 'printf "%s" "$PATH"'],
+        env={"HOME": str(home), "PATH": "/usr/bin:/bin"},
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert result.stdout.startswith(f"/opt/tools:{home}/.local/bin:{home}/.local/share/mise/shims:")
 
 
 def test_dotfiles_that_supply_a_mise_config_get_an_install_without_mise_packages(
