@@ -374,3 +374,35 @@ PTY/URL-driver failures and the corrected isolated-home repeat are retained. The
 measured receipts and independently confirmed all six homes absent and all seventeen recorded
 fixture/callback ports closed. This is phase-2 research, not Agentworks OAuth implementation,
 registration integration acceptance, provider-grant revocation or a resolved workflow choice.
+
+## Registration round 3
+
+The authenticated overall allowance permits three rounds, including the initial design-only
+checkpoint. The actual
+[round-2 report](https://github.com/WayfarerLabs/agentworks/pull/888#issuecomment-6795726868)
+arrived at 12:24 UTC on 2026-11-11 and was read in full. It confirms F1 and the common relocation
+policy at `7accf20c`, with all required gates and its stated native/platform cases passing. No new
+product defect is established. Its hold concerns missing genuine managed conversation resume; normal
+Claude project consent and actual linked-worktree native relocation also remain gaps.
+
+The lead's
+[critical reading and round start](https://github.com/WayfarerLabs/agentworks/pull/888#issuecomment-6796139518)
+retain those obligations. A controlled provider can enable normal native history generation and
+continuation without a paid model. This follows the existing distinction between registration and
+model cooperation; neither the fixture nor local native research supplies managed acceptance. The PR
+was verified draft at unchanged `7accf20c` before source work. This is the last authorized public
+round, not another design-only checkpoint or an OAuth implementation push.
+
+- [ ] Add a maintained, standard-library local Messages/Responses/MCP protocol fixture and
+      meaningful boundary tests. Keep it free of native-client launch, history mutation, real
+      credentials, external provider dependencies and an Agentworks acceptance verdict.
+- [ ] Document an actual managed fresh/resume procedure with normal native onboarding, strict
+      resume, native-generated history, new managed-run ownership, neighbor isolation, unchanged
+      shared registrations and independent cleanup. Keep model-cooperation claims separate.
+- [ ] Reconcile the second report in the acceptance record without promoting its untested modes.
+- [ ] Complete the private project, Muntz and generic correctness reviews, required gates,
+      installed-package checks and exact-head CI; hand off the complete green head ready for the
+      separate integration-test session.
+- [ ] Obtain and critically assess the next actual integration report. R6 and phase-1 acceptance
+      remain owed until its required observations exist. Further material fix work after this round
+      needs operator direction; no automatic merge or MCP SDD lock is authorized.
