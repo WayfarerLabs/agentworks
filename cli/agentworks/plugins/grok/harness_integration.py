@@ -182,8 +182,7 @@ class GrokBuildIntegration(HarnessIntegration):
 
     def user_init(self, invocation: UserSetupInvocation) -> ArtifactApplication:
         if not (
-            tuple(invocation.artifacts.items())
-            or (invocation.prior and (invocation.prior.claims or invocation.prior.artifact_files))
+            invocation.artifacts or (invocation.prior and (invocation.prior.claims or invocation.prior.artifact_files))
         ):
             return ArtifactApplication()
         layout = user_layout("grok", invocation)

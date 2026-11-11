@@ -486,7 +486,7 @@ class CodexIntegration(HarnessIntegration):
         """Apply native setup and return the user's artifact publication plan."""
         config = None if self.retiring else self._config_as(CodexUserConfig)
         if not (
-            tuple(invocation.artifacts.items())
+            invocation.artifacts
             or (invocation.prior and (invocation.prior.claims or invocation.prior.artifact_files))
             or (config and (config.settings is not None or config.plugins or config.marketplaces))
         ):

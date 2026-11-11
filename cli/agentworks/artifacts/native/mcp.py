@@ -111,7 +111,7 @@ def user_mcp_location(
         if layout is None:
             raise ConfigError("Native user configuration location is unknown")
         return _user_mcp_path(layout, invocation.home), False, ()
-    except (ConfigError, ConnectivityError, ExternalError):
+    except ConfigError:
         reason = "Native MCP config location could not be resolved safely; existing MCP ownership is retained."
         if previous:
             invocation.report_incomplete(reason)
