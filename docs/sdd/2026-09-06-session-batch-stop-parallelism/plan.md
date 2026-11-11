@@ -473,7 +473,8 @@ fresh validation and a separate ready handoff; it is not byte-identical to the e
 
 - [ ] Merge the pinned main tip, review automatic merges, and retain trust and teardown invariants.
 - [ ] Run fresh local gates, installed-package checks and independent private delta reviews.
-- [ ] Publish the combined head, verify hosted checks and restore ready status with a scoped handoff.
+- [ ] Publish the combined head, verify hosted checks and restore ready status with a scoped
+      handoff.
 
 ## Residual Work Deliberately Deferred
 
