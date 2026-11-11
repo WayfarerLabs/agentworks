@@ -66,9 +66,14 @@ def artifact(
             type,
             name,
             description="Review changes",
-            text="before ${agw:session_name} after\n",
+            text="" if type is ArtifactType.MCP_SERVER else "before ${agw:session_name} after\n",
             members=members,
-            native_options_json=json.dumps(options or {}),
+            metadata_json=json.dumps(
+                {"type": "stdio", "command": "fixture-server", "args": [], "env": {}, "description": "Review changes"}
+                if type is ArtifactType.MCP_SERVER
+                else {}
+            ),
+            native_options_json=json.dumps({} if type is ArtifactType.MCP_SERVER else options or {}),
         ),
         ArtifactProvenance(),
         ArtifactOrigin("session", "session", owner, bundle="team", entry=name),
@@ -157,7 +162,10 @@ def test_session_artifact_directory_is_bound_to_the_prepared_run():
 
 
 def test_codex_outer_installs_guidance_skills_and_standard_skills_and_personas():
-    items = tuple(artifact(type, name=type.value) for type in ArtifactType)
+    items = tuple(
+        artifact(type, name=type.value)
+        for type in (ArtifactType.HINT, ArtifactType.RULE, ArtifactType.SKILL, ArtifactType.AGENT)
+    )
     result = codex.outer_artifacts(
         received(*items), skills_root="/home/a/.agents/skills", agents_root="/home/a/.codex/agents"
     )
@@ -503,7 +511,9 @@ def test_user_native_home_boundary_precedes_other_setup(db, monkeypatch, impleme
     plugin = import_module(module)
     setup_calls = []
     if hasattr(plugin, "setup_user"):
-        monkeypatch.setattr(plugin, "setup_user", lambda *args: setup_calls.append(args))
+        monkeypatch.setattr(
+            plugin, "setup_user", lambda *args, **kwargs: setup_calls.append(args) or ArtifactApplication()
+        )
     root = "/mnt/native" if outside_home else "/home/alice/custom-native"
     monkeypatch.setattr(plugin, "probe_native", lambda *args, **kwargs: root)
     integration = implementation.for_setup(owner_kind="agent", owner_name="alice", facet="user", config={})
@@ -530,7 +540,7 @@ def test_codex_external_home_does_not_block_home_owned_skills(db, monkeypatch):
     from agentworks.capabilities.harness_integration.setup import UserSetupInvocation
     from agentworks.plugins.codex import harness_integration as plugin
 
-    monkeypatch.setattr(plugin, "setup_user", lambda *args: None)
+    monkeypatch.setattr(plugin, "setup_user", lambda *args, **kwargs: ArtifactApplication())
     monkeypatch.setattr(plugin, "probe_native", lambda *args, **kwargs: "/mnt/native")
     integration = CodexIntegration.for_setup(owner_kind="agent", owner_name="alice", facet="user", config={})
     result = integration.user_init(

@@ -20,12 +20,14 @@ from __future__ import annotations
 
 import shlex
 import uuid
+from dataclasses import replace
 from typing import TYPE_CHECKING, Annotated, ClassVar, Literal
 
 from pydantic import Field
 
 from agentworks import output
 from agentworks.artifacts.application import ArtifactApplication
+from agentworks.artifacts.model import ArtifactInputs, ArtifactType
 from agentworks.artifacts.native.common import (
     NativeSessionArtifacts,
     defer,
@@ -37,6 +39,7 @@ from agentworks.artifacts.native.common import (
     validate_native_command,
     validate_user_placement,
 )
+from agentworks.artifacts.native.mcp import apply_mcp, user_mcp_location
 from agentworks.artifacts.native.probe import probe_native
 from agentworks.capabilities.harness_integration.base import (
     HarnessIntegration,
@@ -187,7 +190,8 @@ class GrokBuildIntegration(HarnessIntegration):
                 home=invocation.home,
                 check_policy=False,
             )
-            if invocation.artifacts and not self.retiring
+            if any(item.content.type is not ArtifactType.MCP_SERVER for item in invocation.artifacts.items())
+            and not self.retiring
             else ""
         )
         plan = (
@@ -201,6 +205,18 @@ class GrokBuildIntegration(HarnessIntegration):
             )
         )
         validate_user_placement(plan, invocation.home)
+        mcp_destination, skip_mcp, mcp_deferred = user_mcp_location("grok", invocation, retiring=self.retiring)
+        mcp = (
+            ArtifactApplication()
+            if skip_mcp
+            else apply_mcp(
+                "grok",
+                replace(invocation, artifacts=ArtifactInputs()) if self.retiring else invocation,
+                destination=mcp_destination
+                or f"{native_home(invocation.home, invocation.environment, 'GROK_HOME', '.grok')}/config.toml",
+            )
+        )
+        mcp = replace(mcp, deferred=(*mcp.deferred, *mcp_deferred))
 
         if plan.files:
             plan = defer_setup_conflicts(
@@ -215,7 +231,12 @@ class GrokBuildIntegration(HarnessIntegration):
                     files=files,
                 ),
             )
-        return plan
+        return replace(
+            plan,
+            files=(*plan.files, *mcp.files),
+            deferred=(*plan.deferred, *mcp.deferred),
+            shared_paths=mcp.shared_paths,
+        )
 
     def workspace_init(self, invocation: WorkspaceSetupInvocation) -> ArtifactApplication:
         plan = (
@@ -224,6 +245,11 @@ class GrokBuildIntegration(HarnessIntegration):
             else render_setup_artifacts(
                 invocation, lambda inputs: outer_artifacts(inputs, f"{invocation.root}/.grok", workspace=True)
             )
+        )
+        mcp = apply_mcp(
+            "grok",
+            replace(invocation, artifacts=ArtifactInputs()) if self.retiring else invocation,
+            destination=f"{invocation.root}/.grok/config.toml",
         )
         if plan.files:
             plan = defer_setup_conflicts(
@@ -239,7 +265,12 @@ class GrokBuildIntegration(HarnessIntegration):
                     workspace_only=True,
                 ),
             )
-        return plan
+        return replace(
+            plan,
+            files=(*plan.files, *mcp.files),
+            deferred=(*plan.deferred, *mcp.deferred),
+            shared_paths=mcp.shared_paths,
+        )
 
     @property
     def config(self) -> GrokBuildConfig:

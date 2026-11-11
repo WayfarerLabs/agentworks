@@ -5,8 +5,9 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import shlex
 from collections.abc import Callable
-from typing import Literal, cast
+from typing import TYPE_CHECKING, Literal, cast
 
 from agentworks import output
 from agentworks.artifacts.application import ArtifactApplication, ArtifactDeferral
@@ -20,9 +21,14 @@ from agentworks.capabilities.harness_integration.settings import (
     serialize_settings,
 )
 from agentworks.capabilities.harness_integration.setup import UserSetupInvocation, WorkspaceSetupInvocation
-from agentworks.errors import ConfigError, ConnectivityError, ExternalError, StateError
+from agentworks.errors import ConfigError, ConnectivityError, ExternalError
 from agentworks.harness_setup.model import NativeClaim
 from agentworks.native_files import NativeFiles, native_path
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from agentworks.transports import Transport
 
 MCP_CLAIM_ROLE = "artifact-mcp-server"
 type MCPTool = Literal["claude", "codex", "grok"]
@@ -94,6 +100,137 @@ def mcp_servers(inputs: ArtifactInputs, tool: MCPTool) -> SettingsObject:
     return result
 
 
+_MCP_USER_PATH = r"""
+import json, os, sys
+request = json.load(sys.stdin)
+home = os.environ.get('HOME', '')
+if home != request['home']:
+    raise SystemExit(2)
+tool = request['tool']
+variable, default = {'claude': ('CLAUDE_CONFIG_DIR', '.claude'), 'codex': ('CODEX_HOME', '.codex'),
+                     'grok': ('GROK_HOME', '.grok')}[tool]
+override = os.environ.get(variable)
+root = override or home + '/' + default
+if tool == 'claude':
+    path = override + '/.claude.json' if override else home + '/.claude.json'
+else:
+    path = root + '/config.toml'
+print('AGW_MCP_USER_CONFIG=' + json.dumps(path))
+"""
+
+
+def resolve_mcp_user_path(tool: MCPTool, runner: Transport, *, home: str, environment: Mapping[str, str]) -> str:
+    """Observe only fixed-role paths in the workload's actual target login environment."""
+    command = shlex.join(["python3", "-c", _MCP_USER_PATH])
+    result = runner.run(
+        f'"$SHELL" -lic {shlex.quote(command)}',
+        env=dict(environment),
+        input_data=json.dumps({"tool": tool, "home": home}),
+        tty=False,
+        check=False,
+        timeout=30,
+    )
+    if not result.ok:
+        raise ExternalError("Native MCP config location could not be resolved")
+    lines = [
+        line.removeprefix("AGW_MCP_USER_CONFIG=")
+        for line in result.stdout.splitlines()
+        if line.startswith("AGW_MCP_USER_CONFIG=")
+    ]
+    try:
+        path = json.loads(lines[0]) if len(lines) == 1 else None
+    except (ValueError, RecursionError):
+        path = None
+    if not isinstance(path, str):
+        raise ExternalError("Native MCP config location could not be resolved")
+    path = native_path(path)
+    if not path.startswith(native_path(home).rstrip("/") + "/"):
+        raise ConfigError("User MCP config placement outside HOME is unsupported")
+    return path
+
+
+def user_mcp_location(
+    tool: MCPTool, invocation: UserSetupInvocation, *, retiring: bool
+) -> tuple[str | None, bool, tuple[ArtifactDeferral, ...]]:
+    """Resolve current-role authority, preserving prior claims when it is unavailable."""
+    items = tuple(item for item in invocation.artifacts.items() if item.content.type is ArtifactType.MCP_SERVER)
+    previous = (
+        tuple(claim for claim in invocation.prior.claims if claim.role == MCP_CLAIM_ROLE) if invocation.prior else ()
+    )
+    if not items and not previous:
+        return None, False, ()
+    try:
+        return (
+            resolve_mcp_user_path(tool, invocation.runner, home=invocation.home, environment=invocation.environment),
+            False,
+            (),
+        )
+    except (ConfigError, ConnectivityError, ExternalError):
+        reason = "Native MCP config location could not be resolved safely; existing MCP ownership is retained."
+        if previous:
+            invocation.report_incomplete(reason)
+        return (
+            None,
+            True,
+            (
+                ()
+                if retiring
+                else tuple(
+                    ArtifactDeferral(input_id=item.identity, destination="session", reason=reason) for item in items
+                )
+            ),
+        )
+
+
+def session_mcp_conflicts(
+    tool: Literal["claude", "codex"],
+    runner: Transport | None,
+    inputs: ArtifactInputs,
+    *,
+    home: str,
+    environment: Mapping[str, str],
+    workspace: str,
+) -> dict[str, str]:
+    """Read fixed native roles before optional invocation overrides; never return config values."""
+    items = tuple(item for item in inputs.items() if item.content.type is ArtifactType.MCP_SERVER)
+    if not items:
+        return {}
+    conflicts: dict[str, str] = {}
+    if runner is None:
+        return {
+            item.identity: "The native launch target is unavailable for MCP configuration checks." for item in items
+        }
+    try:
+        user = resolve_mcp_user_path(tool, runner, home=home, environment=environment)
+        project = native_path(workspace) + ("/.mcp.json" if tool == "claude" else "/.codex/config.toml")
+        key = "mcpServers" if tool == "claude" else "mcp_servers"
+        format: SettingsFormat = "json" if tool == "claude" else "toml"
+        with NativeFiles(runner) as files:
+            for path in dict.fromkeys((user, project)):
+                content = files.read(path)
+                document = {} if content is None else parse_settings(content, format=format)
+                tables = [_table(document, key)]
+                if tool == "claude" and path == user:
+                    projects = _table(document, "projects")
+                    local = projects.get(workspace, {})
+                    if not isinstance(local, dict):
+                        raise ConfigError("native MCP project config must use an object")
+                    tables.append(_table(local, key))
+                for item in items:
+                    name = mcp_native_name(item)
+                    expected = render_mcp(item, tool)
+                    if any(name in table and table[name] != expected for table in tables):
+                        conflicts[item.identity] = (
+                            "An existing native MCP entry differs; invocation delivery leaves it unchanged."
+                        )
+    except (ConfigError, ConnectivityError, ExternalError):
+        return {
+            item.identity: "Native MCP configuration could not be checked safely; invocation delivery is deferred."
+            for item in items
+        }
+    return conflicts
+
+
 def _fingerprint(value: SettingsValue) -> str:
     content = json.dumps(value, sort_keys=True, ensure_ascii=True, separators=(",", ":"), default=str).encode()
     return hashlib.sha256(content).hexdigest()
@@ -107,10 +244,18 @@ def _table(document: SettingsObject, key: str) -> SettingsObject:
 
 
 def _shared_paths(
-    invocation: UserSetupInvocation | WorkspaceSetupInvocation, claims: tuple[NativeClaim, ...]
+    invocation: UserSetupInvocation | WorkspaceSetupInvocation, claims: tuple[NativeClaim, ...], *, destination: str
 ) -> tuple[str, ...]:
     return (
-        tuple(sorted({claim.destination for claim in claims if claim.role == MCP_CLAIM_ROLE}))
+        tuple(
+            sorted(
+                {
+                    claim.destination
+                    for claim in claims
+                    if claim.role == MCP_CLAIM_ROLE and claim.destination == destination
+                }
+            )
+        )
         if isinstance(invocation, WorkspaceSetupInvocation)
         else ()
     )
@@ -140,14 +285,25 @@ def apply_mcp(
     }
     if len(desired) != sum(item.content.type == ArtifactType.MCP_SERVER for item in invocation.artifacts.items()):
         raise ConfigError("MCP server native names collide")
-    if not desired and old:
-        destinations = {claim.destination for claim in old}
-        if len(destinations) == 1:
-            destination = destinations.pop()
-    if any(claim.destination != destination for claim in old):
-        raise StateError("MCP native config destination changed; clean up the previous destination first")
+    elsewhere = tuple(claim for claim in old if claim.destination != destination)
+    old = tuple(claim for claim in old if claim.destination == destination)
+    blocked = {
+        name: item
+        for name, item in desired.items()
+        if any(claim.identifier == name or claim.source == item.origin_identity for claim in elsewhere)
+    }
+    retained_location_reason = (
+        "Recorded MCP ownership belongs to another config location; its entries are retained for explicit cleanup."
+    )
+    if elsewhere:
+        invocation.report_incomplete(retained_location_reason)
+    blocked_deferrals = tuple(
+        ArtifactDeferral(input_id=item.identity, destination="session", reason=retained_location_reason)
+        for item in blocked.values()
+    )
+    desired = {name: item for name, item in desired.items() if name not in blocked}
     if not desired and not old and map_document is None:
-        return ArtifactApplication()
+        return ArtifactApplication(deferred=blocked_deferrals)
     format: SettingsFormat = "json" if tool == "claude" else "toml"
     key = "mcpServers" if tool == "claude" else "mcp_servers"
     group = invocation.linux_group if isinstance(invocation, WorkspaceSetupInvocation) else ""
@@ -157,11 +313,14 @@ def apply_mcp(
         if old or map_document is not None:
             invocation.report_incomplete(reason)
         return ArtifactApplication(
-            deferred=tuple(
-                ArtifactDeferral(input_id=item.identity, destination="session", reason=reason)
-                for item in desired.values()
+            deferred=(
+                *blocked_deferrals,
+                *tuple(
+                    ArtifactDeferral(input_id=item.identity, destination="session", reason=reason)
+                    for item in desired.values()
+                ),
             ),
-            shared_paths=_shared_paths(invocation, old),
+            shared_paths=_shared_paths(invocation, old, destination=destination),
         )
 
     with NativeFiles(invocation.runner) as files:
@@ -176,7 +335,7 @@ def apply_mcp(
                     group=group,
                     preserve_metadata=initial is not None,
                 )
-            return ArtifactApplication()
+            return ArtifactApplication(deferred=blocked_deferrals)
         try:
             initial = files.read(destination)
         except (ConnectivityError, ExternalError):
@@ -226,7 +385,7 @@ def apply_mcp(
             document = {} if working is None else parse_settings(working, format=format)
         table = _table(document, key)
         contributed = _table(contributions, key)
-        deferred: list[ArtifactDeferral] = []
+        deferred: list[ArtifactDeferral] = list(blocked_deferrals)
         confirmed = {claim.identifier: claim for claim in retained}
         for name, item in desired.items():
             entry = render_mcp(item, tool)
@@ -252,7 +411,9 @@ def apply_mcp(
                 sha256=_fingerprint(entry),
             )
 
-        updated = tuple(claim for claim in previous if claim.role != MCP_CLAIM_ROLE) + tuple(confirmed.values())
+        updated = (
+            tuple(claim for claim in previous if claim.role != MCP_CLAIM_ROLE) + elsewhere + tuple(confirmed.values())
+        )
         content = serialize_settings(document, format=format)
         if initial is not None and document == original_document:
             content = initial
@@ -276,4 +437,6 @@ def apply_mcp(
                 f"Removed MCP server '{name}'. Any native OAuth credentials are retained. "
                 "Use the harness's native logout before withdrawing a server when logout requires its definition."
             )
-        return ArtifactApplication(deferred=tuple(deferred), shared_paths=_shared_paths(invocation, updated))
+        return ArtifactApplication(
+            deferred=tuple(deferred), shared_paths=_shared_paths(invocation, updated, destination=destination)
+        )

@@ -12,6 +12,7 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from agentworks import output
+from agentworks.artifacts.application import ArtifactApplication
 from agentworks.artifacts.model import ArtifactInputs
 from agentworks.artifacts.native.mcp import apply_mcp
 from agentworks.capabilities.harness_integration.settings import (
@@ -37,7 +38,6 @@ from agentworks.plugins._harness_native.native_cli import (
 )
 
 if TYPE_CHECKING:
-    from agentworks.artifacts.application import ArtifactApplication
     from agentworks.capabilities.harness_integration.setup import UserSetupInvocation, WorkspaceSetupInvocation
     from agentworks.plugins._harness_native.native_config import NativeUserConfig, NativeWorkspaceConfig
 
@@ -270,7 +270,12 @@ def _check_contributions(
 
 
 def setup_user(
-    tool: NativeTool, config: NativeUserConfig | None, invocation: UserSetupInvocation
+    tool: NativeTool,
+    config: NativeUserConfig | None,
+    invocation: UserSetupInvocation,
+    *,
+    mcp_destination: str | None = None,
+    skip_mcp: bool = False,
 ) -> ArtifactApplication:
     """Reconcile actual-user native associations using confirmed prior claims."""
     mapping = None if config is None else config.settings
@@ -295,7 +300,7 @@ def setup_user(
             raise StateError("native retirement requires one recorded config home; ownership evidence was retained")
         root = roots.pop()
     destination = root + "/" + _filename(tool)
-    mcp_destination = (
+    mcp_destination = mcp_destination or (
         native_path(invocation.environment["CLAUDE_CONFIG_DIR"]) + "/.claude.json"
         if tool == "claude" and invocation.environment.get("CLAUDE_CONFIG_DIR")
         else native_path(invocation.home) + "/.claude.json"
@@ -307,11 +312,13 @@ def setup_user(
     sources = [] if config is None else config.marketplaces
     requested = [] if config is None else config.plugins
     if not native_claims and not sources and not requested:
-        if prepared is not None and tool == "claude":
+        if prepared is not None and (tool == "claude" or skip_mcp):
             with NativeFiles(invocation.runner) as files:
                 initial = files.read(destination)
                 settings_plan = _MappingPlan.build(prepared, initial, destination)
                 settings_plan.publish(files, destination, current=initial)
+        if skip_mcp:
+            return ArtifactApplication()
         return apply_mcp(
             tool,
             invocation,
@@ -677,7 +684,7 @@ def setup_user(
                 for selector in selectors
                 if selector not in blocked_plugins
             )
-            if tool == "claude":
+            if tool == "claude" or skip_mcp:
                 current = files.read(destination)
                 plan.publish(
                     files,
@@ -689,6 +696,8 @@ def setup_user(
                 )
         else:
             overlays = ()
+        if skip_mcp:
+            return ArtifactApplication()
         return apply_mcp(
             tool,
             invocation,

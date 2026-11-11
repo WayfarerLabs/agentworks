@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 from typing import TYPE_CHECKING
 
 import tomli_w
@@ -10,6 +11,7 @@ import tomli_w
 from agentworks import output
 from agentworks.artifacts.application import ArtifactApplication, ArtifactDeferral
 from agentworks.artifacts.model import ArtifactType
+from agentworks.artifacts.names import mcp_native_name
 from agentworks.artifacts.native.common import (
     MAX_CODEX_PERSONA_BYTES,
     NativeSessionArtifacts,
@@ -18,16 +20,19 @@ from agentworks.artifacts.native.common import (
     has_artifacts,
     persona_options,
     reject_flags,
+    select_inputs,
     select_session_artifacts,
     skill_files,
     validate_names,
     validate_native_argv,
+    validate_native_command,
 )
 from agentworks.artifacts.native.guidance import guidance_skills, session_skill_files
+from agentworks.artifacts.native.mcp import render_mcp
 from agentworks.errors import ConfigError
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Mapping, Sequence
 
     from agentworks.artifacts.application import SessionArtifactContext
     from agentworks.artifacts.model import ArtifactInput, ArtifactInputs
@@ -41,6 +46,7 @@ _SESSION_WORKAROUNDS = {
     ArtifactType.RULE: "session-home-skills",
     ArtifactType.SKILL: "session-home-skills",
     ArtifactType.AGENT: "session-agent-config",
+    ArtifactType.MCP_SERVER: "session-mcp-overrides",
 }
 
 
@@ -81,7 +87,7 @@ def vm_artifacts(inputs: ArtifactInputs) -> ArtifactApplication:
     for item in inputs.items():
         if item.content.type is ArtifactType.SKILL:
             files.extend(skill_files("/etc/codex/skills", item))
-        elif item.content.type is ArtifactType.AGENT:
+        elif item.content.type in (ArtifactType.AGENT, ArtifactType.MCP_SERVER):
             deferred.append(
                 ArtifactDeferral(
                     input_id=item.identity,
@@ -125,13 +131,20 @@ def session_artifacts(
     *,
     extra_args: Sequence[str],
     enabled_workarounds: Sequence[str] = (),
+    mcp_conflicts: Callable[[ArtifactInputs, SessionArtifactContext], Mapping[str, str]] | None = None,
 ) -> NativeSessionArtifacts:
     """Render session inputs, validating persona names for native override paths."""
     if context is None or not has_artifacts(context):
         return NativeSessionArtifacts()
     inputs, deferred = select_session_artifacts(context.inputs, enabled_workarounds, _SESSION_WORKAROUNDS)
-    if not inputs and not context.ancestor_files:
-        return NativeSessionArtifacts(ArtifactApplication(deferred=deferred))
+    mcp_inputs = select_inputs(
+        inputs, {item.identity for item in inputs.items() if item.content.type is ArtifactType.MCP_SERVER}
+    )
+    inputs = select_inputs(
+        inputs, {item.identity for item in inputs.items() if item.content.type is not ArtifactType.MCP_SERVER}
+    )
+    mcp = _session_mcp(context, mcp_inputs, extra_args, mcp_conflicts)
+    deferred = (*deferred, *mcp.application.deferred)
     validate_names(inputs, types=(ArtifactType.AGENT,))
     types = {item.content.type for item in inputs.items()}
     ancestors = {file.native_identity or "" for file in context.ancestor_files}
@@ -175,6 +188,95 @@ def session_artifacts(
                 "-c",
                 f"{key}.description={json.dumps(item.content.description, ensure_ascii=False)}",
             ]
+    try:
+        validate_native_argv((*argv, *mcp.argv))
+        validate_native_command(shlex.quote(shlex.join((*argv, *mcp.argv))))
+    except ConfigError:
+        # Optional MCP must not prevent an otherwise-valid legacy launch.
+        validate_native_argv(tuple(argv))
+        deferred = (
+            *deferred,
+            *(
+                ArtifactDeferral(
+                    input_id=item.identity,
+                    destination="session",
+                    reason="session-mcp-overrides exceeds the native command carrier limit",
+                )
+                for item in mcp_inputs.items()
+                if item.identity not in {entry.input_id for entry in mcp.application.deferred}
+            ),
+        )
+    else:
+        argv.extend(mcp.argv)
     application = ArtifactApplication(tuple(files), deferred)
-    validate_native_argv(tuple(argv))
     return NativeSessionArtifacts(application, tuple(argv))
+
+
+def _config_values(extra_args: Sequence[str]) -> list[str]:
+    values = []
+    for index, token in enumerate(extra_args):
+        if token in ("-c", "--config") and index + 1 < len(extra_args):
+            values.append(extra_args[index + 1])
+        elif token.startswith("--config="):
+            values.append(token.removeprefix("--config="))
+        elif token.startswith("-c"):
+            values.append(token[2:])
+    return values
+
+
+def _mcp_override_conflicts(extra_args: Sequence[str], names: set[str]) -> set[str]:
+    """Match native CLI dotted paths; its components are literal, not TOML keys."""
+    conflicts: set[str] = set()
+    for value in _config_values(extra_args):
+        path = value.split("=", 1)[0].strip().split(".")
+        if path[0] == "mcp_servers":
+            conflicts.update(names if len(path) == 1 else names.intersection({path[1]}))
+    return conflicts
+
+
+def _toml_literal(value: object) -> str:
+    if isinstance(value, dict):
+        # CLI paths split on dots, so header/env maps travel as one leaf table.
+        return (
+            "{"
+            + ", ".join(
+                f"{json.dumps(key, ensure_ascii=False)} = {_toml_literal(entry)}" for key, entry in value.items()
+            )
+            + "}"
+        )
+    return tomli_w.dumps({"value": value}).split("=", 1)[1].strip()
+
+
+def _session_mcp(
+    context: SessionArtifactContext,
+    inputs: ArtifactInputs,
+    extra_args: Sequence[str],
+    inspect: Callable[[ArtifactInputs, SessionArtifactContext], Mapping[str, str]] | None,
+) -> NativeSessionArtifacts:
+    items = tuple(inputs.items())
+    conflicts = _mcp_override_conflicts(extra_args, {mcp_native_name(item) for item in items})
+    inspect_inputs = select_inputs(inputs, {item.identity for item in items if mcp_native_name(item) not in conflicts})
+    native_conflicts = {} if inspect is None or not inspect_inputs else inspect(inspect_inputs, context)
+    deferred = []
+    argv: list[str] = []
+    for item in items:
+        name = mcp_native_name(item)
+        if name in conflicts:
+            deferred.append(
+                ArtifactDeferral(
+                    input_id=item.identity,
+                    destination="session",
+                    reason="session-mcp-overrides conflicts with an extra_args MCP override",
+                )
+            )
+            continue
+        if item.identity in native_conflicts:
+            deferred.append(
+                ArtifactDeferral(input_id=item.identity, destination="session", reason=native_conflicts[item.identity])
+            )
+            continue
+        try:
+            argv.extend(("-c", f"mcp_servers.{name}={_toml_literal(render_mcp(item, 'codex'))}"))
+        except ConfigError as error:
+            deferred.append(ArtifactDeferral(input_id=item.identity, destination="session", reason=str(error)))
+    return NativeSessionArtifacts(ArtifactApplication(deferred=tuple(deferred)), tuple(argv))

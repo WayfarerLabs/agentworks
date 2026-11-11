@@ -111,6 +111,7 @@ from typing import TYPE_CHECKING, Annotated, ClassVar, Literal, NamedTuple
 from pydantic import Field
 
 from agentworks.artifacts.application import ArtifactApplication
+from agentworks.artifacts.model import ArtifactType
 from agentworks.artifacts.native.common import (
     NativeSessionArtifacts,
     defer_setup_conflicts,
@@ -121,6 +122,7 @@ from agentworks.artifacts.native.common import (
     validate_native_command,
     validate_user_placement,
 )
+from agentworks.artifacts.native.mcp import session_mcp_conflicts, user_mcp_location
 from agentworks.artifacts.native.probe import probe_native
 from agentworks.capabilities.harness_integration.base import (
     HarnessIntegration,
@@ -239,7 +241,7 @@ class CodexConfig(AgwModel):
     ``config.toml`` a newer codex wrote."""
 
     enabled_workarounds: Annotated[
-        list[Literal["session-home-skills", "session-agent-config"]], MergeStrategy.REPLACE
+        list[Literal["session-home-skills", "session-agent-config", "session-mcp-overrides"]], MergeStrategy.REPLACE
     ] = Field(default_factory=list)
     """Explicitly enabled session artifact carriers. An authored list replaces inherited opt-ins."""
 
@@ -491,7 +493,8 @@ class CodexIntegration(HarnessIntegration):
                 home=invocation.home,
                 check_policy=False,
             )
-            if invocation.artifacts and not self.retiring
+            if any(item.content.type is not ArtifactType.MCP_SERVER for item in invocation.artifacts.items())
+            and not self.retiring
             else ""
         )
         config = None if self.retiring else self._config_as(CodexUserConfig)
@@ -513,7 +516,15 @@ class CodexIntegration(HarnessIntegration):
         setup_invocation = (
             replace(invocation, environment={**invocation.environment, "CODEX_HOME": root}) if root else invocation
         )
-        setup_user("codex", config, setup_invocation)
+        mcp_destination, skip_mcp, mcp_deferred = user_mcp_location("codex", invocation, retiring=self.retiring)
+        mcp = setup_user(
+            "codex",
+            config,
+            setup_invocation,
+            mcp_destination=mcp_destination,
+            skip_mcp=skip_mcp,
+        )
+        mcp = replace(mcp, deferred=(*mcp.deferred, *mcp_deferred))
         if plan.files:
             plan = defer_setup_conflicts(
                 plan,
@@ -527,7 +538,12 @@ class CodexIntegration(HarnessIntegration):
                     files=files,
                 ),
             )
-        return plan
+        return replace(
+            plan,
+            files=(*plan.files, *mcp.files),
+            deferred=(*plan.deferred, *mcp.deferred),
+            shared_paths=mcp.shared_paths,
+        )
 
     def workspace_init(self, invocation: WorkspaceSetupInvocation) -> ArtifactApplication:
         """Apply project settings and return workspace-owned artifact files."""
@@ -544,7 +560,7 @@ class CodexIntegration(HarnessIntegration):
                 ),
             )
         )
-        setup_workspace("codex", config, invocation)
+        mcp = setup_workspace("codex", config, invocation)
         if plan.files:
             plan = defer_setup_conflicts(
                 plan,
@@ -559,7 +575,12 @@ class CodexIntegration(HarnessIntegration):
                     workspace_only=True,
                 ),
             )
-        return plan
+        return replace(
+            plan,
+            files=(*plan.files, *mcp.files),
+            deferred=(*plan.deferred, *mcp.deferred),
+            shared_paths=mcp.shared_paths,
+        )
 
     @property
     def config(self) -> CodexConfig:
@@ -619,6 +640,14 @@ class CodexIntegration(HarnessIntegration):
                 prepared,
                 extra_args=self._rendered_extra_args,
                 enabled_workarounds=self.config.enabled_workarounds,
+                mcp_conflicts=lambda inputs, prepared: session_mcp_conflicts(
+                    "codex",
+                    runner,
+                    inputs,
+                    home=prepared.home,
+                    environment=prepared.environment,
+                    workspace=self._workspace_path,
+                ),
             ),
             workspace=self._workspace_path,
         )
