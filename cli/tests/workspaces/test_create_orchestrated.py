@@ -22,7 +22,7 @@ from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
 from agentworks.workspaces import manager as workspace_manager
-from tests.conftest import ManifestDoc, stub_vm_ssh_identity
+from tests.conftest import ManifestDoc, seed_vm_trust, stub_vm_ssh_identity
 
 if TYPE_CHECKING:
     from agentworks.capabilities.base import OperationScope, RunContext
@@ -67,6 +67,7 @@ def _seed_vm(db: Database) -> None:
 
     db.insert_vm("box", site="proxmox", hostname="box")
     db.update_vm_tailscale("box", "100.64.0.9")
+    seed_vm_trust("box")
     # The orchestrator's pre-gate _guard_vm_status refuses VMs that
     # never finished initializing, so the seeded row must be COMPLETE.
     db.update_vm_init_status("box", InitStatus.COMPLETE)

@@ -9,6 +9,7 @@ from agentworks import output
 from agentworks.capabilities.base import RunContext
 from agentworks.db import VMStatus
 from agentworks.errors import NotFoundError, StateError, UserAbort, ValidationError
+from agentworks.execution import trust
 from agentworks.naming import MAX_SECRET_NAME_LENGTH, NAME_RE, validate_name
 from agentworks.secrets.policy import require_exact_tty_interaction_policy
 
@@ -47,6 +48,10 @@ def start_vm(
 
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)
+    # Before the boundary resolves a secret or the start boots the VM: with no
+    # host-key record the reconnect check below could only fail, and its
+    # failure would send the repair path to spend a Tailscale auth key.
+    trust.require_record(name)
     registry = load_request_registry(config, live_database=db)
     vm_node, ops_ctx = _live_vm_boundary(
         db,
@@ -257,7 +262,14 @@ def delete_vm(
 
         from agentworks.ssh_config import sync_ssh_config
 
-        sync_ssh_config(config, db)
+        # The store file goes whenever the VM's row goes, even if the SSH config
+        # rebuild raises. Reaching here means the platform delete succeeded (it
+        # raises, keeping the row and the record, when it cannot remove the
+        # backend VM) or backend cleanup was skipped after a binding failure.
+        try:
+            trust.remove(name)
+        finally:
+            sync_ssh_config(config, db)
         output.result(f"VM '{name}' deleted")
 
 
@@ -308,6 +320,9 @@ def rekey_vm(
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)
     _warn_legacy_release(vm)
+    # Before the auth key resolves: a rekey with no host-key record would spend
+    # the new key and record the new address before its reconnect check raised.
+    trust.require_record(name)
 
     registry = load_request_registry(config, live_database=db)
     rekey_vm_tmpl = resolve_live_template(db, registry, vm.name, vm.template)

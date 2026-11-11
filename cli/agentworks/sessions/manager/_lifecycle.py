@@ -823,7 +823,9 @@ def _launch_existing_session(
                         legacy_running_authorized=(not replace_running or running_restart_authorized),
                     )
 
-                commit_session_artifacts(db, name, template.harness_integration, session_target, prepared_artifacts)
+                commit_session_artifacts(
+                    db, name, template.harness_integration, session_target, prepared_artifacts, artifact_application
+                )
                 deploy_restricted_config(run_command, history_limit=config.session.history_limit)
 
                 if harness_start.note is not None:

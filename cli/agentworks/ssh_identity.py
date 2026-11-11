@@ -1,8 +1,8 @@
 """Bounded, public-only SSH identity parsing.
 
-This leaf derives the fingerprint OpenSSH exposes for a public key. It never
-decrypts private material, consults a sibling public-key file, or invokes an
-external program.
+This leaf derives the fingerprint OpenSSH exposes for a public key and checks
+that a public-key blob is whole. It never decrypts private material, consults
+a sibling public-key file, or invokes an external program.
 """
 
 from __future__ import annotations
@@ -12,10 +12,13 @@ import binascii
 import contextlib
 import hashlib
 import os
+import shlex
 import stat
 import struct
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
+
+from agentworks.path_rendering import format_host_path
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -25,6 +28,10 @@ _MAX_ERROR_DETAIL_CHARACTERS = 256
 _OPENSSH_MAGIC = b"openssh-key-v1\x00"
 _OPENSSH_BEGIN = b"-----BEGIN OPENSSH PRIVATE KEY-----"
 _OPENSSH_END = b"-----END OPENSSH PRIVATE KEY-----"
+_OPENSSH_UNENCRYPTED_CIPHER = b"none"
+_CERTIFICATE_SUFFIX = "-cert-v01@openssh.com"
+_PKCS8_ENCRYPTED_BEGIN = b"-----BEGIN ENCRYPTED PRIVATE KEY-----"
+_LEGACY_ENCRYPTED_HEADER = b"Proc-Type: 4,ENCRYPTED"
 _ASCII_WHITESPACE = b" \t\r\n\v\f"
 _LEGACY_ARMOR_LABELS = (
     b"RSA PRIVATE KEY",
@@ -69,6 +76,26 @@ def fingerprint_public_blob(blob: bytes) -> str:
     digest = hashlib.sha256(blob).digest()
     encoded = base64.standard_b64encode(digest).decode("ascii").rstrip("=")
     return f"SHA256:{encoded}"
+
+
+def is_public_key_blob(blob: bytes, key_type: str) -> bool:
+    """Whether ``blob`` is a complete public-key blob of ``key_type``.
+
+    Its first SSH string must be the key type, and a plain key must be nothing
+    but whole SSH strings after it, which catches a truncated blob. Only a
+    certificate's type is read: the rest of a certificate is not a run of
+    strings.
+    """
+    reader = _SSHReader(blob)
+    try:
+        if reader.read_string("key type").decode("ascii") != key_type:
+            return False
+        if not key_type.endswith(_CERTIFICATE_SUFFIX):
+            while not reader.exhausted:
+                reader.skip_string("key field")
+    except (SSHIdentityReadError, UnicodeDecodeError):
+        return False
+    return True
 
 
 def parse_public_ssh_identity(text: str) -> VerifiedSSHIdentity:
@@ -129,6 +156,27 @@ def read_private_ssh_identity(path: Path) -> SSHIdentity:
     raise _invalid("private identity uses an unrecognized envelope")
 
 
+def identity_is_passphrase_protected(path: Path) -> bool:
+    """Whether ``path`` is a passphrase-protected private key.
+
+    An OpenSSH key is protected when its envelope names a cipher; a legacy PEM
+    key when its header says ``ENCRYPTED``; a PKCS#8 key when its label is
+    ``ENCRYPTED PRIVATE KEY``. Nothing is decrypted. Any read or parse failure,
+    and any other key format, is ``False``: this is a best-effort hint for an
+    operator-supplied file, never a gate.
+    """
+    try:
+        contents = _read_bounded_file(path)
+        if contents.startswith(_PKCS8_ENCRYPTED_BEGIN):
+            return True
+        if not contents.startswith(_OPENSSH_BEGIN):
+            return contents.startswith(b"-----BEGIN ") and _LEGACY_ENCRYPTED_HEADER in contents
+        reader = _SSHReader(_decode_openssh_envelope(contents), offset=len(_OPENSSH_MAGIC))
+        return reader.read_string("cipher name") != _OPENSSH_UNENCRYPTED_CIPHER
+    except SSHIdentityReadError:
+        return False
+
+
 def _read_bounded_file(path: Path) -> bytes:
     descriptor: int | None = None
     try:
@@ -162,7 +210,41 @@ def _read_bounded_file(path: Path) -> bytes:
                 os.close(descriptor)
 
 
-def _parse_openssh_private_identity(contents: bytes) -> VerifiedSSHIdentity:
+def passphrase_hint(identity_file: Path) -> str | None:
+    """The line telling the operator to load ``identity_file`` into the SSH agent, or ``None``.
+
+    Only a passphrase-protected key gets one: ssh runs in batch mode and cannot
+    ask for the passphrase. It reads conditionally because a connection failure
+    has other causes too, such as a stopped VM or a dropped network. The path in
+    the suggested command is one a shell reads back as exactly that path: the
+    ``~`` form when it needs no quoting (a quoted ``~`` does not expand),
+    otherwise the absolute path, single-quoted on POSIX. On Windows it is always
+    the absolute path in double quotes, since neither cmd nor PowerShell expands
+    the ``~`` form for ssh-add; cmd still expands ``%NAME%`` and PowerShell
+    ``$name`` inside them, which no one quoting avoids in both.
+    """
+    if not identity_is_passphrase_protected(identity_file):
+        return None
+    shown = format_host_path(identity_file)
+    return f"If {shown} is not loaded in your SSH agent, load it with: ssh-add {_typed_path(identity_file, shown)}"
+
+
+def _typed_path(identity_file: Path, shown: str) -> str:
+    if not _on_windows() and shown.startswith("~/") and shlex.quote(shown[2:]) == shown[2:]:
+        return shown
+    absolute = str(identity_file.absolute())
+    if not _on_windows():
+        return shlex.quote(absolute)
+    # cmd and PowerShell do not expand ~ for ssh-add, and a Windows file name cannot contain a double quote.
+    return f'"{absolute}"'
+
+
+def _on_windows() -> bool:
+    return os.name == "nt"
+
+
+def _decode_openssh_envelope(contents: bytes) -> bytes:
+    """The binary envelope inside OpenSSH private-key armor, checked for armor, size and magic."""
     end_offset = contents.find(_OPENSSH_END, len(_OPENSSH_BEGIN))
     if end_offset < 0:
         raise _invalid("OpenSSH private identity armor is incomplete")
@@ -179,7 +261,11 @@ def _parse_openssh_private_identity(contents: bytes) -> VerifiedSSHIdentity:
         raise _invalid("OpenSSH private identity envelope exceeds the supported size limit")
     if not envelope.startswith(_OPENSSH_MAGIC):
         raise _invalid("OpenSSH private identity has invalid envelope magic")
+    return envelope
 
+
+def _parse_openssh_private_identity(contents: bytes) -> VerifiedSSHIdentity:
+    envelope = _decode_openssh_envelope(contents)
     reader = _SSHReader(envelope, offset=len(_OPENSSH_MAGIC))
     reader.skip_string("cipher name")
     reader.skip_string("KDF name")

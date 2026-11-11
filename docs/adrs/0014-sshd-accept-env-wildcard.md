@@ -10,6 +10,12 @@ superseded by ADR 0016's backend-chain model; the transport decision itself stan
 for the console agent-pane case, where composed operator env and secrets also cross via
 `--preserve-env`.
 
+Amended: the commands that run through `agentworks.execution` send no environment through ssh (see
+the [transport take 2 SDD](../sdd/2026-10-20-transport-take2/)). Their request carries it on the
+client's stdin, so nothing passes through `SetEnv` option parsing. `AcceptEnv *` and the coalesced
+`SetEnv` remain for the paths not yet migrated; whether the sshd fragment keeps a user is decided
+when the last of them moves. ADR 0020's closed-stdin path likewise stays until then.
+
 ## Context
 
 The env-and-secrets SDD propagates user-defined env vars (plaintext and secret-resolved) plus

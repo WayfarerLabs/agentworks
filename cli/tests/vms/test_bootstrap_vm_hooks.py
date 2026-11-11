@@ -27,6 +27,7 @@ from agentworks.capabilities.base import RunContext
 from agentworks.ssh import SSHResult
 from agentworks.transports import SSHTransport
 from agentworks.vms.initializer import driver
+from tests.conftest import ssh_enrolls_on_first_use
 from tests.native_exec_support import ExecCall, ExecutionOnlyTransport
 
 if TYPE_CHECKING:
@@ -117,10 +118,12 @@ def test_phase_a_accepts_execution_only_transport(
         return SSHResult(returncode=0, stdout="100.64.0.8\n", stderr="")
 
     target = ExecutionOnlyTransport(result_for)
-    monkeypatch.setattr(
-        "agentworks.transports.ssh.SSHTransport.run",
-        lambda *_args, **_kwargs: SSHResult(returncode=0, stdout="ok\n", stderr=""),
-    )
+
+    def _connect(self: SSHTransport, *_args: object, **_kwargs: object) -> SSHResult:
+        ssh_enrolls_on_first_use(self.trust)
+        return SSHResult(returncode=0, stdout="ok\n", stderr="")
+
+    monkeypatch.setattr("agentworks.transports.ssh.SSHTransport.run", _connect)
     logger = MagicMock()
     config = SimpleNamespace(operator=SimpleNamespace(ssh_private_key=None))
 

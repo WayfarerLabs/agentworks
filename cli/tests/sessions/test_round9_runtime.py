@@ -411,7 +411,7 @@ def test_real_create_lost_ack_repr_secret_is_redacted_in_rollback_and_canonical_
         return result
 
     monkeypatch.setattr(native, "run", lose_ack)
-    monkeypatch.setattr(cli, "app", lambda: invoke(db, "create_session", workspace="ws1", agent="a1"))
+    monkeypatch.setattr(cli, "app", lambda **_: invoke(db, "create_session", workspace="ws1", agent="a1"))
     try:
         with pytest.raises(SystemExit) as caught:
             cli.main()

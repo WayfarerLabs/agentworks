@@ -93,7 +93,7 @@ class ArtifactMetadata:
     declared: bool
     input_id: str | None = None
     origin_id: str | None = None
-    native_name: str | None = None
+    native_name: str | None = None  # Canonical source name; recorded placements carry projected identities.
     source: str | None = None
     requested_ref: str | None = None
     revision: str | None = None
@@ -427,7 +427,7 @@ def render_artifacts(inspection: ArtifactInspection) -> None:
             if artifact.source is not None:
                 if artifact.description is not None:
                     output.info(f"    Description: {artifact.description}")
-                output.info(f"    Source: {artifact.source}; native name: {artifact.native_name}")
+                output.info(f"    Source: {artifact.source}; artifact name: {artifact.native_name}")
                 if artifact.selected_path:
                     output.info(
                         f"    Selected path: {artifact.selected_path}; "

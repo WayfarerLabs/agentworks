@@ -27,6 +27,7 @@ from enum import Enum
 from typing import TYPE_CHECKING
 
 from agentworks.errors import StateError
+from agentworks.execution.trust import TrustBinding, TrustMode
 from agentworks.ssh import SSH_DEFAULT_RETRIES
 from agentworks.transports.base import ExecTransport, Transport
 from agentworks.transports.lima import LimaTransport
@@ -85,6 +86,11 @@ def transport_for_user(
     Raises :class:`StateError` if the VM has no Tailscale IP (a typed
     error rather than an assert, which would disappear under
     ``python -O``).
+
+    The transport verifies the VM's host key against its store (VM trust). It
+    does not check for a record when built; each spawn does, and a VM with no
+    record raises :class:`TrustMissing` there instead of falling back to first
+    use.
     """
     if vm.tailscale_host is None:
         raise StateError(
@@ -95,6 +101,7 @@ def transport_for_user(
         )
     return SSHTransport(
         host=vm.tailscale_host,
+        trust=TrustBinding(TrustMode.VM, vm.name),
         user=user,
         identity_file=config.operator.ssh_private_key,
         default_timeout=default_timeout,
@@ -286,7 +293,9 @@ def wait_for_reconnect(
     temporarily break the transport. Double-checks once on first success
     to handle flapping. Polymorphic over any :class:`Transport` via its
     :meth:`Transport.run`. Returns ``True`` if the connection
-    stabilized, ``False`` if it timed out.
+    stabilized, ``False`` if it timed out. A VM with no host-key record raises
+    :class:`TrustMissing` on the first attempt (it is not an ``SSHError``), so
+    callers never mistake it for an unreachable peer and rejoin Tailscale.
 
     ``context`` selects the operator-facing lines from the
     :class:`TailscaleWait` vocabulary. The default ``RECONNECT``

@@ -34,7 +34,9 @@ context.
 Native-home overrides for user artifact files must stay beneath that user's `HOME`. For example,
 `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, or `GROK_HOME` can select another directory there. A user
 artifact plan that would write outside `HOME` is refused before that integration changes settings or
-plugins. Session files still use their private directory beneath `HOME`.
+plugins. Session files use their private run directory and, when explicitly enabled, narrowly owned
+native helper packages beneath `HOME`. Codex/Grok home-skill discovery is shared with other sessions
+of that user.
 
 Native preflight conservatively refuses relevant restrictions for new delivery in the configuration
 files it inspects. Restrictions affecting existing ancestor placement warn without blocking session
@@ -44,6 +46,8 @@ unsupported even when the native tool would allow it. Inspect the effective nati
 changing restrictions; the error does not establish that the tool itself disables the artifact.
 
 <!-- agw:include path="artifacts/README.md" heading="Session workarounds" -->
+
+<!-- agw:include path="artifacts/README.md" heading="Upgrade existing artifact setup" -->
 
 <!-- agw:include path="artifacts/README.md" heading="Inspect before changing state" -->
 

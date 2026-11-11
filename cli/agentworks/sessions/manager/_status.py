@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
 
 import agentworks.sessions.manager as _mgr
+from agentworks import output
 from agentworks.db import PID_STOPPED, SessionMode, SessionStatus
 from agentworks.errors import (
     AgentworksError,
@@ -16,6 +17,7 @@ from agentworks.errors import (
     StateError,
     UserAbort,
 )
+from agentworks.execution.errors import TrustMissing
 from agentworks.sessions.tmux import (
     ProbeStatus,
     probe_tmux_server,
@@ -452,6 +454,12 @@ def observe_session_statuses(
                 require_vm_ssh_boundary(db, config, vm)
             except UserAbort:
                 raise
+            except TrustMissing as exc:
+                # One VM's missing host key must not abort the listing for the
+                # others: report it once and leave that VM's sessions UNKNOWN.
+                output.warn(f"Session status on VM '{ws.vm_name}' is unavailable: {exc}. {exc.hint}")
+                unavailable_vms.add(ws.vm_name)
+                continue
             except (ConfigError, ConnectivityError, VMSSHIdentityPolicyError):
                 unavailable_vms.add(ws.vm_name)
                 continue

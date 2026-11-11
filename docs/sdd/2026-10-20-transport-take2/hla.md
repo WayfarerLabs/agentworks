@@ -1,6 +1,6 @@
 # Transport Take 2: High-Level Architecture
 
-- Status: Draft for review. Nothing here is implemented.
+- Status: Slices 1 and 2 implemented in PR A (#863); slices 3 to 8 not started.
 - Date: 2026-10-31
 - Requirements: [frd.md](./frd.md)
 - Plan: [plan.md](./plan.md)
@@ -57,23 +57,23 @@ contract.
 
 ## Components
 
-| Module                                   | Responsibility                                                                                                                                    | Adopted from                                                      |
-| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| `execution/client.py`                    | Resolve the OpenSSH executable once to an absolute path, read its version and build, refuse unsupported builds before dispatch                    | `carriers/ssh/client.py` version probe                            |
-| `execution/ssh_process.py`               | Build a client argv from a policy (VM or host) and run it: stdin source, stdout and stderr pump, local deadline. The only place that spawns `ssh` | `carriers/ssh/connection.py`, `_io.py`                            |
-| `execution/trust.py`                     | The VM-bound host-key store: lookup, enrollment, import, re-establishment, removal                                                                | new                                                               |
-| `execution/envelope.py`                  | Encode a request into its envelope; frame and parse the start and completion markers                                                              | `preparation.py`, adapted                                         |
-| `execution/launcher.py`                  | `agw-launch`: the constant stage 0, the Python launcher it receives, and the terminal handover                                                    | `bootstrap.py` ideas, rewritten in Python                         |
-| `execution/requests.py`, `results.py`    | The caller vocabulary and typed outcomes                                                                                                          | `preparation.py` types; `carrier.py` ideas                        |
-| `execution/errors.py`                    | Typed failures, each subclassing the matching `agentworks.errors` kind                                                                            | new                                                               |
-| `execution/access.py`                    | `VMAccess`: identity-bound, passive entry point holding `run`, `stream`, `attach` and `forward`, plus `files` and `detached`                      | new                                                               |
-| `execution/files.py`                     | File operations built on `run` (D6)                                                                                                               | semantics from `native_files.py` callers                          |
-| `execution/detached.py`                  | Launch, observe and stop work that outlives its connection (D7)                                                                                   | `remote_exec.py` wrapper idea, copied                             |
-| `execution/attach.py`, `forwarding.py`   | Terminal attach under `agentworks.terminal.guarded_terminal`; port forwards with an explicit lifetime                                             | `transports/base.py`, `vms/manager/tailscale.py`                  |
-| `execution/reachability.py`              | Wait until a VM answers over SSH, with the operator-facing wait wording                                                                           | `transports.wait_for_reconnect`                                   |
-| `execution/oplog.py`                     | Per-VM operation log: label, request shape, outcome; never payloads                                                                               | `SSHLogger` file layout                                           |
-| `capabilities/vm_platform/public_ssh.py` | The cloud platforms' SSH to a VM's public address, for provisioning and recovery, composed from `ssh_process`                                     | cloud `SSHTransport` uses                                         |
-| `vms/contract.py`, `vms/recovery.py`     | The VM contract checks; `run_recovery` with its marker wrapper, core's recovery scripts and `vm recover`                                          | new; scripts from `vms/initializer/credentials.py` and `power.py` |
+| Module                                   | Responsibility                                                                                                                                                                                | Adopted from                                                      |
+| ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| `execution/client.py`                    | Resolve the OpenSSH executable once to an absolute path, read its version and build, refuse unsupported builds before dispatch                                                                | `carriers/ssh/client.py` version probe                            |
+| `execution/ssh_process.py`               | Build a client argv from a policy (VM or host), hold stage 0, and start the client. The only place that spawns `ssh`; its pump (stdin source, stdout and stderr, local deadline) is `pump.py` | `carriers/ssh/connection.py`, `_io.py`                            |
+| `execution/trust.py`                     | The VM-bound host-key store: lookup, enrollment, import, re-establishment, removal                                                                                                            | new                                                               |
+| `execution/envelope.py`                  | Encode a request into its envelope; frame and parse the start and completion markers; load the agw-launch source                                                                              | `preparation.py`, adapted                                         |
+| `execution/agw_launch.py`                | `agw-launch`: the Python program stage 0 runs on the guest, including the terminal handover                                                                                                   | `bootstrap.py` ideas, rewritten in Python                         |
+| `execution/requests.py`, `results.py`    | The caller vocabulary and typed outcomes                                                                                                                                                      | `preparation.py` types; `carrier.py` ideas                        |
+| `execution/errors.py`                    | Typed failures, each subclassing the matching `agentworks.errors` kind                                                                                                                        | new                                                               |
+| `execution/access.py`                    | `VMAccess`: identity-bound, passive entry point holding `run`, `stream`, `attach` and `forward`, plus `files` and `detached`                                                                  | new                                                               |
+| `execution/files.py`                     | File operations built on `run` (D6)                                                                                                                                                           | semantics from `native_files.py` callers                          |
+| `execution/detached.py`                  | Launch, observe and stop work that outlives its connection (D7)                                                                                                                               | `remote_exec.py` wrapper idea, copied                             |
+| `execution/attach.py`, `forwarding.py`   | Terminal attach under `agentworks.terminal.guarded_terminal`; port forwards with an explicit lifetime                                                                                         | `transports/base.py`, `vms/manager/tailscale.py`                  |
+| `execution/reachability.py`              | Wait until a VM answers over SSH, with the operator-facing wait wording                                                                                                                       | `transports.wait_for_reconnect`                                   |
+| `execution/oplog.py` (slice 3)           | Per-VM operation log: label, request shape, outcome; never payloads                                                                                                                           | `SSHLogger` file layout                                           |
+| `capabilities/vm_platform/public_ssh.py` | The cloud platforms' SSH to a VM's public address, for provisioning and recovery, composed from `ssh_process`                                                                                 | cloud `SSHTransport` uses                                         |
+| `vms/contract.py`, `vms/recovery.py`     | The VM contract checks; `run_recovery` with its marker wrapper, core's recovery scripts and `vm recover`                                                                                      | new; scripts from `vms/initializer/credentials.py` and `power.py` |
 
 `agentworks.terminal` is not one of the six legacy modules, so attach keeps using its guard. The
 proof modules that do not fit are deleted when the package is adopted: `carrier.py`'s generic
@@ -93,14 +93,16 @@ directory.
 - **Windows** never searches `PATH`, because `PATH` commonly finds the MSYS build bundled with Git
   for Windows, whose argv handling corrupts every invocation (measured). It tries
   `%SystemRoot%\System32\OpenSSH\ssh.exe`, then `%ProgramFiles%\OpenSSH\ssh.exe` (the Win32-OpenSSH
-  MSI install). It accepts a build only when its `ssh -V` banner is the `OpenSSH_for_Windows_` form.
+  MSI install), preferring their `Sysnative` and `ProgramW6432` forms for a 32-bit Python. It
+  accepts a build only when its `ssh -V` banner is the `OpenSSH_for_Windows_` form.
 - **Every workstation** requires 8.5 or newer. A missing, unsupported or too-old client gets a typed
   `ClientUnsupported` refusal before credentials are resolved. The refusal names the paths tried and
   how to install a supported client.
 - **Windows 10.** Its inbox client is 8.1 (measured, per the salvage message), so a Windows 10
   workstation needs the MSI install. The refusal says so.
-- **Doctor.** `agw doctor`'s existing check, which looks for `ssh` and `scp` on `PATH`, becomes this
-  resolver's verdict, since scp is no longer used.
+- **Doctor.** `agw doctor` reports this resolver's verdict beside its existing `PATH` presence rows
+  for `ssh`, `scp` and `tailscale`. The legacy paths still run bare `ssh` and `scp`, so the `ssh`
+  and `scp` rows stay until the last legacy user goes (slice 7 or 8).
 
 ### D2. Policies and request delivery (R4, R8)
 
@@ -108,17 +110,21 @@ directory.
 
 - **VM policy**, for every connection the transport makes to a VM:
   - **Options.** `-F none`, so no operator or system configuration applies, plus explicit `-o`
-    options adopted from the proof's list. These include `BatchMode`, connection sharing off per ADR
-    0015, agent and X11 forwarding off, no proxy commands, `ConnectionAttempts=1`, an explicit
-    `ConnectTimeout`, and the 8.5 `CertificateFile` workaround.
+    options for what that leaves to say: `BatchMode`, `PreferredAuthentications=publickey`,
+    `SecurityKeyProvider=none`, an explicit `ConnectTimeout`, and the 8.5 `CertificateFile`
+    workaround. Connection sharing (ADR 0015), agent and X11 forwarding, proxy commands and password
+    authentication are off by the defaults that `-F none` leaves, with no configuration read; the CI
+    `ssh -G` test and the live 8.5 and Windows cells guard those defaults.
   - **Identity.** `IdentityFile` is `operator.ssh_private_key` with `IdentitiesOnly=yes`. The
     default agent stays enabled, so an encrypted key can be served by it, but only that identity is
     offered. ssh never prompts for a passphrase (BatchMode), so when a connection fails before the
-    start marker and that key is passphrase-protected, the error's hint says to load it into the
-    agent. Nothing is checked when a connection succeeds.
+    start marker and that key is a passphrase-protected OpenSSH key (its cipher name, read with the
+    existing identity parser), the error's hint says to load it into the agent if it is not loaded
+    already. The wording is conditional because the same failure has other causes; nothing asks the
+    agent, and nothing is checked when a connection succeeds.
   - **Trust.** The VM's store options (D9).
-  - **Keepalives.** `ServerAliveInterval` and `ServerAliveCountMax`, which the current stack also
-    applies, on streaming, attach and forward.
+  - **Keepalives.** `ServerAliveInterval` and `ServerAliveCountMax` on every connection, so a dead
+    peer ends even a request with no deadline.
 - **Host policy**, for platforms' own access to a host or to a VM's public address. It honors
   operator configuration, which R8 allows outside VM connections (ruled on 2026-10-23), and the
   platform supplies the trust options. Remote Lima's host connection depends on that today.
@@ -126,13 +132,13 @@ directory.
 **Request delivery.** Everything request-bearing travels on the client's stdin, never on a command
 line or in the environment.
 
-- **What reaches the command line.** The client's arguments are the policy options, `-T` or `-tt`
+- **What reaches the command line.** The client's arguments are the policy options, `-T` or `-t`
   (`-N -L` for a forward), the destination and the constant stage 0 command (D4). None of them
   carries request data.
 - **Why stdin.** The pipe belongs to the client, so request content appears in no process list on
-  either machine and never touches disk. It has no size limit, and it depends on no client version
-  and no sshd configuration beyond the admin's existing passwordless sudo, so it works from core's
-  first connection to a new VM.
+  either machine and never touches disk. It has no size limit of its own, and it depends on no
+  client version and no sshd configuration beyond the admin's existing passwordless sudo, so it
+  works from core's first connection to a new VM.
 - **Terminals.** An attach is the one case where stdin is the operator's terminal. It uses two
   connections (D8), so its request still travels on a private stdin.
 
@@ -148,12 +154,15 @@ The client writes three things on stdin, in order:
    tag, because the client sends agw-launch and the envelope together from one build.
 3. **The caller's input**, untouched, until end of file.
 
-- **Exact reads.** One reading function, defined by stage 0 and reused by agw-launch, reads each
-  prefixed part with unbuffered reads of exactly its length. The payload inherits stdin positioned
-  at the caller's first byte, with no copy loop in agw-launch. (Where sudo's I/O logging is enabled,
-  sudo itself relays stdin for an elevated request.)
-- **Size.** Nothing bounds a request but memory. The largest program in a request today is the
-  native probe (`artifacts/native/probe.py`, 14,391 bytes).
+- **Exact reads.** Stage 0 reads the agw-launch source, and agw-launch reads the envelope, each with
+  unbuffered reads of exactly its length. The payload inherits stdin positioned at the caller's
+  first byte, with no copy loop in agw-launch. (Where sudo's I/O logging is enabled, sudo itself
+  relays stdin for an elevated request.)
+- **Size.** Nothing bounds a request but memory and the kernel's limit of 131,071 bytes on any one
+  argv element or `NAME=VALUE` environment string, which the client refuses beyond; a total over
+  `ARG_MAX` is refused by the guest's `exec`. A script's source goes to an anonymous file, not argv,
+  so it is not bounded by that limit. The largest program in a request today is the native probe
+  (`artifacts/native/probe.py`, 14,391 bytes).
 - **What it replaces.** The current stack's coalesced `-o SetEnv` truncates at a newline and is
   first-value-wins (ADR 0014), and OpenSSH 10.x expands `%` and `${HOME}` in `SetEnv` values where
   9.x does not (#845). Nothing in the envelope passes through OpenSSH option parsing. The config and
@@ -169,10 +178,11 @@ source from stdin, or from the handover socket, and runs it. If it cannot read o
 exits non-zero before any start marker, so the request is not delivered. The client discards
 everything before the marker, so a traceback quoting misaligned request bytes, as a startup file
 that reads stdin produces, never reaches the error or a log. Stage 0's line contains no single
-quote, so the account shell passes it through unchanged. `-I` ignores Python's environment variables
-and the user site directory, and `-S` skips site packages, so no Python startup applies. The short
-line stays far below Windows' 32,767-character command-line limit and keeps sudo's log entry to one
-line. Elevation is the whole operation running under `sudo -n`, so no variable has to survive sudo.
+quote, double quote, backslash, `!` or newline, so the account shell passes it through unchanged and
+Windows argument quoting has nothing to escape. `-I` ignores Python's environment variables and the
+user site directory, and `-S` skips site packages, so no Python startup applies. The short line
+stays far below Windows' 32,767-character command-line limit and keeps sudo's log entry to one line.
+Elevation is the whole operation running under `sudo -n`, so no variable has to survive sudo.
 
 **Account shell precondition.** sshd hands that command to the destination account's login shell as
 `$SHELL -c`, so the account shell parses one constant line before stage 0 runs. Managed accounts
@@ -190,8 +200,10 @@ delivered, and a conformance vector covers it.
 
 **What agw-launch needs.** The python3 of every recognized Debian release (`debian.py`), which
 provisioning installs (D10), its standard library, and `sudo` for elevation. It is written in plain
-syntax that needs no particular python3 release. It is rewritten in Python from the proof's
-`bootstrap.py`, keeping that program's measured handling of locale and private names.
+syntax that needs no particular python3 release. A python3 without its standard library, as
+`python3-minimal` alone gives, exits with a dedicated status before the start marker and is typed
+`VMNotReady`. It is rewritten in Python from the proof's `bootstrap.py`; the locale handling of that
+Bash program has no counterpart (step 4).
 
 **Relationship to agw-atc.** The follow-up containment effort introduces `agw-atc`, an installed,
 long-running VM program for sessions, limits and process-to-session lookup. The two stay distinct by
@@ -206,8 +218,10 @@ if one proves necessary, is the same installed program (`2026-08-04-next-steps/t
 
 **What agw-launch does:**
 
-1. **Reads the envelope.** A malformed one fails before the start marker, so the request is not
-   delivered.
+1. **Reads the envelope and the passwd entry.** The client validates the envelope and one build
+   ships both halves, so agw-launch does not re-validate its schema. A malformed envelope, a missing
+   passwd entry (sshd cannot authenticate a uid without one) or a string that cannot be encoded to
+   bytes is an exception before the start marker, so the request is not delivered.
 2. **Checks its standard streams.** sshd gives the command pipes or sockets, stdout and stderr
    distinct (the terminal in TTY mode). If a startup file redirected one, for example with
    `exec >/dev/null` or `exec 2>&1`, agw-launch exits non-zero before the start marker, so the
@@ -217,17 +231,18 @@ if one proves necessary, is the same installed program (`2026-08-04-next-steps/t
 3. **Writes the start marker**, `<nonce> start`, to stdout and to stderr.
 4. **Resets what the payload inherits:**
    - the environment, rebuilt from `HOME`, `USER`, `LOGNAME` and `SHELL` from the identity's passwd
-     entry, a fixed `PATH`, the locale, `SHLVL=1` (so a bash child of the payload never reads the
-     account's `~/.bashrc`, whichever of Debian bash's triggers is present), then the session
-     variables today's shells and session workloads use, each taken from a source startup files
-     cannot touch: `TERM` from the envelope (the operator's terminal type, with a default the LLD
-     sets for a Windows workstation that has none) and `SSH_TTY` from the terminal's name in TTY
-     mode, and `XDG_RUNTIME_DIR` as `/run/user/<uid>` when that directory exists and belongs to the
-     identity; then the request's environment. Nothing is copied from the inherited environment,
-     since only these sources are out of startup files' reach, so `SSH_CLIENT` and `SSH_CONNECTION`
-     are no longer passed, and release notes say so;
+     entry, a fixed `PATH`, `LANG=C.UTF-8` with no `LC_*`, `SHLVL=1` (so a bash child of the payload
+     never reads the account's `~/.bashrc`, whichever of Debian bash's triggers is present), then
+     the session variables today's shells and session workloads use, each taken from a source
+     startup files cannot touch: `TERM` from the envelope (the operator's terminal type, with a
+     default the LLD sets for a Windows workstation that has none) and `SSH_TTY` from the terminal's
+     name in TTY mode, and `XDG_RUNTIME_DIR` as `/run/user/<uid>` when that directory exists and
+     belongs to the identity; then the request's environment. Nothing is copied from the inherited
+     environment, since only these sources are out of startup files' reach, so `SSH_CLIENT` and
+     `SSH_CONNECTION` are no longer passed, and release notes say so;
    - the working directory (the home directory by default) and a fixed umask;
-   - signal dispositions back to their defaults, and no inherited descriptor above 2.
+   - signal dispositions back to their defaults, the signal mask cleared, and no inherited
+     descriptor above 2 other than a script's.
 
    R3 (operator, 2026-11-01) states three known gaps. Resource limits and scheduling priority a
    startup file lowered cannot be reset, since an unprivileged process cannot tell them from PAM's
@@ -238,14 +253,15 @@ if one proves necessary, is the same installed program (`2026-08-04-next-steps/t
 
 5. **Runs the payload as a child.** A literal argv runs with no shell. A script runs under the
    chosen interpreter, which reads the source from a file descriptor and never from its arguments
-   (D2). Login or interactive startup applies only when requested. `sh` and `bash` are fixed paths.
-   The default shell is the destination identity's passwd entry. A missing interpreter fails rather
-   than being substituted.
+   (D2), which the launcher keeps in an anonymous in-memory file. Login or interactive startup
+   applies only when requested. `sh` and `bash` are fixed paths. The default shell is the
+   destination identity's passwd entry. A missing interpreter fails rather than being substituted.
 6. **Reports completion.** Except in TTY mode, once the payload exits, or once it finds it cannot
    start it, agw-launch writes an end marker, `<nonce> end`, to stdout and then one framed trailer
    to stderr: `<nonce> exit <status>`, or `<nonce> refused <reason>` when the payload could not
-   start (a missing interpreter or passwd entry). Every trailer follows an end marker. In TTY mode
-   it execs the payload instead.
+   start (a command or interpreter that cannot be executed, `exec <errno>`, or a working directory
+   it cannot enter, `cwd`). Every trailer follows an end marker. In TTY mode it execs the shell
+   instead.
 
 **Completion rules:**
 
@@ -265,20 +281,24 @@ if one proves necessary, is the same installed program (`2026-08-04-next-steps/t
 - **Not delivered.** A remote exit status other than 255 with no start marker means the payload
   never started: a clean exit delivers all prior output first, and step 2 refuses streams the marker
   could not reach. Status 127 without `sudo` there means the account shell found no python3, which
-  is typed `VMNotReady`. Under `sudo` a missing python3 exits 1 instead; the unelevated base check
-  (D10) finds it first.
+  is typed `VMNotReady`, as is the dedicated status of a python3 without its standard library. Under
+  `sudo` a missing python3 exits 1 instead; the unelevated base check (D10) finds it first.
 - **Unknown.** Everything else is unknown, whatever the client's own exit status: a start marker
-  without both the end marker and the trailer, or 255 with no start marker. The client does not read
-  OpenSSH's diagnostics to tell a refused connection from a dropped one. It reads one OpenSSH token
-  only to type an error: `Host key verification failed` on a 255 becomes `TrustMismatch`. Its hint
-  names the store file: after verifying the new key through the platform console or provider, remove
-  that file and follow the `TrustMissing` guidance (import in PR A, `agw vm recover` from PR B), or
-  recreate the VM. Recovery alone cannot fix a mismatch, since it re-establishes only a missing
-  record; no flow in this design replaces a changed key.
+  without both the end marker and the trailer, or 255 with no start marker. The client sends ssh's
+  own diagnostics to a private log file (`-E`), apart from the guest's stderr, and does not read
+  them to tell a refused connection from a dropped one. It shows the log's last 20 lines in the
+  error, and reads one token from it to type the error: `Host key verification failed` on a 255
+  becomes `TrustMismatch`. Its hint names the store file: after verifying the new key through the
+  platform console or provider, remove that file and follow the `TrustMissing` guidance (import in
+  PR A, `agw vm recover` from PR B), or recreate the VM. Recovery alone cannot fix a mismatch, since
+  it re-establishes only a missing record; no flow in this design replaces a changed key.
 - **TTY mode.** An attach never elevates to root; an elevated attach request is refused before
   dispatch, and no current attach consumer elevates. The root `sudo -n` prefix and the handover
   argument are never combined. An attach returns its exit code; a 255 is reported as "connection
-  ended or command exited 255", never guessed.
+  ended or command exited 255", never guessed. TTY mode runs a login shell, adding `-i` only when
+  stdin is a terminal, and resets every ignored signal before the exec. A refusal there prints one
+  line and exits 127 for a missing command, 126 for any other `exec` failure and 125 for a working
+  directory or handover refusal; `stream` reports a `refused` trailer with the same statuses.
 - **Forgery.** The nonce is never in the payload's argv or environment, so ordinary payload output
   cannot forge a marker. A hostile process of the same user could read agw-launch's memory. That is
   outside R4's threat model, which concerns honesty, not a hostile same-user process.
@@ -289,9 +309,10 @@ if one proves necessary, is the same installed program (`2026-08-04-next-steps/t
 | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
 | `Command`              | Literal argv tuple                                                                                                                                                           | most buffered calls                                                                       |
 | `Script`               | Source plus `Shell.SH`, `Shell.BASH` or `Shell.USER_DEFAULT`, with `login` and `interactive` flags                                                                           | initializers                                                                              |
+| `LoginShell`           | The identity's default shell as an interactive login shell; valid only for `attach`                                                                                          | `vm shell`, `agent shell`                                                                 |
 | `PythonProgram`        | Core-owned Python source and arguments, run by `/usr/bin/python3 -I -S` reading the source from a file descriptor, with the same `login` and `interactive` flags as `Script` | the file program, native probing, the native CLI's login resolution                       |
-| Common options         | `env`, `cwd`, `elevated`, `deadline`, `observation`                                                                                                                          | `observation`: status probes that retry today                                             |
-| Input                  | `NoInput`, `Bytes(data, sensitive=)`, `FromFile(path)`                                                                                                                       | `FromFile`: workspace copy (slice 7)                                                      |
+| Common options         | `env`, `cwd`, `elevated`, `deadline` (not `LoginShell`), `observation`                                                                                                       | `observation`: status probes that retry today                                             |
+| Input                  | `NoInput`, `Bytes(data, sensitive=)`, `FromFile(path)`                                                                                                                       | `Bytes`: the file program (slice 5); `FromFile`: workspace copy (slice 7)                 |
 | Output sink (buffered) | `Capture(limit)`, `Discard`, `ToFile(path, on_progress=)`                                                                                                                    | `Discard`: `command_checks.py`, native CLI; `ToFile`: backup and workspace copy (slice 7) |
 | `Result`               | `completion` is `Completed(status)`, `NotDelivered(reason)` or `Unknown(reason)`; `stdout` and `stderr` are bytes                                                            | all                                                                                       |
 
@@ -398,19 +419,24 @@ platform-private (D11).
   stdin into the pipe in binary mode until end of file. After the start marker each stream passes
   through a filter that holds back only bytes that could begin its closing marker (the end marker on
   stdout, the trailer on stderr) and stops there, so live output is never delayed by a timer and
-  nothing after the markers reaches the operator. Consumers: `vm exec`, `agent exec`.
+  nothing after the markers reaches the operator. It returns the guest's status, and a refusal
+  becomes status 127, 126 or 125 with one line on stderr (D4). Consumers: `vm exec`, `agent exec`.
 - **`attach(request, clear_screen_on_exit=)`** uses two connections, so ssh keeps the operator's
   real terminal (its window size and modes come from its own stdin) while the request still travels
-  on a private stdin. A first `-T` request carries the envelope marked for handover: agw-launch
-  listens on a Unix socket in a fresh 0700 directory, reports the path and waits. The client then
-  runs `ssh -tt` under `guarded_terminal` with the handover form of stage 0 naming that path, which
-  fetches the agw-launch source and the envelope and execs the payload on the terminal as in D4. The
-  parked agw-launch serves one connection, removes its directory and exits with a trailer, or exits
-  after 30 seconds with none, so nothing is left behind. Only the account's own processes can reach
-  the socket, and they can already read that account's processes. Every attach pays one extra SSH
-  handshake, which ADR 0015 measured at 150 to 300 ms. The post-guard notice for a dropped
-  connection and the Windows clear behavior are kept. Consumers: session and console attach,
-  `vm shell`, `agent shell`.
+  on a private stdin. A first `-T` request carries the envelope marked for handover, with a token
+  the client chose. agw-launch first checks that the working directory is enterable and the shell
+  executable, so a refusal comes back typed before the terminal is touched. It then creates the
+  directory `/tmp/agw-handover-<token>` (mode 0700; an existing name is a refusal, so a planted path
+  is never reused), listens on a Unix socket in it, writes a bare `parked` marker and waits. The
+  client then runs `ssh -t` under `guarded_terminal` with the handover form of stage 0 naming the
+  socket path, which fetches the agw-launch source and the envelope and execs the payload on the
+  terminal as in D4. The parked agw-launch serves one connection, removes its directory and exits
+  with a trailer. After 30 seconds without a connection, or when the client closes its end, it exits
+  with an `end` marker and a `refused handover` trailer, and `SIGHUP` and `SIGTERM` take the same
+  cleanup path, so nothing is left behind. Only the account's own processes can reach the socket,
+  and they can already read that account's processes. Every attach pays one extra SSH handshake,
+  which ADR 0015 measured at 150 to 300 ms. The post-guard notice for a dropped connection and the
+  Windows clear behavior are kept. Consumers: session and console attach, `vm shell`, `agent shell`.
 
 - **Console panes.** A pane added to an existing console's tmux server inherits only that server's
   environment plus `tmux -e` arguments, and today those arguments carry resolved secrets on a guest
@@ -424,10 +450,13 @@ platform-private (D11).
   which inherits the request environment, so their `tmux -e` arguments (`sessions/tmux.py:737`) go
   too.
 
-- **`forward(local, remote)`** is a context manager running `ssh -N -L` under the VM policy, minus
-  the forwarding restrictions, with `ExitOnForwardFailure=yes`. It returns once the local port
-  accepts a connection, raises a typed error with the client's diagnostic if the client exits first,
-  and ends the client on exit. Consumer: `vm port-forward`.
+- **`forward(forwards, verbose=)`** blocks while it runs `ssh -N -L` under the VM policy with
+  `ExitOnForwardFailure=yes`, and returns the client's exit status. A setup failure is the same
+  non-zero exit, which `ExitOnForwardFailure` and `ConnectTimeout` make visible, so there is no
+  readiness probe. On a non-zero exit it shows the last lines of the client's `-E` log, and
+  `Host key verification failed` there raises `TrustMismatch`; under `verbose` the client's stderr
+  is the operator's and neither applies. The client always ends on the way out. `vm port-forward`
+  owns its signal handling and returns 0 on an operator stop. Consumer: `vm port-forward`.
 - **`reachability.wait(access, ...)`** polls an observation request until it completes, with today's
   wait wording and flap double-check. Consumers: create's post-Tailscale step, start, rejoin and
   rekey.
@@ -448,10 +477,10 @@ Host connections such as Remote Lima's keep their own configuration and are not 
   Windows reserved names such as `con` usable), in `known_hosts` format, with records under a
   host-key alias derived from the VM name. Every connection pins the global known-hosts file away,
   plus `UpdateHostKeys=no` and `HashKnownHosts=no`, as `-o` options that configuration cannot
-  override. Slice 2's VM policy uses `none` values (`GlobalKnownHostsFile=none`,
-  `KnownHostsCommand=none`) under `-F none` with D1's 8.5 client. Until consumers move to it, the
-  legacy paths keep their client and pin `GlobalKnownHostsFile` to the null device instead, since a
-  `none` value before 8.5 names a file in the working directory ([trust-lld.md](./trust-lld.md)).
+  override. They pin `GlobalKnownHostsFile` to the null device rather than `none`, since a `none`
+  value before 8.5 names a file in the working directory, and the null device is accepted by every
+  version, so the legacy paths and the VM policy share one function
+  ([trust-lld.md](./trust-lld.md)).
 - **Identity.** The VM name keys `vms` (`db/migrations.py:240`) and survives every tailnet address
   change. Delete removes the store file, and create resets it, so a reused name never inherits a
   key.
@@ -514,10 +543,11 @@ Host connections such as Remote Lima's keep their own configuration and are not 
   - pam_env settings, a warning and never a failure: agw-launch does not apply pam_env (the
     operator's 2026-11-01 ruling), so if `/etc/environment`, `/etc/security/pam_env.conf` or the
     admin's `~/.pam_environment` holds anything but comments and blank lines, the check warns and
-    names the file. `/etc/default/locale`, which Debian's sshd PAM stack also reads, is left out on
-    purpose, since it is set on every VM and agw-launch sets the locale itself. Agent homes are not
-    read. PR A already gives this warning at reinit, where the behavior ships; this check replaces
-    it.
+    names the file. The home file counts only where `/etc/pam.d/sshd` passes `user_readenv=1` to
+    `pam_env.so`, as Debian 12 does; Debian 13's sshd never reads it. `/etc/default/locale`, which
+    Debian's sshd PAM stack also reads, is left out on purpose, since it is set on every VM and
+    agw-launch sets the locale itself. Agent homes are not read. PR A already gives this warning at
+    reinit, where the behavior ships; this check is where that warning moves.
 
   Because this is core's first operation, the release check is the first thing core does on the
   common path.
@@ -541,16 +571,16 @@ Host connections such as Remote Lima's keep their own configuration and are not 
 
 Changes to `capabilities/vm_platform/base.py`:
 
-| Today                                         | After                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ProvisionResult.native_transport` (required) | Removed in slice 3, when Phase A and Debian attestation move onto SSH                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `ProvisionResult.tailscale_ip: str \| None`   | `tailnet_address: str`, required. After a successful join the platform retries reading the address within its own provisioning step, so a transient failure costs neither the VM nor a second use of the key. If it still cannot read it, the platform logs the node out over that same provisioning channel, which is still open and still pinned, and create fails without a second join; the failed VM is kept for `agw vm delete`. This matters for the clouds: core never enrolled the host key, so delete's recovery, which runs under VM trust, could not log the node out later. When the logout does not report success, create's error names the node for removal in the Tailscale admin console. Today's join-once rule (`tailscale_join.py:65-71`, `vms/initializer/driver.py:386-398`) carries over |
-| `native_transport(vm, ctx, config)`           | Removed in slice 4, when rejoin, rekey, logout and the native shell move                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| (none)                                        | `run_as_root(vm, ctx, script, stdin, deadline) -> RawRun`: runs core's `sh` script as root through the platform's channel, once, with no Tailscale dependency and VM trust only, and returns both streams when the channel ends or the deadline passes, with output bounded                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| (none)                                        | `read_host_keys(vm, ctx) -> HostKeyReading`, the key-reading half of the same R7 capability, not a second one: the VM's public host keys, plus any provider-side fingerprints. An optional override that core detects on the class, as with `native_shell`: when a platform has none, core's `vms/recovery.py` runs a fixed script through `run_recovery`; a cloud overrides it with its private access under Unverified trust                                                                                                                                                                                                                                                                                                                                                                                   |
-| (none)                                        | `ClassVar recovery_needs_guest_sshd: bool`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `native_shell_unavailable_hint`               | `native_shell(vm, ctx) -> int`. A platform offers a shell by overriding it. Core detects the override on the class before the operation boundary, so it refuses with `FeatureUnavailable` before credentials are resolved (R2). A platform may set guidance text for the refusal                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| `transient_route`, `probe_failure_hint`       | Private to each platform's own native code (recovery and native shell)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Today                                         | After                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ProvisionResult.native_transport` (required) | Removed in slice 3, when Phase A and Debian attestation move onto SSH                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `ProvisionResult.tailscale_ip: str \| None`   | `tailnet_address: str`, required. After a successful join the platform retries reading the address within its own provisioning step, so a transient failure costs neither the VM nor a second use of the key. If it still cannot read it, the platform logs the node out over that same provisioning channel, which is still open and still pinned, and create fails without a second join, like any other create failure: the platform rolls back its backend state or raises `RetainedProvisioningError` when it cannot confirm the rollback (`capabilities/vm_platform/base.py:265-273`). This matters for the clouds: core never enrolled the host key, so delete's recovery, which runs under VM trust, could not log the node out later. When the logout does not report success, create's error names the node for removal in the Tailscale admin console. Today's join-once rule (`tailscale_join.py:65-71`, `vms/initializer/driver.py:386-398`) carries over |
+| `native_transport(vm, ctx, config)`           | Removed in slice 4, when rejoin, rekey, logout and the native shell move                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| (none)                                        | `run_as_root(vm, ctx, script, stdin, deadline) -> RawRun`: runs core's `sh` script as root through the platform's channel, once, with no Tailscale dependency and VM trust only, and returns both streams when the channel ends or the deadline passes, with output bounded                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| (none)                                        | `read_host_keys(vm, ctx) -> HostKeyReading`, the key-reading half of the same R7 capability, not a second one: the VM's public host keys, plus any provider-side fingerprints. An optional override that core detects on the class, as with `native_shell`: when a platform has none, core's `vms/recovery.py` runs a fixed script through `run_recovery`; a cloud overrides it with its private access under Unverified trust                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| (none)                                        | `ClassVar recovery_needs_guest_sshd: bool`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `native_shell_unavailable_hint`               | `native_shell(vm, ctx) -> int`. A platform offers a shell by overriding it. Core detects the override on the class before the operation boundary, so it refuses with `FeatureUnavailable` before credentials are resolved (R2). A platform may set guidance text for the refusal                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `transient_route`, `probe_failure_hint`       | Private to each platform's own native code (recovery and native shell)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 
 **`run_recovery`.** Core's `run_recovery` in `vms/recovery.py` wraps the script in a small `sh`
 wrapper that writes D4's start and closing markers, passes it to the platform's `run_as_root`, and
@@ -630,22 +660,28 @@ D5. The capability takes no environment, directory or files.
 | `CommandFailed` (carries the `Result`)       | `ExternalError`      |
 | `PermissionDenied`                           | `AuthorizationError` |
 | `FeatureUnavailable`, `VMNotReady`           | `StateError`         |
+| `RequestRefused`                             | `StateError`         |
 | `TrustMissing`, `TrustMismatch`              | `StateError`         |
 | `ClientUnsupported`                          | `ConfigError`        |
 
 `ExecutionIncomplete` covers both `NotDelivered` and `Unknown` completions and names which one, so
-the facts are held once.
+the facts are held once, and shows the last lines of the client's `-E` log. `RequestRefused` is a
+`refused` trailer under `run` and under a refused handover. `VMNotReady` also covers a python3
+without its standard library. `TrustMismatch` names the manual path (D4), since import never
+rewrites an existing record and recovery re-establishes only a missing one. No error message, `repr`
+or hint holds a stream, an environment value or script text.
 
-`execution/oplog.py` writes the per-VM operation log under `~/.config/agentworks/logs/`, as today.
-It records a label, the request shape, the outcome and the streams, never the envelope's environment
-values, script source or stdin. Every retained stream has the request's secret values (its secret
-environment values and any other values the caller marks secret) removed before it is written, as
-`SSHLogger` does today (`cli/agentworks/ssh.py:113-131`). R4's "sensitive" qualifies input,
-environment and script content alike, so script source that an interpreter quotes in its own error
-output is retained output, with the caller's secret values removed like any other. A sensitive stdin
-keeps the streams out of the log entirely. The readers of the old `LOG_DIR` constant
-(`doctor_state.py`, `vms/manager/lifecycle.py`, `vms/manager/_helpers.py`, `vm logs`) move to the
-new constant in slice 2.
+`execution/oplog.py`, which lands in slice 3 with create's Phase A as its first writer, writes the
+per-VM operation log under `~/.config/agentworks/logs/`, as today. It records a label, the request
+shape, the outcome and the streams, never the envelope's environment values, script source or stdin.
+Every retained stream has the request's secret values (its secret environment values and any other
+values the caller marks secret) removed before it is written, as `SSHLogger` does today
+(`cli/agentworks/ssh.py:113-131`). R4's "sensitive" qualifies input, environment and script content
+alike, so script source that an interpreter quotes in its own error output is retained output, with
+the caller's secret values removed like any other. A sensitive stdin keeps the streams out of the
+log entirely. The readers of the old `LOG_DIR` constant (`doctor_state.py`,
+`vms/manager/lifecycle.py`, `vms/manager/_helpers.py`, `vm logs`) move to the new constant in
+slice 3.
 
 ### D14. Enforcing independence (R10)
 
@@ -677,15 +713,16 @@ The slices:
 1. **Trust.** The store, explicit trust modes, import, create's enrollment, managed entries, and the
    legacy VM-target factories bound to the store.
 2. **Execution core with the operator exec surface.** Client resolution, `ssh_process`, the
-   envelope, agw-launch with the terminal handover, results, errors and the operation log.
-   Consumers: `vm exec`, `vm shell`, `agent exec`, `agent shell`, `vm verify-connection` and
-   `vm port-forward`.
+   envelope, agw-launch with the terminal handover, results and errors. Consumers: `vm exec`,
+   `vm shell`, `agent exec`, `agent shell`, `vm verify-connection` and `vm port-forward`.
 3. **First contact and the VM contract.**
    - Platforms report the required tailnet address.
    - Provisioning installs python3.
    - Phase A and release probing move onto `VMAccess`, in Enroll mode at create, with the base
      checks and Debian attestation; the initialized checks land too.
    - `ProvisionResult.native_transport` goes away, and `reachability` lands for create.
+   - `oplog.py` lands with its `LOG_DIR` constant and the readers that move to it, create's Phase A
+     being its first writer.
 
    Phase B stays on the legacy stack until slice 6.
 
@@ -696,14 +733,17 @@ The slices:
    - Rejoin, rekey and logout move onto recovery, starting a VM stops rejoining on its own, and
      `native_shell` lands.
    - `vm recover` is added, and `native_transport` and its factory are deleted.
-5. **Files and capability delivery.** `files.py` and the `RunContext` accessors. Consumers: harness,
-   artifact, native-file and git-credential.
+   - The host policy (D2) lands, beside `public_ssh.py` and Remote Lima's host connection, its first
+     callers.
+5. **Files and capability delivery.** `files.py`, the `RunContext` accessors, and finite stdin with
+   `Bytes(data, sensitive=)` and its conformance vector. Consumers: harness, artifact, native-file
+   and git-credential.
 6. **Initialization.** VM and agent initializers, hardening, DNS, sources and the setup runners.
 7. **Workspaces, sessions and backup.** Workspace backends, copy, rehome and repair; tmux, sessions
    and consoles; `detached.py` with backup.
-8. **Removal.** Delete the six legacy modules, `admin_target()` and `agent_target()`, and their
-   tests (slice 2 already deleted the proof modules the package does not adopt), after the incident
-   inventory is re-proved and the evidence matrix is complete.
+8. **Removal.** Delete the six legacy modules, `admin_target()` and `agent_target()`, doctor's `ssh`
+   and `scp` `PATH` rows, and their tests (slice 2 already deleted the proof modules the package
+   does not adopt), after the incident inventory is re-proved and the evidence matrix is complete.
 
 ### Incident inventory (R10)
 
@@ -718,7 +758,7 @@ linked issues and fix history) and adds rows before anything is deleted.
 | I2  | Byte-exact stdin on Windows (text-mode rewrite)                                                                                                                                                                                                    | 2            |
 | I3  | Guest mechanics tested on real targets, not Git for Windows tools                                                                                                                                                                                  | 2            |
 | I4  | Sensitive input refused with a forced TTY; value-free errors                                                                                                                                                                                       | 2            |
-| I5  | The `--` fence for dash-led commands, now inherent in literal argv                                                                                                                                                                                 | 2            |
+| I5  | The `--` fence for dash-led commands: inherent in a literal argv, and in `vm exec`'s shell-joined form because the line is delivered as a script file, never as a shell argument                                                                   | 2            |
 | I6  | The attach notice after the terminal guard                                                                                                                                                                                                         | 2            |
 | I6a | Console recovery after a killed `ssh -t`                                                                                                                                                                                                           | 7            |
 | I7  | Keepalives on long-lived paths                                                                                                                                                                                                                     | 2            |
@@ -726,6 +766,16 @@ linked issues and fix history) and adds rows before anything is deleted.
 | I9  | Host-key preservation across stop and start                                                                                                                                                                                                        | 1            |
 | I10 | Provisioning's first Tailscale join sends the auth key once, out of command lines, logs, exceptions and retained provisioning artifacts (`bootstrap_script.py:262-265`, `lima.py:181-183`, `tailscale_join.py:22-48`, `wsl2_bootstrap.py:100-120`) | 4            |
 | I11 | A bash child of the payload reads no account startup file (measured in the integration report on #856: Debian bash sources `~/.bashrc` when `SSH_CLIENT` is set)                                                                                   | 2            |
+| I12 | No connection sharing: no `ControlMaster`, since a shared master keeps stale supplementary groups and PAM state (ADR 0015; `execution/carriers/ssh/connection.py:140-141` at `fd1256b1f`)                                                          | 2            |
+| I13 | The operator's identity file passed explicitly on every VM connection, for keys with non-default names on Windows (`3b8413291`; `transports/__init__.py:97`)                                                                                       | 2            |
+| I14 | `-T` on every non-terminal run, so an operator's `RequestTTY force` never injects a pseudo-terminal (`584ac5f6e`, `e9eb9565a`; `transports/ssh.py:186-192`, `:443`)                                                                                | 2            |
+| I15 | The reconnect wait: bounded at about 240 s, with a second probe confirming a success that follows a failed attempt, with closed wording (#251; `transports/__init__.py:241`, `:272-309`)                                                           | 3            |
+| I16 | A failed or interrupted Phase A secures the VM before the error propagates (`vms/initializer/driver.py:188`, `:206`)                                                                                                                               | 3            |
+| I17 | Azure's network propagation: the provisioning probe retries and shows the platform's hint before the error (`eb99a3f99`, `17f5c92c8`; `transports/__init__.py:223-237`)                                                                            | 4            |
+| I18 | A failed backend delete keeps the VM's row and its store record (#329; `vms/manager/power.py:312-320`)                                                                                                                                             | 4            |
+| I19 | The agent probe tells an unreachable VM from an agent that predates the rollout (ADR 0011; `agents/manager/_common.py:237-286`)                                                                                                                    | 2, 6         |
+| I20 | Backup's download stops the copy and removes the partial file on Ctrl-C (`97e11a168`; `vms/backup.py:504-505`)                                                                                                                                     | 7            |
+| I21 | The local terminal is sanitized on entry and restored on exit after a dropped or killed attach (`897248ead`, `80c813db4`)                                                                                                                          | 2            |
 
 ### Release behaviors to preserve (R10)
 

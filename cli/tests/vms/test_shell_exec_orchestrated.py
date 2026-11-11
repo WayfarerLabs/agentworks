@@ -17,15 +17,19 @@ import pytest
 
 from agentworks.db import VersionedPayload, VMStatus
 from agentworks.errors import StateError, ValidationError
+from agentworks.execution.access import Admin
+from agentworks.execution.trust import HOST_TRUST
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.transports import SSHTransport
 from agentworks.vms import manager as vm_manager
-from tests.conftest import ManifestDoc, stub_vm_ssh_identity
+from tests.conftest import ManifestDoc, seed_vm_trust, stub_vm_ssh_identity
 
 if TYPE_CHECKING:
     from agentworks.capabilities.base import OperationScope, RunContext
     from agentworks.db import Database
+    from agentworks.execution.requests import LoginShell
+    from tests.vm_access_support import AccessRecorder
 
 # A vm template with an env-block secret reference: a RUNTIME input
 # for these commands, so it joins the boundary through the env-target
@@ -47,6 +51,7 @@ def _env_secret(monkeypatch: pytest.MonkeyPatch) -> None:
 def _seed_vm(db: Database) -> None:
     db.insert_vm("box", site="proxmox", hostname="box")
     db.update_vm_tailscale("box", "100.64.0.9")
+    seed_vm_trust("box")
 
 
 def _seed_workspace(
@@ -77,27 +82,6 @@ def _stop_the_vm(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> None:
     monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: events.append("start"))
     monkeypatch.setattr(vm_manager, "_tailscale_rejoin_required", lambda *a, **k: True)
     monkeypatch.setattr(vm_manager, "_ensure_tailscale", lambda *a, **k: events.append("tailscale"))
-
-
-class _FakeTarget:
-    def __init__(self) -> None:
-        self.interactive_calls: list[tuple[str, dict[str, str]]] = []
-        self.streaming_calls: list[tuple[str, dict[str, str]]] = []
-
-    def interactive(self, cmd: str, *, env: dict[str, str] | None = None) -> int:
-        self.interactive_calls.append((cmd, dict(env or {})))
-        return 0
-
-    def call_streaming(self, cmd: str, *, env: dict[str, str] | None = None) -> int:
-        self.streaming_calls.append((cmd, dict(env or {})))
-        return 0
-
-
-@pytest.fixture
-def target(monkeypatch: pytest.MonkeyPatch) -> _FakeTarget:
-    fake = _FakeTarget()
-    monkeypatch.setattr("agentworks.transports.transport", lambda vm, config, **kwargs: fake)
-    return fake
 
 
 # -- the derived graph and the env-target seam --------------------------------
@@ -241,7 +225,7 @@ def test_exec_copied_workspace_pin_no_longer_crashes(
     db: Database,
     make_config,  # noqa: ANN001
     resolve_counter: list[list[str]],
-    target: _FakeTarget,
+    vm_access_recorder: AccessRecorder,
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
@@ -258,11 +242,11 @@ def test_exec_copied_workspace_pin_no_longer_crashes(
     )
 
     assert rc == 0
-    ((cmd, env),) = target.streaming_calls
+    (request,) = vm_access_recorder.requests("stream")
     # Still runs in the workspace dir, just without any template-derived env.
-    assert cmd == "cd /srv/copied-ws && echo hi"
+    assert (request.source, request.cwd) == ("echo hi", "/srv/copied-ws")
     # The vm-template env still flows; the copied workspace adds nothing.
-    assert env.get("API_KEY") == "env-val"
+    assert request.env.get("API_KEY") == "env-val"
 
 
 # -- gate-prompt parity (the per-command carries) -----------------------------
@@ -272,7 +256,7 @@ def test_shell_reachable_vm_is_one_boundary_burst(
     db: Database,
     make_config,  # noqa: ANN001
     resolve_counter: list[list[str]],
-    target: _FakeTarget,
+    vm_access_recorder: AccessRecorder,
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
@@ -288,16 +272,16 @@ def test_shell_reachable_vm_is_one_boundary_burst(
 
     assert len(resolve_counter) == 1
     assert sorted(resolve_counter[0]) == ["proxmox-token", "vm-env-secret"]
-    ((cmd, env),) = target.interactive_calls
-    assert cmd == ""
-    assert env.get("API_KEY") == "env-val"
+    (request,) = vm_access_recorder.requests("attach")
+    assert request.cwd is None  # the admin's home: an interactive login shell, no command
+    assert request.env.get("API_KEY") == "env-val"
 
 
 def test_shell_stopped_vm_gate_burst_then_boundary_burst(
     db: Database,
     make_config,  # noqa: ANN001
     resolve_counter: list[list[str]],
-    target: _FakeTarget,
+    vm_access_recorder: AccessRecorder,
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
@@ -313,14 +297,14 @@ def test_shell_stopped_vm_gate_burst_then_boundary_burst(
 
     assert events == ["status", "start", "tailscale"]  # the gate ran
     assert resolve_counter == [["proxmox-token"], ["vm-env-secret"]]
-    assert len(target.interactive_calls) == 1
+    assert len(vm_access_recorder.requests("attach")) == 1
 
 
 def test_exec_reachable_vm_is_one_boundary_burst(
     db: Database,
     make_config,  # noqa: ANN001
     resolve_counter: list[list[str]],
-    target: _FakeTarget,
+    vm_access_recorder: AccessRecorder,
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
@@ -333,15 +317,15 @@ def test_exec_reachable_vm_is_one_boundary_burst(
     assert rc == 0
     assert len(resolve_counter) == 1
     assert sorted(resolve_counter[0]) == ["proxmox-token", "vm-env-secret"]
-    ((cmd, env),) = target.streaming_calls
-    assert cmd == "echo hi"
-    assert env.get("API_KEY") == "env-val"
+    (request,) = vm_access_recorder.requests("stream")
+    assert request.source == "echo hi"
+    assert request.env.get("API_KEY") == "env-val"
 
 
 def test_exec_resolves_a_stored_overlay_only_secret_through_the_runtime_boundary(
     db: Database,
     make_config,  # noqa: ANN001
-    target: _FakeTarget,
+    vm_access_recorder: AccessRecorder,
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
@@ -362,7 +346,8 @@ def test_exec_resolves_a_stored_overlay_only_secret_through_the_runtime_boundary
     rc = vm_manager.exec_vm(db, config, "box", ["echo", "hi"], interaction=TtyInteractionPolicy.REFUSE)
 
     assert rc == 0
-    ((_cmd, env),) = target.streaming_calls
+    (request,) = vm_access_recorder.requests("stream")
+    env = request.env
     assert env["OVERLAY_TOKEN"] == "resolved"
     assert env["ADMIN_OVERLAY_TOKEN"] == "admin-resolved"
 
@@ -371,7 +356,7 @@ def test_exec_stopped_vm_gate_burst_then_boundary_burst(
     db: Database,
     make_config,  # noqa: ANN001
     resolve_counter: list[list[str]],
-    target: _FakeTarget,
+    vm_access_recorder: AccessRecorder,
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
@@ -402,7 +387,7 @@ def test_exec_dash_prefixed_command_fails_with_zero_resolves_and_zero_gate(
     db: Database,
     make_config,  # noqa: ANN001
     resolve_counter: list[list[str]],
-    target: _FakeTarget,
+    vm_access_recorder: AccessRecorder,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config = make_config()
@@ -418,14 +403,14 @@ def test_exec_dash_prefixed_command_fails_with_zero_resolves_and_zero_gate(
     assert "put '--' before" in hint
     assert "sh -c" in hint
     assert resolve_counter == []
-    assert target.streaming_calls == []
+    assert vm_access_recorder.requests("stream") == []
 
 
 def test_exec_double_dash_separator_runs_dash_led_command(
     db: Database,
     make_config,  # noqa: ANN001
     resolve_counter: list[list[str]],
-    target: _FakeTarget,
+    vm_access_recorder: AccessRecorder,
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
@@ -439,15 +424,15 @@ def test_exec_double_dash_separator_runs_dash_led_command(
     rc = vm_manager.exec_vm(db, config, "box", ["--", "--version"], interaction=TtyInteractionPolicy.REFUSE)
 
     assert rc == 0
-    ((cmd, _env),) = target.streaming_calls
-    assert cmd == "--version"
+    (request,) = vm_access_recorder.requests("stream")
+    assert request.source == "--version"  # one argument is a command line
 
 
 def test_exec_double_dash_separator_strips_only_the_first(
     db: Database,
     make_config,  # noqa: ANN001
     resolve_counter: list[list[str]],
-    target: _FakeTarget,
+    vm_access_recorder: AccessRecorder,
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
@@ -462,15 +447,15 @@ def test_exec_double_dash_separator_strips_only_the_first(
     )
 
     assert rc == 0
-    ((cmd, _env),) = target.streaming_calls
-    assert cmd == "git log -- path"
+    (request,) = vm_access_recorder.requests("stream")
+    assert request.source == "git log -- path"
 
 
 def test_exec_double_dash_separator_preserves_an_adjacent_second(
     db: Database,
     make_config,  # noqa: ANN001
     resolve_counter: list[list[str]],
-    target: _FakeTarget,
+    vm_access_recorder: AccessRecorder,
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
@@ -484,15 +469,15 @@ def test_exec_double_dash_separator_preserves_an_adjacent_second(
     rc = vm_manager.exec_vm(db, config, "box", ["--", "--", "x"], interaction=TtyInteractionPolicy.REFUSE)
 
     assert rc == 0
-    ((cmd, _env),) = target.streaming_calls
-    assert cmd == "-- x"
+    (request,) = vm_access_recorder.requests("stream")
+    assert request.source == "-- x"
 
 
 def test_exec_missing_command_after_double_dash_fails_pre_gate(
     db: Database,
     make_config,  # noqa: ANN001
     resolve_counter: list[list[str]],
-    target: _FakeTarget,
+    vm_access_recorder: AccessRecorder,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A bare `--` with nothing after it is a missing command, rejected
@@ -505,14 +490,14 @@ def test_exec_missing_command_after_double_dash_fails_pre_gate(
         vm_manager.exec_vm(db, config, "box", ["--"], interaction=TtyInteractionPolicy.REFUSE)
 
     assert resolve_counter == []
-    assert target.streaming_calls == []
+    assert vm_access_recorder.requests("stream") == []
 
 
 def test_exec_bare_flag_after_command_word_still_works(
     db: Database,
     make_config,  # noqa: ANN001
     resolve_counter: list[list[str]],
-    target: _FakeTarget,
+    vm_access_recorder: AccessRecorder,
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
@@ -525,15 +510,15 @@ def test_exec_bare_flag_after_command_word_still_works(
     rc = vm_manager.exec_vm(db, config, "box", ["free", "-m"], interaction=TtyInteractionPolicy.REFUSE)
 
     assert rc == 0
-    ((cmd, _env),) = target.streaming_calls
-    assert cmd == "free -m"
+    (request,) = vm_access_recorder.requests("stream")
+    assert request.source == "free -m"
 
 
 def test_cross_vm_workspace_mismatch_fails_with_zero_resolves_and_zero_gate(
     db: Database,
     make_config,  # noqa: ANN001
     resolve_counter: list[list[str]],
-    target: _FakeTarget,
+    vm_access_recorder: AccessRecorder,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config = make_config()
@@ -548,7 +533,7 @@ def test_cross_vm_workspace_mismatch_fails_with_zero_resolves_and_zero_gate(
         )
 
     assert resolve_counter == []
-    assert target.streaming_calls == []
+    assert vm_access_recorder.requests("stream") == []
 
 
 # -- the operation scope reaches readiness ------------------------------------
@@ -557,7 +542,7 @@ def test_cross_vm_workspace_mismatch_fails_with_zero_resolves_and_zero_gate(
 def test_vm_scope_reaches_node_readiness(
     db: Database,
     make_config,  # noqa: ANN001
-    target: _FakeTarget,
+    vm_access_recorder: AccessRecorder,
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
@@ -590,7 +575,7 @@ def test_vm_scope_reaches_node_readiness(
 def test_shell_interactive_runs_inside_the_held_active_span(
     db: Database,
     make_config,  # noqa: ANN001
-    target: _FakeTarget,
+    vm_access_recorder: AccessRecorder,
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
@@ -613,13 +598,14 @@ def test_shell_interactive_runs_inside_the_held_active_span(
             events.append("hold-close")
 
     monkeypatch.setattr(ProxmoxPlatform, "vm_active", _recording_hold)
-    interactive = target.interactive
+    admin_access = vm_access_recorder.access(Admin())
+    attach = admin_access.attach
 
-    def _tracking(cmd: str, *, env: dict[str, str] | None = None) -> int:
+    def _tracking(request: LoginShell) -> int:
         events.append("interactive")
-        return interactive(cmd, env=env)
+        return attach(request)
 
-    target.interactive = _tracking  # type: ignore[method-assign]
+    admin_access.attach = _tracking  # type: ignore[method-assign]
 
     assert vm_manager.shell_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE) == 0
 
@@ -658,7 +644,7 @@ def test_shell_platform_transport_routes_through_the_node_platform(
     _seed_vm(db)
     _reachable(monkeypatch, True)
     seen: list[object] = []
-    target = SSHTransport(host="203.0.113.8")
+    target = SSHTransport(trust=HOST_TRUST, host="203.0.113.8")
     target.interactive = lambda *_args, **_kwargs: 0  # type: ignore[method-assign]
     monkeypatch.setattr(ProxmoxPlatform, "native_shell_unavailable_hint", None)
 
@@ -703,7 +689,7 @@ def test_shell_platform_transport_hands_a_secret_bearing_ctx(
     _seed_vm(db)
     _reachable(monkeypatch, True)
     seen: list[RunContext] = []
-    target = SSHTransport(host="203.0.113.8")
+    target = SSHTransport(trust=HOST_TRUST, host="203.0.113.8")
     target.interactive = lambda *_args, **_kwargs: 0  # type: ignore[method-assign]
     monkeypatch.setattr(ProxmoxPlatform, "native_shell_unavailable_hint", None)
 

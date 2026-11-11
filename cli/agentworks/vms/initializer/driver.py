@@ -25,9 +25,12 @@ from typing import TYPE_CHECKING
 from agentworks import output
 from agentworks.db import InitStatus, ProvisioningStatus
 from agentworks.env import ResourceContext, vm_stable_identity_env
+from agentworks.errors import ProvisioningError
+from agentworks.execution import trust
 from agentworks.git_config import ensure_safe_directory_wildcard
 from agentworks.git_credentials import configure_user_git_credentials
 from agentworks.linux_users import managed_home
+from agentworks.path_rendering import format_host_path
 from agentworks.ssh import SSHError, SSHLogger
 from agentworks.transports import ExecTransport, SSHTransport, Transport
 
@@ -413,14 +416,20 @@ def _phase_a_bootstrap(
     db.update_vm_tailscale(vm_name, tailscale_ip)
     db.update_vm_provisioning_status(vm_name, ProvisioningStatus.COMPLETE)
 
-    # Switch to Tailscale SSH, carrying over the SSH logger.
-    ts_target = SSHTransport(
-        host=tailscale_ip,
-        user=admin_username,
-        identity_file=config.operator.ssh_private_key,
-        default_timeout=60,
-        logger=logger,
-    )
+    # Switch to Tailscale SSH, carrying over the SSH logger. Create's first core
+    # connection enrolls the VM: it runs under ENROLL so its first success
+    # writes the host key to the VM's store file, and to nowhere else.
+    def _tailscale_ssh(mode: trust.TrustMode) -> SSHTransport:
+        return SSHTransport(
+            host=tailscale_ip,
+            trust=trust.TrustBinding(mode, vm_name),
+            user=admin_username,
+            identity_file=config.operator.ssh_private_key,
+            default_timeout=60,
+            logger=logger,
+        )
+
+    ts_target = _tailscale_ssh(trust.TrustMode.ENROLL)
 
     # Verify Tailscale SSH works (retry: peer connection may take time)
     logger.step("Verify Tailscale SSH")
@@ -437,7 +446,18 @@ def _phase_a_bootstrap(
             output.detail(f"Tailscale SSH not ready, retrying ({attempt + 1}/5)...")
             time.sleep(3)
 
-    return ts_target
+    # A success that left no key behind would leave every later connection
+    # refused for want of a record, so fail here, where the cause is known.
+    if not trust.has_record(vm_name):
+        raise ProvisioningError(
+            f"the host key of VM '{vm_name}' could not be recorded in '{format_host_path(trust.store_file(vm_name))}'",
+            entity_kind="vm",
+            entity_name=vm_name,
+            hint=f"Run 'agw vm delete {vm_name}' and create it again.",
+        )
+
+    # ENROLL covers exactly this connection; everything after verifies.
+    return _tailscale_ssh(trust.TrustMode.VM)
 
 
 def _phase_b_setup(

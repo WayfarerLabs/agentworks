@@ -2,7 +2,7 @@
 
 This package preserves the flat ``agentworks.vms.manager`` import surface
 that predates the split into submodules (``_helpers``, ``boundary``,
-``tailscale``, ``lifecycle``, ``inspect``, ``power``, ``exec``): every name below is
+``tailscale``, ``port_forward``, ``lifecycle``, ``inspect``, ``power``, ``exec``): every name below is
 re-exported here so ``from agentworks.vms.manager import create_vm`` (and
 the many ``agentworks.vms.manager.<name>`` attribute / monkeypatch
 references across the codebase and test suite) keep working unchanged.
@@ -59,6 +59,7 @@ from .inspect import (
     vm_listing,
 )
 from .lifecycle import create_vm, reinit_vm
+from .port_forward import port_forward_vm
 from .power import delete_vm, rekey_vm, start_vm, stop_vm
 from .release import confirm_vm_release, verified_vm_release
 from .tailscale import (
@@ -67,7 +68,6 @@ from .tailscale import (
     _tailscale_logout,
     _tailscale_rejoin_required,
     _warned_tailscale_missing,
-    port_forward_vm,
 )
 from .verification import VMConnectionVerification, verify_vm_connection
 

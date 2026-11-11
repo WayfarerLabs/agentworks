@@ -37,6 +37,7 @@ from agentworks.capabilities.vm_platform import ProvisionRequest, wsl2
 from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 from agentworks.debian import DebianRelease
 from agentworks.errors import StateError
+from tests.conftest import provisioning_trust_for_tests
 
 if TYPE_CHECKING:
     from tests.conftest import CapturedOutput
@@ -58,6 +59,7 @@ def _request() -> ProvisionRequest:
         admin_username="agw",
         ssh_public_key="ssh-ed25519 AAAA test",
         ssh_private_key=None,
+        provisioning_trust=provisioning_trust_for_tests("vm1"),
         tailscale_auth_key="tskey-test",
         progress=MagicMock(),
         # The vm-template layer's resolved defaults, which is the only

@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Annotated, ClassVar, Literal
 
 from pydantic import Field
 
+from agentworks import output
 from agentworks.artifacts.application import ArtifactApplication
 from agentworks.artifacts.native.common import (
     NativeSessionArtifacts,
@@ -51,6 +52,7 @@ from agentworks.topics import TopicProse
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
+    from agentworks.artifacts.application import SessionArtifactContext
     from agentworks.capabilities.base import RunContext
     from agentworks.capabilities.descriptor import Facet
     from agentworks.capabilities.harness_integration.setup import (
@@ -110,14 +112,10 @@ class GrokBuildConfig(AgwModel):
     rules: str | None = None
     """Forwarded as ``--rules`` on every process launch, including resume."""
 
-    enabled_workarounds: Annotated[
-        list[Literal["session-rules", "session-agent-definitions"]], MergeStrategy.REPLACE
-    ] = Field(default_factory=list)
-    """Explicitly enabled session artifact carriers; replaces inherited opt-ins.
-
-    ``session-agent-definitions`` remains accepted for config compatibility,
-    but private session personas have no verified carrier and stay unhandled.
-    """
+    enabled_workarounds: Annotated[list[Literal["session-home-skills"]], MergeStrategy.REPLACE] = Field(
+        default_factory=list
+    )
+    """Explicitly enabled session artifact carriers; replaces inherited opt-ins."""
 
     extra_args: Annotated[list[str], MergeStrategy.REPLACE] = Field(default_factory=list)
     """Argv tokens appended after every managed flag and before
@@ -152,17 +150,21 @@ class GrokBuildIntegration(HarnessIntegration):
         Ships as the opt-in `grok` system plugin and requires the `grok` CLI on
         the session's launch target.
 
-        User and workspace facets publish native rules, skills and agent personas.
-        Session artifacts are optional and unhandled by default. `enabled_workarounds`
-        can opt into `session-rules` for rules/hints through `--rules`. Private session
-        skills and personas have no verified carrier and remain unhandled. The accepted
-        `session-agent-definitions` spelling does not enable persona delivery. Activate
-        the user or workspace facet to publish skills and personas at their native scope.
+        User facets publish native rules, skills and personas. Workspace guidance uses
+        skills so exact local Git exclusions do not disable native rule discovery.
+        Session artifacts are unhandled by default. `session-home-skills` publishes
+        one stable session-specific entry in the shared user skill catalog. That entry
+        reads rules, hints and complete skills through the current private run index;
+        individual indexed skills are not native registrations. Applicability is best
+        effort, and old conversations may need fresh setup or manual index reading on
+        first adoption. Session personas remain unhandled. Native trust and model
+        cooperation still govern consumption.
         """,
     )
 
     _resumed: bool | None = None
     _artifact_plan: NativeSessionArtifacts = NativeSessionArtifacts()
+    _rendered_extra_args: tuple[str, ...] = ()
 
     @classmethod
     def config_for(cls, facet: Facet | None = None) -> type[BaseModel] | None:
@@ -219,7 +221,9 @@ class GrokBuildIntegration(HarnessIntegration):
         plan = (
             ArtifactApplication()
             if self.retiring
-            else render_setup_artifacts(invocation, lambda inputs: outer_artifacts(inputs, f"{invocation.root}/.grok"))
+            else render_setup_artifacts(
+                invocation, lambda inputs: outer_artifacts(inputs, f"{invocation.root}/.grok", workspace=True)
+            )
         )
         if plan.files:
             plan = defer_setup_conflicts(
@@ -249,8 +253,22 @@ class GrokBuildIntegration(HarnessIntegration):
         intent: HarnessLaunchIntent = HarnessLaunchIntent.RESUME_OR_NEW,
     ) -> HarnessStart:
         """Choose the requested fresh, strict-resume, or fallback policy."""
+        self._rendered_extra_args = tuple(self.render_context_argv(token) for token in self.config.extra_args)
         artifact_context = self._session_binding.artifact_context
         runner = ctx.admin_target() if self._admin else ctx.agent_target()
+
+        def resolve_home(current: SessionArtifactContext) -> str:
+            if runner is None:
+                raise StateError("artifact delivery requires the actual native launch target")
+            return probe_native(
+                runner,
+                tool="grok",
+                environment=current.environment,
+                redactions=current.redactions,
+                home=current.home,
+                check_policy=False,
+            )
+
         self._artifact_plan, native_root = prepare_session_delivery(
             runner,
             tool="grok",
@@ -258,15 +276,21 @@ class GrokBuildIntegration(HarnessIntegration):
             context=artifact_context,
             render=lambda prepared: session_artifacts(
                 prepared,
-                configured=self.config.rules,
-                extra_args=self.config.extra_args,
+                extra_args=self._rendered_extra_args,
                 enabled_workarounds=self.config.enabled_workarounds,
+                resolve_home=resolve_home,
             ),
             workspace=self._workspace_path,
         )
         if artifact_context is not None and native_root is not None:
             validate_discovery_paths(artifact_context, (native_root, f"{self._workspace_path}/.grok"))
         command = self._resume_or_launch(ctx, intent=intent)
+        if self._resumed and self._artifact_plan.application.artifacts_dir is not None:
+            output.warn(
+                "Grok resume may retain a catalog from before this session's artifact entry was installed. "
+                "If the entry is unavailable, use --force-new for a fresh conversation or read "
+                "$AGENTWORKS_ARTIFACTS_DIR/index.json manually in the current workload."
+            )
         if intent is HarnessLaunchIntent.FORCE_NEW:
             note = "Fresh Grok Build session requested. Starting a new one without resuming prior state..."
         elif intent is HarnessLaunchIntent.CREATE:
@@ -302,10 +326,10 @@ class GrokBuildIntegration(HarnessIntegration):
         parts = [shlex.quote(token) for token in (*identity, *self._managed_flags())]
         if self.config.agent is not None:
             parts += ["--agent", shlex.quote(self.config.agent)]
-        if self.config.rules is not None and "--rules" not in self._artifact_plan.argv:
+        if self.config.rules is not None:
             parts += ["--rules", shlex.quote(self.config.rules)]
         parts += [shlex.quote(token) for token in self._artifact_plan.argv]
-        parts += [self.quote_context_argv(token) for token in self.config.extra_args]
+        parts += [shlex.quote(token) for token in self._rendered_extra_args]
         if not resume and (prompt := self._fresh_prompt()) is not None:
             parts += ["--", shlex.quote(prompt)]
         argv = " ".join(parts)

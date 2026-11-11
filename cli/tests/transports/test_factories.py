@@ -17,6 +17,7 @@ import pytest
 
 from agentworks.capabilities.base import RunContext
 from agentworks.errors import StateError
+from agentworks.execution.trust import HOST_TRUST
 from agentworks.ssh import SSHError, SSHResult
 from agentworks.transports import (
     LimaTransport,
@@ -212,7 +213,7 @@ def test_native_transport_empty_ssh_host_raises_typed_state_error() -> None:
     platform = MagicMock()
     platform.name = "azure-vm"
     platform.transient_route.return_value = contextlib.nullcontext()
-    platform.native_transport.return_value = SSHTransport(host="", user="agentworks")
+    platform.native_transport.return_value = SSHTransport(trust=HOST_TRUST, host="", user="agentworks")
 
     with (
         contextlib.ExitStack() as stack,
@@ -279,7 +280,7 @@ def test_native_transport_probe_exhaustion_warns_platform_hint(captured_output) 
     platform.name = "azure-vm"
     platform.probe_failure_hint = "scoped allow guidance"
     platform.transient_route.return_value = contextlib.nullcontext()
-    fake_target = SSHTransport(host="1.2.3.4", user="agentworks")
+    fake_target = SSHTransport(trust=HOST_TRUST, host="1.2.3.4", user="agentworks")
     platform.native_transport.return_value = fake_target
 
     with (
@@ -320,7 +321,7 @@ def test_native_transport_azure_transient_route_opens_and_closes() -> None:
             events.append("close")
 
     platform.transient_route.side_effect = fake_route
-    fake_target = SSHTransport(host="1.2.3.4", user="agentworks")
+    fake_target = SSHTransport(trust=HOST_TRUST, host="1.2.3.4", user="agentworks")
     platform.native_transport.return_value = fake_target
 
     with (
@@ -375,14 +376,14 @@ def test_native_transport_azure_close_fires_on_downstream_exception() -> None:
 def test_wait_for_reconnect_returns_true_on_first_success() -> None:
     """Polymorphic over any Transport via ``run``. The double-check
     handles flapping but only fires after a prior failure."""
-    t = SSHTransport(host="1.2.3.4", user="agentworks")
+    t = SSHTransport(trust=HOST_TRUST, host="1.2.3.4", user="agentworks")
     with patch.object(t, "run", return_value=SSHResult(returncode=0, stdout="", stderr="")) as mock_run:
         assert wait_for_reconnect(t) is True
         mock_run.assert_called_once()
 
 
 def test_wait_for_reconnect_double_checks_after_prior_failure() -> None:
-    t = SSHTransport(host="1.2.3.4", user="agentworks")
+    t = SSHTransport(trust=HOST_TRUST, host="1.2.3.4", user="agentworks")
     calls = 0
 
     def flaky(*_a: object, **_kw: object) -> SSHResult:
@@ -402,7 +403,7 @@ def test_wait_for_reconnect_double_checks_after_prior_failure() -> None:
 
 
 def test_wait_for_reconnect_returns_false_after_max_attempts() -> None:
-    t = SSHTransport(host="1.2.3.4", user="agentworks")
+    t = SSHTransport(trust=HOST_TRUST, host="1.2.3.4", user="agentworks")
     with (
         patch.object(t, "run", side_effect=SSHError("never")),
         patch("agentworks.transports.time.sleep"),
@@ -436,7 +437,7 @@ def test_tailscale_wait_wording_is_a_closed_set() -> None:
 
 def test_wait_for_reconnect_default_context_is_reconnect(captured_output) -> None:  # noqa: ANN001
     """The default context emits the reconnect wording."""
-    t = SSHTransport(host="1.2.3.4", user="agentworks")
+    t = SSHTransport(trust=HOST_TRUST, host="1.2.3.4", user="agentworks")
     with patch.object(t, "run", return_value=SSHResult(returncode=0, stdout="", stderr="")):
         assert wait_for_reconnect(t) is True
     assert any("Waiting for Tailscale to reconnect" in line for line in captured_output.detail)
@@ -446,7 +447,7 @@ def test_wait_for_reconnect_default_context_is_reconnect(captured_output) -> Non
 def test_wait_for_reconnect_verify_context_emits_verify_wording(captured_output) -> None:  # noqa: ANN001
     """``context=TailscaleWait.VERIFY`` selects the truthful verify lines
     and never the scary reconnect wording."""
-    t = SSHTransport(host="1.2.3.4", user="agentworks")
+    t = SSHTransport(trust=HOST_TRUST, host="1.2.3.4", user="agentworks")
     with patch.object(t, "run", return_value=SSHResult(returncode=0, stdout="", stderr="")):
         assert wait_for_reconnect(t, context=TailscaleWait.VERIFY) is True
     assert any("Verifying Tailscale connectivity" in line for line in captured_output.detail)
