@@ -95,6 +95,7 @@ def _workspace_excludes(
                 checkpoint,
                 group=workspace.linux_group,
                 report_incomplete=incomplete,
+                redactions=(),
             )
         except AgentworksError as error:
             if error is persistence_failure:
@@ -125,6 +126,7 @@ def _workspace_excludes(
                     checkpoint,
                     group=workspace.linux_group,
                     report_incomplete=incomplete,
+                    redactions=(),
                     prior_workspace=workspace.workspace_path,
                 )
             except AgentworksError as error:

@@ -21,6 +21,14 @@ if TYPE_CHECKING:
     from agentworks.execution.access import VMAccess
 
 GIT_EXCLUDE_ROLE = "artifact-git-exclude"
+METADATA_DEADLINE_SECONDS = 30
+"""How long the Git metadata read may take.
+
+The read is bounded so an unresponsive guest cannot stall the operation
+around it. A timeout is ``ExecutionIncomplete``: setup records the
+integration's setup as failed, and workspace deletion and rehome record the
+exclusion as incomplete and carry on.
+"""
 _METADATA = """
 import json, pathlib, subprocess, sys
 r = json.load(sys.stdin)
@@ -77,7 +85,7 @@ def _metadata(
     redactions: Iterable[str],
 ) -> tuple[str, str, list[str]] | None:
     request = json.dumps({"workspace": workspace, "paths": paths}).encode()
-    result = access.run(PythonProgram(_METADATA, stdin=Bytes(request), deadline=30))
+    result = access.run(PythonProgram(_METADATA, stdin=Bytes(request), deadline=METADATA_DEADLINE_SECONDS))
     status = result.require_completed(access.vm_name)
     unavailable_reason = ""
     try:
@@ -119,8 +127,8 @@ def reconcile_workspace_excludes(
     *,
     group: str,
     report_incomplete: Callable[[str], None],
+    redactions: Iterable[str],
     prior_workspace: str | None = None,
-    redactions: Iterable[str] = (),
 ) -> None:
     """Own only our exact marker/pattern pairs, preserving all unrelated lines.
 
@@ -199,6 +207,9 @@ def reconcile_workspace_excludes(
     if not prior and not desired:
         return
     guest = access.files()
+    # The read keeps Files' default capture limit (1 MiB). A larger exclude file
+    # is ExecutionIncomplete naming that limit, handled as a timeout is (see
+    # METADATA_DEADLINE_SECONDS), and nothing rewrites a file not read whole.
     current = guest.read(destination)
     for claim in (*prior, *(claim for claim in desired if claim not in prior)):
         if claim in desired and any(

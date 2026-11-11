@@ -72,6 +72,7 @@ def apply(
     claims: tuple[NativeClaim, ...] = (),
     integration: str = "codex",
     redactions: Iterable[str] = (),
+    group: str = "",
 ) -> tuple[tuple[NativeClaim, ...], list[tuple[NativeClaim, ...]], list[str]]:
     current = claims
     checkpoints: list[tuple[NativeClaim, ...]] = []
@@ -89,7 +90,7 @@ def apply(
         files,
         claims,
         checkpoint,
-        group="",
+        group=group,
         report_incomplete=incomplete.append,
         redactions=redactions,
     )
@@ -130,6 +131,28 @@ def test_exact_literal_exclusions_are_idempotent_and_retire_only_owned_pairs(rep
     remaining, _, _ = apply(target, workspace, (), claims)
     assert not remaining and exclude.read_bytes() == prefix
     assert other.read_bytes() == b"operator file"
+
+
+@pytest.mark.parametrize("shared", [False, True])
+def test_created_exclude_file_and_parent_are_private_or_shared_with_the_workspace_group(repository, shared):
+    import grp
+    import os
+    import shutil
+    import stat
+
+    target, workspace = repository
+    info = workspace / ".git/info"
+    shutil.rmtree(info)
+    # A supplementary group, where the account has one, shows the group is applied rather than inherited.
+    gid = next((other for other in os.getgroups() if other != os.getgid()), os.getgid())
+    group = grp.getgrgid(gid).gr_name if shared else ""
+    claims, _, incomplete = apply(target, workspace, (file(workspace / ".agents/skills/x/SKILL.md"),), group=group)
+    assert len(claims) == 1 and not incomplete
+    exclude = info / "exclude"
+    modes = (stat.S_IMODE(exclude.stat().st_mode), stat.S_IMODE(info.stat().st_mode))
+    assert modes == ((0o660, 0o2770) if shared else (0o600, 0o700))
+    if shared:
+        assert exclude.stat().st_gid == info.stat().st_gid == gid
 
 
 def test_preexisting_identical_pattern_and_unrelated_claim_survive_retirement(repository):
@@ -359,6 +382,7 @@ def test_rebound_git_claims_roundtrip_every_persisted_checkpoint(db, repository)
         checkpoint,
         group="",
         report_incomplete=lambda reason: pytest.fail(reason),
+        redactions=(),
     )
     assert checkpoints and all(state.records[0].claims == claims for state in checkpoints)
     assert read_native_setup(db, "workspace", "project").records[0].claims == claims
