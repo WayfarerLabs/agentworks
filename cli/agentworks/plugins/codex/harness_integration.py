@@ -130,10 +130,10 @@ from agentworks.capabilities.harness_integration.base import (
     HarnessStart,
     require_commands,
 )
-from agentworks.errors import StateError
+from agentworks.errors import ConfigError, StateError
 from agentworks.plugins._harness_native.native import setup_user, setup_workspace
 from agentworks.plugins._harness_native.native_config import NativeUserConfig, NativeWorkspaceConfig
-from agentworks.plugins.codex.artifacts import outer_artifacts, session_artifacts, vm_artifacts
+from agentworks.plugins.codex.artifacts import defer_session_mcp, outer_artifacts, session_artifacts, vm_artifacts
 from agentworks.plugins.codex.recorder import home_word, notify_value_word, provision_fragment, thread_tail
 from agentworks.schema import AgwModel, MergeStrategy
 from agentworks.topics import TopicProse
@@ -684,8 +684,6 @@ class CodexIntegration(HarnessIntegration):
                 self._state.clear()
                 self._state.update(prior_state)
             raise
-        if self._artifact_plan.argv:
-            validate_native_command(command)
         return HarnessStart(command, self._decision_note(intent=intent), self._artifact_plan.application)
 
     def _decision_note(self, *, intent: HarnessLaunchIntent) -> str | None:
@@ -985,8 +983,32 @@ class CodexIntegration(HarnessIntegration):
             # recording must not outlive it and re-report a dead id.
             parts.append(f"rm -f {home_word(thread_tail(self._session_name))}")
         parts.append(provision_fragment())
-        parts.append(f"exec codex {self._codex_argv(head, fresh=fresh)}".rstrip())
-        return f"sh -c {shlex.quote('; '.join(parts))}"
+
+        def render() -> str:
+            body = [*parts, f"exec codex {self._codex_argv(head, fresh=fresh)}".rstrip()]
+            return f"sh -c {shlex.quote('; '.join(body))}"
+
+        command = render()
+        if self._artifact_plan.argv:
+            try:
+                validate_native_command(command)
+            except ConfigError:
+                context = self._session_binding.artifact_context
+                if context is None:
+                    raise
+                reduced = defer_session_mcp(
+                    self._artifact_plan,
+                    context.inputs,
+                    "session-mcp-overrides exceeds the complete native command carrier limit",
+                )
+                if reduced is self._artifact_plan:
+                    raise
+                self._artifact_plan = reduced
+                # Rebuild the same selected launch without repeating discovery or adoption.
+                command = render()
+                if self._artifact_plan.argv:
+                    validate_native_command(command)
+        return command
 
     def _resume_command(self, sid: str, *, msg: str, legacy_marker: str | None) -> str:
         """The resume pane command: ``codex resume <sid>`` with

@@ -10,7 +10,6 @@ import pytest
 
 from agentworks.artifacts.model import ArtifactContent, ArtifactInput, ArtifactOrigin, ArtifactProvenance, ArtifactType
 from agentworks.artifacts.names import mcp_native_name
-from agentworks.errors import ConfigError
 from agentworks.plugins.claude import artifacts as claude
 from agentworks.plugins.codex import artifacts as codex
 from agentworks.plugins.grok import artifacts as grok
@@ -125,7 +124,7 @@ def test_codex_unrelated_raw_config_does_not_block_mcp():
     assert result.argv and not result.application.deferred
 
 
-@pytest.mark.parametrize("payload", ["x" * 40000, "'" * 6000])
+@pytest.mark.parametrize("payload", ["x" * 40000])
 def test_codex_large_optional_mcp_does_not_gate_legacy_artifacts(payload):
     server = mcp(metadata={"type": "stdio", "command": "server", "args": [payload], "env": {}})
     skill = artifact(ArtifactType.SKILL)
@@ -136,23 +135,6 @@ def test_codex_large_optional_mcp_does_not_gate_legacy_artifacts(payload):
     )
     assert result.application.files and not result.argv
     assert {entry.input_id for entry in result.application.deferred} == {server.identity}
-
-
-@pytest.mark.parametrize("module,workaround", [(claude, "session-mcp-config"), (codex, "session-mcp-overrides")])
-def test_unrepresentable_entry_defers_without_losing_independent_entries(monkeypatch, module, workaround):
-    blocked, allowed = mcp(name="blocked"), mcp(name="allowed")
-    render = module.render_mcp
-
-    def reject_one(item, tool):
-        if item.identity == blocked.identity:
-            raise ConfigError("native representation unavailable")
-        return render(item, tool)
-
-    monkeypatch.setattr(module, "render_mcp", reject_one)
-    result = module.session_artifacts(context(blocked, allowed), extra_args=[], enabled_workarounds=[workaround])
-    assert {entry.input_id for entry in result.application.deferred} == {blocked.identity}
-    payload = " ".join(result.argv) + " ".join(file.data.decode() for file in result.application.files)
-    assert mcp_native_name(allowed) in payload and mcp_native_name(blocked) not in payload
 
 
 @pytest.mark.parametrize(

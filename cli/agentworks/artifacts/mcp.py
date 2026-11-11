@@ -18,6 +18,7 @@ from agentworks.sources import SourceRefError
 _ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 _REFERENCE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}\Z")
 _HEADER_NAME = re.compile(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+\Z")
+_DEFINITION_FIELDS = frozenset({"type", "description", "command", "args", "env", "url", "headers"})
 
 
 def _public_string(value: str) -> str:
@@ -139,7 +140,14 @@ def parse_definition(value: object) -> MCPStdioDefinition | MCPHTTPDefinition:
 
 def definition_error(error: ValidationError) -> str:
     """Pydantic's discriminator messages can otherwise echo rejected field values."""
-    fields = sorted({".".join(str(part) for part in row["loc"]) or "definition" for row in error.errors()})
+    rows = error.errors(include_input=False)
+    fields = sorted(
+        {part for row in rows for part in row["loc"] if isinstance(part, str) and part in _DEFINITION_FIELDS}
+    )
+    if any(row["type"] == "extra_forbidden" for row in rows):
+        fields.append("unexpected fields")
+    if not fields:
+        fields = ["definition"]
     return f"invalid MCP definition field(s): {', '.join(fields)}"
 
 

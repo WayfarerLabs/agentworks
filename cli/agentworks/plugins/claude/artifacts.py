@@ -26,7 +26,6 @@ from agentworks.artifacts.native.common import (
 )
 from agentworks.artifacts.native.guidance import guidance_rules, guidance_skills
 from agentworks.artifacts.native.mcp import render_mcp
-from agentworks.errors import ConfigError
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -175,12 +174,8 @@ def _session_mcp(
                 ArtifactDeferral(input_id=item.identity, destination="session", reason=native_conflicts[item.identity])
             )
             continue
-        try:
-            servers[mcp_native_name(item)] = render_mcp(item, "claude")
-        except ConfigError as error:
-            deferred.append(ArtifactDeferral(input_id=item.identity, destination="session", reason=str(error)))
-        else:
-            selected.append(item)
+        servers[mcp_native_name(item)] = render_mcp(item, "claude")
+        selected.append(item)
     if not selected:
         return NativeSessionArtifacts(ArtifactApplication(deferred=tuple(deferred)))
     file = artifact_file(path, json_text({"mcpServers": servers}), tuple(selected))

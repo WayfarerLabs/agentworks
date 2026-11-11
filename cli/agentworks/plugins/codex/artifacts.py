@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-import shlex
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import tomli_w
@@ -25,7 +25,6 @@ from agentworks.artifacts.native.common import (
     skill_files,
     validate_names,
     validate_native_argv,
-    validate_native_command,
 )
 from agentworks.artifacts.native.guidance import guidance_skills, session_skill_files
 from agentworks.artifacts.native.mcp import render_mcp
@@ -191,7 +190,6 @@ def session_artifacts(
             ]
     try:
         validate_native_argv((*argv, *mcp.argv))
-        validate_native_command(shlex.quote(shlex.join((*argv, *mcp.argv))))
     except ConfigError:
         # Optional MCP must not prevent an otherwise-valid legacy launch.
         validate_native_argv(tuple(argv))
@@ -211,6 +209,40 @@ def session_artifacts(
         argv.extend(mcp.argv)
     application = ArtifactApplication(tuple(files), deferred)
     return NativeSessionArtifacts(application, tuple(argv))
+
+
+def defer_session_mcp(plan: NativeSessionArtifacts, inputs: ArtifactInputs, reason: str) -> NativeSessionArtifacts:
+    """Remove generated MCP overrides after measuring the complete selected command."""
+    keys = {
+        f"mcp_servers.{mcp_native_name(item)}": item.identity
+        for item in inputs.items()
+        if item.content.type is ArtifactType.MCP_SERVER
+    }
+    argv: list[str] = []
+    omitted: set[str] = set()
+    # Both persona and MCP overrides are generated flag/value pairs.
+    for flag, value in zip(plan.argv[::2], plan.argv[1::2], strict=True):
+        identity = keys.get(value.partition("=")[0]) if flag == "-c" else None
+        if identity is None:
+            argv.extend((flag, value))
+        else:
+            omitted.add(identity)
+    if not omitted:
+        return plan
+    return replace(
+        plan,
+        argv=tuple(argv),
+        application=replace(
+            plan.application,
+            deferred=(
+                *plan.application.deferred,
+                *(
+                    ArtifactDeferral(input_id=identity, destination="session", reason=reason)
+                    for identity in sorted(omitted)
+                ),
+            ),
+        ),
+    )
 
 
 def _config_values(extra_args: Sequence[str]) -> list[str]:
@@ -297,8 +329,5 @@ def _session_mcp(
                 ArtifactDeferral(input_id=item.identity, destination="session", reason=native_conflicts[item.identity])
             )
             continue
-        try:
-            argv.extend(("-c", f"mcp_servers.{name}={_toml_literal(render_mcp(item, 'codex'))}"))
-        except ConfigError as error:
-            deferred.append(ArtifactDeferral(input_id=item.identity, destination="session", reason=str(error)))
+        argv.extend(("-c", f"mcp_servers.{name}={_toml_literal(render_mcp(item, 'codex'))}"))
     return NativeSessionArtifacts(ArtifactApplication(deferred=tuple(deferred)), tuple(argv))

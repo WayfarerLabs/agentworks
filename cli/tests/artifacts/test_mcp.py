@@ -38,6 +38,15 @@ def inline(value: object = STDIO) -> MCPServerArtifactSpec:
     return MCPServerArtifactSpec.model_validate({"definition": value})
 
 
+@pytest.mark.parametrize("key", ["\x1b[31mprivate-field", "private\nfield", "private-field" * 1000])
+def test_rejected_field_names_cannot_inject_or_expand_diagnostics(key):
+    with pytest.raises(SourceRefError) as error:
+        parse_definition({**STDIO, key: "private-rejected-value"})
+    diagnostic = str(error.value)
+    assert diagnostic.isprintable() and len(diagnostic) < 256
+    assert key not in diagnostic and "private-rejected-value" not in diagnostic
+
+
 @pytest.mark.parametrize("definition", [STDIO, HTTP])
 def test_inline_capture_is_normalized_unresolved_metadata(definition, monkeypatch):
     monkeypatch.setenv("TOKEN", "must-not-enter-artifacts")
