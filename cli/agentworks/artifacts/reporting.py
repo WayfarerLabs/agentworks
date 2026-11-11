@@ -29,6 +29,12 @@ def _names(items: Sequence[ArtifactInput]) -> str:
     return ", ".join(names)
 
 
+def _noun(artifact_type: ArtifactType, count: int) -> str:
+    if artifact_type is ArtifactType.MCP_SERVER:
+        return "MCP server" if count == 1 else "MCP servers"
+    return artifact_type.value if count == 1 else artifact_type.map_name
+
+
 def report_applied(
     inputs: ArtifactInputs,
     *,
@@ -50,7 +56,7 @@ def report_applied(
             and item.identity not in deferred_ids
         )
         if delivered:
-            noun = artifact_type.value if len(delivered) == 1 else artifact_type.map_name
+            noun = _noun(artifact_type, len(delivered))
             output.info(f"Applying {len(delivered)} {noun} ({_names(delivered)}) via {integration} at {owner}")
 
 
@@ -79,7 +85,7 @@ def report_deferrals(
                 )
                 grouped.setdefault((route.destination, route.reason, source), []).append(item)
         for (destination, reason, source), group in grouped.items():
-            noun = artifact_type.value if len(group) == 1 else artifact_type.map_name
+            noun = _noun(artifact_type, len(group))
             action = "Unhandled" if terminal else "Deferring"
             target = f"from {source}" if terminal else f"to {destination}"
             output.warn(

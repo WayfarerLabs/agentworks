@@ -569,7 +569,7 @@ def test_shell_index_preserves_declared_key_order_with_fixed_type_order():
     application = filesystem_artifacts(inputs, "/private", session=True)
     index = json.loads(next(file.data for file in application.files if file.path.endswith("/index.json")))
     owner = index["groups"][0]
-    assert list(owner) == ["owner", "hints", "rules", "skills", "agents"]
+    assert list(owner) == ["owner", "hints", "rules", "skills", "agents", "mcp_servers"]
     assert list(owner["hints"]) == list(owner["rules"]) == ["zebra", "alpha"]
 
 

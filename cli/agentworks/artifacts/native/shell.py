@@ -52,7 +52,9 @@ def filesystem_artifacts(
                             "native_options": content.native_options,
                         }
                     )
-                suffix = "json" if content.type is ArtifactType.AGENT else "md"
+                elif content.type is ArtifactType.MCP_SERVER:
+                    body = json_text(content.metadata)
+                suffix = "json" if content.type in (ArtifactType.AGENT, ArtifactType.MCP_SERVER) else "md"
                 publication = (artifact_file(f"{directory}/{content.name}.{suffix}", body, (item,)),)
             if content.type is not ArtifactType.HINT or hint_file is None:
                 files.extend(publication)
