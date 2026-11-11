@@ -1,7 +1,8 @@
 # Implementation Plan: Transport Take 2
 
-- Status: Slices 1 and 2 implemented in PR A (#863), slices 3 and 4 in PR B (#866) and slice 5 in PR
-  C, with the live evidence cells listed below still open; slices 6 to 8 not started
+- Status: Slices 1 and 2 implemented in PR A (#863, merged), slices 3 and 4 in PR B (#866), and
+  slices 5 and 6 in PR C, with the live evidence cells listed below still open; slices 7 and 8 not
+  started
 - Date: 2026-10-31
 - Requirements: [frd.md](./frd.md)
 - Architecture: [hla.md](./hla.md)
@@ -523,14 +524,14 @@ reads a legacy transport.
 
 ## Slice 6: Initialization (PR C)
 
-- [ ] Write `init-lld.md`. It covers:
+- [x] Write `init-lld.md`. It covers:
   - Phase B's move onto VMAccess, request by request, with each bound;
   - `write` and `update` on the file program and its lock, and the dotfiles tree upload as one
     `Script`;
   - each hand-written write it replaces, with mode, owner and secret handling;
   - the git-credential and agent-grant paths;
   - the incident audit of the entry points this slice moves.
-- [ ] Migrate:
+- [x] Migrate:
   - `vms/initializer/`, `vms/hardening.py` and `vms/tailscale_dns.py`;
   - `sources.py` (with `upload_tree` as one script) and `git_config.py`, and the
     `dotfiles_destination` validation in `vms/admin.py` and `agents/template.py`;
@@ -539,12 +540,12 @@ reads a legacy transport.
   - `workspaces/acls.py` and the tmux socket helpers with their stale-socket cleanup, which Phase B
     and agent create call;
   - `ensure_directory`'s owner and elevation, for the agent's `.ssh`.
-- [ ] Replace hand-written `printf | sudo tee`, `tee -a` and `write_file` plus `chmod` sequences
+- [x] Replace hand-written `printf | sudo tee`, `tee -a` and `write_file` plus `chmod` sequences
       with `files.write` and `files.update`, adding `Files.update` here with its first callers and
       moving slice 5's native settings publish onto it.
-- [ ] Tests: `write` applies mode and owner before the rename, a failed or interrupted tree upload
+- [x] Tests: `write` applies mode and owner before the rename, a failed or interrupted tree upload
       leaves the previous tree in place, and a corrupt archive changes nothing.
-- [ ] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
+- [x] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
       issues and fix history), and add incident inventory rows before deleting anything.
 - [x] `vm reinit --admin-template NAME` and `--admin-spec JSON` (operator ruling 2026-11-10), so a
       VM whose stored admin spec holds a source reference this release refuses has a repair. They
@@ -557,7 +558,7 @@ reads a legacy transport.
       credentials, dotfiles, mise install, the fragments' source lines again, user install commands,
       then a final source-line pass, with one mise install helper and one install-command runner
       shared by both accounts.
-- [ ] Collateral: guides or reference pages whose described init behavior changes.
+- [x] Collateral: guides or reference pages whose described init behavior changes.
 - [ ] Live evidence: create and reinit on every platform from at least one workstation each.
 
 Definition of done: create and reinit run entirely on the new transport.
@@ -577,6 +578,8 @@ Definition of done: create and reinit run entirely on the new transport.
     restore, console recovery after a killed attach) parks a fresh handover;
   - backup's launch, observation, interrupt and download, using `detached` and `ToFile` with
     progress.
+  - the codex recorder's install in the session launch line (`plugins/codex/recorder.py`, a
+    `printf`, `chmod` and `mv` fragment), which writes a guest file outside `Files`.
 - [ ] Tests:
   - a fresh launch never matches an earlier one;
   - observation resumes across a dropped connection;
