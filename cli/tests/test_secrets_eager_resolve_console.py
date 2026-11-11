@@ -25,7 +25,7 @@ from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.tmux import ProbeStatus
 
 from ._secrets_eager_support import _seed_basic_db, _stub_build_registry
-from .conftest import stub_vm_gates
+from .conftest import seed_vm_trust, stub_vm_gates
 
 __all__ = ["_stub_build_registry"]
 
@@ -157,6 +157,7 @@ def test_start_console_eager_resolves_before_tmux(
     from agentworks.sessions import multi_console
 
     db = _seed_basic_db(tmp_path)
+    seed_vm_trust("vm1")
     db._conn.execute("INSERT INTO consoles (name, vm_name, admin_shell) VALUES ('c1', 'vm1', 1)")
     db._conn.commit()
 
@@ -289,6 +290,7 @@ def test_attach_console_existing_tmux_session_skips_eager_resolve(
     from agentworks.sessions import multi_console
 
     db = _seed_basic_db(tmp_path)
+    seed_vm_trust("vm1")
     db._conn.execute("INSERT INTO consoles (name, vm_name) VALUES ('c1', 'vm1')")
     db._conn.commit()
 

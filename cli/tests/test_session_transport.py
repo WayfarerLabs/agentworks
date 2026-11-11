@@ -24,6 +24,7 @@ from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.tmux import FingerprintProbe, ProbeStatus, TmuxServerFingerprint
 
 from .conftest import (
+    seed_vm_trust,
     stub_build_registry,
     stub_session_resolvers,
     stub_vm_gates,
@@ -65,6 +66,7 @@ class _Target:
 def _seed_db(tmp_path: Path) -> Database:
     db = Database(tmp_path / "test.db")
     db.insert_vm("vm1", "lima", "h", admin_username="admin")
+    seed_vm_trust("vm1")
     db.update_vm_tailscale("vm1", "100.64.0.5")
     db._conn.execute(
         "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "

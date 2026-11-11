@@ -23,7 +23,7 @@ from agentworks.errors import SecretUnavailableError
 from agentworks.secrets.policy import TtyInteractionPolicy
 
 from ._secrets_eager_support import _seed_basic_db, _stub_build_registry, _stub_session_prep
-from .conftest import stub_vm_gates
+from .conftest import seed_vm_trust, stub_vm_gates
 
 __all__ = ["_stub_build_registry"]
 
@@ -241,6 +241,7 @@ def test_session_restart_eager_resolve_fires_before_teardown(
     from agentworks.sessions import manager as session_manager
 
     db = _seed_basic_db(tmp_path)
+    seed_vm_trust("vm1")
     _stub_session_prep(monkeypatch)
 
     # A non-NULL socket_path keeps this session on the new per-session-socket
