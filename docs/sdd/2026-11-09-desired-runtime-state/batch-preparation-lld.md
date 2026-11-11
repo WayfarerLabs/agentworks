@@ -290,6 +290,12 @@ preparation failures retain main's permitted sibling handling; repair conflicts 
 failures escape before submission. Reconciliation keeps its independent isolation and evidence-only
 checkpoint behavior.
 
+Named explicit stop likewise retains raw candidates until shared workload success, then performs
+safe admin PID repair before any status dispatch. Its owning-user preparation and teardown remain
+synchronous. Off-parent named and bulk paths construct neither transport and perform no guest status
+or repair. This preserves main's failure-before-status guarantee without moving runtime writes ahead
+of the secret boundary or changing reconciliation's read-only eligibility phase.
+
 Complete dedicated plans use main's existing executor once across selected VMs. Each gets a distinct
 bounded transport; workers receive no database, output, resolver or activation authority. Collision
 checks and the complete-future-map submission gate precede remote mutation. Incomplete dedicated and

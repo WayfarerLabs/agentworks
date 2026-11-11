@@ -502,9 +502,9 @@ lead owns integration decisions in the [architecture](hla.md) and
 [batch design](batch-preparation-lld.md); one isolated owner implements code, tests and matching
 permanent collateral. The incoming locked SDD remains untouched.
 
-- [ ] Integrate current main and all four conflicts, preserving intent/secret boundaries and main's
+- [x] Integrate current main and all four conflicts, preserving intent/secret boundaries and main's
       native teardown, conditional writes and public bulk concurrency.
-- [ ] Correct the GCP transition test's clock without changing production activation; retain the
+- [x] Correct the GCP transition test's clock without changing production activation; retain the
       deliberate inherited stop-transition policy.
 - [ ] Verify named versus filtered bulk stop, admin routing, strict bulk unknown refusal, original
       snapshot fencing, off-parent behavior, secret barriers and truthful interrupted completion.
@@ -516,3 +516,22 @@ This uses the one supplemental allowance. Later feedback belongs to a later batc
 round. Keep the goal active through monitoring and disposition. The open follow-up cleanup item
 covers all remaining and new task resources. Four finished worker/scout trees and three subordinate
 branches were retired after round two; review trees and two new factual scout trees remain.
+
+Merge `d7260da42` integrates the pinned main and supplemental implementation. The owner passed 1,337
+impacted tests, full Ruff lint/format across 1,043 files, strict mypy across 1,008 files, file
+quality across 511 Markdown and 484 spelling inputs, the locked-SDD guard and diff checks. Removing
+an accepted GCP settled state produced the expected two failures and four passes in 0.54 seconds;
+the test clock no longer waits for the real timeout. GCP production code, schema, public grammar,
+policy and incoming locked artifacts are unchanged by this supplemental work.
+
+Explicit named stop also defers safe admin repair until after shared secret success and before
+status, preserving main's writer-failure refusal while remaining synchronous. Ten cases with an
+enclosing read transaction in the twenty-case PID-repair matrix preaccept intent before that
+transaction and narrowly replace the setter with a read-only seam. They isolate post-accept repair
+and retain original conflict and stale-snapshot assertions. Separate public-controller tests
+exercise real named/bulk acceptance and repair-writer refusal before status or teardown. This
+qualification is not a waiver or a production change made for the old harness.
+
+Root combined gates, three independent source reviews, exact-head CI and the new ready handoff and
+associated integration report remain required. The owner's focused and static results are not live
+validation, and the goal remains active.

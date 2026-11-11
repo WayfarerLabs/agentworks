@@ -163,3 +163,14 @@ The operator authorized one supplemental round. Its main teardown integration an
 test-clock correction require new combined gates, three private lanes, exact-head CI, ready handoff
 and the associated integration report. Those remain pending; publication alone does not complete
 monitoring or disposition.
+
+The supplemental implementation is integrated at `d7260da42`, with 1,337 impacted tests and full
+static/file-quality checks passed by its isolated owner. GCP production behavior and schema are
+unchanged; the deterministic-clock mutation failed as expected in 0.54 seconds. Ten transaction
+cases in the retained twenty-case PID-repair matrix use a narrow post-accept setter seam after
+preaccepting intent outside the transaction. They retain runtime conflict/stale-snapshot assertions;
+separate public tests exercise real acceptance and writer-failure ordering. This is a component
+boundary qualification, not full public acceptance inside an artificial read transaction.
+
+Independent source reviews, required root gates, final CI and the new associated integration report
+remain pending. No fresh native GCP, bulk teardown or recovery pass is established by these tests.

@@ -190,6 +190,12 @@ persistence/output and serial compatibility work afterward. Named stop, start/re
 reconciliation retain synchronous ordering; reconciliation retains independent-family failure
 handling. Stop-only work neither activates an off parent nor opens a hold that could boot it.
 
+Explicit named stop also retains raw selected rows through shared secret success. Safe caller-thread
+admin PID repair precedes any status dispatch, followed by the named stop's owning-user preparation
+and synchronous teardown. Repair conflicts and database writer failures escape before status or
+destructive dispatch. Off-parent stops skip repair, guest status and transport construction.
+Reconciliation keeps its read-only preparation before workload resolution.
+
 Destructive work follows complete workload preparation. Guards and the writable database remain
 owned through interruption draining and reconciliation. A narrow caller-thread observer records
 success only after conditional stopped persistence, before the future leaves pending. Recording is
