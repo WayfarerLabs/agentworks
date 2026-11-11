@@ -28,13 +28,34 @@ if TYPE_CHECKING:
 
 SECRET = "ghp-stored-secret"
 
+SETTINGS: JsonObject = {
+    "harness_integrations": {
+        "codex": {"settings": {"source": f"u:{SECRET}@example.com:settings.json", "strategy": "replace"}}
+    }
+}
 REFUSED: list[JsonObject] = [
     {"dotfiles_source": f"git::https://u:{SECRET}@example.com/dots.git"},
     {"dotfiles_source": f"https://u:{SECRET}@example.com/dots.git"},
     {"dotfiles_source": f"user:{SECRET}@example.com:me/dots.git"},
     {"mise_lockfile": f"git::https://{SECRET}@example.com/locks.git//mise.lock"},
+    SETTINGS,
 ]
-IDS = ["credentialed-git", "bare-url", "bare-scp", "lockfile"]
+IDS = ["credentialed-git", "bare-url", "bare-scp", "lockfile", "harness-settings"]
+FIELDS = [
+    "dotfiles_source",
+    "dotfiles_source",
+    "dotfiles_source",
+    "mise_lockfile",
+    "harness_integrations.codex.settings.source",
+]
+
+
+@pytest.fixture(autouse=True)
+def _seated_integrations(make_config) -> None:  # noqa: ANN001
+    """Seat the bundled harness integrations, whose configs hold the settings ``source``, as every command does."""
+    from agentworks.bootstrap import load_request_registry
+
+    load_request_registry(make_config(), include_live_resources=False)
 
 
 def _stored_agent(db: Database, value: JsonObject) -> VersionedPayload:
@@ -45,9 +66,9 @@ def _stored_agent(db: Database, value: JsonObject) -> VersionedPayload:
     return stored
 
 
-@pytest.mark.parametrize("value", REFUSED, ids=IDS)
+@pytest.mark.parametrize(("value", "field"), list(zip(REFUSED, FIELDS, strict=True)), ids=IDS)
 def test_a_refused_stored_source_asks_for_an_explicit_replacement_and_names_only_the_field(
-    value: JsonObject,
+    value: JsonObject, field: str
 ) -> None:
     record = DesiredOverlayRecord("agent", "a1", VersionedPayload(1, value), "2026-11-10")
 
@@ -55,7 +76,7 @@ def test_a_refused_stored_source_asks_for_an_explicit_replacement_and_names_only
         decode_stored_overlay(record)
 
     assert isinstance(refused.value, ExplicitReplacementRequired)
-    assert next(iter(value)) in str(refused.value)
+    assert refused.value.fields == (field,)
     assert SECRET not in f"{refused.value} {refused.value.hint}"
 
 
@@ -80,14 +101,17 @@ def test_agent_reinit_clears_or_replaces_a_refused_stored_source_but_a_retain_re
     assert db.instance_state.get_desired_overlay("agent", "a1") is None
 
 
-def test_a_vm_s_refused_stored_admin_source_gets_the_vm_hint() -> None:
-    payload = VersionedPayload(2, {"vm": {}, "admin": REFUSED[0]})
+@pytest.mark.parametrize(
+    ("value", "field"), [(REFUSED[0], FIELDS[0]), (SETTINGS, FIELDS[-1])], ids=["dotfiles", "settings"]
+)
+def test_a_vm_s_refused_stored_admin_source_gets_the_vm_hint(value: JsonObject, field: str) -> None:
+    payload = VersionedPayload(2, {"vm": {}, "admin": value})
 
     with pytest.raises(StoredSourceReferenceRefused) as refused:
         decode_stored_overlay(DesiredOverlayRecord("vm", "box", payload, "2026-11-10"))
 
     assert refused.value.hint == VM_ADMIN_REPLACEMENT_REMEDY
-    assert "admin.dotfiles_source" in str(refused.value)
+    assert refused.value.fields == (f"admin.{field}",)
     assert SECRET not in str(refused.value)
 
 

@@ -29,7 +29,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 from agentworks import output
-from agentworks.errors import ExternalError, RefusedSourceReference, StateError, ValueFreeError
+from agentworks.errors import ExternalError, StateError, ValueFreeError
+
+# SourceRefFormError is defined in agentworks.errors, beside the other value-free errors, and re-exported
+# here with check_source_ref, which raises it; the `X as X` shape marks it as explicit for mypy.
+from agentworks.errors import SourceRefFormError as SourceRefFormError
 from agentworks.execution.errors import CommandFailed, PathRefusal, PathRefused
 from agentworks.execution.files import guest_path
 from agentworks.execution.requests import Bytes, Command, Script, Shell
@@ -54,7 +58,6 @@ _DRIVE_RE = re.compile(r"^[A-Za-z]:([/\\]|$)")
 
 A single letter and a colon followed by anything else, such as ``u:token@host:path``, is a remote.
 """
-
 
 # Ref must be safe for shell and git: alphanumeric, hyphens, dots, underscores, slashes
 _SAFE_REF_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._/-]*$")
@@ -152,10 +155,6 @@ def _parse_git_source(url_str: str, default_filename: str) -> SourceRef:
         subpath = default_filename
 
     return SourceRef(kind="git", path=url_str, subpath=subpath, ref=ref)
-
-
-class SourceRefFormError(RefusedSourceReference):
-    """A configured source reference that does not parse; the message names the accepted forms, never the value."""
 
 
 def check_source_ref(value: str, *, field: str) -> str:

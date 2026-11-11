@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, cast
 from pydantic import ValidationError as PydanticValidationError
 
 from agentworks.declared_resource import DeclaredResource
-from agentworks.errors import RefusedSourceReference, ValidationError, ValueFreeError
+from agentworks.errors import SourceRefFormError, ValidationError, ValueFreeError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -80,12 +80,18 @@ def value_safe_model_validation_error(
     errors = error.errors(include_url=False, include_context=True, include_input=False)
     details = []
     errors_by_parent: dict[tuple[object, ...], set[str]] = {}
+    # The path of each refused source field, or None once any failure is something else.
+    refused: list[str] | None = []
     for item in errors:
         location = ".".join(str(part) for part in item["loc"] if part != "name") or "<root>"
         message = item["msg"]
+        context = item.get("ctx")
+        cause = context.get("error") if isinstance(context, dict) else None
+        if refused is not None and isinstance(cause, SourceRefFormError):
+            refused.append(".".join([*(str(part) for part in item["loc"][:-1] if part != "name"), cause.field]))
+        else:
+            refused = None
         if item["type"] in {"value_error", "assertion_error"}:
-            context = item.get("ctx")
-            cause = context.get("error") if isinstance(context, dict) else None
             if isinstance(cause, ValueFreeError):
                 message = str(cause)
             else:
@@ -103,19 +109,14 @@ def value_safe_model_validation_error(
         return UnsupportedOverlayFieldsError(
             f"{label}: {'; '.join(details)}", entity_kind=entity_kind, entity_name=entity_name
         )
-    refused = [_cause(item) for item in errors]
-    if refused and all(isinstance(cause, RefusedSourceReference) for cause in refused):
-        fields = tuple(dict.fromkeys(cast("RefusedSourceReference", cause).field for cause in refused))
+    if refused:
         return RefusedSourceFieldsError(
-            f"{label}: {'; '.join(details)}", fields=fields, entity_kind=entity_kind, entity_name=entity_name
+            f"{label}: {'; '.join(details)}",
+            fields=tuple(dict.fromkeys(refused)),
+            entity_kind=entity_kind,
+            entity_name=entity_name,
         )
     return ValidationError(f"{label}: {'; '.join(details)}", entity_kind=entity_kind, entity_name=entity_name)
-
-
-def _cause(item: object) -> object:
-    """The exception a value or assertion error item carries, if any."""
-    context = item.get("ctx") if isinstance(item, dict) else None
-    return context.get("error") if isinstance(context, dict) else None
 
 
 def encode_overlay_model(model: BaseModel, instance_kind: str) -> JsonObject:

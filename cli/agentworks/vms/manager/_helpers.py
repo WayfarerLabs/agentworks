@@ -72,11 +72,17 @@ def _resolve_vm_admin_env_scopes(
         # base disappears. A workspace without either still contributes an
         # empty scope, preserving copied-workspace compatibility.
         from agentworks.errors import ConfigError, NotFoundError
-        from agentworks.instance_specs import UnsupportedStoredOverlayError
+        from agentworks.instance_specs import ExplicitReplacementRequired, UnsupportedStoredOverlayError
         from agentworks.workspaces.templates import resolve_live_template, resolve_ws_template_env_or_empty
 
         try:
             ws_env = resolve_live_template(db, registry, ws.name, ws.template).env
+        except ExplicitReplacementRequired as error:
+            output.warn(
+                f"{error}; using its base template for this environment operation."
+                + (f"\n{error.hint}" if error.hint else "")
+            )
+            ws_env = resolve_ws_template_env_or_empty(registry, ws.template)
         except UnsupportedStoredOverlayError:
             output.warn(
                 f"Stored workspace instance spec for {ws.name!r} requires a compatible or newer "

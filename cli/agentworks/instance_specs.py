@@ -15,14 +15,16 @@ from agentworks.instance_overlay_codec import (
     OVERLAY_EXCLUDED_FIELDS,
     RefusedSourceFieldsError,
     UnsupportedOverlayFieldsError,
+    value_safe_model_validation_error,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Callable, Iterator, Mapping
 
     from pydantic import BaseModel
 
     from agentworks.agents.template import AgentTemplate
+    from agentworks.capabilities.descriptor import Facet
     from agentworks.db import Database, DesiredOverlayRecord
     from agentworks.resources.reference import ResourceReference
     from agentworks.resources.registry import Registry
@@ -36,6 +38,8 @@ _NON_VM_RECORD_PAYLOAD_VERSION = 1
 _LEGACY_VM_RECORD_PAYLOAD_VERSION = 1
 _VM_RECORD_PAYLOAD_VERSION = 2
 _VM_COMPONENT_PAYLOAD_VERSION = 1
+_STORED_LAYER_FACETS: dict[str, Facet] = {"agent": "user", "workspace": "workspace"}
+"""The facet each non-VM stored layer's ``harness_integrations`` validates at (a VM's admin layer is ``user``)."""
 
 
 @dataclass(frozen=True)
@@ -97,7 +101,11 @@ class ActivationMapMigrationRequired(ExplicitReplacementRequired):
 
 
 class StoredSourceReferenceRefused(ExplicitReplacementRequired):
-    """A stored overlay's source reference fields are ones this release refuses; it names them, never their values."""
+    """A stored overlay holds source references this release refuses; ``fields`` names them, never a value."""
+
+    def __init__(self, message: str, *, fields: tuple[str, ...], entity_kind: str, entity_name: str, hint: str) -> None:
+        super().__init__(message, entity_kind=entity_kind, entity_name=entity_name, hint=hint)
+        self.fields = fields
 
 
 VM_ADMIN_REPLACEMENT_REMEDY = (
@@ -106,12 +114,17 @@ VM_ADMIN_REPLACEMENT_REMEDY = (
 )
 """How an operator supersedes a VM's stored admin layer that needs an explicit replacement."""
 
+_ACTIVATION_MIGRATION_REMEDY = (
+    "Back up the state database and explicitly migrate the saved instance spec to activation maps "
+    "before using this resource, or recreate the resource with the new config."
+)
+"""How an operator supersedes a saved activation list in a layer no command replaces."""
+
 
 def _replacement_remedy(instance_kind: str) -> str:
     """How an operator supersedes a stored overlay of ``instance_kind`` that needs an explicit replacement.
 
-    A VM's admin layer has its own remedy (``VM_ADMIN_REPLACEMENT_REMEDY``);
-    its VM layer cannot change after create, so that one needs a migration.
+    A VM's admin layer has its own remedy (``VM_ADMIN_REPLACEMENT_REMEDY``).
     """
     if instance_kind == "agent":
         return (
@@ -128,10 +141,50 @@ def _refused_sources(record: DesiredOverlayRecord, fields: tuple[str, ...], hint
     return StoredSourceReferenceRefused(
         f"stored {record.instance_kind} {record.instance_name!r} instance spec holds a source reference this "
         f"release refuses ({', '.join(fields)})",
+        fields=fields,
         entity_kind=record.instance_kind,
         entity_name=record.instance_name,
         hint=hint,
     )
+
+
+def _refused_activation_sources(
+    activations: Mapping[str, CapabilityConfig | None], *, facet: Facet, owner: tuple[str, str]
+) -> list[str]:
+    """The ``harness_integrations`` source fields of a stored layer that this release refuses.
+
+    The layer codec keeps each activation's config opaque; the registry
+    validates it against its integration when it publishes the owner. A
+    source the release now refuses, such as a harness settings ``source``,
+    would surface there as a config error with no repair, so the decode
+    classifies it first. Any other config failure is left to that
+    validation, as before. Only seated integrations are checked; every
+    command seats them when it loads its registry, before any decode.
+    """
+    from pydantic import ValidationError as PydanticValidationError
+
+    from agentworks.capabilities.config import validate_capability_config
+    from agentworks.errors import ConfigError
+    from agentworks.schema import RefOwner
+
+    fields: list[str] = []
+    for name, config in activations.items():
+        if config is None:
+            continue
+        try:
+            validate_capability_config(
+                kind="harness-integration", name=name, facet=facet, config=config.config, owner=RefOwner(*owner)
+            )
+        except ConfigError as error:
+            cause = error.__cause__
+            if not isinstance(cause, PydanticValidationError):
+                continue
+            classified = value_safe_model_validation_error(
+                cause, "stored activation", entity_kind=owner[0], classify_unsupported=False
+            )
+            if isinstance(classified, RefusedSourceFieldsError):
+                fields.extend(f"harness_integrations.{name}.{field}" for field in classified.fields)
+    return fields
 
 
 def parse_instance_spec(instance_kind: InstanceKind, value: str) -> InstanceOverlay[BaseModel]:
@@ -235,7 +288,18 @@ def decode_stored_overlay(
             entity_name=record.instance_name,
             hint="Back up the state database before repairing it, or restore a known-good backup.",
         ) from error
-    _refuse_stored_activation_list(record, raw)
+    _refuse_stored_activation_list(
+        record,
+        raw,
+        remedy=_replacement_remedy("agent") if record.instance_kind == "agent" else _ACTIVATION_MIGRATION_REMEDY,
+    )
+    facet = _STORED_LAYER_FACETS.get(record.instance_kind)
+    activations = getattr(parsed.declaration, "harness_integrations", None)
+    if facet is not None and activations:
+        owner = (record.instance_kind, record.instance_name)
+        refused = _refused_activation_sources(activations, facet=facet, owner=owner)
+        if refused:
+            raise _refused_sources(record, tuple(refused), _replacement_remedy(record.instance_kind))
     return parsed
 
 
@@ -265,9 +329,9 @@ def decode_stored_vm_overlays(
     raw_vm = raw.get("vm")
     raw_admin = raw.get("admin")
     if isinstance(raw_vm, dict):
-        _refuse_stored_activation_list(record, raw_vm)
+        _refuse_stored_activation_list(record, raw_vm, remedy=_ACTIVATION_MIGRATION_REMEDY)
     if isinstance(raw_admin, dict):
-        _refuse_stored_activation_list(record, raw_admin, vm_admin=True)
+        _refuse_stored_activation_list(record, raw_admin, remedy=VM_ADMIN_REPLACEMENT_REMEDY)
     component_unknown: list[str] = []
     if isinstance(raw_vm, dict):
         component_unknown.extend(f"vm.{field}" for field in _unknown_vm_component_fields(raw_vm))
@@ -288,8 +352,6 @@ def decode_stored_vm_overlays(
     else:
         try:
             vm_overlay = _decode_stored_vm_component(raw_vm)
-        except RefusedSourceFieldsError as error:
-            refused.extend(f"vm.{field}" for field in error.fields)
         except UnsupportedOverlayFieldsError as error:
             unsupported.append(error)
         except ValidationError as error:
@@ -306,6 +368,12 @@ def decode_stored_vm_overlays(
             parsed_admin = vm_codec.decode_admin_overlay(raw_admin)
             if vm_codec.encode_admin_overlay(parsed_admin):
                 admin = parsed_admin
+                refused.extend(
+                    f"admin.{field}"
+                    for field in _refused_activation_sources(
+                        parsed_admin.harness_integrations, facet="user", owner=("vm", record.instance_name)
+                    )
+                )
         except RefusedSourceFieldsError as error:
             refused.extend(f"admin.{field}" for field in error.fields)
         except UnsupportedOverlayFieldsError as error:
@@ -318,30 +386,17 @@ def decode_stored_vm_overlays(
     if unsupported:
         raise _unsupported_stored_overlay(record, f"unsupported fields: {unsupported[0]}") from unsupported[0]
     if refused and not malformed:
-        admin_only = all(field.startswith("admin.") for field in refused)
-        hint = VM_ADMIN_REPLACEMENT_REMEDY if admin_only else _replacement_remedy("vm")
-        raise _refused_sources(record, tuple(refused), hint)
+        # Only the admin layer holds source references, so its remedy is the repair.
+        raise _refused_sources(record, tuple(refused), VM_ADMIN_REPLACEMENT_REMEDY)
     if malformed:
         raise _malformed_stored_overlay(record, str(malformed[0])) from malformed[0]
     return _vm_instance_overlays(vm_overlay, admin)
 
 
-def _refuse_stored_activation_list(record: DesiredOverlayRecord, raw: JsonObject, *, vm_admin: bool = False) -> None:
-    """Refuse a saved list whose replacement semantics cannot be preserved by map conversion.
-
-    ``vm_admin`` marks ``raw`` as a VM record's admin layer, which ``vm reinit --admin-spec`` replaces.
-    """
+def _refuse_stored_activation_list(record: DesiredOverlayRecord, raw: JsonObject, *, remedy: str) -> None:
+    """Refuse a saved list whose replacement semantics cannot be preserved by map conversion; ``remedy`` repairs it."""
     if not isinstance(raw.get("harness_integrations"), list):
         return
-    if record.instance_kind == "agent":
-        remedy = _replacement_remedy("agent")
-    elif vm_admin:
-        remedy = VM_ADMIN_REPLACEMENT_REMEDY
-    else:
-        remedy = (
-            "Back up the state database and explicitly migrate the saved instance spec to activation maps "
-            "before using this resource, or recreate the resource with the new config."
-        )
     raise ActivationMapMigrationRequired(
         f"stored {record.instance_kind} {record.instance_name!r} uses the retired harness activation list format",
         entity_kind=record.instance_kind,
@@ -641,7 +696,7 @@ def _vm_instance_overlays(
 
 def _decode_legacy_stored_vm_overlay(record: DesiredOverlayRecord) -> VMInstanceOverlays:
     """Read the payload-v1 flat VM layer written before paired admin layers."""
-    _refuse_stored_activation_list(record, record.payload.value)
+    _refuse_stored_activation_list(record, record.payload.value, remedy=_ACTIVATION_MIGRATION_REMEDY)
     try:
         unknown = _unknown_vm_component_fields(record.payload.value)
         if unknown:
@@ -650,10 +705,6 @@ def _decode_legacy_stored_vm_overlay(record: DesiredOverlayRecord) -> VMInstance
                 entity_kind="vm",
             )
         vm = _decode_stored_vm_component(record.payload.value)
-    except RefusedSourceFieldsError as error:
-        raise _refused_sources(
-            record, tuple(f"vm.{field}" for field in error.fields), _replacement_remedy("vm")
-        ) from None
     except UnsupportedOverlayFieldsError as error:
         raise _unsupported_stored_overlay(record, f"unsupported fields: {error}") from error
     except ValidationError as error:

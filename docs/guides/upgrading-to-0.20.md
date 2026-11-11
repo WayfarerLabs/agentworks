@@ -318,10 +318,11 @@ place its `authorized_keys`; every later step runs as the agent, which cannot ru
   without echoing it; declare a `git-credential` resource for the host instead. A subpath with an
   empty or `.` component is refused too, as one with `..` was.
 - **Replace a stored spec whose source reference is now refused.** An agent created or reinitialized
-  with `--spec`, or a VM created with `--admin-spec`, holding a source reference this release
-  refuses (a `git::https://` URL with a user name or token in it, or a remote written without
-  `git::`) keeps that spec stored, and a plain `agw agent reinit <name>` or `agw vm reinit <name>`
-  refuses it, naming the field but not the value. Supersede it with
+  with `--spec`, or a VM created with `--admin-spec`, holding a source reference this release refuses
+  (a `git::https://` URL with a user name or token in it, a remote written without `git::`, or such
+  a harness settings `source`) keeps that spec stored. Every command that uses that agent's or VM's
+  spec, a plain `agw agent reinit <name>` or `agw vm reinit <name>` among them, refuses it, naming
+  the field but not the value; other commands, deletes and listings included, work as before. Supersede it with
   `agw agent reinit <name> --spec '<complete replacement spec>'` or
   `agw vm reinit <name> --admin-spec '<complete replacement admin spec>'`, or clear it with
   `--spec '{}'` or `--admin-spec '{}'`; `agw doctor` names the same repair. `vm reinit` now takes

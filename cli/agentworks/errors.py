@@ -77,12 +77,13 @@ class ValueFreeError(ValueError):
     """
 
 
-class RefusedSourceReference(ValueFreeError):
-    """A source reference field this release refuses; ``field`` names it, and no part of the value is kept.
+class SourceRefFormError(ValueFreeError):
+    """A configured source reference that does not parse; ``field`` names it, and no part of the value is kept.
 
-    A stored overlay that fails only on such fields was valid when it was
-    saved, so its decode asks for an explicit replacement instead of calling
-    the record malformed (``instance_specs``).
+    Raised by ``sources.check_source_ref``, whose message names the accepted
+    forms. A stored overlay that fails only on such fields was valid when it
+    was saved, so its decode asks for an explicit replacement instead of
+    calling the record malformed (``instance_specs``).
     """
 
     def __init__(self, message: str, *, field: str) -> None:
@@ -272,9 +273,8 @@ def unknown_template_error(
     declared names for that kind so the operator can correct the name in
     place; when none are declared it says so plainly rather than offering an
     empty list. It deliberately never points at config.toml, which is
-    deprecated for resources. Shared by the four template resolvers and the
-    ``require_declared_template`` re-point validator so the hint shapes stay
-    uniform.
+    deprecated for resources. Shared by the four template resolvers so the
+    hint shapes stay uniform.
     """
     names = sorted(available)
     hint = f"available {label}s: {', '.join(names)}" if names else f"no {label}s are declared"

@@ -1058,15 +1058,28 @@ no longer use them. The departures from the tables above, each recorded where it
   the system install commands, which run earlier in the VM section, still see no profile on a first
   create.
 - A stored overlay that fails only on source reference fields this release refuses (every
-  `errors.RefusedSourceReference`: `dotfiles_source`, `mise_lockfile` and a harness settings
-  `source`, all through `sources.check_source_ref`) decodes to
-  `instance_specs.StoredSourceReferenceRefused`, which names the fields and never a value. It and
+  `errors.SourceRefFormError`, raised by `sources.check_source_ref`, which `sources` re-exports)
+  decodes to `instance_specs.StoredSourceReferenceRefused`, whose `fields` names them and never a
+  value: `dotfiles_source` and `mise_lockfile` through the layer codec, and a harness settings
+  `source` through `_refused_activation_sources`. The codec keeps an activation's config opaque and
+  the registry validates it per integration when it publishes the owner, where a refused settings
+  `source` would be a config error with no repair, so the decode validates each seated
+  integration's config itself and classifies a failure that is only refused sources. Only an
+  agent's, a workspace's and a VM admin layer's activations can hold one (no VM-facet config has a
+  source), so a VM record's refusal always carries `VM_ADMIN_REPLACEMENT_REMEDY`. It and
   `ActivationMapMigrationRequired` share the base `ExplicitReplacementRequired`, which
   `replace_agent_overlay` lets an explicit `--spec` replace or clear; a retain still refuses. Doctor
   shows its hint, and the describe commands' `instance_state` reports any
   `ExplicitReplacementRequired` as reason `replacement-required` with issue
   `instance-spec-replacement-required` (`instance_description.InstanceSpecUnavailableReason`), where
   an activation list read `unsupported-version` through v0.19.0.
+- The live publisher (`resources/live_publish._stored_layer`) publishes an owner whose stored layer
+  raises `ExplicitReplacementRequired` identity-only: its selected templates and its owner, VM and
+  site edges, with no layer references. So one such record never fails the registry every command
+  loads, every refused owner can be repaired in turn, and deletes and listings work beside it; a
+  command acting on that owner decodes the record itself and refuses with the value-free hint. The
+  workspace env fallbacks (`env/show.py`, `vms/manager/_helpers.py`) warn with that error's own
+  message and hint before using the base template.
 - `vm reinit --admin-template NAME` and `--admin-spec JSON` (operator ruling 2026-11-10) follow
   `agent reinit`'s `--update-template` and `--spec`. Omitted, both are retained; a supplied admin
   spec replaces the stored admin layer, and `''` or `{}` clears it. `--admin-template` must name a
