@@ -215,10 +215,11 @@ absent.
 
 ## Phase 2: OAuth
 
-- [ ] Resolve the operator's native-configuration versus Agentworks login-workflow preference and
-      complete the [OAuth design](oauth-phase.md) after the first working registration push. The
-      [working LLD](oauth-lld.md) separates the proposed public configuration from the remaining
-      workflow, confidential-client, callback and session-only decisions; it does not settle them.
+- [ ] Define the explicit native authentication workflow and complete the
+      [OAuth design](oauth-phase.md) after the first working registration push, incorporating any
+      further operator preference without treating an unanswered optional question as approval. The
+      [detailed design](oauth-lld.md) selects the strict public profile, existing actual-user access
+      and explicit unsupported cases; advertised native modes still require acceptance.
 - [ ] Specify strict supported auth fields, native translation and actual-user credential ownership;
       research public/confidential clients, scopes, remote browser/callback behavior and
       session-only discovery without introducing an Agentworks token store or protocol client.
@@ -232,6 +233,42 @@ absent.
       advertised refresh/status/logout behavior and independent credential/resource cleanup.
 - [ ] Update permanent guides, examples, inspection and upgrade teaching; run all gates and required
       private reviews and the independent integration pipeline on the complete OAuth PR.
+
+Private phase-2 preparation remains separate from public registration. `4e9db5601` adds typed public
+OAuth options and capture v5, including retained-v4 refusal and unchanged phase-1 content and
+declaration hashes. `d459e3d22` adds Claude/Codex native public-option translation and per-entry
+Grok deferral for unsupported explicit options. `1f1b61605` aligns retained roundtrip/health tests
+with the new current version while retaining malformed-v4 and unknown-future-version coverage. The
+lead's combined local selection passed 513 tests with five skips, full mypy passed 993 files, and
+Ruff/format passed. The measured import boundary selected this private source, not the separate
+registration checkout supplying the frozen test interpreter. The owned temporary root was removed
+and independently verified absent. These are preparation checks, not a full final suite, native
+OAuth acceptance or R11 completion.
+
+The native worker retained its initial filesystem ownership-fixture and unused-import failures;
+corrected tests used an owned fixture root with the current primary group, without changing
+production ownership rules. Its frozen package and pinned lint downloads used package-network access
+despite ambiguous no-network wording in its charter. No native/provider/auth endpoint was accessed.
+The spelling invocation selected zero Python files and is inapplicable, not a passing spelling gate.
+The lead read the full result and source and independently verified the named
+environment/cache/fixture root absent. Future lane charters distinguish package downloads from
+native/provider traffic explicitly.
+
+The [detailed design](oauth-lld.md) selects documented operator-native authentication through
+existing agent/admin access, with no login wrapper or automatic consent. The optional preference
+question remains unanswered; this is the lead's conservative implementation choice. Confidential
+secrets and custom issuer/callback URLs remain explicitly unsupported by the portable profile.
+Native session-only auth, remote/callback modes, Grok's actual auth path and managed-user isolation
+remain acceptance work, not results inferred from public config translation. The initial SDD-only
+checkpoint is not repeated for these private working increments.
+
+One further bounded Codex 0.167.0 public-options-only native flow matched the actual renderer's
+client ID, callback port and server-level scopes without a callback URL override. Native callback
+selection/listener, public PKCE login, model-free authenticated MCP discovery and targeted local
+logout passed on the first attempt; native config stayed unchanged. The lead read the full report
+and measured config/commands, matched the actual source hash, and independently checked both
+fixture/callback ports closed and the exact native home absent. This closes the local default
+callback uncertainty while retaining managed-user, session-only and provider-specific limits.
 
 ## Overall closeout, after both phases
 

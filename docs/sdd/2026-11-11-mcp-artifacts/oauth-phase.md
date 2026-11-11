@@ -7,12 +7,12 @@ push rejects OAuth fields; that is a phase boundary, not the completed scope of 
 Detailed auth schema/workflow design follows phase 1 and precedes OAuth implementation. The overall
 SDD stays open until both phases and their acceptance obligations are complete.
 
-The [phase-2 working design](oauth-lld.md) proposes the strict public configuration and capture
-extension while retaining the open workflow and native-support decisions. It is preparation for the
-OAuth implementation PR, not acceptance or an additional artifact-only handoff.
+The [phase-2 design](oauth-lld.md) defines the strict public configuration and capture extension
+while retaining the remaining native-support acceptance work. It is preparation for the OAuth
+implementation PR, not acceptance or an additional artifact-only handoff.
 
 Phase 1 must preserve stable original-owner native names, ordinary entry ownership and native
-credential stores, so phase 2 can extend a connection without inventing another artifact kind or
+credential stores, so phase 2 can extend a connection without inventing another artifact type or
 importing credentials into artifact storage. It does not add an untyped OAuth options bag now.
 Existing native OAuth can work independently; registration is not proof that authentication has been
 configured, completed or refreshed.
@@ -25,9 +25,10 @@ describes HTTP-based authorization. Stdio normally receives credentials from its
 Agentworks delegates OAuth protocol behavior to the native harness rather than implementing a
 client, token cache, authorization server or refresh service.
 
-Phase 2 will define supported canonical public auth options and faithful native translations,
-separate from the phase-1 bearer/header reference grammar. Secret client material, if supported,
-must use an explicit native credential sink and existing secret-resolution boundaries. Tokens,
+Phase 2 defines supported canonical public auth options and faithful native translations, separate
+from the phase-1 bearer/header reference grammar. The portable profile explicitly rejects
+confidential-client secrets and custom issuer/callback URL options. Any future secret support must
+use an explicit native credential sink and existing secret-resolution boundaries. Tokens,
 authorization codes and refresh credentials never become bundle bodies, captures, applied config
 snapshots, argv values or diagnostic output. A configured header and OAuth fallback are not
 interchangeable authentication modes.
@@ -40,9 +41,10 @@ authentication policy and prompts. The detailed design must state the effects of
 and non-interactive commands; absence of a TTY does not prove absence of browser/device
 authentication.
 
-The operator's workflow preference is still being clarified: configure native OAuth and orchestrate
-native login through Agentworks, or configure it and leave native login to the operator. Neither
-option transfers token ownership to Agentworks. This question does not block phase-1 registration.
+The optional operator workflow preference remains unanswered. The lead's conservative design uses
+documented operator-native login through existing agent/admin shell access; it adds no wrapper. This
+is a lead implementation choice, not an operator selection, and transfers no token ownership to
+Agentworks. The detailed design records native-mode evidence and remaining acceptance work.
 
 ## Current native research
 

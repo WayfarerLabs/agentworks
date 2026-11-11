@@ -1,15 +1,18 @@
-# MCP OAuth: phase-2 working design
+# MCP OAuth: phase-2 design
 
 ## Status and dependencies
 
-This is private phase-2 preparation on registration head `7accf20c`. It does not change the ready
-registration PR, complete R11 or resolve the operator's pending login-workflow preference. The
-registration report and any resulting correction must be absorbed before this dependent increment is
-handed off. OAuth remains part of this SDD; registration alone does not justify its lock.
+This is private phase-2 preparation based on registration head `7accf20c`. It does not change the
+active registration PR or complete R11. The registration report and any resulting correction must be
+absorbed before this dependent increment is handed off. OAuth remains part of this SDD; registration
+alone does not justify its lock.
 
-The public configuration and native ownership contract below can be designed independently of the
-choice between an Agentworks native-login wrapper and documented operator-native login. The
-workflow, confidential-client and session-only support decisions remain explicit open work.
+The lead selects documented operator-native login through existing actual-user access as the
+conservative implementation. The optional operator preference remains unanswered; this is a lead
+decision within the authorized design, not a claim of operator selection. No login wrapper is added.
+Confidential-client secrets and custom callback URLs are explicitly unsupported in the canonical
+profile. Session-only authentication and supported remote/native modes still need their own evidence
+before support is advertised.
 
 ## Configuration boundary
 
@@ -21,7 +24,7 @@ same-key JSONC definitions continue through the same canonical parser.
 This boundary follows the
 [MCP authorization transport model](https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization).
 
-The proposed public subset is:
+The public subset is:
 
 ```yaml
 mcp_servers:
@@ -59,9 +62,10 @@ native discovery/token requests.
 These names follow Agentworks configuration spelling. Native spelling is a translation concern.
 Rulesync supplies useful prior art, but its permissive OAuth passthrough is not this contract.
 
-This subset is a proposal, not a decision that every other OAuth option is permanently excluded.
-Confidential clients, metadata overrides and custom callback URLs require the dispositions below
-before phase-2 scope and acceptance can be finalized. Unknown structure remains an error throughout.
+Confidential-client secrets, issuer/metadata overrides and custom callback URLs are rejected rather
+than carried through an untyped options bag. This is the supported portable profile for this phase;
+future extensions need explicit fields, native translation and ownership evidence. Unknown structure
+remains an error throughout.
 
 ## Native translation and ownership
 
@@ -86,12 +90,14 @@ issuer while publishing config, force one native client-registration mechanism, 
 credential-store backend or run native add/remove as part of artifact application. Those operations
 have native side effects and auth semantics beyond an owned registration entry.
 
-Claude and Codex public-client translations have bounded isolated native evidence, with the exact
-qualification that the Codex fixture explicitly supplied a callback URL. Native default callback
-selection without that extra field still needs its own measured case. Grok's strict public-option
-translation is not established. Do not drop unsupported explicit options and call the entry handled;
-defer the whole connection with a useful reason. Shell continues to publish canonical data without
-authenticating or executing it.
+Claude and Codex public-client translations have bounded isolated native evidence. An additional
+Codex 0.167.0 flow used only the public fields, without a callback URL override, and observed a
+native-generated callback on the configured fixed port, public login, authenticated MCP discovery
+and targeted local logout. Its native config stayed unchanged. That is one owned native mode, not
+managed acceptance or a promise about arbitrary issuers and installed versions. Grok's strict
+public-option translation is not established. Do not drop unsupported explicit options and call the
+entry handled; defer the whole connection with a useful reason. Shell continues to publish canonical
+data without authenticating or executing it.
 
 For Grok, an explicit empty object needs only the ordinary URL registration: native HTTP OAuth
 defaults remain native, with no invented configuration field. Explicit client ID, callback port or
@@ -111,11 +117,10 @@ promise that a stable registration name necessarily denotes the same provider gr
 
 ## Capture compatibility
 
-Public OAuth expands the accepted canonical MCP structure. Give new captures an explicit new
-interpretation version, with version 5 as the proposed successor to registration's version 4.
-Retained versions 2/3/4 must keep their existing meaning and identity; a retained v4 payload
-carrying OAuth stays invalid rather than acquiring newly accepted semantics through the latest
-parser.
+Public OAuth expands the accepted canonical MCP structure. New captures use interpretation version
+5, following registration's version 4. Retained versions 2/3/4 must keep their existing meaning and
+identity; a retained v4 payload carrying OAuth stays invalid rather than acquiring newly accepted
+semantics through the latest parser.
 
 Keep wire-envelope selection, canonical parser admission and instance-state version admission
 coherent. Write the new version through ordinary state boundaries; older releases must refuse and
@@ -136,40 +141,42 @@ This change needs boundary tests for declaration/source equivalence, typed rejec
 capture interpretation, exact digests and unknown-version preservation. Tests should assert behavior
 and data, not the wording of the guide or this design.
 
-## Explicit authentication workflow, decision pending
+## Explicit authentication workflow
 
-Both candidate workflows leave authorization, token storage, refresh and local credential removal
-with the actual user's native harness. Setup/reinit/start performs no automatic browser, consent,
-login or logout orchestration. Native behavior during an operator-launched harness remains native
-behavior and must be described honestly, including differences when there is no interactive
-terminal.
+Authorization, token storage, refresh and local credential removal stay with the actual user's
+native harness. Setup/reinit/start performs no automatic browser, consent, login or logout
+orchestration. Native behavior during an operator-launched harness remains native behavior and must
+be described honestly, including differences when there is no interactive terminal.
 
-The operator's pending choice is whether Agentworks supplies an explicit native-login wrapper or
-documents operator-native commands using existing access. `agent shell` and `agent exec` already
-select the actual agent user and optional workspace through the existing SSH, login environment,
-secret and TTY boundaries. `vm shell` and `vm exec` provide the corresponding admin-user paths,
-including workspace selection; the workflow must not require an agent to exist. These are candidate
-reuse points, not proof that a remote OAuth paste flow works through every access mode. No wrapper
-command or new capability method is selected here.
+Use documented operator-native commands through existing access. `agent shell` and `agent exec`
+already select the actual agent user and optional workspace through the existing SSH, login
+environment, secret and TTY boundaries. `vm shell` and `vm exec` provide the corresponding
+admin-user paths, including workspace selection; the workflow must not require an agent to exist.
+Reusing these commands does not prove that a remote OAuth paste flow works through every access
+mode. No wrapper command or new capability method is added. The native command reports its own
+login/status/logout result through the existing remote execution or terminal path; Agentworks does
+not read its token store or translate an unmeasured native auth state into success.
 
-The final workflow must identify the original-owner native server name, actual Linux user and
-workspace context. A session-only entry must remain invocation-only while authenticating; do not
-temporarily register it at user scope for convenience. Define login, status and logout behavior,
-failure/exit propagation, cancellation and refusal without an interactive terminal before
-implementing a wrapper. Offline artifact inspection must remain offline and must not read native
-credentials or probe auth.
+The workflow must identify the original-owner native server name, actual Linux user and workspace
+context. A session-only entry must remain invocation-only while authenticating; do not temporarily
+register it at user scope for convenience. Document only established native modes and their
+terminal/callback requirements, ordinary failure and cancellation behavior. Without a usable
+interactive path, leave the connection unauthenticated rather than inventing a browser flow or
+pre-seeding credentials. Offline artifact inspection remains offline and does not read native
+credentials or probe auth. Configured scopes describe a request, not granted permissions or an
+authentication result.
 
 ## Remaining support decisions
 
-- **Confidential clients:** native sinks differ. Claude documents secret input separate from public
-  entry metadata; Codex documents storing a client secret in its private config. Decide supported
-  native secret references/sinks or an explicit unsupported disposition without putting secret
-  material in artifact captures, argv, workspace files or diagnostic output. Do not equate an
-  ordinary env bearer reference with an OAuth client secret. A native-added Codex secret in the same
-  server table conflicts with the current whole-entry fingerprint/public rendering: do not exempt
-  arbitrary fields or let a public update erase it. That combination needs a demonstrated separate
-  sink/reference, an explicit unsupported disposition or a precise revised ownership contract before
-  support is claimed.
+- **Confidential clients:** unsupported by the canonical artifact profile. Native sinks differ.
+  Claude documents secret input separate from public entry metadata; Codex documents storing a
+  client secret in its private config. No secret field is accepted in artifact captures, argv,
+  workspace files or diagnostic output. Do not equate an ordinary env bearer reference with an OAuth
+  client secret. A native-added Codex secret in the same server table conflicts with the current
+  whole-entry fingerprint/public rendering: do not exempt arbitrary fields or let a public update
+  erase it. Preserve it as an external modification under the existing claim rules. Supporting this
+  combination later needs a demonstrated separate sink/reference or a precise revised ownership
+  contract.
 - **Callbacks:** a fixed listener port is not a portable redirect URI. Native host, callback path,
   server identity and issuer support can affect the URI. Custom remote ingress may differ from a
   loopback listener. Preserve native issuer validation and display the actual callback rather than
@@ -192,6 +199,15 @@ DCR/PKCE login, configured public IDs/callback ports without DCR, authenticated 
 refresh, cancellation and local logout against owned loopback endpoints. Tokens were public fixture
 material. Separate HOME/file-store checks did not establish OS-UID or shared-keyring isolation. The
 fixture deliberately granted refresh capability; preconfigured Codex requested read alone.
+
+A separate public-options-only Codex 0.167.0 flow used exactly URL, server-level scopes and
+`oauth.client_id`/`oauth.callback_port`, with no callback URL or issuer/metadata override. Native
+authorization selected the configured port and a generated callback path; the live listener was
+observed before manual redirect paste. Public S256 login and model-free authenticated MCP catalog
+discovery succeeded, followed by targeted local logout. The native config stayed byte-identical. The
+fixture granted read only and made no provider revocation claim. The lead read the measured
+receipts, matched the actual renderer hash and independently verified both listener ports closed and
+the exact owned native home absent. Session-only, OS-user and managed acceptance are not inferred.
 
 That is research, not Agentworks R11 acceptance. Test the shipped increment against actual managed
 users, including two users of a shared workspace, native credential isolation, remote browser/paste
