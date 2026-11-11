@@ -20,9 +20,13 @@ from agentworks.instance_specs import (
     VM_ADMIN_REPLACEMENT_REMEDY,
     ActivationMapMigrationRequired,
     ExplicitReplacementRequired,
+    OverlayDisposition,
+    OverlayOutcome,
     StoredSourceReferenceRefused,
     UnsupportedStoredOverlayError,
+    admin_overlay_field_names,
     get_vm_instance_overlays,
+    parse_admin_instance_spec,
 )
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
@@ -226,6 +230,8 @@ def test_the_new_binding_and_layer_remain_when_initialization_fails(
         raise RuntimeError("initialization failed")
 
     monkeypatch.setattr(vm_manager, "run_initialization", _fail)
+    rendered: list[OverlayOutcome | None] = []
+    monkeypatch.setattr("agentworks.instance_specs.render_overlay_outcome", rendered.append)
 
     with pytest.raises(RuntimeError):
         _reinit(db, config, admin_template="work", admin_spec='{"mise_activate":true}')
@@ -233,6 +239,29 @@ def test_the_new_binding_and_layer_remain_when_initialization_fails(
     vm = db.get_vm("rvm")
     assert vm is not None and vm.admin_template == "work"
     assert _stored_payload(db) == VersionedPayload(2, {"vm": STORED_VM, "admin": {"mise_activate": True}})
+    # The outcome still renders once the failed command settles, naming the replaced layer's fields.
+    replacement = parse_admin_instance_spec('{"mise_activate":true}')
+    assert replacement is not None
+    assert [(outcome.disposition, outcome.fields) for outcome in rendered if outcome is not None] == [
+        (OverlayDisposition.REPLACED, admin_overlay_field_names(replacement))
+    ]
+
+
+def test_the_binding_line_appears_only_when_the_effective_template_changes(
+    db: Database, config: object, initialized: list[AdminConfig], captured_output: CapturedOutput
+) -> None:
+    """Leaving a NULL template names it as the reserved ``default``; re-pointing to the current one says nothing."""
+    _reinit(db, config, admin_template="work")
+    changed = list(captured_output.info)
+
+    captured_output.info.clear()
+    _reinit(db, config, admin_template="work")
+    unchanged = list(captured_output.info)
+
+    assert len(changed) == len(unchanged) + 1
+    (binding,) = [line for line in changed if repr("work") in line]
+    assert repr("default") in binding
+    assert not any(repr("work") in line for line in unchanged)
 
 
 def test_a_plain_reinit_refuses_a_refused_stored_admin_source_and_names_the_repair(

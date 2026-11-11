@@ -1452,3 +1452,28 @@ def test_native_failure_preserves_agent_and_continues_sibling_grants_and_ssh(
     assert not records["shell"].complete
     assert records["codex"].complete
     assert db.instance_state.get_desired_overlay("agent", "dev") is not None
+
+
+def test_reinit_binding_line_appears_only_when_the_effective_template_changes(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: dict[str, Any],
+    captured_output,  # noqa: ANN001
+) -> None:
+    """Leaving a NULL template names it as the reserved ``default``; re-pointing to the current one says nothing."""
+    config = make_config()
+    _seed_vm(db)
+    db.insert_agent("dev", "box", "agt-dev")
+    _reachable(monkeypatch, True)
+
+    agent_manager.reinit_agent(db, config, name="dev", update_template="other", interaction=TtyInteractionPolicy.REFUSE)
+    changed = list(captured_output.info)
+    captured_output.info.clear()
+    agent_manager.reinit_agent(db, config, name="dev", update_template="other", interaction=TtyInteractionPolicy.REFUSE)
+    unchanged = list(captured_output.info)
+
+    assert len(changed) == len(unchanged) + 1
+    (binding,) = [line for line in changed if repr("other") in line]
+    assert repr("default") in binding
+    assert not any(repr("other") in line for line in unchanged)
