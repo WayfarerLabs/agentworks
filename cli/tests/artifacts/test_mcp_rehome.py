@@ -169,9 +169,20 @@ def test_all_existing_record_shapes_follow_copy_without_inventing_activation(db,
         identity = destination_id(db.get_vm("box"), target, location=str(new))
         assert len(current) == len(records)
         for before, after in zip(records, current, strict=True):
-            assert after == _relocated_record(before, str(old), str(new), identity)
+            assert after.destination_id == identity and after.destination_id != before.destination_id
+            assert after.component == before.component and after.integration == before.integration
+            assert after.declaration == before.declaration
+            assert after.claims == before.claims and after.artifact_files == before.artifact_files
+            assert after.artifact_inputs == before.artifact_inputs and after.deferred == before.deferred
+            assert after.complete == before.complete and after.pending_cleanup == before.pending_cleanup
+            assert after.incomplete_reasons == before.incomplete_reasons
+            expected_paths = (str(new / "skipped"),) if before.integration == "skips" else ()
+            assert tuple(skip.path for skip in after.skipped) == expected_paths
+            assert tuple((skip.origins, skip.reason) for skip in after.skipped) == tuple(
+                (skip.origins, skip.reason) for skip in before.skipped
+            )
         assert current[-1].claims == (opaque, legacy)
-        records, old = current, new
+        records = current
     assert observations == [str(target.home / f"moved-{index}") for index in range(2)]
     assert all(opaque.destination not in command and legacy.destination not in command for command in target.commands)
 
