@@ -26,10 +26,13 @@ a fresh snapshot; session launch does not need the workstation source.
 | Claude Code | `~/.claude/settings.json` | `.claude/settings.json` | JSON object |
 | Codex       | `~/.codex/config.toml`    | `.codex/config.toml`    | TOML table  |
 
-User roles respect `CLAUDE_CONFIG_DIR` and `CODEX_HOME` in the prepared setup environment. Overrides
-must be absolute guest paths without `.` or `..` components. Workspace destinations stay under the
-workspace root regardless of user overrides. These are fixed settings roles, not arbitrary guest
-destinations. Source paths embedded inside the document are copied as values without rewriting.
+User roles respect `CLAUDE_CONFIG_DIR` and `CODEX_HOME` in the actual user's login environment,
+including exports from guest startup. The selected native home applies consistently to settings,
+plugins and artifacts; adding or removing MCP does not select another settings destination.
+Overrides must be absolute guest paths without `.` or `..` components. Workspace destinations stay
+under the workspace root regardless of user overrides. These are fixed settings roles, not arbitrary
+guest destinations. Source paths embedded inside the document are copied as values without
+rewriting.
 
 | Strategy          | Existing destination                                                  |
 | ----------------- | --------------------------------------------------------------------- |
@@ -179,11 +182,11 @@ configuration before retrying. Malformed overall inventory still fails that face
 
 Tool discovery reads the actual user's login-shell PATH once per setup invocation. An explicit PATH
 in the prepared setup environment takes precedence. Native commands use that resolved executable and
-keep the prepared environment, so login profiles cannot replace setup identities or explicit values
-during execution. Marketplace discovery reuses the same executable under its private HOME and native
-config directories. A launcher that depends on the real HOME may fail there; use a standalone CLI
-installation or a launcher compatible with an isolated HOME. Agentworks does not bypass isolation or
-guess package-manager cache paths to make such a launcher work.
+bind the selected native home and remaining prepared values explicitly during execution. Marketplace
+discovery reuses the same executable under its private HOME and native config directories. A
+launcher that depends on the real HOME may fail there; use a standalone CLI installation or a
+launcher compatible with an isolated HOME. Agentworks does not bypass isolation or guess
+package-manager cache paths to make such a launcher work.
 
 A newly declared marketplace is first resolved in a private temporary native home. This discovers
 its native name and validates conflicts before registration in the real user home. Native source
