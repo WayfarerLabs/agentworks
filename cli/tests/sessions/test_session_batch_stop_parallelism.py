@@ -445,13 +445,13 @@ def test_batch_partitions_complete_work_before_serial_compatibility_and_uses_dis
     events: list[str] = []
     concurrent_targets: list[object] = []
 
-    def concurrent(plans: list[DedicatedTeardownPlan], *, db: Database, on_stopped) -> list[tuple[str, str]]:
+    def concurrent(plans: list[DedicatedTeardownPlan], *, db: Database, on_outcome) -> list[tuple[str, str]]:
         events.append("concurrent")
         concurrent_targets.extend(plan.target for plan in plans)
         assert [plan.session_name for plan in plans] == ["complete-a", "complete-b"]
         for plan in plans:
             teardown_mod.reconcile_dedicated_teardown(db, plan)
-            on_stopped(plan)
+            on_outcome(plan, None)
             statuses[plan.session_name] = SessionStatus.STOPPED
         return []
 

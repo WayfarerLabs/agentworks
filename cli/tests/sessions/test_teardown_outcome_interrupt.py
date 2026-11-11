@@ -49,7 +49,7 @@ def test_real_sigint_during_successful_outcome_retrieval_still_reconciles(monkey
         sys.settrace(trace)
         with pytest.raises(KeyboardInterrupt):
             teardown.execute_concurrent_dedicated_teardowns(
-                [plan], db=db, on_stopped=lambda stopped: completed.append(stopped.session_name)
+                [plan], db=db, on_outcome=lambda stopped, reason: completed.append(stopped.session_name)
             )
     finally:
         sys.settrace(previous_trace)
@@ -98,7 +98,7 @@ def test_caller_outcome_interrupt_retries_without_repeating_native_work(monkeypa
     completed = []
     with pytest.raises(signal_type) as caught:
         teardown.execute_concurrent_dedicated_teardowns(
-            plans, db=db, on_stopped=lambda plan: completed.append(plan.session_name)
+            plans, db=db, on_outcome=lambda plan, reason: completed.append(plan.session_name)
         )
     assert caught.value is errors[0]
     assert injected == interruptions
@@ -125,7 +125,7 @@ def test_genuine_worker_abort_is_consumed_once_and_preserves_successful_sibling(
     completed = []
     with pytest.raises(signal_type) as caught:
         teardown.execute_concurrent_dedicated_teardowns(
-            plans, db=db, on_stopped=lambda plan: completed.append(plan.session_name)
+            plans, db=db, on_outcome=lambda plan, reason: completed.append(plan.session_name)
         )
     assert caught.value is error
     assert Counter(executed) == Counter(plan.session_name for plan in plans)

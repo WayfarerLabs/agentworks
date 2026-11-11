@@ -184,11 +184,12 @@ strict actionable-unknown refusal and serial compatibility work afterward. Recon
 its independent-family behavior and read-only preparation.
 
 The native teardown coordinator owns its existing collision, submission, timeout and drain policy.
-It conditionally persists stopped evidence before notifying the invocation of a completed target.
-The notification runs on the caller thread and is idempotent across interrupted reconciliation, so
-completed siblings remain completed when cancellation eventually propagates. Family guards and the
-writable database remain owned until all submitted work drains. Stop-only paths do not acquire a
-hold that could boot an off VM.
+It conditionally persists stopped evidence before notifying the invocation of a completed target,
+and also notifies each native, persistence or completion-recording failure. Established receipts
+stay pending until caller-thread notification finishes, so interrupted notification retries preserve
+both success and failure without repeating native work or a completed persistence attempt. Family
+guards and the writable database remain owned until all submitted work drains. Stop-only paths do
+not acquire a hold that could boot an off VM.
 
 The shared prepared-stop helper validates the original session/runtime snapshot, parent route and
 desired target before returning for an off parent. That path retains every runtime fingerprint field

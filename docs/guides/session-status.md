@@ -123,8 +123,9 @@ cleanup or make a row eligible for parallel teardown.
 
 An interrupt cancels teardown that has not started but cannot terminate a running worker safely.
 Agentworks visibly drains bounded in-flight work, persists every verified result, and then exits as
-interrupted. During a quiet concurrent wait it reports completed, active, and queued counts every
-five seconds.
+interrupted. Known native, persistence and completion-recording failures remain failed even when a
+sibling is interrupted. Queued work that never ran remains blocked. During a quiet concurrent wait
+it reports completed, active, and queued counts every five seconds.
 
 `--force` is intentionally narrow. It permits stale dedicated-socket cleanup only after the stored
 boot/PID/start-time fingerprint proves the old server process is absent. It does not turn unknown

@@ -240,12 +240,13 @@ def execute_public_stops(invocation: RuntimeInvocation) -> None:
 
     output.info(f"Stopping {len(plans) + len(serial)} session(s)...")
 
-    def stopped(plan: DedicatedTeardownPlan) -> None:
-        _completed(invocation, plan.session_name, changed=True)
+    def outcome(plan: DedicatedTeardownPlan, failure_reason: str | None) -> None:
+        if failure_reason is None:
+            _completed(invocation, plan.session_name, changed=True)
+        else:
+            invocation.fail("session", plan.session_name, failure_reason)
 
-    failures = execute_concurrent_dedicated_teardowns(plans, db=invocation.db, on_stopped=stopped)
-    for name, failure_reason in failures:
-        invocation.fail("session", name, failure_reason)
+    execute_concurrent_dedicated_teardowns(plans, db=invocation.db, on_outcome=outcome)
     for prepared in serial:
         name = prepared.session.name
         current = _selected_session(invocation, prepared.session)
