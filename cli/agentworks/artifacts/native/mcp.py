@@ -83,6 +83,28 @@ def render_mcp(item: ArtifactInput, tool: MCPTool) -> SettingsObject:
                 result["env_http_headers"] = references
         elif headers:
             result["headers"] = cast("SettingsObject", headers)
+        oauth = cast("SettingsObject | None", metadata.get("oauth"))
+        if oauth is not None:
+            if tool == "grok":
+                if oauth:
+                    raise ConfigError(
+                        "Grok MCP registration has no established translation for explicit public OAuth options; "
+                        "configure this connection natively or select a supported harness."
+                    )
+            else:
+                native_oauth: SettingsObject = {}
+                for canonical, native in (
+                    ("client_id", "clientId" if tool == "claude" else "client_id"),
+                    ("callback_port", "callbackPort" if tool == "claude" else "callback_port"),
+                ):
+                    if canonical in oauth:
+                        native_oauth[native] = oauth[canonical]
+                if "scopes" in oauth:
+                    if tool == "claude":
+                        native_oauth["scopes"] = " ".join(cast("list[str]", oauth["scopes"]))
+                    else:
+                        result["scopes"] = oauth["scopes"]
+                result["oauth"] = native_oauth
     if tool == "claude":
         result["type"] = cast("str", metadata["type"])
     return result
@@ -343,7 +365,11 @@ def apply_mcp(
         deferred: list[ArtifactDeferral] = list(blocked_deferrals)
         confirmed = {claim.identifier: claim for claim in retained}
         for name, item in desired.items():
-            entry = render_mcp(item, tool)
+            try:
+                entry = render_mcp(item, tool)
+            except ConfigError as error:
+                deferred.append(ArtifactDeferral(input_id=item.identity, destination="session", reason=str(error)))
+                continue
             owned_claim = confirmed.get(name)
             observed = table.get(name)
             conflict = name in contributed and observed != entry
