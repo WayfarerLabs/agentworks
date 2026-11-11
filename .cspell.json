@@ -252,6 +252,7 @@
     "workstream",
     "workstreams",
     "worktree",
+    "worktrees",
     "xdist"
   ],
   "ignoreRegExpList": ["`[^`\\r\\n]+`"],

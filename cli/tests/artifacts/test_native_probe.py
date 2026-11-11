@@ -65,6 +65,7 @@ def probe(
         "entries": entries or {},
         "proposed": proposed or {},
         "session_plugin": session_plugin,
+        "plugin_names": tuple(identity.split(":")[1] for identity in identities if identity.count(":") > 1),
         "workspace_only": workspace_only,
         "vm_only": vm_only,
         "identities": identities,
@@ -161,7 +162,10 @@ def test_grok_gitignore_check_only_inspects_workspace_owned_files(tmp_path):
     (workspace / ".gitignore").write_text(".grok/\n")
     outside = str(tmp_path / "home/.grok/skills/review/SKILL.md")
     assert probe(tmp_path, tool="grok", paths=(outside,))["problems"] == []
-    inside = str(workspace / ".grok/skills/review/SKILL.md")
+    for relative in (".grok/skills/review/SKILL.md", ".grok/agents/review.md"):
+        inside = str(workspace / relative)
+        assert probe(tmp_path, tool="grok", paths=(inside,))["problems"] == []
+    inside = str(workspace / ".grok/rules/review.md")
     assert "native-discovery-exclusions" in probe(tmp_path, tool="grok", paths=(inside,))["problems"]
 
 
@@ -170,6 +174,7 @@ def test_claude_plugin_policy_is_independent_of_carrier_certification(tmp_path):
         tmp_path,
         tool="claude",
         session_plugin=True,
+        identities=("skill:agentworks-artifacts:review",),
         settings={"enabledPlugins": {"agentworks-artifacts@fixture": False}},
     )
     assert result["problems"] == ["native-plugin-policy"]
@@ -363,7 +368,6 @@ def test_codex_generated_outer_persona_above_header_limit_remains_discoverable(t
         received(item),
         skills_root=str(tmp_path / "home/.agents/skills"),
         agents_root=str(tmp_path / "home/.codex/agents"),
-        instructions_path=str(tmp_path / "home/.codex/AGENTS.md"),
     )
     file = application.files[0]
     assert len(file.data) > 32768

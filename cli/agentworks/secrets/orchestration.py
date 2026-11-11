@@ -128,6 +128,7 @@ class SecretTarget:
             self.effective_env(),
             values,
             field=f"{self.label}.env" if self.label else "env",
+            legacy_keys=self.session or {},
         )
 
 

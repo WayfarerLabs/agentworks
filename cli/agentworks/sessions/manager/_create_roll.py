@@ -376,7 +376,9 @@ def _start_session_slice(
             stage_session_artifacts(
                 db, name, template.harness_integration, agent_target or target, prepared_artifacts, artifact_application
             )
-            commit_session_artifacts(db, name, template.harness_integration, agent_target or target, prepared_artifacts)
+            commit_session_artifacts(
+                db, name, template.harness_integration, agent_target or target, prepared_artifacts, artifact_application
+            )
             deploy_restricted_config(run_command, history_limit=config.session.history_limit)
             # Pick the SSH transport for tmux operations:
             # - admin sessions: admin's run_command (unchanged)

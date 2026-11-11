@@ -177,3 +177,74 @@ def test_authored_values_without_applicable_identity_remain_winners(key: str) ->
     assert compose_env(values={}, ctx=_ctx(), vm={key: EnvEntry("${agw:user_name}")})[key] == "agentworks"
     with pytest.raises(ValidationError):
         compose_env(values={}, ctx=_ctx(), vm={key: EnvEntry("${agw:agent_name}")})
+
+
+@pytest.mark.parametrize("scope", ["vm", "workspace", "admin", "agent", "session"])
+def test_legacy_placeholders_apply_only_to_session_scope(scope: str, warnings: list[str]) -> None:
+    source = {"LABEL": EnvEntry("{{session_name}}/{{workspace_name}}/${agw:user_name}")}
+    out = compose_env(
+        values={},
+        ctx=_ctx(workspace_name="project", workspace_dir="/srv/project", session_name="work", session_kind="admin"),
+        vm=source if scope == "vm" else {},
+        workspace=source if scope == "workspace" else None,
+        admin=source if scope == "admin" else None,
+        agent=source if scope == "agent" else None,
+        session=source if scope == "session" else None,
+    )
+
+    expected = "work/project/agentworks" if scope == "session" else "{{session_name}}/{{workspace_name}}/agentworks"
+    assert out["LABEL"] == expected
+    assert source["LABEL"].value == "{{session_name}}/{{workspace_name}}/${agw:user_name}"
+    assert len(warnings) == (1 if scope == "session" else 0)
+
+
+def test_session_legacy_and_namespaced_values_render_once_with_dollar_adjacency(warnings: list[str]) -> None:
+    workspace = "{{session_name}}${agw:session_name}"
+    out = compose_env(
+        values={},
+        ctx=_ctx(workspace_name=workspace, session_name="work"),
+        vm={},
+        session={"LABEL": EnvEntry("{{workspace_name}}|${agw:workspace_name}|${{session_name}}|$${agw:session_name}")},
+    )
+
+    assert out["LABEL"] == f"{workspace}|{workspace}|$work|${{agw:session_name}}"
+    assert len(warnings) == 1
+
+
+def test_discarded_session_aliases_and_secret_values_do_not_warn(warnings: list[str]) -> None:
+    secret = "{{session_name}}/${agw:session_name}/$${agw:unknown}"
+    out = compose_env(
+        values={"credential": secret},
+        ctx=_ctx(session_name="work", session_kind="admin"),
+        vm={
+            "SECRET": EnvEntry("{{workspace_name}}"),
+            "OVERRIDDEN": EnvEntry("{{workspace_name}}"),
+            "VM_ONLY": EnvEntry("{{workspace_name}}"),
+        },
+        session={
+            "SECRET": EnvEntry({"secret": "credential"}),
+            "OVERRIDDEN": EnvEntry("literal"),
+            "AGENTWORKS_SESSION": EnvEntry("{{workspace_name}}"),
+        },
+    )
+
+    assert out["SECRET"] == secret
+    assert out["OVERRIDDEN"] == "literal"
+    assert out["VM_ONLY"] == "{{workspace_name}}"
+    assert out["AGENTWORKS_SESSION"] == "work"
+    assert warnings == []
+
+
+@pytest.mark.parametrize("value", ["line\nbreak", "carriage\rreturn", "nul\0value"])
+def test_session_legacy_replacements_retain_env_line_safety(value: str, warnings: list[str]) -> None:
+    with pytest.raises(ValidationError) as caught:
+        compose_env(
+            values={},
+            ctx=_ctx(workspace_name=value),
+            vm={},
+            session={"PATH": EnvEntry("{{workspace_name}}")},
+        )
+
+    assert caught.value.entity_name == "env.PATH"
+    assert value not in repr((caught.value.args, vars(caught.value)))
+    assert warnings == []

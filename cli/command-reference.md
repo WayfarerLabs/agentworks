@@ -1112,6 +1112,15 @@ intact. Normal lifecycle preparation may already have persisted observed PID, bo
 facts. The built-in `shell` integration does not implement `--resume-only` because an arbitrary
 shell command cannot prove that it resumed harness state.
 
+Batch stop overlaps teardown for dedicated sessions whose persisted runtime identity is complete,
+with at most eight teardown operations active at once. Incomplete dedicated rows and older
+shared-server rows retain serial teardown after the concurrent work drains. Per-session outcomes
+identify the session and may appear in completion order. If concurrent work is quiet for five
+seconds, Agentworks reports completed, active, and queued counts. Ctrl-C cancels work that has not
+started, then waits for bounded in-flight teardown and reconciles every completed result before
+exiting as interrupted. Successful siblings remain stopped when another session fails; the command
+still ends with an aggregate error for any failed session.
+
 Maintainers: [Session status internals](../docs/guides/session-status.md) documents the persisted
 PID and boot-ID model, read-only live status derivation, lifecycle repair, and the safety boundary
 for `--force`.
@@ -1369,11 +1378,15 @@ spec:
 
 `agw resource explain harness-integration/shell` documents its config field by field. Command
 strings support context substitution such as `${agw:session_name}`, `${agw:workspace_name}`, and
-`${agw:user_home_dir}`. Only `${agw:...}` belongs to Agentworks; text outside that namespace remains
-literal to its renderer and does not produce placeholder errors. The namespace keeps shell variables
-and Go templates available to their own consumers. The executables an integration requires are
-checked on the session's launch target before state mutation, so a missing tool fails with an
-actionable error.
+`${agw:user_home_dir}`. The namespaced syntax keeps shell variables and Go templates available to
+their own consumers. For existing Shell configurations, `{{session_name}}` and `{{workspace_name}}`
+remain accepted in `command` and `resume_command` throughout CLI 1.x, with removal planned for
+2.0.0. They also remain accepted in winning session-scope plaintext env values for every
+integration. Replace them with `${agw:session_name}` and `${agw:workspace_name}`. Affected
+operations emit one suppressible deprecation notice; `agw doctor` also identifies affected effective
+templates and stored session overrides. Other brace text remains literal. The executables an
+integration requires are checked on the session's launch target before state mutation, so a missing
+tool fails with an actionable error.
 
 See [runtime context and interpolation](../docs/arch/runtime-context.md) for the complete
 vocabulary, literal escaping, env precedence, and command quoting rules.

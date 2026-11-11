@@ -1,5 +1,75 @@
 # Harness Scope Framework: Implementation Plan
 
+## Native delivery feedback, round 2 of 3, 2026-11-10
+
+PR 871's
+[complete report](https://github.com/WayfarerLabs/agentworks/pull/871#issuecomment-6755957164) at
+`b8c03be5` satisfies the operator's report gate for the second authorized round. The
+[companion plan](../2026-09-12-agent-artifacts/plan.md#native-delivery-feedback-round-2-of-3-2026-11-10)
+owns the implementation batch and validation record. Draft is verified before changes; refreshed
+main remains `438c4546`.
+
+- [x] Assess the exact-head report and retained evidence without inventing model, native-version or
+      provider coverage requirements.
+- [x] Restore framework R9's no-deletion-prerequisite contract while safely retiring known shared
+      exclusions where possible. Correct supported rehome through the verified owning lifecycle;
+      preserve native association and file-safety boundaries.
+- [ ] Complete the companion's effective-argument guards and permanent author-contract correction,
+      then validate and hand off the exact combined change through all three private lanes.
+- [ ] Reconcile corrected-head acceptance against R1-R16 and the companion's R1-R10, finish actual
+      remaining promotion and create both locks. The separate workspace-mode PR is not a gate.
+
+The earlier framework reconciliation retains its unchanged-API and live-vertical evidence. The
+post-handoff audit found a current R9 contradiction: known artifact cleanup can veto workspace
+deletion even though this FRD and permanent native-setup/idempotency/DB guides forbid that
+prerequisite. This round corrects behavior against the retained contract rather than documenting a
+new refusal exception. The author-contract inconsistencies belong to the companion's current
+native-file carriers. Neither discovery reopens the merged PR 862 correction or transfers closeout
+ownership.
+
+The companion's frozen `9d17d365` correction passed 11,560 non-integration tests with 11 skips, full
+mypy over 943 files and the other local gates. All three independent private lanes cleared the
+corrected source. Successive rehome, ambiguous retained associations, typed malformed metadata and
+current-owner preservation were rechecked without new native state or a broader lifecycle engine.
+Original failed fixtures and their corrected replays remain in the companion's validation record.
+Final-head CI, the exact ready handoff and subsequent independent acceptance remain necessary;
+neither lock is created here.
+
+## Native delivery feedback, round 1 of 3, 2026-11-09
+
+PR 871's [final report](https://github.com/WayfarerLabs/agentworks/pull/871#issuecomment-6752844405)
+at `1ecffc5c` supplies new scoped live evidence and two material artifact corrections. The
+companion's
+[round 1 plan](../2026-09-12-agent-artifacts/plan.md#native-delivery-feedback-round-1-of-3-2026-11-09)
+owns the implementation batch and validation record. The PR is draft before correction. This session
+retains both closeouts; the framework's transferred artifact obligations are not waived by the
+earlier clean intermediate merge.
+
+- [x] Assess the final report and preserve its tested-head, native, workstation and authentication
+      limits. Rebase onto main `438c4546` without undoing runtime-context behavior.
+- [ ] Complete the companion's literal guidance and safe shared-exclusion deletion corrections,
+      smaller review fixes, current gates and three independent private review lanes.
+- [ ] Reconcile the next report against retained R1-R16 and companion R1-R10, then add both locks
+      only when the final evidence proves completion. Workspace modes remain a separate PR.
+
+## Acceptance reconciliation, 2026-11-08
+
+- [x] Reconcile R1-R16 and the definition of done against current source, meaningful local controls
+      and the replacement tester's final report `6719171109`, preserving prior-head attribution in
+      [acceptance.md](acceptance.md). Thirteen requirements are proven; R7/R12/R16 remain explicit
+      transfers to the companion. No new framework functional or permanent-promotion gap was found.
+- [x] Independently review the acceptance records and Codex project-trust clarification at
+      `08827b56` through the project and Muntz lanes; neither found a material correction for that
+      draft. File lint passed. These are draft-document results, not final lock or code-change
+      reviews.
+- [ ] Complete the companion's delivery reassessment and the approved implementation before joint
+      closeout. Exact interactive Codex/Grok probes retain initial guidance despite changed launch
+      arguments; the operator requested a broader file/skill-based design response. The clean
+      intermediate correction PR #862 merged at `89bb63e4`; this audit does not reopen that
+      correction.
+- [ ] Record final acceptance and plan dispositions, review and validate the actual final change,
+      then add both locks. Neither SDD is locked by this reconciliation.
+
 ## Facet independence and closeout, 2026-11-01
 
 The operator authorized the saga's facet-independence amendment and completion of both this SDD and

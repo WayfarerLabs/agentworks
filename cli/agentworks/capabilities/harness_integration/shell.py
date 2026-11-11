@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, ClassVar
 from pydantic import Field
 
 from agentworks.artifacts.application import ArtifactApplication
-from agentworks.artifacts.native.shell import shell_artifacts
+from agentworks.artifacts.native.shell import filesystem_artifacts
 from agentworks.capabilities.base import ScopeLevel
 from agentworks.capabilities.harness_integration.base import (
     HarnessIntegration,
@@ -18,6 +18,11 @@ from agentworks.capabilities.harness_integration.base import (
     require_commands,
 )
 from agentworks.interpolation import render_template
+from agentworks.interpolation_compat import (
+    LEGACY_PLACEHOLDERS,
+    uses_legacy_placeholders,
+    warn_legacy_placeholders,
+)
 from agentworks.schema import AgwModel
 from agentworks.topics import TopicProse
 
@@ -56,11 +61,14 @@ class ShellConfig(AgwModel):
     command: str = Field(default="", examples=["htop"])
     """The command the session's pane runs. Empty (the default) is a bare
     login shell. Supports ${agw:NAME} context substitution; ordinary shell
-    expressions and Go templates retain their own syntax."""
+    expressions and Go templates retain their own syntax. The legacy
+    {{session_name}} and {{workspace_name}} placeholders remain accepted
+    with a deprecation warning until removal in 2.0.0."""
 
     resume_command: str = ""
     """The command a resumed session's pane runs. Empty (the default)
-    reruns ``command``. Supports the same ${agw:NAME} context substitution."""
+    reruns ``command``. Supports ${agw:NAME} context substitution. Legacy
+    {{session_name}} and {{workspace_name}} are deprecated for removal in 2.0.0."""
 
     required_commands: list[str] = Field(default_factory=list, examples=[["htop"]])
     """Commands that must exist on the session's target before it starts.
@@ -111,21 +119,21 @@ class ShellIntegration(HarnessIntegration):
         return (
             ArtifactApplication()
             if self.retiring
-            else shell_artifacts(invocation.artifacts, "/opt/agentworks/artifacts")
+            else filesystem_artifacts(invocation.artifacts, "/opt/agentworks/artifacts")
         )
 
     def user_init(self, invocation: UserSetupInvocation) -> ArtifactApplication:
         return (
             ArtifactApplication()
             if self.retiring
-            else shell_artifacts(invocation.artifacts, f"{invocation.home}/.agentworks-artifacts/user")
+            else filesystem_artifacts(invocation.artifacts, f"{invocation.home}/.agentworks-artifacts/user")
         )
 
     def workspace_init(self, invocation: WorkspaceSetupInvocation) -> ArtifactApplication:
         return (
             ArtifactApplication()
             if self.retiring
-            else shell_artifacts(invocation.artifacts, f"{invocation.root}/.agentworks-artifacts")
+            else filesystem_artifacts(invocation.artifacts, f"{invocation.root}/.agentworks-artifacts")
         )
 
     @property
@@ -148,11 +156,15 @@ class ShellIntegration(HarnessIntegration):
             field, command = "resume_command", config.resume_command
         else:
             field, command = "command", config.command
-        return render_template(
+        rendered = render_template(
             command,
             self._session_binding.context_values,
             field=f"session={self._session_name}.{field}",
+            legacy_placeholders=LEGACY_PLACEHOLDERS,
         )
+        if uses_legacy_placeholders(command):
+            warn_legacy_placeholders()
+        return rendered
 
     def start(
         self,
@@ -171,7 +183,7 @@ class ShellIntegration(HarnessIntegration):
         context = self._session_binding.artifact_context
         application = ArtifactApplication()
         if context:
-            application = shell_artifacts(context.inputs, context.directory, session=True)
+            application = filesystem_artifacts(context.inputs, context.directory, session=True)
         return HarnessStart(command, artifacts=application)
 
     def _probe_target(self, transport: Transport) -> None:

@@ -32,7 +32,7 @@ def composed_workspace_env(monkeypatch: pytest.MonkeyPatch, key: str) -> None:
     monkeypatch.setattr("agentworks.vms.sites.site_platform_name", lambda *a: "linux")
 
 
-@pytest.mark.parametrize("key", ["_AGW_SESSION_UUID", "_AGW_RUN_ID"])
+@pytest.mark.parametrize("key", ["_AGW_SESSION_UUID", "_AGW_RUN_ID", "AGENTWORKS_SESSION_UUID", "AGENTWORKS_RUN_ID"])
 @pytest.mark.parametrize("operation", ["create_session", "restart_session"])
 def test_manager_refuses_composed_reserved_env_before_staging_or_teardown(
     tmp_path, monkeypatch, native, key, operation

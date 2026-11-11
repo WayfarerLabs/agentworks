@@ -9,14 +9,22 @@ import sys
 import tempfile
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
-from agentworks.errors import StateError
+from agentworks.errors import ExternalError, StateError
+from agentworks.sessions.manager._teardown import (
+    DedicatedTeardownPlan,
+    _remove_stale_socket,
+    execute_dedicated_teardown,
+)
 from agentworks.sessions.tmux import _cleanup_stale_sockets_under
 from agentworks.ssh import SSHResult
 from tests.native_setup_fixtures import LocalFixtureTransport
+
+if TYPE_CHECKING:
+    from agentworks.transports import Transport
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="executes Linux guest socket and tmux commands")
 
@@ -31,6 +39,51 @@ def target() -> Iterator[LocalFixtureTransport]:
 def stale(path: Path) -> None:
     with socket.socket(socket.AF_UNIX) as sock:
         sock.bind(str(path))
+
+
+@pytest.mark.parametrize("symlink", [False, True])
+@pytest.mark.parametrize("phase", ["worker-entry", "socket-removal"])
+def test_dedicated_worker_preserves_non_socket_paths(
+    target: LocalFixtureTransport,
+    symlink: bool,
+    phase: str,
+) -> None:
+    candidate = target.root / "selected.sock"
+    outside = target.root / "outside.sock"
+    stale(outside)
+    if symlink:
+        candidate.symlink_to(outside)
+    else:
+        candidate.write_bytes(b"operator content")
+
+    if phase == "worker-entry":
+        plan = DedicatedTeardownPlan(
+            session_name="selected",
+            session_uuid="11111111-1111-4111-8111-111111111111",
+            run_id=None,
+            vm_name="vm",
+            socket_path=str(candidate),
+            stored_pid=101,
+            stored_boot_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            stored_start_ticks=201,
+            target=cast("Transport", target),
+            sudo=False,
+            force=True,
+        )
+        with pytest.raises(StateError):
+            execute_dedicated_teardown(plan)
+        assert not any("tmux " in command for command in target.commands)
+    else:
+        with pytest.raises(ExternalError):
+            _remove_stale_socket(
+                session_name="selected", socket_path=str(candidate), target=cast("Transport", target), sudo=False
+            )
+
+    assert outside.is_socket()
+    if symlink:
+        assert candidate.is_symlink()
+    else:
+        assert candidate.read_bytes() == b"operator content"
 
 
 def inventory(*paths: str) -> str:

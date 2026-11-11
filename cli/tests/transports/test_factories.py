@@ -89,6 +89,13 @@ def test_transport_uses_admin_username() -> None:
     assert t.identity_file == Path("/home/op/.ssh/agentworks_ed25519")
 
 
+def test_transport_accepts_explicit_timeout_and_attempt_policy() -> None:
+    t = transport(_mock_vm(), _mock_config(), default_timeout=12, retries=2)
+    assert isinstance(t, SSHTransport)
+    assert t.default_timeout == 12
+    assert t.retries == 2
+
+
 def test_agent_transport_uses_agent_linux_user() -> None:
     t = agent_transport(_mock_vm(), _mock_config(), _mock_agent("claude"))
     assert isinstance(t, SSHTransport)

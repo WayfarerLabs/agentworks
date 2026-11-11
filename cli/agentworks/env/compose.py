@@ -63,7 +63,7 @@ def compose_env(
         session=session,
         identity_keys=identity.keys(),
     )
-    user_env = render_plaintext(merged, runtime_values(ctx))
+    user_env = render_plaintext(merged, runtime_values(ctx), legacy_keys=session or {})
     for key, entry in merged.items():
         if entry.secret is not None:
             if entry.secret not in values:
