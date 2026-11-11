@@ -7,6 +7,10 @@ push rejects OAuth fields; that is a phase boundary, not the completed scope of 
 Detailed auth schema/workflow design follows phase 1 and precedes OAuth implementation. The overall
 SDD stays open until both phases and their acceptance obligations are complete.
 
+The [phase-2 working design](oauth-lld.md) proposes the strict public configuration and capture
+extension while retaining the open workflow and native-support decisions. It is preparation for the
+OAuth implementation PR, not acceptance or an additional artifact-only handoff.
+
 Phase 1 must preserve stable original-owner native names, ordinary entry ownership and native
 credential stores, so phase 2 can extend a connection without inventing another artifact kind or
 importing credentials into artifact storage. It does not add an untyped OAuth options bag now.

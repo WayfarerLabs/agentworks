@@ -216,7 +216,9 @@ absent.
 ## Phase 2: OAuth
 
 - [ ] Resolve the operator's native-configuration versus Agentworks login-workflow preference and
-      complete the [OAuth design](oauth-phase.md) after the first working registration push.
+      complete the [OAuth design](oauth-phase.md) after the first working registration push. The
+      [working LLD](oauth-lld.md) separates the proposed public configuration from the remaining
+      workflow, confidential-client, callback and session-only decisions; it does not settle them.
 - [ ] Specify strict supported auth fields, native translation and actual-user credential ownership;
       research public/confidential clients, scopes, remote browser/callback behavior and
       session-only discovery without introducing an Agentworks token store or protocol client.
