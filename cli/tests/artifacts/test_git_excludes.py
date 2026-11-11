@@ -257,7 +257,7 @@ def test_git_directory_move_rebinds_only_current_metadata_and_converges(reposito
 
 
 @pytest.mark.parametrize("change", ["source", "glob", "escape", "outside"])
-def test_invalid_persisted_association_is_released_without_writing_its_destination(repository, change):
+def test_invalid_persisted_association_is_released_without_writing_its_destination(repository, change, captured_output):
     target, workspace = repository
     record = file(workspace / ".agents/skills/policy/SKILL.md")
     claims, _, _ = apply(target, workspace, (record,))
@@ -273,6 +273,65 @@ def test_invalid_persisted_association_is_released_without_writing_its_destinati
     remaining, _, incomplete = apply(target, workspace, (), (bad,))
     assert not remaining and not incomplete
     assert exclude.read_bytes() == before
+    assert any(bad.identifier in warning and bad.destination in warning for warning in captured_output.warnings)
+
+
+@pytest.mark.parametrize("cleanup", [False, True])
+@pytest.mark.parametrize("field", ["identifier", "destination"])
+def test_claim_diagnostics_bound_untrusted_data_without_using_it_for_io(
+    repository, db, monkeypatch, tmp_path, captured_output, cleanup, field
+):
+    import json
+    import shutil
+    from uuid import uuid4
+
+    from agentworks.harness_setup.cleanup import cleanup_workspace_excludes
+    from agentworks.harness_setup.model import NativeSetupState, SetupRecord
+    from agentworks.harness_setup.state import read_native_setup, write_native_setup
+    from agentworks.ssh import SSHLogger
+
+    target, workspace = repository
+    git("-C", workspace, "init", "-q", "--separate-git-dir", target.home / "metadata")
+    claims, _, _ = apply(target, workspace, (file(workspace / ".agents/skills/policy/SKILL.md"),))
+    exclude = Path(claims[0].destination)
+    before = exclude.read_bytes()
+    secret, marker = uuid4().hex, uuid4().hex
+    bad = claims[0].model_copy(
+        update={"source": str(workspace) + "-old", field: f"/{marker}/{secret}\x1b[31m\x07" + "x" * 5000}
+    )
+    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path / "logs")
+    logger = SSHLogger("fixture", "claim-diagnostic", redactions=(secret,))
+    target.logger = logger
+    requests = []
+    original = target.run
+
+    def run(command, **kwargs):
+        requests.append((command, kwargs.get("input_data"), kwargs.get("input_text")))
+        return original(command, **kwargs)
+
+    monkeypatch.setattr(target, "run", run)
+    try:
+        if cleanup:
+            db.insert_vm("box", "site", "host")
+            owner = db.insert_workspace("project", str(workspace), "box", "")
+            record = SetupRecord(
+                component="workspace", integration="codex", destination_id="a" * 64, declaration={}, claims=(bad,)
+            )
+            write_native_setup(db, "workspace", owner.name, NativeSetupState(records=(record,)), operation="create")
+            shutil.rmtree(workspace)
+            cleanup_workspace_excludes(db, owner, lambda: target)
+            assert read_native_setup(db, "workspace", owner.name).records[0].claims == (bad,)
+        else:
+            remaining, _, incomplete = apply(target, workspace, (), (bad,))
+            assert not remaining and not incomplete
+        relevant = [warning for warning in captured_output.warnings if marker in warning]
+        assert len(relevant) == 1
+        assert secret not in relevant[0] and "\x1b" not in relevant[0] and "\x07" not in relevant[0]
+        assert len(relevant[0].encode()) <= 2048
+        assert marker not in json.dumps(requests)
+        assert exclude.read_bytes() == before
+    finally:
+        logger.close()
 
 
 def test_exclusion_refuses_paths_outside_the_owning_workspace(repository):
