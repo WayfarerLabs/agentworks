@@ -342,7 +342,7 @@ points and its three optional points; one further round remains after this round
       document the confirmed-write/failed-claim checkpoint gap without adding ownership machinery.
 - [x] Run all three independent private review lanes, full gates and installed-package checks on the
       corrected source, preserving exact pins and original failure logs.
-- [ ] Verify the final record delta and exact pushed-head CI, re-hand off the complete green head as
+- [x] Verify the final record delta and exact pushed-head CI, re-hand off the complete green head as
       round 2 and mark ready. Wait for its actual independent integration report for up to six hours
       before another fix round.
 
@@ -413,3 +413,73 @@ PTY/URL-driver failures and the corrected isolated-home repeat are retained. The
 measured receipts and independently confirmed all six homes absent and all seventeen recorded
 fixture/callback ports closed. This is phase-2 research, not Agentworks OAuth implementation,
 registration integration acceptance, provider-grant revocation or a resolved workflow choice.
+
+## Registration round 3
+
+The authenticated overall allowance permits three rounds, including the initial design-only
+checkpoint. The actual
+[round-2 report](https://github.com/WayfarerLabs/agentworks/pull/888#issuecomment-6795726868)
+arrived at 12:24 UTC on 2026-11-11 and was read in full. It confirms F1 and the common relocation
+policy at `7accf20c`, with all required gates and its stated native/platform cases passing. No new
+product defect is established. Its hold concerns missing genuine managed conversation resume; normal
+Claude project consent and actual linked-worktree native relocation also remain gaps.
+
+The lead's
+[critical reading and round start](https://github.com/WayfarerLabs/agentworks/pull/888#issuecomment-6796139518)
+retain those obligations. A controlled provider can enable normal native history generation and
+continuation without a paid model. This follows the existing distinction between registration and
+model cooperation; neither the fixture nor local native research supplies managed acceptance. The PR
+was verified draft at unchanged `7accf20c` before source work. This is the last authorized public
+round, not another design-only checkpoint or an OAuth implementation push.
+
+- [x] Add a maintained, standard-library local Messages/Responses/MCP protocol fixture and
+      meaningful boundary tests. Keep it free of native-client launch, history mutation, real
+      credentials, external provider dependencies and an Agentworks acceptance verdict.
+- [x] Document an actual managed fresh/resume procedure with normal native onboarding, strict
+      resume, native-generated history, new managed-run ownership, neighbor isolation, unchanged
+      shared registrations and independent cleanup. Keep model-cooperation claims separate.
+- [x] Reconcile the second report in the acceptance record without promoting its untested modes.
+- [ ] Complete the private project, Muntz and generic correctness reviews, required gates,
+      installed-package checks and exact-head CI; hand off the complete green head ready for the
+      separate integration-test session.
+- [ ] Obtain and critically assess the next actual integration report. R6 and phase-1 acceptance
+      remain owed until its required observations exist. Further material fix work after this round
+      needs operator direction; no automatic merge or MCP SDD lock is authorized.
+
+Round 2's final handoff was `7accf20c`, with all ten exact-head CI jobs passing in run 43010264601.
+The actual second report above completes that round's observation task; it does not complete R6.
+
+`f1890e8c7` adds the managed acceptance recipe and actual second-report record. `cf4756bc2` adds a
+403-line standard-library fixture, with one bounded loopback listener serving minimal Messages,
+Responses and authenticated MCP protocols. It neither launches clients nor writes native history.
+Public fixed auth values, role-aware context predicates and safe fixed-field observations support
+evidence correlation without deciding acceptance. Its thirteen tests cover wire framing, auth, input
+bounds, false continuation, confidential input omission and bounded signal/timer cleanup.
+
+The frozen `cf4756bc2` full suite passed 12,592 tests with 35 skips. Seventeen of eighteen gate
+records passed, including repository/website checks; full mypy reported 37 untyped calls in the new
+test helpers. `d3e763bb5` corrects only their annotations. Corrected full mypy passes 992 files,
+Ruff/format and the thirteen selected stdlib tests pass. The fixture's executable bytes are
+unchanged. The original full gate failure is retained, not described as a green run. Frozen
+wheel/source archive/install checks at `cf4756bc2` passed all eleven records, including four
+standalone guide renders, help/sample and 489 matching package files with locked Typer 0.27.3. Final
+source-archive and record checks follow the annotation and plan corrections.
+
+All three pinned private review lanes cleared the fixture, procedure and acceptance limits at
+`cf4756bc2`; project review's sole important finding was the accepted helper typing correction. They
+independently cleared its exact test-only follow-up at `d3e763bb5`. The lead read the reports and
+independently found all forty retained unit/review listener addresses closed. These overlapping unit
+runs are not additional distinct cases or managed acceptance.
+
+Separate local native observations used the exact unchanged helper hash. Codex 0.167.0 completed one
+controlling-PTY fresh/resume pair with `--no-daemon --no-alt-screen`, the same native history ID and
+observed continued user/assistant context. Claude 2.1.319 completed one separate headless Messages
+pair with its same native-generated history ID. A Claude TUI attempt reached authenticated MCP
+discovery but did not complete a model turn/history or resume; its prompt-driver limitation remains
+recorded. The lead read the measured reports and independently verified seventeen retained listener
+addresses closed and the named native homes absent. These are mode-specific protocol observations,
+not default-daemon, persistent managed R6, model-cooperation or tool-execution proof.
+
+The pending ready handoff must still obtain the actual managed fresh/resume and isolation report,
+including normal Claude project consent and linked-worktree native relocation. OAuth remains phase 2
+of the same open SDD in its separate implementation PR. No phase-1 acceptance or lock is claimed.

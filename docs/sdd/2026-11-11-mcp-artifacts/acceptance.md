@@ -98,3 +98,59 @@ The corrected handoff must emphasize consistent profile-selected settings before
 reinit, common file-only and MCP-bearing rehome metadata, and fresh/genuine resumed session carriers
 with neighbor isolation. Retain project approval and endpoint limits explicitly. Phase-2 OAuth
 research does not replace this registration acceptance.
+
+## Independent registration round 2
+
+The [second report](https://github.com/WayfarerLabs/agentworks/pull/888#issuecomment-6795726868)
+tested exact `7accf20c` against main `07feb4a4`. All twelve required gates passed, including 12,579
+CLI tests with 35 skips. The independent installed-wheel check compared all 492 non-RECORD members,
+including 489 package members; five installed guide calls succeeded. These inventories remain
+distinct from the lead's earlier package checks.
+
+Linux and Windows Server 2025 workstations drove separate real remote-Lima guests. The report's
+native clients were Claude 2.1.322, Codex 0.167.1 and Grok 1.0.77. Four actual reinitializations on
+each workstation covered settings-only setup, MCP addition, withdrawal and the subsequent
+settings-only operation. Changed settings stayed at the login-selected Codex home, with the default
+file absent and neighboring sessions preserved. Malformed login exports refused safely while
+preserving native bytes, ownership and recorded claims.
+
+Two file-only and two MCP-bearing moves covered metadata relocation, literal contents, retained
+copies and current Git handling. Strict HTTP canaries observed correct runtime bindings and a 401 on
+missing bindings. Grok project HTTP connected under normal explicit trust while its endpoint was
+live. The earlier permissive stdio logger still does not prove an authentication refusal.
+
+Managed session carriers launched on Windows and preserved the neighbor. That proves carrier
+delivery, not a completed native conversation. Strict Claude resume still found no resumable
+history. A managed print-mode help invocation exited immediately and was correctly rolled back; it
+does not prove a persistent managed print-mode workload. No model credentials or inference were
+used. R6 session acceptance therefore remains open; Claude project consent and actual
+linked-worktree native rehome also retain their reported gaps. No new product defect was
+established.
+
+The report separately records independent guest, disk, process, socket, database and profile
+cleanup, unchanged standing defaults and the deallocated Windows workstation. Its exact
+platform/mode and cleanup limits remain attached to those observations.
+
+## Native-generated resume history
+
+A controlled provider endpoint may return deterministic public replies through the native client's
+ordinary Messages or Responses interface. The native client must create and persist its own
+conversation ID and history, then genuinely resume it through the actual managed launcher. This
+permits the existing R6 state and isolation checks without making paid-provider or model-cooperation
+claims. Do not write history/rollout/DB records manually, delay an otherwise exited workload with a
+wrapper, or count a fallback fresh conversation as resume.
+
+The local protocol fixture and procedure in the
+[test-harness catalogue](../../testing/harnesses/README.md) support this method. Request receipts
+must be paired with actual native IDs/history observations, managed operation results, current-run
+ownership and an unchanged neighbor. A provider request containing prior user/assistant context is
+useful evidence of continuation; it cannot by itself establish the managed lifecycle or isolation.
+Actual MCP initialization and canary discovery establish separate loading observations; record which
+invocations they cover. Model cooperation and actual tool execution remain separate claims.
+
+Isolation checks concern shared native MCP registrations and managed artifact placement. Native
+history writes and observed normal trust/onboarding updates must be attributed separately. Prepare
+the owned native environment and record the baseline; do not describe a whole config file as
+byte-identical when legitimate native onboarding changed it. Verify unchanged MCP registration
+tables and unrelated settings in addition to the session's private carrier and ownership evidence.
+The procedure does not waive normal project consent or the remaining live topology checks.
