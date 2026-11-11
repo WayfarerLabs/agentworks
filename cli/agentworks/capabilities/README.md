@@ -259,8 +259,8 @@ The derived validation and extraction views have these contracts:
 - **Both read the EFFECTIVE blob on a host that inherits.** An inheriting host merges its
   declaration chain before deriving edges and checking shape, so a required field is a claim about
   the whole lineage rather than about one declaration (see `harness_integration/README.md`). This
-  includes VM, agent, workspace and session templates. A host without inheritance has a chain of one.
-  The inheritance edge itself is excluded from runtime-need traversal because the child already
+  includes VM, agent, workspace and session templates. A host without inheritance has a chain of
+  one. The inheritance edge itself is excluded from runtime-need traversal because the child already
   carries what it inherited.
 - **Both are pure**, and structurally so: they read `model_fields` and a raw blob, and invoke no
   user code at all.

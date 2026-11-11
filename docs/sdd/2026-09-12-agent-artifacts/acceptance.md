@@ -10,18 +10,18 @@ gates passed, including 11,560 tests with 11 skips. No new material finding was 
 is the delivery event; the observations and retained behavioral evidence below are the acceptance
 basis.
 
-| Requirement                                   | Final acceptance basis                                                                                                                                                                                                                                                                                                                                                             |
-| --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| R1: reusable bundles and references           | Ordinary declarations, inheritance and per-type whole-entry replacement are established by the retained type-map, owner and routing controls and real independent consumers. Declaration alone installs nothing.                                                                                                                                                                   |
-| R2: local/Git acquisition                     | Retained bounded acquisition controls and real refresh/pinning/source-failure observations establish consistent captured inputs and deliberate updates. No packaged-distribution source is claimed.                                                                                                                                                                                |
-| R3: normalized representation and safety      | Retained strict-format, original-owner/provenance, bounded-member, binary/text and executable-intent controls, corroborated by real native bytes, modes and ownership. The current report independently preserved a 270-byte binary payload in three native homes. Its script named .exe does not establish PE executable intent.                                                  |
-| R4: independent routing                       | Retained inactive-diamond, unknown/empty, stale route, partial-failure and independent-recovery controls, with real ancestor routing and convergence observations. Inactive VM defaults to user; inactive user/workspace passes to session.                                                                                                                                        |
-| R5: honest native delivery                    | Generated rule navigation files, per-owner hints and supported native skills/personas have scoped actual native evidence. Current Codex app-server and Grok inspect observed delivered catalogs; earlier Claude private-plugin and genuine resume observations keep their own source/mode. Effective argument refusal is now independently verified on the corrected head.         |
-| R6: hints                                     | Current rendering controls establish one hints aggregate per original owner, separate from per-rule outputs, with literal supporting data. Earlier actual Claude Read and current file/catalog observations retain their distinct claims.                                                                                                                                          |
-| R7: session applicability and lifecycle       | Retained native/private-loader and opt-in home-package controls plus real concurrent-user/session, failed replacement, successful restart, deletion and name-reuse observations. The current six refusal cases preserve every existing Shell session identity, process and artifact byte before teardown. Shared catalogs and voluntary selection remain explicit.                 |
-| R8: safe idempotency                          | Retained adoption, drift preservation, ordinary applied state and recovery controls. Current real successive rehomes, tracked paths and ambiguous shared-metadata deletion establish the corrected behavior while preserving other owners/operator state. Missing/unreadable metadata and persistence/cancellation cases have local controls, not new live fault-injection claims. |
-| R9: optional outcomes and inspection          | Retained metadata-only inspection and reporting controls with actual CLI observations: no acquisition, remote setup, secret/body disclosure or state mutation to explain an owner and its ancestors. Unknown evidence is not confirmed empty; recorded application is not native or model verification.                                                                            |
-| R10: scoped validation and permanent teaching | Required local/CI gates, locked-runtime installed-package/guides and independently driven native/VM lifecycle and cleanup. The permanent homes and limits below remain part of this acceptance. No paid inference or universal native-version/provider matrix is required.                                                                                                         |
+| Requirement                                   | Final acceptance basis                                                                                                                                                                                                                                                                                                                                                           |
+| --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R1: reusable bundles and references           | Ordinary declarations, inheritance and per-type whole-entry replacement are established by the retained type-map, owner and routing controls and real independent consumers. Declaration alone installs nothing.                                                                                                                                                                 |
+| R2: local/Git acquisition                     | Retained bounded acquisition controls and real refresh/pinning/source-failure observations establish consistent captured inputs and deliberate updates. No packaged-distribution source is claimed.                                                                                                                                                                              |
+| R3: normalized representation and safety      | Retained strict-format, original-owner/provenance, bounded-member, binary/text and executable-intent controls, corroborated by real native bytes, modes and ownership. The current report independently preserved a 270-byte binary payload in three native homes. Its script named .exe does not establish PE executable intent.                                                |
+| R4: independent routing                       | Retained inactive-diamond, unknown/empty, stale route, partial-failure and independent-recovery controls, with real ancestor routing and convergence observations. Inactive VM defaults to user; inactive user/workspace passes to session.                                                                                                                                      |
+| R5: honest native delivery                    | Generated rule navigation files, per-owner hints and supported native skills/personas have scoped actual native evidence. Current Codex app-server and Grok inspect observed delivered catalogs; earlier Claude private-plugin and genuine resume observations keep their own source/mode. Effective argument refusal is now independently verified on the corrected head.       |
+| R6: hints                                     | Current rendering controls establish one hints aggregate per original owner, separate from per-rule outputs, with literal supporting data. Earlier actual Claude Read and current file/catalog observations retain their distinct claims.                                                                                                                                        |
+| R7: session applicability and lifecycle       | Retained native/private-loader and opt-in home-package controls plus real concurrent-user/session, failed replacement, successful restart, deletion and name-reuse observations. The current six refusal cases preserve every existing Shell session identity, process and artifact byte before teardown. Shared catalogs and voluntary selection remain explicit.               |
+| R8: safe idempotency                          | Retained adoption, drift preservation, ordinary applied state and recovery controls. Current real successive moves, tracked paths and ambiguous shared-metadata deletion establish the corrected behavior while preserving other owners/operator state. Missing/unreadable metadata and persistence/cancellation cases have local controls, not new live fault-injection claims. |
+| R9: optional outcomes and inspection          | Retained metadata-only inspection and reporting controls with actual CLI observations: no acquisition, remote setup, secret/body disclosure or state mutation to explain an owner and its ancestors. Unknown evidence is not confirmed empty; recorded application is not native or model verification.                                                                          |
+| R10: scoped validation and permanent teaching | Required local/CI gates, locked-runtime installed-package/guides and independently driven native/VM lifecycle and cleanup. The permanent homes and limits below remain part of this acceptance. No paid inference or universal native-version/provider matrix is required.                                                                                                       |
 
 Current native guidance rendering is unchanged from the earlier literal-data correction. The actual
 Claude 2.1.319 supporting-file Read at `818ccee9` establishes that measured boundary. The final
@@ -237,7 +237,11 @@ failure, not clean acceptance. Separate exact-mode probes used bounded valid/int
 responses and stayed within their new limits. No failed native fixture termination is presented as a
 successful model turn.
 
-## Implemented correction awaiting independent acceptance
+## Retained implementation awaiting acceptance, 2026-11-08
+
+This section records the earlier implementation and its then-pending acceptance. The final
+functional acceptance above supersedes that pending status; these observations retain their own
+source and native mode.
 
 The measured discrepancy is tracked in
 [issue 869](https://github.com/WayfarerLabs/agentworks/issues/869), separately from PR
@@ -258,7 +262,7 @@ of this correction. R5/R6/R7/R8/R10 need the current independent integration rep
 closeout. The following bounded observations establish specific native mechanics; earlier results
 remain evidence for unchanged behavior, not certification of the new carriers or cleanup.
 
-### Current native and local evidence
+### Native and local evidence at the retained sources
 
 Actual renderers and native tools were exercised in isolated homes without operator credentials,
 real inference, SSH or VM resources. Native state was created by successful synthetic conversations
@@ -298,15 +302,15 @@ different claims; none of these local probes substitutes for the separate full i
 ## Permanent promotion and closeout
 
 The standalone artifact README and packaged guide cover strict authoring, local/Git sources,
-normalization, refresh, maps/overrides, original scopes and deferrals, the native matrix, optional
-workarounds, collisions, legacy-section retirement, ownership/cleanup, privacy and read-only
-inspection. `scoped-artifacts.yaml` and `concurrent-sessions.yaml` provide the worked examples.
-Capability authors use the permanent harness-integration contract. No load-bearing artifact
-knowledge was found stranded solely in this SDD. Current native-file behavior still requires
-independent acceptance before locking.
+contained acquisition and operation budgets, normalization, refresh, maps/overrides, original scopes
+and deferrals, the native matrix, optional workarounds, collisions, legacy-section retirement,
+ownership/cleanup, privacy and read-only inspection. `scoped-artifacts.yaml` and
+`concurrent-sessions.yaml` provide the worked examples. Capability authors use the permanent
+harness-integration contract; the capability and database READMEs describe inheritance and the
+current capture/state boundaries. None of this teaching requires the SDD directory.
 
-The framework's [acceptance record](../2026-09-06-harness-scope-framework/acceptance.md) separately
-reconciles its 16 retained requirements and transferred artifact scope. Both locks still require the
-resolved native disposition, truthful final plan records, independent closeout review and the
-appropriate final gates. The clean intermediate correction neither waives those duties nor needs to
-absorb a new native-resume design.
+The framework's [acceptance record](../2026-09-06-harness-scope-framework/acceptance.md) reconciles
+its 16 retained requirements and transferred artifact scope. The final report completes the changed
+native-file lifecycle evidence. Final local validation, independent closeout review, historical plan
+reconciliation and lock creation are recorded in both plans. The earlier clean intermediate
+correction did not waive those duties.
