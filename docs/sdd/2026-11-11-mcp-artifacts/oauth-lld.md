@@ -2,7 +2,7 @@
 
 ## Status and dependencies
 
-This is private phase-2 preparation based on registration head `7accf20c`. It does not change the
+This is private phase-2 preparation based on registration head `95a51d3b`. It does not change the
 active registration PR or complete R11. The registration report and any resulting correction must be
 absorbed before this dependent increment is handed off. OAuth remains part of this SDD; registration
 alone does not justify its lock.
@@ -166,7 +166,7 @@ pre-seeding credentials. Offline artifact inspection remains offline and does no
 credentials or probe auth. Configured scopes describe a request, not granted permissions or an
 authentication result.
 
-## Remaining support decisions
+## Support boundaries and acceptance gaps
 
 - **Confidential clients:** unsupported by the canonical artifact profile. Native sinks differ.
   Claude documents secret input separate from public entry metadata; Codex documents storing a

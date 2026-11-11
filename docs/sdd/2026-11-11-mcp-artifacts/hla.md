@@ -3,7 +3,7 @@
 ## Status and choices
 
 Architecture responding to the [FRD](frd.md). The initial checkpoint reviewed all SDD artifacts
-together before implementation. This PR now includes registration; [research](prior-art-research.md)
+together before implementation. Registration implements phase 1; [research](prior-art-research.md)
 and [acceptance](acceptance.md) distinguish source, documented primitives and measured behavior from
 the remaining native integration obligations.
 
@@ -17,6 +17,14 @@ after the first working push. The first PR carries this complete design checkpoi
 implementation; a subsequent PR completes OAuth. Phase 1 is useful with env credentials and normal
 native authentication, but it does not close or lock the overall effort. See the
 [OAuth phase boundary](oauth-phase.md).
+
+Phase 2 extends HTTP definitions with public native OAuth options through the same entry ownership
+and routing pipeline. Its [detailed design](oauth-lld.md) uses typed client ID, callback port and
+scope requests, translated faithfully or left unhandled per entry. Capture v5 preserves older
+interpretations and unchanged declaration hashes. Authentication uses existing access as the actual
+Linux user and the native client's explicit login/status/logout interface. Native clients own
+consent, tokens and refresh; setup performs no auth orchestration. Confidential secrets and custom
+issuer/callback URL fields remain outside the supported portable profile.
 
 ## Artifact flow
 

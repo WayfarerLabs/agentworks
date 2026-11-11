@@ -15,7 +15,7 @@ its backend and resource budget.
 | R7-R8        | Real shared-document create/adopt/update/remove, foreign conflict, unrelated-key preservation, partial retry, modified obsolete retention, settings mapping coexistence       |
 | R8 lifecycle | Activation removal, session deletion/replacement, normal workspace/VM deletion and rehome behavior without a new cleanup prerequisite                                         |
 | R9           | Offline public inspection and per-type reporting without source/secret/network/native inventory activity or connection bodies                                                 |
-| R10          | v2/v3 retention and v4 validation; unchanged legacy digests/routes/native files; existing workspace usage; standalone installed guides and source/package parity              |
+| R10          | v2/v3/v4 retention and v5 validation; unchanged legacy digests/routes/native files; existing workspace usage; standalone installed guides and source/package parity           |
 
 Workspace cases must include untracked shared-config exclusion, tracked-config visibility/warning,
 coexisting foreign keys, repeated rehome with current placement evidence and retained old copies.
@@ -154,3 +154,40 @@ the owned native environment and record the baseline; do not describe a whole co
 byte-identical when legitimate native onboarding changed it. Verify unchanged MCP registration
 tables and unrelated settings in addition to the session's private carrier and ownership evidence.
 The procedure does not waive normal project consent or the remaining live topology checks.
+
+## OAuth phase-2 acceptance
+
+Exercise the public profile and explicit native workflow at the actual phase-2 head. Registration
+and prior isolated native research do not substitute for these managed observations:
+
+- Strict public-option admission from inline and selected file/Git entries, whole-entry overrides,
+  OAuth/Authorization conflict and unknown/confidential-field refusal. Retained v4 interpretation
+  and unchanged phase-1 content/declaration digests must survive; v5 and unknown-future captures
+  need the ordinary preservation boundary.
+- Actual Claude/Codex user and shared-workspace registrations, with explicit public client ID,
+  requested scopes and fixed callback port where supported. Observe the native-selected redirect,
+  normal consent, authenticated MCP discovery and the difference between requested/granted scopes.
+  Do not add a callback URL or native option that the canonical artifact did not declare to make a
+  public-profile case pass.
+- Existing agent and admin access as the actual Linux user, including two users of a shared
+  workspace with independent credentials. Keep interactive native login, remote manual flow,
+  cancellation, missing/expired credentials, advertised refresh, status and targeted local logout
+  distinct from automatic setup. Do not infer OS-user isolation from two HOME directories alone.
+- Per-entry Grok handling: empty native-default intent registers the URL; unsupported explicit
+  public options defer the whole entry and preserve previous claims/bytes while independent entries
+  continue. Shell publishes canonical public data without starting auth or contacting the endpoint.
+  Successful Grok native OAuth is a separate observation, not implied by that registration result.
+- For any advertised session-only authentication path, use the existing invocation carrier and
+  actual active-session/native interface without publishing a broader registration. Record actual
+  native version/mode, login/discovery and credential cleanup; parser help or a rendered config is
+  insufficient. Leave an unestablished combination explicit rather than counting it as a pass.
+- Normal update, withdrawal, activation removal and parent deletion retain native credentials and
+  foreign/modified entry protection. A native-added same-table secret remains an external edit.
+  Setup/inspection must not probe auth stores or endpoints. Verify no tokens/codes/refresh material
+  in captures, applied state, argv or diagnostics, and independently clean all owned users,
+  credentials, callback/listener processes, native homes and test resources. Local logout alone does
+  not prove provider-side grant revocation.
+
+The phase-2 PR still receives full gates, installed-package/guide checks and all required private
+reviews before its separate integration handoff. Only its actual report can close these managed
+cells; overall lock also requires the outstanding phase-1 obligations.

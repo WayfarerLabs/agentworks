@@ -1,7 +1,8 @@
 # MCP artifacts: format and delivery design
 
-This proposed LLD makes the [HLA](hla.md) implementable. It describes prospective schema and native
-behavior, not current CLI support.
+This LLD defines registration's phase-1 schema and native delivery contract under the [HLA](hla.md).
+The [OAuth design](oauth-lld.md) extends HTTP definitions and capture interpretation in phase 2.
+Acceptance records distinguish implementation from observed native and managed behavior.
 
 ## Declaration shape
 

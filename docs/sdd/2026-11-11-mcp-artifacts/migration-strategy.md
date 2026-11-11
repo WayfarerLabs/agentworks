@@ -56,6 +56,30 @@ passthrough placeholder or importing native grants. Stable managed identities an
 credential stores are the extension seam; phase 2 will explicitly version any new canonical/state
 shape and document its upgrade/downgrade effects. No lock or OAuth-completion claim rides phase 1.
 
+## OAuth capture and native state, phase 2
+
+New captures use version 5. Readers retain the original meanings of versions 2, 3 and 4; version 4
+still rejects an OAuth metadata key, including an explicit null. Unknown future captures remain
+preserved and refused. Do not relabel a capture to make a downgrade load it.
+
+The optional OAuth field is omitted when absent/null without changing older nullable fields.
+Unchanged four-type and registration-only content, native names and declaration digests remain
+stable. Explicit `{}` records native OAuth intent and changes the declaration; bundle overrides
+still replace the whole connection. No token, authorization code or refresh credential enters the
+capture or applied-state payload.
+
+Public options converge through the existing native entry fingerprint and expected-content write.
+Changing endpoint/client options does not clear native credentials or attest that an old grant is
+appropriate. Unsupported Grok options defer the whole entry while retaining its previous claim and
+native content; independent entries can still apply. A native-added confidential secret in the same
+table is an external modification under ordinary protection, not new authority to overwrite it.
+
+Authentication and local logout use the actual user's native client through existing access. They
+are explicit actions, separate from setup/reinit and artifact withdrawal. A shared workspace entry
+does not share user credentials. Session-only definitions remain invocation-only during auth. No
+credential migration, automatic logout, callback rewrite or credential-store/backend selection is
+introduced by Agentworks.
+
 An older binary cannot read v4 captures and may reject new config fields. Document that downgrade
 limit; do not promise reverse conversion or delete unknown state. Normal supported cleanup should
 run with the version that provisioned the entries before an operator elects to downgrade. The
