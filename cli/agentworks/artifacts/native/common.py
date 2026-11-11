@@ -349,6 +349,7 @@ def prepare_session_delivery(
         try:
             plan = render(current)
             validate_ancestor_names(current, plan.application)
+            # MCP uses entry-specific config checks, not skill/persona discovery.
             deferred = {item.input_id for item in plan.application.deferred}
             legacy_delivery = not current.inputs or any(
                 item.content.type is not ArtifactType.MCP_SERVER and item.identity not in deferred

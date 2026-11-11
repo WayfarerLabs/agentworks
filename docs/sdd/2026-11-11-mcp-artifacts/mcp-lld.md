@@ -213,7 +213,7 @@ workflow belongs to phase 2.
 - Claude: `session-mcp-config` writes a private JSON file under the current session/run directory
   and appends `--mcp-config` with that file. Do not add `--strict-mcp-config` or replace other
   sources. Existing explicit conflicting native flags need a clear unhandled reason.
-- Codex: `session-mcp-overrides` supplies typed invocation-only `-c` leaves for the derived server
+- Codex: `session-mcp-overrides` supplies typed invocation-only `-c` overrides for each derived server
   table. Encode literal values with the TOML serializer; env bindings remain variable names. Do not
   write the project/user config or replace the entire `mcp_servers` table.
 - Grok: evaluate `session-mcp-plugin` using one private MCP-bearing plugin and `--plugin-dir`. Prove
@@ -221,6 +221,19 @@ workflow belongs to phase 2.
   cannot meet that contract, report unsupported with no shared-catalog fallback.
 - Shell: canonical JSON files join the existing private session index; no native workaround or
   server launch is needed.
+
+Codex config overrides deep-merge with lower layers, including when the override names a whole
+server table. They cannot clear stale fields from a differing same-named native entry. Before a
+selected session carrier is rendered, read only the fixed native user/project MCP roles and compare
+that selected derived key. Equal entries are safe; differing or unreadable native entries defer that
+MCP item with a value-free reason. This is a registration conflict check, not native CLI inventory,
+credential discovery or an environment-binding probe. Preserve independent legacy delivery.
+
+Resolve Claude's actual user MCP role separately from its rules/settings root. Without a native
+override it is `$HOME/.claude.json`; with explicit `CLAUDE_CONFIG_DIR` it is the `.claude.json` under
+that directory. A wrapper-synthesized rules root is not evidence that an override was present. Use
+the workload's existing login environment to observe only HOME and the native-home variable, never
+credential variables or profile-file content.
 
 No MCP session carrier runs by default. Preserve unrelated artifact delivery when selecting MCP
 inputs, and explicitly handle/defer MCP in every adapter so omission cannot mean applied.

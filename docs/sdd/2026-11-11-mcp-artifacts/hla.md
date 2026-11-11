@@ -108,6 +108,12 @@ opt-in carrier on fresh and resumed starts and with another session present befo
 mechanism that fails that proof stays explicitly unsupported; it cannot fall back to a user/project
 write. Normal native approval, trust and authentication remain in force.
 
+Native role discovery may observe HOME and the native-home override through the existing workload
+login shell. It does not inspect credential bindings or profile files. Claude's MCP document has a
+separate role from its rules/settings root. Session overrides also compare selected native keys in
+fixed user/project roles: Codex deep-merges a server table, so a differing existing entry must be
+left unhandled rather than combined into an invalid registration.
+
 ## Shared config and ownership
 
 Whole-file artifact ownership fits private session files and Shell publication. It does not fit one

@@ -51,16 +51,16 @@ planned. OAuth workflow preference remains a phase-2 question.
 
 ## Canonical model and capture
 
-- [ ] Add the strict MCP definition/declaration models and fifth type maps using ordinary
+- [x] Add the strict MCP definition/declaration models and fifth type maps using ordinary
       whole-entry merge and original-owner identity; reject unknown or contradictory input.
-- [ ] Implement bounded JSON/JSONC source parsing with duplicate-key rejection, selecting the
+- [x] Implement bounded JSON/JSONC source parsing with duplicate-key rejection, selecting the
       same-named server; capture only normalized selected content. Choose a maintained parser if a
       dependency is needed, verify its current stable release and avoid a custom comment lexer.
-- [ ] Extend inline/workstation/Git capture and equivalent-content identity; preserve acquisition
+- [x] Extend inline/workstation/Git capture and equivalent-content identity; preserve acquisition
       limits, no execution/network-to-endpoint behavior and credential-safe diagnostics.
-- [ ] Introduce codec v4 with strict retained v2/v3 interpretation and unknown-version protection;
+- [x] Introduce codec v4 with strict retained v2/v3 interpretation and unknown-version protection;
       preserve legacy hashes and empty-map freshness as specified in migration.
-- [ ] Prove per-type replacement, unchanged old artifacts, scope grouping and absence of resolved
+- [x] Prove per-type replacement, unchanged old artifacts, scope grouping and absence of resolved
       credentials in durable data. Use meaningful boundary tests, never authored-prose pins.
 
 ## Native entry application
@@ -68,11 +68,11 @@ planned. OAuth workflow preference remains a phase-2 question.
 - [ ] Resolve native-home roles and use existing guarded file APIs and normal setup invocation.
       Implement bounded MCP entry reconciliation with existing parsers, claims, fingerprints,
       checkpoints and expected-content publication; no parallel state or whole-document ownership.
-- [ ] Implement deterministic original-owner-qualified native identities, adoption, owned
+- [x] Implement deterministic original-owner-qualified native identities, adoption, owned
       convergence, per-entry foreign conflict, removed-entry cleanup and modified obsolete
       retention. Include the bounded readable key and full-key identity hash; explicitly use MCP
       claims' `sha256` contract rather than a second fingerprint/ownership store.
-- [ ] Plan Codex settings mapping contributions and MCP entries together, preserving every existing
+- [x] Plan Codex settings mapping contributions and MCP entries together, preserving every existing
       settings strategy and diagnosing conflicting explicit values before canonical mutation. Test
       canonical withdrawal with a still-authored mapped key under all four strategies in one pass,
       including suppressed initial contributions and original file-existence decisions.
@@ -80,13 +80,13 @@ planned. OAuth workflow preference remains a phase-2 question.
       must apply or defer the new type; test against silent handled-but-omitted behavior.
 - [ ] Translate unresolved env/header/bearer references to native primitives. Test bindings from
       declared env and guest startup exports, including a project definition bound by each actual
-      user. Never infer absence from the partial prepared map or add an environment/profile probe.
+      user. Never infer binding absence from the partial prepared map or probe credentials/profile-file contents.
       Unsupported representations defer whole entries. Preserve native trust/approval/auth state.
-- [ ] Publish Shell canonical JSON and indexes at all existing scope locations, with no new
+- [x] Publish Shell canonical JSON and indexes at all existing scope locations, with no new
       deferrals or server execution.
 - [ ] Verify interruption/retry, other-owner preservation, activation removal and ordinary parent
       deletion/rehome without introducing a new gate or stored-path I/O authority.
-- [ ] Include confirmed shared MCP workspace paths in existing Git exclusion handling, with
+- [x] Include confirmed shared MCP workspace paths in existing Git exclusion handling, with
       tracked-file warnings. Rehome destination evidence and keep coexisting file metadata/identity
       coherent through repeated moves and retained copies without workspace reinit.
 - [ ] Keep the skill/persona embedded-MCP guard and ship server-specific credential-retention
@@ -109,7 +109,7 @@ planned. OAuth workflow preference remains a phase-2 question.
 
 ## Inspection, collateral and validation
 
-- [ ] Extend safe placement/claim inspection and per-type applying/deferring output, preserving
+- [x] Extend safe placement/claim inspection and per-type applying/deferring output, preserving
       offline behavior and existing small-list truncation. Do not add secret/source/native probes.
 - [ ] Update artifact and integration READMEs/guides, sample config, examples, schema teaching and
       release/upgrade notes with actual supported mechanisms, limits, native formatting changes and
@@ -123,6 +123,32 @@ planned. OAuth workflow preference remains a phase-2 question.
 - [ ] Wait for each actual independent integration report before a subsequent implementation fix
       round, observing up to six hours. Critically assess the complete batch, return to draft before
       changes, re-run required private lanes/gates and re-hand off within the remaining allowance.
+
+## Registration implementation evidence, before full handoff
+
+Core and capture changes are integrated in `0e27a26c1` and `0db1b2d02`, including strict
+selected-definition validation, same-content acquisition, supported legacy hashes and future-version
+refusal. The acquisition helper records whether the source was a directory rather than inferring
+that from its member count. The only dependency addition is Apache-2.0 `json5` 0.17.3; its broader
+JSON5 lexical conveniences are accepted, while root/duplicate and selected-definition structure
+remain strict. No handwritten comment lexer or executable import step was added.
+
+Native reconciliation in `9070a8d5a`, `50583817b` and `6befe33c3` passes its 36 file-backed MCP
+cases and retained mapping/plugin regressions. Those observations prove file/claim behavior, not
+native connectivity. `59ea743da` adds 27 shared-path/dispatch cases; the combined relevant selection
+passed 168 tests. `761aadde6` adds Shell/reporting/inspection, with 70 owned tests passing. The
+adapter worker owns the remaining known all-types-as-files Codex fixture correction.
+
+Lead commit `b25baecc8` adds legacy-only probe selection and coherent MCP-bearing workspace evidence
+relocation. The probe/diagnostic/guidance selection passed 35 tests; rehome plus existing move
+regressions passed 31. The first new rehome run had two failures from an incorrect fixture digest
+expectation; comparing with the original recorded digest corrected that test. No product change was
+needed for those failures. Repeated moves retain package roots, skips, fingerprints and the actual
+new destination identity. File-only predecessor rehome semantics remain unchanged.
+
+These are local implementation observations. Combined full gates, full-PR private reviews, installed
+package checks and independent integration acceptance remain unchecked below and above. They do not
+inherit the SDD checkpoint's green result.
 
 ## Phase 2: OAuth
 
