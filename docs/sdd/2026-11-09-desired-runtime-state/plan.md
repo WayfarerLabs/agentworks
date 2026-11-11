@@ -373,7 +373,7 @@ attribution and do not validate the new integration.
 
 - [x] Integrate current main, resolve the ten conflicts, and verify automatically merged lifecycle,
       trust, artifact, compatibility, CLI and documentation seams against both contracts.
-- [ ] Exercise combined behavior with focused tests and required gates. Obtain independent project,
+- [x] Exercise combined behavior with focused tests and required gates. Obtain independent project,
       complexity and generic correctness reviews at one pinned candidate head.
 - [ ] Publish the complete green candidate to the same PR with a scoped ready handoff; wait for its
       associated separate integration report before any further iteration. Record actual results and
@@ -399,3 +399,12 @@ passed and 34 skipped. Test-only correction `03939d126` seeds actual isolated ho
 three retained fixture files, preserving every behavioral assertion. Their 30 targeted tests passed.
 The full rerun and exact-head CI remain required. The retained VM guide now names the guest
 SSH/activation prerequisite precisely, preserving provider-only and pure-intent exceptions.
+
+The corrected full rerun passed 12,325 tests with 34 skips in 281.21 seconds. Ruff checked and
+formatted 1,033 files; strict mypy passed 998 files. File-quality checks passed 504 Markdown and 477
+spelling inputs. Typer isolation, rulesync, locked-SDD checks, 160 Python and 103 Node website
+tests, and deterministic double builds at both site bases returned zero. All three private delta
+reviews were clean at `101071778`, each verifying the 30 affected tests. Production code is
+unchanged from the earlier clean review head; the corrections retain actual trust enforcement and
+every original fixture assertion. Fresh exact-head CI must still pass before publication, and the
+new live report remains pending.

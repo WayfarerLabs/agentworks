@@ -103,8 +103,10 @@ neither established a product defect.
 The operator-directed current-main integration follows the completed SDD-only closeout at
 `ad4600df8`. It changes the combination of desired-state lifecycle with main's newer trust,
 execution, artifact delivery and compatibility code. The reports above remain evidence about their
-original tested heads. Fresh combined-head gates, independent review and a completed separate
-integration report are pending; no new native pass or unchanged-artifact equivalence is claimed.
+original tested heads. Combined-source gates and all three independent review lanes passed, with
+12,325 tests and 34 skips in the corrected root run. The final delta at `101071778` is independently
+clean. Exact final-head CI and a completed separate integration report remain required before
+convergence; no new native pass or unchanged-artifact equivalence is claimed.
 
 Independent verification also reproduced an incoming-main host-key import metadata race:
 `vms/manager/host_keys.py` retains a VM row/address, then writes trust by name without a family
