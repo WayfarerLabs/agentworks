@@ -2,9 +2,10 @@
 
 ## Status and choices
 
-Proposed response to the [FRD](frd.md). This checkpoint reviews all SDD artifacts together; it
-contains no implementation or permanent claim of MCP support. [Research](prior-art-research.md)
-distinguishes current source and native documentation from behavior still requiring live proof.
+Architecture responding to the [FRD](frd.md). The initial checkpoint reviewed all SDD artifacts
+together before implementation. This PR now includes registration; [research](prior-art-research.md)
+and [acceptance](acceptance.md) distinguish source, documented primitives and measured behavior from
+the remaining native integration obligations.
 
 MCP becomes a fifth artifact type in the existing bundle, capture, routing and application pipeline.
 There is no separate MCP resource registry, lifecycle or secret resolver. Canonical connection

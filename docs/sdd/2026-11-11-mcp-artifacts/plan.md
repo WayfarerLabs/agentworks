@@ -197,7 +197,7 @@ defect. The suspected implicit/default Codex-profile bypass was tested and refut
 without another runtime discovery decision. It deletes the two unreachable renderer catches and
 their synthetic tests. Its scoped selection passed 129 tests; eight complete-command cases cover
 fresh/resume/picker assembly and preservation of existing legacy limits. A first local edit had an
-indentation error, and a first regression used an overbroad substring assertion against the whole
+indentation error, and a first regression used a broad substring assertion against the whole
 launcher; both were corrected before the passing result, with failures retained in proof.
 
 `cab7f0297` removes lossy native hash conversion, protects absent fingerprints, and reconciles
@@ -208,9 +208,10 @@ lane. The lead must still verify the combined full mypy/gates, package parity an
 lanes at the corrected head before handoff.
 
 Reviewer filesystem failures are scoped separately: metadata-preserving ownership on the workspace
-mount returned EINVAL from existing `fchown`; equivalent owned `/tmp` fixtures passed. No global
-native ownership policy was changed for that environment limitation. Their original logs remain
-retained; the lead independently verified the reported temporary fixture roots absent.
+mount returned error 22 (invalid argument) from existing `fchown`; equivalent owned `/tmp` fixtures
+passed. No global native ownership policy was changed for that environment limitation. Their
+original logs remain retained; the lead independently verified the reported temporary fixture roots
+absent.
 
 ## Phase 2: OAuth
 
@@ -238,3 +239,24 @@ retained; the lead independently verified the reported temporary fixture roots a
       only when the completed effort supports it. The lock binds at merge.
 - [ ] Verify final PR/CI/review/label state and actual merge; leave no owned live resources or
       unreported cleanup obligations. MCP completion does not include single-session workspaces.
+
+## Corrected source verification
+
+All three private lanes independently cleared `ad632ada`, including the material corrections and the
+actual surrounding contracts. Project follow-up passed 271 focused cases plus 116 retained Codex
+regressions; Muntz passed 252 cases plus its original ownership regression; generic correctness
+passed 595 cases and supplemental fingerprint/diagnostic probes. These overlapping counts are not
+added to the full suite. The lead read each report and independently checked the named runtime
+cleanup receipts.
+
+The corrected full frozen suite passed **12,513 tests, 35 skipped**; full mypy passed 989 files, and
+Ruff/format and exact CI Typer isolation passed. Frozen wheel/source archive/install and the four
+standalone guides/help/sample passed, with all 488 package files matching source, wheel and
+installation. One extra skip is an inapplicable Claude-only local-project parameter for Codex, not
+an untested advertised mechanism.
+
+The same run found two spelling words in this record and one website browser input timing failure.
+CI independently reported those same spelling words; its website and Windows jobs passed. The
+original logs are retained. The spelling is corrected with these records, and the unchanged website
+is being replayed independently before the final handoff. No browser source or timing policy is
+changed by this effort.
