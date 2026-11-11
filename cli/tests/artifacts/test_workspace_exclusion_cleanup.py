@@ -10,7 +10,10 @@ import pytest
 
 from agentworks.db import Database
 from agentworks.errors import StateError
+from agentworks.execution.errors import ExecutionIncomplete
+from agentworks.execution.results import Result, Unknown, UnknownReason
 from agentworks.harness_setup.model import NativeClaim, NativeSetupState, SetupRecord
+from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
 from agentworks.harness_setup.state import read_native_setup, write_native_setup
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.workspaces.manager import delete_workspace
@@ -109,7 +112,9 @@ def test_workspace_delete_retires_only_its_shared_exclusions(db, deletion, share
 
 
 @pytest.mark.parametrize("force", [False, True])
-@pytest.mark.parametrize("problem", ["modified", "duplicate", "unavailable", "missing-workspace", "transport", "trust"])
+@pytest.mark.parametrize(
+    "problem", ["modified", "duplicate", "unavailable", "missing-workspace", "unreachable", "trust"]
+)
 def test_incomplete_shared_cleanup_warns_and_keeps_parent_deletion_best_effort(
     db, deletion, shared_workspace, problem, force, monkeypatch, captured_output
 ):
@@ -127,10 +132,11 @@ def test_incomplete_shared_cleanup_warns_and_keeps_parent_deletion_best_effort(
         git_dir.rename(displaced)
     elif problem == "missing-workspace":
         shutil.rmtree(first)
-    elif problem == "transport":
-        from agentworks.errors import ConnectivityError
-
-        monkeypatch.setattr(target.access(), "answer", lambda call: ConnectivityError("fixture unreachable"))
+    elif problem == "unreachable":
+        # What VMAccess.run returns when ssh cannot reach the VM: an outcome, not an exception.
+        unreachable = Result(Unknown(UnknownReason.CONNECTION))
+        monkeypatch.setattr(target.access(), "answer", lambda call: unreachable)
+        expected = sanitize_setup_diagnostic(str(ExecutionIncomplete(target.access().vm_name, unreachable)))
     elif problem == "trust":
         target.environment["GIT_TEST_ASSUME_DIFFERENT_OWNER"] = "1"
     before = exclude.read_bytes() if exclude.exists() else None
@@ -150,6 +156,8 @@ def test_incomplete_shared_cleanup_warns_and_keeps_parent_deletion_best_effort(
         assert db.get_workspace("project") is None and not first.exists()
         assert db.instance_state.get_applied_slices("workspace", "project") == ()
         assert first_claims[0] in observed[0].claims
+        if problem == "unreachable":
+            assert expected in observed[0].incomplete_reasons
         if before is not None:
             assert exclude.read_bytes() == before
         assert db.get_workspace("survivor") is not None and second.exists()
