@@ -215,18 +215,18 @@ absent.
 
 ## Phase 2: OAuth
 
-- [ ] Define the explicit native authentication workflow and complete the
+- [x] Define the explicit native authentication workflow and complete the
       [OAuth design](oauth-phase.md) after the first working registration push, incorporating any
       further operator preference without treating an unanswered optional question as approval. The
       [detailed design](oauth-lld.md) selects the strict public profile, existing actual-user access
       and explicit unsupported cases; advertised native modes still require acceptance.
-- [ ] Specify strict supported auth fields, native translation and actual-user credential ownership;
+- [x] Specify strict supported auth fields, native translation and actual-user credential ownership;
       research public/confidential clients, scopes, remote browser/callback behavior and
       session-only discovery without introducing an Agentworks token store or protocol client.
 - [ ] Keep the detailed phase-2 design/FRD/plan update with its OAuth implementation PR and assess
       feedback through normal delivery. Obtain any changed-requirements ruling before building it;
       the single initial SDD-only checkpoint remains the artifact-only review requested here.
-- [ ] Implement supported canonical OAuth configuration and the agreed explicit authentication
+- [x] Implement supported canonical OAuth configuration and the specified explicit authentication
       workflow with native credential sinks and existing secret/transport boundaries. Keep ordinary
       setup/start free of automatic consent/login and unsupported combinations explicit.
 - [ ] Validate actual native OAuth and authenticated MCP use, user isolation, cancellation,
@@ -269,6 +269,41 @@ logout passed on the first attempt; native config stayed unchanged. The lead rea
 and measured config/commands, matched the actual source hash, and independently checked both
 fixture/callback ports closed and the exact native home absent. This closes the local default
 callback uncertainty while retaining managed-user, session-only and provider-specific limits.
+
+## OAuth source validation before public handoff
+
+All three independent private lanes cleared `d5239181`: project passed 218 focused cases and scoped
+Ruff/format/mypy; generic correctness passed 221 cases plus 104 bounded edge probes; Muntz passed
+the 144 new cases and three deletion experiments. These counts overlap and are not added to the full
+suite. The project lane also traced the existing actual-user terminal path: native login interaction
+inherits the operator terminal rather than an Agentworks remote-output log. The lead read every
+report and independently verified the named owned runtime/cache/fixture roots absent.
+
+The first full run at `d5239181` had 12,733 passes, 35 skips and four failures. One remaining
+type-map roundtrip expected the old default version. Two harness tests required the normal
+`cli/.venv` location instead of the lead's nonstandard proof environment; a fresh package build
+failed because closed proxies blocked its build dependency. An exact-command replay confirmed the
+blocked Hatchling fetch. File lint and Rulesync likewise could not resolve their pinned packages.
+Original outputs remain retained; no product runtime was changed to address these setup failures.
+
+`2968f5780` corrects the current roundtrip expectation. `b343180a4` changes the existing Codex
+foreign/modified fixture to use the real nested `oauth.client_secret` field; it retains the same
+ownership and diagnostic assertions. All three lanes independently cleared this exact two-test-file
+delta, with production and docs unchanged. The corrected canonical-environment full run passed
+12,737 tests with 35 skips. Full mypy passed 994 files; Ruff/format, CI Typer isolation and every
+repository/website gate passed, all eighteen records successful.
+
+Frozen wheel/source archive/install, four standalone guide renders, help/sample and source/package
+parity passed all eleven checks at `b343180a4`, with 489 matching package files and locked Typer
+0.27.3. Permanent teaching covers public options, native-user auth, cleanup, supported defaults and
+explicit unsupported cases. The final record delta clarifies ordinary parent deletion rather than
+adding a native-logout prerequisite; runtime and package bytes remain unchanged. Final artifact
+checks/review follow that record delta.
+
+This is still private preparation. Exact pushed-head CI, the OAuth PR handoff and actual managed R11
+report are owed. The predecessor registration report and its remaining material acceptance hold must
+be resolved before this dependent increment is handed off. No overall completion or lock is claimed,
+and the original optional workflow preference is not recast as operator approval.
 
 ## Overall closeout, after both phases
 
@@ -439,7 +474,7 @@ round, not another design-only checkpoint or an OAuth implementation push.
       resume, native-generated history, new managed-run ownership, neighbor isolation, unchanged
       shared registrations and independent cleanup. Keep model-cooperation claims separate.
 - [x] Reconcile the second report in the acceptance record without promoting its untested modes.
-- [ ] Complete the private project, Muntz and generic correctness reviews, required gates,
+- [x] Complete the private project, Muntz and generic correctness reviews, required gates,
       installed-package checks and exact-head CI; hand off the complete green head ready for the
       separate integration-test session.
 - [ ] Obtain and critically assess the next actual integration report. R6 and phase-1 acceptance
@@ -448,6 +483,9 @@ round, not another design-only checkpoint or an OAuth implementation push.
 
 Round 2's final handoff was `7accf20c`, with all ten exact-head CI jobs passing in run 43010264601.
 The actual second report above completes that round's observation task; it does not complete R6.
+Round 3's final handoff is `95a51d3b`, with all ten jobs in CI run 43031424647 passing. Its ready
+signal was 13:50:52 UTC on 2026-11-11, event 35804468665; the actual integration report is still
+pending within the six-hour window. The fixture delivery task is complete, while R6 stays open.
 
 `f1890e8c7` adds the managed acceptance recipe and actual second-report record. `cf4756bc2` adds a
 403-line standard-library fixture, with one bounded loopback listener serving minimal Messages,

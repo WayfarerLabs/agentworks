@@ -181,12 +181,13 @@ and prior isolated native research do not substitute for these managed observati
   actual active-session/native interface without publishing a broader registration. Record actual
   native version/mode, login/discovery and credential cleanup; parser help or a rendered config is
   insufficient. Leave an unestablished combination explicit rather than counting it as a pass.
-- Normal update, withdrawal, activation removal and parent deletion retain native credentials and
-  foreign/modified entry protection. A native-added same-table secret remains an external edit.
-  Setup/inspection must not probe auth stores or endpoints. Verify no tokens/codes/refresh material
-  in captures, applied state, argv or diagnostics, and independently clean all owned users,
-  credentials, callback/listener processes, native homes and test resources. Local logout alone does
-  not prove provider-side grant revocation.
+- Artifact update, withdrawal and activation removal leave native credential stores untouched and
+  preserve foreign/modified entry protection. Parent deletion keeps its ordinary filesystem/VM
+  semantics and needs no new native-logout or reachability prerequisite. A native-added same-table
+  secret remains an external edit. Setup/inspection must not probe auth stores or endpoints. Verify
+  no tokens/codes/refresh material in captures, applied state, argv or diagnostics, and
+  independently clean all owned users, credentials, callback/listener processes, native homes and
+  test resources. Local logout alone does not prove provider-side grant revocation.
 
 The phase-2 PR still receives full gates, installed-package/guide checks and all required private
 reviews before its separate integration handoff. Only its actual report can close these managed
