@@ -306,7 +306,7 @@ points and its three optional points; one further round remains after this round
 - [ ] Re-hand off the complete pushed head as round 2 and mark ready. Wait for its actual
       independent integration report for up to six hours before another fix round.
 
-Native layout source is integrated from `550f3042` and `938e55d6`; its broader retained selection
+Native layout source is integrated in `f8b73a924` and `8fed2868f`; its broader retained selection
 passed 2,298 cases with five skips, and the final small simplification selection passed 243 with one
 skip. New cases cover real isolated profile selection across MCP add/withdraw/following reinit,
 selected-root reuse by all three adapters, mixed plugin/settings work and unknown/changed-role
@@ -315,13 +315,35 @@ typed path refusal. Its correction catches only that refusal; CAS, internal stat
 checkpoint errors still escape. Initial obsolete fixture API/count assumptions and the corrected
 failure remain in the owned proof logs.
 
-Rehome source is integrated from `151dd9ba` and its public-boundary test correction `adfb2802`. Its
+Rehome source is integrated in `50f413451` and its public-boundary test correction `352c84b6b`. Its
 85-case focused selection passed; explicit tests cover file-only and MCP-bearing records,
 empty/settings/skips/opaque records, partial Git failure, preserved bytes/hashes and persistence or
 cancellation failure. The first workspace-mount fixture run had ownership-preservation failures; the
 owned `/tmp` replay and corrected manager-error expectations passed. The lead read the source and
 measured logs and independently checked the named fixture roots absent. No filesystem authority was
-relaxed for that environment. Full combined review/gates/package acceptance remains pending.
+relaxed for that environment. Corrected combined review/gates/package acceptance remains pending.
+
+The first combined pin, `947975c56`, passed all repository gates and exact-head CI: 12,573 unit
+passes, 35 skips, full mypy across 991 files, website tests/builds and installed-package checks with
+489 matching package files. Project review found no product issue in 300 focused passes and one
+skip; Muntz's 202-pass/one-skip baseline and deletion experiments justified the two main fixes and
+three small simplifications. Generic correctness passed 240 focused cases with one skip and
+reproduced one additional defect: an unterminated profile banner could hide the new layout frame.
+
+`dbe7823f9` adds the missing frame delimiter and actual profile-output regression cases. The
+retained before-fix run had three no-newline failures and three passing newline controls. The same
+correction removes the lower helper's unused second resolver, unreachable layout-None handling and
+redundant shared-path collection. Four production setup calls now supply the already selected root;
+standalone tests use one fixture-only path adapter. Its focused selection passed 439 cases with one
+skip. These private corrections remain within round 2; all three lanes and combined source/package
+validation must be checked again at the corrected pin.
+
+The project lane separately reported an execution lapse: two selected tests invoked installed native
+plugin CLIs despite its no-native-call charter. It stopped further runtime work and recorded the
+exact test nodes and missing subprocess-transcript limit. The fixtures supplied no provider
+credentials and used owned homes with blocked proxy traffic. The lead read the report and verified
+the named fixture/environment/cache paths absent. Follow-up review excludes those native-bearing
+tests; the lapse is not recast as managed acceptance.
 
 R6 session acceptance remains open: the Windows resume-only attempt found no resumable native
 history. It proves neither genuine resume nor a native defect. The corrected handoff must request
