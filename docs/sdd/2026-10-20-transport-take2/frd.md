@@ -301,6 +301,22 @@ script source stays out of logs, the operator chose:]
 
 > Sensitive qualifies all three (Recommended)
 
+### 2026-11-04
+
+[Asked how to treat the cells the integration tester could not cover for PR A (I4 live, Debian 12
+guests, an OpenSSH 8.5 client, Proxmox, Remote Lima from macOS and a cloud driven from Windows), the
+operator chose:]
+
+> Merge; carry them forward (Recommended)
+
+[Asked how to treat six further cells PR A's evidence did not cover, three the ruling above did not
+name (I11 with a socket on stdin, local Lima from Linux, and an address change after rekey) and
+three its ticks overstated (import on local Lima from macOS, an agent-held encrypted key on any cell
+but Linux against Remote Lima, and slice 2's conformance vectors against a live cloud), the operator
+chose:]
+
+> Carry forward too (Recommended)
+
 ### Rulings carried forward
 
 These predecessor rulings still hold, quoted from the transport-improv FRD.

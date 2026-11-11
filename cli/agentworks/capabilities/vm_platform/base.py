@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import VMRow, VMStatus
     from agentworks.debian import DebianRelease
+    from agentworks.execution.trust import TrustBinding
     from agentworks.transports import ExecTransport
 
 
@@ -82,6 +83,10 @@ class ProvisionRequest:
     # Path to the operator's SSH private key when a platform's create path
     # constructs an SSH transport.
     ssh_private_key: Path | None
+    # Host-key trust for a platform whose create path reaches the VM over its
+    # public address before the VM is in the host-key store: an UNVERIFIED
+    # binding whose file the manager owns and deletes when the create ends.
+    provisioning_trust: TrustBinding
     # Domain-owned operation input: the vm-template declares the secret name
     # and the VM manager resolves its value before platform dispatch. This is
     # intentionally separate from platform-config secrets delivered by ctx.

@@ -154,7 +154,7 @@ def test_launch_secret_stays_out_of_terminal_and_cli_error_log(tmp_path, monkeyp
     def fail(*args, **kwargs):
         raise failure
 
-    def run_operation():
+    def run_operation(**_):
         getattr(manager, operation)(
             db,
             SimpleNamespace(session=SimpleNamespace(history_limit=1)),

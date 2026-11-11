@@ -24,7 +24,6 @@ from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.tmux import FingerprintProbe, ProbeStatus, TmuxServerFingerprint
 
 from .conftest import (
-    empty_secret_target,
     stub_build_registry,
     stub_session_resolvers,
     stub_vm_gates,
@@ -618,76 +617,6 @@ def test_delete_session_probes_before_confirm_prompt(tmp_path: Path, monkeypatch
         session_manager.delete_session(db, config, name="s1", yes=False, interaction=TtyInteractionPolicy.REFUSE)  # type: ignore[arg-type]
 
     assert not confirm_called[0], "confirm prompt fired before probe rejected; probe must run first"
-    db.close()
-
-
-def test_exec_agent_uses_direct_agent_ssh(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """``exec_agent`` must run through a direct-agent ``Transport`` (whose
-    SSH user IS the agent's Linux user) and must NOT shell out through
-    ``sudo --login -u``.
-    """
-    from agentworks.agents import manager as agent_mgr
-    from agentworks.transports import SSHTransport
-
-    db = _seed_db(tmp_path)
-
-    # Real SSHTransport so call_streaming is exercised end-to-end; the only
-    # thing we monkey-patch is subprocess.call (which call_streaming uses
-    # to passthrough stdio).
-    target = SSHTransport(host="100.64.0.5", user="aw-a1", identity_file=None, proxy_jump=None)
-
-    monkeypatch.setattr(
-        "agentworks.transports.agent_transport",
-        lambda vm, config, agent, **kwargs: target,
-    )
-    monkeypatch.setattr(agent_mgr, "_assert_agent_ssh_works", lambda *a, **k: None)
-    stub_vm_gates(monkeypatch)
-
-    # Phase 6.5 added eager-resolve + env composition; stub both out so the
-    # SimpleNamespace config below doesn't need vm_templates / agent_templates
-    # / secrets plumbing. This test focuses on the SSH transport, not env.
-    monkeypatch.setattr(
-        agent_mgr,
-        "_resolve_agent_direct_env_scopes",
-        lambda *a, **k: agent_mgr._AgentDirectEnvScopes(vm={}, workspace=None, agent={}),
-    )
-    # A real, empty SecretTarget: the orchestrated root registers the
-    # env target on the operation's REAL resolver, so a bare object()
-    # sentinel no longer survives the seam.
-    monkeypatch.setattr(
-        agent_mgr,
-        "_agent_direct_secret_target",
-        lambda *a, **k: empty_secret_target(),
-    )
-    monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: {})
-    monkeypatch.setattr("agentworks.env.compose_env", lambda **k: {})
-
-    called_args: list[list[str]] = []
-
-    def _spy_call(args: list[str], *_a: object, **_k: object) -> int:
-        called_args.append(args)
-        return 0
-
-    monkeypatch.setattr("subprocess.call", _spy_call)
-
-    config = SimpleNamespace(
-        operator=SimpleNamespace(ssh_private_key=None),
-    )
-
-    rc = agent_mgr.exec_agent(db, config, name="a1", command=["echo", "hi"], interaction=TtyInteractionPolicy.REFUSE)  # type: ignore[arg-type]
-    assert rc == 0
-
-    assert called_args, "subprocess.call was not invoked"
-    argv = called_args[0]
-    # The SSH destination is the agent's Linux user, NOT admin@host with
-    # `sudo -n su --login`.
-    assert any(a == "aw-a1@100.64.0.5" for a in argv), f"argv was: {argv}"
-    # No remnants of the old admin+sudo path.
-    assert not any("sudo" in a for a in argv), f"unexpected sudo in argv: {argv}"
-    assert not any("su --login" in a or "su -" in a for a in argv), f"unexpected su in argv: {argv}"
-    # The remote command is wrapped in $SHELL -lc to source the agent's env.
-    assert any("$SHELL -lc" in a for a in argv), f"missing login shell wrapper: {argv}"
-
     db.close()
 
 

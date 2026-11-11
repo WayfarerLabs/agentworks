@@ -20,9 +20,12 @@ from typing import TYPE_CHECKING, cast
 import pytest
 
 from agentworks.db import VMStatus
+from agentworks.execution import trust
+from agentworks.execution.errors import TrustMissing
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
+from tests.conftest import seed_vm_trust
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator
@@ -34,6 +37,7 @@ if TYPE_CHECKING:
 def _seed_vm(db: Database, *, operator_stopped: bool = False) -> None:
     db.insert_vm("box", site="proxmox", hostname="box")
     db.update_vm_tailscale("box", "100.64.0.9")
+    seed_vm_trust("box")
     if operator_stopped:
         db.set_operator_stopped("box", True)
 
@@ -119,6 +123,28 @@ def test_start_stopped_vm_resolves_once_starts_and_clears_flag(
     assert row is not None and row.operator_stopped is False
     assert row.last_started_at is not None
     assert not any("already running" in m for m in captured_output.info)
+
+
+def test_start_without_a_host_key_record_raises_before_resolving_or_touching_the_vm(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The reconnect check after a start could only fail for want of a record,
+    and its failure would send the repair path to spend a Tailscale auth key."""
+    config = make_config()
+    _seed_vm(db, operator_stopped=True)
+    trust.remove("box")
+    events = _fake_power(monkeypatch, VMStatus.STOPPED)
+
+    with pytest.raises(TrustMissing):
+        vm_manager.start_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert resolve_counter == []
+    assert events == []
+    row = db.get_vm("box")
+    assert row is not None and row.operator_stopped is True
 
 
 def test_start_running_vm_short_circuits_but_still_clears_flag(

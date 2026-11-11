@@ -162,6 +162,15 @@ def _emit_group_completions(lines: list[str], spec: CommandSpec) -> None:
     lines.append("            esac")
 
 
+def _emit_file_completion(lines: list[str], indent: str) -> None:
+    """Emit native file completion that keeps names with spaces intact."""
+    lines.append(f"{indent}COMPREPLY=()")
+    lines.append(f"{indent}while IFS= read -r candidate; do")
+    lines.append(f'{indent}    COMPREPLY+=("$candidate")')
+    lines.append(f'{indent}done < <(compgen -f -- "$cur")')
+    lines.append(f"{indent}compopt -o filenames 2>/dev/null || true")
+
+
 def _emit_leaf_completions(lines: list[str], spec: CommandSpec, token_offset: int | str) -> None:
     """Emit completions for a leaf command."""
     indent = "            " if token_offset == 2 else "                    "
@@ -179,6 +188,8 @@ def _emit_leaf_completions(lines: list[str], spec: CommandSpec, token_offset: in
             if param.choices or param.suggestions:
                 choices_str = " ".join(param.choices or param.suggestions or ())
                 lines.append(f'{indent}        COMPREPLY=($(compgen -W "{choices_str}" -- "$cur"))')
+            elif param.dynamic_completer == "files":
+                _emit_file_completion(lines, f"{indent}        ")
             elif param.dynamic_completer and param.dynamic_completer in DYNAMIC_SNIPPETS:
                 snippet = DYNAMIC_SNIPPETS[param.dynamic_completer]
                 lines.append(f'{indent}        COMPREPLY=($(compgen -W "{snippet}" -- "$cur"))')
@@ -236,11 +247,7 @@ def _emit_leaf_completions(lines: list[str], spec: CommandSpec, token_offset: in
         if words:
             lines.append(f'{indent}if [[ $positional_count {cmp_op} {i} && "$cur" != -* ]]; then')
             if param.dynamic_completer == "files":
-                lines.append(f"{indent}    COMPREPLY=()")
-                lines.append(f"{indent}    while IFS= read -r candidate; do")
-                lines.append(f'{indent}        COMPREPLY+=("$candidate")')
-                lines.append(f'{indent}    done < <(compgen -f -- "$cur")')
-                lines.append(f"{indent}    compopt -o filenames 2>/dev/null || true")
+                _emit_file_completion(lines, f"{indent}    ")
             else:
                 lines.append(f'{indent}    COMPREPLY=($(compgen -W "{words}" -- "$cur"))')
             lines.append(f"{indent}    return")

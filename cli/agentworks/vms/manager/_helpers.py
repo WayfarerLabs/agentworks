@@ -278,7 +278,9 @@ def _lookup_or_synthesize_secret(registry: Registry, name: str) -> SecretDecl:
 
 def _query_live_resources(db: Database, vm: VMRow, config: Config) -> dict[str, str] | None:
     """Query live resource usage from a VM over SSH."""
+    from agentworks import output
     from agentworks.errors import AgentworksError
+    from agentworks.execution.errors import TrustMissing
     from agentworks.transports import transport
 
     try:
@@ -286,6 +288,10 @@ def _query_live_resources(db: Database, vm: VMRow, config: Config) -> dict[str, 
 
         require_vm_ssh_boundary(db, config, vm)
         target = transport(vm, config)
+    except TrustMissing as exc:
+        # Describe leaves live resources out rather than refusing, but says why.
+        output.warn(f"{exc}. {exc.hint}")
+        return None
     except AgentworksError:
         return None
     cmd = (

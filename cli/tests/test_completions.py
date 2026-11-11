@@ -328,7 +328,8 @@ print -r -- __READY__
                         output += os.read(master, 65536)
                 assert b"__READY__" in output
                 os.write(master, line.encode() + b"\t")
-                deadline = time.monotonic() + 1
+                # Generous: CI runs this beside other workers, and the wait ends as soon as zsh responds.
+                deadline = time.monotonic() + 5
                 while not (group_capture.exists() or topic_capture.exists()) and time.monotonic() < deadline:
                     time.sleep(0.02)
             finally:
@@ -460,6 +461,22 @@ function Complete([string]$line) {{
             assert "restore" in script
             assert "--force" in script
             assert "--yes" in script
+
+    @requires_posix_shell
+    def test_generated_bash_preserves_spaces_in_known_hosts_option_completion(self, tmp_path: Path) -> None:
+        # Skips on Windows: runs the generated bash completion under a real bash.
+        filename = "known hosts with spaces"
+        (tmp_path / filename).touch()
+        invocation = f"""{generate("bash")}
+COMP_WORDS=(agw vm import-host-keys --known-hosts known)
+COMP_CWORD=4
+_agentworks
+printf '%s\\0' "${{COMPREPLY[@]}}"
+"""
+
+        completed = subprocess.run(["bash"], cwd=tmp_path, input=invocation.encode(), capture_output=True, check=True)
+
+        assert completed.stdout.split(b"\0") == [filename.encode(), b""]
 
     @requires_posix_shell
     def test_generated_bash_preserves_spaces_in_restore_file_completion(self, tmp_path: Path) -> None:

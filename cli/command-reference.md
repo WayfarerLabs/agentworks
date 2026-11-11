@@ -567,10 +567,12 @@ WAL mode, and takes an exclusive SQLite writer lock. The database-use lock remai
 installation so another Agentworks process cannot recreate WAL state in the replacement gap. Restore
 refuses after a bounded wait when other database users prevent that safe replacement boundary.
 
-Restore does not create an implicit backup of the live destination and does not migrate the restored
-schema. Run `agw database backup` first if you want an additional recovery point before replacement.
-Restore a schema-compatible backup before running an older Agentworks release against state created
-by a newer release.
+Restore does not touch the VM host-key store in `~/.config/agentworks/known_hosts/`, which is
+outside the database; copy that directory along with the backup when restoring on another
+workstation (see [Host keys](#host-keys)). Restore does not create an implicit backup of the live
+destination and does not migrate the restored schema. Run `agw database backup` first if you want an
+additional recovery point before replacement. Restore a schema-compatible backup before running an
+older Agentworks release against state created by a newer release.
 
 ### Secrets
 
@@ -629,23 +631,24 @@ just a vm-site.
 > true long-lived VMs (e.g. Lima, Azure, Proxmox, etc.) if you need a VM that survives independent
 > of your workstation.
 
-| Command                                             | Description                                                   |
-| --------------------------------------------------- | ------------------------------------------------------------- |
-| `agw vm create <name>`                              | Create a new VM (provision + initialize)                      |
-| `agw vm list`                                       | List configured VMs                                           |
-| `agw vm describe <name>`                            | Show VM details, workspaces, and event log                    |
-| `agw vm verify-connection <name>`                   | Test the canonical admin connection without starting the VM   |
-| `agw vm shell <name> [--workspace <ws>]`            | Admin shell on a VM (optionally rooted in a workspace)        |
-| `agw vm exec <name> [--workspace <ws>] -- <cmd...>` | Run a one-shot command as admin (optionally from a workspace) |
-| `agw vm start <name>`                               | Start a stopped VM and clear its manual-stop intent           |
-| `agw vm stop <name>`                                | Stop a VM and keep it stopped (no auto-start)                 |
-| `agw vm reinit <name>`                              | Re-run initialization on a provisioned VM                     |
-| `agw vm confirm-release <name>`                     | Observe and explicitly record the live Debian release         |
-| `agw vm delete <name>`                              | Delete a VM (with confirmation)                               |
-| `agw vm backup <name>`                              | Back up a VM: metadata, agents, workspaces, and files         |
-| `agw vm rekey <name>`                               | Assign a new Tailscale auth key to a VM (logout + rejoin)     |
-| `agw vm port-forward <name> <ports...>`             | Forward local port(s) to a VM (like kubectl port-forward)     |
-| `agw vm logs <name>`                                | Show SSH logs for a VM                                        |
+| Command                                             | Description                                                    |
+| --------------------------------------------------- | -------------------------------------------------------------- |
+| `agw vm create <name>`                              | Create a new VM (provision + initialize)                       |
+| `agw vm list`                                       | List configured VMs                                            |
+| `agw vm describe <name>`                            | Show VM details, workspaces, and event log                     |
+| `agw vm verify-connection <name>`                   | Test the canonical admin connection without starting the VM    |
+| `agw vm shell <name> [--workspace <ws>]`            | Admin shell on a VM (optionally rooted in a workspace)         |
+| `agw vm exec <name> [--workspace <ws>] -- <cmd...>` | Run a one-shot command as admin (optionally from a workspace)  |
+| `agw vm start <name>`                               | Start a stopped VM and clear its manual-stop intent            |
+| `agw vm stop <name>`                                | Stop a VM and keep it stopped (no auto-start)                  |
+| `agw vm reinit <name>`                              | Re-run initialization on a provisioned VM                      |
+| `agw vm confirm-release <name>`                     | Observe and explicitly record the live Debian release          |
+| `agw vm delete <name>`                              | Delete a VM (with confirmation)                                |
+| `agw vm backup <name>`                              | Back up a VM: metadata, agents, workspaces, and files          |
+| `agw vm rekey <name>`                               | Assign a new Tailscale auth key to a VM (logout + rejoin)      |
+| `agw vm port-forward <name> <ports...>`             | Forward local port(s) to a VM (like kubectl port-forward)      |
+| `agw vm logs <name>`                                | Show SSH logs for a VM                                         |
+| `agw vm import-host-keys (--all \| <name>...)`      | Import VM host keys from `known_hosts` into the host-key store |
 
 `vm rekey <name>` resolves the template's auth-key secret by default. Use `--secret <name>` to
 select another declared secret for this operation, or `--prompt` to enter the replacement key
@@ -692,7 +695,10 @@ ask again. Non-interactive runs never prompt (a later interactive create still a
 
 `vm reinit` re-runs the initialization phase using the current config without reprovisioning the VM.
 Changes to config (new packages, different install commands, etc.) are picked up automatically. It
-consumes both stored VM and admin instance specs but cannot change or clear either one.
+consumes both stored VM and admin instance specs but cannot change or clear either one. It warns,
+without failing, when `/etc/environment`, `/etc/security/pam_env.conf` or the admin's
+`~/.pam_environment` (only where sshd reads it, as on Debian 12) holds settings, because Agentworks
+does not apply pam_env settings to the commands it runs.
 
 VMs created before SSH lifecycle-evidence tracking have no synthesized identity evidence. Ordinary
 canonical SSH commands refuse that unknown state until one successful `agw vm reinit <name>` proves
@@ -737,6 +743,20 @@ directory on this VM. The workspace's template env joins the env chain (between 
 into the workspace; the exec variant runs the command from the workspace directory. A workspace that
 lives on a different VM is rejected with a `ValidationError` before any SSH work.
 
+`vm shell`, `vm exec`, `vm verify-connection`, `vm port-forward`, `agent shell` and `agent exec`
+connect with the OpenSSH client on the workstation, version 8.5 or newer (`vm shell --platform` uses
+the platform's own path instead, and needs neither the client nor `python3`). Agentworks uses the
+first `ssh` on `PATH`; on Windows it uses only the native Win32-OpenSSH under `System32\OpenSSH` or
+`Program Files\OpenSSH`, never the `ssh` bundled with Git for Windows. `agw doctor` shows which
+client was resolved, and an unsupported one is refused before anything else runs. These commands run
+`ssh -F none` in batch mode, so `~/.ssh/config` does not apply and an encrypted private key must be
+loaded in the SSH agent. The VM needs `python3`; a VM without it is reported as unable to run
+Agentworks requests, and `agw vm reinit <name>` installs it. A command that is not found exits 127,
+one that cannot run exits 126, and a missing workspace directory exits 125.
+
+`vm port-forward` runs until interrupted and exits 0 when stopped with Ctrl-C or `SIGTERM`. It exits
+non-zero when a forward cannot be set up, such as a busy local port.
+
 In both exec commands the `--` separator is only required when the remote command's first token
 starts with `-` (it stops Agentworks from reading the token as its own option); without it, a
 dash-led first token is rejected with a hint naming the recoveries. Bare commands need no `--`.
@@ -759,6 +779,34 @@ the config's `[operator]` section to a list of IPv4 addresses and/or CIDRs to al
 detection fails entirely, those entries are used alone. Proxmox QGA supplies native non-interactive
 execution, but it does not provide the interactive terminal required by this flag. Use the Proxmox
 web UI's serial console (`VM > Console` in the Proxmox VE web UI) as the equivalent escape hatch.
+
+#### Host keys
+
+Agentworks verifies every connection to a VM against a per-VM host-key store, never against your
+`~/.ssh/known_hosts`. The store is one file per VM under `~/.config/agentworks/known_hosts/`, keyed
+by VM name, so a VM keeps its trust across tailnet address changes. `vm create` records the key on
+its first connection and nowhere else; `vm delete` removes the file. A command that reaches a VM
+over SSH refuses a VM with no recorded key, with a hint naming the import, rather than trusting it
+on first use; describe and listing commands warn per VM and carry on. `vm delete` works without a
+record.
+
+`agw vm import-host-keys (--all | <name>...) [--known-hosts <path>]` copies keys you already trust
+into the store. It asks OpenSSH's own `ssh-keygen -F` which keys `~/.ssh/known_hosts` (or the file
+named by `--known-hosts`) holds for each VM's tailnet address, so the answer is exactly what `ssh`
+would have trusted: wildcards, negation, comma lists, hashed entries and bracketed ports all behave
+as OpenSSH defines them. It runs the `ssh-keygen` beside the OpenSSH client agw connects with, never
+one found on `PATH`, so it needs that supported client. The source file is only read. A VM that
+already has a record is never changed; the report says `already current` or
+`conflicts with the stored key`. A matching `@cert-authority` or `@revoked` line blocks the import
+for that VM (`trust marker present`).
+
+Each VM gets one report line: `imported (N keys)`, `already current`, `no matching entry`,
+`trust marker present`, `conflicts with the stored key`, or `no tailnet address`. The command exits
+non-zero while any selected VM ends without a record, with `--all` as well.
+
+For a VM with no matching entry, verify its host key fingerprints against its console or provider,
+gather the keys with `ssh-keyscan` into a file, and pass that file with `--known-hosts`. The scanned
+file is trusted as given, so check the fingerprints first.
 
 ### Workspaces
 
@@ -823,9 +871,9 @@ changes the final instance layer under the rules in [Instance specs](#instance-s
 
 `agent shell` and `agent exec` both SSH directly as the agent's Linux user. `agent shell` opens an
 interactive login shell (sources the agent's profile). `agent exec` runs a single command
-non-interactively but still wraps it in the agent's login shell so the agent's `PATH` (mise shims,
-`~/.local/bin`, etc.) is in scope. Useful for scripted invocations like
-`agw agent exec myagent -- claude -p "..."`.
+non-interactively but still runs it in the agent's login shell so the agent's `PATH` (mise shims,
+`~/.local/bin`, etc.) is in scope. A template `shell` is one of `sh`, `dash`, `bash` or `zsh`.
+Useful for scripted invocations like `agw agent exec myagent -- claude -p "..."`.
 
 Both accept `--workspace <ws>` to root the session in a workspace the agent has access to. The
 workspace's template env joins the env chain (between vm and agent), and `AGENTWORKS_WORKSPACE` /
@@ -859,6 +907,12 @@ prefixes are configurable via `operator.ssh_host_prefix` (default `awvm--`) and
 Entries are rebuilt declaratively from the database on every agent / VM lifecycle operation, so a
 fresh `agw agent create` or `agw vm delete` keeps the file in sync without manual intervention. Run
 `agw config sync-ssh-config` to force a rebuild.
+
+Entries for a VM that has a host-key record also carry `HostKeyAlias`, `UserKnownHostsFile` (the
+VM's store file) and `StrictHostKeyChecking yes`, plus `UpdateHostKeys no` and `HashKnownHosts no`
+so your own `ssh` neither writes to the store nor hashes it. Entries for a VM without a record are
+unchanged, so your own `ssh` keeps working until you run `agw vm import-host-keys`. See
+[Host keys](#host-keys).
 
 ### Sessions
 

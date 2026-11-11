@@ -12,27 +12,25 @@ from agentworks.cli import app
 from agentworks.config import Config
 from agentworks.db import Database
 from agentworks.errors import ConnectivityError, NotFoundError, StateError
+from agentworks.execution.access import Admin
+from agentworks.execution.errors import ClientUnsupported
+from agentworks.execution.requests import Command
 from agentworks.resources.registry import Registry
 from agentworks.vms.manager.verification import verify_vm_connection
+from tests.vm_access_support import AccessRecorder
 
 
-def test_verify_connection_uses_one_canonical_no_op(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_verify_connection_uses_one_canonical_no_op(
+    monkeypatch: pytest.MonkeyPatch, vm_access_recorder: AccessRecorder
+) -> None:
     vm = SimpleNamespace(name="worker", site="local", debian_release=None)
     calls: list[tuple[object, ...]] = []
-
-    class Target:
-        def run(self, command: str, **kwargs: object) -> None:
-            calls.append((command, kwargs))
-
-        def describe(self) -> str:
-            return "ssh:100.64.0.2"
 
     monkeypatch.setattr("agentworks.vms.sites.resolve_site", lambda site, registry: calls.append(("site", site)))
     monkeypatch.setattr(
         "agentworks.vms.manager.boundary.require_vm_ssh_boundary",
         lambda db, config, candidate: calls.append(("identity", candidate.name)),
     )
-    monkeypatch.setattr("agentworks.transports.transport", lambda candidate, config: Target())
 
     result = verify_vm_connection(
         SimpleNamespace(get_vm=lambda name: vm),  # type: ignore[arg-type]
@@ -41,11 +39,10 @@ def test_verify_connection_uses_one_canonical_no_op(monkeypatch: pytest.MonkeyPa
         "worker",
     )
 
-    assert calls == [
-        ("site", "local"),
-        ("identity", "worker"),
-        ("true", {"sudo": False, "tty": False, "env": None, "timeout": 10}),
-    ]
+    assert calls == [("site", "local"), ("identity", "worker")]
+    (call,) = vm_access_recorder.calls
+    assert (call.identity, call.operation, call.request) == (Admin(), "run", Command(("true",), deadline=10))
+    assert call.options == {"check": True}
     assert not hasattr(result, "connected")
     assert result.transport == "ssh"
 
@@ -61,6 +58,7 @@ def test_verify_connection_uses_one_canonical_no_op(monkeypatch: pytest.MonkeyPa
 )
 def test_verify_connection_surfaces_failure_without_activation_or_mutation(
     monkeypatch: pytest.MonkeyPatch,
+    vm_access_recorder: AccessRecorder,
     failure: Exception,
 ) -> None:
     vm = SimpleNamespace(name="worker", site="local", debian_release=None)
@@ -75,14 +73,6 @@ def test_verify_connection_surfaces_failure_without_activation_or_mutation(
             if name.startswith(("add_", "update_", "delete_", "set_", "record_")):
                 raise AssertionError(f"database mutation attempted: {name}")
             raise AttributeError(name)
-
-    class FailingTarget:
-        def run(self, command: str, **kwargs: object) -> None:
-            calls.append(("run", command, kwargs))
-            raise failure
-
-        def describe(self) -> str:
-            raise AssertionError("failed transport must not be described")
 
     forbidden = {
         "gated_vm_boundary",
@@ -106,7 +96,7 @@ def test_verify_connection_surfaces_failure_without_activation_or_mutation(
         "agentworks.vms.manager.boundary.require_vm_ssh_boundary",
         lambda db, config, candidate: calls.append(("identity", candidate.name)),
     )
-    monkeypatch.setattr("agentworks.transports.transport", lambda candidate, config: FailingTarget())
+    vm_access_recorder.access(Admin()).run_outcomes = [failure]
 
     with pytest.raises(type(failure), match=str(failure)):
         verify_vm_connection(
@@ -116,15 +106,11 @@ def test_verify_connection_surfaces_failure_without_activation_or_mutation(
             "worker",
         )
 
-    assert calls == [
-        ("get_vm", "worker"),
-        ("site", "local"),
-        ("identity", "worker"),
-        ("run", "true", {"sudo": False, "tty": False, "env": None, "timeout": 10}),
-    ]
+    assert calls == [("get_vm", "worker"), ("site", "local"), ("identity", "worker")]
+    assert vm_access_recorder.operations == [("admin", "run")]
 
 
-def test_verify_connection_missing_vm() -> None:
+def test_verify_connection_missing_vm(vm_access_recorder: AccessRecorder) -> None:
     with pytest.raises(NotFoundError, match="VM 'missing' not found"):
         verify_vm_connection(
             cast("Database", SimpleNamespace(get_vm=lambda name: None)),
@@ -136,6 +122,7 @@ def test_verify_connection_missing_vm() -> None:
 
 def test_verify_connection_refuses_identity_state_before_transport(
     monkeypatch: pytest.MonkeyPatch,
+    vm_access_recorder: AccessRecorder,
 ) -> None:
     vm = SimpleNamespace(name="worker", site="local", debian_release=None)
     monkeypatch.setattr("agentworks.vms.sites.resolve_site", lambda site, registry: None)
@@ -144,14 +131,33 @@ def test_verify_connection_refuses_identity_state_before_transport(
         raise StateError("SSH identity drift")
 
     monkeypatch.setattr("agentworks.vms.manager.boundary.require_vm_ssh_boundary", refuse)
-    monkeypatch.setattr(
-        "agentworks.transports.transport",
-        lambda *args, **kwargs: pytest.fail("transport constructed before identity refusal"),
-    )
 
     with pytest.raises(StateError):
         verify_vm_connection(
             cast("Database", SimpleNamespace(get_vm=lambda name: vm)),
+            cast("Config", SimpleNamespace()),
+            cast("Registry", SimpleNamespace()),
+            "worker",
+        )
+
+    assert vm_access_recorder.built == []  # no access object was built after the refusal
+
+
+def test_verify_connection_refuses_an_unsupported_client_before_reading_the_database(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unsupported() -> None:
+        raise ClientUnsupported("no client")
+
+    monkeypatch.setattr("agentworks.execution.resolve_ssh", unsupported)
+
+    class UntouchableDatabase:
+        def __getattr__(self, name: str) -> object:
+            raise AssertionError(f"database read before the client was resolved: {name}")
+
+    with pytest.raises(ClientUnsupported):
+        verify_vm_connection(
+            cast("Database", UntouchableDatabase()),
             cast("Config", SimpleNamespace()),
             cast("Registry", SimpleNamespace()),
             "worker",

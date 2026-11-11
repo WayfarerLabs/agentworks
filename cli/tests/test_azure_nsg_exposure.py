@@ -52,6 +52,7 @@ from tests._azure_platform_support import (
     _install_fakes,
     _Poller,
 )
+from tests.conftest import provisioning_trust_for_tests
 
 if TYPE_CHECKING:
     from agentworks.db import VMRow
@@ -182,6 +183,7 @@ class TestCreate:
             admin_username="agentworks",
             ssh_public_key="ssh-ed25519 AAAA test",
             ssh_private_key=None,
+            provisioning_trust=provisioning_trust_for_tests("vm1"),
             tailscale_auth_key="tskey-test",
             progress=MagicMock(),
             # The vm-template layer's resolved defaults, which is the only

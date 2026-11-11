@@ -12,6 +12,7 @@ import agentworks.native_files as native
 from agentworks.artifacts.application import ArtifactFile, OwnedArtifactFile
 from agentworks.artifacts.publication import publish_artifacts
 from agentworks.errors import ExternalError, StateError
+from agentworks.execution.trust import HOST_TRUST
 from agentworks.transports import Transport
 from tests.native_setup_fixtures import LocalFixtureTransport
 
@@ -286,7 +287,7 @@ def test_first_party_ssh_python_probe_accepts_startup_output_without_a_newline(t
         return execute(["/bin/bash", "-c", args[-1]], cwd=target.home, env=target.environment, **kwargs)
 
     monkeypatch.setattr("agentworks.transports.ssh.subprocess.run", ssh_locally)
-    transport = SSHTransport("fixture.invalid", user="fixture", login_shell=login_shell, retries=1)
+    transport = SSHTransport("fixture.invalid", user="fixture", trust=HOST_TRUST, login_shell=login_shell, retries=1)
     assert transport.run("command -v python3 >/dev/null", check=False, discard_output=True).ok
     native.require_python3(transport)
     assert len(calls) == 2
