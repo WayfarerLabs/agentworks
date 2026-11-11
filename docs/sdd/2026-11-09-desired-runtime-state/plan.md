@@ -391,3 +391,11 @@ existing public restart tests cover file and ownership retention; no duplicate a
 was added. Focused composition/regression verification passed 174 cases, including all remaining
 failures from the preceding impacted run. Root full-suite and independent review results are still
 required before the ready handoff.
+
+All three private lanes were clean at `67b7b0530`: project review passed 245 focused tests,
+complexity review passed 151, and generic correctness/security review passed 251 plus four isolated
+checks. The root full run then found six missing-trust fixtures among 12,359 collected cases; 12,319
+passed and 34 skipped. Test-only correction `03939d126` seeds actual isolated host-key records in
+three retained fixture files, preserving every behavioral assertion. Their 30 targeted tests passed.
+The full rerun and exact-head CI remain required. The retained VM guide now names the guest
+SSH/activation prerequisite precisely, preserving provider-only and pure-intent exceptions.

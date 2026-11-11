@@ -105,3 +105,12 @@ The operator-directed current-main integration follows the completed SDD-only cl
 execution, artifact delivery and compatibility code. The reports above remain evidence about their
 original tested heads. Fresh combined-head gates, independent review and a completed separate
 integration report are pending; no new native pass or unchanged-artifact equivalence is claimed.
+
+Independent verification also reproduced an incoming-main host-key import metadata race:
+`vms/manager/host_keys.py` retains a VM row/address, then writes trust by name without a family
+guard or fresh identity check. A controller/SQLite proof used public VM deletion and replacement
+through `Database.insert_vm`, after which import wrote the old key for the replacement. It does not
+establish a full public-create/native campaign or a compromised ready VM. Importer and trust store
+code are byte-identical to main `834eb7156`, and the conflict resolution introduces no new caller.
+This is recorded for the SSH trust/import owner as an upstream discovery outside this follow-up; no
+production fix or broader trust-import contract change is included.
