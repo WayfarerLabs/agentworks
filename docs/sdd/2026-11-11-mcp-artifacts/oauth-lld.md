@@ -93,6 +93,12 @@ translation is not established. Do not drop unsupported explicit options and cal
 defer the whole connection with a useful reason. Shell continues to publish canonical data without
 authenticating or executing it.
 
+For Grok, an explicit empty object needs only the ordinary URL registration: native HTTP OAuth
+defaults remain native, with no invented configuration field. Explicit client ID, callback port or
+scope options remain unhandled until a faithful native translation is established. Defer those
+connections per entry while preserving prior claims/native bytes and allowing independent entries to
+apply. This is a registration disposition, not evidence that a particular native login succeeds.
+
 Current native mechanisms determine which facet can faithfully apply a definition. VM normally
 defers native MCP to user; inactive VM still defaults to user and inactive user/workspace pass to
 session. An unsupported terminal session item warns. No scope performs login on behalf of unknown
