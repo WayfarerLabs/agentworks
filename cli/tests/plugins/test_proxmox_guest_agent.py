@@ -85,7 +85,7 @@ def test_the_script_is_the_input_of_one_bash_s_and_the_streams_come_back() -> No
 
 
 def test_the_deadline_returns_empty_streams_without_dispatching_again(monkeypatch: pytest.MonkeyPatch) -> None:
-    clock = iter([0.0, 0.0, 0.0, 0.0, 100.0, 100.0])  # the deadline, the agent wait, the ping, then polls
+    clock = iter([0.0, 0.0, 0.0, 0.0, 100.0, 100.0])  # the deadline, the agent wait, the ping, the dispatch, then polls
     monkeypatch.setattr("agentworks.plugins.proxmox.guest_agent.time.monotonic", lambda: next(clock))
     api = FakeAPI([])
 

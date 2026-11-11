@@ -210,8 +210,33 @@ def test_a_rekey_the_channel_could_not_dispatch_is_retried_with_the_same_selecti
     assert "agw vm rekey box --secret replacement-key --wait-for-share" in (caught.value.hint or "")
 
 
-def test_the_repeated_rekey_names_a_prompted_selection() -> None:
+@pytest.mark.parametrize(
+    "selection",
+    [
+        {"secret": None, "prompt": False, "wait_for_share": False},
+        {"secret": "replacement-key", "prompt": False, "wait_for_share": True},
+        {"secret": None, "prompt": True, "wait_for_share": True},
+    ],
+)
+def test_the_repeated_rekey_parses_back_to_the_same_selection(db, make_config, monkeypatch, selection) -> None:
+    """The hint is a command the CLI accepts, so a renamed option cannot leave it naming one that no longer exists."""
+    import shlex
+
+    from typer.testing import CliRunner
+
+    from agentworks.cli.commands.vm import vm_app
     from agentworks.vms.manager.power import _rekey_command
 
-    assert _rekey_command("box", secret=None, prompt=True, wait_for_share=False) == "agw vm rekey box --prompt"
-    assert _rekey_command("box", secret=None, prompt=False, wait_for_share=False) == "agw vm rekey box"
+    config = make_config()
+    monkeypatch.setattr("agentworks.config.load_config", lambda: config)
+    monkeypatch.setattr("agentworks.cli.commands.vm.get_db", lambda: db)
+    calls = []
+    monkeypatch.setattr(manager, "rekey_vm", lambda *args, **kwargs: calls.append((args, kwargs)))
+    words = shlex.split(_rekey_command("box", **selection))
+
+    assert words[:3] == ["agw", "vm", "rekey"]
+    result = CliRunner().invoke(vm_app, words[2:])
+    assert result.exit_code == 0, result.exception
+    ((args, kwargs),) = calls
+    assert args[2] == "box"
+    assert {key: kwargs[key] for key in selection} == selection

@@ -9,9 +9,9 @@ one ``exec`` dispatches the script as ``input-data`` (limited to 65,536
 characters), unless the pinging left none of the deadline, then
 ``exec-status`` is polled every two seconds until the guest reports an exit
 or the deadline passes. Each request's wait is bounded by what remains of
-the deadline, at most the API's ``REQUEST_TIMEOUT_SECONDS``. A poll carries only the PID, so
-a failed one is asked again, since one missed answer says nothing of the
-script; polls that keep failing for ``STATUS_RETRY_SECONDS`` give up (a
+the deadline, at most the API's ``REQUEST_TIMEOUT_SECONDS``. A poll carries
+only the PID, so a failed one is asked again, since one missed answer says
+nothing of the script; polls that keep failing for ``STATUS_RETRY_SECONDS`` give up (a
 guest agent that restarted mid-script no longer knows the PID). QGA has no
 cancellation endpoint: at the deadline the result is empty, so the outcome
 is unknown, and nothing is dispatched again. No message holds the script,
