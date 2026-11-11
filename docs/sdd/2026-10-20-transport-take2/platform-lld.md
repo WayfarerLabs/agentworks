@@ -490,13 +490,14 @@ controlling pseudo-terminal (`tests/capabilities/test_wsl2_root_channel.py`).
 
 ### Proxmox
 
-`guest_agent.run_as_root(api, node, vmid, script, deadline) -> RawRun` is written fresh from the
-dispatch-and-poll half of `plugins/proxmox/transport.py:51-137`. First it pings the guest agent
-(`guest_agent_ping`, `POST .../agent/ping`) every two seconds until it answers, since a VM that has
-just started (recover starts a stopped one with no wait) has no agent running yet. A ping carries no
-script, so asking again is safe; a token rejection raises `TokenRejectedError` at once, any other
-`ProxmoxAPIError` means not yet (anything else the client raises is a bug and propagates), and no
-answer within `AGENT_WAIT_SECONDS` (120 s) or the deadline, whichever comes first, raises
+`guest_agent.run_as_root(api, node, vmid, script, deadline) -> RawRun`, a duration wrapper over
+`run_as_root_until(..., expires)`, which the platform calls with its own expiry, is written fresh
+from the dispatch-and-poll half of `plugins/proxmox/transport.py:51-137`. First it pings the guest
+agent (`guest_agent_ping`, `POST .../agent/ping`) every two seconds until it answers, since a VM
+that has just started (recover starts a stopped one with no wait) has no agent running yet. A ping
+carries no script, so asking again is safe; a token rejection raises `TokenRejectedError` at once,
+any other `ProxmoxAPIError` means not yet (anything else the client raises is a bug and propagates),
+and no answer within `AGENT_WAIT_SECONDS` (120 s) or the deadline, whichever comes first, raises
 `ChannelUnreachable` saying no script was dispatched, so a VM with no agent fails in about two
 minutes rather than after the repair's 600. Then, unless the pinging left none of the deadline
 (which raises `ChannelUnreachable` the same way), one `guest_agent_exec` of `["/bin/bash", "-s"]`
@@ -511,22 +512,22 @@ than enforced: the API is the site's own server, and a whole-response bound woul
 abandoning a worker thread at the deadline. A poll carries only the PID, so a failed one is asked
 again at the next interval; only polls that keep failing for `STATUS_RETRY_SECONDS` (30 s) give up,
 as they do for an agent that restarted and lost the PID. Dispatch and status failures raise
-`ConnectivityError` with no stdin in the message (`transport.py:69-123`), except an HTTP 401 or 403,
-which raises `TokenRejectedError` at once; a status failure of either kind says the script may still
-be running, and a status failure from the API adds the API's own error text (an agent that restarted
-mid-script answers `Agent error: PID <pid> does not exist`), since that request carries only the
-PID. A dispatch failure adds none, since its request carries the script. A `_TruncatedQGAOutput`
-report raises `ConnectivityError` saying the script exited with its output cut short. No failure
-chains the API error, whose request quotes the script. `create` waits for cloud-init through it
-(`cloud-init status --wait --long`, the cloud bootstrap's readiness command, 420 s, which covers the
-agent ping's 120 and cloud-init's 300, status 2 a warning, and any other failure quoting
-cloud-init's last lines as the cloud bootstrap does; a channel failure is asked again within that
-budget, since cloud-init can restart the guest agent and the command changes nothing), with no
-separate wait for a guest IP, then runs the bootstrap through it with `run_bootstrap` and today's
-600-second deadline (`platform.py:600`), then joins and settles; `guest_agent_exec_wait` and
-`guest_agent_network` leave the API client. `out-data` and `err-data` are encoded with
-`errors="replace"`, since the API's JSON can carry a lone surrogate, and `_request` types
-`http.client.HTTPException` as `ProxmoxAPIError` like any transport failure.
+`ConnectivityError` with no stdin in the message (`guest_agent.py:84-118`), except an HTTP 401 or
+403, which raises `TokenRejectedError` at once; a status failure of either kind says the script may
+still be running, and a status failure from the API adds the API's own error text (an agent that
+restarted mid-script answers `Agent error: PID <pid> does not exist`), since that request carries
+only the PID. A dispatch failure adds none, since its request carries the script. A
+`_TruncatedQGAOutput` report raises `ConnectivityError` saying the script exited with its output cut
+short. No failure chains the API error, whose request quotes the script. `create` waits for
+cloud-init through it (`cloud-init status --wait --long`, the cloud bootstrap's readiness command,
+420 s, which covers the agent ping's 120 and cloud-init's 300, status 2 a warning, and any other
+failure quoting cloud-init's last lines as the cloud bootstrap does; a channel failure is asked
+again within that budget, since cloud-init can restart the guest agent and the command changes
+nothing), with no separate wait for a guest IP, then runs the bootstrap through it with
+`run_bootstrap` and today's 600-second deadline (`platform.py:600`), then joins and settles;
+`guest_agent_exec_wait` and `guest_agent_network` leave the API client. `out-data` and `err-data`
+are encoded with `errors="replace"`, since the API's JSON can carry a lone surrogate, and `_request`
+types `http.client.HTTPException` as `ProxmoxAPIError` like any transport failure.
 `_run_bootstrap_via_agent` (`platform.py:566-636`), `native_transport` (`:488-502`) and
 `transport.py` go. No `native_shell` override. `recovery_needs_guest_sshd = False`.
 
