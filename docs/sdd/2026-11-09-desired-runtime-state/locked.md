@@ -69,3 +69,8 @@ and session evidence loss across suspension. Corrections at `afe92857f` retain a
 completed-future reconciliation and last-known fingerprints while the parent is inactive. The owner
 passed 1,365 impacted tests and full static checks. Final independent review, root gates, CI, ready
 publication and actual integration evidence remain required; the goal remains active.
+
+A further private mixed failure/cancellation case is corrected at `33928add9` with one outcome
+observer preserving established success and failure receipts. The owner passed 1,389 impacted tests
+and full static checks. Final private delta reviews, root gates, exact-head CI and subsequent actual
+integration evidence remain pending. Publication alone will not finish this effort.

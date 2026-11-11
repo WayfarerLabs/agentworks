@@ -574,3 +574,23 @@ accepted target/timestamp; same-boot resume safely stops without force. Changed 
 while new-boot recovery, peer preservation and healthy repeats pass. Console, provider power APIs,
 global statuses and schema are unchanged. New independent delta reviews, root gates, exact-head CI
 and the subsequent actual integration report remain required; the goal stays active.
+
+One additional private combination remained at `8db8760ba`: an ordinary native failure was recorded
+only in the executor's returned list. A sibling notification cancellation prevented normal return,
+so the controller mislabeled that known failure as cancelled. Project review reproduced it through
+the public controller, real SQLite and threaded executor. The other corrected paths remained clean
+under 192 cold-lane tests plus nine independent probes, and 330 complexity tests plus restored-code
+experiments. No handoff occurred with that finding open.
+
+- [x] Notify the invocation of established failures as well as successes before cancellation can
+      escape; preserve each receipt through interrupted delivery without native or completed-CAS
+      replay.
+
+Correction `33928add9` supplies one outcome observer and passes 1,389 impacted tests, including a
+24-case mixed native/CAS/notification-failure and first/repeated cancellation matrix. The two active
+workers, controller, SQLite, CAS and drain paths are real; its third queued Future is
+deterministically executor-notified cancelled to prove never-started accounting. The prior
+coordinator, with hook-only signature compatibility, fails the regression as expected. Ruff
+lint/format passed 1,047 files and strict mypy passed 1,012; file quality and locked-SDD checks
+passed. Final independent delta review, required root gates, exact-head CI and actual associated
+integration evidence are still pending.

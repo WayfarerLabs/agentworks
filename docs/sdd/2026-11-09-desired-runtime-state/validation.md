@@ -198,3 +198,11 @@ refusal on changed native ticks, new-boot recovery and healthy repetition. Autho
 errors remain failed after parent shutdown, and real caller-interrupt regressions preserve stopped
 reconciliation. Independent final reviews, root gates, CI and native validation of the new handoff
 remain pending. No model result is a live GCP pass.
+
+The final private mixed-outcome correction is `33928add9`. Known failure receipts now reach the
+controller before cancellation escapes, preserving FAILED alongside verified CHANGED and queued
+BLOCKED outcomes. The owner passed 1,389 impacted tests and full static checks; 24 mixed cases use
+two real workers and real SQLite/controller/drain paths with a deterministically cancelled third
+Future for never-started accounting. The prior coordinator fails the targeted regression. New
+independent reviews, root full-suite verification, final CI and the actual integration report remain
+required before convergence.

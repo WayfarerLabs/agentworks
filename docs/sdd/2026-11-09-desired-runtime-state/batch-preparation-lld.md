@@ -302,11 +302,14 @@ checks and the complete-future-map submission gate precede remote mutation. Inco
 legacy work stays serial afterward. Preserve non-activating stop-only observation, including WSL
 hold admission, with guards and database lifetime through all execution and draining.
 
-The observer runs immediately after successful stopped CAS, before removing its future from pending,
-inside interruption/retry handling. It only updates invocation results and completed names on the
-caller thread and tolerates repeated notification. Handle `UserAbort` before ordinary exceptions; an
-observer failure after successful persistence is not a failed database commit. Never infer success
-from submission or missing failure names when an exception escapes.
+The caller-thread outcome observer receives success only after stopped CAS, or an established
+ordinary native/persistence/completion-recording failure. Retain that receipt until notification
+finishes before removing its future from pending. Notification updates invocation results and
+completed names idempotently; interrupted notification repeats neither native work nor a completed
+CAS attempt and cannot turn a known failure into success or cancellation. Actual interruption during
+CAS retains the existing retry. Handle `UserAbort` before ordinary exceptions; an observer failure
+after successful persistence is not a failed database commit. Never infer success from submission or
+missing failure names when an exception escapes.
 
 Parent-off completion compares the original prepared runtime snapshot after existing
 session/parent/target checks. Do not construct expected state from the latest row to hide an

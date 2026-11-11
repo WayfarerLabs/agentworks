@@ -204,7 +204,10 @@ for stopped-state CAS. This uses existing states and fields, preserving safe own
 resume without changing VM power policy.
 
 Destructive work follows complete workload preparation. Guards and the writable database remain
-owned through interruption draining and reconciliation. A narrow caller-thread observer records
-success only after conditional stopped persistence, before the future leaves pending. Recording is
-idempotent for interrupted retries. Cancellation, including `UserAbort`, remains control flow and
-must not become a persistence warning or permission to run subsequent serial work.
+owned through interruption draining and reconciliation. One narrow caller-thread outcome observer
+records success after conditional stopped persistence and records established failures before their
+future leaves pending. Receipts survive interrupted notification, so neither successful work nor a
+known failure is replaced by cancellation. Notification retries repeat neither native work nor a
+completed persistence attempt; interrupted persistence still uses the existing safe retry.
+Cancellation, including `UserAbort`, remains control flow and must not become a persistence warning
+or permission to run subsequent serial work.
