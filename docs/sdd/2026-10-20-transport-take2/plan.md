@@ -565,7 +565,7 @@ Definition of done: create and reinit run entirely on the new transport.
 
 ## Slice 7: Workspaces, sessions and backup (HLA D7; PR C)
 
-- [ ] Write `sessions-lld.md`. It covers:
+- [ ] Write [`sessions-lld.md`](./sessions-lld.md). It covers:
   - `detached.py` (launch, observe, interrupt, download) with `FromFile` and `ToFile`, and the
     `observation` option's rule for dispatching again;
   - each workspace, session, console and backup request it moves, with its bound;
