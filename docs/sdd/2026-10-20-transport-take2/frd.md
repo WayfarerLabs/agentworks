@@ -367,6 +367,16 @@ warning only), the operator chose the first:]
 > to lean towards ripping the bandaid now if it's at all related, though. It all has to work
 > together at the end of the day, right?
 
+### 2026-11-11
+
+[Asked whether #866 may take an eighth feedback round for the round 7 integration report, and how to
+handle a Proxmox API response that keeps arriving past a root call's deadline (the HTTP client
+bounds each socket wait, not a whole response), with the options to document the per-wait bound in
+the platform contract and LLD, or to enforce a whole-response bound by replacing `urllib` or
+reaching into private socket attributes, the operator chose:]
+
+> Round 8, document (Recommended)
+
 ### Rulings carried forward
 
 These predecessor rulings still hold, quoted from the transport-improv FRD.
