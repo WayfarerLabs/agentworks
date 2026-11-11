@@ -158,7 +158,7 @@ def test_launch_secret_stays_out_of_terminal_and_cli_error_log(
     def fail(*args, **kwargs):
         raise failure
 
-    def run_operation():
+    def run_operation(**_):
         getattr(manager, operation)(
             db,
             make_config(),

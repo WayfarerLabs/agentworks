@@ -11,17 +11,21 @@ from agentworks.bootstrap import load_request_registry
 from agentworks.db import Database, VMRow, VMStatus
 from agentworks.db import DesiredRuntimeState as Target
 from agentworks.errors import ConnectivityError, StateError, UserAbort, ValidationError
+from agentworks.execution import trust
+from agentworks.execution.errors import TrustMissing
 from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy as Policy
 from agentworks.secrets.resolver import Resolver
 from agentworks.vms import manager
 from agentworks.vms.manager.runtime import activate_vm_runtime, execute_vm_stop, observe_vm_runtime, prepare_vm_runtime
+from tests.conftest import seed_vm_trust
 
 
 def _seed(db: Database, target: Target = Target.ON_DEMAND) -> VMRow:
     vm = db.insert_vm("box", "proxmox", "box", desired_runtime_state=target)
     db.update_vm_tailscale("box", "100.64.0.9")
+    seed_vm_trust("box")
     row = db.get_vm(vm.name)
     assert row is not None
     return row
@@ -367,3 +371,29 @@ def test_invalid_provider_power_result_refuses_runtime_mutation(db, make_config,
         assert not context.started and not context.repaired
     assert "start" not in events and "stop" not in events and "hold-enter" not in events
     assert db.get_vm("box") == vm
+
+
+def test_start_without_host_key_refuses_before_intent_secrets_or_provider(db, make_config, platform, resolve_counter):
+    config = make_config()
+    original = _seed(db, Target.STOPPED)
+    trust.remove("box")
+    events, _ = platform
+    with pytest.raises(TrustMissing):
+        manager.start_vm(db, config, "box", interaction=Policy.REFUSE)
+    assert resolve_counter == []
+    assert events == []
+    assert db.get_vm("box") == original
+
+
+def test_runtime_activation_rechecks_host_key_before_power_or_repair(db, make_config, platform):
+    vm = _seed(db, Target.RUNNING)
+    events, _ = platform
+    with _prepared(db, make_config(), vm) as (context, resolver):
+        assert events == ["status"]
+        trust.remove(vm.name)
+        with pytest.raises(TrustMissing):
+            activate_vm_runtime(context, resolve_secret=resolver.resolve_gate)
+        assert events == ["status"]
+        assert not context.started
+        assert not context.repaired
+        assert db.get_vm(vm.name) == vm

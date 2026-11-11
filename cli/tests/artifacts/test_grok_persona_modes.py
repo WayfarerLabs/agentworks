@@ -27,7 +27,7 @@ _MODES = [
 def test_personas_remain_unhandled_in_every_mode(args: Sequence[str], workarounds: list[str]) -> None:
     item = artifact(ArtifactType.AGENT, options={"grok-build": {"hooks": {}}})
     prepared = context(item)
-    result = session_artifacts(prepared, configured=None, extra_args=args, enabled_workarounds=workarounds)
+    result = session_artifacts(prepared, extra_args=args, enabled_workarounds=workarounds)
     assert result.argv == ()
     assert result.application.files == ()
     assert tuple(deferred.input_id for deferred in result.application.deferred) == (item.identity,)
@@ -40,22 +40,19 @@ def test_unhandled_personas_do_not_block_independent_rules_and_hints(args: Seque
     prepared = context(agent, rule, hint, skill)
     result = session_artifacts(
         prepared,
-        configured="configured guidance",
         extra_args=args,
-        enabled_workarounds=["session-rules", "session-agent-definitions"],
+        enabled_workarounds=["session-home-skills", "session-agent-definitions"],
     )
-    assert result.argv == ("--rules", "configured guidance\n\n" + hint.content.text + "\n\n" + rule.content.text)
-    assert result.application.files == ()
-    assert {deferred.input_id for deferred in result.application.deferred} == {agent.identity, skill.identity}
+    assert result.argv == () and result.application.files
+    assert {deferred.input_id for deferred in result.application.deferred} == {agent.identity}
     assert validate_session_application(result.application, prepared, integration="grok-build") == result.application
 
 
 def test_compatible_workaround_name_does_not_restrict_operator_native_selection() -> None:
-    config = GrokBuildConfig(enabled_workarounds=["session-agent-definitions"], agent="operator-persona")
+    config = GrokBuildConfig(agent="operator-persona")
     item = artifact(ArtifactType.AGENT)
     result = session_artifacts(
         context(item),
-        configured=None,
         extra_args=["--agents", '{"operator-persona": {"prompt": "operator content"}}', "--no-subagents"],
         enabled_workarounds=config.enabled_workarounds,
     )
@@ -77,7 +74,7 @@ def test_unsupported_persona_allows_launch_without_native_artifact_probe(monkeyp
     item = artifact(ArtifactType.AGENT)
     integration = GrokBuildIntegration(
         "grok-build",
-        {"enabled_workarounds": ["session-agent-definitions"], "extra_args": ["--single", "task"]},
+        {"extra_args": ["--single", "task"]},
         session_name="s1",
         vm_name="box",
         workspace_name="ws",

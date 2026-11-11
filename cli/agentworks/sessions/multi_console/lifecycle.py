@@ -35,12 +35,10 @@ def preflight_console_vm(
     """Check known local VM and provider policies before accepting intent."""
     from agentworks.orchestration.readiness import preflight_all
     from agentworks.orchestration.walk import walk
-    from agentworks.vms.manager import require_vm_ssh_boundary
     from agentworks.vms.manager._helpers import _guard_failed_vm, _vm_scope
     from agentworks.vms.nodes import live_vm_node
 
     _guard_failed_vm(vm)
-    require_vm_ssh_boundary(db, config, vm)
     node = live_vm_node(db, config, registry, vm, held_native_guard=held_native_guard)
     preflight_all(
         walk(node),
@@ -63,6 +61,7 @@ def realize_console(
     from agentworks.bootstrap import load_request_registry
     from agentworks.secrets.resolver import Resolver
     from agentworks.transports import transport
+    from agentworks.vms.manager import require_vm_ssh_boundary
     from agentworks.vms.manager.runtime import activate_vm_runtime, prepare_vm_runtime
 
     require_exact_tty_interaction_policy(interaction)
@@ -74,6 +73,7 @@ def realize_console(
         if vm.tailscale_host is None:
             raise StateError(f"VM '{vm.name}' has no Tailscale address", entity_kind="vm", entity_name=vm.name)
         registry = load_request_registry(config, live_database=db)
+        require_vm_ssh_boundary(db, config, vm)
         node = preflight_console_vm(
             db,
             config,
@@ -139,6 +139,7 @@ def stop_console_runtime(
     from agentworks.bootstrap import load_request_registry
     from agentworks.secrets.resolver import Resolver
     from agentworks.transports import transport
+    from agentworks.vms.manager import require_vm_ssh_boundary
     from agentworks.vms.manager.runtime import observe_vm_runtime, prepare_vm_runtime
 
     require_exact_tty_interaction_policy(interaction)
@@ -172,7 +173,10 @@ def stop_console_runtime(
             status = context.observed_status
             if status is VMStatus.UNKNOWN:
                 raise StateError("parent VM power state is unknown", entity_kind="console", entity_name=name)
-            target = None if status in {VMStatus.STOPPED, VMStatus.DEALLOCATED} else transport(vm, config)
+            target = None
+            if status not in {VMStatus.STOPPED, VMStatus.DEALLOCATED}:
+                require_vm_ssh_boundary(db, config, vm)
+                target = transport(vm, config)
             try:
                 prepared = _mc.prepare_console_stop(
                     db,
@@ -187,6 +191,7 @@ def stop_console_runtime(
                     if current_status is VMStatus.UNKNOWN:
                         raise StateError("parent VM power state is unknown", entity_kind="console", entity_name=name)
                     if current_status is VMStatus.RUNNING:
+                        require_vm_ssh_boundary(db, config, vm)
                         prepared = _mc.prepare_console_stop(
                             db,
                             console=console,
@@ -222,6 +227,7 @@ def attach_running_console(
     from agentworks.sessions.tmux import ProbeStatus, exact_tmux_target
     from agentworks.terminal import clear_screen_on_detach
     from agentworks.transports import transport
+    from agentworks.vms.manager import require_vm_ssh_boundary
     from agentworks.vms.manager.runtime import activate_vm_runtime, prepare_vm_runtime
 
     from ._helpers import tmux_session_name
@@ -240,6 +246,7 @@ def attach_running_console(
                 if vm.tailscale_host is None:
                     raise StateError(f"VM '{vm.name}' has no Tailscale address", entity_kind="vm", entity_name=vm.name)
                 registry = load_request_registry(config, live_database=db)
+                require_vm_ssh_boundary(db, config, vm)
                 node = preflight_console_vm(
                     db,
                     config,

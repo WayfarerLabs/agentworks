@@ -38,6 +38,7 @@ from agentworks.errors import ProvisioningError
 from agentworks.plugins.proxmox.api import ProxmoxAPIError
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.plugins.proxmox.transport import ProxmoxExecTransport
+from tests.conftest import provisioning_trust_for_tests
 
 if TYPE_CHECKING:
     from agentworks.db import VMRow
@@ -229,6 +230,7 @@ def _request(*, tailscale: bool) -> ProvisionRequest:
         admin_username="agentworks",
         ssh_public_key="ssh-ed25519 AAAA test",
         ssh_private_key=None,
+        provisioning_trust=provisioning_trust_for_tests("vm1"),
         tailscale_auth_key=_SENTINEL if tailscale else "tskey-test",
         progress=MagicMock(),
         # The vm-template layer's resolved defaults, which is the only

@@ -16,6 +16,7 @@ from agentworks.capabilities.vm_platform.debian_release import (
 from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
 from agentworks.db import VMStatus
 from agentworks.errors import NotFoundError, StateError
+from agentworks.execution.trust import TrustBinding, TrustMode
 from agentworks.plugins.azure.auth import (
     _build_ambient_credential,
     _build_service_principal_credential,
@@ -641,6 +642,7 @@ class AzureVMPlatform(VMPlatform):
 
                 prov_transport = SSHTransport(
                     host=public_ip,
+                    trust=request.provisioning_trust,
                     user=admin_username,
                     identity_file=request.ssh_private_key,
                 )
@@ -823,6 +825,7 @@ class AzureVMPlatform(VMPlatform):
 
         return SSHTransport(
             host=public_ip,
+            trust=TrustBinding(TrustMode.VM, vm.name),
             user=vm.admin_username,
             identity_file=identity_file,
         )

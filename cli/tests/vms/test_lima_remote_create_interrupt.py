@@ -22,6 +22,7 @@ from agentworks.errors import ProvisioningError, StateError
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.ssh import SSHError
 from agentworks.vms import manager as vm_manager
+from tests.conftest import provisioning_trust_for_tests
 
 if TYPE_CHECKING:
     from agentworks.db import Database
@@ -46,6 +47,7 @@ def _request(*, tailscale_auth_key: str = "tskey-test") -> ProvisionRequest:
         admin_username="agw",
         ssh_public_key="ssh-ed25519 AAAA test",
         ssh_private_key=Path("/dev/null"),
+        provisioning_trust=provisioning_trust_for_tests("myvm"),
         tailscale_auth_key=tailscale_auth_key,
         progress=MagicMock(),
         cpus=4,

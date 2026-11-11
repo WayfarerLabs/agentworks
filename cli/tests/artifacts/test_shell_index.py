@@ -8,7 +8,7 @@ from dataclasses import replace
 import pytest
 
 from agentworks.artifacts.model import ArtifactProvenance, ArtifactType
-from agentworks.artifacts.native.shell import shell_artifacts
+from agentworks.artifacts.native.shell import filesystem_artifacts
 from tests.artifacts._fixtures import received
 from tests.artifacts.test_native_delivery import artifact
 
@@ -18,7 +18,7 @@ def test_guest_index_omits_acquisition_path_without_losing_origin_or_revision(ar
     source = "file::/private/workstation/agent-content"
     revision = "a" * 40
     item = replace(artifact(artifact_type), provenance=ArtifactProvenance(source=source, commit=revision))
-    application = shell_artifacts(received(item), "/opt/agentworks/artifacts")
+    application = filesystem_artifacts(received(item), "/opt/agentworks/artifacts")
     index_file = next(file for file in application.files if file.path.endswith("/index.json"))
     index = json.loads(index_file.data)
     entry = index["groups"][0][artifact_type.map_name][item.content.name]

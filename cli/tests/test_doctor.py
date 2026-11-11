@@ -317,6 +317,57 @@ class TestCompletionChecks:
         assert doctor._shell_available("powershell") is True
 
 
+class TestRequiredToolsOpenSSHResolver:
+    """The resolver's verdict sits beside the PATH presence rows, which stay for the legacy paths."""
+
+    def test_a_supported_client_is_reported_with_its_path_and_version(self, monkeypatch) -> None:
+        from agentworks import doctor
+        from agentworks.execution.client import SSHClient
+
+        monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+        monkeypatch.setattr("agentworks.execution.resolve_ssh", lambda: SSHClient("/opt/ssh/bin/ssh", (9, 9)))
+
+        group = doctor._check_required_tools()
+
+        assert [c.name for c in group.checks] == ["ssh", "scp", "tailscale", "OpenSSH client"]
+        verdict = group.checks[-1]
+        assert verdict.status is Status.OK
+        assert "/opt/ssh/bin/ssh" in (verdict.message or "")
+        assert "9.9" in (verdict.message or "")
+
+    def test_a_refusal_fails_the_row_and_carries_the_install_guidance(self, monkeypatch) -> None:
+        from agentworks import doctor
+        from agentworks.execution.errors import ClientUnsupported
+
+        def refuse() -> None:
+            raise ClientUnsupported("no supported OpenSSH client:\n  /usr/bin/ssh: OpenSSH 8.4 is too old")
+
+        monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+        monkeypatch.setattr("agentworks.execution.resolve_ssh", refuse)
+
+        group = doctor._check_required_tools()
+
+        verdict = group.checks[-1]
+        assert verdict.status is Status.FAIL
+        assert "/usr/bin/ssh" in (verdict.hint or "")
+        # The presence rows are independent of the verdict.
+        assert [c.status for c in group.checks[:3]] == [Status.OK] * 3
+
+    def test_a_missing_binary_still_fails_its_presence_row(self, monkeypatch) -> None:
+        from agentworks import doctor
+        from agentworks.execution.errors import ClientUnsupported
+
+        def refuse() -> None:
+            raise ClientUnsupported("no supported OpenSSH client:\n  no OpenSSH client was found")
+
+        monkeypatch.setattr("shutil.which", lambda name: None)
+        monkeypatch.setattr("agentworks.execution.resolve_ssh", refuse)
+
+        group = doctor._check_required_tools()
+
+        assert [c.status for c in group.checks] == [Status.FAIL] * 4
+
+
 # These probes share the operator config and database, so one worker owns them.
 @pytest.mark.xdist_group(name="doctor-environment")
 @pytest.mark.integration

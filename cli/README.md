@@ -613,6 +613,11 @@ where the platform offers a usable recovery transport, restore the configured pu
 reinitialize. Some platform transports also depend on the configured key; use provider-native
 recovery or recreate the VM when that path cannot connect.
 
+Agentworks verifies each VM's SSH host key against its own per-VM store, never trusting a first
+connection. A VM created before the store existed needs a one-time `agw vm import-host-keys --all`;
+see [Host keys](command-reference.md#host-keys) and
+[Upgrading to 0.20](../docs/guides/upgrading-to-0.20.md).
+
 Debian distribution upgrades remain operator-led. After following Debian's release notes and
 verifying provider-native recovery, run `agw vm confirm-release <name>` to inspect and explicitly
 adopt the live release, then run the separate `agw vm reinit <name>` to converge release-aware
@@ -622,7 +627,9 @@ Passphrase-protected OpenSSH private keys remain supported: Agentworks reads the
 embedded in the private-key envelope without decrypting it or consulting a sibling public-key file.
 Recognized encrypted legacy key formats that do not expose a public identity are reported as
 unverifiable, not mismatched. SSH-agent identity selection is not part of this comparison contract;
-the configured private-key path remains the identity source.
+the configured private-key path remains the identity source. Connections for `vm exec`, `vm shell`,
+`agent exec`, `agent shell`, `vm verify-connection` and `vm port-forward` run in SSH batch mode and
+never prompt for a passphrase, so an encrypted key must be loaded in the SSH agent first.
 
 Required system packages, including `python3` for guest-side native setup and artifact helpers, are
 installed on every platform during create and reinit regardless of template configuration. Failure

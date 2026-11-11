@@ -18,7 +18,7 @@ are driven for real.
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
@@ -40,6 +40,7 @@ from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.manager._scope import _regenerate_tmuxinator as _real_regenerate_tmuxinator
 from agentworks.sessions.tmux import FingerprintProbe, ProbeStatus, TmuxServerFingerprint
 from agentworks.vms import manager as vm_manager
+from tests.conftest import seed_vm_trust
 
 from ..conftest import (
     ManifestDoc,
@@ -106,6 +107,7 @@ class _Target:
 def _seed_db(tmp_path: Path) -> Database:
     db = Database(tmp_path / "test.db")
     db.insert_vm("vm1", "lima", "h", admin_username="admin")
+    seed_vm_trust("vm1")
     db.update_vm_tailscale("vm1", "100.64.0.5")
     db.update_vm_init_status("vm1", InitStatus.COMPLETE)
     db._conn.execute(
@@ -1680,6 +1682,7 @@ def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN20
 def _seed_stopped_proxmox_vm(db: Database) -> None:
     db.insert_vm("box", site="proxmox", hostname="box")
     db.update_vm_tailscale("box", "100.64.0.9")
+    seed_vm_trust("box")
     db._conn.execute(
         "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "
         "VALUES ('ws1', 'box', '/home/me/ws1', 'ws-ws1')"
@@ -2230,8 +2233,14 @@ def test_create_command_preflight_uses_planned_identity_and_workspace_before_row
     rendered: list[str] = []
     original_render = render_template
 
-    def record_render(text: str, values: dict[str, str], *, field: str) -> str:
-        result = original_render(text, values, field=field)
+    def record_render(
+        text: str,
+        values: dict[str, str],
+        *,
+        field: str,
+        legacy_placeholders: Mapping[str, str] | None = None,
+    ) -> str:
+        result = original_render(text, values, field=field, legacy_placeholders=legacy_placeholders)
         rendered.append(result)
         return result
 

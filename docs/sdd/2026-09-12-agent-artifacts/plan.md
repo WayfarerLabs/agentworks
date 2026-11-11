@@ -1,5 +1,322 @@
 # Agent artifacts: implementation plan
 
+## Native delivery feedback, round 2 of 3, 2026-11-10
+
+The [complete report](https://github.com/WayfarerLabs/agentworks/pull/871#issuecomment-6755957164)
+at `b8c03be5` arrived before this round began. The
+[critical reading and batch](https://github.com/WayfarerLabs/agentworks/pull/871#issuecomment-6755998854)
+include its rendered-argument counterexample, Muntz's deletion/rehome findings and the permanent
+author-contract contradictions found during the wait. Draft is verified before source changes;
+refreshed main remains `438c4546`. This is round 2 of the operator's three-round allowance on
+PR 871.
+
+- [x] Read the complete report, verify the guard/render ordering in all three integrations, and
+      preserve its actual native, workstation, cleanup and packaging scope.
+- [x] Render each integration's extra-argument vector once per start, validate those effective
+      values and emit the same values without another interpolation pass. Preserve literal
+      replacement data, token boundaries and pre-teardown refusal.
+- [x] Make workspace exclusion retirement best effort during owning deletion, consistent with
+      framework R9. Preserve safe current-metadata-only I/O and diagnose unresolved leftovers
+      without introducing a new parent-deletion prerequisite or changing VM deletion.
+- [x] Correct exclusion ownership through the supported old/new rehome lifecycle without trusting
+      arbitrary saved sources, running facets or adding a workspace reinit. Preserve other owners
+      and operator content; use existing applied state.
+- [x] Align the permanent integration-author contract and deletion/rehome teaching with the approved
+      native-file carriers and actual implementation.
+- [ ] Complete the integrated required gates and independent project, Muntz and correctness lanes;
+      publish one exact green ready handoff without `review-requested`.
+- [ ] Wait for the next actual integration report before the remaining authorized round. Finish the
+      joint requirement and promotion audit and both locks only after corrected-head acceptance.
+
+The report independently passed all 12 required gates, including 11,480 non-integration tests with
+11 skips, 160 Python and 103 Node website tests. Linux and Windows remote-Lima observations
+establish safe shared-Git retirement, literal supporting-file publication/catalog exposure,
+binary-byte preservation and the reported Shell lifecycle. The report's duplicate-marker deletion
+refusal is a measurement, not adoption of a policy contradicting framework R9.
+
+Its Claude rendered-flag case proves actual native catalog suppression; the corresponding Codex and
+Grok failure ordering is source/adversarial evidence only. No native supporting-file Read or real
+model turn completed in that run. The separate `818ccee9` Read proof retains its own attribution.
+Windows binary preservation does not establish executable intent for a real PE file. The pending
+pre-allocation VM row needed manual disposal after absence proof; this is not supported-cleanup
+acceptance. The actual-main Typer comparison corroborates separate issue 880, outside this
+correction. No Transport/provider redesign, model-inference gate or workspace-mode implementation is
+added. Both guests and their children were independently verified absent by the testing session.
+
+### Implementation checkpoint
+
+Worker `b61487e6`, integrated as `6258b4e3`, rebuilds one typed transient argument tuple at each
+start. Guards and command quoting consume that same tuple; the existing quote helper remains
+available through a small render helper. The new regressions failed with eight failures before
+correction; the frozen focused selection passed 536 tests, full mypy passed over 942 files, and
+touched-file Ruff/format passed. Actual shell/fake-executable token observations and restart-manager
+controls establish quoting and pre-staging/runtime preservation, not native tool interpretation.
+
+Worker `61fe7851`, integrated as `3a87e296`, makes deletion cleanup best effort and binds rehome's
+old-source authority to the actual old row. Original claims survive long enough to retire copied
+pairs. Full, nested and linked-repository copies, both old-directory modes, other-owner/foreign-path
+preservation and native metadata/write faults passed through actual local Git, copy, Database and
+file-publisher boundaries. Twenty-six selected regressions fail against the original `b8c03be5`
+product; the restored frozen selection passes 137 tests. Focused Ruff, format and mypy passed. Two
+initial rehome directory checks now quote their operands, matching the actual target-with-space
+control. VM routing, ACL/system ownership and final system cleanup remain disclosed fixture seams.
+
+Original failures remain in the worker receipts: the first lifecycle runs used an owned proof root
+with inherited group/default ACL conditions, then passed unchanged product guards after that root
+was corrected; new test annotations and formatting were corrected after their initial failures. The
+lead's first file-lint run failed only on source-archive terminology, then passed after ordinary
+wording. Complete integrated gates and the three private review lanes remain pending.
+
+### Private review corrections
+
+Project and generic reviews at `e797b380` independently reproduced a second supported rehome
+dropping all exclusions: general file inventory stays at its original root, so the second move had
+no desired paths. The generic lane also proved that malformed external destination types escaped as
+AttributeError, and that a retained modified old pair could produce a duplicate ownership key after
+publishing its replacement. Revalidation rejected that checkpoint; prior database state remained
+valid. No stored-corruption claim is made.
+
+Worker `f8fd2ce3`, integrated as `5f59adbe`, derives migration paths from verified current-owner
+claims through the same canonical validator, before current Git checks every desired tracked path.
+Ordinary removal does not derive desired inputs from claims. It validates external destination types
+and skips a conflicting replacement before writing while retaining old evidence and allowing
+independent pairs/core rehome. No state schema, ledger, general native relocation or broad internal
+exception handler was added.
+
+The frozen focused selection passed 165 tests. Three consecutive actual public workspace moves, both
+old-copy modes, full/nested/linked repositories, later tracked files, modified-pair preservation and
+malformed-response deletion are covered. The before-control returned 20 failures and four
+already-correct malformed-string passes; both tracked-query removal controls failed. Original source
+bytes were restored and verified. Focused Ruff, format and mypy passed. Complete combined gates and
+exact correction re-reviews remain necessary.
+
+The lead initially put website temporary output beneath the checkout. The builder correctly refused
+that location, and browser fixtures exited before DevTools opened; the original 160-test run
+returned 11 failures and three errors. Using a short owned temporary directory outside the checkout,
+unchanged website inputs passed all 160 tests in 34.112 seconds; four builds and two deterministic
+diffs passed. That temporary root was removed and independently checked absent. No website source
+was changed or independent Chromium root cause claimed. Node's 103 tests, Rulesync and locked-SDD
+checks passed. CI on `e797b380` passed Python/Windows and website jobs but failed file lint on one
+authored word; ordinary wording corrected it and local file lint passed.
+
+### Final local validation for round 2
+
+At frozen `9d17d365`, the complete non-integration suite passed **11,560 tests with 11 skips**, exit
+0 in 244.04 seconds. Ruff lint/format, full mypy over 943 files and CI's exact Typer-isolation check
+passed. All 943 tracked Python source/test files had identical aggregate hashes before and after the
+run. Project, Muntz and generic correctness lanes independently cleared that exact correction,
+including their original counterexample replays and meaningful removal controls. Their 41-, 165- and
+84-case selections overlap the full suite and are not additional full-suite totals.
+
+The first full run returned 23 failures, 11,537 passes and 11 skips. Twenty-one failures were Unix
+socket paths exceeding the native length limit under the lead's deep temporary directory; two
+maintained launchers required the conventional CLI `.venv` layout instead of the worker-root
+environment. Preparing the standard frozen environment and using a short owned external temporary
+root made all 32 affected module cases pass, followed by the full passing run above. Product bytes
+did not change. The original receipts remain. The external temporary root was removed and
+independently checked absent after the terminal gate.
+
+Website validation passed 160 Python tests, 103 Node tests and four builds/two deterministic diffs.
+File lint, Rulesync and locked-SDD checks passed locally. The `9d17d365` CI code, Windows and
+website jobs passed; file lint found two occurrences of a plural term, corrected with ordinary
+wording. Final-head CI remains the delivery gate.
+
+A fresh wheel and source archive built, the wheel installed with repository-locked runtime
+dependencies, and both artifact/integration guides rendered for human and agent audiences. Installed
+artifact help and bundle sample passed. All 475 package files matched source, wheel and installed
+bytes, including generated guide sources. The first parity observer used the wrong source location
+for the explicitly included changelog; correcting that observer mapping passed against the same
+wheel and installed files. Its original failure remains recorded. This does not clear separate issue
+880's unconstrained Typer install.
+
+These gates and private reviews establish the correction's local handoff evidence. They do not
+replace the next independent integration report, final requirement reconciliation or either lock.
+Final bookkeeping changes only spec records and spelling; its review and exact-head CI are checked
+before the ready signal.
+
+## Native delivery feedback, round 1 of 3, 2026-11-09
+
+The
+[final independent report](https://github.com/WayfarerLabs/agentworks/pull/871#issuecomment-6752844405)
+at `1ecffc5c` satisfies the operator's report gate. The
+[critical reading](https://github.com/WayfarerLabs/agentworks/pull/871#issuecomment-6753135303)
+freezes this round's complete review/test batch. PR 871 returned to draft before changes. The
+initial six-hour observation window elapsed without a final report; this round starts only after its
+actual arrival, not on an interim finding. This is the first of three authorized rounds on this PR,
+independent of earlier merged PR budgets.
+
+- [x] Assess the complete report and Muntz batch; preserve the measured native/lifecycle evidence,
+      authentication limits and cleanup attribution. Rebase onto main `438c4546`, retaining its
+      runtime-context quoting contract.
+- [x] Keep generated rule/hint data literal through fixed skill navigation and a supporting file,
+      with content revision in the entrypoint. Preserve authored skill semantics and ordinary
+      package ownership; verify actual native consumption without claiming model obedience.
+- [x] Correct Git-relative lookup and current-metadata-only recovery. Retire known shared exclusions
+      before destructive workspace deletion; retain incomplete known evidence for retry without
+      changing VM deletion or adding a new ownership mechanism.
+- [x] Complete setup collision coverage, Claude selection simplification, filesystem-renderer
+      naming, public identity-alias validation and legacy-section teaching.
+- [x] Run the required gates and independent project, Muntz and correctness lanes on the combined
+      correction; publish an exact green ready handoff with scoped evidence and limitations.
+- [ ] Wait for the next actual integration report, up to six hours, before another authorized round.
+      Finish both acceptance audits and locks only after retained requirements are proved.
+
+The current report establishes native discovery, file ownership and multi-session lifecycle at its
+tested head, and identifies two material failures: shared exclusion retirement on workspace deletion
+and Rule-to-Skill preprocessing. Its interactive API history/resume cell did not reach a health
+prompt because of native onboarding; it is unvalidated, not an established authentication defect.
+R10 does not require model calls. Workspace modes remain a separate owned additional PR.
+
+### Private correction and gate record
+
+The project, Muntz and generic correctness lanes reviewed `4dbadd9d` independently. The first two
+corroborated the Git rebinding convergence failure: carrying irrelevant legacy fields prevented
+deduplication, and checkpoint validation refused the result before writing. Prior valid database
+evidence remained intact; saved corruption was not established. The generic lane additionally proved
+that substring-based pair removal could join an annotated marker to the next operator exclusion,
+changing actual Git ignore behavior. Metadata-only `ls-files` also ran a configured filesystem
+monitor; the optional local suppression preserved its results.
+
+Worker `772f2aab` corrects all three through canonical four-field associations, whole-line marker
+recognition/span removal and a local filesystem-monitor override. Fifty combined real-Git, workspace
+deletion, setup-probe and source-package tests passed. Regressions were observed failing before
+correction. Ruff and full mypy over 941 files passed; the final full suite and private delta
+re-reviews were still pending at that checkpoint. The actual native renderer evidence retains source
+`818ccee9`; later changes to that renderer only add a list type annotation.
+
+The first frozen full suite at `17456c60` returned 1: 11,471 passed, 11 skipped and one
+source-distribution packaging failure in 1,029.82 seconds. An old owned wheel environment beneath
+`cli/.dev-proof.local.work` entered the source archive with an absolute interpreter symlink. The
+original result is retained. Moving those owned receipts/environments outside the package root fixed
+the fixture condition; no product packaging or dependency change was made. Own-tree test temporary
+directories now have the process's group and scoped Git discovery, preserving the actual
+file-ownership guard and avoiding discovery of the enclosing developer repository.
+
+A second full run at `772f2aab` returned 1 with 11,477 passed, 11 skipped and three
+fixture-environment failures in 496.94 seconds. Its owned temporary tree inherited a default POSIX
+ACL, violating two tests' starting conditions; a native tmux test also exceeded the Unix socket path
+limit under the longer owned namespace. Only the owned proof root's ACLs were cleared before a fresh
+temporary tree. Worker `90dbddb2` gives the tmux test a unique short socket namespace with cleanup
+verification and gives the actual workspace collision test its correct original workspace owner.
+Product bytes remain unchanged from `772f2aab`; the completed final run is recorded below.
+
+The website Python gate at `13b9c416` failed one browser departure observer during the concurrent
+CLI run, and a focused concurrent replay failed too. Website inputs were unchanged from the earlier
+passing gate. After that CLI run ended, the same browser test passed in 2.094 seconds and the full
+160-test website suite passed in 41.526 seconds, with no website change. The observed load
+correlation does not establish a root cause. Original failures and both passing replays remain in
+the proof record. Node's 103 tests, deterministic builds, Rulesync, locked-SDD and Typer-isolation
+checks passed. A guide spell-check finding was corrected with ordinary wording and file lint passed.
+
+### Final local validation for round 1
+
+The frozen final worker `90dbddb2d687bc6a4cf2a05222b032fb9e8b9a25` passed the complete CI-selected
+non-integration suite: **11,480 passed, 11 skipped**, exit 0 in 393.65 seconds. Ruff lint/format and
+full mypy over 941 files also passed. No source or test bytes changed during that run. The
+integrated branch has identical Python source/tests; README and SDD records are the lead's separate
+documentation changes. Earlier failed full runs remain recorded above rather than reclassified as
+passes.
+
+Project, Muntz and generic correctness reviews independently cleared `13b9c416` after the three Git
+corrections. Their focused selections were 83, 101 and 172 tests, respectively, with real-Git and
+database-boundary observations; these selections overlap and are not a full-suite total. The final
+test-fixture/record delta receives its own re-read before handoff. No product source changed after
+their approved candidate.
+
+Root gates passed: file lint after the documented spelling correction, Rulesync drift, locked-SDD
+checks, Typer isolation, 103 Node website tests, the quiet 160-test website Python run and
+deterministic double builds for both site bases. A fresh locked-runtime wheel at `13b9c416`
+contained 479 members, with all 471 corresponding source/wheel/installed static files identical.
+Both artifact/integration guide topics rendered for human and agent audiences. The unconstrained
+Typer 0.29 installation remains a distinct failed result tracked in issue 880. The actual corrected
+Claude native Read/publisher proof retains its exact source and limits in acceptance.md.
+
+These results establish private/local validation, not a substitute for the next independent
+integration report or either SDD lock. The ready handoff identifies the exact pushed head and
+remaining acceptance emphasis.
+
+## Delivery reassessment, 2026-11-08
+
+The approved design is promoted into the FRD, HLA and native LLD. The private exploratory response
+is retained with the research evidence rather than published as a competing architecture document.
+Workspace modes are explicitly transferred to an additional PR owned by this effort lead, not a
+prerequisite for accepting this multi-session correction.
+
+- [x] Reconsider all four artifact types using the operator's distinction between delivery and
+      voluntary cooperation. Map current native placement, lifecycle, private loaders,
+      shared-document mutation and Git-ignore behavior; preserve the verified resume counterexamples
+      as evidence rather than treating them as a reason to reject skill-based guidance.
+- [x] Verify Codex 0.167.0 project skill discovery after an exact Git exclusion and process-local
+      app-server extra-root set/list/clear behavior without requesting model turns. Distinguish that
+      API evidence from an unverified interactive-CLI private loader.
+- [x] Assess one output per rule, hints aggregated per original owner, and ordinary-home session
+      skills selected by names/descriptions. Identify native selection controls, existing workload
+      identities, publication/cleanup restrictions and the shared-catalog tradeoff. Record a
+      concrete opt-in candidate without claiming runtime support or treating semantic applicability
+      as native catalog isolation.
+- [x] Evaluate workspace admission and record the operator's single-session/multi-session direction:
+      at most one registered session, including stopped sessions, until deletion permits
+      replacement. New workspaces will default to single-session; existing workspaces retain
+      multi-session behavior.
+- [x] Record the operator's PR split: workspace modes are an additional PR. Current artifact work
+      solves multi-session workspaces now with documented best-effort semantics and must not depend
+      on future workspace exclusivity.
+- [x] Implement current multi-session delivery. Use a native private plugin for Claude session
+      artifacts; replace Codex/Grok session rule/hint prompt injection with explicitly enabled home
+      skills. Codex uses bounded per-run packages; Grok uses one stable session entry and current
+      private files/index because native resume retains its original catalog. Preserve complete
+      skills, supported native persona registration and ordinary state; document first-adoption
+      limits and index-based access instead of individual Grok skill registration.
+- [x] Replace shared generated instruction sections with separate per-rule guidance skills where
+      native separate rules are unavailable. Aggregate hints per original owner. Retire only
+      recorded Agentworks section content and preserve repository/operator bytes.
+- [x] Keep generated workspace output out of commits through exact locally owned exclusions where
+      native discovery supports them; verify and report incompatible native discovery rather than
+      hiding tracked-file changes or ignoring whole native configuration directories.
+- [x] Update the amended FRD, HLA, native LLD, support matrix and permanent teaching together.
+      Verify both concurrent-session applicability metadata and safe restart, failed replacement,
+      removal, deletion and name reuse. Run private project/Muntz/correctness reviews and required
+      gates.
+- [x] Publish one implementation PR for the current artifact correction, with both governing SDD
+      labels and an explicit independent integration-testing handoff. Wait for its actual report, up
+      to six hours per iteration, before starting another of the three authorized fix rounds.
+- [ ] Complete both acceptance records and locks after the retained current requirements have real
+      evidence. No existing workspace mode changes belong to the current artifact PR.
+- [x] Transfer workspace-mode implementation to the separately authorized additional PR, still owned
+      by this effort lead: new workspaces single-session, existing workspaces multi-session, one
+      registered session in single mode until deletion. It is not a current SDD closeout
+      prerequisite.
+
+The initial private quality loop is complete. Source and tests at worker `eb86e703` passed 11,345
+non-integration tests with 11 skips, full mypy over 935 files, Ruff lint/format and the focused
+native regressions. The combined branch has identical product/test bytes. Project, Muntz and generic
+correctness re-reviews resolved the initial naming, observed-home, inactive-path and nested-Git
+findings. Repository lint, rulesync drift, locked-SDD checks, typer isolation, 160 website Python
+tests, 103 Node tests and deterministic builds passed. A fresh installed wheel rendered both guide
+topics for both audiences. These checks support the ready handoff; independent integration
+acceptance and both locks remain pending.
+
+## Acceptance reconciliation, 2026-11-08
+
+- [x] Reconcile R1-R10, current native evidence and permanent promotion in
+      [acceptance.md](acceptance.md). R1-R4/R6-R9 are proven with local and scoped real
+      observations; R5/R10 retain the concrete native-resume question rather than generic
+      pending-test claims.
+- [x] Verify Codex outer persona availability at user scope and trusted project scope using current
+      renderer bytes; document native project trust in the permanent artifact guide. Actual
+      interactive Codex and Grok resumes retain initial guidance despite receiving changed current
+      arguments. The probe modes, repetitions, controls and exploratory fixture overrun are
+      preserved in the record.
+- [x] Independently review the records and trust clarification at `08827b56` through project and
+      Muntz lanes, with no material correction; pass file lint. These results do not cover a later
+      product correction or either lock.
+- [ ] Resolve [issue 869](https://github.com/WayfarerLabs/agentworks/issues/869) through the broader
+      delivery reassessment before changing approved support. The prior binary warning-versus-resume
+      workaround proposal is superseded by that operator-requested design work.
+- [ ] Implement and verify the approved behavior, finish plan and acceptance records, run the final
+      private review and gates, and add both SDD locks. PR #862's clean intermediate correction
+      merged at `89bb63e4` and does not discharge these duties.
+
 ## Facet independence and closeout, 2026-11-01
 
 The operator authorized the saga's facet-independence amendment and completion of both this SDD and

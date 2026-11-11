@@ -3,22 +3,19 @@
 from __future__ import annotations
 
 import contextlib
-import signal
 import subprocess
 from typing import TYPE_CHECKING
 
 from agentworks import output
-from agentworks.errors import ConnectivityError, StateError, ValidationError
+from agentworks.errors import StateError
 
-from ._helpers import _guard_failed_vm, _require_vm
-from .boundary import gated_vm_boundary
+from ._helpers import _require_vm
 
 if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext, SecretReader
     from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
-    from agentworks.secrets.policy import TtyInteractionPolicy
 
 # Guards the missing-tailscale-binary warning to once per process: the
 # power-state fast path calls _is_tailscale_reachable on every gated
@@ -67,125 +64,6 @@ def _is_tailscale_reachable(tailscale_host: str) -> bool:
                 "(or add it to PATH) to speed them up."
             )
         return False
-
-
-def port_forward_vm(
-    db: Database,
-    config: Config,
-    name: str,
-    ports: list[str],
-    address: str = "localhost",
-    verbose: bool = False,
-    *,
-    interaction: TtyInteractionPolicy,
-) -> int:
-    """Forward one or more local ports to a VM via SSH tunnels.
-
-    Returns the underlying SSH process's exit code; the CLI layer owns the
-    translation to process exit (this service function never calls
-    ``sys.exit``). Mirrors ``exec_vm``'s return-the-code contract.
-
-    Each port spec is either REMOTE_PORT (local defaults to same) or
-    LOCAL_PORT:REMOTE_PORT, matching kubectl port-forward syntax.
-
-    Orchestrated (:func:`gated_vm_boundary`): the graph derives from
-    the VM's row, the activation gate replaces this command's
-    ``keep_active`` use (opening BEFORE the preflight sweep; its
-    just-in-time values seed the boundary resolver), and the
-    held-active span covers the foreground SSH tunnel. The port-spec
-    validation and the no-Tailscale guard stay pre-gate: a refused
-    forward costs zero prompts, zero resolves, and zero gate events.
-    """
-    from agentworks.bootstrap import load_request_registry
-
-    vm = _require_vm(db, name)
-    _guard_failed_vm(vm)
-    if vm.tailscale_host is None:
-        raise StateError(
-            f"VM '{name}' has no Tailscale IP",
-            entity_kind="vm",
-            entity_name=name,
-            hint="VM init may not be complete. Check 'vm describe' for status.",
-        )
-
-    # Parse port specs
-    forwards: list[tuple[int, int]] = []  # (local_port, remote_port)
-    for spec in ports:
-        parts = spec.split(":")
-        if len(parts) == 1:
-            try:
-                port = int(parts[0])
-            except ValueError:
-                raise ValidationError(
-                    f"invalid port '{spec}'",
-                    entity_kind="vm",
-                    entity_name=name,
-                ) from None
-            forwards.append((port, port))
-        elif len(parts) == 2:
-            try:
-                local_port = int(parts[0])
-                remote_port = int(parts[1])
-            except ValueError:
-                raise ValidationError(
-                    f"invalid port spec '{spec}'",
-                    entity_kind="vm",
-                    entity_name=name,
-                ) from None
-            forwards.append((local_port, remote_port))
-        else:
-            raise ValidationError(
-                f"invalid port spec '{spec}' (expected [LOCAL:]REMOTE)",
-                entity_kind="vm",
-                entity_name=name,
-            )
-
-    # Validate port ranges
-    for local_port, remote_port in forwards:
-        for label, port in [("local", local_port), ("remote", remote_port)]:
-            if port < 1 or port > 65535:
-                raise ValidationError(
-                    f"{label} port {port} out of range (1-65535)",
-                    entity_kind="vm",
-                    entity_name=name,
-                )
-
-    # Build SSH command with -L flags for each forward
-    ssh_cmd = ["ssh", "-N", "-o", "StrictHostKeyChecking=accept-new"]
-    if config.operator.ssh_private_key:
-        ssh_cmd.extend(["-i", str(config.operator.ssh_private_key)])
-    for local_port, remote_port in forwards:
-        ssh_cmd.extend(["-L", f"{address}:{local_port}:localhost:{remote_port}"])
-    if verbose:
-        ssh_cmd.append("-v")
-    ssh_cmd.append(f"{vm.admin_username}@{vm.tailscale_host}")
-
-    # Print forwarding info
-    for local_port, remote_port in forwards:
-        output.info(f"Forwarding {address}:{local_port} -> {vm.tailscale_host}:{remote_port}")
-    if not verbose:
-        output.info("Use --verbose for detailed SSH output.")
-
-    # Run in foreground until interrupted
-    registry = load_request_registry(config, live_database=db)
-    with gated_vm_boundary(db, config, registry, vm, interaction=interaction):
-        try:
-            proc = subprocess.Popen(ssh_cmd)
-
-            # Forward SIGINT/SIGTERM to the SSH process for clean shutdown
-            def _handle_signal(sig: int, _frame: object) -> None:
-                proc.terminate()
-
-            signal.signal(signal.SIGINT, _handle_signal)
-            signal.signal(signal.SIGTERM, _handle_signal)
-
-            return proc.wait()
-        except OSError as e:
-            raise ConnectivityError(
-                f"failed to start SSH: {e}",
-                entity_kind="vm",
-                entity_name=name,
-            ) from e
 
 
 def _ensure_tailscale(

@@ -365,6 +365,7 @@ def _prepare_vm_target(
     """Prepare canonical guest access using the invocation's secret resolver."""
     from agentworks.harness_setup.locking import native_mutation_guard
     from agentworks.transports import transport
+    from agentworks.vms.manager import require_vm_ssh_boundary
     from agentworks.vms.manager.runtime import activate_vm_runtime, prepare_vm_runtime
 
     from .lifecycle import preflight_console_vm
@@ -377,6 +378,7 @@ def _prepare_vm_target(
     context = None
     try:
         with native_mutation_guard(db.path, vm_name, held=held_native_guard) as guard:
+            require_vm_ssh_boundary(db, config, vm)
             node = preflight_console_vm(
                 db,
                 config,

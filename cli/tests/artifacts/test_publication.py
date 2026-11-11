@@ -124,9 +124,7 @@ def test_generated_section_retirement_reports_without_removing_operator_content(
     result = publish_artifacts(target, (), previous, lambda files: None, roots=(str(target.home),))
     remaining = path.read_bytes()
     assert not result.files and remaining.startswith(original)
-    from agentworks.artifacts.sections import BEGIN, END
-
-    assert remaining[len(original) :] == BEGIN + b"\n" + END + b"\n"
+    assert remaining[len(original) :] == b"\n"
     assert len(reports) == 1 and str(path) in reports[0]
 
 

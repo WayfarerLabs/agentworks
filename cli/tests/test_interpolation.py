@@ -103,3 +103,67 @@ def test_error_does_not_echo_surrounding_input_or_replacements() -> None:
     with pytest.raises(ValidationError) as caught:
         render_template(sensitive + "${agw:unknown}", {"user_name": sensitive}, field="env.TOKEN")
     assert sensitive not in repr((caught.value.args, vars(caught.value)))
+
+
+def test_legacy_tokens_require_explicit_consumer_opt_in() -> None:
+    text = "{{session_name}} {{workspace_name}}"
+    values = {"session_name": "work", "workspace_name": "project"}
+    assert render_template(text, values, field="env.PLAIN") == text
+    assert (
+        render_template(
+            text,
+            values,
+            field="command",
+            legacy_placeholders={"{{session_name}}": "session_name", "{{workspace_name}}": "workspace_name"},
+        )
+        == "work project"
+    )
+
+
+def test_legacy_and_namespaced_replacements_share_one_pass() -> None:
+    session = "${agw:workspace_name}{{workspace_name}}"
+    workspace = "{{session_name}}${agw:session_name}"
+    assert (
+        render_template(
+            "{{session_name}}:${agw:workspace_name}:{{workspace_name}}:${agw:session_name}",
+            {"session_name": session, "workspace_name": workspace},
+            field="command",
+            legacy_placeholders={"{{session_name}}": "session_name", "{{workspace_name}}": "workspace_name"},
+        )
+        == f"{session}:{workspace}:{workspace}:{session}"
+    )
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("${{session_name}}", "$work"),
+        ("$${{session_name}}", "$$work"),
+        ("{{{session_name}}}", "{work}"),
+        ("$${agw:session_name} {{session_name}}", "${agw:session_name} work"),
+        ("{{unknown}} {{range .items}}{{.name}}{{end}}", "{{unknown}} {{range .items}}{{.name}}{{end}}"),
+    ],
+)
+def test_legacy_tokens_preserve_surrounding_dollars_and_unrelated_syntax(text: str, expected: str) -> None:
+    assert (
+        render_template(
+            text,
+            {"session_name": "work"},
+            field="command",
+            legacy_placeholders={"{{session_name}}": "session_name"},
+        )
+        == expected
+    )
+
+
+@pytest.mark.parametrize("text", ["{{session_name}}", "{{session_name}} ${agw:unknown}", "${agw:bad-name}"])
+def test_legacy_rendering_retains_field_aware_validation(text: str) -> None:
+    with pytest.raises(ValidationError) as caught:
+        render_template(
+            text,
+            {},
+            field="session=work.resume_command",
+            legacy_placeholders={"{{session_name}}": "session_name"},
+        )
+    assert caught.value.entity_kind == "template"
+    assert caught.value.entity_name == "session=work.resume_command"

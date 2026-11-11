@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from agentworks.capabilities.base import RunContext
 from agentworks.db import DesiredRuntimeState, VMStatus
 from agentworks.errors import StateError
+from agentworks.execution import trust
 from agentworks.orchestration.secrets import ScopedSecrets
 
 from ._helpers import _guard_failed_vm, _vm_scope
@@ -112,6 +113,7 @@ def _start_vm_runtime(context: VMRuntimeContext, *, resolve_secret: Callable[[st
     row = _current_vm(context)
     if row.desired_runtime_state is DesiredRuntimeState.STOPPED:
         raise StateError("VM has stopped intent", entity_kind="vm", entity_name=row.name)
+    trust.require_record(row.name)
     platform = context.node.site.platform
     status = observe_vm_runtime(context)
     if status is VMStatus.UNKNOWN and not allow_unknown:

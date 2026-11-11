@@ -10,6 +10,7 @@
     "DERP",
     "EACCES",
     "Liskov",
+    "MSYS",
     "Muntz",
     "Plurify",
     "RLIMITs",
@@ -150,6 +151,7 @@
     "preflighting",
     "preflights",
     "pryce",
+    "publickey",
     "pushd",
     "pveapi",
     "pydantic",
@@ -249,6 +251,7 @@
     "workstream",
     "workstreams",
     "worktree",
+    "worktrees",
     "xdist"
   ],
   "ignoreRegExpList": ["`[^`\\r\\n]+`"],

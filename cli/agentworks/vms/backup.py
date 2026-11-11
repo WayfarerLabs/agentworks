@@ -461,7 +461,7 @@ def _transfer_with_progress(
     """
     from agentworks.ssh import SSHError
 
-    args = ["scp", "-q", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes"]
+    args = ["scp", "-q", *target.host_key_options(), "-o", "BatchMode=yes"]
     if target.port is not None:
         args.extend(["-P", str(target.port)])
     if target.identity_file is not None:

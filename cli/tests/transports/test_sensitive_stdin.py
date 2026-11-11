@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from agentworks.execution.trust import HOST_TRUST
 from agentworks.ssh import SSHResult
 from agentworks.transports.lima import LimaTransport
 from agentworks.transports.remote_lima import RemoteLimaTransport
@@ -30,7 +31,7 @@ def test_ssh_transport_streams_sensitive_input_without_exposing_it(monkeypatch) 
     logger = MagicMock()
     monkeypatch.setattr("agentworks.ssh.subprocess.run", process)
 
-    result = SSHTransport("vm-host", logger=logger).run(_COMMAND, input_text=f"{_SENTINEL}\n")
+    result = SSHTransport("vm-host", trust=HOST_TRUST, logger=logger).run(_COMMAND, input_text=f"{_SENTINEL}\n")
 
     assert (result.stdout, result.stderr) == ("", "")
     assert process.call_args.kwargs["input"] == f"{_SENTINEL}\n".encode()
@@ -116,7 +117,7 @@ def test_remote_lima_transport_forwards_sensitive_input_to_the_safe_ssh_hop(monk
 @pytest.mark.parametrize(
     ("transport", "run_path"),
     [
-        (SSHTransport("vm-host"), "agentworks.transports.ssh.subprocess.run"),
+        (SSHTransport("vm-host", trust=HOST_TRUST), "agentworks.transports.ssh.subprocess.run"),
         (LimaTransport("vm1"), "agentworks.transports.lima.subprocess.run"),
         (WSL2Transport("Debian"), "agentworks.transports.wsl2.subprocess.run"),
     ],
@@ -156,7 +157,7 @@ def test_ssh_transport_discards_output_without_disabling_forced_tty(monkeypatch)
     logger = MagicMock()
     monkeypatch.setattr("agentworks.transports.ssh.subprocess.run", process)
 
-    result = SSHTransport("vm-host", logger=logger).run(_COMMAND, discard_output=True, tty=True)
+    result = SSHTransport("vm-host", trust=HOST_TRUST, logger=logger).run(_COMMAND, discard_output=True, tty=True)
 
     assert (result.stdout, result.stderr) == ("", "")
     assert "-tt" in process.call_args.args[0]
@@ -204,7 +205,7 @@ def test_remote_lima_transport_forwards_output_discard(monkeypatch) -> None:  # 
 @pytest.mark.parametrize(
     "transport",
     [
-        SSHTransport("vm-host"),
+        SSHTransport("vm-host", trust=HOST_TRUST),
         LimaTransport("vm1"),
         WSL2Transport("Debian"),
         RemoteLimaTransport("vm1", "vm-host"),

@@ -12,6 +12,7 @@ import pytest
 from agentworks.artifacts.native.common import ancestor_diagnostics
 from agentworks.artifacts.native.probe import probe_native
 from agentworks.errors import ExternalError
+from agentworks.execution.trust import HOST_TRUST
 from agentworks.harness_setup.dispatch import destination_id
 from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
 from agentworks.harness_setup.runner import SetupRunner
@@ -161,7 +162,9 @@ def test_firstparty_ssh_timeout_cannot_expose_setenv_through_its_traceback(monke
 
     monkeypatch.setattr("agentworks.transports.ssh.subprocess.run", run)
     with pytest.raises(SSHError) as caught:
-        probe_native(SSHTransport("fixture.invalid", retries=1), tool="grok", environment={"TOKEN": secret})
+        probe_native(
+            SSHTransport("fixture.invalid", trust=HOST_TRUST, retries=1), tool="grok", environment={"TOKEN": secret}
+        )
     assert len(calls) == 2 and any(secret in argument for argument in calls[1])
     assert secret not in "".join(traceback.format_exception(caught.value))
     assert caught.value.__cause__ is None and caught.value.__suppress_context__

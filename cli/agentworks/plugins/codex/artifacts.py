@@ -3,45 +3,43 @@
 from __future__ import annotations
 
 import json
-from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import tomli_w
 
-from agentworks.artifacts.application import ArtifactApplication, ArtifactDeferral, ArtifactFile
+from agentworks import output
+from agentworks.artifacts.application import ArtifactApplication, ArtifactDeferral
 from agentworks.artifacts.model import ArtifactType
 from agentworks.artifacts.native.common import (
     MAX_CODEX_PERSONA_BYTES,
     NativeSessionArtifacts,
     ancestor_diagnostics,
     artifact_file,
-    context_text,
     has_artifacts,
     persona_options,
     reject_flags,
     select_session_artifacts,
     skill_files,
-    validate_ancestor_names,
     validate_names,
     validate_native_argv,
 )
+from agentworks.artifacts.native.guidance import guidance_skills, session_skill_files
 from agentworks.errors import ConfigError
-from agentworks.native_files import NativeFiles
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from agentworks.artifacts.application import SessionArtifactContext
     from agentworks.artifacts.model import ArtifactInput, ArtifactInputs
-    from agentworks.transports import Transport
 
 
 _OPTIONS = {"model": str, "model_reasoning_effort": str}
 
 
 _SESSION_WORKAROUNDS = {
-    ArtifactType.HINT: "session-developer-instructions",
-    ArtifactType.RULE: "session-developer-instructions",
+    ArtifactType.HINT: "session-home-skills",
+    ArtifactType.RULE: "session-home-skills",
+    ArtifactType.SKILL: "session-home-skills",
     ArtifactType.AGENT: "session-agent-config",
 }
 
@@ -59,24 +57,9 @@ def _persona(item: ArtifactInput, *, role_layer: bool = False) -> str:
     return rendered
 
 
-def guidance_path(runner: Transport, root: str) -> str:
-    """Use the instruction file Codex actually selects at this directory."""
-    override = f"{root}/AGENTS.override.md"
-    with NativeFiles(runner) as files:
-        content = files.read(override)
-    return override if content and content.strip() else f"{root}/AGENTS.md"
-
-
-def outer_artifacts(
-    inputs: ArtifactInputs, *, skills_root: str, agents_root: str, instructions_path: str
-) -> ArtifactApplication:
+def outer_artifacts(inputs: ArtifactInputs, *, skills_root: str, agents_root: str) -> ArtifactApplication:
     validate_names(inputs)
-    files: list[ArtifactFile] = []
-    guidance = tuple(item for item in inputs.items() if item.content.type in (ArtifactType.HINT, ArtifactType.RULE))
-    if guidance:
-        files.append(
-            replace(artifact_file(instructions_path, context_text(guidance), guidance), generated_section=True)
-        )
+    files = list(guidance_skills(skills_root, inputs))
     for item in inputs.items():
         content = item.content
         if content.type is ArtifactType.SKILL:
@@ -93,12 +76,12 @@ def outer_artifacts(
 def vm_artifacts(inputs: ArtifactInputs) -> ArtifactApplication:
     """Use machine skill discovery; other types need native user placement here."""
     validate_names(inputs)
-    files: list[ArtifactFile] = []
+    files = list(guidance_skills("/etc/codex/skills", inputs))
     deferred = []
     for item in inputs.items():
         if item.content.type is ArtifactType.SKILL:
             files.extend(skill_files("/etc/codex/skills", item))
-        else:
+        elif item.content.type is ArtifactType.AGENT:
             deferred.append(
                 ArtifactDeferral(
                     input_id=item.identity,
@@ -112,12 +95,10 @@ def vm_artifacts(inputs: ArtifactInputs) -> ArtifactApplication:
     return ArtifactApplication(tuple(files), tuple(deferred))
 
 
-def _reject_overrides(extra_args: Sequence[str], *, guidance: bool, skills: bool, agents: bool) -> None:
+def _reject_overrides(extra_args: Sequence[str], *, skills: bool, agents: bool) -> None:
     reject_flags(extra_args, {"--profile", "-p"}, "codex")
     features = ({"multi_agent"} if agents else set()) | ({"skills"} if skills else set())
     reserved = {"features"} if features else set()
-    if guidance:
-        reserved.update({"developer_instructions", "model_instructions_file"})
     if agents:
         reserved.add("agents")
     if skills:
@@ -142,7 +123,6 @@ def _reject_overrides(extra_args: Sequence[str], *, guidance: bool, skills: bool
 def session_artifacts(
     context: SessionArtifactContext | None,
     *,
-    configured: str | None,
     extra_args: Sequence[str],
     enabled_workarounds: Sequence[str] = (),
 ) -> NativeSessionArtifacts:
@@ -152,31 +132,34 @@ def session_artifacts(
     inputs, deferred = select_session_artifacts(context.inputs, enabled_workarounds, _SESSION_WORKAROUNDS)
     if not inputs and not context.ancestor_files:
         return NativeSessionArtifacts(ArtifactApplication(deferred=deferred))
-    validate_names(inputs)
+    validate_names(inputs, types=(ArtifactType.AGENT,))
     types = {item.content.type for item in inputs.items()}
     ancestors = {file.native_identity or "" for file in context.ancestor_files}
     if inputs:
         _reject_overrides(
             extra_args,
-            guidance=bool(types & {ArtifactType.HINT, ArtifactType.RULE}),
-            skills=False,
+            skills=bool(types & {ArtifactType.HINT, ArtifactType.RULE, ArtifactType.SKILL}),
             agents=ArtifactType.AGENT in types,
         )
     if context.ancestor_files:
         with ancestor_diagnostics("codex"):
             _reject_overrides(
                 extra_args,
-                guidance=False,
                 skills=any(name.startswith("skill:") for name in ancestors),
                 agents=any(name.startswith("agent:") for name in ancestors),
             )
 
-    files: list[ArtifactFile] = []
+    skills_root = f"{context.home}/.agents/skills"
+    files = list(guidance_skills(skills_root, inputs, context=context))
     argv: list[str] = []
-    guidance = tuple(item for item in inputs.items() if item.content.type in (ArtifactType.HINT, ArtifactType.RULE))
-    if guidance:
-        text = context_text(guidance, configured)
-        argv += ["-c", f"developer_instructions={json.dumps(text, ensure_ascii=False)}"]
+    for item in inputs.items():
+        if item.content.type is ArtifactType.SKILL:
+            files.extend(session_skill_files(skills_root, item, context))
+    if files:
+        output.warn(
+            "Codex session-home-skills uses the shared user skill catalog. "
+            "Session/run applicability is best effort; other sessions can discover these entries."
+        )
     for item in inputs.items():
         if item.content.type is ArtifactType.AGENT:
             name = item.content.name
@@ -193,6 +176,5 @@ def session_artifacts(
                 f"{key}.description={json.dumps(item.content.description, ensure_ascii=False)}",
             ]
     application = ArtifactApplication(tuple(files), deferred)
-    validate_ancestor_names(context, application)
     validate_native_argv(tuple(argv))
     return NativeSessionArtifacts(application, tuple(argv))

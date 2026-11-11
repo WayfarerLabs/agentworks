@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from agentworks import output
 from agentworks.capabilities.base import RunContext
 from agentworks.debian import DebianSupport, classify_release
+from agentworks.execution import trust
 
 from ._helpers import _vm_scope
 
@@ -69,12 +70,15 @@ def require_vm_ssh_boundary(
     *,
     allow_not_recorded: bool = False,
 ) -> None:
-    """Require the configured SSH identity allowed by the VM's applied state."""
+    """Require what any SSH connection to the VM needs, before a gate opens or a
+    secret resolves: a recorded host key, then the configured SSH identity
+    allowed by the VM's applied state."""
     from agentworks.vms.applied_state import (
         compare_vm_ssh_identity,
         require_vm_ssh_identity,
     )
 
+    trust.require_record(vm.name)
     comparison = compare_vm_ssh_identity(db, vm.name, config.operator.ssh_private_key)
     require_vm_ssh_identity(comparison, allow_not_recorded=allow_not_recorded)
 

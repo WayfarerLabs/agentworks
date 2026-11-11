@@ -75,8 +75,16 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen
 
-      - name: Install tmux for native runtime tests
-        run: sudo apt-get update && sudo apt-get install -y tmux
+      # The execution conformance lanes need zsh and dash (a missing shell fails
+      # there), an sshd for the S lane, and a 3.11 interpreter for the L lane's
+      # second run, because ast.parse cannot catch 3.12-only standard library calls.
+      # The native runtime tests need tmux.
+      - name: Prepare the execution conformance lanes and native runtime tests
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends openssh-server zsh dash tmux
+          uv python install 3.11
+          echo "AGW_CONFORMANCE_PYTHON311=$(uv python find 3.11)" >> "$GITHUB_ENV"
 
       - name: Pytest
         run: uv run pytest tests/ -m 'not integration'

@@ -28,7 +28,7 @@ from agentworks.output import Role
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
-from tests.conftest import ManifestDoc, stub_vm_ssh_identity
+from tests.conftest import ManifestDoc, seed_vm_trust, stub_vm_ssh_identity
 from tests.orchestrated_fixtures import PLUGINS_ENABLED, proxmox_site, write_operator_config
 
 if TYPE_CHECKING:
@@ -90,6 +90,7 @@ def mutation(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 def _seed_vm(db: Database) -> None:
     db.insert_vm("box", site="proxmox", hostname="box")
     db.update_vm_tailscale("box", "100.64.0.9")
+    seed_vm_trust("box")
 
 
 def test_create_with_missing_vm_preserves_domain_error_and_state(

@@ -213,6 +213,16 @@ def prepare_infrastructure(invocation: RuntimeInvocation) -> None:
         if not eligible:
             continue
         try:
+            needs_activation = (
+                name in invocation.selection.explicit_vms
+                and vm.desired_runtime_state is DesiredRuntimeState.RUNNING
+                or vm.desired_runtime_state is not DesiredRuntimeState.STOPPED
+                and _needs_running_guest(invocation, name)
+            )
+            if needs_activation:
+                from agentworks.execution import trust
+
+                trust.require_record(name)
             context = vms.prepare_vm_runtime(
                 invocation.db,
                 invocation.config,

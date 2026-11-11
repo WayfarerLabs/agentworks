@@ -18,6 +18,8 @@ if TYPE_CHECKING:
         VMRow,
     )
     from agentworks.doctor import HealthGroup, InstanceStateHealthFactType
+    from agentworks.resources.registry import Registry
+    from agentworks.sessions.templates import ResolvedSessionTemplate
     from agentworks.ssh_identity import SSHIdentity
     from agentworks.vms.applied_state import SSHAppliedState
     from agentworks.vms.sites import VMSiteDecl
@@ -35,6 +37,96 @@ def _current_database() -> Iterator[tuple[bool, int, int, Database | None]]:
     finally:
         if database is not None:
             database.close()
+
+
+def append_session_template_deprecation_checks(group: HealthGroup, registry: Registry) -> None:
+    """Inspect session declarations without rendering or resolving secrets.
+
+    Declared templates are always available from this registry. Persisted session
+    overlays are inspected only through the ordinary current, read-only database;
+    an unavailable live view receives an explicit coverage row.
+    """
+    from agentworks.db import DatabaseDriverError
+    from agentworks.errors import AgentworksError
+    from agentworks.sessions.templates import resolve_live_template, resolve_template
+
+    for name, _template in registry.iter_kind_items("session-template"):
+        owner = f"session-template/{name}"
+        try:
+            resolved = resolve_template(registry, name)
+        except AgentworksError:
+            group.fail(owner, "Session compatibility could not be checked for this declaration")
+            continue
+        _append_session_template_fields(group, owner, resolved)
+
+    try:
+        with _current_database() as (exists, current, latest, database):
+            if not exists:
+                return
+            if current != latest:
+                group.info(
+                    "Session template compatibility coverage",
+                    "Live session declarations not checked; see the Database group",
+                )
+                return
+            assert database is not None
+            with database.snapshot():
+                for session in database.list_sessions():
+                    owner = f"session/{session.name}"
+                    try:
+                        resolved = resolve_live_template(database, registry, session.name, session.template)
+                    except AgentworksError:
+                        group.fail(owner, "Session compatibility could not be checked for this declaration")
+                        continue
+                    _append_session_template_fields(group, owner, resolved)
+    except (AgentworksError, DatabaseDriverError, OSError, ValueError):
+        group.fail(
+            "Session template compatibility coverage",
+            "Live session declarations not checked; see the Database group",
+        )
+
+
+def _append_session_template_fields(group: HealthGroup, owner: str, template: ResolvedSessionTemplate) -> None:
+    """Inspect session plaintext and validate persisted Shell capability fields.
+
+    A stored session overlay can be decoded without capability-field validation
+    when doctor falls back to a declared-only registry. Inspect only a validated
+    Shell config, and keep malformed input out of the health report.
+    """
+    from pydantic import ValidationError as PydanticValidationError
+
+    from agentworks.capabilities.harness_integration.shell import ShellConfig
+    from agentworks.env.identity import SESSION_IDENTITY_KEYS, WORKSPACE_IDENTITY_KEYS
+    from agentworks.env.merge import effective_env
+
+    session_env = effective_env(
+        vm={}, session=template.env, identity_keys=SESSION_IDENTITY_KEYS | WORKSPACE_IDENTITY_KEYS
+    )
+    for key, entry in session_env.items():
+        if entry.value is not None:
+            _append_legacy_placeholder_check(group, f"{owner}.env.{key}", entry.value)
+    if template.harness_integration != "shell":
+        return
+    try:
+        config = ShellConfig.model_validate(template.harness_integration_config)
+    except PydanticValidationError:
+        group.fail(owner, "Shell compatibility could not be checked for this declaration")
+        return
+    for field, command in (("command", config.command), ("resume_command", config.resume_command)):
+        _append_legacy_placeholder_check(group, f"{owner}.{field}", command)
+
+
+def _append_legacy_placeholder_check(group: HealthGroup, field: str, value: str) -> None:
+    from agentworks.interpolation_compat import LEGACY_PLACEHOLDER_REMOVAL, uses_legacy_placeholders
+
+    if uses_legacy_placeholders(value):
+        group.warn(
+            field,
+            "Deprecated session context placeholders",
+            hint=(
+                f"Use ${{agw:session_name}} and ${{agw:workspace_name}} before release {LEGACY_PLACEHOLDER_REMOVAL}."
+            ),
+        )
 
 
 def check_system() -> HealthGroup:

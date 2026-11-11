@@ -380,11 +380,14 @@ def _resolve_session_env(
         agent=scopes.agent,
         session=scopes.session,
     )
-    if {"_AGW_SESSION_UUID", "_AGW_RUN_ID"}.intersection(resolved):
+    reserved = {"_AGW_SESSION_UUID", "_AGW_RUN_ID", "AGENTWORKS_SESSION_UUID", "AGENTWORKS_RUN_ID"}.intersection(
+        resolved
+    )
+    if reserved:
         raise ValidationError(
-            "session environment conflicts with private tmux launch identity",
+            "session environment conflicts with managed launch identity",
             entity_kind="session",
             entity_name=session_name,
-            hint="Remove _AGW_SESSION_UUID and _AGW_RUN_ID from the session environment.",
+            hint=f"Remove {', '.join(sorted(reserved))} from the session environment.",
         )
     return resolved

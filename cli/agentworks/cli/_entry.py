@@ -74,7 +74,11 @@ def main() -> None:
         # successfully. Inside the try so a Ctrl-C during the pre-pass still
         # routes through our wrapper.
         _seed_debug_from_pre_callback()
-        _cli.app()
+        # Typer expands wildcards, ~ and %VAR% in argv on Windows, after `--`
+        # too, so `vm exec` would forward the workstation's filenames and
+        # environment instead of the literals the operator quoted. Arguments
+        # reach the commands as the shell passed them, as on POSIX.
+        _cli.app(windows_expand_args=False)
     except ConfigError as e:
         # Config errors get their own label since the user is looking at the
         # wrong file, not at a runtime state problem.

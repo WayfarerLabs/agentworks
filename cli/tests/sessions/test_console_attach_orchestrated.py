@@ -27,7 +27,7 @@ from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import multi_console
 from agentworks.sessions.tmux import ProbeStatus
 from agentworks.vms import manager as vm_manager
-from tests.conftest import ManifestDoc, stub_vm_ssh_identity
+from tests.conftest import ManifestDoc, seed_vm_trust, stub_vm_ssh_identity
 
 if TYPE_CHECKING:
     from agentworks.db import Database
@@ -42,6 +42,7 @@ def _outside_tmux(monkeypatch: pytest.MonkeyPatch) -> None:
 def _seed_vm(db: Database) -> None:
     db.insert_vm("box", site="proxmox", hostname="box")
     db.update_vm_tailscale("box", "100.64.0.9")
+    seed_vm_trust("box")
 
 
 def _seed_named_console(db: Database) -> None:

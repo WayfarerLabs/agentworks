@@ -16,11 +16,12 @@ import pytest
 from agentworks.db import DesiredRuntimeState as Target
 from agentworks.db import VMStatus
 from agentworks.errors import AuthorizationError, ConfigError, StateError, UserAbort
+from agentworks.execution import trust
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
 from tests._azure_platform_support import _RESOURCE_ID, _authorization_denied, _install_fakes
-from tests.conftest import ManifestDoc, requires_symlinks
+from tests.conftest import ManifestDoc, requires_symlinks, seed_vm_trust
 from tests.orchestrated_fixtures import write_operator_config
 
 if TYPE_CHECKING:
@@ -578,3 +579,79 @@ def test_binding_failure_warns_and_retires_local_resources(db: Database, make_co
     assert not artifact.exists()
     assert counts["delete"] == 0
     assert len(synced) == 1
+
+
+# -- The host-key record goes whenever the row goes ---------------------------
+
+
+def test_delete_removes_the_host_key_record_after_the_backend_delete(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    _seed(db)
+    seed_vm_trust("dvm")
+    seed_vm_trust("other")
+    counts = _fake_backend(monkeypatch)
+
+    vm_manager.delete_vm(db, make_config(), "dvm", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert counts["delete"] == 1
+    assert db.get_vm("dvm") is None
+    assert not trust.has_record("dvm")
+    assert trust.has_record("other")
+
+
+def test_delete_removes_the_host_key_record_when_backend_cleanup_was_skipped(
+    db: Database,
+    make_config,  # noqa: ANN001
+    captured_output: CapturedOutput,
+) -> None:
+    _seed(db, site="gone")
+    seed_vm_trust("dvm")
+
+    vm_manager.delete_vm(db, make_config(), "dvm", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert db.get_vm("dvm") is None
+    assert not trust.has_record("dvm")
+
+
+def test_backend_delete_failure_keeps_the_host_key_record(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    _seed(db)
+    seed_vm_trust("dvm")
+    counts = _fake_backend(monkeypatch)
+    _failing_backend_delete(monkeypatch, counts)
+
+    with pytest.raises(AuthorizationError):
+        vm_manager.delete_vm(db, make_config(), "dvm", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert db.get_vm("dvm") is not None
+    assert trust.has_record("dvm")
+
+
+def test_delete_removes_the_host_key_record_even_when_the_ssh_config_rebuild_fails(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    _seed(db)
+    seed_vm_trust("dvm")
+    _fake_backend(monkeypatch)
+
+    def _boom(*_a: object, **_k: object) -> None:
+        raise RuntimeError("read-only home")
+
+    monkeypatch.setattr("agentworks.ssh_config.sync_ssh_config", _boom)
+
+    with pytest.raises(RuntimeError):
+        vm_manager.delete_vm(db, make_config(), "dvm", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert db.get_vm("dvm") is None
+    assert not trust.has_record("dvm")

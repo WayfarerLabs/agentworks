@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from agentworks.execution.trust import HOST_TRUST, ssh_options
 from agentworks.ssh import SSHError, SSHTarget, run
 
 
@@ -22,7 +23,7 @@ def test_ssh_run_streams_input_without_logging_it() -> None:
         )
 
         result = run(
-            SSHTarget(host="vm-host"),
+            SSHTarget(host="vm-host", host_key_options=ssh_options(HOST_TRUST)),
             "umask 077 && cat > /tmp/template.yaml",
             input_text=secret,
         )
@@ -47,7 +48,7 @@ def test_ssh_run_plain_closes_stdin_with_dash_n_and_no_tt() -> None:
     Lima hop). ``-tt`` is never forced by default."""
     with patch("agentworks.ssh.subprocess.run") as process:
         process.return_value = subprocess.CompletedProcess([], 0, stdout=b"", stderr=b"")
-        run(SSHTarget(host="vm-host"), "limactl list --json")
+        run(SSHTarget(host="vm-host", host_key_options=ssh_options(HOST_TRUST)), "limactl list --json")
 
     argv = process.call_args.args[0]
     assert "-n" in argv
@@ -63,7 +64,11 @@ def test_ssh_run_input_text_forces_no_tty_even_with_omitted_tty() -> None:
     #684 regression, reachable through ssh_config rather than a caller)."""
     with patch("agentworks.ssh.subprocess.run") as process:
         process.return_value = subprocess.CompletedProcess([], 0, stdout=b"", stderr=b"")
-        run(SSHTarget(host="vm-host"), "cat > /tmp/template.yaml", input_text="payload")
+        run(
+            SSHTarget(host="vm-host", host_key_options=ssh_options(HOST_TRUST)),
+            "cat > /tmp/template.yaml",
+            input_text="payload",
+        )
 
     argv = process.call_args.args[0]
     assert "-T" in argv
@@ -81,7 +86,7 @@ def test_ssh_run_failure_diagnostic_omits_input() -> None:
 
         with pytest.raises(SSHError) as caught:
             run(
-                SSHTarget(host="vm-host"),
+                SSHTarget(host="vm-host", host_key_options=ssh_options(HOST_TRUST)),
                 "cat > /tmp/template.yaml",
                 input_text=secret,
             )
@@ -102,7 +107,7 @@ def test_ssh_run_check_false_discards_input_reflections() -> None:
         )
 
         result = run(
-            SSHTarget(host="vm-host"),
+            SSHTarget(host="vm-host", host_key_options=ssh_options(HOST_TRUST)),
             "cat > /tmp/template.yaml",
             input_text=secret,
             check=False,
@@ -118,7 +123,7 @@ def test_ssh_run_rejects_logging_sensitive_input_before_subprocess() -> None:
 
     with patch("agentworks.ssh.subprocess.run") as process, pytest.raises(ValueError) as caught:
         run(
-            SSHTarget(host="vm-host"),
+            SSHTarget(host="vm-host", host_key_options=ssh_options(HOST_TRUST)),
             "cat > /tmp/template.yaml",
             input_text=secret,
             logger=MagicMock(),
@@ -142,7 +147,7 @@ def test_transport_stdin_allocates_no_tty_and_leaves_stdin_open() -> None:
 
     with patch("agentworks.ssh.subprocess.run") as process:
         process.return_value = subprocess.CompletedProcess([], 0, stdout=b"", stderr=b"")
-        SSHTransport("vm-host").run("read -r token", input_text=secret)
+        SSHTransport("vm-host", trust=HOST_TRUST).run("read -r token", input_text=secret)
 
     argv = process.call_args.args[0]
     assert "-tt" not in argv
@@ -156,7 +161,7 @@ def test_transport_stdin_still_refuses_an_explicit_tty() -> None:
     from agentworks.transports.ssh import SSHTransport
 
     with patch("agentworks.ssh.subprocess.run") as process, pytest.raises(ValueError):
-        SSHTransport("vm-host").run("read -r token", input_text="s", tty=True)
+        SSHTransport("vm-host", trust=HOST_TRUST).run("read -r token", input_text="s", tty=True)
 
     process.assert_not_called()
 
@@ -167,7 +172,7 @@ def test_ssh_run_translates_sensitive_native_failure_without_exception_link() ->
 
     with patch("agentworks.ssh.subprocess.run", side_effect=native_failure), pytest.raises(SSHError) as caught:
         run(
-            SSHTarget(host="vm-host"),
+            SSHTarget(host="vm-host", host_key_options=ssh_options(HOST_TRUST)),
             "cat > /tmp/template.yaml",
             input_text=secret,
         )
@@ -180,7 +185,7 @@ def test_ssh_run_translates_sensitive_native_failure_without_exception_link() ->
 
 def test_ssh_run_translates_process_launch_failure() -> None:
     with patch("agentworks.ssh.subprocess.run", side_effect=FileNotFoundError("ssh")), pytest.raises(SSHError):
-        run(SSHTarget(host="vm-host"), "true")
+        run(SSHTarget(host="vm-host", host_key_options=ssh_options(HOST_TRUST)), "true")
 
 
 def test_ssh_run_sensitive_timeout_drops_partial_output_and_native_exception() -> None:
@@ -194,7 +199,7 @@ def test_ssh_run_sensitive_timeout_drops_partial_output_and_native_exception() -
 
     with patch("agentworks.ssh.subprocess.run", side_effect=timeout), pytest.raises(SSHError) as caught:
         run(
-            SSHTarget(host="vm-host"),
+            SSHTarget(host="vm-host", host_key_options=ssh_options(HOST_TRUST)),
             "cat > /tmp/template.yaml",
             input_text=secret,
             timeout=5,
@@ -214,7 +219,7 @@ def test_ssh_run_non_sensitive_timeout_retries_logs_and_chains_last_timeout() ->
 
     with patch("agentworks.ssh.subprocess.run", side_effect=timeout), pytest.raises(SSHError) as caught:
         run(
-            SSHTarget(host="vm-host"),
+            SSHTarget(host="vm-host", host_key_options=ssh_options(HOST_TRUST)),
             "echo ok",
             timeout=5,
             retries=2,

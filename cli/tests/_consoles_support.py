@@ -22,7 +22,7 @@ from __future__ import annotations
 import pytest
 
 from agentworks.db import Database, SessionMode
-from tests.conftest import stub_build_registry
+from tests.conftest import seed_vm_trust, stub_build_registry
 
 
 @pytest.fixture(autouse=True)
@@ -34,6 +34,7 @@ def _stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:
 def _seed_vm(db: Database, vm_name: str = "vm1", *, with_tailscale: bool = False) -> None:
     """Insert a VM and a workspace. No tailscale host -> live-sync skips."""
     db.insert_vm(vm_name, "lima", "h", admin_username="admin")
+    seed_vm_trust(vm_name)
     if with_tailscale:
         db._conn.execute(
             "UPDATE vms SET tailscale_host = ? WHERE name = ?",

@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING
 
 from agentworks.db import DesiredRuntimeState, VMStatus
 from agentworks.errors import StateError
+from agentworks.execution import trust
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -270,6 +271,7 @@ class LiveVMNode:
                     entity_name=row.name,
                     hint=f"start it with: agw vm start {row.name}",
                 )
+            trust.require_record(row.name)
             platform = self._site.platform
             ctx = self._gate_ops_ctx(gate_secrets)
             observed = platform.status(row, ctx)

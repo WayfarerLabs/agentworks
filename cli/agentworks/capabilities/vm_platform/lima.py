@@ -33,6 +33,7 @@ from agentworks.capabilities.vm_platform.tailscale_join import TAILSCALE_JOIN_ST
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
 from agentworks.errors import ProvisioningError, StateError
+from agentworks.execution.trust import HOST_TRUST, ssh_options
 from agentworks.naming import NAME_RE
 from agentworks.schema import AgwModel, NonEmptyStr
 from agentworks.ssh import SSH_DEFAULT_RETRIES, SSHError, SSHTarget
@@ -277,7 +278,12 @@ class LimaPlatform(VMPlatform):
         """Run a limactl command, locally or on the site's placement host."""
         if self.is_remote:
             assert self._remote_host is not None
-            target = SSHTarget(host=self._remote_host, user=None, login_shell=True)
+            target = SSHTarget(
+                host=self._remote_host,
+                user=None,
+                login_shell=True,
+                host_key_options=ssh_options(HOST_TRUST),
+            )
             return ssh_run(
                 target,
                 command,
@@ -555,6 +561,7 @@ class LimaPlatform(VMPlatform):
         assert self._remote_host is not None
         return SSHTransport(
             host=self._remote_host,
+            trust=HOST_TRUST,
             user=None,
             login_shell=True,
             logger=logger,
@@ -580,7 +587,7 @@ class LimaPlatform(VMPlatform):
         contain no resolved secret.
         """
         assert self._remote_host is not None
-        target = SSHTarget(host=self._remote_host, user=None)
+        target = SSHTarget(host=self._remote_host, user=None, host_key_options=ssh_options(HOST_TRUST))
 
         remote_template_dir = self._allocate_remote_template_dir(target)
         remote_template = f"{remote_template_dir}/template.yaml"

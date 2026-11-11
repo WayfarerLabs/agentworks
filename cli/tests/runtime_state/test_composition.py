@@ -17,7 +17,7 @@ from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import manager, tmux
 from agentworks.sessions import multi_console as mc
 from agentworks.sessions.tmux import ProbeStatus, TmuxServerFingerprint
-from tests.conftest import ManifestDoc, stub_vm_ssh_identity
+from tests.conftest import ManifestDoc, seed_vm_trust, stub_vm_ssh_identity
 from tests.console_helpers import create_console_record
 
 if TYPE_CHECKING:
@@ -33,6 +33,7 @@ def seed_vm(
 ) -> VMRow:
     row = db.insert_vm(name, site, name, admin_username="admin", desired_runtime_state=target)
     db.update_vm_tailscale(name, "100.64.0.5")
+    seed_vm_trust(name)
     db.update_vm_init_status(name, InitStatus.COMPLETE)
     db._conn.execute(
         "INSERT INTO workspaces (name,vm_name,workspace_path,linux_group) VALUES(?,?,?,?)",
@@ -335,3 +336,95 @@ def test_busy_family_does_not_prevent_independent_start(db, make_config, runtime
     with native_mutation_guard(db.path, "busy"), pytest.raises(AgentworksError):
         reconcile_vm(db, make_config(), all_vms=True, interaction=REFUSE)
     assert ("session-start", "work") in runtime[2]
+
+
+@pytest.mark.parametrize("power", [VMStatus.STOPPED, VMStatus.RUNNING])
+def test_missing_host_key_blocks_activation_before_sources_or_runtime(db, make_config, runtime, resolve_counter, power):
+    from agentworks.execution import trust
+
+    powers, _, events = runtime
+    seed_vm(db, "missing")
+    original = db.get_vm("missing")
+    trust.remove("missing")
+    powers["missing"] = power
+    with pytest.raises(AgentworksError):
+        reconcile_vm(db, make_config(), name="missing", interaction=REFUSE)
+    assert resolve_counter == []
+    assert events == []
+    assert db.get_vm("missing") == original
+
+
+def test_missing_host_key_family_does_not_block_independent_recovery(db, make_config, runtime, resolve_counter):
+    from agentworks.execution import trust
+
+    powers, _, events = runtime
+    for name in ("missing", "healthy"):
+        seed_vm(db, name)
+        powers[name] = VMStatus.STOPPED
+    original = db.get_vm("missing")
+    trust.remove("missing")
+    with pytest.raises(AgentworksError):
+        reconcile_vm(db, make_config(), all_vms=True, interaction=REFUSE)
+    assert ("vm-start", "healthy") in events
+    assert all(name != "missing" for _, name in events)
+    assert resolve_counter == [["proxmox-token"]]
+    assert db.get_vm("missing") == original
+
+
+@pytest.mark.parametrize("target", [DesiredRuntimeState.ON_DEMAND, DesiredRuntimeState.STOPPED])
+def test_provider_only_reconcile_does_not_require_host_key(db, make_config, runtime, target):
+    from agentworks.execution import trust
+
+    powers, _, events = runtime
+    seed_vm(db, "provider", target=target)
+    original = db.get_vm("provider")
+    trust.remove("provider")
+    powers["provider"] = VMStatus.STOPPED if target is DesiredRuntimeState.ON_DEMAND else VMStatus.RUNNING
+    reconcile_vm(db, make_config(), name="provider", interaction=REFUSE)
+    assert ("vm-start", "provider") not in events
+    assert ("hold", "provider") not in events
+    assert (("vm-stop", "provider") in events) == (target is DesiredRuntimeState.STOPPED)
+    assert db.get_vm("provider") == original
+
+
+def test_off_child_stop_does_not_require_host_key(db, make_config, runtime):
+    from agentworks.execution import trust
+
+    powers, _, events = runtime
+    seed_vm(db, "off")
+    seed_session(db, "stopped-child", "off", target=DesiredRuntimeState.STOPPED)
+    trust.remove("off")
+    powers["off"] = VMStatus.STOPPED
+    reconcile_session(db, make_config(), name="stopped-child", interaction=REFUSE)
+    assert events == []
+
+
+@pytest.mark.parametrize("power", [VMStatus.STOPPED, VMStatus.RUNNING])
+def test_console_stop_requires_host_key_only_for_live_guest(db, make_config, monkeypatch, power):
+    from agentworks.execution import trust
+
+    seed_vm(db, "box")
+    create_console_record(db, name="console", vm_name="box", session_specs=[], add_admin_shell=True)
+    original_vm = db.get_vm("box")
+    original_console = db.get_console("console")
+    trust.remove("box")
+    events = []
+    monkeypatch.setattr(ProxmoxPlatform, "status", lambda *a: events.append("status") or power)
+    monkeypatch.setattr(ProxmoxPlatform, "start", lambda *a: pytest.fail("started guest"))
+    monkeypatch.setattr(ProxmoxPlatform, "vm_active", lambda *a, **k: pytest.fail("held guest"))
+    monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: pytest.fail("guest transport before trust"))
+    if power is VMStatus.RUNNING:
+        with pytest.raises(AgentworksError):
+            mc.stop_console(db, make_config(), name="console", interaction=REFUSE)
+    else:
+        mc.stop_console(db, make_config(), name="console", interaction=REFUSE)
+    assert events and all(event == "status" for event in events)
+    assert db.get_vm("box") == original_vm
+    current = db.get_console("console")
+    assert current is not None and original_console is not None
+    assert current.desired_runtime_state is DesiredRuntimeState.STOPPED
+    assert (current.name, current.vm_name, current.created_at) == (
+        original_console.name,
+        original_console.vm_name,
+        original_console.created_at,
+    )

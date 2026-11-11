@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import contextlib
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -22,13 +22,13 @@ from agentworks.config import load_config
 from agentworks.db import DesiredRuntimeState as Target
 from agentworks.db import VersionedPayload, VMStatus
 from agentworks.debian import DebianRelease
-from agentworks.errors import ConfigError, StateError, ValidationError
+from agentworks.errors import ConfigError, ExternalError, StateError, ValidationError
 from agentworks.output import Role
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
 from agentworks.vms.admin import AdminConfig
 from agentworks.vms.templates import ResolvedVMTemplate
-from tests.conftest import ManifestDoc, pin_wsl2_unsupported, write_manifests
+from tests.conftest import ManifestDoc, pin_wsl2_unsupported, seed_vm_trust, ssh_enrolls_on_first_use, write_manifests
 from tests.orchestrated_fixtures import proxmox_site
 from tests.ssh_fixtures import write_test_ssh_keypair
 
@@ -673,6 +673,107 @@ def test_create_phase_a_failure_maps_to_provisioning_error(
     assert row.provisioning_status == ProvisioningStatus.FAILED.value
 
 
+def _stub_create_with_trust_probes(
+    monkeypatch: pytest.MonkeyPatch,
+    db: Database,
+    seen: dict[str, object],
+    *,
+    bootstrap_fails: bool = False,
+) -> None:
+    """Fake the platform's create and Phase A, recording what the host-key
+    store and the provisioning file look like at each point."""
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+    from agentworks.execution import trust
+
+    def _fake_create(self: LimaPlatform, request: Any, ctx: object) -> ProvisionResult:
+        binding = request.provisioning_trust
+        seen["binding"] = binding
+        seen["row_at_create"] = db.get_vm(request.vm_name) is not None
+        seen["record_at_create"] = trust.has_record(request.vm_name)
+        seen["file_at_create"] = binding.provisioning_file.is_file()
+        return ProvisionResult(native_transport=SimpleNamespace(), platform_metadata={}, tailscale_ip="100.64.0.7")  # type: ignore[arg-type]
+
+    def _bootstrap(db_: Database, config_: object, vm_name: str, *a: object, **k: object) -> tuple[object, str]:
+        # Core keeps using the create-time transport here (release probe,
+        # Phase A's fallback), so the file must still exist.
+        seen["file_at_bootstrap"] = seen["binding"].provisioning_file.is_file()  # type: ignore[attr-defined]
+        if bootstrap_fails:
+            raise RuntimeError("bootstrap exploded")
+        return SimpleNamespace(), "/home/agentworks"
+
+    monkeypatch.setattr(LimaPlatform, "create", _fake_create)
+    monkeypatch.setattr(LimaPlatform, "vm_active", _noop_hold)
+    monkeypatch.setattr(vm_manager, "bootstrap_vm", _bootstrap)
+    monkeypatch.setattr(vm_manager, "run_initialization", lambda *a, **k: None)
+    monkeypatch.setattr("agentworks.ssh_config.sync_ssh_config", lambda *a, **k: None)
+
+
+def test_create_resets_the_store_once_the_row_exists_and_hands_cloud_create_an_unverified_file(
+    make_config,
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,
+) -> None:
+    from agentworks.execution import trust
+
+    seed_vm_trust("nvm")  # a stale record from an earlier VM of the same name
+    seen: dict[str, object] = {}
+    _stub_create_with_trust_probes(monkeypatch, db, seen)
+
+    vm_manager.create_vm(db, make_config(), name="nvm", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert seen["row_at_create"] is True
+    assert seen["record_at_create"] is False
+    binding = seen["binding"]
+    assert isinstance(binding, trust.TrustBinding)
+    assert binding.mode is trust.TrustMode.UNVERIFIED
+    assert seen["file_at_create"] is True
+    assert seen["file_at_bootstrap"] is True
+    assert binding.provisioning_file is not None
+    assert not binding.provisioning_file.exists()
+
+
+def test_create_removes_the_provisioning_file_when_a_later_step_fails(
+    make_config,
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,
+) -> None:
+    seen: dict[str, object] = {}
+    _stub_create_with_trust_probes(monkeypatch, db, seen, bootstrap_fails=True)
+
+    with pytest.raises(ExternalError, match="bootstrap exploded"):
+        vm_manager.create_vm(db, make_config(), name="fvm", interaction=TtyInteractionPolicy.REFUSE)
+
+    binding = seen["binding"]
+    assert binding.provisioning_file is not None  # type: ignore[attr-defined]
+    assert not binding.provisioning_file.exists()  # type: ignore[attr-defined]
+
+
+def test_create_that_cannot_reset_the_store_unwinds_the_row_before_the_platform_runs(
+    make_config,
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,
+) -> None:
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+    from agentworks.execution import trust
+
+    def _refuse(vm_name: str) -> None:
+        raise StateError("cannot reset the host-key store")
+
+    def _platform_must_not_run(self: LimaPlatform, request: object, ctx: object) -> ProvisionResult:
+        raise AssertionError("the platform ran without a reset store")
+
+    monkeypatch.setattr(trust, "begin_enrollment", _refuse)
+    monkeypatch.setattr(LimaPlatform, "create", _platform_must_not_run)
+
+    with pytest.raises(StateError):
+        vm_manager.create_vm(db, make_config(), name="uvm", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert db.get_vm("uvm") is None
+
+
 def test_create_phase_a_sync_failure_is_non_fatal(
     make_config,
     db: Database,
@@ -705,8 +806,10 @@ def test_create_phase_a_sync_failure_is_non_fatal(
         def __init__(self, **kwargs: object) -> None:
             self.host = kwargs.get("host")
             self.logger = kwargs.get("logger")
+            self.trust = kwargs.get("trust")
 
         def run(self, cmd: str, timeout: int | None = None) -> object:
+            ssh_enrolls_on_first_use(self.trust)
             return SimpleNamespace(ok=True, stdout="ok", returncode=0)
 
     monkeypatch.setattr(driver, "SSHTransport", _FakeTS)
@@ -763,8 +866,10 @@ def test_create_provisioning_section_has_explicit_closing_body_line(
         def __init__(self, **kwargs: object) -> None:
             self.host = kwargs.get("host")
             self.logger = kwargs.get("logger")
+            self.trust = kwargs.get("trust")
 
         def run(self, cmd: str, timeout: int | None = None) -> object:
+            ssh_enrolls_on_first_use(self.trust)
             return SimpleNamespace(ok=True, stdout="ok", returncode=0)
 
     monkeypatch.setattr(driver, "SSHTransport", _FakeTS)
@@ -796,8 +901,14 @@ def _seed_provisioned_vm(db: Database) -> None:
     db.update_vm_provisioning_status("rvm", ProvisioningStatus.COMPLETE)
 
 
+def _reinit_transport(*, stdout: str = "", returncode: int = 0) -> SimpleNamespace:
+    """A reinit transport whose only call is the pam_env probe."""
+    return SimpleNamespace(run=lambda command, **kwargs: SimpleNamespace(stdout=stdout, returncode=returncode))
+
+
 @pytest.fixture(autouse=True)
 def _verified_reinit_release(monkeypatch: pytest.MonkeyPatch) -> None:
+    seed_vm_trust("rvm")
     monkeypatch.setattr(
         vm_manager,
         "verified_vm_release",
@@ -871,7 +982,7 @@ def test_reinit_runs_initialization_through_the_gate(
     monkeypatch.setattr(vm_manager, "run_initialization", _fake_init)
     import agentworks.transports as transports
 
-    monkeypatch.setattr(transports, "transport", lambda vm, config, **kw: SimpleNamespace())
+    monkeypatch.setattr(transports, "transport", lambda vm, config, **kw: _reinit_transport())
 
     vm_manager.reinit_vm(db, config, "rvm", interaction=TtyInteractionPolicy.REFUSE)
 
@@ -970,7 +1081,7 @@ def test_reinit_resolves_the_stored_admin_template(
     monkeypatch.setattr(vm_manager, "run_initialization", _fake_init)
     import agentworks.transports as transports
 
-    monkeypatch.setattr(transports, "transport", lambda vm, config, **kw: SimpleNamespace())
+    monkeypatch.setattr(transports, "transport", lambda vm, config, **kw: _reinit_transport())
 
     vm_manager.reinit_vm(db, config, "rvm", interaction=TtyInteractionPolicy.REFUSE)
 
@@ -1004,13 +1115,47 @@ def test_reinit_applies_a_legacy_flat_vm_payload(
         captured["vm_template"] = args[3]
 
     monkeypatch.setattr(vm_manager, "run_initialization", _fake_init)
-    monkeypatch.setattr("agentworks.transports.transport", lambda vm, config, **kw: SimpleNamespace())
+    monkeypatch.setattr("agentworks.transports.transport", lambda vm, config, **kw: _reinit_transport())
 
     vm_manager.reinit_vm(db, config, "rvm", interaction=TtyInteractionPolicy.REFUSE)
 
     vm_template = captured["vm_template"]
     assert isinstance(vm_template, ResolvedVMTemplate)
     assert vm_template.cpus == 11
+
+
+@pytest.mark.parametrize(
+    "transport",
+    [_reinit_transport(stdout="/etc/environment\n"), _reinit_transport(returncode=127)],
+    ids=["settings", "probe-exits-non-zero"],
+)
+def test_reinit_warns_about_pam_env_settings_and_still_initializes(
+    make_config,
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,
+    transport: SimpleNamespace,
+) -> None:
+    """A VM with pam_env settings (or a probe that did not run to its end) costs a warning, never the reinit."""
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+
+    config = make_config()
+    _seed_provisioned_vm(db)
+    monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: True)
+
+    @contextlib.contextmanager
+    def _hold(self: LimaPlatform, vm: object, *, config: object | None = None):
+        yield
+
+    monkeypatch.setattr(LimaPlatform, "vm_active", _hold)
+    initialized: list[bool] = []
+    monkeypatch.setattr(vm_manager, "run_initialization", lambda *a, **k: initialized.append(True))
+    monkeypatch.setattr("agentworks.transports.transport", lambda vm, config, **kw: transport)
+
+    vm_manager.reinit_vm(db, config, "rvm", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert initialized == [True]
+    assert len(captured_output.warnings) == 1
 
 
 @pytest.mark.parametrize("admin_template", ["", "work"])

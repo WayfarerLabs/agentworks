@@ -8,6 +8,7 @@ import pytest
 
 from agentworks.db import ConsoleRow
 from agentworks.errors import ConnectivityError, NotFoundError
+from agentworks.execution.errors import TrustMissing
 from agentworks.sessions.multi_console._status import (
     ConsoleStatus,
     _enumerate_tmux_sessions,
@@ -114,6 +115,32 @@ def test_console_observer_isolates_unreachable_vm_and_uses_exact_names(
         "beta": ConsoleStatus.UNKNOWN,
     }
     assert len(target.calls) == 1
+
+
+def test_console_observer_reports_a_vm_without_a_host_key_record_and_observes_the_others(
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    consoles = [ConsoleRow("alpha", "vm-a", False, "", ""), ConsoleRow("beta", "vm-b", False, "", "")]
+    vms = {name: object() for name in ("vm-a", "vm-b")}
+
+    class _DB:
+        def get_vm(self, name: str) -> object:
+            return vms[name]
+
+    def require(_db: object, _config: object, vm: object) -> None:
+        if vm is vms["vm-b"]:
+            raise TrustMissing("vm-b")
+
+    target = _Target(_Result(0, stdout="aw-console-alpha\n"))
+    monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", require)
+    monkeypatch.setattr("agentworks.transports.transport", lambda *_args, **_kwargs: target)
+
+    result = observe_console_statuses(_DB(), object(), consoles)  # type: ignore[arg-type]
+
+    assert result == {"alpha": ConsoleStatus.RUNNING, "beta": ConsoleStatus.UNKNOWN}
+    assert len(captured_output.warnings) == 1
+    assert "vm-b" in captured_output.warnings[0]
 
 
 def test_console_observer_preserves_missing_vm_as_structural_failure() -> None:

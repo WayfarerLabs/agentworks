@@ -162,14 +162,14 @@ def test_admin_template_kind_errors_on_unreserved_name_reference(
 
 
 def test_admin_config_manifest_still_produces_named_default(tmp_path: Path) -> None:
-    """An admin-template manifest declaring ``shell = "fish"`` still
+    """An admin-template manifest declaring ``shell = "zsh"`` still
     produces a single named-default ``AdminConfig`` with that shell:
     the admin-template default surface, now declared as a manifest
     (config.toml is settings only, ADR 0022).
     """
     cfg_file = _write_cfg(tmp_path / "config.toml")
-    write_manifests(cfg_file.parent, ManifestDoc("admin-template", "default", {"shell": "fish"}))
+    write_manifests(cfg_file.parent, ManifestDoc("admin-template", "default", {"shell": "zsh"}))
     cfg = load_config(cfg_file, warn_issues=False)
     admin = build_registry(cfg).lookup("admin-template", "default")
     assert admin.name == "default"
-    assert admin.shell == "fish"
+    assert admin.shell == "zsh"

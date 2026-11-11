@@ -14,7 +14,9 @@ if TYPE_CHECKING:
     from agentworks.artifacts.model import ArtifactInputs
 
 
-def shell_artifacts(inputs: ArtifactInputs, root: str, *, session: bool = False) -> ArtifactApplication:
+def filesystem_artifacts(
+    inputs: ArtifactInputs, root: str, *, session: bool = False, aggregate_hints: bool = False
+) -> ArtifactApplication:
     files: list[ArtifactFile] = []
     groups = []
     for group in inputs.groups():
@@ -22,10 +24,22 @@ def shell_artifacts(inputs: ArtifactInputs, root: str, *, session: bool = False)
             continue
         maps: dict[str, dict[str, object]] = {kind.map_name: {} for kind in ArtifactType}
         group_root = f"{root}/scopes/{group.owner.component}/{group.owner.resource_name}"
+        hints = tuple(group.hints.values())
+        hint_file = None
+        if aggregate_hints and hints:
+            hint_file = artifact_file(
+                f"{group_root}/hints/agentworks-hints.md",
+                "\n\n".join(f"## {item.content.name}\n\n{item.content.text}" for item in hints),
+                hints,
+            )
+            files.append(hint_file)
         for item in group.items():
             content = item.content
             directory = f"{group_root}/{content.type.map_name}"
-            if content.type is ArtifactType.SKILL:
+            publication: tuple[ArtifactFile, ...]
+            if content.type is ArtifactType.HINT and hint_file is not None:
+                publication = (hint_file,)
+            elif content.type is ArtifactType.SKILL:
                 publication = skill_files(directory, item)
             else:
                 body = content.text
@@ -40,10 +54,12 @@ def shell_artifacts(inputs: ArtifactInputs, root: str, *, session: bool = False)
                     )
                 suffix = "json" if content.type is ArtifactType.AGENT else "md"
                 publication = (artifact_file(f"{directory}/{content.name}.{suffix}", body, (item,)),)
-            files.extend(publication)
+            if content.type is not ArtifactType.HINT or hint_file is None:
+                files.extend(publication)
             maps[content.type.map_name][content.name] = {
                 "files": [file.path.removeprefix(root + "/") for file in publication],
                 "origin": asdict(item.origin),
+                "description": content.description,
                 "commit": item.provenance.commit,
             }
         groups.append({"owner": asdict(group.owner), **maps})

@@ -63,3 +63,10 @@ reinitialization. Selecting `agw vm set-desired-state NAME on-demand` or `runnin
 holds and future activation; it is not only a per-command keepalive switch. Change the policy only
 when those effects are intended, or retain stopped intent and report the access limitation. Even
 live diagnostic access may report busy briefly while another operation holds the VM family.
+
+## Host keys
+
+Agentworks verifies each VM's SSH host key against a per-VM store and never trusts a first
+connection. Commands that act on a VM refuse one with no record, while describe and listing commands
+report the missing record per VM and carry on. `agw vm import-host-keys --help` explains how to fill
+the store for a VM that predates it.

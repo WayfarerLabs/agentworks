@@ -351,6 +351,7 @@ def test_stop_guest_disappearance_requires_conclusive_provider_off(db: Database,
     node = SimpleNamespace(hold_active=lambda: pytest.fail("opened hold"))
     context = SimpleNamespace(node=node, observed_status=VMStatus.RUNNING, clear_values=lambda: None)
     monkeypatch.setattr(lifecycle, "preflight_console_vm", lambda *a, **kw: node)
+    monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", lambda *a, **kw: None)
     monkeypatch.setattr("agentworks.vms.manager.runtime.prepare_vm_runtime", lambda *a, **kw: context)
     monkeypatch.setattr("agentworks.vms.manager.runtime.observe_vm_runtime", lambda *a: VMStatus(power_state))
     monkeypatch.setattr("agentworks.transports.transport", lambda *a, **kw: object())

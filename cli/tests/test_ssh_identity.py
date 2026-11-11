@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import os
+import shlex
 import shutil
 import struct
 import subprocess
@@ -18,7 +19,9 @@ from agentworks.ssh_identity import (
     UnverifiableSSHIdentity,
     VerifiedSSHIdentity,
     fingerprint_public_blob,
+    identity_is_passphrase_protected,
     parse_public_ssh_identity,
+    passphrase_hint,
     read_private_ssh_identity,
 )
 
@@ -343,3 +346,102 @@ def test_real_native_openssh_key_matches_ssh_keygen_fingerprint(tmp_path: Path, 
     ).stdout.split()[1]
 
     assert read_private_ssh_identity(private_key) == VerifiedSSHIdentity(fingerprint)
+    assert identity_is_passphrase_protected(private_key) is bool(passphrase)
+
+
+@pytest.mark.parametrize(("cipher", "protected"), [(b"none", False), (b"aes256-ctr", True)])
+def test_the_envelope_cipher_decides_whether_a_key_is_passphrase_protected(
+    tmp_path: Path, cipher: bytes, protected: bool
+) -> None:
+    key = _write(tmp_path / "id", _native_armor(_native_envelope(cipher=cipher)))
+
+    assert identity_is_passphrase_protected(key) is protected
+
+
+@pytest.mark.parametrize(
+    ("contents", "protected"),
+    [
+        (b"-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nDEK-Info: AES-128-CBC,00\n\nAA==\n", True),
+        (b"-----BEGIN RSA PRIVATE KEY-----\nAA==\n-----END RSA PRIVATE KEY-----\n", False),
+        (b"-----BEGIN ENCRYPTED PRIVATE KEY-----\nAA==\n-----END ENCRYPTED PRIVATE KEY-----\n", True),
+        (b"-----BEGIN PRIVATE KEY-----\nAA==\n-----END PRIVATE KEY-----\n", False),
+    ],
+    ids=["encrypted-pem", "plain-pem", "encrypted-pkcs8", "plain-pkcs8"],
+)
+def test_legacy_pem_and_pkcs8_keys_report_their_encryption(tmp_path: Path, contents: bytes, protected: bool) -> None:
+    assert identity_is_passphrase_protected(_write(tmp_path / "id", contents)) is protected
+
+
+@pytest.mark.parametrize(
+    "contents",
+    [
+        _OPENSSH_BEGIN + b"\n!!!not base64!!!\n" + _OPENSSH_END + b"\n",
+        _OPENSSH_BEGIN + b"\n" + base64.b64encode(_OPENSSH_MAGIC + b"\x00\x00") + b"\n" + _OPENSSH_END + b"\n",
+    ],
+    ids=["bad-base64", "truncated-envelope"],
+)
+def test_an_unparsable_identity_is_not_passphrase_protected(tmp_path: Path, contents: bytes) -> None:
+    assert identity_is_passphrase_protected(_write(tmp_path / "id", contents)) is False
+
+
+def test_a_missing_identity_is_not_passphrase_protected(tmp_path: Path) -> None:
+    assert identity_is_passphrase_protected(tmp_path / "absent") is False
+
+
+def test_the_hint_exists_only_for_a_passphrase_protected_key(tmp_path: Path) -> None:
+    protected = _write(tmp_path / "protected", _native_armor(_native_envelope(cipher=b"aes256-ctr")))
+    plain = _write(tmp_path / "plain", _native_armor(_native_envelope()))
+
+    assert passphrase_hint(protected) is not None
+    assert passphrase_hint(plain) is None
+    assert passphrase_hint(tmp_path / "absent") is None
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the POSIX shell reads the suggested command")
+@pytest.mark.parametrize("directory", ["plain", "my keys", 'a b$(echo PWN)"q', "it's"])
+def test_the_suggested_path_is_read_back_by_a_shell_as_exactly_the_key_path(tmp_path: Path, directory: str) -> None:
+    folder = tmp_path / directory
+    folder.mkdir()
+    key = _write(folder / "id", _native_armor(_native_envelope(cipher=b"aes256-ctr")))
+
+    hint = passphrase_hint(key)
+
+    assert hint is not None
+    assert shlex.split(hint.rsplit("ssh-add ", 1)[1]) == [str(key.absolute())]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the POSIX shell expands the ~")
+def test_a_key_under_the_home_directory_is_suggested_in_its_tilde_form(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    (tmp_path / ".ssh").mkdir()
+    key = _write(tmp_path / ".ssh" / "id", _native_armor(_native_envelope(cipher=b"aes256-ctr")))
+
+    hint = passphrase_hint(key)
+
+    assert hint is not None
+    suggested = hint.rsplit("ssh-add ", 1)[1]
+    assert suggested.startswith("~")  # unquoted, so the shell expands it
+    assert os.path.expanduser(suggested) == str(key)
+
+
+@pytest.mark.parametrize("directory", ["plain", "my keys"])
+@pytest.mark.parametrize("under_home", [False, True])
+def test_on_windows_the_suggested_path_is_always_the_absolute_path_in_double_quotes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, directory: str, under_home: bool
+) -> None:
+    # cmd and PowerShell do not expand ~ for ssh-add, so even a home-relative key gets its absolute path.
+    from agentworks import ssh_identity
+
+    monkeypatch.setattr(ssh_identity, "_on_windows", lambda: True)
+    if under_home:
+        monkeypatch.setenv("HOME", str(tmp_path))
+    folder = tmp_path / directory
+    folder.mkdir()
+    key = _write(folder / "id", _native_armor(_native_envelope(cipher=b"aes256-ctr")))
+
+    hint = passphrase_hint(key)
+
+    assert hint is not None
+    assert hint.endswith(f'ssh-add "{key.absolute()}"')
