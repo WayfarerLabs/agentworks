@@ -257,10 +257,10 @@ an untested advertised mechanism.
 
 The same run found two spelling words in this record and one website browser input timing failure.
 CI independently reported those same spelling words; its website and Windows jobs passed. The
-original logs are retained. At `a8cb56deb`, spelling/file checks and the full 160-test website replay
-passed. Node tests, both deterministic build pairs, locks, Rulesync and installed package parity
-also passed. Runtime/packaged source remains byte-identical to `ad632ada`. No browser source or
-timing policy changed, and no cause beyond the observed one-off timing failure is asserted.
+original logs are retained. At `a8cb56deb`, spelling/file checks and the full 160-test website
+replay passed. Node tests, both deterministic build pairs, locks, Rulesync and installed package
+parity also passed. Runtime/packaged source remains byte-identical to `ad632ada`. No browser source
+or timing policy changed, and no cause beyond the observed one-off timing failure is asserted.
 
 The final record delta is limited to this SDD's HLA/plan, including the historical checkpoint
 framing clarification. The handoff records its exact pushed green head and CI separately. The
