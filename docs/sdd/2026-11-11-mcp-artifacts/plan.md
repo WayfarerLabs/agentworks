@@ -294,17 +294,34 @@ the operator's three-round allowance after the actual report, and verified draft
 changes. Main was refreshed and remains `07feb4a4`. The frozen batch is F1, Muntz's two material
 points and its three optional points; one further round remains after this round.
 
-- [ ] Use one passive current-user native-layout observation for settings/plugin/artifact/MCP
+- [x] Use one passive current-user native-layout observation for settings/plugin/artifact/MCP
       placement, preserving Claude's explicit override distinction, MCP-only executable independence
       and current-role ownership boundaries.
-- [ ] Apply one known-metadata and destination-identity rehome policy to all existing workspace
+- [x] Apply one known-metadata and destination-identity rehome policy to all existing workspace
       setup records, preserving Git authority, opaque claims, literal contents and incomplete state.
-- [ ] Distinguish already-absent MCP retirement, remove the redundant native-name count check and
+- [x] Distinguish already-absent MCP retirement, remove the redundant native-name count check and
       document the confirmed-write/failed-claim checkpoint gap without adding ownership machinery.
 - [ ] Run all three independent private review lanes, full gates, installed-package checks and
       exact-head CI on the corrected source and actual final records.
 - [ ] Re-hand off the complete pushed head as round 2 and mark ready. Wait for its actual
       independent integration report for up to six hours before another fix round.
+
+Native layout source is integrated from `550f3042` and `938e55d6`; its broader retained selection
+passed 2,298 cases with five skips, and the final small simplification selection passed 243 with one
+skip. New cases cover real isolated profile selection across MCP add/withdraw/following reinit,
+selected-root reuse by all three adapters, mixed plugin/settings work and unknown/changed-role
+retirement. A new guarded-path case also exposed optional MCP handling that omitted the existing
+typed path refusal. Its correction catches only that refusal; CAS, internal state, cancellation and
+checkpoint errors still escape. Initial obsolete fixture API/count assumptions and the corrected
+failure remain in the owned proof logs.
+
+Rehome source is integrated from `151dd9ba` and its public-boundary test correction `adfb2802`. Its
+85-case focused selection passed; explicit tests cover file-only and MCP-bearing records,
+empty/settings/skips/opaque records, partial Git failure, preserved bytes/hashes and persistence or
+cancellation failure. The first workspace-mount fixture run had ownership-preservation failures; the
+owned `/tmp` replay and corrected manager-error expectations passed. The lead read the source and
+measured logs and independently checked the named fixture roots absent. No filesystem authority was
+relaxed for that environment. Full combined review/gates/package acceptance remains pending.
 
 R6 session acceptance remains open: the Windows resume-only attempt found no resumable native
 history. It proves neither genuine resume nor a native defect. The corrected handoff must request
