@@ -13,6 +13,7 @@ import pytest
 from agentworks.artifacts.application import ArtifactFile, SessionArtifactContext
 from agentworks.artifacts.model import ArtifactType
 from agentworks.artifacts.native.common import NativeSessionArtifacts
+from agentworks.artifacts.native.probe import _PROBE
 from agentworks.artifacts.session import validate_session_application
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.harness_integration import HarnessStart, ShellIntegration
@@ -23,6 +24,7 @@ from tests.artifacts._fixtures import received
 from tests.artifacts.test_native_delivery import artifact, context, owned
 from tests.artifacts.test_session_lifecycle import lifecycle as lifecycle
 from tests.native_setup_fixtures import LocalFixtureTransport
+from tests.vm_access_support import RecordingVMAccess
 
 
 def render(current: SessionArtifactContext) -> NativeSessionArtifacts:
@@ -120,6 +122,7 @@ def start(
     current: SessionArtifactContext,
     monkeypatch: pytest.MonkeyPatch,
     workarounds: list[str],
+    access: RecordingVMAccess | None = None,
 ) -> HarnessStart:
     integration = GrokBuildIntegration(
         "grok-build",
@@ -134,7 +137,7 @@ def start(
         artifact_context=current,
     )
     monkeypatch.setattr(integration, "_resume_or_launch", lambda *args, **kwargs: "fixture-launch")
-    return integration.start(RunContext(admin_access=target.access()))
+    return integration.start(RunContext(admin_access=access or target.access()))
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="isolated Linux login environment")
@@ -152,10 +155,12 @@ def test_disabled_grok_publication_keeps_invalid_home_and_ancestor_checks_adviso
             "GROK_HOME": "relative-grok" if override == "relative" else str(login_target.home / ".grok") + "/"
         },
     )
-    result = start(login_target, current, monkeypatch, [])
+    access = login_target.access()
+    result = start(login_target, current, monkeypatch, [], access)
     assert not result.artifacts.files
     assert {item.input_id for item in result.artifacts.deferred} == ({rule.identity} if local else set())
-    assert bool(login_target.logged_output) == ancestor
+    # Only an ancestor needs the native home, so only then does the discovery probe run, once.
+    assert [request.source for request in access.requests()] == ([_PROBE] if ancestor else [])
     if ancestor:
         assert captured_output.warnings
     assert not (login_target.home / "native-executed").exists()
