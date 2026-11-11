@@ -198,14 +198,19 @@ VM. It is not produced by merging setup configs. Environment values follow their
 artifact handling does not consume or reroute those values. Launched workloads also receive
 `AGENTWORKS_SESSION_UUID` and `AGENTWORKS_RUN_ID`, identifying their managed logical session and
 current run independently of the reusable session display name and native conversation ID. The
-pipeline is core environment and artifacts, then harness integration. Features and automatic hint
-emission are future work.
+pipeline is core environment and artifacts, then harness integration. MCP credential references stay
+unresolved for the native runtime. This prepared env map is not proof that a name is absent from the
+later login-shell environment; artifact handling does not add a credential-presence probe. Features
+and automatic hint emission are future work.
 
 ## Artifact handling across facets
 
 An owner selects reusable bundles through `artifacts.bundles`, independently of integration
 activation. Core captures those inputs even when no integration is activated there. A later facet
 reads the capture; it does not reopen workstation files or fetch Git sources for an ancestor.
+Bundles contain `hints`, `rules`, `skills`, `agents` and `mcp_servers` maps. MCP entries describe
+connections, not running services; registration never proves authentication, connectivity, tool
+discovery or model use. Select the consuming user's env/secret declarations separately.
 
 Core routes an inactive VM facet's inputs to the user facet by default. An activated VM facet can
 choose user, workspace, or session for each deferred input. These routes do not depend on which
@@ -228,13 +233,13 @@ consume another's inputs. Admin and agent users remain separate. With neither VM
 activation, those inputs reach the session through user passthrough.
 
 Claude applies VM guidance skills, skills and agents in its managed locations. Codex applies VM
-skills and guidance skills, and defers personas to user. Grok defers VM inputs to user. Shell
-applies all VM types under `/opt/agentworks/artifacts`. Workspace-owned bundles remain useful
-independently: their workspace facet handles them in project locations or passes them to each
-consuming session. Workspace placement is shared with other users of that workspace. Session-only
-content stays under the actual user's home: private session/run files or an explicitly enabled
-best-effort native skill workaround. Home-skill catalogs can be shared by that user's sessions;
-metadata states intended applicability. The
+skills and guidance skills, and defers personas to user. Native VM facets defer MCP to user. Grok
+defers VM inputs to user. Shell applies all VM types under `/opt/agentworks/artifacts`.
+Workspace-owned bundles remain useful independently: their workspace facet handles them in project
+locations or passes them to each consuming session. Workspace placement is shared with other users
+of that workspace. Session-only content stays under the actual user's home: private session/run
+files or an explicitly enabled best-effort native skill workaround. Home-skill catalogs can be
+shared by that user's sessions; metadata states intended applicability. The
 [two concurrent Shell sessions example](../../cli/agentworks/artifacts/README.md#two-concurrent-sessions)
 uses an existing workspace and distinct private run paths, with inspection and teardown commands.
 
@@ -274,6 +279,17 @@ applied by a descendant.
 See `agw guide show concept-agent-artifacts` for bundle examples, source capture, native support,
 and inspection. `agw artifact show` includes upstream handling even when handled payloads no longer
 flow to a descendant.
+
+Claude Code, Codex and Grok register MCP at user/workspace scope in their actual native config
+roles, preserving unrelated settings and entries unless an explicit mapping changes them. Managed
+names include the original owner, so equal keys at different scopes do not shadow one another. An
+identical unowned entry can be adopted; conflicting entries are retained and deferred individually.
+The optional session carriers are Claude `session-mcp-config` and Codex `session-mcp-overrides`.
+Grok has no supported session MCP carrier; unhandled MCP warns and launch continues. Shell publishes
+canonical files at every scope without running servers. See
+[MCP setup](native-harness-setup.md#mcp-registrations) for paths, merge interaction and the separate
+native authentication/credential-removal workflow. OAuth configuration is planned for a later phase;
+the initial artifact profile rejects OAuth and tool-filter fields explicitly.
 
 ## Session prerequisites
 
@@ -365,9 +381,13 @@ Workspace mappings require explicit recreation to apply changes; `workspace repa
 existing access and Git identity responsibilities.
 
 Cleanup only removes effects whose ownership can be established. Removed settings mappings retain
-the document; removed owned plugin associations are reconciled where safe. Obsolete artifact files
-are removed when their recorded ownership and contents still match. Modified files are retained and
-diagnosed instead of being silently overwritten or deleted. See
+the document; removed owned plugin associations and unchanged MCP entries are reconciled where safe.
+MCP removal leaves native OAuth credentials, if any, untouched and reports that distinction.
+Untracked shared native MCP files receive exact local Git exclusions covering the entire file;
+tracked files warn and remain tracked. Cleanup removes owned exclusions without deleting the shared
+document or changing the Git index. Obsolete artifact files are removed when their recorded
+ownership and contents still match. Modified files are retained and diagnosed instead of being
+silently overwritten or deleted. See
 [native cleanup rules](native-harness-setup.md#deleting-owning-resources) before deleting an owner.
 Parent deletion follows the existing VM, agent, or workspace lifecycle. It removes the contained
 native files with their parent and clears setup records through the existing database deletion. It
@@ -376,8 +396,10 @@ does not first uninstall plugins or require readable applied-state records.
 Setup, deletion, and workspace rehome share a VM-family mutation guard. A competing mutation refuses
 with retry guidance. Rehome moves project settings with the workspace. Existing applied-state
 records do not block the move; readiness reports stale setup when its recorded destination no longer
-matches. [Idempotency](idempotency.md#harness-setup-reconciliation) describes retry guarantees and
-limits.
+matches. MCP entry destination metadata follows the active workspace after a successful copy,
+preserving server names and fingerprints. A deliberately retained old copy is unmanaged. Rehome does
+not rerun facets. [Idempotency](idempotency.md#harness-setup-reconciliation) describes retry
+guarantees and limits.
 
 Before changing setup, confirm authorization for the owning operation and inspect its effects.
 Reinit can change native files and plugin registrations; workspace recreation replaces a shared

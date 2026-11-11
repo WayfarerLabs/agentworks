@@ -255,6 +255,13 @@ fetching content or exposing bodies. Start with `agw guide show concept-agent-ar
 [artifact documentation](agentworks/artifacts/README.md) for bundle sources, explicit facet
 activation, worked manifests, and native delivery limits.
 
+Bundles include an explicit `mcp_servers` map for portable stdio and Streamable HTTP definitions.
+Workstation/Git JSON(C) sources select a same-named entry from `mcpServers`; only that definition is
+captured. Credentials stay unresolved env references. User/workspace facets register entries in
+native config, while session-only delivery requires its documented workaround. Registration does not
+establish connectivity, authentication or tool availability. See the
+[MCP artifact guide](agentworks/artifacts/README.md#mcp-servers) for accepted fields and examples.
+
 Env vars ride their owning resource, as an `env` map in the template's `spec` (the removed TOML
 shape used `[<scope>.env]` subsections), at vm / workspace / admin / agent / session scope. The
 `lima-local` and `wsl2` vm-sites ship built in and their names are reserved.
@@ -526,8 +533,9 @@ spec:
 Use `agw guide show concept-harness-integrations` for scopes, facets, activation and deferred
 application, or read [the harness integration guide](../docs/guides/harness-facets.md). See
 [native harness setup](../docs/guides/native-harness-setup.md) for settings policies and native
-ownership, and [the Claude setup migration guide](../docs/guides/migrating-claude-setup.md) for
-existing declarations and stored instance overlays.
+ownership and MCP entry cleanup, and
+[the Claude setup migration guide](../docs/guides/migrating-claude-setup.md) for existing
+declarations and stored instance overlays.
 
 ### Optional Apt / Install-Command Catalogs
 

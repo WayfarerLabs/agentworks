@@ -1,9 +1,10 @@
 # Native harness setup
 
 Activated Claude Code and Codex user facets configure that actual user's marketplaces, plugins, and
-settings. The same integration activation model serves administrators and agents. Activated
-workspace facets map project settings. They do not install workspace plugins. Integration activation
-must be explicit, including when all configuration fields use defaults.
+settings. Claude Code, Codex and Grok also register declared MCP server artifacts at user and
+workspace scope. The same integration activation model serves administrators and agents. Activated
+workspace facets map project settings where supported. They do not install workspace plugins.
+Integration activation must be explicit, including when all configuration fields use defaults.
 
 Agentworks installs `python3` as a required system package on every VM during create and reinit.
 Native setup uses its standard library for guarded file access, atomic publication and artifact
@@ -60,6 +61,105 @@ policy. It does not restore overwritten values. Workspace mapping changes follow
 applying a new mapping requires workspace recreation. Correct the source before recreating and
 preserve work outside the workspace first; see the
 [workspace recovery guidance](harness-facets.md#inspecting-and-reconciling-setup).
+
+## MCP registrations
+
+Select connections through an artifact bundle's `mcp_servers` map and the owner's
+`artifacts.bundles` block. Explicit integration activation is still required, including default
+configuration. See the
+[artifact format and examples](../../cli/agentworks/artifacts/README.md#mcp-servers) for the strict
+stdio/Streamable HTTP profile, workstation/Git sources and unresolved env references. MCP
+definitions register connections; they do not install executables or dependencies, authenticate, run
+a server, connect to an endpoint or grant tool permissions. Native clients keep their own trust,
+approval and runtime authentication behavior.
+
+| Integration | Default user MCP role                   | Workspace MCP role               |
+| ----------- | --------------------------------------- | -------------------------------- |
+| Claude Code | `mcpServers` in `~/.claude.json`        | `<workspace>/.mcp.json`          |
+| Codex       | `mcp_servers` in `~/.codex/config.toml` | `<workspace>/.codex/config.toml` |
+| Grok Build  | `mcp_servers` in `~/.grok/config.toml`  | `<workspace>/.grok/config.toml`  |
+
+These are fixed native roles. User roles follow actual native-home overrides beneath the user's
+home. An explicit `CLAUDE_CONFIG_DIR` selects `<CLAUDE_CONFIG_DIR>/.claude.json`; without that
+override, Claude's role is `~/.claude.json`, not `~/.claude/settings.json`. Codex and Grok use their
+`CODEX_HOME` and `GROK_HOME` config directories. Workspace roles stay within the workspace. Native
+VM facets defer MCP to user; Shell publishes canonical JSON and an index at each scope without
+running clients or servers.
+
+Managed names include a readable logical-key prefix and an original-owner identity digest:
+`agentworks-<key-prefix>-<origin-digest-prefix>`. They distinguish equal keys from different scopes
+and remain stable across content/bundle changes and workspace rehome. Native endpoint deduplication
+and policy can still affect discovery. Use `agw artifact show` for the recorded native name and
+destination without querying a native MCP inventory or exposing connection values.
+
+Application owns an entry, not the whole shared file. Missing entries are created; identical unowned
+entries can be adopted and become managed. Matching the recorded entry fingerprint permits an owned
+update. Different unowned or externally modified entries are retained and deferred individually.
+Removing a declaration or activation retires unchanged owned entries wherever safely possible;
+modified obsolete entries keep their claims and warn. Unrelated entries and settings remain unless
+an explicit settings mapping changes them. JSON/TOML serialization preserves values, not comments or
+formatting. Concurrent changes refuse publication rather than replacing them from a saved document
+snapshot.
+
+Codex settings mappings share `config.toml` with MCP. Setup computes safe obsolete-entry removal,
+the selected mapping policy and desired MCP entries in one document plan. An actual surviving mapped
+value that differs at a desired derived server name leaves that MCP artifact unhandled. Equal values
+can be adopted. If an unchanged MCP entry is withdrawn but the source mapping still supplies that
+key, `replace`, `merge-overwrite` and `merge-preserve` leave the source value and release the MCP
+claim in that same application. For `skip-existing`, the original file-existence decision still
+governs the mapping: an existing file skips the source while the withdrawn entry retires; a missing
+file is populated from the source. `skip-existing` does not disable separately declared MCP work.
+Removing only a settings mapping retains its current values as usual.
+
+Untracked shared MCP config documents receive exact local Git exclusions. The exclusion covers the
+entire file, including unrelated values, because Git cannot hide individual entries. Already-tracked
+files warn and remain tracked; Agentworks changes neither the Git index nor repository `.gitignore`.
+Exclusion cleanup removes only unchanged owned marker/pattern pairs and leaves the native document
+intact. Workspace rehome updates managed MCP destination metadata after a successful copy; server
+names and entry fingerprints follow the active workspace unchanged. A deliberately retained old copy
+is unmanaged and can keep its native entries.
+
+### Session opt-ins
+
+Claude `session-mcp-config` passes a private session/run JSON file through `--mcp-config` without
+enabling strict mode or suppressing other native sources. Codex `session-mcp-overrides` uses
+invocation-only configuration overrides without writing user/project config. Both are explicitly
+selected through the session facet's `enabled_workarounds`. They preserve env references and native
+consent/authentication. A differing conflicting native entry remains unhandled rather than being
+silently combined with another connection definition.
+
+Grok Build 1.0.77 rejects the proposed private-plugin `--plugin-dir` carrier, so no Grok session MCP
+workaround is advertised. Those session inputs warn and stay unhandled. Shell exposes canonical
+files and its private session index without an opt-in. No native session MCP method is enabled by
+default; terminal unhandled artifacts warn and permit launch.
+
+### Credentials after removal
+
+Removing an Agentworks registration names the native server and warns that any OAuth credentials
+remain. This is conditional guidance, not a claim that credentials exist: setup and inspection do
+not read native credential caches or log out automatically. OAuth-specific artifact configuration
+and an explicit authentication workflow are planned for phase 2; they are not part of this initial
+registration support. Native authentication remains separate.
+
+If removing the server's stored credentials is authorized, use the actual workload user and native
+config context before withdrawing its artifact definition. For Codex, use
+`codex mcp logout <native-name>` as documented in the
+[native CLI reference](https://learn.chatgpt.com/docs/cli/reference#codex-mcp). Claude documents
+`claude mcp logout <native-name>` and its interactive `/mcp` authentication controls in its
+[MCP authentication guide](https://code.claude.com/docs/en/mcp#authenticate-from-the-command-line).
+Use the derived name from Agentworks inspection and check the installed native CLI's supported
+interface. Credential deletion and provider-side revocation are different operations; follow the
+provider's revocation process when necessary. There is no verified Grok logout command claimed here.
+
+Some native logout commands need the server definition still present. If it was already removed,
+temporarily restore the same native server name and matching definition in the original native
+user/project config context through its supported configuration workflow, perform logout, then
+remove the temporary registration. Keep the intended Agentworks declaration consistent so later
+setup does not reintroduce it. Existing workspaces have no reinit; native credential cleanup does
+not require recreating a workspace. Native client removal and Agentworks entry removal can have
+different credential behavior. If logout is outside the requested work, leave credentials untouched
+and report the remaining native authentication task. Reading this guide authorizes neither logout
+nor temporary reprovisioning.
 
 ## Marketplaces and plugins
 
@@ -214,9 +314,11 @@ with retry guidance. Unavailable native applied-state evidence does not prevent 
 
 Rehome moves project settings with the workspace and holds the same guard across the move. It uses
 the known old/new owner paths to reconcile artifact exclusions where safe, warning about unresolved
-shared metadata. Setup records do not block rehome. General native setup records retain their old
-destinations and can become stale; rehome does not rerun facets, and existing workspaces have no
-harness reinit operation. Session restart does not repair that workspace setup.
+shared metadata. Setup records do not block rehome. MCP entry destinations and their active owner
+metadata follow the verified copied workspace, keeping server names and fingerprints stable. A
+retained old copy is unmanaged. Other general native setup records retain their old destinations and
+can become stale; rehome does not rerun facets, and existing workspaces have no harness reinit
+operation. Session restart does not repair that workspace setup.
 
 The VM description's initialization field records the last initialization run. It is separate from
 per-integration lifecycle evidence: a run can finish while a native entry is skipped. Read the

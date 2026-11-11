@@ -20,6 +20,12 @@ spec:
   agents:
     reviewer:
       source: file::~/agent-content/reviewer.md
+  mcp_servers:
+    docs:
+      definition:
+        type: http
+        url: https://mcp.example.test/mcp
+        description: Replace this placeholder with the intended documentation endpoint
 ---
 apiVersion: agentworks/v1
 kind: vm-template
@@ -35,7 +41,7 @@ kind: agent-template
 metadata:
   name: artifact-user
 spec:
-  # User activation alone handles VM-origin skills through the default route.
+  # User activation handles VM-origin artifacts through the default route.
   harness_integrations:
     codex: {}
 ---
