@@ -16,6 +16,10 @@ is exercised. The separate integration-test session owns its backend and resourc
 | R9           | Offline public inspection and per-type reporting without source/secret/network/native inventory activity or connection bodies                                                 |
 | R10          | v2/v3 retention and v4 validation; unchanged legacy digests/routes/native files; existing workspace usage; standalone installed guides and source/package parity              |
 
+R11 belongs to phase 2: require native OAuth configuration and the agreed explicit auth workflow,
+actual authenticated MCP access, actual-user credential isolation, remote flow/cancellation,
+advertised refresh/logout and independent credential cleanup.
+
 Run all standard gates, required private project/Muntz reviews and the independent PR integration
 pipeline. Code-heavy implementation also receives the generic correctness/security lane. Exercise
 the actual command surface, including failure and removal paths, rather than only direct helpers.
@@ -26,6 +30,10 @@ protocol evidence without paid-model or external service dependencies. A success
 not required to establish a correctly registered and connected MCP server. Unreachable mechanisms
 are reported with their limits; do not infer broad native support from static docs.
 
-Before a final lock, reconcile every FRD requirement with observed evidence or obtain an explicit
-scope ruling. Promote surviving contracts into permanent guides and READMEs. The lock cannot ride
-the initial artifact-only checkpoint.
+Registration evidence completes phase 1 only. Include a workspace definition bound by a later user's
+env, and canonical withdrawal with a settings-mapped key under all four mapping strategies in one
+operation. Phase-2 OAuth evidence cannot be replaced by bearer-token or registration tests.
+
+Before a final lock after both phases, reconcile every FRD requirement with observed evidence or
+obtain an explicit scope ruling. Promote surviving contracts into permanent guides and READMEs. The
+lock cannot ride the initial artifact-only checkpoint.

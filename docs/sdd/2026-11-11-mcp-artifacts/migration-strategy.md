@@ -51,6 +51,11 @@ mechanisms and does not silently edit that workspace instead.
 
 ## Downgrade and conflict policy
 
+OAuth follows registration under this same SDD. Phase 1 rejects OAuth fields without adding a
+passthrough placeholder or importing native grants. Stable managed identities and preserved native
+credential stores are the extension seam; phase 2 will explicitly version any new canonical/state
+shape and document its upgrade/downgrade effects. No lock or OAuth-completion claim rides phase 1.
+
 An older binary cannot read v4 captures and may reject new config fields. Document that downgrade
 limit; do not promise reverse conversion or delete unknown state. Normal supported cleanup should
 run with the version that provisioned the entries before an operator elects to downgrade. The

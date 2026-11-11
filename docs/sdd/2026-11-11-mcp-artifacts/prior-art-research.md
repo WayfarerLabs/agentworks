@@ -20,7 +20,8 @@ The inspected
 [Rulesync schema](https://github.com/dyoshikawa/rulesync/blob/54267ffc28387184383b7c8c1cb2c435a1d5ecb7/src/types/mcp.ts)
 is pinned independently of the moving documentation. Fields that control trust, approval or tools
 cannot safely disappear during translation. The operator elected to reject them in the initial
-profile rather than broaden this effort.
+profile. OAuth is phase 2 of this same effort, with research and the unresolved workflow recorded in
+the [OAuth phase boundary](oauth-phase.md).
 
 The
 [MCP transport specification](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)

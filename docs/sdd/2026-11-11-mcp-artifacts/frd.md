@@ -27,6 +27,14 @@ weakening its meaning. Existing workload provisioning supplies executables and e
 configuration supplies credentials. The harness owns connections, stdio child processes and native
 approval/authentication policy.
 
+## Delivery phases
+
+Phase 1 delivers registration with public literals and env-based credentials. Phase 2 delivers OAuth
+support under this same SDD. The first push rejects OAuth configuration fields rather than silently
+accepting unfinished behavior. Existing native OAuth behavior remains the harness's own. The
+detailed OAuth design follows phase 1; its remaining work is tracked explicitly and prevents locking
+the overall SDD after registration alone.
+
 ## Requirements
 
 ### R1. One additional artifact type
@@ -55,13 +63,16 @@ is no per-producing-resource namespace inside a scope and no receiver-map flatte
 
 ### R4. Credential references
 
-Credential-bearing values use references to variables supplied through the existing consuming
-environment and secret mechanism. Preserve references through acquisition, propagation, capture and
-applied-state records. Never resolve them into those records, inspection output, process arguments
-or diagnostics. Native runtime interpolation/forwarding is the ordinary delivery path. Missing or
-unrepresentable bindings get an actionable per-entry warning, without publishing a partially
-translated or less restricted connection. Public literal values remain supported; operators must not
-author credentials as literal artifact content.
+Credential-bearing phase-1 values use references to variables supplied through the existing
+consuming environment and secret mechanism. Preserve references through acquisition, propagation,
+capture and applied-state records. Never resolve them into those records, inspection output, process
+arguments or diagnostics. Native runtime interpolation/forwarding is the ordinary delivery path.
+Outer setup preserves references without requiring the environment of an unknown future consumer; a
+workspace definition can use a variable each actual user supplies later. An unrepresentable binding
+is explicitly deferred. For session-local inputs, a missing variable in the actual managed-launch
+environment warns and leaves that entry unhandled. Previously registered outer connections retain
+the native client's runtime binding/error behavior, without a new Agentworks launch gate or probe.
+Public literal values remain supported; operators must not author credentials as literal content.
 
 ### R5. Defining-scope placement and routing
 
@@ -94,7 +105,8 @@ Use ordinary instance state to track the smallest owned native unit, an MCP serv
 private file, including partial progress. Retry converges owned registrations. Removing a
 declaration, activation or session retires unchanged owned effects wherever safely possible;
 operator-modified obsolete entries are retained with actionable diagnostics and cleanup evidence. Do
-not delete native OAuth credentials, foreign entries or shared documents wholesale. Artifact cleanup
+not delete native OAuth credentials, foreign entries or shared documents wholesale during ordinary
+artifact cleanup. Explicit OAuth logout belongs to its own authentication workflow. Artifact cleanup
 adds no prerequisite to parent deletion or workspace rehome. Existing persistence, cancellation,
 internal-failure and recoverable-facet-failure semantics remain intact.
 
@@ -116,12 +128,27 @@ module contracts, sample config, examples and schema/inspection collateral with 
 Demonstrate the actual supported native paths and independently verified test cleanup before closing
 this effort.
 
+### R11. OAuth in phase 2
+
+Support MCP OAuth through native harness mechanisms in the subsequent phase of this SDD. Provide
+explicit configuration for supported native OAuth options and an actionable authentication workflow
+for the actual user, including connections declared at workspace scope. Native harnesses own token
+storage, refresh and credential isolation; acquired artifact bodies and applied-state records never
+become a token store. Agentworks authentication orchestration is an explicit operator activity, not
+an automatic side effect of acquisition, reinit or session startup. Native client authentication
+retains its own ordinary policy and interaction.
+
+Settle the canonical auth fields and amount of Agentworks login orchestration in the phase-2 design
+before implementing them. Preserve native auth intent and disclose unsupported combinations; do not
+silently substitute bearer credentials, anonymous access or broader permissions. Phase 1 retains a
+viable extension path without implementing a second OAuth client or credential service.
+
 ## Explicit exclusions
 
-No MCP daemon hosting, dependency installation, endpoint probing during setup, OAuth/login
-automation, tool-filter/approval translation, trust-policy bypass, native config import, automatic
-feature emission, hook support, new bundle distribution formats or compressed capture storage.
-Transport/SSH redesign and single-session workspace modes remain separate efforts.
+No MCP daemon hosting, dependency installation, endpoint probing during setup, tool-filter/approval
+translation, trust-policy bypass, native config import, automatic feature emission, hook support,
+new bundle distribution formats or compressed capture storage. Transport/SSH redesign and
+single-session workspace modes remain separate efforts.
 
 ## Operator ruling, 2026-11-11
 
@@ -129,8 +156,16 @@ Asked whether to include MCP-specific tool filters and OAuth automation, the ope
 
 > Defer tool filters and OAuth automation; reject those fields explicitly
 
-The canonical profile therefore rejects these fields instead of silently ignoring them. Native
-approval and authentication continue to work independently under the harness's own configuration.
+The phase-1 profile therefore rejects these fields instead of silently ignoring them. Native
+approval and authentication continue independently under the harness's own configuration.
+
+The operator then clarified the overall scope:
+
+> Note that oauth should absolutely be part of the overall mcp sdd, just not in the initial push
+
+OAuth is phase 2 of this effort, not an excluded follow-up SDD. The workflow question is whether
+Agentworks should orchestrate native login or configure native OAuth with operator-run login;
+neither choice transfers token ownership to Agentworks.
 
 ## Response
 

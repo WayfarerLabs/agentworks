@@ -3,24 +3,28 @@
 ## Ownership, vehicle and definition of done
 
 The operator chartered this successor effort on 2026-11-11. The lead owns architecture, this plan,
-integration and delivery; draft requirements are in [frd.md](frd.md). Scope excludes tool filters
-and OAuth automation under the recorded operator ruling. The source baseline is `834eb715`.
+integration and delivery; draft requirements are in [frd.md](frd.md). Tool filters are excluded.
+OAuth is phase 2 of this same SDD under the operator's clarification; phase 1 rejects its fields.
+The source baseline is `834eb715`.
 
-Use one branch/PR for the complete implementation. First publish one coherent SDD-only draft with
-FRD, HLA, this plan, research, LLD, migration and acceptance together; apply `review-requested` for
-that checkpoint. Do not merge the checkpoint or claim implementation. Count the design feedback
-round within the three-round allowance, leaving at most two subsequent feedback/fix rounds unless
-the operator extends it. Remove the label before implementation. A complete green implementation
-gets a scoped handoff and ready state without that label. No automatic merge.
+Use the initial branch/PR for the complete registration phase. First publish one coherent SDD-only
+draft with FRD, HLA, this plan, research, LLD, migration and acceptance together; apply
+`review-requested` for that checkpoint. Do not merge the checkpoint or claim implementation. Count
+the design feedback round within the three-round allowance, leaving at most two subsequent
+feedback/fix rounds unless the operator extends it. Remove the label before implementation. A
+complete green registration implementation gets a scoped handoff and ready state without that label.
+OAuth follows in a separate PR under this same open SDD, with up to three rounds per PR. Its
+detailed design follows the first working push. No automatic merge and no lock after phase 1.
 
 Closeout PR 887 remains a separate ready predecessor. Its green head and clean report are retained;
 MCP research/design can proceed while its normal merge is pending. Refresh main and assess actual
 predecessor state before implementation handoff. Do not edit predecessor SDDs or the saga ledger.
 
-Done means R1-R10 implemented and independently evidenced at the actual head, public collateral
-current, required private reviews clear, all gates green, actual integration findings critically
-disposed within budget, cleanup independently verified and the final SDD lock justified. Publishing
-a design or passing the unit suite alone does not complete this plan.
+Overall done means R1-R11 implemented and independently evidenced at the actual head, public
+collateral current, required private reviews clear, all gates green, actual integration findings
+critically disposed within budget, cleanup independently verified and the final SDD lock justified.
+Publishing a design or passing the unit suite alone does not complete this plan. Registration
+acceptance completes phase 1 only; the OAuth tasks remain owed.
 
 ## Design checkpoint
 
@@ -57,12 +61,15 @@ a design or passing the unit suite alone does not complete this plan.
       convergence, per-entry foreign conflict, removed-entry cleanup and modified obsolete
       retention.
 - [ ] Plan Codex settings mapping contributions and MCP entries together, preserving every existing
-      settings strategy and diagnosing conflicting explicit values before canonical mutation.
+      settings strategy and diagnosing conflicting explicit values before canonical mutation. Test
+      canonical withdrawal with a still-authored mapped key under all four strategies in one pass,
+      including suppressed initial contributions and original file-existence decisions.
 - [ ] Add Claude/Codex/Grok user and workspace translation and explicit VM deferral. Every adapter
       must apply or defer the new type; test against silent handled-but-omitted behavior.
-- [ ] Translate the supported unresolved env/header/bearer references to actual native primitives;
-      missing or unsupported bindings defer whole entries. Preserve native trust/approval/auth
-      state.
+- [ ] Translate unresolved env/header/bearer references to actual native primitives. Outer setup
+      cannot require future-user values; test a project definition later bound by each actual user.
+      Session-local missing names and unsupported representations defer whole entries. Preserve
+      native trust/approval/auth state.
 - [ ] Publish Shell canonical JSON and indexes at all existing scope locations, with no new
       deferrals or server execution.
 - [ ] Verify interruption/retry, other-owner preservation, activation removal and ordinary parent
@@ -97,9 +104,27 @@ a design or passing the unit suite alone does not complete this plan.
       round, observing up to six hours. Critically assess the complete batch, return to draft before
       changes, re-run required private lanes/gates and re-hand off within the remaining allowance.
 
-## Closeout
+## Phase 2: OAuth
 
-- [ ] Reconcile R1-R10 and every advertised native mechanism against exact source/mode/platform
+- [ ] Resolve the operator's native-configuration versus Agentworks login-workflow preference and
+      complete the [OAuth design](oauth-phase.md) after the first working registration push.
+- [ ] Specify strict supported auth fields, native translation and actual-user credential ownership;
+      research public/confidential clients, scopes, remote browser/callback behavior and
+      session-only discovery without introducing an Agentworks token store or protocol client.
+- [ ] Keep the detailed phase-2 design/FRD/plan update with its OAuth implementation PR and assess
+      feedback through normal delivery. Obtain any changed-requirements ruling before building it;
+      the single initial SDD-only checkpoint remains the artifact-only review requested here.
+- [ ] Implement supported canonical OAuth configuration and the agreed explicit authentication
+      workflow with native credential sinks and existing secret/transport boundaries. Keep ordinary
+      setup/start free of automatic consent/login and unsupported combinations explicit.
+- [ ] Validate actual native OAuth and authenticated MCP use, user isolation, cancellation,
+      advertised refresh/status/logout behavior and independent credential/resource cleanup.
+- [ ] Update permanent guides, examples, inspection and upgrade teaching; run all gates and required
+      private reviews and the independent integration pipeline on the complete OAuth PR.
+
+## Overall closeout, after both phases
+
+- [ ] Reconcile R1-R11 and every advertised native mechanism against exact source/mode/platform
       evidence and independent cleanup. Keep inherited limitations and unrelated findings explicit.
 - [ ] Finish permanent promotions, verify all checked work and requirements, and add `locked.md`
       only when the completed effort supports it. The lock binds at merge.

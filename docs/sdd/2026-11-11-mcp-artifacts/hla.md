@@ -11,6 +11,12 @@ There is no separate MCP resource registry, lifecycle or secret resolver. Canoni
 definitions stay immutable and unresolved. Integrations choose native registrations; core retains
 its existing owner graph and warning policy.
 
+Registration is phase 1. OAuth is phase 2 of this same SDD, with its detailed schema/workflow design
+after the first working push. The first PR carries this complete design checkpoint and registration
+implementation; a subsequent PR completes OAuth. Phase 1 is useful with env credentials and normal
+native authentication, but it does not close or lock the overall effort. See the
+[OAuth phase boundary](oauth-phase.md).
+
 ## Artifact flow
 
 This diagram concerns artifact flow for one integration and one session's actual ancestors. Each
@@ -75,11 +81,14 @@ runtime forwarding/interpolation, without putting resolved values into config ov
 content, ownership records or diagnostics.
 
 The small portable grammar supports same-name stdio forwarding, a complete HTTP header value from
-env and bearer authorization from env. It does not introduce a shell/template language. Known
-unavailable or unrepresentable bindings leave the entire entry unhandled with a reason; a partially
-translated connection is never applied. Native restrictions on provider credential variables and the
-limits of externally launched processes remain explicit. Dedicated MCP env names are the recommended
-operator path.
+env and bearer authorization from env. It does not introduce a shell/template language. Outer facets
+validate representation and retain unresolved names; absence from their own setup env says nothing
+about a future user's runtime env. It does not defer a valid workspace registration. For
+session-local inputs, the actual managed-launch env permits missing-name diagnostics. The native
+client owns runtime binding errors for already-handled outer registrations; no new upstream launch
+gate or probe is introduced. Unrepresentable definitions remain wholly unhandled. Native provider
+credential restrictions and externally launched processes retain their limits. Dedicated MCP env
+names are the recommended operator path.
 
 ## Native placement
 
@@ -116,10 +125,14 @@ commands that also erase OAuth state.
 
 Codex settings mappings can already write `mcp_servers`. Plan mapping and canonical contributions
 together before publication. For a managed identity, identical contributions agree; differing
-explicit contributions skip that canonical entry with a clear conflict diagnostic. Unrelated mapping
-keys retain the selected settings strategy. Mapping removal retains its current native values as
-before. No execution-order accident decides ownership, and no blanket reservation of all MCP
-settings is needed.
+explicit contributions skip that canonical entry with a clear conflict diagnostic. Plan prior claims
+and removals too: compute one final document from safe MCP retirements and the selected mapping
+policy, preserving its original file-existence decision. If a mapping supplies an entry after
+canonical withdrawal, retain it and release the artifact claim after confirmation. A source entry
+suppressed by `merge-preserve` in the initial snapshot can become applicable during that same plan;
+it must not disappear until a second reinit. Unrelated mapping keys retain their selected strategy.
+Mapping removal alone retains current values; explicit MCP lifecycle changes still apply to
+MCP-owned units. No execution-order accident or blanket MCP settings ban is needed.
 
 All adapters must explicitly handle or defer the fifth type. Existing render loops otherwise
 silently omit a new type while reporting it handled. Successful entry registrations join ordinary

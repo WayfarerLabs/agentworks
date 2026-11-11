@@ -43,11 +43,12 @@ execution occurs. The selected artifact key must exist under `mcpServers`:
 }
 ```
 
-The source root accepts only `mcpServers` and optional string `$schema`. Validate the document and
-all server definitions against this profile, reject duplicate object keys, and capture only the
-selected normalized definition. Unselected bodies and source comments do not become persisted
-artifact members. The optional schema URL is editor metadata and is never fetched. Do not use a
-regex comment stripper or execute the source to parse it.
+The source root accepts only `mcpServers` and optional string `$schema`. Validate whole-document
+syntax/root shape and reject duplicate object keys, then apply the strict definition profile only to
+the selected same-named server. Unused definitions do not become dependencies of that artifact.
+Capture only its normalized definition. Unselected bodies and source comments do not become
+persisted artifact members. The optional schema URL is editor metadata and is never fetched. Do not
+use a regex comment stripper or execute the source to parse it.
 
 ## Definition profile
 
@@ -63,16 +64,18 @@ regex comment stripper or execute the source to parse it.
 
 Stdio rejects HTTP fields; HTTP rejects stdio fields. Other fields fail, including `transport`,
 `local`, `sse`, `ws`, `streamable-http`, `cwd`, `disabled`, `enabled`, tool filters, trust, approval
-controls, OAuth fields and tool-specific blocks. These can be added deliberately later; they are not
-silently passed through. This profile uses Rulesync's `http` spelling while the operator-facing
-transport name is Streamable HTTP. Native SSE fallback is not a claim of support for canonical SSE
-definitions.
+controls, OAuth fields and tool-specific blocks in phase 1. OAuth gains a deliberate phase-2 schema
+under this same SDD; no opaque reserved auth bag is added now. Other extensions can be added
+deliberately later; they are not silently passed through. This profile uses Rulesync's `http`
+spelling while the operator-facing transport name is Streamable HTTP. Native SSE fallback is not a
+claim of support for canonical SSE definitions.
 
 Keep existing canonical artifact name rules. Reject NUL and unsupported control characters in
-strings and invalid env/header names. Command, args and URL are literal target-runtime values.
-Relative executable lookup uses the harness's actual PATH, not the workstation PATH. Stdio inherits
-the harness's normal working directory; no separate cwd setting is introduced. No automatic
-dependency installation or command probe happens at capture/application.
+strings and invalid env/header names, including case-insensitive duplicate header names. Command,
+args and URL are literal target-runtime values. Relative executable lookup uses the harness's actual
+PATH, not the workstation PATH. Stdio inherits the harness's normal working directory; no separate
+cwd setting is introduced. No automatic dependency installation or command probe happens at
+capture/application.
 
 Errors identify bundle, artifact and field, not rejected values or parser excerpts. Reject ambiguous
 duplicate keys and invalid or contradictory types before native mutation. Reuse the ordinary
@@ -91,12 +94,16 @@ or URL, variable renaming, embedded fragments, shell substitution or escape lang
 Reject other `${...}` forms explicitly. This intentionally small shared subset maps to documented
 native primitives without resolving a secret into a durable artifact or argv value.
 
-The owner supplies values through ordinary env configuration, for example
+The actual consuming workload receives values through ordinary env configuration, for example
 `MCP_DOCS_TOKEN: {secret: docs-token}`. Direct `{secret: ...}` inside the MCP definition is
 rejected: acquired content does not join a second secret dependency graph. Env references remain
 names in canonical JSON, captures, digests and native definitions. Existing eager secret resolution
-supplies the normal integration execution environment and redaction boundary. Check known reference
-availability before native application; do not dump a missing variable's value.
+supplies the normal integration execution environment and redaction boundary. Outer application
+validates representation, not the existence of a future user's variables. A workspace registration
+may intentionally reference that user's runtime env. Session-local delivery can check names against
+its actual launch env and leave missing bindings unhandled. Already-handled outer entries retain
+native runtime binding/error behavior, with no Agentworks launch gate or implicit repair. Never dump
+a variable's value.
 
 Claude/Grok receive supported native interpolation strings. Codex receives same-name `env_vars`,
 `env_http_headers` and `bearer_token_env_var`, with public literals in its literal maps. Never emit
@@ -139,17 +146,35 @@ destination identity, origin identity and a canonical native-entry fingerprint; 
 document or credential body. Do not invent a second receipt ledger. Reuse an existing suitable
 fingerprint field rather than overloading source text with encoded config.
 
-For each desired entry: absent creates; equal can be adopted; a confirmed owned entry converges;
-different unowned content is retained and that entry is deferred with a conflict reason. For a
-removed entry: absent drops the stale claim; unchanged owned content is removed; modified content is
-retained with its claim and warning. Checkpoint confirmed progress so retry heals interruption. Do
-not erase other owners' keys or OAuth credentials. Private session files instead use existing
-whole-file/run ownership and retirement.
+For each desired entry: absent creates; equal can be adopted; current content matching the recorded
+owned fingerprint can be updated. Other differing or externally modified content is retained and
+that entry is deferred with a conflict reason. For a removed entry: absent drops the stale claim;
+unchanged owned content is removed; modified content is retained with its claim and warning.
+Checkpoint confirmed progress so retry heals interruption. Do not erase other owners' keys or OAuth
+credentials. Private session files instead use existing whole-file/run ownership and retirement.
 
-Mapped Codex settings and desired MCP entries are prepared together. Compare contributions at the
-derived native key before writes. Equal entries agree; conflicting explicit values leave that
-canonical entry unhandled. The mapping's selected strategy still governs unrelated keys. Removal of
-a mapping keeps its current retention contract. No extra integration activates implicitly.
+Mapped Codex settings, prior MCP claims and desired entries are prepared together from one live
+snapshot. Compute safe obsolete-entry retirements in a working document, then apply the mapping with
+its original file-existence decision and reconcile desired canonical entries. Compare actual
+policy-winning contributions at the derived native key before publication. Equal entries agree;
+conflicts leave that canonical entry unhandled. Publish the final document once with the observed
+file hash, then checkpoint claims. Never publish an intermediate deletion and rely on a second
+reinit to restore a mapped key.
+
+For an unchanged MCP-owned entry withdrawn while the mapping source still names that key:
+
+| Mapping strategy  | One-pass result                                                                                                               |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `replace`         | Source entry survives in the final document; release the MCP claim                                                            |
+| `merge-overwrite` | Source entry survives in the final document; release the MCP claim                                                            |
+| `merge-preserve`  | Retired owned value no longer masks the source; source entry survives and the claim is released                               |
+| `skip-existing`   | If the original file existed, ignore the source and retire the MCP entry; if absent, apply source and release the stale claim |
+
+Modified obsolete values retain their current protection. Unrelated mapping keys obey the original
+strategy, and a removed mapping alone retains native values. `contributions(initial)` is not enough
+for this plan: suppressed source keys may become applicable after safe retirement. Use the prepared
+source and existing parser/serializer APIs, not a second state ledger or reread. No extra
+integration activates implicitly.
 
 ## Session carriers
 
