@@ -110,11 +110,16 @@ opt-in carrier on fresh and resumed starts and with another session present befo
 mechanism that fails that proof stays explicitly unsupported; it cannot fall back to a user/project
 write. Normal native approval, trust and authentication remain in force.
 
-Native role discovery may observe HOME and the native-home override through the existing workload
-login shell. It does not inspect credential bindings or profile files. Claude's MCP document has a
-separate role from its rules/settings root. Session overrides also compare selected native keys in
-fixed user/project roles: Codex deep-merges a server table, so a differing existing entry must be
-left unhandled rather than combined into an invalid registration.
+User setup observes HOME and the native-home override once through the existing workload login shell
+when native placement is needed. That selected layout supplies settings, plugin, artifact and MCP
+roles together; optional MCP presence must not change the settings destination. Legacy artifact
+discovery uses the selected root rather than choosing another. The observation inspects neither
+credential bindings nor profile files and requires no native executable. Claude's default MCP role
+is separate from its rules/settings root; an explicit override retains its native distinction even
+when it names the default directory. An unavailable role retains its ownership evidence rather than
+authorizing a guessed write. Session overrides also compare selected native keys in fixed
+user/project roles: Codex deep-merges a server table, so a differing existing entry must be left
+unhandled rather than combined into an invalid registration.
 
 ## Shared config and ownership
 
@@ -155,9 +160,13 @@ file-content mutation. Ownership stays entry-local in native claims. Local exclu
 entire untracked shared document; tracked files remain visible with a warning. Do not edit the
 repository index or `.gitignore`.
 
-After a verified workspace copy, ordinary rehome checkpoints relocate MCP destination evidence to
-the new root and preserve native identity/fingerprints. Keep current-context file authority and
-existing partial-failure behavior; no workspace reinit or new cleanup prerequisite is needed.
+After a verified workspace copy, ordinary rehome checkpoints relocate known placement metadata and
+destination identity for every existing setup record. Files, package roots, skipped paths and MCP
+destinations follow the new root regardless of whether a record has an MCP claim. Preserve hashes,
+native identities, opaque claims and incomplete results. Current Git metadata still governs
+exclusion transfer; a recoverable exclusion failure does not prevent independently safe metadata
+relocation. Facets and literal file contents are not rerun or rewritten. Keep existing
+partial-failure behavior; no workspace reinit or new cleanup prerequisite is needed.
 
 ## Lifecycle and diagnostics
 

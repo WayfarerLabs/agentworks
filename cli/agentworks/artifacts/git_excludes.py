@@ -144,8 +144,7 @@ def reconcile_workspace_excludes(
         if source_metadata is None:
             return
         source_prefix = source_metadata[0]
-        # Repeated moves retain the initial file inventory. Current verified
-        # exclusion claims carry the relative paths needed for later moves.
+        # Include verified claim paths for shared files and incomplete inventories.
         relative_paths = tuple(
             dict.fromkeys(
                 (

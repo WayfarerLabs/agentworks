@@ -138,16 +138,19 @@ Derive each server name from the original-owner/type/key identity, independent o
 bundle and receiving facet: `agentworks-<key-prefix>-<origin-digest-prefix>`. Use up to 24 key
 characters, trim a trailing hyphen, and use 20 digest characters; the full key participates in the
 existing `origin_identity` hash. This bounds names to 56 ASCII characters while keeping them
-readable and stable across content changes and workspace rehome. Check proposed native identities
-for duplicates. Inspection shows logical and native names. Source names need not match native names.
+readable and stable across content changes and workspace rehome. Validated per-owner/type maps keep
+logical keys unique. Inspection shows logical and native names. Source names need not match native
+names.
 
 User/workspace registration edits the harness's fixed current native MCP role: Claude user
 `mcpServers`, Claude workspace `.mcp.json`, or the Codex/Grok `mcp_servers` table. Resolve actual
-native-home conventions before writing; a recorded path is evidence rather than unrestricted file
-authority. Preserve unrelated entries/keys semantically through existing native JSON/TOML
-parsers/serializers. Comments and formatting may change as with current settings mapping; document
-that limitation. Use expected-content writes to detect concurrent edits. Never overwrite a whole
-config from a stored snapshot.
+native-home conventions once per user setup, sharing the selected root with settings, plugins and
+legacy artifact discovery. Derive the settings and MCP paths from that same observation. Preserve
+Claude's absent-versus-explicit override distinction, including an explicit default directory. A
+recorded path is evidence rather than unrestricted file authority. Preserve unrelated entries/keys
+semantically through existing native JSON/TOML parsers/serializers. Comments and formatting may
+change as with current settings mapping; document that limitation. Use expected-content writes to
+detect concurrent edits. Never overwrite a whole config from a stored snapshot.
 
 Reuse ordinary `NativeClaim` and checkpoint storage: `role` is `artifact-mcp-server`, `identifier`
 is the derived native server name, `destination` is the current native config path, `source` is the
@@ -160,8 +163,11 @@ For each desired entry: absent creates; equal can be adopted; current content ma
 owned fingerprint can be updated. Other differing or externally modified content is retained and
 that entry is deferred with a conflict reason. For a removed entry: absent drops the stale claim;
 unchanged owned content is removed; modified content is retained with its claim and warning.
-Checkpoint confirmed progress so retry heals interruption. Do not erase other owners' keys or OAuth
-credentials. Private session files instead use existing whole-file/run ownership and retirement.
+Checkpoint confirmed progress so retry heals interruption. A successful native write followed by a
+failed claim checkpoint can leave an unrecorded entry. Retrying the same declaration adopts the
+identical entry; withdrawing it before retry leaves it unowned for operator review. Do not infer
+cleanup authority from its name. Do not erase other owners' keys or OAuth credentials. Private
+session files instead use existing whole-file/run ownership and retirement.
 
 Mapped Codex settings, prior MCP claims and desired entries are prepared together from one live
 snapshot. Compute safe obsolete-entry retirements in a working document, then apply the mapping with
@@ -199,12 +205,17 @@ existing Git-exclude helper. A path report grants no file-write or whole-documen
 existing exclusion claims for retention, removal and current-Git metadata transfer, including
 tracked-file warnings; add no persistent file-birth registry.
 
-After successful copy in workspace rehome, relocate MCP claim destinations from the actual old root
-to the verified new root through ordinary state checkpoints, retaining identifiers and hashes. Keep
-destination identity and coexisting file-placement metadata coherent. Unsafe/unprovable recorded
-destinations get bounded diagnostics instead of becoming I/O authority. Preserve existing error
-propagation and incomplete-state handling, not a new rollback or deletion gate. A retained old
-directory remains the operator-requested copy; managed evidence follows the active workspace.
+After successful copy in workspace rehome, relocate known file, package-root, skipped-path and MCP
+destination metadata from the actual old root to the verified new root for every existing setup
+record. Observe the new destination identity once and preserve identifiers, hashes, opaque claims
+and incomplete results. Empty, settings-only and file-only records follow the same policy as MCP
+records. Keep the original snapshot for copied Git-pair retirement, and let current Git metadata
+govern exclusion claims. Independently safe metadata relocation still proceeds after a recoverable
+Git failure. Unsafe known paths get bounded incomplete diagnostics instead of becoming I/O
+authority. Do not rewrite literal file contents or adopt changed bytes by replacing saved hashes.
+Preserve existing persistence/error handling without a new rollback or deletion gate. A retained old
+directory remains the operator-requested copy; managed placement evidence follows the active
+workspace.
 
 When a registration is removed, identify the native server and warn that any native OAuth
 credentials remain. The guide gives logout-before-withdrawal instructions for verified native

@@ -119,7 +119,7 @@ planned. OAuth workflow preference remains a phase-2 question.
       standalone guide renders and source/package parity on the complete candidate.
 - [x] Run independent pinned project, Muntz and generic correctness/security reviews for code; fix
       material findings and revalidate the actual final delta before public handoff.
-- [ ] Hand off the complete green pushed head with integration emphasis from
+- [x] Hand off the complete green pushed head with integration emphasis from
       [acceptance](acceptance.md), then mark ready without `review-requested`.
 - [ ] Wait for each actual independent integration report before a subsequent implementation fix
       round, observing up to six hours. Critically assess the complete batch, return to draft before
@@ -266,3 +266,57 @@ The final record delta is limited to this SDD's HLA/plan, including the historic
 framing clarification. The handoff records its exact pushed green head and CI separately. The
 remaining unchecked registration tasks track independent integration evidence, not a claim that
 OAuth or the overall SDD is done. No `locked.md` is added.
+
+## Registration round 2
+
+The complete registration handoff was `8e827215`, ready at 08:44:20 UTC. Its exact-head CI passed
+all ten jobs. The
+[independent integration report](https://github.com/WayfarerLabs/agentworks/pull/888#issuecomment-6793155673)
+arrived at 10:16:11 UTC, before the six-hour deadline. It repeated all twelve gates successfully,
+including 12,513 unit passes and 35 skips, and exercised installed-package boundaries, real Linux
+and Windows managed acquisition/setup/session operations, native tool discovery, neighbor
+preservation, MCP-bearing rehome and independent cleanup. Its 491 installed non-RECORD payload
+comparison includes distribution metadata; the lead's 488-file comparison covers package files.
+Those are different inventories, not interchangeable counts.
+
+The report independently reproduced F1 through three real agent reinitializations: adding MCP,
+withdrawing it, then reinitializing without a prior MCP claim made the same Codex settings mapping
+switch away from the actual profile-selected native home. The separate
+[Muntz review](https://github.com/WayfarerLabs/agentworks/pull/888#issuecomment-6791937894) also
+identified the MCP-dependent settings path and workspace metadata relocation policies. File-only
+rehome staleness predates this PR; making its correction conditional on MCP is the new
+inconsistency. Both findings were corroborated by read-only source scouts and accepted in the
+published readings.
+
+The lead
+[started round 2](https://github.com/WayfarerLabs/agentworks/pull/888#issuecomment-6793215043) under
+the operator's three-round allowance after the actual report, and verified draft state before source
+changes. Main was refreshed and remains `07feb4a4`. The frozen batch is F1, Muntz's two material
+points and its three optional points; one further round remains after this round.
+
+- [ ] Use one passive current-user native-layout observation for settings/plugin/artifact/MCP
+      placement, preserving Claude's explicit override distinction, MCP-only executable independence
+      and current-role ownership boundaries.
+- [ ] Apply one known-metadata and destination-identity rehome policy to all existing workspace
+      setup records, preserving Git authority, opaque claims, literal contents and incomplete state.
+- [ ] Distinguish already-absent MCP retirement, remove the redundant native-name count check and
+      document the confirmed-write/failed-claim checkpoint gap without adding ownership machinery.
+- [ ] Run all three independent private review lanes, full gates, installed-package checks and
+      exact-head CI on the corrected source and actual final records.
+- [ ] Re-hand off the complete pushed head as round 2 and mark ready. Wait for its actual
+      independent integration report for up to six hours before another fix round.
+
+R6 session acceptance remains open: the Windows resume-only attempt found no resumable native
+history. It proves neither genuine resume nor a native defect. The corrected handoff must request
+fresh and genuine resumed carrier/isolation evidence without synthetic history or a fallback fresh
+launch. Claude project consent and the Grok project HTTP case whose fixture expired also retain
+their reported limits. None is silently promoted to a pass or removed from the acceptance contract.
+
+Separate bounded OAuth research at unchanged `8e827215`, Linux aarch64, observed Claude 2.1.319 and
+Codex 0.167.0 public DCR/PKCE manual-redirect login, authenticated MCP initialization/tool discovery
+and local credential cleanup. Both added `offline_access` to the pinned scope. Grok 1.0.77 had no
+MCP login/logout subcommands, and its doctor stopped at authentication required. Initial
+PTY/URL-driver failures and the corrected isolated-home repeat are retained. The lead read the
+measured receipts and independently confirmed all six homes absent and all seventeen recorded
+fixture/callback ports closed. This is phase-2 research, not Agentworks OAuth implementation,
+registration integration acceptance, provider-grant revocation or a resolved workflow choice.
