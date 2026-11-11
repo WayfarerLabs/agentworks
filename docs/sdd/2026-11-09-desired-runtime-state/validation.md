@@ -137,6 +137,16 @@ before provider credentials/observation and a real Console preacceptance regress
 operator-directed GCP correction dispatches native resume for suspended instances and waits for
 known stopping/suspending transitions before deciding, preserving numeric identity checks and
 operation verification. Behavioral tests cover request/operation identity, ownership replacement,
-timeouts, cancellation and unchanged stored intent. Root combined gates, all three private review
-lanes, exact-head CI and the new separate integration report are pending. No new live GCP result is
-established by unit tests or earlier reports.
+timeouts, cancellation and unchanged stored intent. All three private lanes were clean at
+`98b957b40`, with independent focused runs of 184, 121 and 121 tests. Removal experiments confirmed
+the new boundaries' sensitivity; the Console experiment did not reach an intent write because
+provider configuration was incomplete after the early boundary was removed.
+
+The complete non-overlapping root confirmation returned zero with 12,366 tests passed and 34 skipped
+in 308.04 seconds. The earlier overlapping run's sole failure was a handover-cleanup timeout in
+unchanged incoming-main execution conformance code. Its isolated rerun passed; the original cause is
+unproven, and no source was changed for it. All twelve required local gates passed, including static
+checks, file quality, rulesync, locked SDDs, typer isolation, 160 Python and 103 Node website tests
+and both deterministic double-build variants. Exact final-head CI, ready publication and the new
+separate integration report remain pending. No new live GCP result is established by unit tests or
+earlier reports.

@@ -378,7 +378,7 @@ attribution and do not validate the new integration.
 - [x] Publish the complete green candidate to the same PR with a scoped ready handoff; wait for its
       associated separate integration report before any further iteration. Record actual results and
       coverage limits without converting previous reports into fresh evidence.
-- [ ] Retire this follow-up's owned worktrees, subordinate branch, caches and temporary outputs;
+- [ ] Retire this follow-up's owned worktrees, subordinate branches, caches and temporary outputs;
       preserve the feature branch, PR and unrelated resources.
 
 Merge `5e9b8e90f` combines the prior PR head and the stated main commit. It preserves early SSH
@@ -444,8 +444,8 @@ CLI. No live GCP pass is claimed by the source implementation or its behavioral 
 
 - [x] Integrate the disjoint GCP adapter and reconciliation/test corrections from their owning
       workers, with permanent GCP guidance and meaningful ownership, timeout, cancellation,
-      nonmutation and preacceptance regressions.
-- [ ] Complete the combined candidate's required gates and independent project, complexity and
+      read-only preview and preacceptance regressions.
+- [x] Complete the combined candidate's required gates and independent project, complexity and
       generic correctness/security reviews at one pinned head; resolve material private findings.
 - [ ] Publish a complete green round-two handoff to PR #885, naming the spent allowance and GCP
       direction, then wait for its associated separate integration report before any further
@@ -456,3 +456,22 @@ changed only their assigned GCP or reconciliation/test files. New material feedb
 requires an authenticated disposition when the existing authority does not cover it; it cannot
 become optional merely because the original two-round allowance is spent. The preceding follow-up
 cleanup item also covers these workers, review trees and temporary outputs.
+
+Private project, complexity and generic correctness/security reviews were clean at `98b957b40`.
+Their independent focused runs passed 184, 121 and 121 tests respectively. Complexity verification
+also compared 216 decision combinations and confirmed expected failures after removing preview
+trust, resume selection, transition settling, operation identity and Console preacceptance checks.
+The Console removal experiment protects the early refusal boundary; its incomplete provider
+configuration prevented reaching acceptance, so it is not evidence of an actual intent write. All
+experiments were confined to separate trees and restored. No private lane used live GCP.
+
+The non-overlapping root confirmation returned zero with 12,366 tests passed and 34 skipped in
+308.04 seconds. An earlier overlapping run returned one after a handover-cleanup timeout in the
+execution conformance code, which is byte-identical to main. That exact case then passed in
+isolation before the complete confirmation passed. The original cause remains unproven; no source
+change or waiver was made for it. Separate log and exit-code records preserve the confirmation. Ruff
+lint and format checks passed for 1,035 files and strict mypy passed 1,000. File quality passed 504
+Markdown and 477 spelling inputs after correcting the new SDD spelling. Typer isolation, rulesync,
+locked-SDD checks, 160 Python and 103 Node website tests, and deterministic double builds at both
+site bases all returned zero. Exact final-head CI, ready publication and the associated separate
+integration report remain required.

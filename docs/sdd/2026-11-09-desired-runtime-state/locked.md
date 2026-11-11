@@ -45,6 +45,8 @@ The main-integration handoff at `dbbbd31cc` received green CI and completed inte
 report 6786419851. Its fresh Linux/Windows-to-Lima recovery and artifact results retain that head's
 attribution. The report confirmed an R6 preview blocker omission. The final original implementation
 feedback round, two of two, corrects that omission and protects Console preacceptance. The operator
-also directed GCP suspend/resume recovery in the same PR. The combined corrective candidate is in
-development; its reviews, gates, ready handoff and separate integration result remain required.
-Earlier completion claims do not mark this follow-up complete or establish live GCP validation.
+also directed GCP suspend/resume recovery in the same PR. All three private reviews were clean at
+`98b957b40`, and all twelve required local gates passed with 12,366 tests and 34 skips in the
+non-overlapping root confirmation. Exact final-head CI, ready handoff and the associated separate
+integration result remain required. Earlier completion claims do not mark this follow-up complete or
+establish live GCP validation.
