@@ -640,6 +640,7 @@ class CodexIntegration(HarnessIntegration):
                 prepared,
                 extra_args=self._rendered_extra_args,
                 enabled_workarounds=self.config.enabled_workarounds,
+                profile=self.config.profile,
                 mcp_conflicts=lambda inputs, prepared: session_mcp_conflicts(
                     "codex",
                     runner,

@@ -119,7 +119,7 @@ def test_codex_unrelated_raw_config_does_not_block_mcp():
     item = mcp()
     result = codex.session_artifacts(
         context(item),
-        extra_args=["--profile", "operator", "-c", 'mcp_servers.other.command="other"'],
+        extra_args=["-c", 'mcp_servers.other.command="other"'],
         enabled_workarounds=["session-mcp-overrides"],
     )
     assert result.argv and not result.application.deferred
@@ -293,3 +293,43 @@ def test_start_rebinds_mcp_to_current_inputs_and_run_without_accumulating_argv(
     else:
         assert "replacement-server" in b.command and "inventory-server" not in b.command
         assert not b.artifacts.files
+
+
+@pytest.mark.parametrize("raw", [["--profile", "operator"], ["-p", "operator"], ["--profile=operator"], ["-poperator"]])
+def test_codex_explicit_profile_defers_optional_mcp_without_native_inspection(raw):
+    item = mcp()
+
+    def forbid(*args):
+        pytest.fail("explicit profile MCP reached partial native inspection")
+
+    result = codex.session_artifacts(
+        context(item), extra_args=raw, enabled_workarounds=["session-mcp-overrides"], mcp_conflicts=forbid
+    )
+    assert not result.argv and not result.application.files
+    assert {entry.input_id for entry in result.application.deferred} == {item.identity}
+
+
+def test_codex_modeled_profile_remains_usable_with_optional_mcp_deferred(monkeypatch):
+    from agentworks.capabilities.base import RunContext
+    from agentworks.capabilities.harness_integration import HarnessLaunchIntent
+    from tests.artifacts.test_rendered_launch_args import integration
+    from tests.conftest import _FakeResult, _FakeTarget
+
+    item = mcp()
+    selected = integration(
+        "codex",
+        "CodexIntegration",
+        {"profile": "operator", "enabled_workarounds": ["session-mcp-overrides"]},
+        artifacts=context(item),
+    )
+
+    def forbid(*args, **kwargs):
+        pytest.fail("modeled profile MCP reached partial native inspection")
+
+    monkeypatch.setattr("agentworks.plugins.codex.harness_integration.session_mcp_conflicts", forbid)
+    result = selected.start(
+        RunContext(admin_target=_FakeTarget({".thread": _FakeResult(1)})), intent=HarnessLaunchIntent.CREATE
+    )
+    assert {entry.input_id for entry in result.artifacts.deferred} == {item.identity}
+    assert "--profile operator" in result.command or "-p operator" in result.command
+    assert mcp_native_name(item) not in result.command

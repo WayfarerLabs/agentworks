@@ -131,6 +131,7 @@ def session_artifacts(
     *,
     extra_args: Sequence[str],
     enabled_workarounds: Sequence[str] = (),
+    profile: str | None = None,
     mcp_conflicts: Callable[[ArtifactInputs, SessionArtifactContext], Mapping[str, str]] | None = None,
 ) -> NativeSessionArtifacts:
     """Render session inputs, validating persona names for native override paths."""
@@ -143,7 +144,7 @@ def session_artifacts(
     inputs = select_inputs(
         inputs, {item.identity for item in inputs.items() if item.content.type is not ArtifactType.MCP_SERVER}
     )
-    mcp = _session_mcp(context, mcp_inputs, extra_args, mcp_conflicts)
+    mcp = _session_mcp(context, mcp_inputs, extra_args, mcp_conflicts, profile=profile)
     deferred = (*deferred, *mcp.application.deferred)
     validate_names(inputs, types=(ArtifactType.AGENT,))
     types = {item.content.type for item in inputs.items()}
@@ -252,8 +253,29 @@ def _session_mcp(
     inputs: ArtifactInputs,
     extra_args: Sequence[str],
     inspect: Callable[[ArtifactInputs, SessionArtifactContext], Mapping[str, str]] | None,
+    *,
+    profile: str | None,
 ) -> NativeSessionArtifacts:
     items = tuple(inputs.items())
+    if profile is not None or any(
+        token.split("=", 1)[0] in {"--profile", "-p"} or (token.startswith("-p") and not token.startswith("--"))
+        for token in extra_args
+    ):
+        return NativeSessionArtifacts(
+            ArtifactApplication(
+                deferred=tuple(
+                    ArtifactDeferral(
+                        input_id=item.identity,
+                        destination="session",
+                        reason=(
+                            "session-mcp-overrides does not inspect explicit Codex profiles; "
+                            "use native user/workspace MCP placement."
+                        ),
+                    )
+                    for item in items
+                )
+            )
+        )
     conflicts = _mcp_override_conflicts(extra_args, {mcp_native_name(item) for item in items})
     inspect_inputs = select_inputs(inputs, {item.identity for item in items if mcp_native_name(item) not in conflicts})
     native_conflicts = {} if inspect is None or not inspect_inputs else inspect(inspect_inputs, context)
