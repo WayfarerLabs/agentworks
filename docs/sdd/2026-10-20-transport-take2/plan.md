@@ -517,6 +517,10 @@ reads a legacy transport.
       follow `agent reinit`'s retain, replace and clear semantics; the
       `StoredSourceReferenceRefused` hint for a VM names them. Completions, the command reference
       and the upgrade guide follow.
+- [ ] One initialization order for the admin and every agent: fragments, mise config, git
+      credentials, dotfiles, mise install, the fragments' source lines again, user install commands,
+      then a final source-line pass, with one mise install helper and one install-command runner
+      shared by both accounts.
 - [ ] Collateral: guides or reference pages whose described init behavior changes.
 - [ ] Live evidence: create and reinit on every platform from at least one workstation each.
 
