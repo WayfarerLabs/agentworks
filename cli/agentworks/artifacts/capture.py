@@ -104,6 +104,9 @@ def capture_artifacts(
                                 if package.is_directory or len(package.members) != 1:
                                     raise SourceRefError("an MCP source must select one JSON/JSONC file")
                                 content = content_from_source(entry, normalize_text(package.members[0].data))
+                                active.check()
+                                if len(content.metadata_json.encode("utf-8")) > active.limits.member_bytes:
+                                    raise SourceRefError("normalized MCP definition exceeds its member size limit")
                             else:
                                 content = _content(artifact_type, entry, package, spec.preserve_bytes)
                             provenance = ArtifactProvenance(

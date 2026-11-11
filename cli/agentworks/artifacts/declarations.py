@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Annotated, ClassVar, Self
 
-from pydantic import ConfigDict, Field, field_validator, model_validator
+from pydantic import ConfigDict, Field, ValidationError, ValidatorFunctionWrapHandler, field_validator, model_validator
 
-from agentworks.artifacts.mcp import MCPDefinition
+from agentworks.artifacts.mcp import MCPDefinition, definition_error
 from agentworks.package_sources import validate_artifact_source
 from agentworks.schema import AgwModel, MergeStrategy, NonBlankStr, ResourceRef
 from agentworks.sources import SourceRefError
@@ -96,6 +96,14 @@ class MCPServerArtifactSpec(_ArtifactSpec):
 
     definition: MCPDefinition | None = None
     source: NonBlankStr | None = None
+
+    @field_validator("definition", mode="wrap")
+    @classmethod
+    def _safe_definition_errors(cls, value: object, handler: ValidatorFunctionWrapHandler) -> object:
+        try:
+            return handler(value)
+        except ValidationError as error:
+            raise ValueError(definition_error(error)) from None
 
     @model_validator(mode="after")
     def _one_input(self) -> Self:

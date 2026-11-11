@@ -134,8 +134,13 @@ def parse_definition(value: object) -> MCPStdioDefinition | MCPHTTPDefinition:
     try:
         return _DEFINITION.validate_python(value)
     except ValidationError as error:
-        fields = sorted({".".join(str(part) for part in row["loc"]) or "definition" for row in error.errors()})
-        raise SourceRefError(f"invalid MCP definition field(s): {', '.join(fields)}") from None
+        raise SourceRefError(definition_error(error)) from None
+
+
+def definition_error(error: ValidationError) -> str:
+    """Pydantic's discriminator messages can otherwise echo rejected field values."""
+    fields = sorted({".".join(str(part) for part in row["loc"]) or "definition" for row in error.errors()})
+    return f"invalid MCP definition field(s): {', '.join(fields)}"
 
 
 def content_from_definition(name: str, definition: MCPDefinition) -> ArtifactContent:

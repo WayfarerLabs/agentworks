@@ -115,6 +115,18 @@ def test_wrapper_requires_exactly_one_safe_input(entry):
     assert "private-token" not in str(error.value)
 
 
+def test_rejected_discriminator_values_do_not_escape_in_declaration_or_source_errors(tmp_path):
+    rejected = {"type": "private-token", "command": "server"}
+    with pytest.raises(ValidationError) as declaration_error:
+        inline(rejected)
+    assert "private-token" not in str(declaration_error.value)
+    source = tmp_path / "mcp.json"
+    source.write_text(json.dumps({"mcpServers": {"inventory": rejected}}))
+    with pytest.raises(SourceRefError) as source_error:
+        capture(MCPServerArtifactSpec(source=str(source)))
+    assert "private-token" not in str(source_error.value)
+
+
 def test_public_literals_and_all_three_reference_forms_are_preserved():
     stdio = parse_definition(
         {**STDIO, "args": ["", "--read", "a path"], "env": {"PUBLIC": "value", "TOKEN": "${TOKEN}"}}
@@ -185,6 +197,16 @@ def test_source_file_is_distinguished_from_one_file_directory_and_bounds_apply(t
         capture(MCPServerArtifactSpec(source=str(source)), limits=CaptureLimits(member_bytes=10))
     with pytest.raises(SourceRefError):
         capture(inline(), limits=CaptureLimits(member_bytes=10))
+
+
+def test_source_normalized_definition_obeys_the_same_member_limit(tmp_path):
+    source = tmp_path / "mcp.json"
+    definition = {"type": "stdio", "command": "server-" + "\u00e9" * 100}
+    source.write_text(json.dumps({"mcpServers": {"inventory": definition}}, ensure_ascii=False), encoding="utf-8")
+    source_size = source.stat().st_size
+    assert len(content_from_definition("inventory", parse_definition(definition)).metadata_json.encode()) > source_size
+    with pytest.raises(SourceRefError):
+        capture(MCPServerArtifactSpec(source=str(source)), limits=CaptureLimits(member_bytes=source_size))
 
 
 def test_inheritance_replaces_the_whole_connection_and_never_opens_discarded_source(tmp_path):
