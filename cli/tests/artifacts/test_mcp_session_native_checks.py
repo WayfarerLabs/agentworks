@@ -8,13 +8,12 @@ from dataclasses import replace
 
 import pytest
 
-from agentworks.artifacts.application import ArtifactApplication
 from agentworks.artifacts.model import ArtifactOrigin, ArtifactType
 from agentworks.artifacts.names import mcp_native_name
 from agentworks.artifacts.native.mcp import render_mcp, resolve_mcp_user_path, session_mcp_conflicts
 from agentworks.capabilities.harness_integration.settings import SettingsObject, serialize_settings
 from agentworks.capabilities.harness_integration.setup import UserSetupInvocation
-from agentworks.errors import ExternalError, StateConflictError, StateError, UserAbort
+from agentworks.errors import StateConflictError, StateError, UserAbort
 from agentworks.harness_setup.model import NativeClaim
 from agentworks.native_files import NativeFiles
 from agentworks.plugins.claude import artifacts as claude
@@ -176,23 +175,13 @@ def test_session_native_advisory_preserves_cancellation_internal_and_persistence
         )
 
 
-def test_claude_role_resolution_failure_defers_mcp_and_continues_legacy_application(db, target, monkeypatch):
+def test_claude_unreadable_mcp_role_defers_mcp_and_continues_legacy_application(db, target, monkeypatch):
     from agentworks.plugins.claude import harness_integration as plugin
 
     server, rule = mcp(), artifact(ArtifactType.RULE)
-    monkeypatch.setattr(plugin, "probe_native", lambda *args, **kwargs: str(target.home / ".claude"))
-
-    def unavailable(*args, **kwargs):
-        raise ExternalError("native-private-sentinel")
-
-    monkeypatch.setattr("agentworks.artifacts.native.mcp.resolve_mcp_user_path", unavailable)
-    observed = []
-
-    def setup(tool, config, invocation, **kwargs):
-        observed.append((invocation, kwargs))
-        return ArtifactApplication()
-
-    monkeypatch.setattr(plugin, "setup_user", setup)
+    root = target.home / ".claude"
+    (root / ".claude.json").mkdir(parents=True)
+    monkeypatch.setattr(plugin, "probe_native", lambda *args, **kwargs: str(root))
     invocation = UserSetupInvocation(
         vm=db.insert_vm("vm", "site", "host"),
         runner=target,
@@ -205,11 +194,8 @@ def test_claude_role_resolution_failure_defers_mcp_and_continues_legacy_applicat
     result = ClaudeCodeIntegration.for_setup(owner_kind="agent", owner_name="alice", facet="user", config={}).user_init(
         invocation
     )
-    assert len(observed) == 1 and observed[0][1]["skip_mcp"]
-    assert tuple(observed[0][0].artifacts.items()) == (rule, server)
     assert {entry.input_id for entry in result.deferred} == {server.identity}
     assert result.files and all(server.origin_identity not in file.origins for file in result.files)
-    assert "native-private-sentinel" not in repr(result.deferred)
 
 
 @pytest.mark.parametrize("tool,variable", [("claude", "CLAUDE_CONFIG_DIR"), ("codex", "CODEX_HOME")])
@@ -375,6 +361,7 @@ def test_mcp_only_user_application_needs_no_native_cli_probe(db, target, monkeyp
 
 
 def test_unknown_retirement_role_skips_mcp_io_and_retains_claims(target, monkeypatch):
+    from agentworks.artifacts.native.layout import resolve_user_layout
     from agentworks.artifacts.native.mcp import apply_mcp, user_mcp_location
     from agentworks.plugins._harness_native.native import setup_user
     from tests.native_setup_fixtures import invocation, record
@@ -388,7 +375,8 @@ def test_unknown_retirement_role_skips_mcp_io_and_retains_claims(target, monkeyp
     reported: list[str] = []
     retired = replace(seeded, prior=record(old, "codex"), artifacts=received(), report_incomplete=reported.append)
     target.environment["CODEX_HOME"] = str(target.root / "outside-home")
-    destination, skip, deferred = user_mcp_location("codex", retired, retiring=True)
+    layout = resolve_user_layout("codex", target, home=retired.home, environment=retired.environment)
+    destination, skip, deferred = user_mcp_location(layout, retired, retiring=True)
     assert destination is None and skip and not deferred and reported
 
     def forbid_io(self):

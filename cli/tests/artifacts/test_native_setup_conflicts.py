@@ -12,6 +12,7 @@ import pytest
 from agentworks.artifacts.application import ArtifactApplication
 from agentworks.artifacts.model import ArtifactOrigin, ArtifactType
 from agentworks.artifacts.native.common import defer_setup_conflicts
+from agentworks.artifacts.native.layout import NativeUserLayout
 from agentworks.artifacts.native.probe import NativeArtifactConflictError, _inventory_problems
 from agentworks.capabilities.harness_integration.setup import (
     SetupInvocation,
@@ -34,6 +35,11 @@ def test_setup_defers_all_colliding_origins_and_applies_independent_rule(
 ):
     module = import_module(implementation.__module__)
     monkeypatch.setattr(module, "probe_native", lambda *args, **kwargs: "/home/alice/.native")
+    monkeypatch.setattr(
+        module,
+        "user_layout",
+        lambda *args, **kwargs: NativeUserLayout("/home/alice/.native", "/home/alice/.native/config.toml"),
+    )
     native_setup = Mock(return_value=ArtifactApplication())
     setup_method = "setup_user" if facet == "user" else "setup_workspace"
     if hasattr(module, setup_method):

@@ -174,7 +174,13 @@ def test_outer_facets_compose_entry_deferrals_and_shared_paths_with_legacy_files
     module = import_module(f"agentworks.plugins.{module_name}.harness_integration")
     implementation = getattr(module, implementation_name)
     if facet == "user":
-        monkeypatch.setattr(module, "user_mcp_location", lambda *args, **kwargs: (None, False, ()))
+        from agentworks.artifacts.native.layout import NativeUserLayout
+
+        monkeypatch.setattr(
+            module,
+            "user_layout",
+            lambda *args, **kwargs: NativeUserLayout("/home/alice/.native", "/home/alice/.native/config.toml"),
+        )
     server, rule = mcp(), artifact(ArtifactType.RULE)
     monkeypatch.setattr(module, "probe_native", lambda *args, **kwargs: "/home/alice/.native")
     shared = ("/workspace/.native-config",) if facet == "workspace" else ()

@@ -115,13 +115,13 @@ from agentworks.artifacts.model import ArtifactType
 from agentworks.artifacts.native.common import (
     NativeSessionArtifacts,
     defer_setup_conflicts,
-    native_home,
     prepare_session_delivery,
     render_setup_artifacts,
     validate_discovery_paths,
     validate_native_command,
     validate_user_placement,
 )
+from agentworks.artifacts.native.layout import unavailable_user_artifacts, user_layout
 from agentworks.artifacts.native.mcp import session_mcp_conflicts, user_mcp_location
 from agentworks.artifacts.native.probe import probe_native
 from agentworks.capabilities.harness_integration.base import (
@@ -484,22 +484,19 @@ class CodexIntegration(HarnessIntegration):
 
     def user_init(self, invocation: UserSetupInvocation) -> ArtifactApplication:
         """Apply native setup and return the user's artifact publication plan."""
-        root = (
-            probe_native(
-                invocation.runner,
-                tool="codex",
-                environment=invocation.environment,
-                redactions=invocation.secrets.values(),
-                home=invocation.home,
-                check_policy=False,
-            )
-            if any(item.content.type is not ArtifactType.MCP_SERVER for item in invocation.artifacts.items())
-            and not self.retiring
-            else ""
-        )
         config = None if self.retiring else self._config_as(CodexUserConfig)
-        if not self.retiring:
-            root = root or native_home(invocation.home, invocation.environment, "CODEX_HOME", ".codex")
+        if not (
+            tuple(invocation.artifacts.items())
+            or (invocation.prior and (invocation.prior.claims or invocation.prior.artifact_files))
+            or (config and (config.settings is not None or config.plugins or config.marketplaces))
+        ):
+            return ArtifactApplication()
+        layout = user_layout("codex", invocation)
+        if layout is None:
+            if self.retiring:
+                setup_user("codex", None, invocation, skip_mcp=True)
+            return unavailable_user_artifacts(invocation, retiring=self.retiring)
+        root = layout.root
         plan = (
             ArtifactApplication()
             if self.retiring
@@ -513,14 +510,24 @@ class CodexIntegration(HarnessIntegration):
             )
         )
         validate_user_placement(plan, invocation.home)
-        setup_invocation = (
-            replace(invocation, environment={**invocation.environment, "CODEX_HOME": root}) if root else invocation
-        )
-        mcp_destination, skip_mcp, mcp_deferred = user_mcp_location("codex", invocation, retiring=self.retiring)
+        if not self.retiring and any(
+            item.content.type is not ArtifactType.MCP_SERVER for item in invocation.artifacts.items()
+        ):
+            probe_native(
+                invocation.runner,
+                tool="codex",
+                environment=invocation.environment,
+                redactions=invocation.secrets.values(),
+                home=invocation.home,
+                native_root=root,
+                check_policy=False,
+            )
+        mcp_destination, skip_mcp, mcp_deferred = user_mcp_location(layout, invocation, retiring=self.retiring)
         mcp = setup_user(
             "codex",
             config,
-            setup_invocation,
+            invocation,
+            native_root=root,
             mcp_destination=mcp_destination,
             skip_mcp=skip_mcp,
         )
@@ -535,6 +542,7 @@ class CodexIntegration(HarnessIntegration):
                     environment=invocation.environment,
                     redactions=invocation.secrets.values(),
                     home=invocation.home,
+                    native_root=root,
                     files=files,
                 ),
             )

@@ -120,7 +120,8 @@ def test_real_marketplace_discovery_reuses_user_login_tool_under_isolated_home(
             assert item["HOME"].startswith(str(target.root / "tmp"))
             assert item["CODEX_HOME"] == item["HOME"] + "/.codex"
             assert item["CLAUDE_CONFIG_DIR"] == item["HOME"] + "/.claude"
-    assert (target.home / "profile-runs").read_text() == "x"
+    # Setup observes the layout once; all native commands share one executable/PATH resolution.
+    assert (target.home / "profile-runs").read_text() == "xx"
     assert {claim.role for claim in claims[-1]} == {"marketplace", "plugin"}
     assert not list((target.root / "tmp").iterdir())
 

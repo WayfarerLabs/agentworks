@@ -32,13 +32,13 @@ from agentworks.artifacts.native.common import (
     NativeSessionArtifacts,
     defer,
     defer_setup_conflicts,
-    native_home,
     prepare_session_delivery,
     render_setup_artifacts,
     validate_discovery_paths,
     validate_native_command,
     validate_user_placement,
 )
+from agentworks.artifacts.native.layout import unavailable_user_artifacts, user_layout
 from agentworks.artifacts.native.mcp import apply_mcp, user_mcp_location
 from agentworks.artifacts.native.probe import probe_native
 from agentworks.capabilities.harness_integration.base import (
@@ -181,41 +181,46 @@ class GrokBuildIntegration(HarnessIntegration):
         )
 
     def user_init(self, invocation: UserSetupInvocation) -> ArtifactApplication:
-        root = (
+        if not (
+            tuple(invocation.artifacts.items())
+            or (invocation.prior and (invocation.prior.claims or invocation.prior.artifact_files))
+        ):
+            return ArtifactApplication()
+        layout = user_layout("grok", invocation)
+        if layout is None:
+            return unavailable_user_artifacts(invocation, retiring=self.retiring)
+        root = layout.root
+        plan = (
+            ArtifactApplication()
+            if self.retiring
+            else render_setup_artifacts(
+                invocation,
+                lambda inputs: outer_artifacts(inputs, root),
+            )
+        )
+        validate_user_placement(plan, invocation.home)
+        if not self.retiring and any(
+            item.content.type is not ArtifactType.MCP_SERVER for item in invocation.artifacts.items()
+        ):
             probe_native(
                 invocation.runner,
                 tool="grok",
                 environment=invocation.environment,
                 redactions=invocation.secrets.values(),
                 home=invocation.home,
+                native_root=root,
                 check_policy=False,
             )
-            if any(item.content.type is not ArtifactType.MCP_SERVER for item in invocation.artifacts.items())
-            and not self.retiring
-            else ""
-        )
-        plan = (
-            ArtifactApplication()
-            if self.retiring
-            else render_setup_artifacts(
-                invocation,
-                lambda inputs: outer_artifacts(
-                    inputs, root or native_home(invocation.home, invocation.environment, "GROK_HOME", ".grok")
-                ),
-            )
-        )
-        validate_user_placement(plan, invocation.home)
-        mcp_destination, skip_mcp, mcp_deferred = user_mcp_location("grok", invocation, retiring=self.retiring)
-        mcp = (
-            ArtifactApplication()
-            if skip_mcp
-            else apply_mcp(
+        mcp_destination, skip_mcp, mcp_deferred = user_mcp_location(layout, invocation, retiring=self.retiring)
+        if skip_mcp:
+            mcp = ArtifactApplication()
+        else:
+            assert mcp_destination is not None
+            mcp = apply_mcp(
                 "grok",
                 replace(invocation, artifacts=ArtifactInputs()) if self.retiring else invocation,
-                destination=mcp_destination
-                or f"{native_home(invocation.home, invocation.environment, 'GROK_HOME', '.grok')}/config.toml",
+                destination=mcp_destination,
             )
-        )
         mcp = replace(mcp, deferred=(*mcp.deferred, *mcp_deferred))
 
         if plan.files:
@@ -228,6 +233,7 @@ class GrokBuildIntegration(HarnessIntegration):
                     environment=invocation.environment,
                     redactions=invocation.secrets.values(),
                     home=invocation.home,
+                    native_root=root,
                     files=files,
                 ),
             )

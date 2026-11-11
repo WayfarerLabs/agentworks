@@ -14,7 +14,8 @@ from typing import TYPE_CHECKING
 from agentworks import output
 from agentworks.artifacts.application import ArtifactApplication
 from agentworks.artifacts.model import ArtifactInputs
-from agentworks.artifacts.native.mcp import apply_mcp
+from agentworks.artifacts.native.layout import resolve_user_layout
+from agentworks.artifacts.native.mcp import apply_mcp, user_mcp_location
 from agentworks.capabilities.harness_integration.settings import (
     PreparedSettings,
     SettingsFormat,
@@ -38,6 +39,7 @@ from agentworks.plugins._harness_native.native_cli import (
 )
 
 if TYPE_CHECKING:
+    from agentworks.artifacts.application import ArtifactDeferral
     from agentworks.capabilities.harness_integration.setup import UserSetupInvocation, WorkspaceSetupInvocation
     from agentworks.plugins._harness_native.native_config import NativeUserConfig, NativeWorkspaceConfig
 
@@ -274,20 +276,25 @@ def setup_user(
     config: NativeUserConfig | None,
     invocation: UserSetupInvocation,
     *,
+    native_root: str | None = None,
     mcp_destination: str | None = None,
     skip_mcp: bool = False,
 ) -> ArtifactApplication:
     """Reconcile actual-user native associations using confirmed prior claims."""
+    location_deferred: tuple[ArtifactDeferral, ...] = ()
+    if native_root is None and (config is not None or not skip_mcp):
+        layout = resolve_user_layout(tool, invocation.runner, home=invocation.home, environment=invocation.environment)
+        native_root = layout.root
+        current_mcp, location_skip, location_deferred = user_mcp_location(layout, invocation, retiring=config is None)
+        mcp_destination = mcp_destination or current_mcp
+        skip_mcp = skip_mcp or location_skip
     mapping = None if config is None else config.settings
     if config is None:
         invocation = replace(invocation, artifacts=ArtifactInputs())
     prepared = None if mapping is None else prepare_settings(mapping, format=_format(tool))
     claims = list(invocation.prior.claims if invocation.prior else ())
     preserved = tuple(claim for claim in claims if claim.role not in ("settings", "plugin", "marketplace"))
-    override = "CLAUDE_CONFIG_DIR" if tool == "claude" else "CODEX_HOME"
-    root = native_path(
-        invocation.environment.get(override) or (invocation.home + ("/.claude" if tool == "claude" else "/.codex"))
-    )
+    root = native_root
     if mapping is None and any(claim.role == "settings" for claim in claims):
         output.info("Removed settings mapping; native settings and their current values are retained.")
     native_claims = [claim for claim in claims if claim.role in ("plugin", "marketplace")]
@@ -299,35 +306,36 @@ def setup_user(
         if len(roots) != 1:
             raise StateError("native retirement requires one recorded config home; ownership evidence was retained")
         root = roots.pop()
+    if root is None:
+        return ArtifactApplication(deferred=location_deferred)
+    root = native_path(root)
     destination = root + "/" + _filename(tool)
-    mcp_destination = mcp_destination or (
-        native_path(invocation.environment["CLAUDE_CONFIG_DIR"]) + "/.claude.json"
-        if tool == "claude" and invocation.environment.get("CLAUDE_CONFIG_DIR")
-        else native_path(invocation.home) + "/.claude.json"
-        if tool == "claude"
-        else destination
-    )
+    if not skip_mcp and mcp_destination is None:
+        raise StateError("native MCP setup requires the selected current config role")
+    joint_mapping = tool == "codex" and mcp_destination == destination and not skip_mcp
     if any(claim.destination != root for claim in native_claims):
         raise StateError("native config home differs from existing ownership claims; clean up the previous home first")
     sources = [] if config is None else config.marketplaces
     requested = [] if config is None else config.plugins
     if not native_claims and not sources and not requested:
-        if prepared is not None and (tool == "claude" or skip_mcp):
+        if prepared is not None and not joint_mapping:
             with NativeFiles(invocation.runner) as files:
                 initial = files.read(destination)
                 settings_plan = _MappingPlan.build(prepared, initial, destination)
                 settings_plan.publish(files, destination, current=initial)
         if skip_mcp:
-            return ArtifactApplication()
-        return apply_mcp(
+            return ArtifactApplication(deferred=location_deferred)
+        assert mcp_destination is not None
+        application = apply_mcp(
             tool,
             invocation,
             destination=mcp_destination,
             claims=(*preserved, *claims),
             map_document=(lambda current: _map_settings(prepared, destination, current))
-            if tool == "codex" and prepared is not None
+            if joint_mapping and prepared is not None
             else None,
         )
+        return replace(application, deferred=(*application.deferred, *location_deferred))
     with NativeFiles(invocation.runner) as files:
         initial = files.read(destination)
         plan = None if mapping is None or prepared is None else _MappingPlan.build(prepared, initial, destination)
@@ -684,7 +692,7 @@ def setup_user(
                 for selector in selectors
                 if selector not in blocked_plugins
             )
-            if tool == "claude" or skip_mcp:
+            if not joint_mapping:
                 current = files.read(destination)
                 plan.publish(
                     files,
@@ -697,8 +705,9 @@ def setup_user(
         else:
             overlays = ()
         if skip_mcp:
-            return ArtifactApplication()
-        return apply_mcp(
+            return ArtifactApplication(deferred=location_deferred)
+        assert mcp_destination is not None
+        application = apply_mcp(
             tool,
             invocation,
             destination=mcp_destination,
@@ -712,6 +721,7 @@ def setup_user(
                     protected=tuple(sorted(protected)),
                 )
             )
-            if tool == "codex" and plan is not None
+            if joint_mapping and plan is not None
             else None,
         )
+        return replace(application, deferred=(*application.deferred, *location_deferred))

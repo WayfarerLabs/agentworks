@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-import shlex
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Literal, cast
 
@@ -13,6 +12,7 @@ from agentworks import output
 from agentworks.artifacts.application import ArtifactApplication, ArtifactDeferral
 from agentworks.artifacts.model import ArtifactInput, ArtifactInputs, ArtifactType
 from agentworks.artifacts.names import mcp_native_name
+from agentworks.artifacts.native.layout import NativeUserLayout, resolve_user_layout
 from agentworks.capabilities.harness_integration.settings import (
     SettingsFormat,
     SettingsObject,
@@ -21,7 +21,7 @@ from agentworks.capabilities.harness_integration.settings import (
     serialize_settings,
 )
 from agentworks.capabilities.harness_integration.setup import UserSetupInvocation, WorkspaceSetupInvocation
-from agentworks.errors import ConfigError, ConnectivityError, ExternalError, StateError
+from agentworks.errors import ConfigError, ConnectivityError, ExternalError
 from agentworks.harness_setup.model import NativeClaim
 from agentworks.native_files import NativeFilePathError, NativeFiles, native_path
 
@@ -88,74 +88,29 @@ def render_mcp(item: ArtifactInput, tool: MCPTool) -> SettingsObject:
     return result
 
 
-_MCP_USER_PATH = r"""
-import json, os, sys
-request = json.load(sys.stdin)
-home = os.environ.get('HOME', '')
-if home != request['home']:
-    raise SystemExit(2)
-tool = request['tool']
-variable, default = {'claude': ('CLAUDE_CONFIG_DIR', '.claude'), 'codex': ('CODEX_HOME', '.codex'),
-                     'grok': ('GROK_HOME', '.grok')}[tool]
-override = os.environ.get(variable)
-root = override or home + '/' + default
-if tool == 'claude':
-    path = override + '/.claude.json' if override else home + '/.claude.json'
-else:
-    path = root + '/config.toml'
-print('AGW_MCP_USER_CONFIG=' + json.dumps(path))
-"""
+def _user_mcp_path(layout: NativeUserLayout, home: str) -> str:
+    if not layout.mcp_path.startswith(native_path(home).rstrip("/") + "/"):
+        raise ConfigError("User MCP config placement outside HOME is unsupported")
+    return layout.mcp_path
 
 
 def resolve_mcp_user_path(tool: MCPTool, runner: Transport, *, home: str, environment: Mapping[str, str]) -> str:
-    """Observe only fixed-role paths in the workload's actual target login environment."""
-    command = shlex.join(["python3", "-c", _MCP_USER_PATH])
-    result = runner.run(
-        f'"$SHELL" -lic {shlex.quote(command)}',
-        env=dict(environment),
-        input_data=json.dumps({"tool": tool, "home": home}),
-        tty=False,
-        check=False,
-        timeout=30,
-    )
-    if not result.ok:
-        raise ExternalError("Native MCP config location could not be resolved")
-    lines = [
-        line.removeprefix("AGW_MCP_USER_CONFIG=")
-        for line in result.stdout.splitlines()
-        if line.startswith("AGW_MCP_USER_CONFIG=")
-    ]
-    try:
-        path = json.loads(lines[0]) if len(lines) == 1 else None
-    except (ValueError, RecursionError):
-        path = None
-    if not isinstance(path, str):
-        raise ExternalError("Native MCP config location could not be resolved")
-    try:
-        path = native_path(path)
-    except StateError:
-        raise ConfigError("Native MCP config location must be an absolute normalized path") from None
-    if not path.startswith(native_path(home).rstrip("/") + "/"):
-        raise ConfigError("User MCP config placement outside HOME is unsupported")
-    return path
+    """Observe the native layout and restrict MCP placement to the actual user's HOME."""
+    return _user_mcp_path(resolve_user_layout(tool, runner, home=home, environment=environment), home)
 
 
 def user_mcp_location(
-    tool: MCPTool, invocation: UserSetupInvocation, *, retiring: bool
+    layout: NativeUserLayout | None, invocation: UserSetupInvocation, *, retiring: bool
 ) -> tuple[str | None, bool, tuple[ArtifactDeferral, ...]]:
     """Resolve current-role authority, preserving prior claims when it is unavailable."""
     items = tuple(item for item in invocation.artifacts.items() if item.content.type is ArtifactType.MCP_SERVER)
     previous = (
         tuple(claim for claim in invocation.prior.claims if claim.role == MCP_CLAIM_ROLE) if invocation.prior else ()
     )
-    if not items and not previous:
-        return None, False, ()
     try:
-        return (
-            resolve_mcp_user_path(tool, invocation.runner, home=invocation.home, environment=invocation.environment),
-            False,
-            (),
-        )
+        if layout is None:
+            raise ConfigError("Native user configuration location is unknown")
+        return _user_mcp_path(layout, invocation.home), False, ()
     except (ConfigError, ConnectivityError, ExternalError):
         reason = "Native MCP config location could not be resolved safely; existing MCP ownership is retained."
         if previous:
@@ -285,8 +240,6 @@ def apply_mcp(
         for item in invocation.artifacts.items()
         if item.content.type == ArtifactType.MCP_SERVER
     }
-    if len(desired) != sum(item.content.type == ArtifactType.MCP_SERVER for item in invocation.artifacts.items()):
-        raise ConfigError("MCP server native names collide")
     elsewhere = tuple(claim for claim in old if claim.destination != destination)
     old = tuple(claim for claim in old if claim.destination == destination)
     blocked = {
@@ -340,7 +293,7 @@ def apply_mcp(
             return ArtifactApplication(deferred=blocked_deferrals)
         try:
             initial = files.read(destination)
-        except (ConnectivityError, ExternalError):
+        except (ConnectivityError, ExternalError, NativeFilePathError):
             return unavailable()
         mapped = False
         contributions: SettingsObject = {}
@@ -365,12 +318,14 @@ def apply_mcp(
 
         retained: list[NativeClaim] = []
         retired: list[str] = []
+        absent: set[str] = set()
         modified: list[NativeClaim] = []
         for claim in old:
             if claim.identifier in desired or claim.source in invocation.retain_artifact_origins:
                 retained.append(claim)
             elif claim.identifier not in current:
                 retired.append(claim.identifier)
+                absent.add(claim.identifier)
                 continue
             elif _matches(claim, current[claim.identifier]):
                 _table(document, key).pop(claim.identifier)
@@ -436,14 +391,20 @@ def apply_mcp(
                     group=group,
                     preserve_metadata=initial is not None,
                 )
-        except (ConnectivityError, ExternalError):
+        except (ConnectivityError, ExternalError, NativeFilePathError):
             return unavailable()
         # Persistence failures must escape: a confirmed write cannot be treated as
         # an optional artifact skip or followed by more native mutations.
         if updated != previous:
             invocation.checkpoint(updated)
         for name in retired:
-            action = "Removed MCP server" if name not in table else "Released MCP ownership of native server"
+            action = (
+                "Released MCP ownership of native server"
+                if name in table
+                else "Cleared ownership of already absent MCP server"
+                if name in absent
+                else "Removed MCP server"
+            )
             output.info(
                 f"{action} '{name}'. Any native OAuth credentials are retained. "
                 "Use the harness's native logout before withdrawing a server when logout requires its definition."

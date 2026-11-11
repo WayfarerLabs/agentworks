@@ -13,6 +13,7 @@ import pytest
 from agentworks.artifacts.application import ArtifactApplication
 from agentworks.artifacts.model import ArtifactType
 from agentworks.artifacts.native.common import MAX_CODEX_PERSONA_BYTES
+from agentworks.artifacts.native.layout import NATIVE_USER_DIRECTORIES
 from agentworks.artifacts.native.probe import _PROBE, _inventory_problems
 from agentworks.package_sources import CaptureLimits
 from tests.artifacts.test_native_delivery import artifact
@@ -58,6 +59,7 @@ def probe(
     workspace.mkdir(exist_ok=True)
     request = {
         "tool": tool,
+        "native_directory": NATIVE_USER_DIRECTORIES[tool],
         "codex_persona_bytes": MAX_CODEX_PERSONA_BYTES,
         "inventory_bytes": inventory_bytes,
         "home": str(home),

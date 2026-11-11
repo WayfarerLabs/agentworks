@@ -22,9 +22,9 @@ from agentworks.capabilities.harness_integration.settings import (
     serialize_settings,
 )
 from agentworks.capabilities.harness_integration.setup import WorkspaceSetupInvocation
-from agentworks.errors import ExternalError, StateError
+from agentworks.errors import ExternalError, StateConflictError, StateError, UserAbort
 from agentworks.harness_setup.model import NativeClaim
-from agentworks.native_files import NativeFiles
+from agentworks.native_files import NativeFilePathError, NativeFiles
 from agentworks.plugins._harness_native.native import setup_user, setup_workspace
 from agentworks.plugins._harness_native.native_cli import NativeMarket, NativePlugin, identity
 from agentworks.plugins._harness_native.native_config import NativeUserConfig, NativeWorkspaceConfig
@@ -518,3 +518,50 @@ def test_explicit_mapping_takeover_releases_modified_obsolete_claim_in_one_pass(
         assert len(reports) == int(takeover and attempt == 0)
         assert all(name in report for report in reports)
         retire = replace(retire, prior=record(current, "codex"))
+
+
+@pytest.mark.parametrize("operation", ["read", "publish"])
+@pytest.mark.parametrize(
+    "error",
+    [
+        NativeFilePathError("guarded path"),
+        StateError("internal"),
+        StateConflictError("concurrent"),
+        UserAbort("cancelled"),
+        RuntimeError("bug"),
+        KeyboardInterrupt(),
+    ],
+)
+def test_optional_mcp_catches_only_typed_guarded_path_refusals(transport, monkeypatch, operation, error):
+    path = transport.home / ".codex/config.toml"
+    checkpoints: list[tuple[NativeClaim, ...]] = []
+    call = replace(invocation(transport, checkpoints), artifacts=received(server()))
+    apply_mcp("codex", call, destination=str(path))
+    previous = record(checkpoints[-1], "codex")
+    before = path.read_bytes()
+    checkpoints.clear()
+    reports: list[str] = []
+    changed = server(command="changed")
+    call = replace(call, prior=previous, artifacts=received(changed), report_incomplete=reports.append)
+    with monkeypatch.context() as patch:
+        patch.setattr(NativeFiles, operation, Mock(side_effect=error))
+        if isinstance(error, NativeFilePathError):
+            result = apply_mcp("codex", call, destination=str(path))
+            assert reports and {entry.input_id for entry in result.deferred} == {changed.identity}
+        else:
+            with pytest.raises(type(error)):
+                apply_mcp("codex", call, destination=str(path))
+    assert not checkpoints and path.read_bytes() == before
+
+
+def test_required_mapping_without_mcp_still_propagates_guarded_path_refusals(transport):
+    path = transport.home / ".codex/config.toml"
+    path.mkdir(parents=True)
+    source = transport.root / "mapping.toml"
+    source.write_text('theme = "mapped"\n')
+    with pytest.raises(NativeFilePathError):
+        setup_user(
+            "codex",
+            NativeUserConfig(settings=SettingsMapping(source=str(source), strategy="replace")),
+            invocation(transport, []),
+        )

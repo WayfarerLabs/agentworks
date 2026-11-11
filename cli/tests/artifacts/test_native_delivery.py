@@ -26,6 +26,7 @@ from agentworks.artifacts.model import (
     ArtifactType,
 )
 from agentworks.artifacts.native.common import NativeSessionArtifacts, native_home, validate_ancestor_names
+from agentworks.artifacts.native.layout import NativeUserLayout
 from agentworks.artifacts.native.probe import NativeArtifactConflictError, probe_native
 from agentworks.artifacts.native.shell import filesystem_artifacts
 from agentworks.artifacts.publication import validate_application
@@ -516,6 +517,7 @@ def test_user_native_home_boundary_precedes_other_setup(db, monkeypatch, impleme
         )
     root = "/mnt/native" if outside_home else "/home/alice/custom-native"
     monkeypatch.setattr(plugin, "probe_native", lambda *args, **kwargs: root)
+    monkeypatch.setattr(plugin, "user_layout", lambda *args, **kwargs: NativeUserLayout(root, root + "/config.toml"))
     integration = implementation.for_setup(owner_kind="agent", owner_name="alice", facet="user", config={})
     invocation = UserSetupInvocation(
         vm=db.insert_vm("vm", "lima", "vm"),
@@ -542,6 +544,9 @@ def test_codex_external_home_does_not_block_home_owned_skills(db, monkeypatch):
 
     monkeypatch.setattr(plugin, "setup_user", lambda *args, **kwargs: ArtifactApplication())
     monkeypatch.setattr(plugin, "probe_native", lambda *args, **kwargs: "/mnt/native")
+    monkeypatch.setattr(
+        plugin, "user_layout", lambda *args, **kwargs: NativeUserLayout("/mnt/native", "/mnt/native/config.toml")
+    )
     integration = CodexIntegration.for_setup(owner_kind="agent", owner_name="alice", facet="user", config={})
     result = integration.user_init(
         UserSetupInvocation(
@@ -869,6 +874,9 @@ def test_setup_native_name_conflict_defers_only_affected_artifact(implementation
         return module_root
 
     monkeypatch.setattr(module, "probe_native", check)
+    monkeypatch.setattr(
+        module, "user_layout", lambda *args, **kwargs: NativeUserLayout(module_root, module_root + "/config.toml")
+    )
     bad = artifact(ArtifactType.SKILL)
     good = artifact(ArtifactType.RULE)
     incomplete: list[str] = []

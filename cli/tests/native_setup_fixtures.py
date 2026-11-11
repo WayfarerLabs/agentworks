@@ -30,7 +30,8 @@ class LocalFixtureTransport(Transport):
         # the host login shell here could read the operator's startup files.
         login_shell = root / "login-shell"
         login_shell.write_text(
-            '#!/bin/bash\n[ "$1" = "-lc" ] || exit 9\n. "$HOME/.profile"\nexec /bin/bash --noprofile --norc -c "$2"\n'
+            '#!/bin/bash\ncase "$1" in -lc|-lic) ;; *) exit 9 ;; esac\n'
+            '. "$HOME/.profile"\nexec /bin/bash --noprofile --norc -c "$2"\n'
         )
         login_shell.chmod(0o700)
         (self.home / ".profile").write_text('export PATH="$HOME/.local/bin:$PATH"\n')
