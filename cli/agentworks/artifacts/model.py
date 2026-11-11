@@ -30,9 +30,10 @@ class ArtifactType(StrEnum):
     RULE = "rule"
     SKILL = "skill"
     AGENT = "agent"
+    MCP_SERVER = "mcp-server"
 
     @property
-    def map_name(self) -> Literal["hints", "rules", "skills", "agents"]:
+    def map_name(self) -> Literal["hints", "rules", "skills", "agents", "mcp_servers"]:
         match self:
             case ArtifactType.HINT:
                 return "hints"
@@ -42,6 +43,8 @@ class ArtifactType(StrEnum):
                 return "skills"
             case ArtifactType.AGENT:
                 return "agents"
+            case ArtifactType.MCP_SERVER:
+                return "mcp_servers"
 
 
 @dataclass(frozen=True)
@@ -171,6 +174,7 @@ class ArtifactGroup:
     rules: Mapping[str, ArtifactInput] = field(default_factory=dict)
     skills: Mapping[str, ArtifactInput] = field(default_factory=dict)
     agents: Mapping[str, ArtifactInput] = field(default_factory=dict)
+    mcp_servers: Mapping[str, ArtifactInput] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         for artifact_type, mapping in self.type_maps():
@@ -192,6 +196,7 @@ class ArtifactGroup:
             (ArtifactType.RULE, self.rules),
             (ArtifactType.SKILL, self.skills),
             (ArtifactType.AGENT, self.agents),
+            (ArtifactType.MCP_SERVER, self.mcp_servers),
         )
 
     def items(self) -> Iterator[ArtifactInput]:
@@ -208,7 +213,7 @@ class ArtifactGroup:
         )
 
     def __bool__(self) -> bool:
-        return bool(self.hints or self.rules or self.skills or self.agents)
+        return bool(self.hints or self.rules or self.skills or self.agents or self.mcp_servers)
 
 
 @dataclass(frozen=True)

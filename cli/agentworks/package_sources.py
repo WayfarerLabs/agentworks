@@ -51,6 +51,7 @@ class CapturedPackage:
     selected_path: str = ""
     requested_ref: str = ""
     commit: str = ""
+    is_directory: bool = False
 
 
 _RESERVED = re.compile(r"^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)", re.IGNORECASE)
@@ -246,7 +247,7 @@ class PackageCapture:
                 self.check()
                 if _stamp(os.stat(name, dir_fd=ancestor, follow_symlinks=False))[:3] != identity:
                     raise SourceRefError("artifact source changed during capture")
-        return CapturedPackage(tuple(result), str(path))
+        return CapturedPackage(tuple(result), str(path), is_directory=not relative)
 
     def _local_windows(self, path: Path) -> CapturedPackage:
         from agentworks._package_source_windows import locked_file
@@ -304,7 +305,7 @@ class PackageCapture:
                 relative = "" if stat.S_ISDIR(os.fstat(descriptor).st_mode) else path.name
                 visit(path, relative)
                 visit(path, relative, verify=True)
-        return CapturedPackage(tuple(result), str(path))
+        return CapturedPackage(tuple(result), str(path), is_directory=not relative)
 
     def _storage_size(self) -> int:
         """Account for Git storage while temporary files and directories disappear."""
@@ -458,7 +459,9 @@ class PackageCapture:
             self.account(size)
             data = self._run(repository, "cat-file", "blob", object_name)
             result.append(PackageMember(path, data, mode == b"100755"))
-        return CapturedPackage(tuple(result), reference.path, reference.subpath, reference.ref, commit)
+        return CapturedPackage(
+            tuple(result), reference.path, reference.subpath, reference.ref, commit, object_type == b"tree"
+        )
 
 
 def _stamp(info: os.stat_result) -> tuple[int, int, int, int, int, int]:

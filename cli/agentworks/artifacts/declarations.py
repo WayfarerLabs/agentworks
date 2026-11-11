@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Annotated, ClassVar, Self
 
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
+from agentworks.artifacts.mcp import MCPDefinition
 from agentworks.package_sources import validate_artifact_source
 from agentworks.schema import AgwModel, MergeStrategy, NonBlankStr, ResourceRef
 from agentworks.sources import SourceRefError
@@ -33,6 +34,8 @@ class _ArtifactSpec(AgwModel):
                 raise ValueError(str(error)) from None
         return source
 
+
+class _FileArtifactSpec(_ArtifactSpec):
     preserve_bytes: list[NonBlankStr] = Field(default_factory=list)
     """Relative paths or globs for supporting files whose bytes must not be normalized.
     A skill's SKILL.md always uses normalized UTF-8 text."""
@@ -51,7 +54,7 @@ class _ArtifactSpec(AgwModel):
         return patterns
 
 
-class _TextArtifactSpec(_ArtifactSpec):
+class _TextArtifactSpec(_FileArtifactSpec):
     text: NonBlankStr | None = None
     """Inline context text; specify exactly one of text or source."""
 
@@ -74,21 +77,34 @@ class RuleArtifactSpec(_TextArtifactSpec):
     """Standing Markdown guidance with optional description-only YAML frontmatter."""
 
 
-class SkillArtifactSpec(_ArtifactSpec):
+class SkillArtifactSpec(_FileArtifactSpec):
     """A complete standard Agent Skills directory with SKILL.md at its root."""
 
     source: NonBlankStr = Field(examples=["file::~/agent-content/skills/review"])
     """Explicit workstation directory or Git subdirectory containing SKILL.md."""
 
 
-class AgentArtifactSpec(_ArtifactSpec):
+class AgentArtifactSpec(_FileArtifactSpec):
     """An agent persona with a name, description, and instruction body."""
 
     source: NonBlankStr = Field(examples=["file::~/agent-content/reviewer.md"])
     """Workstation or Git Markdown with name, description and optional native_options frontmatter."""
 
 
-type ArtifactSpec = HintArtifactSpec | RuleArtifactSpec | SkillArtifactSpec | AgentArtifactSpec
+class MCPServerArtifactSpec(_ArtifactSpec):
+    """One canonical MCP connection, inline or selected from a JSON/JSONC file."""
+
+    definition: MCPDefinition | None = None
+    source: NonBlankStr | None = None
+
+    @model_validator(mode="after")
+    def _one_input(self) -> Self:
+        if (self.definition is None) == (self.source is None):
+            raise ValueError("specify exactly one of definition or source")
+        return self
+
+
+type ArtifactSpec = HintArtifactSpec | RuleArtifactSpec | SkillArtifactSpec | AgentArtifactSpec | MCPServerArtifactSpec
 
 
 class ArtifactsConfig(AgwModel):

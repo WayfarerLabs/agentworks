@@ -11,8 +11,9 @@ from pathlib import PurePosixPath, PureWindowsPath
 from typing import TYPE_CHECKING
 
 from agentworks import output
-from agentworks.artifacts.declarations import HintArtifactSpec, RuleArtifactSpec
+from agentworks.artifacts.declarations import HintArtifactSpec, MCPServerArtifactSpec, RuleArtifactSpec
 from agentworks.artifacts.frontmatter import parse_metadata
+from agentworks.artifacts.mcp import content_from_definition, content_from_source
 from agentworks.artifacts.model import (
     ArtifactContent,
     ArtifactGroup,
@@ -86,7 +87,11 @@ def capture_artifacts(
                     try:
                         active.check()
                         source = spec.source
-                        if source is None:
+                        if isinstance(spec, MCPServerArtifactSpec) and spec.definition is not None:
+                            content = content_from_definition(entry, spec.definition)
+                            active.account(len(content.metadata_json.encode("utf-8")))
+                            provenance = ArtifactProvenance()
+                        elif source is None:
                             assert isinstance(spec, (HintArtifactSpec, RuleArtifactSpec))
                             assert spec.text is not None
                             encoded = spec.text.encode("utf-8")
@@ -95,7 +100,12 @@ def capture_artifacts(
                             provenance = ArtifactProvenance()
                         else:
                             package = active.capture(source)
-                            content = _content(artifact_type, entry, package, spec.preserve_bytes)
+                            if isinstance(spec, MCPServerArtifactSpec):
+                                if package.is_directory or len(package.members) != 1:
+                                    raise SourceRefError("an MCP source must select one JSON/JSONC file")
+                                content = content_from_source(entry, normalize_text(package.members[0].data))
+                            else:
+                                content = _content(artifact_type, entry, package, spec.preserve_bytes)
                             provenance = ArtifactProvenance(
                                 package.source, package.requested_ref, package.selected_path, package.commit
                             )
@@ -327,7 +337,7 @@ def _skill_metadata(metadata: dict[str, object]) -> None:
 def _reject_execution_options(value: object) -> None:
     if isinstance(value, dict):
         if any(key in value for key in ("hooks", "mcpServers", "mcp_servers")):
-            raise SourceRefError("hooks and MCP configuration are not supported artifact inputs")
+            raise SourceRefError("hooks and embedded MCP configuration are not supported in skill or persona metadata")
         for child in value.values():
             _reject_execution_options(child)
     elif isinstance(value, list):
