@@ -110,15 +110,15 @@ class _Envelope(_Record):
         )
 
 
-class _EnvelopeV4(_Envelope):
-    version: Annotated[StrictInt, Field(ge=4, le=4)]
+class _MCPEnvelope(_Envelope):
+    version: Annotated[StrictInt, Field(ge=4, le=5)]
     mcp_servers: dict[ArtifactName, _Input]
 
     def type_maps(self) -> tuple[tuple[ArtifactType, dict[str, _Input]], ...]:
         return (*super().type_maps(), (ArtifactType.MCP_SERVER, self.mcp_servers))
 
 
-def encode_inputs(inputs: ArtifactGroup, *, version: int = 4) -> dict[str, object]:
+def encode_inputs(inputs: ArtifactGroup, *, version: int = 5) -> dict[str, object]:
     """Validate the persisted write boundary against the same schema used on read.
 
     No native state or source access is involved. Acquisition also calls this before
@@ -173,8 +173,8 @@ def decode_inputs(payload: object) -> tuple[int, ArtifactGroup]:
     try:
         _bound_payload(payload)
         envelope = (
-            _EnvelopeV4.model_validate(payload)
-            if isinstance(payload, dict) and payload.get("version") == 4
+            _MCPEnvelope.model_validate(payload)
+            if isinstance(payload, dict) and payload.get("version") in (4, 5)
             else _Envelope.model_validate(payload)
         )
         owner = ArtifactOwner(**envelope.owner.model_dump())
@@ -230,6 +230,8 @@ def decode_inputs(payload: object) -> tuple[int, ArtifactGroup]:
                 if content.type == ArtifactType.MCP_SERVER:
                     if envelope.version < 4:
                         raise SourceRefError("MCP artifacts require capture version 4")
+                    if envelope.version == 4 and "oauth" in content.metadata:
+                        raise SourceRefError("MCP OAuth requires capture version 5")
                     expected = content_from_definition(origin.entry, parse_definition(content.metadata))
                 elif content.members:
                     expected = content_from_members(

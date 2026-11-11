@@ -41,7 +41,7 @@ class CapturedArtifacts:
 
     declaration: str
     inputs: ArtifactGroup
-    codec_version: int = 4
+    codec_version: int = 5
 
 
 def _validate_owner(capture: CapturedArtifacts, kind: InstanceKind, name: str, component: ArtifactComponent) -> None:
@@ -98,7 +98,7 @@ def capture_owner(
 
 def encode_captures(captures: dict[ArtifactComponent, CapturedArtifacts]) -> VersionedPayload:
     return VersionedPayload(
-        max((snapshot.codec_version for snapshot in captures.values()), default=4),
+        max((snapshot.codec_version for snapshot in captures.values()), default=5),
         cast(
             "JsonObject",
             {
@@ -118,7 +118,7 @@ def decode_captures(record: AppliedStateSlice) -> dict[ArtifactComponent, Captur
     """Validate persisted input content and its actual owner without echoing values."""
     if record.key is not AppliedStateKey.ARTIFACT_INPUTS:
         raise TypeError("artifact capture requires its matching applied slice")
-    if record.payload.payload_version not in (2, 3, 4):
+    if record.payload.payload_version not in (2, 3, 4, 5):
         raise UnsupportedArtifactCaptureVersionError(
             "artifact captures require a different Agentworks version",
             hint="Use an Agentworks version that supports this capture. Stored data and file ownership were retained.",
@@ -185,6 +185,6 @@ def write_capture(
 
 
 def canonicalize_captures(record: AppliedStateSlice) -> VersionedPayload:
-    if record.payload.payload_version not in (2, 3, 4):
+    if record.payload.payload_version not in (2, 3, 4, 5):
         return record.payload
     return encode_captures(decode_captures(record))

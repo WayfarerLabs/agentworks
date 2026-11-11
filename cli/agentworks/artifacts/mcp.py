@@ -5,11 +5,11 @@ from __future__ import annotations
 import json
 import re
 import unicodedata
-from typing import Annotated, Literal, cast
+from typing import Annotated, Literal, Self, cast
 from urllib.parse import urlsplit
 
 import json5
-from pydantic import ConfigDict, Field, TypeAdapter, ValidationError, field_validator
+from pydantic import ConfigDict, Field, TypeAdapter, ValidationError, field_validator, model_validator
 
 from agentworks.artifacts.model import ArtifactContent, ArtifactType
 from agentworks.schema import AgwModel
@@ -18,7 +18,10 @@ from agentworks.sources import SourceRefError
 _ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 _REFERENCE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}\Z")
 _HEADER_NAME = re.compile(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+\Z")
-_DEFINITION_FIELDS = frozenset({"type", "description", "command", "args", "env", "url", "headers"})
+_SCOPE_TOKEN = re.compile(r"[\x21\x23-\x5b\x5d-\x7e]+\Z")
+_DEFINITION_FIELDS = frozenset(
+    {"type", "description", "command", "args", "env", "url", "headers", "oauth", "client_id", "callback_port", "scopes"}
+)
 
 
 def _public_string(value: str) -> str:
@@ -84,12 +87,52 @@ class MCPStdioDefinition(_MCPDefinition):
         return values
 
 
+class MCPOAuth(AgwModel):
+    """Public native-client OAuth intent, without credentials or protocol state."""
+
+    model_config = ConfigDict(hide_input_in_errors=True)
+
+    client_id: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    callback_port: Annotated[int, Field(ge=1, le=65535)] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    scopes: list[str] | None = Field(default=None, exclude_if=lambda value: value is None)
+
+    @field_validator("client_id")
+    @classmethod
+    def _client_id(cls, value: str | None) -> str | None:
+        if value is not None:
+            _literal(value)
+            if not value.strip():
+                raise ValueError("MCP OAuth client ID must not be blank")
+        return value
+
+    @field_validator("scopes")
+    @classmethod
+    def _scopes(cls, values: list[str] | None) -> list[str] | None:
+        if values is not None and (
+            not values
+            or len(set(values)) != len(values)
+            or any(_SCOPE_TOKEN.fullmatch(value) is None for value in values)
+        ):
+            raise ValueError("MCP OAuth scopes require a nonempty ordered list of unique scope tokens")
+        return values
+
+
 class MCPHTTPDefinition(_MCPDefinition):
     """A Streamable HTTP endpoint with literal or unresolved header values."""
 
     type: Literal["http"]
     url: str
     headers: dict[str, str] = Field(default_factory=dict)
+    # Omit only this new nullable field so existing declaration fingerprints stay stable.
+    oauth: MCPOAuth | None = Field(default=None, exclude_if=lambda value: value is None)
+
+    @model_validator(mode="after")
+    def _authentication_mode(self) -> Self:
+        if self.oauth is not None and any(name.lower() == "authorization" for name in self.headers):
+            raise ValueError("MCP OAuth conflicts with an Authorization header")
+        return self
 
     @field_validator("url")
     @classmethod

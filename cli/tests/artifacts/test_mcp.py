@@ -61,7 +61,7 @@ def test_inline_capture_is_normalized_unresolved_metadata(definition, monkeypatc
     mutable = item.content.metadata
     mutable["type"] = "changed"
     assert item.content.metadata == expected
-    assert decode_inputs(encode_inputs(inputs)) == (4, inputs)
+    assert decode_inputs(encode_inputs(inputs)) == (5, inputs)
 
 
 @pytest.mark.parametrize(
@@ -164,7 +164,7 @@ def test_jsonc_selects_only_same_named_entry_and_source_noise_does_not_change_id
     repeated = capture(MCPServerArtifactSpec(source=str(source)))
     assert repeated.mcp_servers["inventory"].identity == item.identity
     source.unlink()
-    assert decode_inputs(encode_inputs(inputs)) == (4, inputs)
+    assert decode_inputs(encode_inputs(inputs)) == (5, inputs)
 
 
 @pytest.mark.parametrize(
@@ -293,14 +293,14 @@ def test_semantic_forgery_with_matching_hashes_is_rejected():
         encode_inputs(group(forged))
 
 
-def test_mcp_database_capture_round_trip_uses_v4(db):
+def test_mcp_database_capture_round_trip_uses_v5(db):
     db.insert_vm("box", site="local", hostname="box")
     bundle = ArtifactBundle(name="team", mcp_servers={"inventory": inline()})
     registry = registry_with(bundle)
     snapshot = capture_owner(registry, "vm", "box", "vm", ArtifactsConfig(bundles=["team"]))
     write_capture(db, "vm", "box", "vm", snapshot, operation="fixture")
     assert read_captures(db, "vm", "box") == {"vm": snapshot}
-    assert snapshot.codec_version == 4
+    assert snapshot.codec_version == 5
 
 
 @pytest.mark.windows
@@ -333,6 +333,6 @@ def test_git_file_capture_uses_committed_selected_entry_and_tracks_revision(tmp_
     item = inputs.mcp_servers["inventory"]
     assert item.provenance.commit == commit and item.provenance.selected_path == "package/mcp.json"
     assert item.content.metadata == HTTP
-    assert decode_inputs(encode_inputs(inputs)) == (4, inputs)
+    assert decode_inputs(encode_inputs(inputs)) == (5, inputs)
     with pytest.raises(SourceRefError):
         capture(MCPServerArtifactSpec(source="git::https://fixture.invalid/repo.git//package"))
