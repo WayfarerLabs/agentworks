@@ -211,3 +211,7 @@ known failure is replaced by cancellation. Notification retries repeat neither n
 completed persistence attempt; interrupted persistence still uses the existing safe retry.
 Cancellation, including `UserAbort`, remains control flow and must not become a persistence warning
 or permission to run subsequent serial work.
+
+If the failure observer itself cannot deliver an established failure, the shared reporting boundary
+is fatal: retain the first primary error, cancel queued work, drain active work and propagate it.
+Ordinary native failures with a functioning observer remain per-session outcomes.

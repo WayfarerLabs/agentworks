@@ -74,3 +74,9 @@ A further private mixed failure/cancellation case is corrected at `33928add9` wi
 observer preserving established success and failure receipts. The owner passed 1,389 impacted tests
 and full static checks. Final private delta reviews, root gates, exact-head CI and subsequent actual
 integration evidence remain pending. Publication alone will not finish this effort.
+
+The final private failure-observer correction at `d965d9233` fails closed after draining instead of
+returning apparent success when a failure receipt cannot be delivered. The owner passed 1,395
+impacted tests and full static checks; bounded queue fixtures keep regressions from hanging. Final
+private review, root gates, exact-head CI and actual integration feedback remain pending. The
+supplemental round and monitoring are still active.

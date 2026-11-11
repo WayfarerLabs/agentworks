@@ -206,3 +206,13 @@ two real workers and real SQLite/controller/drain paths with a deterministically
 Future for never-started accounting. The prior coordinator fails the targeted regression. New
 independent reviews, root full-suite verification, final CI and the actual integration report remain
 required before convergence.
+
+Complexity review at `fb07fcc36` additionally demonstrated two public-controller/SQLite
+false-success cases when the established-failure observer itself raised an ordinary error.
+Correction `d965d9233` makes that shared reporting failure fatal after cancellation/drain,
+preserving an earlier primary error. Six behavioral cases cover native/CAS failures with no prior
+cancellation, UserAbort or KeyboardInterrupt. The owner passed 1,395 impacted tests and full static
+checks. Controlled queue fixtures now fail within a bounded caller-thread watchdog if a regression
+leaves work pending; the watchdog must not fire on passing code. An older-code synthetic-queue
+replay was stopped, not passed or counted as a completed failure proof. New private reviews, root
+gates, CI and native validation remain pending.

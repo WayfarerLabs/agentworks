@@ -209,6 +209,11 @@ include.
 
 ## Verification boundaries
 
+An ordinary failure while notifying an already established teardown failure must enter the same
+cancel-and-drain path as other fatal reporting failures. Preserve any earlier primary cancellation;
+otherwise propagate that notification error. Never return normal success after losing a failure
+receipt. Successful sibling reconciliation still completes before the primary error escapes.
+
 - Migrate populated version-38 databases, older valid histories, and empty installs; verify mapping,
   preserved relationships/metadata/UUIDs, schema constraints, restore sentinels, rollback, and
   retry.

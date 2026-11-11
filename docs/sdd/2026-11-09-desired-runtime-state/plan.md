@@ -594,3 +594,15 @@ coordinator, with hook-only signature compatibility, fails the regression as exp
 lint/format passed 1,047 files and strict mypy passed 1,012; file quality and locked-SDD checks
 passed. Final independent delta review, required root gates, exact-head CI and actual associated
 integration evidence are still pending.
+
+- [x] Fail closed when the failure observer itself fails; preserve the first primary error and drain
+      active work before propagation, retaining per-session ordinary failures when reporting works.
+
+The final private correction at `d965d9233` adds three production lines for that fatal reporting
+boundary and behavioral regressions covering native/CAS failures and earlier cancellation. The owner
+passed 1,395 impacted tests, Ruff lint/format across 1,048 files and strict mypy across 1,013 files.
+Controlled queued-Future fixtures have a caller-thread watchdog and assert it never fires. An
+older-code scratch replay was stopped while waiting on its synthetic queue and is not counted as a
+completed regression proof. The independent public-controller probes established the defect. Final
+independent review, root gates, exact-head CI and the associated integration report remain pending.
+This is still the same private supplemental round.
