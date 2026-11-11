@@ -183,3 +183,35 @@ def test_cli_rejects_removed_ignore_env_option() -> None:
     from agentworks.cli.commands.vm import vm_app
 
     assert CliRunner().invoke(vm_app, ["rekey", "box", "--ignore-env"]).exit_code == 2
+
+
+def test_a_rekey_the_channel_could_not_dispatch_is_retried_with_the_same_selection(
+    db, make_config, resolve_counter, monkeypatch, captured_output
+) -> None:
+    """Retrying a bare rekey would take the template's key and skip the pause, so the hint repeats every option."""
+    from agentworks.execution.root_script import ChannelUnreachable
+    from tests._root_channel_fakes import Answer
+
+    config = make_config(
+        '[secret_config]\nsources = ["env-var"]\n',
+        manifests=[ManifestDoc("secret", "replacement-key", description="replacement")],
+    )
+    monkeypatch.setenv("AW_SECRET_REPLACEMENT_KEY", "replacement-value")
+    _seed_vm(db)
+    _reachable(monkeypatch, True)
+    _fake_status(monkeypatch, VMStatus.RUNNING)
+    _fake_rekey_channel(monkeypatch, rekey=Answer(raises=ChannelUnreachable("VM 'box' did not answer")))
+
+    with pytest.raises(ChannelUnreachable) as caught:
+        manager.rekey_vm(
+            db, config, "box", secret="replacement-key", wait_for_share=True, interaction=TtyInteractionPolicy.REFUSE
+        )
+
+    assert "agw vm rekey box --secret replacement-key --wait-for-share" in (caught.value.hint or "")
+
+
+def test_the_repeated_rekey_names_a_prompted_selection() -> None:
+    from agentworks.vms.manager.power import _rekey_command
+
+    assert _rekey_command("box", secret=None, prompt=True, wait_for_share=False) == "agw vm rekey box --prompt"
+    assert _rekey_command("box", secret=None, prompt=False, wait_for_share=False) == "agw vm rekey box"

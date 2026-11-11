@@ -432,7 +432,8 @@ def rekey_vm(
         except ChannelUnreachable as error:
             # The script never ran, so the node is as it was: once the channel's own hint gets the VM
             # answering, the rekey itself is what is left to do.
-            error.add_hint(f"Once it answers, run 'agw vm rekey {name}' again.")
+            again = _rekey_command(name, secret=secret, prompt=prompt, wait_for_share=wait_for_share)
+            error.add_hint(f"Once it answers, run '{again}' again.")
             raise
         recovery.require_success(
             result,
@@ -460,3 +461,15 @@ def rekey_vm(
         if not reachability.wait(access, wording=reachability.Wording.RECONNECT):
             raise VMNotAnswering(name, new_ip)
         output.result(f"VM '{name}' rekeyed successfully. Tailscale IP: {new_ip}")
+
+
+def _rekey_command(name: str, *, secret: str | None, prompt: bool, wait_for_share: bool) -> str:
+    """The ``agw vm rekey`` invocation that repeats this one, options included; ``secret`` is a name, not a value."""
+    words = ["agw", "vm", "rekey", name]
+    if secret is not None:
+        words += ["--secret", secret]
+    if prompt:
+        words.append("--prompt")
+    if wait_for_share:
+        words.append("--wait-for-share")
+    return " ".join(words)
