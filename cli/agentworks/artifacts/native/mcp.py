@@ -179,10 +179,28 @@ def apply_mcp(
             return ArtifactApplication()
         try:
             initial = files.read(destination)
+        except (ConnectivityError, ExternalError):
+            return unavailable()
+        mapped = False
+        contributions: SettingsObject = {}
+        try:
             document = {} if initial is None else parse_settings(initial, format=format)
             current = dict(_table(document, key))
-        except (ConfigError, ConnectivityError, ExternalError):
-            return unavailable()
+            original_document = {} if initial is None else parse_settings(initial, format=format)
+        except ConfigError:
+            if map_document is None:
+                return unavailable()
+            # An explicit replacement retains its repair behavior. Ownership of
+            # unreadable old entries cannot authorize changes to source entries.
+            replacement, contributions = map_document(initial)
+            try:
+                document = {} if replacement is None else parse_settings(replacement, format=format)
+                _table(document, key)
+            except ConfigError:
+                return unavailable()
+            current = {}
+            original_document = None
+            mapped = True
 
         retained: list[NativeClaim] = []
         retired: list[str] = []
@@ -203,8 +221,7 @@ def apply_mcp(
                 )
 
         working = None if initial is None else serialize_settings(document, format=format)
-        contributions: SettingsObject = {}
-        if map_document is not None:
+        if map_document is not None and not mapped:
             working, contributions = map_document(working)
             document = {} if working is None else parse_settings(working, format=format)
         table = _table(document, key)
@@ -237,7 +254,7 @@ def apply_mcp(
 
         updated = tuple(claim for claim in previous if claim.role != MCP_CLAIM_ROLE) + tuple(confirmed.values())
         content = serialize_settings(document, format=format)
-        if initial is not None and document == parse_settings(initial, format=format):
+        if initial is not None and document == original_document:
             content = initial
         try:
             if content != initial and (initial is not None or document):

@@ -356,3 +356,22 @@ def test_shared_document_is_observed_and_published_once(transport, monkeypatch):
     config = NativeUserConfig(settings=SettingsMapping(source=str(source), strategy="merge-overwrite"))
     setup_user("codex", config, replace(invocation(transport, []), artifacts=received(server())))
     assert observed == published == [str(path)]
+
+
+def test_explicit_replacement_can_repair_malformed_config_with_mcp_inputs(transport):
+    path = transport.home / ".codex/config.toml"
+    path.parent.mkdir()
+    path.write_text("malformed = [\n")
+    source = transport.root / "mapping.toml"
+    source.write_text('model = "mapped"\n')
+    claims = []
+    item = server()
+    result = setup_user(
+        "codex",
+        NativeUserConfig(settings=SettingsMapping(source=str(source), strategy="replace")),
+        replace(invocation(transport, claims), artifacts=received(item)),
+    )
+    assert result.deferred == ()
+    assert read(path)["model"] == "mapped"
+    assert read(path)["mcp_servers"][mcp_native_name(item)]["command"] == "server"
+    assert claims[-1][0].source == item.origin_identity
