@@ -117,6 +117,15 @@ preserve an unknown future capture instead of downgrading it. Preserve the meani
 four-type and phase-1 MCP records. Canonical metadata with no OAuth addition should not gain an
 extra null/default field merely because the model was extended.
 
+Preserve unchanged declaration fingerprints as well as capture bytes. The separate
+`artifacts/state.py:declaration_digest` boundary hashes a model dump that includes nullable
+defaults; adding an absent `oauth` member there would incorrectly stale existing inline HTTP
+declarations, including workspaces with no reinit path. Omit only this new field when absent/null in
+that projection, keeping older fields' existing representation and retaining an explicit OAuth
+object. Require a boundary test for unchanged phase-1 declarations and a changed fingerprint when
+actual OAuth intent/options are added. Do not globally discard nulls or invent a second freshness
+store.
+
 This change needs boundary tests for declaration/source equivalence, typed rejection, retained
 capture interpretation, exact digests and unknown-version preservation. Tests should assert behavior
 and data, not the wording of the guide or this design.
@@ -132,8 +141,10 @@ terminal.
 The operator's pending choice is whether Agentworks supplies an explicit native-login wrapper or
 documents operator-native commands using existing access. `agent shell` and `agent exec` already
 select the actual agent user and optional workspace through the existing SSH, login environment,
-secret and TTY boundaries. This is a candidate reuse point, not proof that a remote OAuth paste flow
-works through every access mode. No wrapper command or new capability method is selected here.
+secret and TTY boundaries. `vm shell` and `vm exec` provide the corresponding admin-user paths,
+including workspace selection; the workflow must not require an agent to exist. These are candidate
+reuse points, not proof that a remote OAuth paste flow works through every access mode. No wrapper
+command or new capability method is selected here.
 
 The final workflow must identify the original-owner native server name, actual Linux user and
 workspace context. A session-only entry must remain invocation-only while authenticating; do not
@@ -148,7 +159,11 @@ credentials or probe auth.
   entry metadata; Codex documents storing a client secret in its private config. Decide supported
   native secret references/sinks or an explicit unsupported disposition without putting secret
   material in artifact captures, argv, workspace files or diagnostic output. Do not equate an
-  ordinary env bearer reference with an OAuth client secret.
+  ordinary env bearer reference with an OAuth client secret. A native-added Codex secret in the same
+  server table conflicts with the current whole-entry fingerprint/public rendering: do not exempt
+  arbitrary fields or let a public update erase it. That combination needs a demonstrated separate
+  sink/reference, an explicit unsupported disposition or a precise revised ownership contract before
+  support is claimed.
 - **Callbacks:** a fixed listener port is not a portable redirect URI. Native host, callback path,
   server identity and issuer support can affect the URI. Custom remote ingress may differ from a
   loopback listener. Preserve native issuer validation and display the actual callback rather than
