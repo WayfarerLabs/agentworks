@@ -6,6 +6,8 @@ import threading
 from collections import Counter
 from concurrent.futures import Future
 from concurrent.futures import ThreadPoolExecutor as PythonThreadPoolExecutor
+from concurrent.futures import wait as wait_for_futures
+from time import monotonic
 
 import pytest
 
@@ -53,6 +55,20 @@ def test_bulk_failure_receipt_survives_notification_cancellation_and_queued_work
             return pending if plan.session_name == "queued" else super().submit(*args, **kwargs)
 
     monkeypatch.setattr(_teardown, "ThreadPoolExecutor", Pool)
+    # A broken coordinator must fail instead of waiting forever on the
+    # synthetic queued item. The watchdog runs only on the caller thread.
+    deadline = monotonic() + 5
+    watchdog_fired = False
+
+    def wait(futures, **kwargs):
+        nonlocal watchdog_fired
+        if monotonic() >= deadline:
+            watchdog_fired = True
+            pending.cancel()
+        kwargs["timeout"] = min(kwargs["timeout"], 0.1)
+        return wait_for_futures(futures, **kwargs)
+
+    monkeypatch.setattr(_teardown, "_wait_for_futures", wait)
 
     def execute(plan):
         native[plan.session_name] += 1
@@ -115,6 +131,7 @@ def test_bulk_failure_receipt_survives_notification_cancellation_and_queued_work
     with pytest.raises(signal_type) as caught:
         manager.stop_all_sessions(db, make_config(), interaction=REFUSE)
 
+    assert not watchdog_fired
     assert caught.value is errors[0] and injected == interruptions
     outcomes = {row.name: row for row in rendered if row.kind == "session"}
     assert outcomes["bad"].outcome is Outcome.FAILED

@@ -7,6 +7,7 @@ from collections import Counter
 from concurrent.futures import Future
 from concurrent.futures import ThreadPoolExecutor as PythonThreadPoolExecutor
 from concurrent.futures import wait as wait_for_futures
+from time import monotonic
 
 import pytest
 
@@ -63,8 +64,17 @@ def test_failure_receiver_error_drains_and_propagates_without_replaying_known_fa
             return future
 
     monkeypatch.setattr(_teardown, "ThreadPoolExecutor", Pool)
+    # A broken coordinator must fail instead of waiting forever on the
+    # synthetic queued item. The watchdog runs only on the caller thread.
+    deadline = monotonic() + 5
+    watchdog_fired = False
 
     def wait(pending, **kwargs):
+        nonlocal watchdog_fired
+        if monotonic() >= deadline:
+            watchdog_fired = True
+            queued.cancel()
+        kwargs["timeout"] = min(kwargs["timeout"], 0.1)
         # When testing an earlier cancellation, establish it on the good receipt
         # before the bad receipt's receiver fails. Otherwise fail first and drain good.
         first = futures["good" if prior_cancellation else "bad"]
@@ -134,6 +144,7 @@ def test_failure_receiver_error_drains_and_propagates_without_replaying_known_fa
     with pytest.raises(type(primary)) as caught:
         manager.stop_all_sessions(db, make_config(), interaction=REFUSE)
 
+    assert not watchdog_fired
     assert caught.value is primary
     assert drain_errors[0] is primary
     assert receiver_error in drain_errors
