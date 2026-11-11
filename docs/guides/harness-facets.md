@@ -395,11 +395,12 @@ does not first uninstall plugins or require readable applied-state records.
 
 Setup, deletion, and workspace rehome share a VM-family mutation guard. A competing mutation refuses
 with retry guidance. Rehome moves project settings with the workspace. Existing applied-state
-records do not block the move; readiness reports stale setup when its recorded destination no longer
-matches. MCP entry destination metadata follows the active workspace after a successful copy,
-preserving server names and fingerprints. A deliberately retained old copy is unmanaged. Rehome does
-not rerun facets. [Idempotency](idempotency.md#harness-setup-reconciliation) describes retry
-guarantees and limits.
+records do not block the move. After a verified copy, every readable workspace record updates owner
+identity and known file, package, skipped-path and MCP destination metadata, preserving fingerprints
+and unresolved status. MCP server names stay stable; unknown native claims remain unchanged. A
+deliberately retained old copy is unmanaged. Rehome does not rerun facets or rewrite literal
+absolute paths inside copied files or native values, which can remain path-dependent.
+[Idempotency](idempotency.md#harness-setup-reconciliation) describes retry guarantees and limits.
 
 Before changing setup, confirm authorization for the owning operation and inspect its effects.
 Reinit can change native files and plugin registrations; workspace recreation replaces a shared

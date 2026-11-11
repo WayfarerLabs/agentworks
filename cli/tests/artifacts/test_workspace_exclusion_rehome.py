@@ -137,8 +137,9 @@ def test_actual_rehome_rebinds_only_its_pairs_and_delete_retires_them(db, deleti
         assert old.exists() == (not remove_old)
         current = read_native_setup(db, "workspace", "project").records[0]
         assert len(current.claims) == 1 and current.claims[0].source == str(new)
-        # Only exclusion associations move; setup's original file inventory remains stale.
-        assert current.artifact_files == (item,)
+        assert current.artifact_files == (
+            item.model_copy(update={"path": str(new / ".agents/skills/policy/SKILL.md")}),
+        )
         current_exclude = Path(current.claims[0].destination)
         new_pair = _pair(current.claims[0], "codex")
         assert old_pair not in current_exclude.read_bytes() and new_pair in current_exclude.read_bytes()
@@ -255,6 +256,8 @@ def test_rehome_metadata_failure_warns_without_vetoing_the_core_move(
     assert new.exists() and old.exists() == (not remove_old)
     current = read_native_setup(db, "workspace", "project").records[0]
     assert not current.complete and current.pending_cleanup and current.incomplete_reasons
+    assert current.artifact_files == (item.model_copy(update={"path": str(new / ".agents/skills/policy/SKILL.md")}),)
+    assert current.destination_id != "a" * 64
     assert (new / ".agents/skills/policy/SKILL.md").read_bytes() == b"fixture artifact"
     if fault == "retire-old":
         assert current.claims == (new_claim,)
@@ -266,9 +269,7 @@ def test_rehome_metadata_failure_warns_without_vetoing_the_core_move(
 
 
 @pytest.mark.parametrize("remove_old", [False, True])
-def test_later_rehome_track_checks_paths_carried_only_by_current_claims(
-    db, deletion, move_case, remove_old, captured_output
-):
+def test_later_rehome_rechecks_tracked_copied_artifacts(db, deletion, move_case, remove_old, captured_output):
     target, _ = move_case
     old = target.home / "old"
     git("init", "-q", old)
@@ -289,7 +290,8 @@ def test_later_rehome_track_checks_paths_carried_only_by_current_claims(
         )
         current = read_native_setup(db, "workspace", "project").records[0]
         skill = new / ".agents/skills/policy/SKILL.md"
-        assert skill.exists() and current.artifact_files == (item,)
+        assert skill.exists()
+        assert current.artifact_files == (item.model_copy(update={"path": str(skill)}),)
         if index == 0:
             assert current.claims
             git("--literal-pathspecs", "-C", new, "add", "-f", "--", skill)

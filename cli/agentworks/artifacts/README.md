@@ -367,7 +367,9 @@ differing unowned or externally modified entry is preserved and that artifact is
 independent entries continue. Removing an unchanged owned entry removes only that entry; modified
 obsolete entries remain recorded and warn. Native document values are preserved outside the managed
 entries unless an explicit settings mapping changes them; comments/formatting can change during
-serialization. Shared documents are not whole-file artifact ownership. See
+serialization. Shared documents are not whole-file artifact ownership. If a native write succeeds
+but claim persistence fails, an entry can remain unrecorded. Retrying the same declaration adopts an
+identical entry; withdrawing it before that retry leaves an unowned entry for operator review. See
 [native setup](https://github.com/WayfarerLabs/agentworks/blob/main/docs/guides/native-harness-setup.md#mcp-registrations)
 for mapping interaction and credential cleanup.
 
@@ -527,11 +529,13 @@ Supported workspace rehome uses its known old/new owner paths to retire the old 
 copied old pairs and establish exclusions for the copied managed files where possible. Generic
 application still refuses another owner's saved source. Git metadata failures warn and do not
 prevent core rehome. If old retirement fails and the old directory is deliberately retained, that
-unmanaged copy can retain exclusions. Managed MCP destinations and their destination identity follow
-the active workspace's verified new root after a successful copy, preserving server names and entry
-fingerprints. A retained old copy is unmanaged and can retain its native registrations. This does
-not rerun workspace facets or relocate other general native setup records; existing workspaces have
-no harness reinit operation.
+unmanaged copy can retain exclusions. Every readable workspace setup record follows the verified new
+root: owner identity and known file, package, skipped-path and MCP destination metadata relocate,
+while fingerprints, declaration identities and unresolved status remain intact. MCP server names
+stay stable; unknown native claims remain unchanged. Invalid known paths retain their evidence and
+warn. A retained old copy is unmanaged and can retain its native registrations. Rehome does not
+rerun facets or rewrite literal absolute paths inside copied files or native values, which can
+remain path-dependent. Existing workspaces have no harness reinit operation.
 
 Elevated native file operations share a fixed allowlist: `/etc/claude-code`, `/etc/codex` and
 `/opt/agentworks/artifacts`. Reads, writes and cleanup outside those trees are refused, including

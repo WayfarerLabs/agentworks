@@ -314,11 +314,13 @@ with retry guidance. Unavailable native applied-state evidence does not prevent 
 
 Rehome moves project settings with the workspace and holds the same guard across the move. It uses
 the known old/new owner paths to reconcile artifact exclusions where safe, warning about unresolved
-shared metadata. Setup records do not block rehome. MCP entry destinations and their active owner
-metadata follow the verified copied workspace, keeping server names and fingerprints stable. A
-retained old copy is unmanaged. Other general native setup records retain their old destinations and
-can become stale; rehome does not rerun facets, and existing workspaces have no harness reinit
-operation. Session restart does not repair that workspace setup.
+shared metadata. Setup records do not block rehome. Every readable workspace setup record follows
+the verified copy: owner identity and known file, package, skipped-path and MCP destination metadata
+move to the new root, preserving fingerprints and unresolved status. MCP server names stay stable;
+unknown native claims remain unchanged. A retained old copy is unmanaged. Rehome does not rerun
+facets or rewrite literal absolute paths inside copied files or native values, which can remain
+path-dependent. Existing workspaces have no harness reinit operation, and session restart does not
+repair that workspace setup.
 
 The VM description's initialization field records the last initialization run. It is separate from
 per-integration lifecycle evidence: a run can finish while a native entry is skipped. Read the

@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from agentworks import output
 from agentworks.artifacts.git_excludes import GIT_EXCLUDE_ROLE, reconcile_workspace_excludes
 from agentworks.artifacts.native.mcp import MCP_CLAIM_ROLE
-from agentworks.errors import AgentworksError, StateError
+from agentworks.errors import AgentworksError, StateError, UserAbort
 from agentworks.harness_setup.dispatch import destination_id
 from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
 from agentworks.harness_setup.state import read_native_setup, replace_setup_record, write_native_setup
@@ -77,17 +77,16 @@ def _workspace_excludes(
         state = read_native_setup(db, "workspace", workspace.name)
     except StateError:
         output.warn(
-            f"Shared artifact exclusion cleanup for workspace '{workspace.name}' could not be identified from "
+            f"Artifact metadata maintenance for workspace '{workspace.name}' could not be identified from "
             f"its unreadable native setup evidence. Continuing {action}; inspect shared Git metadata."
         )
         return
     failed = []
     target = None
+    identity = None
+    identity_failure: AgentworksError | None = None
     for record in tuple(state.records):
-        if not any(claim.role == GIT_EXCLUDE_ROLE for claim in record.claims) and not (
-            new_path is not None
-            and (record.artifact_files or any(claim.role == MCP_CLAIM_ROLE for claim in record.claims))
-        ):
+        if new_path is None and not any(claim.role == GIT_EXCLUDE_ROLE for claim in record.claims):
             continue
         current = record
         if new_path is None:
@@ -133,36 +132,28 @@ def _workspace_excludes(
                 group=workspace.linux_group,
                 report_incomplete=incomplete,
             )
+        except UserAbort:
+            raise
         except AgentworksError as error:
             if error is persistence_failure:
                 raise
             incomplete(sanitize_setup_diagnostic(str(error), logger=target.logger if target is not None else None))
         if new_path is not None:
+            relocated = None
+            try:
+                relocated = _relocated_record(record, workspace.workspace_path, new_path, record.destination_id)
+            except StateError as error:
+                incomplete(str(error))
             # The snapshot predates old-location retirement: a complete .git
             # copy still contains those pairs even when the old ones are gone.
-            files = tuple(
-                file.model_copy(
-                    update={
-                        "path": new_path + file.path.removeprefix(workspace.workspace_path),
-                        "package_root": None,
-                    }
-                )
-                for file in record.artifact_files
-                if file.path.startswith(workspace.workspace_path + "/")
-            )
             try:
                 if target is None:
                     target = runner()
-                relocated = (
-                    _relocated_record(record, workspace.workspace_path, new_path, record.destination_id)
-                    if any(claim.role == MCP_CLAIM_ROLE for claim in record.claims)
-                    else None
-                )
                 reconcile_workspace_excludes(
                     target,
                     new_path,
                     record.integration,
-                    files,
+                    () if relocated is None else relocated.artifact_files,
                     record.claims,
                     checkpoint,
                     group=workspace.linux_group,
@@ -174,21 +165,36 @@ def _workspace_excludes(
                         if claim.role == MCP_CLAIM_ROLE
                     ),
                 )
-                if any(claim.role == MCP_CLAIM_ROLE for claim in current.claims):
-                    vm = db.get_vm(workspace.vm_name)
-                    if vm is None:
-                        raise StateError("workspace VM is missing while relocating artifact evidence")
-                    current = _relocated_record(
-                        current,
-                        workspace.workspace_path,
-                        new_path,
-                        destination_id(vm, target, location=new_path),
-                    )
-                    checkpoint(current.claims)
+            except UserAbort:
+                raise
             except AgentworksError as error:
                 if error is persistence_failure:
                     raise
                 incomplete(sanitize_setup_diagnostic(str(error), logger=target.logger if target is not None else None))
+            # Safe placement evidence follows the copy independently of Git
+            # cleanup. Keep its current claims and any unresolved cleanup status.
+            if relocated is not None:
+                try:
+                    if target is None:
+                        target = runner()
+                    if identity_failure is not None:
+                        raise identity_failure
+                    if identity is None:
+                        vm = db.get_vm(workspace.vm_name)
+                        if vm is None:
+                            raise StateError("workspace VM is missing while relocating artifact evidence")
+                        identity = destination_id(vm, target, location=new_path)
+                    current = _relocated_record(current, workspace.workspace_path, new_path, identity)
+                except UserAbort:
+                    raise
+                except AgentworksError as error:
+                    if identity is None:
+                        identity_failure = error
+                    incomplete(
+                        sanitize_setup_diagnostic(str(error), logger=target.logger if target is not None else None)
+                    )
+                else:
+                    checkpoint(current.claims)
         if incomplete_seen or any(
             claim.role == GIT_EXCLUDE_ROLE and (new_path is None or claim.source != new_path)
             for claim in current.claims
@@ -196,6 +202,6 @@ def _workspace_excludes(
             failed.append(record.integration)
     if failed:
         output.warn(
-            f"Shared artifact exclusion cleanup for workspace '{workspace.name}' is unfinished "
-            f"({', '.join(failed)}). Continuing {action}; inspect the reported Git metadata for retained exclusions."
+            f"Artifact metadata maintenance for workspace '{workspace.name}' is unfinished "
+            f"({', '.join(failed)}). Continuing {action}; inspect the reported setup evidence and Git metadata."
         )
