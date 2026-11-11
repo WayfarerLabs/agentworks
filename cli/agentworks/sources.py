@@ -49,8 +49,12 @@ class SourceRefError(ExternalError):
     """Raised when a source reference or a destination is invalid, or a fetch from it fails."""
 
 
-_DRIVE_RE = re.compile(r"^[A-Za-z]:")
-"""A Windows drive letter, which ``git`` exempts from its scp-style remote rule."""
+_DRIVE_RE = re.compile(r"^[A-Za-z]:([/\\]|$)")
+"""A Windows drive letter and its separator (or nothing more), which ``git`` exempts from its scp-style rule.
+
+A single letter and a colon followed by anything else, such as ``u:token@host:path``, is a remote.
+"""
+
 
 # Ref must be safe for shell and git: alphanumeric, hyphens, dots, underscores, slashes
 _SAFE_REF_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._/-]*$")

@@ -111,6 +111,9 @@ def test_an_at_sign_after_the_host_is_not_a_credential() -> None:
         "git@example.com:me/d.git",
         "me@host:dots",
         "user:tok@host:path",
+        "a:tok@h:x",
+        "u:tok@h:p",
+        "u:tok@h/p",
         "github:me/dotfiles",
         "github.com:me/d.git",
         "file::a::b",
@@ -134,6 +137,7 @@ def test_a_remote_written_without_git_is_not_read_as_a_local_path(source: str) -
         "file::~/m.lock",
         "C:/Users/me/dots",
         "C:\\Users\\me@corp.com\\dots",
+        "C:",
     ],
 )
 def test_a_local_path_is_still_a_local_path(source: str) -> None:
