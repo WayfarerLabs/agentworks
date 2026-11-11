@@ -38,10 +38,16 @@ acceptance completes phase 1 only; the OAuth tasks remain owed.
       scope/ownership boundaries together across FRD, HLA and LLD.
 - [x] Run independent project and Muntz reviews in separate pinned worktrees; incorporate material
       findings without widening the charter.
-- [ ] Run applicable repository/website gates and exact-head CI; publish the draft checkpoint with
+- [x] Run applicable repository/website gates and exact-head CI; publish the draft checkpoint with
       `sdd:mcp-artifacts` and `review-requested`.
-- [ ] Monitor the single design-only feedback window under the delivery process, critically assess
+- [x] Monitor the single design-only feedback window under the delivery process, critically assess
       the full batch and record requirements questions or changes needing operator direction.
+
+Checkpoint `c8a844d7` received the complete one-hour design window ending 06:40:14 UTC. Muntz's six
+material clarifications were accepted in the published critical reading; they cover the claim
+fingerprint, Git handling, rehome, retained credentials, native names and embedded-MCP guard. Round
+1 incorporates them with the registration implementation; no second artifact-only checkpoint is
+planned. OAuth workflow preference remains a phase-2 question.
 
 ## Canonical model and capture
 
@@ -64,7 +70,8 @@ acceptance completes phase 1 only; the OAuth tasks remain owed.
       checkpoints and expected-content publication; no parallel state or whole-document ownership.
 - [ ] Implement deterministic original-owner-qualified native identities, adoption, owned
       convergence, per-entry foreign conflict, removed-entry cleanup and modified obsolete
-      retention.
+      retention. Include the bounded readable key and full-key identity hash; explicitly use MCP
+      claims' `sha256` contract rather than a second fingerprint/ownership store.
 - [ ] Plan Codex settings mapping contributions and MCP entries together, preserving every existing
       settings strategy and diagnosing conflicting explicit values before canonical mutation. Test
       canonical withdrawal with a still-authored mapped key under all four strategies in one pass,
@@ -79,6 +86,12 @@ acceptance completes phase 1 only; the OAuth tasks remain owed.
       deferrals or server execution.
 - [ ] Verify interruption/retry, other-owner preservation, activation removal and ordinary parent
       deletion/rehome without introducing a new gate or stored-path I/O authority.
+- [ ] Include confirmed shared MCP workspace paths in existing Git exclusion handling, with
+      tracked-file warnings. Rehome destination evidence and keep coexisting file metadata/identity
+      coherent through repeated moves and retained copies without workspace reinit.
+- [ ] Keep the skill/persona embedded-MCP guard and ship server-specific credential-retention
+      notices/native logout-before-removal guidance without credential-store inspection or logout
+      automation in phase 1.
 
 ## Opt-in session delivery
 

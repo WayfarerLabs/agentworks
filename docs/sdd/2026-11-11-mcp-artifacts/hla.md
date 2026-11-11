@@ -139,6 +139,18 @@ silently omit a new type while reporting it handled. Successful entry registrati
 handling results; failures defer only their entries and preserve partial claims. No new
 acknowledgment ledger or readiness gate is introduced.
 
+## Workspace registration files
+
+Entry application returns confirmed shared-document paths separately from whole-file ownership. Core
+includes those paths in existing workspace Git-exclude planning; the metadata authorizes no
+file-content mutation. Ownership stays entry-local in native claims. Local exclusion covers the
+entire untracked shared document; tracked files remain visible with a warning. Do not edit the
+repository index or `.gitignore`.
+
+After a verified workspace copy, ordinary rehome checkpoints relocate MCP destination evidence to
+the new root and preserve native identity/fingerprints. Keep current-context file authority and
+existing partial-failure behavior; no workspace reinit or new cleanup prerequisite is needed.
+
 ## Lifecycle and diagnostics
 
 User/workspace setup captures, prepares env and invokes integrations as today. Reinit reconciles

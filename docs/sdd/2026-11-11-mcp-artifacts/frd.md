@@ -27,6 +27,15 @@ weakening its meaning. Existing workload provisioning supplies executables and e
 configuration supplies credentials. The harness owns connections, stdio child processes and native
 approval/authentication policy.
 
+## Users and scenarios
+
+- An operator already maintains a shared Rulesync `mcp.jsonc` and selects named servers for
+  different bundles/scopes without copying definitions or distributing every server everywhere.
+- A workspace owner shares a project connection while each workload user supplies credentials
+  through their actual runtime environment and retains their own native consent.
+- An integration developer translates one canonical definition, preserves unrelated native settings
+  and can safely retry or remove only the registrations Agentworks owns.
+
 ## Delivery phases
 
 Phase 1 delivers registration with public literals and env-based credentials. Phase 2 delivers OAuth
@@ -53,6 +62,9 @@ unknown or contradictory structure, duplicate keys, unsupported transports and u
 fields with an error identifying the declaration and field without exposing its value. Normalize
 designated text to Unix line endings. Acquisition never executes a server, installs its
 dependencies, logs in or connects to its endpoint.
+
+The new top-level type is the only declarative MCP registration route. Existing guards against
+embedded MCP configuration in skill/persona metadata remain in place.
 
 ### R3. Ordinary composition and provenance
 
@@ -100,6 +112,9 @@ shared config documents. Adopt an identical unowned entry; skip a different unow
 specific warning. Native trust, endpoint deduplication, authentication and connectivity remain
 separate from registration and must be disclosed rather than claimed as guarantees.
 
+Native names include a readable logical-key component and a stable original-owner identity digest.
+Truncating the readable component must not discard the full key from the identity hash.
+
 ### R8. Idempotency and cleanup
 
 Use ordinary instance state to track the smallest owned native unit, an MCP server entry or a
@@ -110,6 +125,18 @@ not delete native OAuth credentials, foreign entries or shared documents wholesa
 artifact cleanup. Explicit OAuth logout belongs to its own authentication workflow. Artifact cleanup
 adds no prerequisite to parent deletion or workspace rehome. Existing persistence, cancellation,
 internal-failure and recoverable-facet-failure semantics remain intact.
+
+Workspace MCP files follow ordinary local Git exclusions when untracked, including shared native
+config files. An already-tracked file stays tracked and produces a warning that changes remain
+visible; Agentworks does not edit the index or repository `.gitignore`. A shared-file exclusion
+covers the whole untracked file, not individual managed entries. Successful workspace rehome moves
+recorded MCP destinations to the verified new root while preserving server identities and
+fingerprints, including repeated moves and retained old copies.
+
+Removal names the affected native server and explains that OAuth credentials, if any, remain.
+Guidance explains native logout before declaration withdrawal and recovery if a native logout
+requires restoring the definition. Phase 1 neither inspects credential stores nor automates logout;
+unverified native cleanup commands remain explicitly unclaimed.
 
 ### R9. Diagnostics and offline inspection
 

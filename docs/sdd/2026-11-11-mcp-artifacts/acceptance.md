@@ -16,6 +16,11 @@ is exercised. The separate integration-test session owns its backend and resourc
 | R9           | Offline public inspection and per-type reporting without source/secret/network/native inventory activity or connection bodies                                                 |
 | R10          | v2/v3 retention and v4 validation; unchanged legacy digests/routes/native files; existing workspace usage; standalone installed guides and source/package parity              |
 
+Workspace cases must include untracked shared-config exclusion, tracked-config visibility/warning,
+coexisting foreign keys, repeated rehome with current placement evidence and retained old copies.
+Removal must name the native server and disclose credential retention without a grant probe. Verify
+embedded MCP metadata remains rejected and bounded native names contain a readable key.
+
 R11 belongs to phase 2: require native OAuth configuration and the agreed explicit auth workflow,
 actual authenticated MCP access, actual-user credential isolation, remote flow/cancellation,
 advertised refresh/logout and independent credential cleanup.

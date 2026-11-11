@@ -50,6 +50,10 @@ Capture only its normalized definition. Unselected bodies and source comments do
 persisted artifact members. The optional schema URL is editor metadata and is never fetched. Do not
 use a regex comment stripper or execute the source to parse it.
 
+Existing skill/persona frontmatter guards against embedded `mcpServers`/`mcp_servers` remain. Only
+this top-level artifact type supplies declarative MCP registration; do not remove those guards when
+updating the general support statement.
+
 ## Definition profile
 
 | Field         | Accepted value and meaning                                                             |
@@ -116,10 +120,12 @@ receive Agentworks env is outside the managed-launch guarantee.
 ## Canonical pipeline and compatibility
 
 Add `ArtifactType.MCP_SERVER`, `mcp_servers` on each immutable group, and a strict definition model.
-Use the canonical serialized definition as MCP content; do not retain a second full raw source
-document. Canonical JSON orders object keys while preserving argument/list order. Source location,
-comments, newline style and unselected entries do not change the selected connection's identity.
-Original owner, canonical key and type continue to determine logical identity.
+Use canonical definition JSON in `ArtifactContent.metadata_json`, with empty instruction text and
+members for both inline and sourced definitions. Keep its public description in the ordinary
+description field. Do not retain a second full raw source document. Canonical JSON orders object
+keys while preserving argument/list order. Source location, comments, newline style and unselected
+entries do not change the selected connection's identity. Original owner, canonical key and type
+continue to determine logical identity.
 
 Write capture codec version 4, retain v2/v3 decoding under their original four-type interpretation,
 and reject MCP data in a legacy envelope. Preserve legacy content identities and declaration
@@ -128,11 +134,12 @@ repair behavior. Use existing instance-state storage, not a SQL schema or parall
 
 ## Native names and smallest ownership unit
 
-Derive each server name from the existing original-owner/type/key identity, independent of content
-digest, bundle and receiving facet. A bounded `agentworks-` prefix plus identity digest avoids
-user/workspace/session same-name shadowing; inspection displays the logical name and derived native
-identity. Check proposed native identities for duplicates before publication. Source names do not
-need to match native names.
+Derive each server name from the original-owner/type/key identity, independent of content digest,
+bundle and receiving facet: `agentworks-<key-prefix>-<origin-digest-prefix>`. Use up to 24 key
+characters, trim a trailing hyphen, and use 20 digest characters; the full key participates in the
+existing `origin_identity` hash. This bounds names to 56 ASCII characters while keeping them
+readable and stable across content changes and workspace rehome. Check proposed native identities
+for duplicates. Inspection shows logical and native names. Source names need not match native names.
 
 User/workspace registration edits the harness's fixed current native MCP role: Claude user
 `mcpServers`, Claude workspace `.mcp.json`, or the Codex/Grok `mcp_servers` table. Resolve actual
@@ -142,10 +149,12 @@ parsers/serializers. Comments and formatting may change as with current settings
 that limitation. Use expected-content writes to detect concurrent edits. Never overwrite a whole
 config from a stored snapshot.
 
-Reuse ordinary `NativeClaim` and checkpoint storage. A claim records role, native name, fixed
-destination identity, origin identity and a canonical native-entry fingerprint; it contains no
-document or credential body. Do not invent a second receipt ledger. Reuse an existing suitable
-fingerprint field rather than overloading source text with encoded config.
+Reuse ordinary `NativeClaim` and checkpoint storage: `role` is `artifact-mcp-server`, `identifier`
+is the derived native server name, `destination` is the current native config path, `source` is the
+stable original-owner identity, and `sha256` fingerprints canonical native-entry content. Update
+that field's current compatibility-only comment for its new MCP use; historical settings fields
+retain their read-compatibility meaning and settings ownership is not revived. No document or
+credential body enters claims, and there is no second receipt ledger.
 
 For each desired entry: absent creates; equal can be adopted; current content matching the recorded
 owned fingerprint can be updated. Other differing or externally modified content is retained and
@@ -176,6 +185,28 @@ strategy, and a removed mapping alone retains native values. `contributions(init
 for this plan: suppressed source keys may become applicable after safe retirement. Use the prepared
 source and existing parser/serializer APIs, not a second state ledger or reread. No extra
 integration activates implicitly.
+
+## Workspace paths, relocation and removal notices
+
+`ArtifactApplication.shared_paths` is transient confirmed native-document metadata for workspace
+entry effects. It is separate from `files`, which grants ordinary file/section ownership. Core
+validates paths against the current workspace and feeds them alongside file placements into the
+existing Git-exclude helper. A path report grants no file-write or whole-document cleanup right. Use
+existing exclusion claims for retention, removal and current-Git metadata transfer, including
+tracked-file warnings; add no persistent file-birth registry.
+
+After successful copy in workspace rehome, relocate MCP claim destinations from the actual old root
+to the verified new root through ordinary state checkpoints, retaining identifiers and hashes. Keep
+destination identity and coexisting file-placement metadata coherent. Unsafe/unprovable recorded
+destinations get bounded diagnostics instead of becoming I/O authority. Preserve existing error
+propagation and incomplete-state handling, not a new rollback or deletion gate. A retained old
+directory remains the operator-requested copy; managed evidence follows the active workspace.
+
+When a registration is removed, identify the native server and warn that any native OAuth
+credentials remain. The guide gives logout-before-withdrawal instructions for verified native
+commands and explains restoring a definition when logout needs it. Do not probe whether a grant
+exists, run logout automatically or invent a Grok credential-cleanup command. Explicit OAuth
+workflow belongs to phase 2.
 
 ## Session carriers
 
