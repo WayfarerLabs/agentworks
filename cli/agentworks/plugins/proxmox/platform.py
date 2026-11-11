@@ -548,14 +548,13 @@ class ProxmoxPlatform(VMPlatform):
             # A failure at the deadline is the deadline's, refused below like a check that spent it.
             if time.monotonic() < expires:
                 raise
-        remaining = expires - time.monotonic()
-        if remaining <= 0:
+        if time.monotonic() >= expires:
             raise ChannelUnreachable(
                 f"confirming that Proxmox VMID {self._vmid(vm)} is VM '{vm.name}' took the whole "
                 f"{deadline:g}-second deadline, so no script was dispatched",
                 hint="Check that the Proxmox API is answering promptly, then run the command again.",
             )
-        return guest_agent.run_as_root(self._api(ctx), self._vm_node(vm), self._vmid(vm), script, remaining)
+        return guest_agent.run_as_root_until(self._api(ctx), self._vm_node(vm), self._vmid(vm), script, expires)
 
     # -- Helpers ---------------------------------------------------------------
 

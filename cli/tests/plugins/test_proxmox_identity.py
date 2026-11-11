@@ -23,7 +23,7 @@ from agentworks.execution import root_script
 from agentworks.execution.root_script import ChannelUnreachable, RawRun
 from agentworks.plugins.proxmox import guest_agent
 from agentworks.plugins.proxmox import platform as proxmox_platform
-from agentworks.plugins.proxmox.api import ProxmoxAPIError
+from agentworks.plugins.proxmox.api import REQUEST_TIMEOUT_SECONDS, ProxmoxAPIError
 from agentworks.plugins.proxmox.identity import find_guest
 from agentworks.plugins.proxmox.platform import STATUS_DEADLINE_SECONDS, ProxmoxPlatform
 from tests._proxmox_fakes import NEWID, PROXMOX_CONFIG, FakeProxmoxAPI
@@ -158,16 +158,55 @@ def test_the_identity_check_spends_the_root_scripts_deadline(monkeypatch: pytest
     monkeypatch.setattr(ProxmoxPlatform, "_api", lambda self, ctx: None)
     monkeypatch.setattr(
         guest_agent,
-        "run_as_root",
-        lambda api, node, vmid, script, deadline: passed.append(deadline) or RawRun(b"", b""),
+        "run_as_root_until",
+        lambda api, node, vmid, script, expires: passed.append(expires) or RawRun(b"", b""),
     )
 
     _platform().run_as_root(ROW, RunContext(), b"true", 30)
 
-    assert passed == [10]
+    # The guest agent gets the instant the deadline ends, not a duration it would start again later.
+    assert passed == [1030]
     with pytest.raises(ChannelUnreachable):
         _platform().run_as_root(ROW, RunContext(), b"true", 20)
-    assert passed == [10]
+    assert passed == [1030]
+
+
+def test_no_guest_agent_request_outlasts_the_deadline_the_identity_check_began(
+    monkeypatch: pytest.MonkeyPatch, fake: FakeProxmoxAPI
+) -> None:
+    """Time passing between the identity check and the guest agent counts: no request ends after the deadline."""
+    now = [1000.0]
+    requests: list[tuple[str, float]] = []
+    deadline_ends: list[float] = []
+
+    def tick() -> float:
+        now[0] += 0.05  # every reading of the clock takes a little time, as scheduling does
+        return now[0]
+
+    def nearly_spent(self: ProxmoxPlatform, vm: VMRow, ctx: RunContext, *, expires: float) -> dict[str, object]:
+        deadline_ends.append(expires)
+        now[0] = expires - 0.5
+        return {}
+
+    def recording(name: str, answer: object) -> object:
+        def call(*args: object, timeout: float, **kwargs: object) -> object:
+            requests.append((name, now[0] + timeout))
+            return answer
+
+        return call
+
+    monkeypatch.setattr(time, "monotonic", tick)
+    monkeypatch.setattr(time, "sleep", lambda seconds: now.__setitem__(0, now[0] + seconds))
+    monkeypatch.setattr(ProxmoxPlatform, "_guest", nearly_spent)
+    monkeypatch.setattr(fake, "guest_agent_ping", recording("ping", None))
+    monkeypatch.setattr(fake, "guest_agent_exec", recording("exec", 7))
+    monkeypatch.setattr(fake, "guest_agent_exec_status", recording("status", {"exited": False}))
+
+    with contextlib.suppress(ChannelUnreachable):
+        _platform().run_as_root(ROW, RunContext(), b"true", 10)
+
+    assert requests
+    assert all(ends <= deadline_ends[0] for _, ends in requests), (deadline_ends, requests)
 
 
 SLOW_READ_SECONDS = 16.0
@@ -216,6 +255,14 @@ def test_the_identity_check_and_its_fallback_share_the_root_scripts_deadline(slo
     assert slow.clock[0] - 1000.0 <= 20
     assert slow.timeouts == [20, 4]
     assert "guest_agent_exec" not in slow.ops()
+
+
+def test_a_long_deadline_still_caps_each_identity_read_at_the_request_timeout(slow: SlowIdentityReads) -> None:
+    """A 600-second budget does not let one read wait 600 seconds: each gets at most the request timeout."""
+    with pytest.raises(StateError):
+        _platform().run_as_root(ROW, RunContext(), b"true", 600)
+
+    assert slow.timeouts == [REQUEST_TIMEOUT_SECONDS, REQUEST_TIMEOUT_SECONDS]
 
 
 def test_status_bounds_the_whole_identity_check(slow: SlowIdentityReads) -> None:

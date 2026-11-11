@@ -73,8 +73,8 @@ def find_guest(
     the guest's identity is unknown, which no caller may treat as gone.
 
     ``expires`` is when the caller's budget ends, on ``time.monotonic()``'s
-    clock: each request gets what remains of it, at most
-    ``REQUEST_TIMEOUT_SECONDS``, and a budget spent before a request leaves
+    clock: each request's wait is bounded by what remains of it, at
+    most ``REQUEST_TIMEOUT_SECONDS``, and a budget spent before a request leaves
     the VMID unplaced. With none, each request gets the whole request timeout.
     """
     timeout = _request_timeout(expires)

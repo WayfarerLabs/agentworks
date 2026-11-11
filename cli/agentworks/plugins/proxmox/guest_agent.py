@@ -8,8 +8,8 @@ comes first, so a VM with no agent at all fails in about two minutes. Then
 one ``exec`` dispatches the script as ``input-data`` (limited to 65,536
 characters), unless the pinging left none of the deadline, then
 ``exec-status`` is polled every two seconds until the guest reports an exit
-or the deadline passes. Each request gets what remains of the deadline, at
-most the API's ``REQUEST_TIMEOUT_SECONDS``. A poll carries only the PID, so
+or the deadline passes. Each request's wait is bounded by what remains of
+the deadline, at most the API's ``REQUEST_TIMEOUT_SECONDS``. A poll carries only the PID, so
 a failed one is asked again, since one missed answer says nothing of the
 script; polls that keep failing for ``STATUS_RETRY_SECONDS`` give up (a
 guest agent that restarted mid-script no longer knows the PID). QGA has no
@@ -42,7 +42,16 @@ _ROOT_SHELL = ["/bin/bash", "-s"]
 
 
 def run_as_root(api: ProxmoxAPI, node: str, vmid: int, script: bytes, deadline: float) -> RawRun:
-    """Run ``script`` through QGA once and return what the guest reported, or empty streams at the deadline.
+    """Run ``script`` through QGA once, with ``deadline`` seconds from now; see :func:`run_as_root_until`."""
+    return run_as_root_until(api, node, vmid, script, time.monotonic() + deadline)
+
+
+def run_as_root_until(api: ProxmoxAPI, node: str, vmid: int, script: bytes, expires: float) -> RawRun:
+    """Run ``script`` through QGA once and return what the guest reported, or empty streams at ``expires``.
+
+    ``expires`` is on ``time.monotonic()``'s clock, so a caller that has
+    already spent part of its budget passes the same instant it started
+    from, and no time passes uncounted between the two.
 
     A dispatch failure, or status polls failing for ``STATUS_RETRY_SECONDS``,
     raises ``ConnectivityError`` saying how far the request got, and never
@@ -57,9 +66,7 @@ def run_as_root(api: ProxmoxAPI, node: str, vmid: int, script: bytes, deadline: 
     text = script.decode("utf-8")
     if len(text) > INPUT_DATA_LIMIT:
         raise ConnectivityError(f"a root script for Proxmox VM {where} exceeds QGA's {INPUT_DATA_LIMIT} characters")
-    start = time.monotonic()
-    expires = start + deadline
-    _await_agent(api, node, vmid, where, min(expires, start + AGENT_WAIT_SECONDS))
+    _await_agent(api, node, vmid, where, min(expires, time.monotonic() + AGENT_WAIT_SECONDS))
     remaining = expires - time.monotonic()
     if remaining <= 0:
         raise ChannelUnreachable(
