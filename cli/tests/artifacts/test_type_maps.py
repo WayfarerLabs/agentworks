@@ -86,7 +86,7 @@ def test_later_bundle_replaces_only_its_type_and_key_and_retains_order_and_prove
     assert snapshot.hints["same"].origin.bundle == "second"
     assert snapshot.hints["same"].replacements[0].origin.bundle == "first"
     assert len(warnings) == 1
-    assert decode_inputs(encode_inputs(snapshot)) == (4, snapshot)
+    assert decode_inputs(encode_inputs(snapshot)) == (5, snapshot)
     with pytest.raises(TypeError):
         cast(dict[str, ArtifactInput], snapshot.hints)["other"] = snapshot.hints["same"]
 
