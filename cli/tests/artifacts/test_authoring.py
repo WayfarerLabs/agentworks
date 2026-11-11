@@ -33,7 +33,7 @@ def test_rule_capture_roundtrip_and_native_body(tmp_path, file_source, header):
     assert item.content.text == "Run relevant checks.\n"
     assert item.content.description == ("Repository conventions" if header else "")
     assert item.content.metadata == ({"description": "Repository conventions"} if header else {})
-    assert decode_inputs(encode_inputs(inputs)) == (4, inputs)
+    assert decode_inputs(encode_inputs(inputs)) == (5, inputs)
     for render in (claude.outer_artifacts, grok.outer_artifacts):
         files = render(received(item), "/home/user/.native").files
         assert len(files) == 1
@@ -85,7 +85,7 @@ def test_hints_remain_plaintext_even_when_they_look_like_frontmatter():
     source = "---\nglobs: ['*.py']\n---\nA setup fact.\n"
     item = capture(HintArtifactSpec(text=source)).hints["review"]
     assert item.content.text == source and item.content.metadata == {}
-    assert decode_inputs(encode_inputs(group(item))) == (4, group(item))
+    assert decode_inputs(encode_inputs(group(item))) == (5, group(item))
 
 
 @pytest.mark.parametrize(
