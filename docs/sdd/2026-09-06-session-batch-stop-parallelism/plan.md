@@ -471,10 +471,24 @@ transport API remains in use; migrating teardown to the new execution API is out
 Earlier validation above remains attributed to its recorded heads. The newly combined result needs
 fresh validation and a separate ready handoff; it is not byte-identical to the earlier wheel.
 
-- [ ] Merge the pinned main tip, review automatic merges, and retain trust and teardown invariants.
-- [ ] Run fresh local gates, installed-package checks and independent private delta reviews.
-- [ ] Publish the combined head, verify hosted checks and restore ready status with a scoped
-      handoff.
+- [x] Merge the pinned main tip, review automatic merges, and retain trust and teardown invariants.
+- [x] Obtain independent private delta reviews of the combined source and maintenance records.
+
+The merge is `2416f45cd`; its only manual resolution combines the trust and retry imports. The
+automatic lifecycle merge retains main's artifact-application argument. Database implementation, PID
+repair and teardown source remain byte-identical to the previous ready head. Independent project and
+complexity reviews found no material issue and passed 143 and 63 focused tests respectively; the
+implementation lane separately passed 183 focused tests.
+
+The integration's new ready handoff records the fresh full-suite, repository, hosted and installed
+wheel results. The first local full-suite attempt used an external environment and failed two
+harness tests requiring the checkout's actual `cli/.venv`; its 12,244 passes and 34 skips are not a
+green full-suite result. Validation uses a real checkout-local environment rather than changing
+product code or weakening those tests. Initial Markdown formatting failures were corrected with the
+pinned formatter. One concurrent website-browser run failed an input-timing assertion; a separate
+full rerun passed all 160 tests. Deterministic builds use external temporary output because the
+builder correctly refuses output under the repository. These setup and run qualifications remain
+part of the evidence; no new native backend or Windows guest run is claimed here.
 
 ## Residual Work Deliberately Deferred
 
