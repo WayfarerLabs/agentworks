@@ -301,10 +301,11 @@ points and its three optional points; one further round remains after this round
       setup records, preserving Git authority, opaque claims, literal contents and incomplete state.
 - [x] Distinguish already-absent MCP retirement, remove the redundant native-name count check and
       document the confirmed-write/failed-claim checkpoint gap without adding ownership machinery.
-- [ ] Run all three independent private review lanes, full gates, installed-package checks and
-      exact-head CI on the corrected source and actual final records.
-- [ ] Re-hand off the complete pushed head as round 2 and mark ready. Wait for its actual
-      independent integration report for up to six hours before another fix round.
+- [x] Run all three independent private review lanes, full gates and installed-package checks on the
+      corrected source, preserving exact pins and original failure logs.
+- [ ] Verify the final record delta and exact pushed-head CI, re-hand off the complete green head as
+      round 2 and mark ready. Wait for its actual independent integration report for up to six hours
+      before another fix round.
 
 Native layout source is integrated in `f8b73a924` and `8fed2868f`; its broader retained selection
 passed 2,298 cases with five skips, and the final small simplification selection passed 243 with one
@@ -344,6 +345,20 @@ exact test nodes and missing subprocess-transcript limit. The fixtures supplied 
 credentials and used owned homes with blocked proxy traffic. The lead read the report and verified
 the named fixture/environment/cache paths absent. Follow-up review excludes those native-bearing
 tests; the lapse is not recast as managed acceptance.
+
+All three lanes independently cleared corrected source `f5573ca5`: project passed 133 focused cases
+with one skip, Muntz passed 208 with one skip, and generic correctness passed 160 with one skip plus
+its repeated concrete banner/role controls. The lead read every follow-up report and independently
+checked the named runtime roots absent. Follow-up project execution traced fixtures first and
+excluded installed-native cases. The counts overlap and are not added to the full suite.
+
+The corrected full frozen suite passed 12,579 tests with 35 skips. Full mypy passed 991 files;
+Ruff/format, CI Typer isolation, file lint, locks, Rulesync, website tests and both deterministic
+build comparisons passed. Frozen wheel/source archive/install, four standalone guide renders,
+help/sample and all 489 source/wheel/installed package files passed. The initial lead spelling
+failure for the protocol term PKCE remains recorded with its dictionary correction. Final record
+checks and exact pushed-head CI are recorded in the handoff after they complete; these source
+results alone do not claim that handoff or independent acceptance is done.
 
 R6 session acceptance remains open: the Windows resume-only attempt found no resumable native
 history. It proves neither genuine resume nor a native defect. The corrected handoff must request
