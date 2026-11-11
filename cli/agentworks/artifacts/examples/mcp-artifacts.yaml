@@ -19,6 +19,17 @@ spec:
           MCP_INVENTORY_TOKEN: ${MCP_INVENTORY_TOKEN}
     docs:
       source: file::~/agent-content/mcp.jsonc
+    issue-tracker:
+      definition:
+        type: http
+        url: https://issues.example.test/mcp
+        # Public options only. Authenticate separately as the actual native user.
+        # Use oauth: {} instead to leave all OAuth options to native defaults.
+        # Grok defers explicit options; Claude/Codex translate them.
+        oauth:
+          client_id: public-registered-client
+          callback_port: 8180
+          scopes: [issues:read]
 ---
 apiVersion: agentworks/v1
 kind: agent-template
@@ -35,6 +46,8 @@ spec:
     codex: {}
 ---
 # This alternative selects a session-owned bundle and the opt-in Claude carrier.
+# Native OAuth with session-only definitions is unverified; never widen their scope
+# temporarily for login. This declaration does not establish authentication.
 # It need not use native-mcp-user; choose an existing authorized agent/workspace.
 apiVersion: agentworks/v1
 kind: session-template

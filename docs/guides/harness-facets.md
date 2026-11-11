@@ -288,8 +288,13 @@ The optional session carriers are Claude `session-mcp-config` and Codex `session
 Grok has no supported session MCP carrier; unhandled MCP warns and launch continues. Shell publishes
 canonical files at every scope without running servers. See
 [MCP setup](native-harness-setup.md#mcp-registrations) for paths, merge interaction and the separate
-native authentication/credential-removal workflow. OAuth configuration is planned for a later phase;
-the initial artifact profile rejects OAuth and tool-filter fields explicitly.
+native authentication/credential-removal workflow. HTTP entries accept a strict public `oauth`
+object with optional client ID, callback port and requested scopes; `{}` delegates to native
+defaults. Credentials, refresh and logout stay with each actual user's native client. Claude and
+Codex translate public options; Grok defers entries with explicit options, while `{}` uses ordinary
+URL registration. Successful Grok OAuth and session-only OAuth remain unverified. Session
+definitions must stay invocation-only during authentication. Confidential client secrets, custom
+callback URLs, issuer/metadata overrides and tool-filter fields are rejected.
 
 ## Session prerequisites
 

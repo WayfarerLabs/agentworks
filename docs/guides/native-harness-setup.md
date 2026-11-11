@@ -136,13 +136,92 @@ workaround is advertised. Those session inputs warn and stay unhandled. Shell ex
 files and its private session index without an opt-in. No native session MCP method is enabled by
 default; terminal unhandled artifacts warn and permit launch.
 
+### Native OAuth authentication
+
+HTTP artifacts accept public `oauth.client_id`, `oauth.callback_port` and `oauth.scopes` options;
+`oauth: {}` leaves all selections to the native client. Consult
+`agw resource explain artifact-bundle` for the installed schema and the
+[artifact profile](../../cli/agentworks/artifacts/README.md#public-oauth-options) for validation and
+translation limits. Confidential secrets, issuer/metadata overrides and custom callback URLs are
+rejected. Native callback host/path selection remains native; a configured port is not a complete
+redirect URI. Requested scopes do not attest to granted or maximum permissions, and a native client
+may request refresh-related scope.
+
+Authentication is an explicit operator action after authorized registration. Agentworks setup,
+reinit and offline artifact inspection do not log in, open a browser or read native auth caches.
+Prefer the installed native harness's interactive MCP controls or documented native login in the
+actual user's shell. No Agentworks authentication wrapper is required.
+
+1. Inspect the actual lineage with `agw artifact show --session <session>` or the appropriate
+   `--agent`, `--workspace`, or `--vm <vm> --admin` selector. Use the recorded original-owner native
+   server name and destination, not just the logical bundle key. Registration and recorded handling
+   do not prove current authentication. If registration is unhandled or its state is incomplete,
+   resolve that owning setup first when authorized; do not treat a login attempt as setup repair.
+2. Identify the Linux user that will run the harness. For a shared workspace, authenticate each
+   intended user in that workspace; the shared registration does not share a grant. Agent access
+   uses that agent's Linux user; VM access uses the VM's admin user and needs no agent. Use the same
+   native-home overrides and workspace context as the workload, retaining existing access checks.
+   These are alternative access paths, using illustrative existing resource names:
+
+   ```sh
+   agw agent shell --workspace service developer
+   agw vm shell --workspace service dev
+   ```
+
+   Omit `--workspace` only for a user-only registration when no workspace context is needed.
+   Existing access can resolve ordinary environment secrets and cross VM access/approval boundaries;
+   obtain authorization for that access and native authentication before running it.
+
+3. Inside the chosen shell, check the installed native help, then use its MCP controls for the exact
+   managed server name. Claude and Codex document `mcp login <native-name>`; Claude also exposes
+   interactive `/mcp` controls. On remote hosts, follow the installed client's documented browser or
+   manual redirect flow. Use the callback it actually displays without changing callback networking,
+   bypassing native approvals or passing confidential secrets through argv to make it work. Native
+   login can contact the provider, request consent and persist credentials for that user.
+4. Check connection/authentication with the native client's supported MCP UI or command. Such a
+   check may contact the endpoint or refresh credentials; it is distinct from offline
+   `agw artifact show`. Connection or authenticated discovery does not prove tool execution. Native
+   clients own token storage and refresh. Cancellation or failure is not success; inspect the native
+   result without copying tokens or redirect codes into diagnostics.
+
+For noninteractive native interface discovery, existing exec paths can run help in the same user and
+workspace context. Put Agentworks options before the resource name:
+
+```sh
+agw agent exec --workspace service developer claude mcp login --help
+agw vm exec --workspace service dev codex mcp login --help
+```
+
+Exec streams the native command's output and returns its exit code, but is not an interactive-login
+substitute. If no suitable terminal or supported manual flow is available, stop and report the
+remaining authentication task. Do not auto-login, retry through reinit or broaden a registration's
+scope. Changed endpoint/client options may require authenticating again; a stable managed name does
+not prove the provider grant is still appropriate.
+
+Claude and Codex public options have native translation support. Codex callback behavior using only
+these public artifact options still needs native verification; rendering a port is not evidence of a
+successful login. Grok `{}` uses ordinary URL registration, but explicit public options defer the
+whole entry and leave prior claims/native bytes intact. Successful Grok MCP OAuth has not been
+established in bounded native checks; consult the installed native interface without assuming that
+Grok lacks OAuth or inventing a login command. Shell only publishes canonical data.
+
+Session carriers forward public OAuth fields, but successful native authentication against their
+invocation-only definitions has not been verified. This guide supplies no session-only login
+procedure. Keep those definitions invocation-only, report that limitation, and do not temporarily
+publish them to user or workspace config. Verify the native invocation's supported authentication
+path before relying on it.
+
+The native references describe current interfaces, not a guarantee for every installed version:
+[Claude MCP authentication](https://code.claude.com/docs/en/mcp#authenticate-from-the-command-line),
+[Codex MCP](https://learn.chatgpt.com/docs/extend/mcp?surface=cli), and
+[Grok MCP](https://docs.x.ai/build/features/mcp-servers#in-the-tui).
+
 ### Credentials after removal
 
 Removing an Agentworks registration names the native server and warns that any OAuth credentials
 remain. This is conditional guidance, not a claim that credentials exist: setup and inspection do
-not read native credential caches or log out automatically. OAuth-specific artifact configuration
-and an explicit authentication workflow are planned for phase 2; they are not part of this initial
-registration support. Native authentication remains separate.
+not read native credential caches or log out automatically. Local credential removal remains an
+explicit native operation under the same actual-user and workspace context as authentication.
 
 If removing the server's stored credentials is authorized, use the actual workload user and native
 config context before withdrawing its artifact definition. For Codex, use
@@ -152,17 +231,19 @@ config context before withdrawing its artifact definition. For Codex, use
 [MCP authentication guide](https://code.claude.com/docs/en/mcp#authenticate-from-the-command-line).
 Use the derived name from Agentworks inspection and check the installed native CLI's supported
 interface. Credential deletion and provider-side revocation are different operations; follow the
-provider's revocation process when necessary. There is no verified Grok logout command claimed here.
+provider's revocation process when necessary; local logout alone does not establish grant
+revocation. There is no verified Grok logout command claimed here.
 
 Some native logout commands need the server definition still present. If it was already removed,
-temporarily restore the same native server name and matching definition in the original native
-user/project config context through its supported configuration workflow, perform logout, then
-remove the temporary registration. Keep the intended Agentworks declaration consistent so later
-setup does not reintroduce it. Existing workspaces have no reinit; native credential cleanup does
-not require recreating a workspace. Native client removal and Agentworks entry removal can have
-different credential behavior. If logout is outside the requested work, leave credentials untouched
-and report the remaining native authentication task. Reading this guide authorizes neither logout
-nor temporary reprovisioning.
+restore the same native server name and matching definition only through an authorized workflow in
+its original user/project config context, perform logout, then remove the temporary registration.
+This recovery applies to registrations that already belonged to that scope; never promote a
+session-only definition to user/project scope for logout. Keep the intended Agentworks declaration
+consistent so later setup does not reintroduce it. Existing workspaces have no reinit; native
+credential cleanup does not require recreating a workspace. Native client removal and Agentworks
+entry removal can have different credential behavior. If logout is outside the requested work, leave
+credentials untouched and report the remaining native authentication task. Reading this guide
+authorizes neither logout nor temporary reprovisioning.
 
 ## Marketplaces and plugins
 

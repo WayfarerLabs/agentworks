@@ -269,6 +269,14 @@ mcp_servers:
       url: https://mcp.example.test/mcp
       headers:
         Authorization: Bearer ${MCP_DOCS_TOKEN}
+  issue-tracker:
+    definition:
+      type: http
+      url: https://issues.example.test/mcp
+      oauth:
+        client_id: public-registered-client
+        callback_port: 8180
+        scopes: [issues:read]
 ```
 
 This is the strict Agentworks subset inspired by Rulesync, not native config passthrough:
@@ -282,12 +290,69 @@ This is the strict Agentworks subset inspired by Rulesync, not native config pas
 | `env`         | Optional stdio string map, with public literals or same-name env forwarding           |
 | `url`         | Required absolute HTTP(S) URL for HTTP, without embedded credentials or interpolation |
 | `headers`     | Optional HTTP string map, with public literals or supported env references            |
+| `oauth`       | Optional HTTP public OAuth object; see below                                          |
 
-Stdio rejects `url` and `headers`; HTTP rejects `command`, `args` and `env`. Unknown fields,
-contradictory types, duplicate keys, invalid env/header names and unsupported control characters are
-errors. Unsupported fields include `transport`, `cwd`, `enabled`, `disabled`, tool filters, approval
-controls, OAuth blocks and native option bags. Canonical SSE and WebSocket transports are not
+Stdio rejects `url`, `headers` and `oauth`; HTTP rejects `command`, `args` and `env`. Unknown
+fields, contradictory types, duplicate keys, invalid env/header names and unsupported control
+characters are errors. Unsupported fields include `transport`, `cwd`, `enabled`, `disabled`, tool
+filters, approval controls and native option bags. Canonical SSE and WebSocket transports are not
 supported. There is no implicit shell command or templating language.
+
+#### Public OAuth options
+
+An HTTP definition can declare `oauth: {}` to use the native client's OAuth defaults, or supply
+these optional public fields:
+
+| Field                 | Accepted value                                                       |
+| --------------------- | -------------------------------------------------------------------- |
+| `oauth.client_id`     | Literal nonblank public client ID, without controls or interpolation |
+| `oauth.callback_port` | Integer from 1 through 65535; strings and booleans are rejected      |
+| `oauth.scopes`        | Nonempty ordered list of unique RFC 6749 scope tokens                |
+
+A scope token contains printable ASCII other than space, double quote or backslash. Omitted or null
+optional fields stay absent. An omitted or null `oauth` object preserves ordinary native
+authentication behavior; `{}` explicitly selects native OAuth defaults. Neither form means logged
+in, and no omitted field receives an Agentworks default. An empty scopes list is rejected. Requested
+scopes are not granted permissions or a maximum: native clients may request refresh-related scope,
+and the authorization server decides what to grant. Bundle composition replaces the entire entry,
+including its OAuth object; fields are never inherited individually.
+
+OAuth and an `Authorization` header conflict, regardless of header-name case. Other headers can
+accompany OAuth, but their use during native OAuth discovery and token requests needs separate
+verification. Confidential client secrets, issuer or metadata overrides, custom callback URLs and
+unknown OAuth fields are unsupported and rejected. Do not place client secrets in literals,
+arguments or workspace config to bypass this profile. Ordinary bearer env references are a separate
+authentication mode, not an OAuth client-secret mechanism.
+
+Claude translates client ID and callback port to `oauth.clientId` and `oauth.callbackPort`, and
+scopes to a space-separated `oauth.scopes` string. Codex uses `oauth.client_id` and
+`oauth.callback_port`, with the scopes list at the server level. Absent options remain absent; the
+native client selects its callback host/path and credential storage. A fixed port does not specify a
+complete callback URL. Codex callback behavior with only these public artifact options still needs
+native verification.
+
+Grok accepts `{}` as an ordinary URL registration using native defaults. Any explicit public OAuth
+option defers that whole entry, preserving its prior native entry and claim while independent
+entries continue. A faithful translation for those options and successful Grok MCP OAuth have not
+been established; this is not a claim that Grok lacks OAuth. Shell publishes canonical OAuth data
+without authenticating.
+
+Setup does not run login, logout or credential-store probes. Use the actual user's native client to
+authenticate an established user/workspace registration, following
+[the native authentication workflow](https://github.com/WayfarerLabs/agentworks/blob/main/docs/guides/native-harness-setup.md#native-oauth-authentication).
+Tokens, refresh and logout remain native-owned. Changing endpoint or client options can require
+reauthentication even though the managed server name stays stable. A native-added confidential
+secret in a managed server table changes its fingerprint; ordinary foreign/modified-entry protection
+preserves it rather than granting authority to overwrite it.
+
+New captures use codec version 5. Retained versions 2, 3 and 4 keep their existing meanings and
+hashes; version 4 cannot contain OAuth. Existing declarations without OAuth keep their declaration
+digests. Older releases must refuse and preserve an unknown capture version. When downgrading, do
+not relabel a version-5 capture as version 4 or delete capture/ownership evidence to force it to
+load. Use a release that understands the stored capture, or restore a compatible instance-state
+backup through the supported backup workflow.
+
+#### Runtime credential references
 
 Credentials must remain references to runtime variables. The supported forms are
 `env.NAME: ${NAME}`, `headers.Header-Name: ${NAME}` and `headers.Authorization: Bearer ${NAME}`.
@@ -304,6 +369,8 @@ can refer to credentials supplied later by each user. The prepared env map is on
 native environment: guest login profiles can add or change values. Absence from that map is not
 proof that a variable is missing. Agentworks does not inspect those profiles or probe bindings;
 native runtime binding errors remain native errors.
+
+#### Connection sources
 
 A `source` selects one workstation or Git JSON/JSONC file. Its root accepts `mcpServers` and an
 optional string `$schema`. The artifact key selects the same key beneath `mcpServers`; there is no
@@ -342,6 +409,8 @@ source paths/endpoints, provision the executable, declare the referenced secrets
 selected system plugins before authorizing owning setup. If setup is outside the requested work,
 inspect declarations with `agw artifact show` instead.
 
+#### Native registration
+
 | Integration | Default user location                 | Workspace location               | Session delivery                            |
 | ----------- | ------------------------------------- | -------------------------------- | ------------------------------------------- |
 | Claude Code | `~/.claude.json`, `mcpServers`        | `<workspace>/.mcp.json`          | Opt-in `session-mcp-config`                 |
@@ -378,9 +447,8 @@ profile overlays can introduce same-named fields that deep-merge with an invocat
 workaround does not inspect profile precedence. Use authorized user/workspace registration for that
 case. Ordinary profile selection and unrelated artifact delivery continue.
 
-MCP registration is the initial phase. OAuth-specific configuration and its explicit authentication
-workflow are planned for phase 2; current artifact definitions reject those fields. Native clients
-can still perform their own independent authentication. Tool filters remain unsupported.
+Public OAuth options configure registration, not a grant. Native consent, authentication and tool
+filters remain separate; artifact tool-filter fields are unsupported.
 
 ## Sources and refresh
 
@@ -681,8 +749,11 @@ metadata does not itself grant or restrict tools. Session personas remain unhand
 MCP workarounds register connections for that invocation, not a shared home/project catalog. They
 retain native consent and authentication requirements. A conflicting native registration can leave
 an entry unhandled rather than silently replacing or deep-merging a different definition. They do
-not suppress other native MCP sources. Grok Build 1.0.77 rejects `--plugin-dir`, so Agentworks does
-not advertise a Grok session MCP plugin workaround; those session inputs warn and remain unhandled.
+not suppress other native MCP sources. Public OAuth fields travel through these carriers, but native
+OAuth with invocation-only definitions has not been verified. Keep session-only definitions at their
+original scope; do not temporarily register them in user/workspace config to log in. Grok Build
+1.0.77 rejects `--plugin-dir`, so Agentworks does not advertise a Grok session MCP plugin
+workaround; those session inputs warn and remain unhandled.
 
 Grok resume can retain a native catalog from before the session entry was first installed. If that
 entry is absent, start a fresh conversation with `--force-new` or explicitly read the current

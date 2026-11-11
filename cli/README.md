@@ -257,10 +257,14 @@ activation, worked manifests, and native delivery limits.
 
 Bundles include an explicit `mcp_servers` map for portable stdio and Streamable HTTP definitions.
 Workstation/Git JSON(C) sources select a same-named entry from `mcpServers`; only that definition is
-captured. Credentials stay unresolved env references. User/workspace facets register entries in
-native config, while session-only delivery requires its documented workaround. Registration does not
-establish connectivity, authentication or tool availability. See the
-[MCP artifact guide](agentworks/artifacts/README.md#mcp-servers) for accepted fields and examples.
+captured. HTTP entries also accept public OAuth intent (`oauth: {}` for native defaults, or optional
+client ID, callback port and requested scopes). Tokens, refresh and logout stay with each actual
+user's native harness; artifact setup does not log in. Other credentials stay unresolved env
+references. User/workspace facets register entries in native config, while session-only delivery
+requires its documented workaround. Registration does not establish connectivity, authentication or
+tool availability. See the [MCP artifact guide](agentworks/artifacts/README.md#mcp-servers) for
+accepted fields, examples, capture-version downgrade limits and the separate
+[native authentication workflow](../docs/guides/native-harness-setup.md#native-oauth-authentication).
 
 Env vars ride their owning resource, as an `env` map in the template's `spec` (the removed TOML
 shape used `[<scope>.env]` subsections), at vm / workspace / admin / agent / session scope. The

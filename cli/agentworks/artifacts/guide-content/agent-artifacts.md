@@ -20,7 +20,13 @@ context.
 
 MCP application records registration only. It does not attest to authentication, a connection, tool
 discovery or model use. Acquiring a source never executes its server. See the MCP format and native
-support sections below before authorizing setup or native authentication.
+support sections below before authorizing setup or native authentication. Public OAuth intent
+configures the native registration; tokens, refresh and logout remain native-owned. For interactive
+login, use the actual Linux user and workspace of an established registration through existing
+`agw agent shell` or admin `agw vm shell` access. See the linked native authentication workflow for
+context selection, status, logout and the unverified session-only/Grok limits. Session definitions
+must stay invocation-only; rendering this guide neither logs in nor authorizes a broader
+registration.
 
 <!-- agw:include path="artifacts/README.md" heading="Select an owner and a handler" -->
 
