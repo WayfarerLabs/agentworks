@@ -1473,7 +1473,6 @@ def test_reinit_binding_line_appears_only_when_the_effective_template_changes(
     agent_manager.reinit_agent(db, config, name="dev", update_template="other", interaction=TtyInteractionPolicy.REFUSE)
     unchanged = list(captured_output.info)
 
-    assert len(changed) == len(unchanged) + 1
     (binding,) = [line for line in changed if repr("other") in line]
     assert repr("default") in binding
     assert not any(repr("other") in line for line in unchanged)

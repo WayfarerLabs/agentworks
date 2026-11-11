@@ -525,8 +525,8 @@ def _phase_b_setup(
         # Non-fatal: the profile and rc fragments, written early as the agent's
         # are, so every later login shell (the dotfiles installer, mise, the user
         # install commands) reads them. The profile's entries are declarations,
-        # so it is complete here: mise's shims, with the install commands' own
-        # paths taking precedence over them.
+        # so it is complete here: mise's shims, with the user install commands'
+        # own paths taking precedence over them.
         profile_paths = (
             install_command_paths(vm_template.system_install_commands, system_install_commands)
             + _mise_shims_path(home)

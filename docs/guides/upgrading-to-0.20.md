@@ -327,11 +327,12 @@ place its `authorized_keys`; every later step runs as the agent, which cannot ru
   `agw vm reinit <name> --admin-spec '<complete replacement admin spec>'`, or clear it with
   `--spec '{}'` or `--admin-spec '{}'`; `agw doctor` names the same repair. `vm reinit` now takes
   `--admin-template` and `--admin-spec`, as `agent reinit` takes `--update-template` and `--spec`.
-  While a record awaits its replacement, inspection output (`resource show`, a resource graph's
-  `used_by`, `secret show`) leaves out the references that owner's stored spec makes. The describe
-  commands' `instance_state` reports such a spec, and a saved harness activation list, as
-  unavailable with reason `replacement-required` and issue `instance-spec-replacement-required`; an
-  activation list used to read `unsupported-version` and `instance-spec-unsupported`.
+  While a record awaits its replacement, inspection output (`resource show`, `resource list`'s
+  used-by count, `secret describe`, and `graph show`'s dependents) leaves out the references that
+  owner's stored spec makes. The describe commands' `instance_state` reports such a spec, and a
+  saved harness activation list, as unavailable with reason `replacement-required` and issue
+  `instance-spec-replacement-required`; an activation list used to read `unsupported-version` and
+  `instance-spec-unsupported`.
 - **A remote written without `git::` is refused.** A source reference (`dotfiles_source`,
   `mise_lockfile`, an artifact's `source`, a harness settings `source`) holding `://` or `::`, or
   whose first path component holds a colon that is not a Windows drive letter (as in
