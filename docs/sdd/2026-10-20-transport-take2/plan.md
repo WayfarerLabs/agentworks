@@ -512,12 +512,14 @@ reads a legacy transport.
       leaves the previous tree in place, and a corrupt archive changes nothing.
 - [ ] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
       issues and fix history), and add incident inventory rows before deleting anything.
-- [ ] `vm reinit --admin-template NAME` and `--admin-spec JSON` (operator ruling 2026-11-10), so a
+- [x] `vm reinit --admin-template NAME` and `--admin-spec JSON` (operator ruling 2026-11-10), so a
       VM whose stored admin spec holds a source reference this release refuses has a repair. They
-      follow `agent reinit`'s retain, replace and clear semantics; the
-      `StoredSourceReferenceRefused` hint for a VM names them. Completions, the command reference
+      follow `agent reinit`'s retain, replace and clear semantics, tolerating what it tolerates; the
+      `StoredSourceReferenceRefused` hint for a VM names `--admin-spec`, since a re-point alone
+      cannot repair a refused layer. A record awaiting replacement is published identity-only, so it
+      stops neither other commands nor another record's repair. Completions, the command reference
       and the upgrade guide follow.
-- [ ] One initialization order for the admin and every agent: fragments, mise config, git
+- [x] One initialization order for the admin and every agent: fragments, mise config, git
       credentials, dotfiles, mise install, the fragments' source lines again, user install commands,
       then a final source-line pass, with one mise install helper and one install-command runner
       shared by both accounts.
