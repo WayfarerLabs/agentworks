@@ -19,6 +19,7 @@ from agentworks.capabilities.harness_integration.setup import WorkspaceSetupInvo
 from agentworks.errors import ExternalError, StateError
 from agentworks.native_files import NativeFiles
 from agentworks.plugins._harness_native.native import setup_user, setup_workspace
+from agentworks.plugins._harness_native.native_cli import NativeMarket, NativePlugin, identity
 from agentworks.plugins._harness_native.native_config import NativeUserConfig, NativeWorkspaceConfig
 from tests.artifacts._fixtures import received
 from tests.native_setup_fixtures import LocalFixtureTransport, invocation, record
@@ -199,19 +200,22 @@ def test_checkpoint_failure_and_expected_hash_conflict_escape(transport, monkeyp
 
 
 @pytest.mark.parametrize("strategy", ["replace", "merge-overwrite", "merge-preserve", "skip-existing"])
-def test_joint_codex_mapping_unmasks_withdrawn_native_key_in_one_pass(transport, strategy):
+@pytest.mark.parametrize("missing", [False, True])
+def test_joint_codex_mapping_unmasks_withdrawn_native_key_in_one_pass(transport, strategy, missing):
     item = server()
     name = mcp_native_name(item)
     path = transport.home / ".codex/config.toml"
     claims = []
     call = replace(invocation(transport, claims), artifacts=received(item))
     setup_user("codex", NativeUserConfig(), call)
+    if missing:
+        path.unlink()
     source = transport.root / "mapping.toml"
     write(source, {"mcp_servers": {name: {"command": "source-owned", "args": []}}})
     config = NativeUserConfig(settings=SettingsMapping(source=str(source), strategy=strategy))
     result = setup_user("codex", config, replace(call, artifacts=received(), prior=record(claims[-1], "codex")))
     document = read(path)
-    if strategy == "skip-existing":
+    if strategy == "skip-existing" and not missing:
         assert name not in document.get("mcp_servers", {})
     else:
         assert document["mcp_servers"][name]["command"] == "source-owned"
@@ -262,3 +266,93 @@ def test_mapping_only_skip_existing_preserves_bytes_and_replace_repairs_invalid_
     path.write_text("malformed = [\n")
     setup_user("codex", NativeUserConfig(settings=SettingsMapping(source=str(source), strategy="replace")), call)
     assert read(path) == {"model": "mapped"}
+
+
+def test_plugin_progress_is_preserved_in_later_mcp_checkpoint(transport, monkeypatch):
+    path = transport.home / ".codex/config.toml"
+    write(path, {"foreign": True})
+    market = NativeMarket("fixture", identity({"source_type": "local", "source": "/fixture-market"}))
+    installed = []
+    cli = Mock()
+    cli.markets.return_value = (market,)
+    cli.plugins.side_effect = lambda _markets: tuple(installed)
+    cli.available.return_value = ("one@fixture",)
+
+    def install(selector):
+        installed.append(NativePlugin(selector, "user", True, identity({"marketplace": market.source})))
+        document = read(path)
+        document["plugins"] = {selector: {"enabled": True}}
+        write(path, document)
+
+    cli.install.side_effect = install
+    monkeypatch.setattr("agentworks.plugins._harness_native.native.NativeCLI", Mock(return_value=cli))
+    claims = []
+    item = server()
+    setup_user(
+        "codex",
+        NativeUserConfig(plugins=["one@fixture"]),
+        replace(invocation(transport, claims), artifacts=received(item)),
+    )
+    assert [c.role for c in claims[0]] == ["plugin"]
+    assert {c.role for c in claims[-1]} == {"plugin", MCP_CLAIM_ROLE}
+    assert all(any(c.role == "plugin" for c in prefix) for prefix in claims)
+    assert read(path)["plugins"]["one@fixture"]["enabled"] is True
+    assert read(path)["foreign"] is True
+
+
+@pytest.mark.parametrize("fault", ["malformed", "read", "publish"])
+def test_native_configuration_failures_defer_without_claiming_or_disclosing(transport, monkeypatch, fault):
+    path = transport.home / ".codex/config.toml"
+    write(path, {"foreign": "private-fixture-only"})
+    if fault == "malformed":
+        path.write_text("private-fixture-only = [\n")
+    elif fault == "read":
+        monkeypatch.setattr(NativeFiles, "read", Mock(side_effect=ExternalError("private-fixture-only")))
+    else:
+        monkeypatch.setattr(NativeFiles, "publish", Mock(side_effect=ExternalError("private-fixture-only")))
+    baseline = path.read_bytes()
+    claims = []
+    item = server()
+    result = apply_mcp("codex", replace(invocation(transport, claims), artifacts=received(item)), destination=str(path))
+    assert [d.input_id for d in result.deferred] == [item.identity]
+    assert "private-fixture-only" not in result.deferred[0].reason
+    assert claims == [] and path.read_bytes() == baseline
+
+
+def test_skip_existing_still_installs_and_retires_mcp_entries(transport):
+    path = transport.home / ".codex/config.toml"
+    write(path, {"foreign": True})
+    source = transport.root / "mapping.toml"
+    source.write_text('source = "ignored"\n')
+    config = NativeUserConfig(settings=SettingsMapping(source=str(source), strategy="skip-existing"))
+    claims = []
+    item = server()
+    call = replace(invocation(transport, claims), artifacts=received(item))
+    setup_user("codex", config, call)
+    assert read(path)["foreign"] is True and "source" not in read(path)
+    assert mcp_native_name(item) in read(path)["mcp_servers"]
+    setup_user("codex", config, replace(call, artifacts=received(), prior=record(claims[-1], "codex")))
+    assert claims[-1] == ()
+    assert read(path) == {"foreign": True, "mcp_servers": {}}
+
+
+def test_shared_document_is_observed_and_published_once(transport, monkeypatch):
+    path = transport.home / ".codex/config.toml"
+    source = transport.root / "mapping.toml"
+    source.write_text("foreign = true\n")
+    observed, published = [], []
+    native_read, native_publish = NativeFiles.read, NativeFiles.publish
+
+    def reading(files, destination):
+        observed.append(destination)
+        return native_read(files, destination)
+
+    def publishing(files, destination, content, **kwargs):
+        published.append(destination)
+        return native_publish(files, destination, content, **kwargs)
+
+    monkeypatch.setattr(NativeFiles, "read", reading)
+    monkeypatch.setattr(NativeFiles, "publish", publishing)
+    config = NativeUserConfig(settings=SettingsMapping(source=str(source), strategy="merge-overwrite"))
+    setup_user("codex", config, replace(invocation(transport, []), artifacts=received(server())))
+    assert observed == published == [str(path)]

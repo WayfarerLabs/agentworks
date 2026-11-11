@@ -175,6 +175,13 @@ class _MappingPlan:
         return serialize_settings(document, format=self.prepared.format), contributions
 
 
+def _map_settings(
+    prepared: PreparedSettings, destination: str, current: bytes | None
+) -> tuple[bytes | None, SettingsObject]:
+    """Plan against the same snapshot the MCP entry updater will publish."""
+    return _MappingPlan.build(prepared, current, destination).render(destination, current=current)
+
+
 def setup_workspace(
     tool: NativeTool, config: NativeWorkspaceConfig | None, invocation: WorkspaceSetupInvocation
 ) -> ArtifactApplication:
@@ -191,18 +198,18 @@ def setup_workspace(
         if mapping is None:
             output.info("Removed settings mapping; native settings and their current values are retained.")
         invocation.checkpoint(preserved)
-    with NativeFiles(invocation.runner) as files:
-        initial = files.read(destination) if prepared is not None else None
-        plan = None if prepared is None else _MappingPlan.build(prepared, initial, destination)
-        if tool == "claude" and plan is not None:
+    if tool == "claude" and prepared is not None:
+        with NativeFiles(invocation.runner) as files:
+            initial = files.read(destination)
+            plan = _MappingPlan.build(prepared, initial, destination)
             plan.publish(files, destination, current=initial, group=invocation.linux_group)
     return apply_mcp(
         tool,
         invocation,
         destination=native_path(invocation.root) + "/.mcp.json" if tool == "claude" else destination,
         claims=preserved,
-        map_document=(lambda current: plan.render(destination, current=current))
-        if tool == "codex" and plan is not None
+        map_document=(lambda current: _map_settings(prepared, destination, current))
+        if tool == "codex" and prepared is not None
         else None,
     )
 
@@ -300,20 +307,18 @@ def setup_user(
     sources = [] if config is None else config.marketplaces
     requested = [] if config is None else config.plugins
     if not native_claims and not sources and not requested:
-        settings_plan = None
-        if prepared is not None:
+        if prepared is not None and tool == "claude":
             with NativeFiles(invocation.runner) as files:
                 initial = files.read(destination)
                 settings_plan = _MappingPlan.build(prepared, initial, destination)
-                if tool == "claude":
-                    settings_plan.publish(files, destination, current=initial)
+                settings_plan.publish(files, destination, current=initial)
         return apply_mcp(
             tool,
             invocation,
             destination=mcp_destination,
             claims=(*preserved, *claims),
-            map_document=(lambda current: settings_plan.render(destination, current=current))
-            if tool == "codex" and settings_plan is not None
+            map_document=(lambda current: _map_settings(prepared, destination, current))
+            if tool == "codex" and prepared is not None
             else None,
         )
     with NativeFiles(invocation.runner) as files:
@@ -663,7 +668,6 @@ def setup_user(
         # Confirmed removals take precedence over an earlier inventory snapshot.
         protected.difference_update(removed_keys)
         if plan is not None:
-            current = files.read(destination)
             overlays: tuple[tuple[tuple[str, str], SettingsValue], ...] = tuple(
                 (_native_key(tool, "marketplace", market.name), _market_fields(market))
                 for market in desired
@@ -674,6 +678,7 @@ def setup_user(
                 if selector not in blocked_plugins
             )
             if tool == "claude":
+                current = files.read(destination)
                 plan.publish(
                     files,
                     destination,

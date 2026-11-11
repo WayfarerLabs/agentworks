@@ -154,7 +154,7 @@ def apply_mcp(
 
     def unavailable() -> ArtifactApplication:
         reason = "Native MCP configuration could not be read or safely updated; review it before reinitializing."
-        if old:
+        if old or map_document is not None:
             invocation.report_incomplete(reason)
         return ArtifactApplication(
             deferred=tuple(
@@ -190,6 +190,7 @@ def apply_mcp(
             if claim.identifier in desired or claim.source in invocation.retain_artifact_origins:
                 retained.append(claim)
             elif claim.identifier not in current:
+                retired.append(claim.identifier)
                 continue
             elif claim.sha256 == _fingerprint(current[claim.identifier]):
                 _table(document, key).pop(claim.identifier)
