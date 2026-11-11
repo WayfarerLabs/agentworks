@@ -462,14 +462,12 @@ def replace_vm_admin_overlay(db: Database, instance_name: str, admin: AdminConfi
     """Replace a VM's stored admin layer with ``admin``, or clear it when ``None``, keeping its VM layer.
 
     This is ``vm reinit --admin-spec``; the caller's outer transaction holds
-    it with any admin-template re-point. Only the VM layer of the stored
-    record is decoded, so an admin layer this release cannot use
-    (``ExplicitReplacementRequired``) is superseded without being read, while
-    a VM layer that does not decode refuses the replacement, since keeping it
-    is part of the decision. The outcome names admin fields only.
+    it with any admin-template re-point. What the stored layers may hold is
+    :func:`vm_layer_kept_by_admin_spec`'s rule. The outcome names admin
+    fields only.
     """
     prior = db.instance_state.get_desired_overlay("vm", instance_name)
-    vm_overlay = None if prior is None else stored_vm_layer(prior)
+    vm_overlay = None if prior is None else vm_layer_kept_by_admin_spec(prior, clearing=admin is None)
     prior_admin_fields = () if prior is None else _stored_admin_field_names(prior)
     if admin is None:
         if not prior_admin_fields:
@@ -490,7 +488,34 @@ def admin_overlay_field_names(admin: AdminConfig) -> tuple[str, ...]:
     return tuple(f"admin.{field}" for field in _admin_overlay_fields(admin))
 
 
-def stored_vm_layer(record: DesiredOverlayRecord) -> InstanceOverlay[VMTemplate] | None:
+def vm_layer_kept_by_admin_spec(record: DesiredOverlayRecord, *, clearing: bool) -> InstanceOverlay[VMTemplate] | None:
+    """The VM layer ``vm reinit --admin-spec`` keeps, once the stored admin layer it supersedes is allowed to go.
+
+    The admin layer gets the tolerance ``agent reinit --spec`` gives its
+    layer (``replace_agent_overlay``): a replacement supersedes one that
+    raises ``ExplicitReplacementRequired``, and a clear (``clearing``) any
+    ``UnsupportedStoredOverlayError``; a malformed admin layer, and on a
+    replacement one written by a newer release, refuse with their own hint.
+    A legacy Claude admin layer is superseded without its conversion. The
+    VM layer is decoded with every check the whole record gets and refuses
+    whatever it cannot read, since keeping it is part of the decision.
+    """
+    from agentworks.legacy_claude import LegacyClaudeContextRequired
+
+    tolerated = UnsupportedStoredOverlayError if clearing else ExplicitReplacementRequired
+    if record.payload.payload_version == _VM_RECORD_PAYLOAD_VERSION:
+        admin_only = {"vm": {}, "admin": record.payload.value.get("admin", {})}
+        try:
+            with suppress(LegacyClaudeContextRequired):
+                decode_stored_vm_overlays(
+                    replace(record, payload=VersionedPayload(_VM_RECORD_PAYLOAD_VERSION, admin_only))
+                )
+        except tolerated:
+            pass
+    return _stored_vm_layer(record)
+
+
+def _stored_vm_layer(record: DesiredOverlayRecord) -> InstanceOverlay[VMTemplate] | None:
     """The VM layer of a stored VM record, decoded with every check the whole record gets, its admin layer unread."""
     value = record.payload.value
     if record.payload.payload_version == _VM_RECORD_PAYLOAD_VERSION:

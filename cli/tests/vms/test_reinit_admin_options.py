@@ -14,12 +14,14 @@ import pytest
 
 from agentworks.config import load_config
 from agentworks.db import ProvisioningStatus, VersionedPayload
-from agentworks.errors import AgentworksError
+from agentworks.errors import AgentworksError, StateError
 from agentworks.execution.results import Completed, Result
 from agentworks.instance_specs import (
     VM_ADMIN_REPLACEMENT_REMEDY,
     ActivationMapMigrationRequired,
+    ExplicitReplacementRequired,
     StoredSourceReferenceRefused,
+    UnsupportedStoredOverlayError,
     get_vm_instance_overlays,
 )
 from agentworks.secrets.policy import TtyInteractionPolicy
@@ -103,12 +105,12 @@ def _store(db: Database, *, vm: JsonObject, admin: JsonObject) -> VersionedPaylo
 _recorder: AccessRecorder | None = None
 
 
-def _reinit(db: Database, config: object, **options: str) -> None:
-    """Reinit ``rvm``, its base checks answering as a clean trixie VM."""
+def _reinit(db: Database, config: object, *, script: bytes = b"AGW-CHECK-END\n", **options: str) -> None:
+    """Reinit ``rvm``, its base checks answering as a trixie VM whose contract script prints ``script``."""
     assert _recorder is not None
     _recorder.access(vm_name="rvm").run_outcomes = [
         Result(Completed(0), TRIXIE),
-        Result(Completed(0), b"AGW-CHECK-END\n"),
+        Result(Completed(0), script),
         Result(Completed(0), b"0\n"),
     ]
     vm_manager.reinit_vm(db, config, "rvm", interaction=TtyInteractionPolicy.REFUSE, **options)  # type: ignore[arg-type]
@@ -294,3 +296,161 @@ def test_admin_spec_repairs_a_stored_admin_activation_list_that_a_plain_reinit_r
 
     assert _stored_payload(db) == VersionedPayload(2, {"vm": STORED_VM, "admin": {}})
     assert len(initialized) == 1
+
+
+def test_admin_spec_repairs_the_vm_beside_a_refused_agent_and_a_refused_vm(
+    db: Database, config: object, initialized: list[AdminConfig], captured_output: CapturedOutput
+) -> None:
+    """Every other refused owner is published identity-only, so it never blocks this repair."""
+    _store(db, vm=STORED_VM, admin=REFUSED_ADMIN)
+    db.insert_agent("a1", "rvm", "agt-a1", template="default")
+    db.instance_state.put_desired_overlay(
+        "agent", "a1", VersionedPayload(1, {"dotfiles_source": REFUSED_ADMIN["dotfiles_source"]})
+    )
+    db.insert_vm("other", site="lima-local", hostname="other")
+    db.instance_state.put_desired_overlay("vm", "other", VersionedPayload(2, {"vm": {}, "admin": REFUSED_ADMIN}))
+
+    _reinit(db, config, admin_spec="{}")
+
+    assert _stored_payload(db) == VersionedPayload(2, {"vm": STORED_VM, "admin": {}})
+    assert len(initialized) == 1
+    assert SECRET not in str(captured_output.lines)
+
+
+NEWER: JsonObject = {"future_admin_field": "do-not-print-this-value"}
+MALFORMED: JsonObject = {"shell": 7}
+
+
+@pytest.mark.parametrize(
+    ("admin", "admin_spec", "refusal"),
+    [
+        (NEWER, '{"shell":"bash"}', UnsupportedStoredOverlayError),
+        (MALFORMED, '{"shell":"bash"}', StateError),
+        (MALFORMED, "{}", StateError),
+    ],
+    ids=["newer-replace", "malformed-replace", "malformed-clear"],
+)
+def test_admin_spec_refuses_an_admin_layer_agent_reinit_would_refuse(
+    db: Database,
+    config: object,
+    initialized: list[AdminConfig],
+    captured_output: CapturedOutput,
+    admin: JsonObject,
+    admin_spec: str,
+    refusal: type[Exception],
+) -> None:
+    stored = _store(db, vm=STORED_VM, admin=admin)
+
+    with pytest.raises(refusal) as refused:
+        _reinit(db, config, admin_spec=admin_spec)
+
+    assert not isinstance(refused.value, ExplicitReplacementRequired)
+    assert _stored_payload(db) == stored
+    assert initialized == []
+    assert "do-not-print-this-value" not in f"{refused.value} {captured_output.lines}"
+
+
+def test_admin_spec_clears_an_admin_layer_written_by_a_newer_release(
+    db: Database, config: object, initialized: list[AdminConfig]
+) -> None:
+    _store(db, vm=STORED_VM, admin=NEWER)
+
+    _reinit(db, config, admin_spec="{}")
+
+    assert _stored_payload(db) == VersionedPayload(2, {"vm": STORED_VM, "admin": {}})
+    assert len(initialized) == 1
+
+
+def test_admin_spec_replaces_a_legacy_claude_admin_layer_without_converting_it(
+    db: Database, config: object, initialized: list[AdminConfig]
+) -> None:
+    _store(db, vm=STORED_VM, admin={"claude_plugins": ["one@fixture"]})
+
+    _reinit(db, config, admin_spec='{"shell":"zsh"}')
+
+    assert _stored_payload(db) == VersionedPayload(2, {"vm": STORED_VM, "admin": {"shell": "zsh"}})
+    assert [admin.shell for admin in initialized] == ["zsh"]
+
+
+def test_a_failed_overlay_write_rolls_the_re_point_back(
+    db: Database, config: object, initialized: list[AdminConfig], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stored = _store(db, vm=STORED_VM, admin={"shell": "bash"})
+
+    def _fail(db: Database, name: str, admin: object) -> None:
+        db.instance_state.clear_desired_overlay("vm", name)
+        raise RuntimeError("overlay write failed")
+
+    monkeypatch.setattr("agentworks.instance_specs.replace_vm_admin_overlay", _fail)
+
+    with pytest.raises(RuntimeError):
+        _reinit(db, config, admin_template="work", admin_spec='{"shell":"zsh"}')
+
+    vm = db.get_vm("rvm")
+    assert vm is not None and vm.admin_template is None
+    assert _stored_payload(db) == stored
+    assert initialized == []
+
+
+def test_a_whitespace_admin_spec_is_refused_before_anything_persists(
+    db: Database, config: object, initialized: list[AdminConfig]
+) -> None:
+    stored = _store(db, vm=STORED_VM, admin={"shell": "bash"})
+
+    with pytest.raises(AgentworksError):
+        _reinit(db, config, admin_spec="  ")
+
+    assert _stored_payload(db) == stored
+    assert initialized == []
+
+
+def test_a_concurrent_native_operation_refuses_reinit_before_anything_persists(
+    db: Database, config: object, initialized: list[AdminConfig]
+) -> None:
+    from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
+
+    stored = _store(db, vm=STORED_VM, admin={"shell": "bash"})
+
+    with native_mutation_guard(db.path, "rvm"), pytest.raises(NativeSetupBusyError):
+        _reinit(db, config, admin_template="work", admin_spec="{}")
+
+    vm = db.get_vm("rvm")
+    assert vm is not None and vm.admin_template is None
+    assert _stored_payload(db) == stored
+    assert initialized == []
+
+
+def test_a_failed_base_check_leaves_the_binding_and_layer_untouched(
+    db: Database, config: object, initialized: list[AdminConfig]
+) -> None:
+    """Reinit stops at the VM contract before it changes anything, the stored declarations included."""
+    stored = _store(db, vm=STORED_VM, admin={"shell": "bash"})
+
+    with pytest.raises(StateError):
+        _reinit(
+            db, config, script=b"AGW-CHECK base-tools flock\nAGW-CHECK-END\n", admin_template="work", admin_spec="{}"
+        )
+
+    vm = db.get_vm("rvm")
+    assert vm is not None and vm.admin_template is None
+    assert _stored_payload(db) == stored
+    assert initialized == []
+
+
+def test_a_refusal_at_the_ssh_boundary_leaves_the_binding_and_layer_untouched(
+    db: Database, config: object, initialized: list[AdminConfig], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The re-point and admin layer persist only after every check that precedes the activation gate."""
+    stored = _store(db, vm=STORED_VM, admin={"shell": "bash"})
+
+    def _refuse(*args: object, **kwargs: object) -> None:
+        raise StateError("SSH identity drift")
+
+    monkeypatch.setattr(vm_manager, "require_vm_ssh_boundary", _refuse)
+
+    with pytest.raises(StateError):
+        _reinit(db, config, admin_template="work", admin_spec="{}")
+
+    vm = db.get_vm("rvm")
+    assert vm is not None and vm.admin_template is None
+    assert _stored_payload(db) == stored

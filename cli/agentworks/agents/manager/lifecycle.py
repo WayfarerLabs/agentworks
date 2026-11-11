@@ -528,13 +528,10 @@ def reinit_agent(
             candidate_overlay = None
 
         if update_template is not None:
-            from agentworks.resources.access import require_declared_template
-
-            require_declared_template(registry, "agent-template", update_template)
-            # Refuse a repoint to a disabled-recipe template BEFORE persisting it,
-            # so a refused reinit never leaves the DB row pointing at the refused
+            # An undeclared re-point already failed resolving its base above. Refuse
+            # one to a disabled-recipe template BEFORE persisting it too, so a
+            # refused reinit never leaves the DB row pointing at the refused
             # template (mirrors create's "gate before any DB / VM / realize work").
-            # require_declared_template only checks the name is DECLARED, not enabled.
             ensure_recipe_enabled(registry, "agent-template", update_template)
         layered_agent_tmpl = resolve_template_with_provenance(
             registry,
@@ -569,7 +566,7 @@ def reinit_agent(
 
         from agentworks.instance_specs import replace_agent_overlay, report_overlay_outcome
 
-        previous_template = agent.template
+        previous_template = "default" if agent.template is None else agent.template
         with db.transaction():
             if update_template is not None:
                 db.update_agent_template(name, update_template)
@@ -580,9 +577,10 @@ def reinit_agent(
                 parsed_overlay,
                 supplied=supplied_overlay,
             )
-        if agent.template != previous_template:
+        selected_template = "default" if agent.template is None else agent.template
+        if selected_template != previous_template:
             output.info(
-                f"Agent '{name}' template binding saved as {agent.template!r} (previously {previous_template!r}). "
+                f"Agent '{name}' template binding saved as {selected_template!r} (previously {previous_template!r}). "
                 "The binding remains if setup fails; use --update-template to choose a different template."
             )
 

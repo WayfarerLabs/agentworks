@@ -87,7 +87,7 @@ def reinit_vm(
             decode_stored_vm_overlays,
             ensure_effective_references_enabled,
             parse_admin_instance_spec,
-            stored_vm_layer,
+            vm_layer_kept_by_admin_spec,
         )
         from agentworks.legacy_claude import legacy_component
         from agentworks.orchestration.activation import (
@@ -99,10 +99,10 @@ def reinit_vm(
         from agentworks.orchestration.walk import walk
         from agentworks.resources.access import ensure_recipe_enabled
         from agentworks.secrets.resolver import Resolver
-        from agentworks.vms.admin_templates import resolve_template_with_provenance as resolve_admin_base
+        from agentworks.vms.admin_templates import resolve_template_with_provenance as resolve_admin
         from agentworks.vms.nodes import live_vm_node
         from agentworks.vms.template import effective_references
-        from agentworks.vms.templates import resolve_template_with_provenance
+        from agentworks.vms.templates import resolve_template_with_provenance as resolve_vm
 
         # Resolve the VM's templates and layers so init uses the right values.
         candidate_admin_template = vm.admin_template if admin_template is None else admin_template
@@ -110,11 +110,15 @@ def reinit_vm(
         supplied_admin = None if admin_spec is None else parse_admin_instance_spec(admin_spec or "{}")
         legacy_conversion = None
         if admin_spec is not None:
-            # The VM layer is kept as stored; the stored admin layer is superseded unread.
-            stored_vm_overlay = None if original_overlay is None else stored_vm_layer(original_overlay)
+            # The VM layer is kept as stored; the stored admin layer may be superseded.
+            stored_vm_overlay = (
+                None
+                if original_overlay is None
+                else vm_layer_kept_by_admin_spec(original_overlay, clearing=supplied_admin is None)
+            )
             candidate_admin_overlay = supplied_admin
         else:
-            base = resolve_admin_base(registry, candidate_admin_template).value.active_harness_integrations
+            base = resolve_admin(registry, candidate_admin_template).value.active_harness_integrations
             stored_overlays = (
                 None if original_overlay is None else decode_stored_vm_overlays(original_overlay, legacy_user_base=base)
             )
@@ -126,7 +130,7 @@ def reinit_vm(
                 legacy_conversion = (original_overlay, stored_overlays.payload)
             stored_vm_overlay = None if stored_overlays is None else stored_overlays.vm
             candidate_admin_overlay = None if stored_overlays is None else stored_overlays.admin
-        layered_reinit_vm_tmpl = resolve_template_with_provenance(
+        layered_reinit_vm_tmpl = resolve_vm(
             registry,
             vm.template,
             overlay=None if stored_vm_overlay is None else stored_vm_overlay.declaration,
@@ -155,11 +159,12 @@ def reinit_vm(
         # rather than a raw KeyError traceback. This cheap row + registry
         # check bails before the Tailscale probe below.
         selected_admin_template = "default" if candidate_admin_template is None else candidate_admin_template
+        previous_admin_template = "default" if vm.admin_template is None else vm.admin_template
+        vm = replace(vm, admin_template=candidate_admin_template)
         from agentworks.resources.live_publish import project_vm_live_resource
         from agentworks.vms.admin import effective_references as admin_effective_references
-        from agentworks.vms.admin_templates import resolve_template_with_provenance as resolve_admin_template
 
-        layered_admin = resolve_admin_template(
+        layered_admin = resolve_admin(
             registry,
             selected_admin_template,
             overlay=candidate_admin_overlay,
@@ -219,15 +224,60 @@ def reinit_vm(
             config.operator.ssh_private_key,
         )
 
-        # Everything is validated and resolved: persist the re-point and the admin
-        # layer together, as agent reinit does, before the boundary. Both remain
-        # if initialization then fails, so a re-run retries them.
+        # Reinit is the one establishment path that may operate on a historic VM
+        # with no SSH evidence. Known drift still refuses before activation or
+        # transport construction.
+        _mgr.require_vm_ssh_boundary(db, config, vm, allow_not_recorded=True)
+
+        _mgr.verify_tailscale_available()
+        # The base checks run through agentworks.execution: an unsupported client
+        # refuses before the gate, a secret or the platform is touched.
+        execution.resolve_ssh()
+        cred_nodes = tuple(git_credential_node(registry, cred_name) for cred_name in admin.git_credentials)
+
+        # The reinit graph: the live VM (whose row's site field is its edge
+        # to the vm-site node) plus each declared credential as its own
+        # root. The vm-template is deliberately NOT a node here: its
+        # Tailscale key is not part of reinit's planned ops (repairing a broken
+        # node is 'agw vm recover'), so it must not join the boundary union.
+        nodes = walk(vm_node, *cred_nodes)
+        for secret_name in secret_union(nodes):
+            resolver.register_name(secret_name)
+
+        from agentworks.harness_setup.lifecycle import prepare_vm_setup
+
+        setup_inputs = prepare_vm_setup(db, registry, name=name, template=reinit_vm_tmpl, admin=admin)
+        for setup_input in setup_inputs:
+            setup_input.register(resolver, registry)
+
+        scope = OperationScope(
+            level=ScopeLevel.VM,
+            system_slug=db.get_setting(SYSTEM_SLUG_KEY) or None,
+            vm=name,
+        )
+
+        def scoped_ctx(
+            secret_names: tuple[str, ...],
+            *,
+            admin_access: VMAccess | None = None,
+            agent_access: VMAccess | None = None,
+        ) -> RunContext:
+            return RunContext(
+                config=config,
+                operation_scope=scope,
+                admin_access=admin_access,
+                agent_access=agent_access,
+                secrets=ScopedSecrets(resolver.values, secret_names),
+            )
+
+        setup_failures: list[SetupFailure] = []
+
         from agentworks.instance_specs import (
             OverlayDisposition,
             OverlayOutcome,
             admin_overlay_field_names,
+            render_overlay_outcome,
             replace_vm_admin_overlay,
-            report_overlay_outcome,
         )
 
         overlay_outcome = None
@@ -235,69 +285,32 @@ def reinit_vm(
             overlay_outcome = OverlayOutcome(
                 OverlayDisposition.RETAINED, admin_overlay_field_names(candidate_admin_overlay)
             )
-        if admin_template is not None or admin_spec is not None:
-            previous_admin_template = vm.admin_template
+
+        def persist_declarations() -> None:
+            """Persist the re-point and the admin layer together, as agent reinit does.
+
+            Called once every check before initialization has passed (the
+            declarations, the SSH boundary, the activation gate, preflight,
+            secrets and the VM contract's base checks), none of which reads
+            what this stores. Both remain if initialization then fails, so a
+            re-run retries them.
+            """
+            nonlocal overlay_outcome
+            if admin_template is None and admin_spec is None:
+                return
             with db.transaction():
                 if admin_template is not None:
                     db.update_vm_admin_template(vm.name, admin_template)
                 if admin_spec is not None:
                     overlay_outcome = replace_vm_admin_overlay(db, vm.name, supplied_admin)
-            vm = replace(vm, admin_template=candidate_admin_template)
-            if admin_template is not None and admin_template != previous_admin_template:
+            if selected_admin_template != previous_admin_template:
                 output.info(
-                    f"VM '{name}' admin template binding saved as {admin_template!r} (previously "
-                    f"{previous_admin_template!r}). The binding remains if initialization fails; use --admin-template "
-                    "to choose a different one."
+                    f"VM '{name}' admin template binding saved as {selected_admin_template!r} (previously "
+                    f"{previous_admin_template!r}). The binding remains if initialization fails; use "
+                    "--admin-template to choose a different one."
                 )
 
-        with report_overlay_outcome(overlay_outcome):
-            # Reinit is the one establishment path that may operate on a historic VM
-            # with no SSH evidence. Known drift still refuses before activation or
-            # transport construction.
-            _mgr.require_vm_ssh_boundary(db, config, vm, allow_not_recorded=True)
-
-            _mgr.verify_tailscale_available()
-            # The base checks run through agentworks.execution: an unsupported client
-            # refuses before the gate, a secret or the platform is touched.
-            execution.resolve_ssh()
-            cred_nodes = tuple(git_credential_node(registry, cred_name) for cred_name in admin.git_credentials)
-
-            # The reinit graph: the live VM (whose row's site field is its edge
-            # to the vm-site node) plus each declared credential as its own
-            # root. The vm-template is deliberately NOT a node here: its
-            # Tailscale key is not part of reinit's planned ops (repairing a broken
-            # node is 'agw vm recover'), so it must not join the boundary union.
-            nodes = walk(vm_node, *cred_nodes)
-            for secret_name in secret_union(nodes):
-                resolver.register_name(secret_name)
-
-            from agentworks.harness_setup.lifecycle import prepare_vm_setup
-
-            setup_inputs = prepare_vm_setup(db, registry, name=name, template=reinit_vm_tmpl, admin=admin)
-            for setup_input in setup_inputs:
-                setup_input.register(resolver, registry)
-
-            scope = OperationScope(
-                level=ScopeLevel.VM,
-                system_slug=db.get_setting(SYSTEM_SLUG_KEY) or None,
-                vm=name,
-            )
-
-            def scoped_ctx(
-                secret_names: tuple[str, ...],
-                *,
-                admin_access: VMAccess | None = None,
-                agent_access: VMAccess | None = None,
-            ) -> RunContext:
-                return RunContext(
-                    config=config,
-                    operation_scope=scope,
-                    admin_access=admin_access,
-                    agent_access=agent_access,
-                    secrets=ScopedSecrets(resolver.values, secret_names),
-                )
-
-            setup_failures: list[SetupFailure] = []
+        try:
             with activation_gate(vm_node, gate_secret_resolver(config, registry, resolver)):
                 # Credentials and active setup env/config secrets share one eager
                 # boundary. Install-command runners keep their existing environment.
@@ -361,6 +374,7 @@ def reinit_vm(
                         verified_release = _mgr.reconcile_release(db, vm, report.release)
                         _warn_newly_observed_legacy(vm, verified_release)
                         contract.enforce(report, name)
+                        persist_declarations()
                         _mgr.run_initialization(
                             db,
                             config,
@@ -397,6 +411,9 @@ def reinit_vm(
             from agentworks.ssh_config import sync_ssh_config_or_warn
 
             sync_ssh_config_or_warn(config, db)
+        finally:
+            # The outcome renders once the command settles, before any collected setup failure.
+            render_overlay_outcome(overlay_outcome)
 
         refreshed_vm = db.get_vm(name)
         assert refreshed_vm is not None

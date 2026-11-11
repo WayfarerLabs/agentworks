@@ -1063,10 +1063,10 @@ no longer use them. The departures from the tables above, each recorded where it
   value: `dotfiles_source` and `mise_lockfile` through the layer codec, and a harness settings
   `source` through `_refused_activation_sources`. The codec keeps an activation's config opaque and
   the registry validates it per integration when it publishes the owner, where a refused settings
-  `source` would be a config error with no repair, so the decode validates each seated
-  integration's config itself and classifies a failure that is only refused sources. Only an
-  agent's, a workspace's and a VM admin layer's activations can hold one (no VM-facet config has a
-  source), so a VM record's refusal always carries `VM_ADMIN_REPLACEMENT_REMEDY`. It and
+  `source` would be a config error with no repair, so the decode validates each seated integration's
+  config itself and classifies a failure that is only refused sources. Only an agent's, a
+  workspace's and a VM admin layer's activations can hold one (no VM-facet config has a source), so
+  a VM record's refusal always carries `VM_ADMIN_REPLACEMENT_REMEDY`. It and
   `ActivationMapMigrationRequired` share the base `ExplicitReplacementRequired`, which
   `replace_agent_overlay` lets an explicit `--spec` replace or clear; a retain still refuses. Doctor
   shows its hint, and the describe commands' `instance_state` reports any
@@ -1082,20 +1082,25 @@ no longer use them. The departures from the tables above, each recorded where it
   message and hint before using the base template.
 - `vm reinit --admin-template NAME` and `--admin-spec JSON` (operator ruling 2026-11-10) follow
   `agent reinit`'s `--update-template` and `--spec`. Omitted, both are retained; a supplied admin
-  spec replaces the stored admin layer, and `''` or `{}` clears it. `--admin-template` must name a
-  declared, enabled admin-template, and the retained admin layer applies on it, as an agent's layer
-  does on its new template. `reinit_vm` holds the VM's native mutation guard throughout (passing it
-  to `run_initialization` as `setup_guard`) and loads declarations only, then resolves both
-  candidate layers and publishes this VM's candidate as a pending live resource before the
-  database's, so a stored layer being superseded is never decoded for it. Every check runs before
-  the re-point (`Database.update_vm_admin_template`) and `instance_specs.replace_vm_admin_overlay`
-  persist in one transaction, ahead of the SSH boundary; both remain if initialization then fails.
-  `replace_vm_admin_overlay` decodes only the stored VM layer (`stored_vm_layer`), which it keeps,
-  so an admin layer that raises `ExplicitReplacementRequired` is superseded unread while a VM layer
-  that does not decode still refuses. The outcome names admin fields only and is rendered when the
-  command settles, before collected setup failures. A refused admin source, or an admin activation
-  list, gets `instance_specs.VM_ADMIN_REPLACEMENT_REMEDY`; a VM layer cannot change after create, so
-  its refusals keep the migrate-or-recreate remedy (no VM-layer field validates a source today).
+  spec replaces the stored admin layer, and an exact `''` or `{}` clears it. `--admin-template` must
+  name a declared, enabled admin-template (resolving it refuses an undeclared one, so the former
+  `require_declared_template` pre-check is gone for both commands), and the retained admin layer
+  applies on it, as an agent's layer does on its new template. `reinit_vm` holds the VM's native
+  mutation guard throughout (passing it to `run_initialization` as `setup_guard`) and loads
+  declarations only, then resolves both candidate layers and publishes this VM's candidate as a
+  pending live resource before the database's. The stored admin layer gets `replace_agent_overlay`'s
+  tolerance (`instance_specs.vm_layer_kept_by_admin_spec`): a replacement supersedes one that raises
+  `ExplicitReplacementRequired`, a clear any `UnsupportedStoredOverlayError`, and a malformed layer,
+  or on a replacement one from a newer release, refuses with its own hint; the kept VM layer refuses
+  whatever it cannot read. The re-point (`Database.update_vm_admin_template`) and
+  `instance_specs.replace_vm_admin_overlay` persist in one transaction after every check before
+  initialization: the declarations, the configured SSH identity, the SSH boundary, Tailscale and the
+  SSH client, the activation gate, preflight, secret resolution and the VM contract's base checks,
+  none of which reads what is stored. So a refusal anywhere before initialization leaves the row and
+  the record untouched, and both remain if initialization then fails. The binding message names a
+  NULL template `'default'` and is skipped when the effective template is unchanged, as agent
+  reinit's now is. The outcome names admin fields only and is rendered when the command settles,
+  before collected setup failures.
 - One git sequence for every case (above, "One dotfiles sync"): the ref, or `HEAD`, is fetched and
   checked out detached after any clone, and a failed sync skips the install for the agent too.
 - A bare relative `dotfiles_destination` is a path in the home, and one that is, holds or lies

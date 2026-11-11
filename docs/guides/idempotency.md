@@ -58,8 +58,9 @@ errors still abort. An integration failure does not report complete setup.
 If the VM was created with `--spec` or `--admin-spec`, reinit consumes both stored final layers
 after their selected VM and admin templates. `vm reinit --admin-template <name>` re-points the admin
 user and `--admin-spec` replaces the admin layer (`'{}'` or `''` clears it), with the same
-validate-then-persist order and retry behavior as `agent reinit --update-template` and `--spec`
-above. The VM layer cannot change after create.
+validation, retry behavior and tolerance of a stored layer that needs replacing as
+`agent reinit --update-template` and `--spec` above. Both are stored only once the VM contract's
+checks have passed, just before initialization. The VM layer cannot change after create.
 
 Reinit never writes Agentworks' own files in a home through a symbolic link: the profile and rc
 fragments, the rc files' source lines, the mise config and lockfile, and `~/.ssh` and its
