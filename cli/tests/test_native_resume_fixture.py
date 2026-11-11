@@ -22,7 +22,7 @@ SPEC.loader.exec_module(fixture)
 
 
 class FixtureTests(unittest.TestCase):
-    def setUp(self):
+    def setUp(self) -> None:
         self.output = io.StringIO()
         with (
             patch("socket.getfqdn", side_effect=AssertionError("DNS lookup")),
@@ -35,7 +35,7 @@ class FixtureTests(unittest.TestCase):
         self.thread.start()
         self.addCleanup(self.cleanup_server)
 
-    def cleanup_server(self):
+    def cleanup_server(self) -> None:
         self.server.stop()
         self.thread.join(3)
         self.assertFalse(self.thread.is_alive())
@@ -48,10 +48,18 @@ class FixtureTests(unittest.TestCase):
         self.assertEqual(events[-1]["event"], "stopped")
         self.assertEqual([row["sequence"] for row in events], list(range(1, len(events) + 1)))
 
-    def events(self):
+    def events(self) -> list[dict[str, object]]:
         return [json.loads(line) for line in self.output.getvalue().splitlines()]
 
-    def request(self, path, data=None, *, headers=None, method="POST", body=None):
+    def request(
+        self,
+        path: str,
+        data: object = None,
+        *,
+        headers: dict[str, str] | None = None,
+        method: str = "POST",
+        body: bytes | None = None,
+    ) -> tuple[int, str | None, bytes]:
         connection = http.client.HTTPConnection(*self.address, timeout=3)
         try:
             connection.request(method, path, json.dumps(data).encode() if body is None else body, headers or {})
@@ -60,14 +68,21 @@ class FixtureTests(unittest.TestCase):
         finally:
             connection.close()
 
-    def mcp(self, method, *, params=None, headers=None, identifier=1):
+    def mcp(
+        self,
+        method: str,
+        *,
+        params: dict[str, object] | None = None,
+        headers: dict[str, str] | None = None,
+        identifier: int | str = 1,
+    ) -> tuple[int, str | None, bytes]:
         return self.request(
             "/mcp",
             {"jsonrpc": "2.0", "id": identifier, "method": method, "params": params or {}},
             headers={"Authorization": "Bearer " + fixture.MCP_TOKEN} if headers is None else headers,
         )
 
-    def test_mcp_requires_exact_public_canary_and_performs_real_discovery(self):
+    def test_mcp_requires_exact_public_canary_and_performs_real_discovery(self) -> None:
         for headers in (
             {},
             {"Authorization": "Bearer wrong-private-value"},
@@ -93,7 +108,7 @@ class FixtureTests(unittest.TestCase):
         self.assertEqual([row["method"] for row in observed], ["initialize", "tools/list"])
         self.assertTrue(all(row["auth_valid"] for row in observed))
 
-    def test_canary_call_is_constant_and_unknown_tool_has_no_healthy_result(self):
+    def test_canary_call_is_constant_and_unknown_tool_has_no_healthy_result(self) -> None:
         status, _, body = self.mcp("tools/call", params={"name": fixture.CANARY_TOOL, "arguments": {}})
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(body)["result"]["content"], [{"type": "text", "text": fixture.MARKER}])
@@ -110,7 +125,7 @@ class FixtureTests(unittest.TestCase):
         for method in ("ping", "resources/list", "resources/templates/list", "prompts/list"):
             self.assertEqual(self.mcp(method)[0], 200)
 
-    def test_provider_json_and_native_tested_sse_frames(self):
+    def test_provider_json_and_native_tested_sse_frames(self) -> None:
         for endpoint, key in (("messages", "messages"), ("responses", "input")):
             for stream in (False, True):
                 with self.subTest(endpoint=endpoint, stream=stream):
@@ -143,7 +158,7 @@ class FixtureTests(unittest.TestCase):
                         self.assertEqual(events[-1]["response"]["output"][0]["content"][0]["text"], fixture.MARKER)
                     self.assertEqual("".join(deltas), fixture.MARKER)
 
-    def test_role_aware_context_and_nested_canary_metadata(self):
+    def test_role_aware_context_and_nested_canary_metadata(self) -> None:
         messages = [
             {"role": "user", "content": [{"type": "input_text", "text": fixture.PROMPT1}]},
             {"role": "assistant", "content": [{"type": "output_text", "text": fixture.MARKER}]},
@@ -176,7 +191,7 @@ class FixtureTests(unittest.TestCase):
         self.assertFalse(fresh["resume_prompt_present"])
         self.assertFalse(fresh["prior_synthetic_reply_present"])
 
-    def test_markers_in_wrong_roles_or_tool_data_do_not_report_continuation(self):
+    def test_markers_in_wrong_roles_or_tool_data_do_not_report_continuation(self) -> None:
         user_markers = fixture.PROMPT1 + fixture.PROMPT2
         messages = [
             {"role": "system", "content": user_markers + fixture.MARKER},
@@ -208,7 +223,7 @@ class FixtureTests(unittest.TestCase):
             )
         )
 
-    def test_provider_auth_accepts_only_absence_or_fixed_public_keys(self):
+    def test_provider_auth_accepts_only_absence_or_fixed_public_keys(self) -> None:
         for headers in ({}, {"x-api-key": fixture.PROVIDER_KEY}, {"Authorization": "Bearer " + fixture.PROVIDER_KEY}):
             self.assertEqual(self.request("/v1/messages", {"messages": []}, headers=headers)[0], 200)
         for headers in (
@@ -222,7 +237,7 @@ class FixtureTests(unittest.TestCase):
         rejected = [row for row in self.events() if row["event"] == "request_rejected"]
         self.assertTrue(all(row["auth_valid"] is False for row in rejected))
 
-    def test_count_tokens_and_maximum_valid_body_use_the_same_listener(self):
+    def test_count_tokens_and_maximum_valid_body_use_the_same_listener(self) -> None:
         status, _, body = self.request("/v1/messages/count_tokens?ignored=true", {"messages": []})
         self.assertEqual(status, 200)
         self.assertGreater(json.loads(body)["input_tokens"], 0)
@@ -230,7 +245,7 @@ class FixtureTests(unittest.TestCase):
         body += b" " * (fixture.MAX_BODY - len(body))
         self.assertEqual(self.request("/v1/messages", body=body)[0], 200)
 
-    def test_query_is_ignored_and_no_raw_secret_body_or_header_is_logged(self):
+    def test_query_is_ignored_and_no_raw_secret_body_or_header_is_logged(self) -> None:
         secret = "private-request-body-and-query-641902"
         error_output = io.StringIO()
         with contextlib.redirect_stderr(error_output):
@@ -255,7 +270,7 @@ class FixtureTests(unittest.TestCase):
         for row in self.events():
             self.assertTrue(all(isinstance(value, (str, int, float, bool)) for value in row.values()))
 
-    def test_malformed_and_bounded_requests_are_refused_without_stopping_listener(self):
+    def test_malformed_and_bounded_requests_are_refused_without_stopping_listener(self) -> None:
         for body in (
             b"{invalid",
             b"[]",
@@ -279,7 +294,7 @@ class FixtureTests(unittest.TestCase):
         self.assertEqual(self.request("/unknown", method="GET")[0], 404)
         self.assertEqual(self.request("/mcp", method="DELETE")[0], 401)
 
-    def test_duplicate_auth_headers_are_refused(self):
+    def test_duplicate_auth_headers_are_refused(self) -> None:
         connection = http.client.HTTPConnection(*self.address, timeout=3)
         try:
             connection.putrequest("POST", "/mcp")
@@ -295,12 +310,12 @@ class FixtureTests(unittest.TestCase):
 
 
 class LifecycleTests(unittest.TestCase):
-    def assert_closed(self, address):
+    def assert_closed(self, address: tuple[str, int]) -> None:
         with socket.socket() as connection:
             connection.settimeout(1)
             self.assertNotEqual(connection.connect_ex(address), 0)
 
-    def test_lifetime_closes_active_partial_request_and_joins_timer(self):
+    def test_lifetime_closes_active_partial_request_and_joins_timer(self) -> None:
         server = fixture.FixtureServer(output=io.StringIO())
         address = ("127.0.0.1", server.server_port)
         thread = threading.Thread(target=server.run, args=(0.2,))
@@ -318,9 +333,9 @@ class LifecycleTests(unittest.TestCase):
             server.server_close()
         self.assert_closed(address)
 
-    def run_signal_case(self, signum):
+    def run_signal_case(self, signum: int) -> None:
         class Output(io.StringIO):
-            def write(self, value):
+            def write(self, value: str) -> int:
                 result = super().write(value)
                 if value == "\n" and '"event": "ready"' in self.getvalue():
                     ready.set()
@@ -329,7 +344,7 @@ class LifecycleTests(unittest.TestCase):
         output = Output()
         ready = threading.Event()
 
-        def terminate():
+        def terminate() -> None:
             if ready.wait(3):
                 signal.raise_signal(signum)
 
@@ -347,10 +362,10 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(events[-1]["event"], "stopped")
         self.assert_closed(("127.0.0.1", events[0]["port"]))
 
-    def test_sigint_stops_and_restores_handler(self):
+    def test_sigint_stops_and_restores_handler(self) -> None:
         self.run_signal_case(signal.SIGINT)
 
-    def test_sigterm_stops_and_restores_handler(self):
+    def test_sigterm_stops_and_restores_handler(self) -> None:
         self.run_signal_case(signal.SIGTERM)
 
 
