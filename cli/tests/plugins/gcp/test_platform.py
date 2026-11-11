@@ -127,6 +127,7 @@ class _Instances:
         self.resource: compute_v1.Instance | None = None
         self.insert_requests: list[compute_v1.InsertInstanceRequest] = []
         self.start_requests: list[compute_v1.StartInstanceRequest] = []
+        self.resume_requests: list[compute_v1.ResumeInstanceRequest] = []
         self.stop_requests: list[compute_v1.StopInstanceRequest] = []
         self.delete_requests: list[compute_v1.DeleteInstanceRequest] = []
         self.get_failures: list[Exception] = []
@@ -167,6 +168,12 @@ class _Instances:
         self.resource.status = "RUNNING"
         self.resource.network_interfaces[0].access_configs[0].nat_i_p = "203.0.113.20"
         return self._operation(request.request_id, "start")
+
+    def resume(self, *, request: compute_v1.ResumeInstanceRequest, **_kwargs: object) -> _Operation:
+        self.resume_requests.append(request)
+        assert self.resource is not None
+        self.resource.status = "RUNNING"
+        return self._operation(request.request_id, "resume")
 
     def stop(self, *, request: compute_v1.StopInstanceRequest, **_kwargs: object) -> _Operation:
         self.stop_requests.append(request)
