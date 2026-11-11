@@ -88,18 +88,6 @@ def render_mcp(item: ArtifactInput, tool: MCPTool) -> SettingsObject:
     return result
 
 
-def mcp_servers(inputs: ArtifactInputs, tool: MCPTool) -> SettingsObject:
-    """Return native entries for private session configurations and overrides."""
-    result: SettingsObject = {}
-    for item in inputs.items():
-        if item.content.type == ArtifactType.MCP_SERVER:
-            name = mcp_native_name(item)
-            if name in result:
-                raise ConfigError("MCP server native names collide")
-            result[name] = render_mcp(item, tool)
-    return result
-
-
 _MCP_USER_PATH = r"""
 import json, os, sys
 request = json.load(sys.stdin)
@@ -235,8 +223,19 @@ def session_mcp_conflicts(
 
 
 def _fingerprint(value: SettingsValue) -> str:
-    content = json.dumps(value, sort_keys=True, ensure_ascii=True, separators=(",", ":"), default=str).encode()
+    content = json.dumps(value, sort_keys=True, ensure_ascii=True, separators=(",", ":"), allow_nan=False).encode()
     return hashlib.sha256(content).hexdigest()
+
+
+def _matches(claim: NativeClaim, value: SettingsValue) -> bool:
+    if claim.sha256 is None:
+        return False
+    try:
+        return claim.sha256 == _fingerprint(value)
+    except (TypeError, ValueError):
+        # TOML dates/times and other non-JSON edits cannot match a managed
+        # canonical entry, even when their printed text resembles a prior string.
+        return False
 
 
 def _table(document: SettingsObject, key: str) -> SettingsObject:
@@ -366,21 +365,18 @@ def apply_mcp(
 
         retained: list[NativeClaim] = []
         retired: list[str] = []
+        modified: list[NativeClaim] = []
         for claim in old:
             if claim.identifier in desired or claim.source in invocation.retain_artifact_origins:
                 retained.append(claim)
             elif claim.identifier not in current:
                 retired.append(claim.identifier)
                 continue
-            elif claim.sha256 == _fingerprint(current[claim.identifier]):
+            elif _matches(claim, current[claim.identifier]):
                 _table(document, key).pop(claim.identifier)
                 retired.append(claim.identifier)
             else:
-                retained.append(claim)
-                invocation.report_incomplete(
-                    f"Retained modified MCP server '{claim.identifier}'; "
-                    "its current native entry differs from applied state."
-                )
+                modified.append(claim)
 
         working = None if initial is None else serialize_settings(document, format=format)
         if map_document is not None and not mapped:
@@ -388,6 +384,17 @@ def apply_mcp(
             document = {} if working is None else parse_settings(working, format=format)
         table = _table(document, key)
         contributed = _table(contributions, key)
+        for claim in modified:
+            # The explicit settings policy authorizes takeover or removal here;
+            # MCP retirement alone cannot change an externally modified entry.
+            if map_document is not None and (claim.identifier in contributed or claim.identifier not in table):
+                retired.append(claim.identifier)
+            else:
+                retained.append(claim)
+                invocation.report_incomplete(
+                    f"Retained modified MCP server '{claim.identifier}'; "
+                    "its current native entry differs from applied state."
+                )
         deferred: list[ArtifactDeferral] = list(blocked_deferrals)
         confirmed = {claim.identifier: claim for claim in retained}
         for name, item in desired.items():
@@ -395,7 +402,7 @@ def apply_mcp(
             owned_claim = confirmed.get(name)
             observed = table.get(name)
             conflict = name in contributed and observed != entry
-            owned = owned_claim is not None and name in current and owned_claim.sha256 == _fingerprint(current[name])
+            owned = owned_claim is not None and name in current and _matches(owned_claim, current[name])
             if conflict or (name in table and observed != entry and not owned):
                 reason = (
                     f"MCP server '{name}' conflicts with a mapped or externally managed native entry; "
@@ -436,8 +443,9 @@ def apply_mcp(
         if updated != previous:
             invocation.checkpoint(updated)
         for name in retired:
+            action = "Removed MCP server" if name not in table else "Released MCP ownership of native server"
             output.info(
-                f"Removed MCP server '{name}'. Any native OAuth credentials are retained. "
+                f"{action} '{name}'. Any native OAuth credentials are retained. "
                 "Use the harness's native logout before withdrawing a server when logout requires its definition."
             )
         return ArtifactApplication(

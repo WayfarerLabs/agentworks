@@ -8,8 +8,15 @@ from unittest.mock import Mock
 
 import pytest
 
+from agentworks.artifacts.application import ArtifactApplication
 from agentworks.artifacts.mcp import content_from_definition, parse_definition
-from agentworks.artifacts.model import ArtifactInput, ArtifactInputs, ArtifactOrigin, ArtifactProvenance
+from agentworks.artifacts.model import (
+    ArtifactComponent,
+    ArtifactInput,
+    ArtifactInputs,
+    ArtifactOrigin,
+    ArtifactProvenance,
+)
 from agentworks.artifacts.names import mcp_native_name
 from agentworks.artifacts.native.mcp import apply_mcp
 from agentworks.artifacts.routing import RoutingResult
@@ -18,7 +25,8 @@ from agentworks.capabilities.harness_integration.settings import parse_settings
 from agentworks.capabilities.harness_integration.setup import UserSetupInvocation
 from agentworks.harness_setup.dispatch import run_setup
 from agentworks.harness_setup.inputs import SetupInputs
-from agentworks.harness_setup.model import NativeSetupState, SetupRecord
+from agentworks.harness_setup.model import NativeClaim, NativeSetupState, SetupRecord
+from agentworks.harness_setup.outcomes import SetupFailure
 from agentworks.harness_setup.state import write_native_setup
 from agentworks.plugins import Plugin, seated_plugin
 from agentworks.schema import CapabilityConfig
@@ -30,7 +38,7 @@ from tests.plugins._fixtures import ConformingHarnessIntegration
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux guest native files")
 
 
-def item(component, name, command="fixture"):
+def item(component: ArtifactComponent, name: str, command: str = "fixture") -> ArtifactInput:
     return ArtifactInput(
         content=content_from_definition(name, parse_definition({"type": "stdio", "command": command})),
         provenance=ArtifactProvenance(),
@@ -46,7 +54,7 @@ def test_ancestor_claim_sources_are_retained_without_retaining_removed_local_def
     vm = db.insert_vm("vm", site="fixture", hostname="vm")
     path = target.home / ".codex/config.toml"
     ancestor, removed, current = item("vm", "ancestor"), item("agent", "removed"), item("agent", "current")
-    checkpoints = []
+    checkpoints: list[tuple[NativeClaim, ...]] = []
     invocation = UserSetupInvocation(
         vm=vm,
         runner=target,
@@ -86,18 +94,18 @@ def test_ancestor_claim_sources_are_retained_without_retaining_removed_local_def
     monkeypatch.setattr("agentworks.artifacts.routing.setup_artifacts", lambda *args: routing)
     monkeypatch.setattr("agentworks.harness_setup.dispatch.destination_id", lambda *args, **kwargs: "a" * 64)
     monkeypatch.setattr("agentworks.harness_setup.dispatch.ensure_harness_integration_enabled", lambda *args: None)
-    observed = []
+    observed: list[frozenset[str]] = []
 
     class RetentionMCP(ConformingHarnessIntegration):
         name = "mcp-retention-fixture"
         description = "Native ancestor retention fixture"
 
-        def user_init(self, call):
+        def user_init(self, call: UserSetupInvocation) -> ArtifactApplication:
             observed.append(call.retain_artifact_origins)
             return apply_mcp("codex", call, destination=str(path))
 
     with seated_plugin(Plugin(name="mcp-retention-plugin", capabilities={"harness-integration": (RetentionMCP,)})):
-        failures = []
+        failures: list[SetupFailure] = []
         state = run_setup(
             db,
             Mock(),
@@ -111,14 +119,17 @@ def test_ancestor_claim_sources_are_retained_without_retaining_removed_local_def
         assert observed == [expected]
         assert removed.origin_identity not in observed[0] and current.origin_identity not in observed[0]
         servers = parse_settings(path.read_bytes(), format="toml")["mcp_servers"]
+        assert isinstance(servers, dict)
         assert mcp_native_name(removed) not in servers
         assert (mcp_native_name(ancestor) in servers) is (unavailable != "none")
-        assert servers[mcp_native_name(current)]["command"] == "updated"
+        current_entry = servers[mcp_native_name(current)]
+        assert isinstance(current_entry, dict) and current_entry["command"] == "updated"
         assert {claim.source for claim in state.records[0].claims} == {current.origin_identity} | set(expected)
         assert read_captures(db, "agent", "fixture")["agent"].inputs == new_capture.inputs
         routing = replace(routing, routing_unknown=False, unresolved_routes=frozenset())
         state = run_setup(db, Mock(), inputs, invocation, operation="agent-reinit", failures=failures)
         assert observed[-1] == frozenset() and failures == []
         assert {claim.source for claim in state.records[0].claims} == {current.origin_identity}
-        assert mcp_native_name(ancestor) not in parse_settings(path.read_bytes(), format="toml")["mcp_servers"]
+        remaining = parse_settings(path.read_bytes(), format="toml")["mcp_servers"]
+        assert isinstance(remaining, dict) and mcp_native_name(ancestor) not in remaining
     assert not list((target.root / "tmp").iterdir())

@@ -27,6 +27,7 @@ from agentworks.errors import StateError
 from agentworks.harness_setup.dispatch import run_setup
 from agentworks.harness_setup.inputs import SetupInputs
 from agentworks.harness_setup.model import NativeClaim
+from agentworks.harness_setup.outcomes import SetupFailure
 from agentworks.plugins import Plugin, seated_plugin
 from agentworks.schema import CapabilityConfig
 from agentworks.secrets.orchestration import SecretTarget
@@ -102,7 +103,7 @@ def test_dispatch_excludes_shared_mcp_document_without_owning_or_changing_it(
     target = LocalFixtureTransport(tmp_path / "guest")
     workspace = target.home / "project"
 
-    def git(*args, check=True):
+    def git(*args: object, check: bool = True) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             ["git", *map(str, args)], env=target.environment, capture_output=True, text=True, check=check
         )
@@ -141,7 +142,7 @@ def test_dispatch_excludes_shared_mcp_document_without_owning_or_changing_it(
         name = "shared-mcp-fixture"
         description = "Shared native document fixture"
 
-        def workspace_init(self, call):
+        def workspace_init(self, call: WorkspaceSetupInvocation) -> ArtifactApplication:
             claims = tuple(claim for claim in (call.prior.claims if call.prior else ()) if claim.role != MCP_CLAIM_ROLE)
             if not self.retiring:
                 claims += (
@@ -157,7 +158,7 @@ def test_dispatch_excludes_shared_mcp_document_without_owning_or_changing_it(
             return ArtifactApplication(shared_paths=() if self.retiring else (str(native),))
 
     with seated_plugin(Plugin(name="shared-mcp-plugin", capabilities={"harness-integration": (SharedMCP,)})):
-        failures = []
+        failures: list[SetupFailure] = []
         state = run_setup(db, Mock(), inputs, invocation, operation="workspace-create", failures=failures)
         assert failures == []
         (record,) = state.records
