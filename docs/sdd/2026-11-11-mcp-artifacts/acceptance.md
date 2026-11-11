@@ -70,3 +70,31 @@ temporary directories were empty, no owned process remained and the loopback por
 connection after cleanup. Eleven fixture homes were removed. Source-scoped logs and reproduction
 scripts remain in the lead's ignored proof area. Full independent PR integration acceptance is still
 owed before phase-1 completion.
+
+## Independent registration round 1
+
+The
+[integration report](https://github.com/WayfarerLabs/agentworks/pull/888#issuecomment-6793155673)
+tested `8e827215` against main `07feb4a4`, through Linux and Windows Server 2025 workstation paths
+to remote Lima. It reports real managed acquisition/setup, agent/admin and fresh session operations,
+native registration/discovery, withdrawal, neighbor preservation, two MCP-bearing workspace moves
+and independent cleanup. Native versions were Claude 2.1.322, Codex 0.167.1 and Grok 1.0.77. The
+report separately attributes its installed-service and package checks rather than presenting them as
+managed CLI observations.
+
+Its three agent reinitializations reproduced an important Codex settings-destination defect when a
+login profile alone selected the native home. That result requires a corrected source and new
+acceptance; the green gates and other observations do not validate the fix. MCP-bearing moves also
+do not cover the separately identified file-only metadata policy.
+
+Fresh session argv/private-file and explicit opt-out observations are retained. Genuine conversation
+resume remains unproven: the resume-only attempt found no resumable native history. Claude project
+consent remained pending; Grok project HTTP reached an expired fixture endpoint. A canary that
+accepted a request without its missing binding proves neither a native binding refusal nor
+authenticated access. No synthetic history, replacement fresh launch or scope reinterpretation
+closes those gaps.
+
+The corrected handoff must emphasize consistent profile-selected settings before/add/withdraw/next
+reinit, common file-only and MCP-bearing rehome metadata, and fresh/genuine resumed session carriers
+with neighbor isolation. Retain project approval and endpoint limits explicitly. Phase-2 OAuth
+research does not replace this registration acceptance.
