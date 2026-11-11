@@ -176,6 +176,42 @@ These are local implementation observations. Combined full gates, full-PR privat
 package checks and independent integration acceptance remain unchecked below and above. They do not
 inherit the SDD checkpoint's green result.
 
+## First complete candidate and private corrections
+
+At `e6dc07a5`, the full frozen suite passed **12,485 tests, 35 skipped**. Ruff/format, exact CI
+Typer isolation and every repository/website gate passed. Full mypy failed with 79 test-helper and
+collection-narrowing errors in four new test files; no source typing relaxation was made. The
+wheel/source archive and frozen installation checks passed, including four standalone guide renders,
+help/sample and 488 source/wheel/installed package files. That is evidence for this pin, not a green
+claim for later corrections.
+
+Three independent pinned lanes found four shared correctness edges: typed TOML values could alias
+strings in ownership hashes; optional MCP could pass fragment admission and fail the complete
+launch; rejected field keys could inject or flood diagnostics; explicit mapping takeover of a
+modified withdrawn entry could leave stale incomplete ownership. Project review also caught an
+incorrect removal notice when the mapping preserved the entry. All findings were accepted. The
+immediate explicit mapping mutation was already authorized; only stale ownership/convergence was the
+defect. The suspected implicit/default Codex-profile bypass was tested and refuted on 0.167.0.
+
+`303c85ce5` fixes bounded known-field diagnostics and authoritative full-command MCP admission,
+without another runtime discovery decision. It deletes the two unreachable renderer catches and
+their synthetic tests. Its scoped selection passed 129 tests; eight complete-command cases cover
+fresh/resume/picker assembly and preservation of existing legacy limits. A first local edit had an
+indentation error, and a first regression used an overbroad substring assertion against the whole
+launcher; both were corrected before the passing result, with failures retained in proof.
+
+`cab7f0297` removes lossy native hash conversion, protects absent fingerprints, and reconciles
+modified obsolete claims after explicit mapping policy. Notices distinguish native removal from
+ownership release. It also deletes the unused collection renderer and types the three affected
+native/publication/dispatch test modules. Eighty-three focused cases and scoped mypy passed in that
+lane. The lead must still verify the combined full mypy/gates, package parity and all three private
+lanes at the corrected head before handoff.
+
+Reviewer filesystem failures are scoped separately: metadata-preserving ownership on the workspace
+mount returned EINVAL from existing `fchown`; equivalent owned `/tmp` fixtures passed. No global
+native ownership policy was changed for that environment limitation. Their original logs remain
+retained; the lead independently verified the reported temporary fixture roots absent.
+
 ## Phase 2: OAuth
 
 - [ ] Resolve the operator's native-configuration versus Agentworks login-workflow preference and

@@ -120,11 +120,14 @@ Truncating the readable component must not discard the full key from the identit
 Use ordinary instance state to track the smallest owned native unit, an MCP server entry or a
 private file, including partial progress. Retry converges owned registrations. Removing a
 declaration, activation or session retires unchanged owned effects wherever safely possible;
-operator-modified obsolete entries are retained with actionable diagnostics and cleanup evidence. Do
-not delete native OAuth credentials, foreign entries or shared documents wholesale during ordinary
-artifact cleanup. Explicit OAuth logout belongs to its own authentication workflow. Artifact cleanup
-adds no prerequisite to parent deletion or workspace rehome. Existing persistence, cancellation,
-internal-failure and recoverable-facet-failure semantics remain intact.
+operator-modified obsolete entries are retained with actionable diagnostics and cleanup evidence. An
+explicit settings mapping retains its normal authority to replace those values; if it takes over or
+removes a withdrawn entry, release obsolete artifact ownership in the same operation and report the
+actual final native outcome. Do not delete native OAuth credentials, foreign entries or shared
+documents wholesale during ordinary artifact cleanup. Explicit OAuth logout belongs to its own
+authentication workflow. Artifact cleanup adds no prerequisite to parent deletion or workspace
+rehome. Existing persistence, cancellation, internal-failure and recoverable-facet-failure semantics
+remain intact.
 
 Workspace MCP files follow ordinary local Git exclusions when untracked, including shared native
 config files. An already-tracked file stays tracked and produces a warning that changes remain

@@ -180,11 +180,15 @@ For an unchanged MCP-owned entry withdrawn while the mapping source still names 
 | `merge-preserve`  | Retired owned value no longer masks the source; source entry survives and the claim is released                               |
 | `skip-existing`   | If the original file existed, ignore the source and retire the MCP entry; if absent, apply source and release the stale claim |
 
-Modified obsolete values retain their current protection. Unrelated mapping keys obey the original
-strategy, and a removed mapping alone retains native values. `contributions(initial)` is not enough
-for this plan: suppressed source keys may become applicable after safe retirement. Use the prepared
-source and existing parser/serializer APIs, not a second state ledger or reread. No extra
-integration activates implicitly.
+MCP cleanup alone preserves modified obsolete values. An explicit policy-winning settings
+contribution can take over that native key, or an authoritative replacement can remove it. Release
+the obsolete artifact claim in the same pass; do not retain a stale fingerprint or repeated
+incomplete warning after that authorized result. Suppressed source contributions and unrelated
+merges keep the modified entry and its protection. Removal output distinguishes a missing native
+entry from a still-present entry whose artifact ownership ended. A removed mapping alone retains
+native values. `contributions(initial)` is not enough for this plan: suppressed source keys may
+become applicable after safe retirement. Use the prepared source and existing parser/serializer
+APIs, not a second state ledger or reread. No extra integration activates implicitly.
 
 ## Workspace paths, relocation and removal notices
 
@@ -238,6 +242,12 @@ override it is `$HOME/.claude.json`; with explicit `CLAUDE_CONFIG_DIR` it is the
 under that directory. A wrapper-synthesized rules root is not evidence that an override was present.
 Use the workload's existing login environment to observe only HOME and the native-home variable,
 never credential variables or profile-file content.
+
+The Codex command budget is decided against the complete selected fresh/resume/picker command,
+including ordinary flags, notification setup, initial input and quoting. If optional MCP makes it
+too large, defer its generated overrides and rebuild that same selected command once. Do not repeat
+discovery/adoption or weaken the legacy artifact limit. Cheap raw-argv rejection can avoid building
+an obviously oversized carrier, but it is not sufficient final admission.
 
 No MCP session carrier runs by default. Preserve unrelated artifact delivery when selecting MCP
 inputs, and explicitly handle/defer MCP in every adapter so omission cannot mean applied.
