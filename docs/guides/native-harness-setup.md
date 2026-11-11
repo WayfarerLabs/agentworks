@@ -184,8 +184,8 @@ actual user's shell. No Agentworks authentication wrapper is required.
    clients own token storage and refresh. Cancellation or failure is not success; inspect the native
    result without copying tokens or redirect codes into diagnostics.
 
-For noninteractive native interface discovery, existing exec paths can run help in the same user and
-workspace context. Put Agentworks options before the resource name:
+For native interface discovery without an interactive terminal, existing exec paths can run help in
+the same user and workspace context. Put Agentworks options before the resource name:
 
 ```sh
 agw agent exec --workspace service developer claude mcp login --help

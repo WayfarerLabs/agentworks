@@ -303,11 +303,11 @@ supported. There is no implicit shell command or templating language.
 An HTTP definition can declare `oauth: {}` to use the native client's OAuth defaults, or supply
 these optional public fields:
 
-| Field                 | Accepted value                                                       |
-| --------------------- | -------------------------------------------------------------------- |
-| `oauth.client_id`     | Literal nonblank public client ID, without controls or interpolation |
-| `oauth.callback_port` | Integer from 1 through 65535; strings and booleans are rejected      |
-| `oauth.scopes`        | Nonempty ordered list of unique RFC 6749 scope tokens                |
+| Field                 | Accepted value                                                                        |
+| --------------------- | ------------------------------------------------------------------------------------- |
+| `oauth.client_id`     | Literal public client ID containing non-space text, without controls or interpolation |
+| `oauth.callback_port` | Integer from 1 through 65535; strings and booleans are rejected                       |
+| `oauth.scopes`        | Nonempty ordered list of unique RFC 6749 scope tokens                                 |
 
 A scope token contains printable ASCII other than space, double quote or backslash. Omitted or null
 optional fields stay absent. An omitted or null `oauth` object preserves ordinary native
@@ -341,7 +341,7 @@ Setup does not run login, logout or credential-store probes. Use the actual user
 authenticate an established user/workspace registration, following
 [the native authentication workflow](https://github.com/WayfarerLabs/agentworks/blob/main/docs/guides/native-harness-setup.md#native-oauth-authentication).
 Tokens, refresh and logout remain native-owned. Changing endpoint or client options can require
-reauthentication even though the managed server name stays stable. A native-added confidential
+authenticating again even though the managed server name stays stable. A native-added confidential
 secret in a managed server table changes its fingerprint; ordinary foreign/modified-entry protection
 preserves it rather than granting authority to overwrite it.
 
