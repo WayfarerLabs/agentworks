@@ -1,5 +1,36 @@
 # Agent artifacts: implementation plan
 
+## Joint closeout, 2026-11-11
+
+The operator approved the sequence: close both existing SDDs, then MCP artifacts, then
+single-session workspaces. PR [871](https://github.com/WayfarerLabs/agentworks/pull/871) merged at
+`dc3fb557`. Its
+[final integration report](https://github.com/WayfarerLabs/agentworks/pull/871#issuecomment-6770963076)
+cleared exact source `fe2209cf` with no new material finding. This closes the earlier report wait;
+merge alone is not the acceptance evidence.
+
+The companion framework plan records the same joint closeout. This follow-up starts from main
+`834eb715`, including the separate Shell/env placeholder compatibility correction and dependency
+update. It owns the two accepted post-handoff Muntz fixes, the final acceptance and promotion audit,
+and both locks. It introduces no new artifact type or workspace mode.
+
+- [x] Read the complete final integration report and retain its exact source, native discovery, real
+      lifecycle and cleanup observations and stated limits.
+- [ ] Finish the two accepted Muntz corrections without changing launch, cleanup authority,
+      persistence or parent-deletion behavior.
+- [ ] Reconcile every retained requirement and historical unchecked task with its actual evidence;
+      finish any remaining permanent promotion.
+- [ ] Run required gates and independent project, Muntz and correctness review of the combined
+      closeout; correct material findings before locking.
+- [ ] Record final acceptance, reconcile the plans and create both `locked.md` files after the
+      evidence and closeout review establish completion.
+- [ ] Review the final record, publish a complete green ready handoff and assess the separate
+      integration report before any authorized feedback/fix round.
+
+Earlier checked records stay immutable. The dated acceptance records and the final reconciliation
+distinguish historical handoffs, corrected or superseded behavior, and the final supported contract.
+MCP and single-session workspace work belong to separate efforts after this closeout.
+
 ## Native delivery feedback, round 2 of 3, 2026-11-10
 
 The [complete report](https://github.com/WayfarerLabs/agentworks/pull/871#issuecomment-6755957164)

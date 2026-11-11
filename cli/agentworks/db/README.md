@@ -111,13 +111,14 @@ file's checkpoint evidence through interrupted required cleanup, even if the fil
 Only permission denial removing the final, verified-empty package root permits completed retirement
 with a warning. File records that omit this optional field can retire owned files with entrypoint
 ordering, but do not authorize directory pruning. Version-1 plugin/settings evidence remains
-readable but cannot claim that it handled artifact inputs. Core captures use a separate version-2
-`artifact-inputs` slice with effective declaration fingerprints and one group per actual owner. Each
-group has four type maps, lossless normalized content and compact replacement provenance. Inactive
-integrations reuse that common capture without acquiring their own applied record. Unsupported
-capture versions remain uninterpreted and cannot be overwritten by owning reinitialization. Backup
-preserves their payloads for an Agentworks version that can interpret them; independent native file
-ownership evidence is retained.
+readable but cannot claim that it handled artifact inputs. Core captures use a separate
+`artifact-inputs` slice, currently version 3 with version-2 captures still readable, containing
+effective declaration fingerprints and one group per actual owner. Each group has four type maps,
+lossless normalized content and compact replacement provenance. Inactive integrations reuse that
+common capture without acquiring their own applied record. Unsupported capture versions remain
+uninterpreted and cannot be overwritten by owning reinitialization. Backup preserves their payloads
+for an Agentworks version that can interpret them; independent native file ownership evidence is
+retained.
 
 Session rows have a durable unique `session_uuid` and a nullable `run_id`. Migration 38 assigns each
 existing session its UUID once; legacy run IDs remain absent until the next managed launch. Core
