@@ -18,7 +18,7 @@ are driven for real.
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
@@ -2217,8 +2217,14 @@ def test_create_command_preflight_uses_planned_identity_and_workspace_before_row
     rendered: list[str] = []
     original_render = render_template
 
-    def record_render(text: str, values: dict[str, str], *, field: str) -> str:
-        result = original_render(text, values, field=field)
+    def record_render(
+        text: str,
+        values: dict[str, str],
+        *,
+        field: str,
+        legacy_placeholders: Mapping[str, str] | None = None,
+    ) -> str:
+        result = original_render(text, values, field=field, legacy_placeholders=legacy_placeholders)
         rendered.append(result)
         return result
 

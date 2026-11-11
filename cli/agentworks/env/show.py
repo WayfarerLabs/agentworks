@@ -125,7 +125,7 @@ def show_env(
         session=session_env,
         identity_keys=identity_env.keys(),
     )
-    plaintext = render_plaintext(user_env_merged, runtime_values(resource_ctx))
+    plaintext = render_plaintext(user_env_merged, runtime_values(resource_ctx), legacy_keys=session_env or {})
     user_provenance = _per_key_provenance(
         vm=vm_env,
         workspace=workspace_env,
