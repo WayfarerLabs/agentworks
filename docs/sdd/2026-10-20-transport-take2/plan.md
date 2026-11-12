@@ -566,16 +566,16 @@ Definition of done: create and reinit run entirely on the new transport.
 ## Slice 7: Workspaces, sessions and backup (HLA D7; PR C)
 
 - [ ] Write [`sessions-lld.md`](./sessions-lld.md). It covers:
-  - `detached.py` (launch, observe, interrupt, download) with `FromFile` and `ToFile`, and the
-    `observation` option's rule for dispatching again;
+  - `detached.py` (launch, observe, interrupt, download) with `FromFile` and `ToFile`, and the bound
+    of each read, each one dispatch;
   - each workspace, session, console and backup request it moves, with its bound;
   - session environment in the request, and every pane path's terminal handover (HLA D8);
   - the env-newline refusals, the console's env carry across sudo and the legacy probe it deletes;
   - the incident audit of the entry points this slice moves.
 - [ ] Implement `detached.py`, and the `FromFile` and `ToFile` input and sink.
-- [ ] Add the `observation` request option (a caller's declaration that a request only reads, so it
-      may be dispatched again after `NotDelivered` or `Unknown`) with its first callers,
-      `detached.observe` and the sessions' status probes (HLA D5).
+- [ ] Bound the session and console status reads and pid repair at 10 seconds and `vm describe`'s
+      live resources at 30, each one dispatch, and retire `GUEST_OBSERVATION_ATTEMPTS` and
+      `DEDICATED_TEARDOWN_ATTEMPTS` (HLA D5).
 - [ ] Migrate:
   - workspace backends, rehome and repair;
   - workspace copy, using `run` over an opaque tar stream;
@@ -586,7 +586,11 @@ Definition of done: create and reinit run entirely on the new transport.
   - backup's launch, observation, interrupt and download, using `detached` and `ToFile` with
     progress.
   - the codex recorder's install in the session launch line (`plugins/codex/recorder.py`, a
-    `printf`, `chmod` and `mv` fragment), which writes a guest file outside `Files`.
+    `printf`, `chmod` and `mv` fragment), which writes a guest file outside `Files`;
+  - agent delete's session teardown and console window cleanup
+    (`agents/manager/lifecycle.py:389-398`, `:423-425`);
+  - `vm describe`'s live resources (`vms/manager/_helpers.py:306`), the last legacy caller outside
+    these modules.
 - [ ] Tests:
   - a fresh launch never matches an earlier one;
   - observation resumes across a dropped connection;
@@ -606,10 +610,13 @@ Definition of done: create and reinit run entirely on the new transport.
 - [ ] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
       issues and fix history), and add incident inventory rows before deleting anything.
 - [ ] Collateral: guides for sessions, consoles and backup where behavior changes.
-- [ ] Settle with the operator the commented post-bind resolve in
+- [x] Settle with the operator the commented post-bind resolve in
       `sessions/multi_console/restore.py` (it either runs or goes), and whether the workspace, agent
       and session refusals of a VM with no recorded SSH identity
-      (`applied_state.require_vm_ssh_identity`) should hint at `agw vm reinit`.
+      (`applied_state.require_vm_ssh_identity`) should hint at `agw vm reinit`. The operator ruled
+      to resolve every console pane's secrets in the boundary pass
+      ([FRD, 2026-11-12](./frd.md#2026-11-12); `sessions-lld.md`, "Console pane secrets in the
+      boundary"), and the refusal already hints at `agw vm reinit` (`vms/applied_state.py:262-273`).
 - [ ] Live evidence:
   - session and console create, attach, detach and restore on Remote Lima from all three
     workstations and on WSL2;
@@ -633,11 +640,10 @@ Definition of done: no workspace, session or backup module imports a legacy modu
       stderr, and have a failed join's error name the log. Deferred from slice 4's port, where it
       would have widened the `BootstrapProgress` protocol every plugin implements.
 - [ ] Delete the remaining legacy modules with their tests (slice 4 deletes
-      `agentworks.plugins.proxmox.transport`, and slice 5 `agentworks.harness_setup.runner` and
-      `agentworks.native_files`):
+      `agentworks.plugins.proxmox.transport`, slice 5 `agentworks.harness_setup.runner` and
+      `agentworks.native_files`, and slice 7 `agentworks.remote_exec`):
   - `agentworks.transports`
   - `agentworks.ssh`
-  - `agentworks.remote_exec`
 - [ ] Delete the `SSHError` special case in `cli/_entry.py`.
 - [ ] Delete doctor's `ssh` and `scp` `PATH` presence rows, which the resolver's verdict replaces.
 - [ ] Delete the independence guards that can no longer fail once the legacy modules are gone: the
