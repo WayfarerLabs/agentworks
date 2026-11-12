@@ -95,3 +95,9 @@ round preserves validated fingerprints and power behavior, integrates current ma
 requires new independent review, gates, exact-head handoff and actual integration feedback. This
 historical lock does not close the active follow-up; the goal remains active through convergence,
 monitoring and cleanup.
+
+The reporting implementation at `de3efe4e1` integrates main `bc294be28` and adds observation-local
+provenance plus equivalent public Console reporting. The owner passed focused behavioral/static
+checks and reviewed actual output, with the trust-test fixture correction recorded in validation.
+New independent review, full root gates, exact-head CI, ready publication and its actual associated
+integration report remain open. No convergence or completion is claimed.

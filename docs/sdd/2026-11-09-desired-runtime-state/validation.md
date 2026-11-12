@@ -267,3 +267,17 @@ databases, credentials/profiles and Windows roots. Unrelated retained fixtures w
 operator then authorized one reporting round on 2026-11-12. Its updated main, new source,
 independent reviews, gates, exact-head CI and actual new integration report still require
 validation; the preceding native results are not silently transferred to a new head.
+
+The reporting source is integrated at `de3efe4e1`, after merging current main `bc294be28` in
+`87d900bc2`. The owner passed 176 runtime-state/artifact lifecycle tests and a separate 119-case
+provenance/Console/MCP/rehome selection. A later 43-case run had 41 passes and two fixture failures
+because the shared fixture stubbed the trust boundary; restoring the real boundary yielded sixteen
+public-stop passes without a production trust change. These are separate possibly overlapping runs,
+not a claimed unique aggregate. Affected-file static checks and two-doc quality checks passed.
+
+Manual rendering covered both provenance values, preserved failure detail, preview and public
+Console forms. Structural tests cover metadata preservation, fresh-observation reset, final OFF
+projection, guest-free evidence retention, conditional preview and Console recheck/fallback paths.
+Imported foreign SDDs are byte-identical to main. New independent review, all root gates, final CI
+and the next actual integration report are required before convergence; no new live result is
+claimed by this focused evidence.

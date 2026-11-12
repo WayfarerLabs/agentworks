@@ -209,6 +209,29 @@ include.
 
 ## Verification boundaries
 
+### Inactive-parent observation provenance
+
+`RuntimeResult.observation_from_parent` defaults to false. An OFF-derived child observation sets it
+explicitly; native VM power records do not use it. `RuntimeInvocation.record` retains provenance
+when changing only action, outcome, reason or target, and replaces it together with a newly supplied
+observation. Ordinary new guest observations, including STOPPED and UNKNOWN, reset it by default.
+Preview's direct result replacements carry the same fact explicitly. This adds no persisted field,
+observation enum or new command.
+
+The renderer discloses parent inactivity and skipped guest inspection for that observation while
+retaining the original action and failure reason. The existing public named Console lifecycle has
+equivalent local reporting, selected by the final prepared target or confirmed OFF error fallback.
+An OFF-to-running recheck followed by guest inspection must report that final path. A late OFF
+projection after earlier native work must not claim that the whole invocation skipped the guest or
+that a complete pre-teardown fingerprint necessarily remains.
+
+Tests assert structured provenance and replacement, actions/outcomes, retained rows and guest/power
+calls across named/bulk/generic stop, Console stop, previews and final observations. Review actual
+rendered disclosures without assertions on authored prose. Preserve authoritative failure detail
+through final OFF projections and preserve existing cancellation accounting.
+
+### Existing runtime and migration boundaries
+
 An ordinary failure while notifying an already established teardown failure must enter the same
 cancel-and-drain path as other fatal reporting failures. Preserve any earlier primary cancellation;
 otherwise propagate that notification error. Never return normal success after losing a failure

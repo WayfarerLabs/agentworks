@@ -215,3 +215,23 @@ or permission to run subsequent serial work.
 If the failure observer itself cannot deliver an established failure, the shared reporting boundary
 is fatal: retain the first primary error, cancel queued work, drain active work and propagate it.
 Ordinary native failures with a functioning observer remain per-session outcomes.
+
+### Observation provenance while a parent is inactive
+
+Child results keep one invocation-local `observation_from_parent` fact alongside the observation. It
+identifies a status inferred from provider inactivity, rather than guest inspection for that
+observation. The renderer consumes it separately from the proposed/completed action and failure
+reason. This preserves conditional actions and authoritative errors instead of overloading either
+field with reporting provenance. Native VM power observations themselves need no qualification.
+
+Pair provenance with its observation: metadata-only updates preserve both, a fresh guest or unknown
+observation clears earlier parent-derived provenance, and an OFF-derived projection explicitly sets
+it. Preparation, completion, final observations, previews and the guest-free error fallback follow
+the same rule for sessions and named consoles. Public named Console stop reports the equivalent fact
+at its existing lifecycle boundary, based on the final prepared path after the power recheck.
+
+The disclosure qualifies this observation, not all work in the invocation. Earlier guest work or
+verified teardown may have occurred before a final OFF projection. Inactivity alone does not clear
+recorded native evidence, but the result must not promise that an original complete fingerprint
+survived earlier legitimate teardown. Existing statuses, convergence decisions, target acceptance,
+power behavior, database schema and native teardown remain unchanged.

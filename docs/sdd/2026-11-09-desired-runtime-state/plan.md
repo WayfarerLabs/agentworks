@@ -12,12 +12,12 @@ on `feat/desired-runtime-state`, based on main. No split PR, stack, early merge,
 is authorized. Private implementation commits may be partial; each published handoff is complete for
 its checkpoint and green. The PR remains draft until the complete implementation handoff.
 
-| Stage                   | Signal                                      | Published fix allowance                                | Current record                            |
-| ----------------------- | ------------------------------------------- | ------------------------------------------------------ | ----------------------------------------- |
-| FRD                     | Draft plus `review-requested`               | Up to two rounds                                       | Converged at `c6337609d`, two rounds used |
-| Complete design         | Draft plus `review-requested`               | Up to two rounds                                       | Converged at `32a176600`; two rounds used |
-| Complete implementation | Ready                                       | Two original rounds plus two separately granted rounds | Reporting round active                    |
-| Closeout                | Final lock in the same PR after convergence | No new feature/fix allowance inferred                  | Lock and closeout checks completed        |
+| Stage                   | Signal                                      | Published fix allowance                                | Current record                                |
+| ----------------------- | ------------------------------------------- | ------------------------------------------------------ | --------------------------------------------- |
+| FRD                     | Draft plus `review-requested`               | Up to two rounds                                       | Converged at `c6337609d`, two rounds used     |
+| Complete design         | Draft plus `review-requested`               | Up to two rounds                                       | Converged at `32a176600`; two rounds used     |
+| Complete implementation | Ready                                       | Two original rounds plus two separately granted rounds | Reporting round active                        |
+| Closeout                | Final lock in the same PR after convergence | No new feature/fix allowance inferred                  | Original closeout recorded; follow-up pending |
 
 The FRD convergence reading is PR comment 6762771633. The final report accepted prior corrections;
 its remaining phrase suggestion was independently assessed as optional. The HLA states uniform
@@ -651,8 +651,8 @@ conflict; integrate both sides and inspect the automatic production merges. Impo
 remain byte-identical to main. This is ordinary feature integration in the same PR, not new MCP
 work.
 
-- [ ] Integrate current main and preserve both artifact delivery and the desired-state lifecycle.
-- [ ] Correct inactive-parent observation provenance across actual/preview session and named Console
+- [x] Integrate current main and preserve both artifact delivery and the desired-state lifecycle.
+- [x] Correct inactive-parent observation provenance across actual/preview session and named Console
       results, preserving failure detail and replacing stale provenance after real observations.
 - [ ] Obtain clean independent reviews and all required gates, then publish the exact green head.
 - [ ] Wait for the actual associated integration report, critically dispose of feedback and complete
@@ -664,3 +664,27 @@ focused tests. One isolated owner implements source/tests/permanent collateral; 
 SDD, architecture and handoff. No further round or PR merge is inferred. Completed worker/scout
 trees and their integrated subordinate branch were retired after the preceding report; the three
 review trees remain available. The goal stays active through monitoring and disposition.
+
+The lead selected one consumed `observation_from_parent` fact in the existing result model after
+independent project and complexity scrutiny. Actions and reasons already carry distinct information;
+overloading them would need repeated merge/clear rules. The fact follows the reported observation,
+survives metadata-only updates and resets on new guest or unknown observations. Public named Console
+stop retains local lifecycle reporting with the equivalent final-path qualification. This is a
+reporting correction under existing R6, not a requirement, domain-status or power-policy amendment.
+The implementation owner is isolated on `fix/desired-runtime-state-provenance`; the lead retains all
+SDD ownership.
+
+The source owner delivered `de3efe4e1`, including merge `87d900bc2` of main `bc294be28`. The single
+artifact lifecycle conflict preserves the startup-observation seam, entity-aware error boundary and
+incoming native layout behavior. Imported foreign SDDs compare byte-identical to main. The result
+flag and local public Console reporter implement the approved observation-specific disclosure
+without altering native power or teardown. The real named/bulk stop trust regression restores the
+production boundary instead of using the shared fixture's intentional stub.
+
+Owner runs passed 176 runtime-state/artifact lifecycle cases and 119 provenance/Console/MCP/rehome
+cases. A later focused run had 41 passes and two test-fixture failures because the trust boundary
+was still stubbed; after restoring that boundary, all 16 public-stop cases passed. No production
+trust correction was made. Ruff check/format and mypy on thirteen affected files, two-doc quality
+checks and diff checks passed. Manual output review covered qualified/direct, failed, preview and
+both Console forms. All owner processes stopped and owned pytest scratch was removed. Independent
+reviews, full root gates, exact-head CI, handoff and actual integration validation remain pending.
