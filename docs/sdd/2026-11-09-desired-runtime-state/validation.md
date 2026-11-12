@@ -332,7 +332,7 @@ qualified parent-derived observations, preserved recorded evidence and reset pro
 guest observations. GCP resume preserved instance, boot and complete session/Console fingerprints;
 terminated cold recovery preserved logical session UUIDs with fresh boot/run identities. Healthy
 repeats preserved native identities. Linux secret-failure cases had positive controls that then
-observed the intended session teardowns and provider stop. Strict Codex continuation preserved
+observed the intended session stop operations and provider stop. Strict Codex continuation preserved
 native history through two turns against an owned loopback provider, without paid inference or MCP
 tool execution.
 
@@ -344,13 +344,13 @@ Shared-engine WSL limits were measured without changing global configuration. Be
 launchers retained explicit product trust arguments. Failed creates/rollback, observer
 serialization/socket/sentinel corrections and one rejected compound Shell command retain their
 original harness attribution. Complete old fingerprints can remain after verified absence; no manual
-database clearing was used. No full-guest scan with supplied private values is claimed. The
-initially over-delegated local join carrier and later omission remain a harness qualification, not a
-new product defect finding.
+database clearing was used. No full-guest scan with supplied private values is claimed. Local setup
+commands initially received the join carrier unnecessarily; later commands omitted it. This remains
+a harness qualification, not a new product defect finding.
 
 Independent cleanup verified all five guests, native/provider/process absence, zeroed nine-table
-databases with integrity/FK checks, credential/profile retirement and Windows registry/VHDX/root
-absence. Standing resources were preserved. Critical reading
+databases with integrity/FK checks, credential/profile retirement and Windows registration, virtual
+disk and test root absence. Standing resources were preserved. Critical reading
 [6833761926](https://github.com/WayfarerLabs/agentworks/pull/885#issuecomment-6833761926) accepts
 convergence with these limits; the existing importer race remains with its owner and is not waived.
 No material item remains open in the reporting batch.
