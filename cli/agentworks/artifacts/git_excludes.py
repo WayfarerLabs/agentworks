@@ -170,7 +170,13 @@ def reconcile_workspace_excludes(
         index = remaining.index(claim)
         remaining.pop(index)
         if _relative(claim, source_workspace, source_prefix) is None:
-            output.warn("Stored artifact exclusion no longer matches this workspace; its association was released.")
+            output.warn(
+                sanitize_setup_diagnostic(
+                    f"Stored artifact exclusion '{claim.identifier}' at recorded path '{claim.destination}' "
+                    "no longer matches this workspace; its association was released.",
+                    logger=runner.logger,
+                )
+            )
             continue
         current_claim = NativeClaim(
             role=GIT_EXCLUDE_ROLE, identifier=claim.identifier, destination=destination, source=source_workspace

@@ -396,6 +396,18 @@ refers to the operator's home. Git refs resolve once per capture; descendants co
 without fetching again. VM and admin capture share the same reference resolution during their setup
 operation. Pin a commit for reproducible updates. Do not put credentials in source URLs.
 
+Packages contain regular files and directories only. Capture rejects symbolic links, Windows reparse
+points, special files and `.git` path components; selected Git submodules are unsupported. Local
+capture checks file and directory identities before and after reading and rejects observed
+concurrent changes. Git capture reads the selected commit's objects without a checkout, hooks,
+checkout filters or export substitutions. Workstation Git credential helpers remain available for
+fetch authentication; capture does not use guest credentials or interactive input.
+
+One capture operation allows 120 seconds, 4,096 members, 16 MiB per member, 64 MiB of content and
+128 MiB of acquisition storage. VM/admin preparation shares that operation budget; other owning
+operations have their own. Acquisition failure removes its private staging and does not publish a
+fresh snapshot. Local enumeration and Git process output are bounded separately.
+
 Text uses Unix line endings. Skill supporting files retain executable intent and binary bytes;
 `preserve_bytes` names relative paths or globs for text fixtures that require exact bytes.
 `SKILL.md` cannot be exempted from normalization. Review imported content before authorizing its

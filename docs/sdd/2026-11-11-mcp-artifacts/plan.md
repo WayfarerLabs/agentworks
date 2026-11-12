@@ -21,9 +21,9 @@ complete green registration implementation gets a scoped handoff and ready state
 OAuth follows in a separate PR under this same open SDD, with up to three rounds per PR. Its
 detailed design follows the first working push. No automatic merge and no lock after phase 1.
 
-Closeout PR 887 remains a separate ready predecessor. Its green head and clean report are retained;
-MCP research/design can proceed while its normal merge is pending. Refresh main and assess actual
-predecessor state before implementation handoff. Do not edit predecessor SDDs or the saga ledger.
+Closeout PR 887 merged at `bd3da970` on 2026-11-12. Both predecessor locks are now binding on
+main. This registration branch incorporates that merge while preserving its diagnostics and the
+MCP relocation behavior. Do not edit predecessor SDDs or the saga ledger.
 
 Overall done means R1-R11 implemented and independently evidenced at the actual head, public
 collateral current, required private reviews clear, all gates green, actual integration findings
@@ -444,3 +444,21 @@ not default-daemon, persistent managed R6, model-cooperation or tool-execution p
 The pending ready handoff must still obtain the actual managed fresh/resume and isolation report,
 including normal Claude project consent and linked-worktree native relocation. OAuth remains phase 2
 of the same open SDD in its separate implementation PR. No phase-1 acceptance or lock is claimed.
+
+## Main conflict maintenance, 2026-11-12
+
+The operator directed resolving the conflicts after PR 887 merged and republishing PR 888. This is
+bounded merge maintenance, not an additional feedback/fix allowance or a change to acceptance.
+The starting public head is `95a51d3b`; current main is `bd3da970`. Draft state was verified before
+changing the branch. Both predecessor lockfiles were verified on main; neither locked directory
+receives an MCP amendment.
+
+- [x] Incorporate current main and resolve the sole conflict in native setup cleanup by preserving
+      both common placement relocation and the new sanitized retained-exclusion warnings.
+- [ ] Validate the combined source and obtain project, Muntz and generic correctness reviews of
+      the merge resolution before the new handoff.
+- [ ] Push the exact green head, update the PR description and handoff, and restore ready state
+      without `review-requested` for the separate integration-test session.
+
+The earlier integration report's missing managed resume evidence remains owed. Conflict resolution
+does not satisfy R6, complete phase 1, ship OAuth or justify the MCP SDD lock.
