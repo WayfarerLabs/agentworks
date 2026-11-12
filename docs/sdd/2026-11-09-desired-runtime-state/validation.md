@@ -239,8 +239,9 @@ disposition remain required; publication does not finish the active effort.
 
 Actual report 6792039907 tested `4825c99d1634855f057b2983b139ab1d08fd5e04` against main `07feb4a45`,
 ready event 35775308963. All twelve gates returned zero on their first runs, including 12,611 tests
-passed and 34 skipped in 456.84 seconds. The noneditable wheel and all 499 installed members were
-verified, and six packaged CLI/provenance/help calls passed without repository fallback.
+passed and 34 skipped in 456.84 seconds. The wheel was installed without editable mode, and all 499
+installed members were verified. Six packaged CLI/provenance/help calls passed without repository
+fallback.
 
 Linux and Windows Server 2025 workstations against remote Lima passed routing, mixed-owner bulk
 teardown with a retained peer, actual cold recovery of two desired sessions plus a named Console,
@@ -281,3 +282,16 @@ projection, guest-free evidence retention, conditional preview and Console reche
 Imported foreign SDDs are byte-identical to main. New independent review, all root gates, final CI
 and the next actual integration report are required before convergence; no new live result is
 claimed by this focused evidence.
+
+At `6ba02b8fa`, private cold review passed 93 reporting cases and four independent reporting/recheck
+probes, but its incoming artifact selection had 89 passes and one failure. The MCP staging test
+intercepted the old lifecycle teardown symbol rather than the exported manager symbol used by the
+prepared executor. A one-line diagnostic change passed the failing test and was restored. The owner
+then committed that test-only correction at `b4caececd`; the exact test and both artifact/MCP
+session lifecycle files passed (one and 39 cases), with focused static checks passing. No production
+staging failure was observed.
+
+Project review at `6ba02b8fa` passed 179 focused cases and was clean. Initial root non-pytest checks
+passed except file quality: cspell rejected one word in the lead's validation prose, now rephrased
+without a dictionary or source change. Final delta review, the file-quality rerun, root full suite,
+final CI and actual new integration evidence remain pending.
