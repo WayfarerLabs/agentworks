@@ -215,7 +215,7 @@ def test_no_claude_invocation_occurs(target: _LocalTarget, tmp_path: Path) -> No
 
 def test_bad_job_id_in_other_record_does_not_hide_parked_link(target: _LocalTarget) -> None:
     _session(target.root, "101.json", {"sessionId": _SID, "parkedJobId": "12ab3456"})
-    _session(target.root, "bad.json", {"kind": "bg", "jobId": [], "sessionId": _NEXT})
+    _session(target.root, "103.json", {"kind": "bg", "jobId": [], "sessionId": _NEXT})
     _session(target.root, "102.json", {"kind": "bg", "jobId": "12ab3456", "sessionId": _PARKED})
     assert _probe(target).candidates == (_PARKED,)
 

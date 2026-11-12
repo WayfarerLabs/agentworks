@@ -9,8 +9,7 @@ Claude process, including a real resume;
 ``--effort`` flags verbatim; ``remote_control`` enables Claude Code Remote
 Control; ``vim_mode`` and ``terminal_bell`` become session-local settings; and
 ``extra_args`` is a list of raw argv tokens emitted after generated options
-(the operator escape hatch for any flag the harness integration does not model). See
-``claude-code-lld.md``.
+(the operator escape hatch for any flag the harness integration does not model).
 
 Addressing uses a stored per-session UUID in the integration's ``session_id``
 state. Normal launches detect explicit continuation and parked-job pointers
@@ -86,7 +85,7 @@ class ClaudeCodeSetupConfig(AgwModel):
 
 
 class ClaudeCodeConfig(AgwModel):
-    """What a session template tells the ``claude-code`` integration.
+    """A session's effective ``claude-code`` harness configuration.
 
     The ``--permission-mode``, ``--model``, and ``--effort`` choice sets are
     Claude's own and drift between releases, so their values are forwarded
@@ -438,7 +437,6 @@ class ClaudeCodeIntegration(HarnessIntegration):
                 files=("/etc/claude-code/CLAUDE.md",),
             )
         command = self._resume_or_launch(sid, resume=resume)
-        self._state["session_id"] = sid
         if intent is HarnessLaunchIntent.FORCE_NEW:
             note = "Fresh Claude Code session requested. Starting a new one without resuming prior state..."
         elif resume:
@@ -449,6 +447,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
             note = "No existing Claude Code session. Starting a new one..."
         if self._artifact_plan.argv:
             validate_native_command(command)
+        self._state["session_id"] = sid
         return HarnessStart(command, note, self._artifact_plan.application)
 
     def _conversation(self, ctx: RunContext, *, intent: HarnessLaunchIntent) -> tuple[str, bool]:

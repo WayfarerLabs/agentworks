@@ -701,3 +701,22 @@ def test_detection_runs_before_artifact_preparation(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr("agentworks.plugins.claude.harness_integration.prepare_session_delivery", prepare)
     _harness_integration().start(_op_ctx(_FakeTarget()))
     assert events == ["detect", "artifacts"]
+
+
+def test_command_validation_failure_does_not_adopt_forced_conversation(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentworks.artifacts.native.common import NativeSessionArtifacts
+
+    _stub_observation(monkeypatch)
+    monkeypatch.setattr(
+        "agentworks.plugins.claude.harness_integration.prepare_session_delivery",
+        lambda *args, **kwargs: (NativeSessionArtifacts(argv=("--plugin-dir", "/fixture")), None),
+    )
+
+    def refuse(command: str) -> None:
+        raise StateError("fixture command rejected")
+
+    monkeypatch.setattr("agentworks.plugins.claude.harness_integration.validate_native_command", refuse)
+    state: dict[str, object] = {"session_id": _SID}
+    with pytest.raises(StateError):
+        _harness_integration({"force_uuid": _NEXT_SID}, state=state).start(_op_ctx(_FakeTarget()))
+    assert state == {"session_id": _SID}
