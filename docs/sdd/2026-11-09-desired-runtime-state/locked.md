@@ -101,3 +101,10 @@ provenance plus equivalent public Console reporting. The owner passed focused be
 checks and reviewed actual output, with the trust-test fixture correction recorded in validation.
 New independent review, full root gates, exact-head CI, ready publication and its actual associated
 integration report remain open. No convergence or completion is claimed.
+
+Reporting candidate `2875b1246` now has all three private lanes clean, all twelve local gates and
+all ten jobs in CI 43274224880. Its unchanged, non-overlapping root suite passed 12,990 tests with
+35 skips. The incoming MCP test interception correction is verified without production changes. This
+evidence update requires its own green CI and artifact review before ready handoff; the new actual
+integration report, feedback disposition and final follow-up cleanup/lock remain open. The goal
+remains active and no additional fix round or PR merge is inferred.

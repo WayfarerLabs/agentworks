@@ -654,7 +654,8 @@ work.
 - [x] Integrate current main and preserve both artifact delivery and the desired-state lifecycle.
 - [x] Correct inactive-parent observation provenance across actual/preview session and named Console
       results, preserving failure detail and replacing stale provenance after real observations.
-- [ ] Obtain clean independent reviews and all required gates, then publish the exact green head.
+- [x] Obtain clean independent reviews and all required gates on the pinned source candidate.
+- [ ] Publish the exact green final head with the complete scoped handoff.
 - [ ] Wait for the actual associated integration report, critically dispose of feedback and complete
       follow-up lock/cleanup only after convergence.
 
@@ -703,3 +704,24 @@ Final delta scrutiny remains required. Initial root non-pytest gates passed exce
 which rejected one word in the lead's validation prose; that word was rephrased without a dictionary
 or source change. The gate will be rerun. No full root suite or new native validation has been
 claimed yet.
+
+### Reporting verification before publication
+
+All three final private lanes are clean at `2875b12460a0431dccc822a63f8efabf44fd6a30`. Project
+review retained 179 focused passes and independently passed the corrected staging test. Complexity
+review retained 195 focused cases, three artifact-conflict cases and seven removal experiments
+producing thirteen expected failures; its final staging regression passed. The cold lane retained 93
+reporting cases and four independent probes, then passed all 39 artifact/MCP lifecycle cases at the
+corrected head. All experiments were restored and processes stopped before root confirmation. The
+test-only composition finding is resolved.
+
+The unchanged pinned root suite returned zero with 12,990 passed and 35 skipped in 306.89 seconds.
+All twelve required local gates passed, including Ruff formatting across 1,065 files, strict mypy
+across 1,030 files, file quality, rulesync, locked SDDs, typer isolation, 160 Python and 103 Node
+website tests and both deterministic double-build variants. CI 43274224880 passed all ten jobs on
+that exact head. Fresh main remains `bc294be28`; ancestry and merge-tree returned zero.
+
+The following evidence-only update changes no source, tests, permanent teaching, dependencies or
+policy. Its own CI and private artifact check precede ready publication. The new actual integration
+report, critical feedback disposition and follow-up lock/cleanup remain required. The reporting
+round allowance is spent; publication will not finish monitoring or the goal.

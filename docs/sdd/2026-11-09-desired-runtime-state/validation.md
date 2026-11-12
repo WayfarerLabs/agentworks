@@ -295,3 +295,23 @@ Project review at `6ba02b8fa` passed 179 focused cases and was clean. Initial ro
 passed except file quality: cspell rejected one word in the lead's validation prose, now rephrased
 without a dictionary or source change. Final delta review, the file-quality rerun, root full suite,
 final CI and actual new integration evidence remain pending.
+
+## Reporting final local verification
+
+All three private lanes are clean at `2875b12460a0431dccc822a63f8efabf44fd6a30`. Project review
+passed 179 focused cases and the final staging regression. Complexity passed 195 focused cases,
+three conflict cases and the final regression; seven removal experiments produced thirteen expected
+failures. Cold correctness passed 93 reporting cases plus four independent provenance/recheck probes
+and all 39 artifact/MCP lifecycle cases on the corrected head. No private finding remains.
+Experiments were restored and all focused processes stopped before root testing.
+
+The non-overlapping root suite at unchanged `2875b1246` returned zero with 12,990 passed and 35
+skipped in 306.89 seconds. All twelve required local gates returned zero, including the corrected
+file-quality gate, 1,065-file Ruff formatting, strict mypy across 1,030 files, 160 Python and 103
+Node website tests and both deterministic double-build variants. Exact-head CI 43274224880 passed
+all ten jobs. Actual fresh-main ancestry and merge-tree checks returned zero against `bc294be28`.
+
+The final evidence-only SDD update still needs its exact-head CI and artifact review before ready
+handoff. Earlier native evidence remains attributed to `4825c99d1`; no live validation of this new
+reporting/main integration is inferred. Its actual ready-triggered report and critical disposition
+remain required, and the goal stays active through monitoring.
