@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 from agentworks.artifacts.application import ArtifactFile
 from agentworks.artifacts.frontmatter import parse_metadata
 from agentworks.artifacts.native.common import MAX_CODEX_PERSONA_BYTES
+from agentworks.artifacts.native.layout import NATIVE_USER_DIRECTORIES
 from agentworks.errors import AgentworksError, ExternalError, StateError
 from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic, sanitize_setup_error
 from agentworks.native_files import require_python3
@@ -43,9 +44,8 @@ request = json.load(sys.stdin)
 tool = request['tool']
 vm_only = request['vm_only']
 home = os.environ.get('HOME', '')
-variable, default = {'claude': ('CLAUDE_CONFIG_DIR', '.claude'),
-                     'codex': ('CODEX_HOME', '.codex'), 'grok': ('GROK_HOME', '.grok')}[tool]
-native_home = os.environ.get(variable) or home + '/' + default
+variable, default = request['native_directory']
+native_home = request.get('native_root') or os.environ.get(variable) or home + '/' + default
 problems = []
 problem_paths = []
 skill_names = {name[6:] for name in request['identities'] if name.startswith('skill:')}
@@ -401,6 +401,7 @@ def probe_native(
     environment: Mapping[str, str],
     redactions: Iterable[str] = (),
     home: str | None = None,
+    native_root: str | None = None,
     workspace: str = "",
     files: Sequence[ArtifactFile | OwnedArtifactFile] = (),
     recognized_files: Sequence[OwnedArtifactFile] = (),
@@ -428,6 +429,8 @@ def probe_native(
         "codex_persona_bytes": MAX_CODEX_PERSONA_BYTES,
         "inventory_bytes": CaptureLimits().total_bytes,
         "home": home,
+        "native_directory": NATIVE_USER_DIRECTORIES[tool],
+        "native_root": native_root,
         "workspace": workspace,
         "paths": tuple(file.path for file in files),
         "entries": {**recognized_entries, **entries},

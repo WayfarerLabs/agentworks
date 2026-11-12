@@ -106,7 +106,9 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # (the EC2 VM platform), and `gcp`
 # (the Google Compute Engine VM platform and optional guest `gcloud-cli` apt
 # package). Core still owns runners and executors, plus snap, mise, dotfiles,
-# and tmuxinator. Harness integrations own native marketplace/plugin setup.
+# and tmuxinator. Harness integrations own native marketplace/plugin setup and
+# declared MCP registrations. Artifact bundles and per-scope activation belong
+# in resource manifests; enabling a plugin alone does not register MCP servers.
 # `agw doctor` shows a System plugins roster with each plugin's state. For a
 # template that selects an apt catalog entry, add `apt`; for one that selects a
 # shipped user install command, add `install-command`. Keep existing names. If

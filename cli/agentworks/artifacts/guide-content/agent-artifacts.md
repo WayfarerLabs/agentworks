@@ -1,14 +1,15 @@
 ---
-description: Select reusable agent context and inspect scoped artifact delivery.
+description: Select scoped agent content and MCP connections, and inspect delivery.
 index-order: 45
 ---
 
 # Agent artifacts
 
-Artifact bundles supply hints, rules, standard skills, and agents (agent personas) without making
-producers depend on a particular harness. An owning scope selects bundles; explicitly activated
-integration facets decide native placement or defer to a later facet. For the scope/facet model,
-activation, environment, and prerequisites, see `agw guide show concept-harness-integrations`.
+Artifact bundles supply hints, rules, standard skills, agents (agent personas), and MCP server
+definitions without making producers depend on a particular harness. An owning scope selects
+bundles; explicitly activated integration facets decide native placement or defer to a later facet.
+For the scope/facet model, activation, environment, and prerequisites, see
+`agw guide show concept-harness-integrations`.
 
 Start with `agw resource explain artifact-bundle` and `agw resource sample artifact-bundle`. Use the
 owning template's `resource explain` output for `artifacts.bundles` and integration activation.
@@ -16,6 +17,10 @@ owning template's `resource explain` output for `artifacts.bundles` and integrat
 owner and its actual ancestors, including artifacts already handled upstream, without showing bodies
 or fetching content. Recorded application is evidence of a past operation, not current model
 context.
+
+MCP application records registration only. It does not attest to authentication, a connection, tool
+discovery or model use. Acquiring a source never executes its server. See the MCP format and native
+support sections below before authorizing setup or native authentication.
 
 <!-- agw:include path="artifacts/README.md" heading="Select an owner and a handler" -->
 
@@ -34,9 +39,10 @@ context.
 Native-home overrides for user artifact files must stay beneath that user's `HOME`. For example,
 `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, or `GROK_HOME` can select another directory there. A user
 artifact plan that would write outside `HOME` is refused before that integration changes settings or
-plugins. Session files use their private run directory and, when explicitly enabled, narrowly owned
-native helper packages beneath `HOME`. Codex/Grok home-skill discovery is shared with other sessions
-of that user.
+plugins. Shared MCP registrations use a separate native role check: an unavailable or out-of-home
+role leaves those MCP entries unhandled while independent setup continues. Session files use their
+private run directory and, when explicitly enabled, narrowly owned native helper packages beneath
+`HOME`. Codex/Grok home-skill discovery is shared with other sessions of that user.
 
 Native preflight conservatively refuses relevant restrictions for new delivery in the configuration
 files it inspects. Restrictions affecting existing ancestor placement warn without blocking session

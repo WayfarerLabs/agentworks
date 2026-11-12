@@ -1,0 +1,18 @@
+{
+    // Selecting mcp_servers.docs captures only this named definition.
+    "mcpServers": {
+        "docs": {
+            "type": "http",
+            "description": "Search the documentation service",
+            "url": "https://mcp.example.test/mcp",
+            "headers": {
+                "Authorization": "Bearer ${MCP_DOCS_TOKEN}",
+            },
+        },
+        // This entry is neither captured nor registered by the docs selection.
+        "unused": {
+            "type": "stdio",
+            "command": "another-mcp-server",
+        },
+    },
+}

@@ -1,9 +1,9 @@
 # Agent artifacts
 
 An `artifact-bundle` declares reusable hints, rules, standard
-[Agent Skills](https://agentskills.io/specification), and agents (agent personas). An owning
-resource selects bundles with `artifacts.bundles`; its core setup captures their contents before
-explicitly activated harness integrations handle or defer them.
+[Agent Skills](https://agentskills.io/specification), agents (agent personas), and MCP server
+definitions. An owning resource selects bundles with `artifacts.bundles`; its core setup captures
+their contents before explicitly activated harness integrations handle or defer them.
 
 Use `agw resource explain artifact-bundle` for the declaration schema and
 `agw resource sample artifact-bundle` for an editable sample. Use `agw artifact show --help` for
@@ -156,9 +156,10 @@ and shared workspace remain available.
 
 ## Composition and names
 
-Bundles contain four maps: `hints`, `rules`, `skills`, and `agents`. Each map key is the artifact's
-canonical name. Skill and persona frontmatter must agree with that key; skill names also match the
-selected directory. Names use at most 64 lowercase letters, digits and single hyphens.
+Bundles contain five maps: `hints`, `rules`, `skills`, `agents`, and `mcp_servers`. Each map key is
+the artifact's canonical name. Skill and persona frontmatter must agree with that key; skill names
+also match the selected directory. Names use at most 64 lowercase letters, digits and single
+hyphens.
 
 A bundle can `inherits` other bundles through ordinary resource inheritance. Each type map merges by
 key, replacing an overridden definition completely. A child `source` replaces a parent's inline
@@ -167,8 +168,8 @@ key, replacing an overridden definition completely. A child `source` replaces a 
 Within one owner, later entries in `artifacts.bundles` replace earlier definitions with the same
 type and key. Inspection retains compact evidence of those replacements. Changed content emits a
 warning; identical content stays quiet and still records the winning source. Traversal uses hints,
-rules, skills, then agents, preserving key insertion order within each map. Replacement keeps that
-key's position. Different artifact types do not compete.
+rules, skills, agents, then MCP servers, preserving key insertion order within each map. Replacement
+keeps that key's position. Different artifact types do not compete.
 
 Each actual owner keeps its own group. A deferred VM group remains a VM group through user and
 session routing; it never becomes part of the receiver's local group. The same type and key from
@@ -237,11 +238,149 @@ its native format. An option for one integration does not configure another.
 All other top-level fields are errors. For example, a top-level `model`, `tools`, `targets` or
 Rulesync `claudecode` block is refused; supported native settings belong under
 `native_options.<integration-name>`. Duplicate keys, non-string keys, YAML aliases and anchors are
-also refused in rule and agent metadata. Hooks and MCP configuration remain unsupported.
+also refused in rule and agent metadata. Hooks and embedded MCP configuration in skill or persona
+metadata remain unsupported. Declare MCP connections in the separate `mcp_servers` map.
 
 These authoring formats borrow Rulesync's common-body and native-options approach without claiming
 full Rulesync format compatibility. They do not change bundle selection, scope ownership or native
 collision handling.
+
+### MCP servers
+
+An MCP artifact registers a connection for a harness. It does not install the server or its
+dependencies, start a service, authenticate, connect to an endpoint, discover tools or grant tool
+permissions. Native clients own those later actions and their existing approval/trust policies. Use
+existing provisioning for executables and ordinary env/secret declarations for credentials.
+
+Each `mcp_servers` entry has exactly one `definition` or `source`. For example:
+
+```yaml
+mcp_servers:
+  inventory:
+    definition:
+      type: stdio
+      command: inventory-mcp
+      args: [serve]
+      env:
+        MCP_INVENTORY_TOKEN: ${MCP_INVENTORY_TOKEN}
+  docs:
+    definition:
+      type: http
+      url: https://mcp.example.test/mcp
+      headers:
+        Authorization: Bearer ${MCP_DOCS_TOKEN}
+```
+
+This is the strict Agentworks subset inspired by Rulesync, not native config passthrough:
+
+| Field         | Accepted value                                                                        |
+| ------------- | ------------------------------------------------------------------------------------- |
+| `type`        | Required `stdio` or `http`; `http` means Streamable HTTP                              |
+| `description` | Optional nonempty public description                                                  |
+| `command`     | Required literal executable string for stdio, resolved in the target runtime          |
+| `args`        | Optional array of literal strings for stdio, preserving argument boundaries           |
+| `env`         | Optional stdio string map, with public literals or same-name env forwarding           |
+| `url`         | Required absolute HTTP(S) URL for HTTP, without embedded credentials or interpolation |
+| `headers`     | Optional HTTP string map, with public literals or supported env references            |
+
+Stdio rejects `url` and `headers`; HTTP rejects `command`, `args` and `env`. Unknown fields,
+contradictory types, duplicate keys, invalid env/header names and unsupported control characters are
+errors. Unsupported fields include `transport`, `cwd`, `enabled`, `disabled`, tool filters, approval
+controls, OAuth blocks and native option bags. Canonical SSE and WebSocket transports are not
+supported. There is no implicit shell command or templating language.
+
+Credentials must remain references to runtime variables. The supported forms are
+`env.NAME: ${NAME}`, `headers.Header-Name: ${NAME}` and `headers.Authorization: Bearer ${NAME}`.
+Variable names use letters, digits and underscores, starting with a letter or underscore. Variable
+renaming, default expressions, partial interpolation and references inside command/args/URL are
+rejected. Public literals are allowed; credential literals and direct `{secret: ...}` objects do not
+belong in MCP definitions. For example, supply `MCP_DOCS_TOKEN: {secret: docs-token}` through the
+consuming owner's ordinary `env` block after declaring that secret. Never put its value in the
+artifact.
+
+References remain unresolved in captures, inspection and native registration. Claude and Grok use
+native interpolation; Codex uses native env forwarding/header binding fields. A workspace definition
+can refer to credentials supplied later by each user. The prepared env map is only part of the final
+native environment: guest login profiles can add or change values. Absence from that map is not
+proof that a variable is missing. Agentworks does not inspect those profiles or probe bindings;
+native runtime binding errors remain native errors.
+
+A `source` selects one workstation or Git JSON/JSONC file. Its root accepts `mcpServers` and an
+optional string `$schema`. The artifact key selects the same key beneath `mcpServers`; there is no
+renaming or automatic import of all servers:
+
+```yaml
+mcp_servers:
+  docs:
+    source: file::~/agent-content/mcp.jsonc
+```
+
+The corresponding file could contain:
+
+```jsonc
+{
+  "mcpServers": {
+    "docs": {
+      "type": "http",
+      "url": "https://mcp.example.test/mcp",
+      "headers": { "Authorization": "Bearer ${MCP_DOCS_TOKEN}" },
+    },
+  },
+}
+```
+
+Git sources use the same existing syntax, for example
+`git::https://github.com/example/agent-content.git//mcp.jsonc?ref=v1.0.0`. Acquisition validates the
+whole document's syntax/root shape, rejects duplicate keys, and validates only the selected server
+against the definition profile. It captures only that normalized definition; comments and unselected
+server bodies do not enter the pipeline. `$schema` is editor metadata and is never fetched. No
+acquisition step executes a server or its arguments.
+
+See [the MCP declarations](examples/mcp-artifacts.yaml) and
+[sample source document](examples/mcp-servers.jsonc). They declare configuration only. Choose real
+source paths/endpoints, provision the executable, declare the referenced secrets and enable the
+selected system plugins before authorizing owning setup. If setup is outside the requested work,
+inspect declarations with `agw artifact show` instead.
+
+| Integration | Default user location                 | Workspace location               | Session delivery                            |
+| ----------- | ------------------------------------- | -------------------------------- | ------------------------------------------- |
+| Claude Code | `~/.claude.json`, `mcpServers`        | `<workspace>/.mcp.json`          | Opt-in `session-mcp-config`                 |
+| Codex       | `~/.codex/config.toml`, `mcp_servers` | `<workspace>/.codex/config.toml` | Opt-in `session-mcp-overrides`              |
+| Grok Build  | `~/.grok/config.toml`, `mcp_servers`  | `<workspace>/.grok/config.toml`  | Unhandled; no supported session MCP carrier |
+| Shell       | Canonical JSON files and index        | Canonical JSON files and index   | Private canonical JSON files and index      |
+
+Native-home overrides follow the actual user's native conventions. In particular, an explicit
+`CLAUDE_CONFIG_DIR` places user MCP config at `<CLAUDE_CONFIG_DIR>/.claude.json`; the default is
+`~/.claude.json`, separate from Claude's `settings.json`. Native VM facets defer MCP to user; Shell
+publishes canonical `mcp_servers/<name>.json` files beneath its normal scope directory, including
+`/opt/agentworks/artifacts/` at VM scope. Shell does not connect or launch servers.
+
+Native server names use `agentworks-<key-prefix>-<origin-digest-prefix>`. The readable prefix uses
+up to 24 key characters, with 20 digest characters qualifying the original owner, artifact type and
+full key. Equal names from different scopes remain distinct. Names stay stable across content
+changes, bundle changes and workspace rehome. Native endpoint deduplication or policy can still
+affect which connections a harness exposes; registration alone makes no availability guarantee.
+
+User/workspace application manages an entry inside a shared document. An absent entry is created; an
+identical unowned entry is adopted. A matching recorded fingerprint permits an owned update. A
+differing unowned or externally modified entry is preserved and that artifact is deferred while
+independent entries continue. Removing an unchanged owned entry removes only that entry; modified
+obsolete entries remain recorded and warn. Native document values are preserved outside the managed
+entries unless an explicit settings mapping changes them; comments/formatting can change during
+serialization. Shared documents are not whole-file artifact ownership. If a native write succeeds
+but claim persistence fails, an entry can remain unrecorded. Retrying the same declaration adopts an
+identical entry; withdrawing it before that retry leaves an unowned entry for operator review. See
+[native setup](https://github.com/WayfarerLabs/agentworks/blob/main/docs/guides/native-harness-setup.md#mcp-registrations)
+for mapping interaction and credential cleanup.
+
+Codex session MCP overrides remain unhandled with an explicit modeled or raw native profile. Native
+profile overlays can introduce same-named fields that deep-merge with an invocation override; this
+workaround does not inspect profile precedence. Use authorized user/workspace registration for that
+case. Ordinary profile selection and unrelated artifact delivery continue.
+
+MCP registration is the initial phase. OAuth-specific configuration and its explicit authentication
+workflow are planned for phase 2; current artifact definitions reject those fields. Native clients
+can still perform their own independent authentication. Tool filters remain unsupported.
 
 ## Sources and refresh
 
@@ -280,6 +419,9 @@ Existing captures keep the authoring interpretation recorded when they were acqu
 Agentworks alone does not reinterpret YAML-looking rule text or remove previously retained persona
 metadata. An explicit owning refresh captures sources under the current strict format; fix any
 unsupported metadata before refreshing. Source changes alone do not update an existing capture.
+Supported older four-type captures remain readable without forcing a refresh. Newly written captures
+use the newer versioned format; older Agentworks releases can refuse it. Preserve an appropriate
+state backup before an upgrade when rollback must remain possible.
 
 VM/admin and agent changes take effect through the owning reinitialization operation. Workspaces
 have no reinit operation; recreate the workspace when its artifact setup must change. Session
@@ -327,6 +469,9 @@ with retained effects still needs the owning cleanup operation before passthroug
 current. Deleting a VM retains the ordinary VM deletion behavior: its filesystem disappears with it.
 
 ## Native delivery
+
+The table below covers hints, rules, skills and personas. See [MCP servers](#mcp-servers) for native
+connection registration and its separate session opt-ins.
 
 | Integration | VM facet                                           | User and workspace facets                                            | Session delivery                                                                  |
 | ----------- | -------------------------------------------------- | -------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
@@ -381,12 +526,14 @@ Confirmed workspace artifact files receive exact repository-local exclusions in 
 `info/exclude`. Git metadata files and linked worktrees are supported; linked worktrees can share
 that metadata. An exclusion also ignores an unrelated untracked file at the same repository-relative
 path in another worktree sharing it. Ordinary applied state records ownership of each marked pattern
-pair. Updates/removal retire only unchanged owned pairs; unrelated exclusions and operator
-modifications remain. Workspace deletion attempts known retirement before removing its directory and
-ownership records. Missing metadata, unreadable evidence, modified pairs or native cleanup failures
-warn about unresolved exclusions while ordinary parent deletion continues. Inspect the reported
-current metadata path for leftovers; deletion does not certify their removal. Cleanup never follows
-an arbitrary saved destination. Whole-VM deletion does not require guest artifact cleanup. Tracked
+pair. Shared MCP config documents also receive an exclusion when untracked; this hides the entire
+file, including unrelated entries in it, because Git cannot exclude individual config entries.
+Updates/removal retire only unchanged owned pairs; unrelated exclusions and operator modifications
+remain. Workspace deletion attempts known retirement before removing its directory and ownership
+records. Missing metadata, unreadable evidence, modified pairs or native cleanup failures warn about
+unresolved exclusions while ordinary parent deletion continues. Inspect the reported current
+metadata path for leftovers; deletion does not certify their removal. Cleanup never follows an
+arbitrary saved destination. Whole-VM deletion does not require guest artifact cleanup. Tracked
 artifact files stay tracked and visible, with a warning. Exclusions cannot conceal tracked changes.
 Agentworks does not edit shared `.gitignore`, hide whole native directories or change index flags.
 
@@ -394,8 +541,13 @@ Supported workspace rehome uses its known old/new owner paths to retire the old 
 copied old pairs and establish exclusions for the copied managed files where possible. Generic
 application still refuses another owner's saved source. Git metadata failures warn and do not
 prevent core rehome. If old retirement fails and the old directory is deliberately retained, that
-unmanaged copy can retain exclusions. This does not rerun workspace facets or relocate general
-native setup records; existing workspaces have no harness reinit operation.
+unmanaged copy can retain exclusions. Every readable workspace setup record follows the verified new
+root: owner identity and known file, package, skipped-path and MCP destination metadata relocate,
+while fingerprints, declaration identities and unresolved status remain intact. MCP server names
+stay stable; unknown native claims remain unchanged. Invalid known paths retain their evidence and
+warn. A retained old copy is unmanaged and can retain its native registrations. Rehome does not
+rerun facets or rewrite literal absolute paths inside copied files or native values, which can
+remain path-dependent. Existing workspaces have no harness reinit operation.
 
 Elevated native file operations share a fixed allowlist: `/etc/claude-code`, `/etc/codex` and
 `/opt/agentworks/artifacts`. Reads, writes and cleanup outside those trees are refused, including
@@ -479,9 +631,10 @@ exact session-owned skill package before using its native skills parent as a fil
 boundary. HOME itself is never a broad publication boundary for these session files.
 
 Native artifact guards inspect the effective `extra_args` after context rendering. The integration
-emits those same argument values with shell quoting; replacement text is not interpolated again. A
-conflicting flag remains an error before old-runtime teardown, including when a template expression
-supplies the flag name.
+emits those same argument values with shell quoting; replacement text is not interpolated again. For
+guidance, skills and personas, a conflicting flag remains an error before old-runtime teardown,
+including when a template expression supplies the flag name. A conflicting MCP carrier flag leaves
+the affected MCP inputs unhandled and permits independent delivery and launch.
 
 Selecting a native persona and delivering its definition are separate operations. If a managed
 persona definition remains unhandled, an explicit integration `agent` selection still applies. The
@@ -505,8 +658,8 @@ A managed restart prepares the next run before replacing the old runtime. Old pr
 remain available through failed preparation and retire only after the old runtime is torn down. If a
 later run omits an unavailable input, its incomplete/unhandled evidence reports that omission.
 
-This delivery includes declared bundles and harness handling. Core hint emission, features, hooks,
-and MCP artifacts are later work.
+This delivery includes declared bundles and harness handling, including MCP registration. Core hint
+emission, features and hooks remain future work.
 
 ## Session workarounds
 
@@ -521,8 +674,10 @@ activations do not enable session workarounds.
 | ----------- | --------------------------- | ------------------------------------------------------------------------------------------ |
 | Claude Code | `session-skill-plugin`      | Rules, aggregate hints and complete skills in a private native plugin.                     |
 | Claude Code | `session-agent-definitions` | Native persona files in the same private plugin.                                           |
+| Claude Code | `session-mcp-config`        | Private session/run MCP config passed with `--mcp-config`, preserving other sources.       |
 | Codex       | `session-home-skills`       | Session-qualified rules, aggregate hints and skills in `~/.agents/skills`.                 |
 | Codex       | `session-agent-config`      | Private native persona configuration through launch overrides.                             |
+| Codex       | `session-mcp-overrides`     | Invocation-only native MCP overrides; no user/project config write.                        |
 | Grok Build  | `session-home-skills`       | One session-specific native entry and a private index of rules, hints and complete skills. |
 
 The home-skill methods warn that the native catalog is shared and matching is best effort. They
@@ -534,6 +689,12 @@ explicitly using Grok activation fields `paths`, `disable-model-invocation` or `
 remain unhandled because indexed access cannot preserve those controls. Grok's `allowed-tools`
 metadata does not itself grant or restrict tools. Session personas remain unhandled; explicit native
 `agent` selection is separate.
+
+MCP workarounds register connections for that invocation, not a shared home/project catalog. They
+retain native consent and authentication requirements. A conflicting native registration can leave
+an entry unhandled rather than silently replacing or deep-merging a different definition. They do
+not suppress other native MCP sources. Grok Build 1.0.77 rejects `--plugin-dir`, so Agentworks does
+not advertise a Grok session MCP plugin workaround; those session inputs warn and remain unhandled.
 
 Grok resume can retain a native catalog from before the session entry was first installed. If that
 entry is absent, start a fresh conversation with `--force-new` or explicitly read the current
@@ -601,7 +762,10 @@ become an empty successful result. Selectors must describe one actual lineage.
 
 The command reads existing state and declarations. It does not fetch sources, apply integrations,
 resolve secrets, or attest to the current filesystem or model context. Artifact bodies are omitted.
-To change setup, first establish authorization for the owning operation and inspect its impact.
+For MCP, logical/native names and recorded destinations explain registration; URLs, command
+arguments, env/header values and connection payloads stay omitted. Native inventory commands can
+attempt connections and are not part of this read-only view. To change setup, first establish
+authorization for the owning operation and inspect its impact.
 
 ## Implementation boundaries
 
@@ -610,6 +774,12 @@ It normalizes designated UTF-8 text to LF, preserves binary bytes and executable
 the frozen groups and values in `model.py`. Skills are complete standard Agent Skills packages.
 Agents are agent personas. Sources are edge concerns: routing and integration APIs consume the same
 normalized inputs regardless of their source.
+
+`mcp.py` validates the strict connection profile and JSON(C) server selection. Source parsing
+accepts JSON5 lexical conveniences, including comments and trailing commas, without relaxing root
+shape, duplicate-key refusal or the selected definition's fields. `native/mcp.py` translates
+unresolved references and tracks native entry fingerprints in ordinary setup claims. It never owns a
+shared config document wholesale or opens a connection to the server.
 
 `codec.py` validates the bounded lossless wire representation. `state.py` records one common core
 capture per owner component in the existing instance-state store. `routing.py` reads that capture

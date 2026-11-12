@@ -14,10 +14,9 @@ import pytest
 from agentworks.capabilities.harness_integration.settings import SettingsMapping, parse_settings, serialize_settings
 from agentworks.harness_setup.model import NativeClaim
 from agentworks.native_files import NativeFiles
-from agentworks.plugins._harness_native.native import setup_user
 from agentworks.plugins._harness_native.native_cli import NativeCLI, NativeTool, identity
 from agentworks.plugins._harness_native.native_config import NativeUserConfig
-from tests.native_setup_fixtures import LocalFixtureTransport, invocation, market_fixture, record
+from tests.native_setup_fixtures import LocalFixtureTransport, invocation, market_fixture, record, setup_fixture_user
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="local execution of Linux guest setup helpers")
 
@@ -54,11 +53,11 @@ def test_retry_adopts_native_mutation_after_its_checkpoint_failed(transport, too
         claims.append(current)
 
     with pytest.raises(OSError):
-        setup_user(tool, config, replace(invocation(transport, claims), checkpoint=checkpoint))
+        setup_fixture_user(tool, config, replace(invocation(transport, claims), checkpoint=checkpoint))
     before = claims[-1] if claims else ()
     settings = transport.home / (".codex/config.toml" if tool == "codex" else ".claude/settings.json")
     previous_bytes = settings.read_bytes()
-    setup_user(tool, config, invocation(transport, claims, prior=record(before, tool)))
+    setup_fixture_user(tool, config, invocation(transport, claims, prior=record(before, tool)))
     assert {(item.role, item.identifier) for item in claims[-1]} == {
         ("marketplace", "fixture-market"),
         ("plugin", "one@fixture-market"),
@@ -66,7 +65,7 @@ def test_retry_adopts_native_mutation_after_its_checkpoint_failed(transport, too
     if step == "plugin":
         assert settings.read_bytes() == previous_bytes
     final = claims[-1]
-    setup_user(tool, None, invocation(transport, claims, prior=record(final, tool)))
+    setup_fixture_user(tool, None, invocation(transport, claims, prior=record(final, tool)))
     assert claims[-1] == ()
 
 
@@ -76,11 +75,11 @@ def test_native_adoption_reports_the_adopted_entry(transport, tool, role, monkey
     market = market_fixture(transport, tool)
     config = NativeUserConfig(marketplaces=[str(market)], plugins=["one@fixture-market"] if role == "plugin" else [])
     claims: list[tuple[NativeClaim, ...]] = []
-    setup_user(tool, config, invocation(transport, claims))
+    setup_fixture_user(tool, config, invocation(transport, claims))
     prior = record(tuple(item for item in claims[-1] if item.role != role), tool)
     reports: list[str] = []
     monkeypatch.setattr("agentworks.plugins._harness_native.native.output.info", reports.append)
-    setup_user(tool, config, invocation(transport, claims, prior=prior))
+    setup_fixture_user(tool, config, invocation(transport, claims, prior=prior))
     identifier = "one@fixture-market" if role == "plugin" else "fixture-market"
     assert len(reports) == 1 and identifier in reports[0]
     assert any(item.role == role and item.identifier == identifier for item in claims[-1])
@@ -90,7 +89,7 @@ def test_native_adoption_reports_the_adopted_entry(transport, tool, role, monkey
 @pytest.mark.parametrize("strategy", ["replace", "merge-overwrite", "merge-preserve", "skip-existing"])
 def test_mapping_policy_controls_a_skipped_plugin_while_an_independent_plugin_converges(transport, tool, strategy):
     market = market_fixture(transport, tool)
-    setup_user(
+    setup_fixture_user(
         tool,
         NativeUserConfig(marketplaces=[str(market)], plugins=["one@fixture-market"]),
         invocation(transport, []),
@@ -117,7 +116,7 @@ def test_mapping_policy_controls_a_skipped_plugin_while_an_independent_plugin_co
     )
     incomplete: list[str] = []
     claims: list[tuple[NativeClaim, ...]] = []
-    setup_user(
+    setup_fixture_user(
         tool,
         NativeUserConfig(
             marketplaces=[str(market)],
@@ -150,12 +149,12 @@ def test_mapping_policy_controls_a_skipped_plugin_while_an_independent_plugin_co
 @pytest.mark.parametrize("tool", ["codex", "claude"])
 def test_unowned_market_source_conflict_does_not_block_independent_market(transport, tool):
     market = market_fixture(transport, tool)
-    setup_user(tool, NativeUserConfig(marketplaces=[str(market)]), invocation(transport, []))
+    setup_fixture_user(tool, NativeUserConfig(marketplaces=[str(market)]), invocation(transport, []))
     alternate = copied_market(market, tool)
     independent = copied_market(market, tool, name="independent")
     incomplete: list[str] = []
     claims: list[tuple[NativeClaim, ...]] = []
-    setup_user(
+    setup_fixture_user(
         tool,
         NativeUserConfig(
             marketplaces=[str(alternate), str(independent)], plugins=["one@fixture-market", "two@independent"]
@@ -182,7 +181,7 @@ def test_unowned_market_source_conflict_does_not_block_independent_market(transp
 def test_owned_marketplace_source_change_reinstalls_its_requested_plugin(transport, tool, monkeypatch):
     market = market_fixture(transport, tool)
     initial: list[tuple[NativeClaim, ...]] = []
-    setup_user(
+    setup_fixture_user(
         tool,
         NativeUserConfig(marketplaces=[str(market)], plugins=["one@fixture-market"]),
         invocation(transport, initial),
@@ -193,7 +192,7 @@ def test_owned_marketplace_source_change_reinstalls_its_requested_plugin(transpo
     monkeypatch.setattr("agentworks.plugins._harness_native.native.output.info", reports.append)
     incomplete: list[str] = []
     claims: list[tuple[NativeClaim, ...]] = []
-    setup_user(
+    setup_fixture_user(
         tool,
         NativeUserConfig(marketplaces=[str(alternate)], plugins=["one@fixture-market"]),
         replace(invocation(transport, claims, prior=record(previous, tool)), report_incomplete=incomplete.append),
@@ -208,7 +207,7 @@ def test_owned_marketplace_source_change_reinstalls_its_requested_plugin(transpo
     assert {item.role for item in claims[-1]} == {"marketplace", "plugin"}
     assert {item.source for item in claims[-1]} != {item.source for item in previous}
     assert all(item.source is not None and str(alternate) in item.source for item in claims[-1])
-    setup_user(tool, None, invocation(transport, claims, prior=record(claims[-1], tool)))
+    setup_fixture_user(tool, None, invocation(transport, claims, prior=record(claims[-1], tool)))
     assert claims[-1] == ()
 
 
@@ -216,7 +215,7 @@ def test_owned_marketplace_source_change_reinstalls_its_requested_plugin(transpo
 @pytest.mark.parametrize("strategy", ["replace", "merge-overwrite"])
 def test_mapping_policy_controls_skipped_marketplace_settings(transport, tool, strategy):
     market = market_fixture(transport, tool)
-    setup_user(
+    setup_fixture_user(
         tool,
         NativeUserConfig(marketplaces=[str(market)], plugins=["one@fixture-market"]),
         invocation(transport, []),
@@ -230,7 +229,7 @@ def test_mapping_policy_controls_skipped_marketplace_settings(transport, tool, s
     source.write_bytes(serialize_settings({field: value}, format=format))
     incomplete: list[str] = []
     claims: list[tuple[NativeClaim, ...]] = []
-    setup_user(
+    setup_fixture_user(
         tool,
         NativeUserConfig(
             marketplaces=[str(copied_market(market, tool))],
@@ -249,7 +248,7 @@ def test_mapping_policy_controls_skipped_marketplace_settings(transport, tool, s
 def test_market_replacement_retains_ownership_when_dependent_cannot_retire(transport, tool, monkeypatch):
     market = market_fixture(transport, tool)
     claims: list[tuple[NativeClaim, ...]] = []
-    setup_user(
+    setup_fixture_user(
         tool,
         NativeUserConfig(marketplaces=[str(market)], plugins=["one@fixture-market"]),
         invocation(transport, claims),
@@ -269,7 +268,7 @@ def test_market_replacement_retains_ownership_when_dependent_cannot_retire(trans
 
     monkeypatch.setattr(NativeCLI, "plugins", changing_inventory)
     incomplete: list[str] = []
-    setup_user(
+    setup_fixture_user(
         tool,
         NativeUserConfig(marketplaces=[str(copied_market(market, tool))], plugins=["one@fixture-market"]),
         replace(invocation(transport, claims, prior=record(previous, tool)), report_incomplete=incomplete.append),
@@ -333,14 +332,14 @@ def test_unowned_git_market_optional_identity_is_not_adopted_for_bare_url(transp
         assert key in native_source
     incomplete: list[str] = []
     claims: list[tuple[NativeClaim, ...]] = []
-    setup_user(
+    setup_fixture_user(
         tool,
         NativeUserConfig(marketplaces=[source]),
         replace(invocation(transport, claims), report_incomplete=incomplete.append),
     )
     assert len(incomplete) == 1
     assert not claims
-    setup_user(tool, None, invocation(transport, claims, prior=record((), tool)))
+    setup_fixture_user(tool, None, invocation(transport, claims, prior=record((), tool)))
     with NativeFiles(transport) as files:
         cli = NativeCLI(tool, files, home=str(transport.home), config_root=str(root))
         assert cli.markets() == before
@@ -353,7 +352,7 @@ def test_native_plugin_update_keeps_ownership_for_repeat_and_retirement(transpor
     market, source = git_market(transport, tool)
     config = NativeUserConfig(marketplaces=[source], plugins=["one@fixture-market"])
     claims: list[tuple[NativeClaim, ...]] = []
-    setup_user(tool, config, invocation(transport, claims))
+    setup_fixture_user(tool, config, invocation(transport, claims))
     previous = claims[-1]
     if legacy:
         previous = tuple(
@@ -386,7 +385,7 @@ def test_native_plugin_update_keeps_ownership_for_repeat_and_retirement(transpor
     reports: list[str] = []
     incomplete: list[str] = []
     monkeypatch.setattr("agentworks.plugins._harness_native.native.output.info", reports.append)
-    setup_user(
+    setup_fixture_user(
         tool,
         config,
         replace(invocation(transport, claims, prior=record(previous, tool)), report_incomplete=incomplete.append),
@@ -394,7 +393,7 @@ def test_native_plugin_update_keeps_ownership_for_repeat_and_retirement(transpor
     assert not incomplete
     assert not reports
     # Retire against the old claim too, including its historical version metadata.
-    setup_user(
+    setup_fixture_user(
         tool,
         None,
         replace(invocation(transport, claims, prior=record(previous, tool)), report_incomplete=incomplete.append),
@@ -411,7 +410,7 @@ def test_native_plugin_update_keeps_ownership_for_repeat_and_retirement(transpor
 @pytest.mark.parametrize("missing", ["extraKnownMarketplaces", "enabledPlugins"])
 def test_claude_missing_native_settings_table_does_not_abort_mapping(transport, missing):
     market = market_fixture(transport, "claude")
-    setup_user(
+    setup_fixture_user(
         "claude",
         NativeUserConfig(marketplaces=[str(market)], plugins=["one@fixture-market"]),
         invocation(transport, []),
@@ -424,7 +423,7 @@ def test_claude_missing_native_settings_table_does_not_abort_mapping(transport, 
     source.write_text(json.dumps({"mapped": True, "enabledPlugins": {"one@fixture-market": True}}))
     incomplete: list[str] = []
     claims: list[tuple[NativeClaim, ...]] = []
-    setup_user(
+    setup_fixture_user(
         "claude",
         NativeUserConfig(
             marketplaces=[str(market)],
@@ -451,7 +450,7 @@ def test_claude_missing_native_settings_table_does_not_abort_mapping(transport, 
 def test_legacy_plugin_ownership_still_protects_the_full_parent_source(transport, tool):
     _market, source = git_market(transport, tool)
     claims: list[tuple[NativeClaim, ...]] = []
-    setup_user(
+    setup_fixture_user(
         tool,
         NativeUserConfig(marketplaces=[source], plugins=["one@fixture-market"]),
         invocation(transport, claims),
@@ -473,7 +472,7 @@ def test_legacy_plugin_ownership_still_protects_the_full_parent_source(transport
     )
     incomplete: list[str] = []
     count = len(claims)
-    setup_user(
+    setup_fixture_user(
         tool,
         None,
         replace(invocation(transport, claims, prior=record(previous, tool)), report_incomplete=incomplete.append),
