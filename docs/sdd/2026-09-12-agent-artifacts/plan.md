@@ -1,5 +1,67 @@
 # Agent artifacts: implementation plan
 
+## Joint closeout, 2026-11-11
+
+The operator approved the sequence: close both existing SDDs, then MCP artifacts, then
+single-session workspaces. PR [871](https://github.com/WayfarerLabs/agentworks/pull/871) merged at
+`dc3fb557`. Its
+[final integration report](https://github.com/WayfarerLabs/agentworks/pull/871#issuecomment-6770963076)
+cleared exact source `fe2209cf` with no new material finding. This closes the earlier report wait;
+merge alone is not the acceptance evidence.
+
+The companion framework plan records the same joint closeout. This follow-up starts from main
+`834eb715`, including the separate Shell/env placeholder compatibility correction and dependency
+update. It owns the two accepted post-handoff Muntz fixes, the final acceptance and promotion audit,
+and both locks. It introduces no new artifact type or workspace mode.
+
+- [x] Read the complete final integration report and retain its exact source, native discovery, real
+      lifecycle and cleanup observations and stated limits.
+- [x] Finish the two accepted Muntz corrections without changing launch, cleanup authority,
+      persistence or parent-deletion behavior.
+- [x] Reconcile every retained requirement and historical unchecked task with its actual evidence;
+      finish any remaining permanent promotion.
+- [x] Run required gates and independent project, Muntz and correctness review of the combined
+      closeout; correct material findings before locking.
+- [x] Record final acceptance, reconcile the plans and create both `locked.md` files after the
+      evidence and closeout review establish completion.
+- [x] Prepare the complete closeout handoff and preserve the normal ready/report feedback workflow
+      under the operator's standing allowance.
+
+Earlier checked records stay immutable. The dated acceptance records and the final reconciliation
+distinguish historical handoffs, corrected or superseded behavior, and the final supported contract.
+MCP and single-session workspace work belong to separate efforts after this closeout.
+
+## Final task and validation record, 2026-11-11
+
+The
+[companion's final task record](../2026-09-06-harness-scope-framework/plan.md#final-task-and-validation-record-2026-11-11)
+maps historical handoffs, actual reports, critical readings and merge evidence to their source
+heads. It also records the combined closeout gates and three independent private lanes. Earlier
+defects and partial/mixed-head reports remain historical evidence, not retrospectively clean
+acceptance. All previously checked records keep their original wording and order.
+
+[Final acceptance](acceptance.md#final-functional-acceptance-2026-11-11) reconciles R1-R10, the
+complete approved support matrix and the predecessor's transferred artifact obligations. The five
+specific artifact tasks are complete: the approved issue-869 delivery reassessment, guarded native
+options and scoped discovery/resume proof, owner/session lifecycle with observed cleanup, public-CLI
+live acceptance with independent disposal, and the historical round-7 correction/handoff. The final
+report supplies corrected-head evidence for the changed paths; retained source/format/routing/
+inspection and actual-user controls keep their earlier attribution. Model cooperation, PE executable
+intent, all native versions/providers and unmeasured fault-injection cells are not invented
+requirements or silently claimed.
+
+The 28 old unchecked tasks are reconciled through that evidence, permanent promotion and the final
+locks. The predecessor's 32 old unchecked tasks are reconciled in the same closeout. The two small
+Muntz fixes only remove the unused helper and disclose retained historical exclusions through the
+existing bounded sanitizer. They add no native I/O authority, deletion gate, state mechanism or
+artifact type.
+
+The artifact README and packaged guide now include the acquisition boundary and budgets as well as
+authoring, normalization, original-scope composition, native availability, opt-in workarounds,
+collisions, inspection and cleanup. The capability/database teaching is current. Both lock records
+preserve the supported best-effort contract. MCP artifacts come next in a separate SDD, followed by
+single-session workspace modes.
+
 ## Native delivery feedback, round 2 of 3, 2026-11-10
 
 The [complete report](https://github.com/WayfarerLabs/agentworks/pull/871#issuecomment-6755957164)
@@ -23,9 +85,9 @@ PR 871.
       and operator content; use existing applied state.
 - [x] Align the permanent integration-author contract and deletion/rehome teaching with the approved
       native-file carriers and actual implementation.
-- [ ] Complete the integrated required gates and independent project, Muntz and correctness lanes;
+- [x] Complete the integrated required gates and independent project, Muntz and correctness lanes;
       publish one exact green ready handoff without `review-requested`.
-- [ ] Wait for the next actual integration report before the remaining authorized round. Finish the
+- [x] Wait for the next actual integration report before the remaining authorized round. Finish the
       joint requirement and promotion audit and both locks only after corrected-head acceptance.
 
 The report independently passed all 12 required gates, including 11,480 non-integration tests with
@@ -158,7 +220,7 @@ independent of earlier merged PR budgets.
       naming, public identity-alias validation and legacy-section teaching.
 - [x] Run the required gates and independent project, Muntz and correctness lanes on the combined
       correction; publish an exact green ready handoff with scoped evidence and limitations.
-- [ ] Wait for the next actual integration report, up to six hours, before another authorized round.
+- [x] Wait for the next actual integration report, up to six hours, before another authorized round.
       Finish both acceptance audits and locks only after retained requirements are proved.
 
 The current report establishes native discovery, file ownership and multi-session lifecycle at its
@@ -280,7 +342,7 @@ prerequisite for accepting this multi-session correction.
 - [x] Publish one implementation PR for the current artifact correction, with both governing SDD
       labels and an explicit independent integration-testing handoff. Wait for its actual report, up
       to six hours per iteration, before starting another of the three authorized fix rounds.
-- [ ] Complete both acceptance records and locks after the retained current requirements have real
+- [x] Complete both acceptance records and locks after the retained current requirements have real
       evidence. No existing workspace mode changes belong to the current artifact PR.
 - [x] Transfer workspace-mode implementation to the separately authorized additional PR, still owned
       by this effort lead: new workspaces single-session, existing workspaces multi-session, one
@@ -310,10 +372,10 @@ acceptance and both locks remain pending.
 - [x] Independently review the records and trust clarification at `08827b56` through project and
       Muntz lanes, with no material correction; pass file lint. These results do not cover a later
       product correction or either lock.
-- [ ] Resolve [issue 869](https://github.com/WayfarerLabs/agentworks/issues/869) through the broader
+- [x] Resolve [issue 869](https://github.com/WayfarerLabs/agentworks/issues/869) through the broader
       delivery reassessment before changing approved support. The prior binary warning-versus-resume
       workaround proposal is superseded by that operator-requested design work.
-- [ ] Implement and verify the approved behavior, finish plan and acceptance records, run the final
+- [x] Implement and verify the approved behavior, finish plan and acceptance records, run the final
       private review and gates, and add both SDD locks. PR #862's clean intermediate correction
       merged at `89bb63e4` and does not discharge these duties.
 
@@ -341,11 +403,11 @@ Transport work remains with its owner; this implementation uses today's transpor
       freshness gate, recapture, implicit setup or duplicate delivery; preserve own-facet errors.
 - [x] Align artifact publication, permanent guides and diagnostics with the amended contract.
 - [x] Complete private project, complexity and correctness reviews and the required gates.
-- [ ] Publish the complete ready handoff with the full live-test emphasis; critically assess and
+- [x] Publish the complete ready handoff with the full live-test emphasis; critically assess and
       incorporate or rebut feedback within the three-round allowance.
-- [ ] Audit the independent live evidence against every retained acceptance requirement, reconcile
+- [x] Audit the independent live evidence against every retained acceptance requirement, reconcile
       completed follow-up handoffs with their merge evidence, and close actual remaining gaps.
-- [ ] Promote remaining load-bearing guidance, audit all requirements and create `locked.md` only
+- [x] Promote remaining load-bearing guidance, audit all requirements and create `locked.md` only
       once both efforts' retained obligations are complete.
 
 ## Current stage and ownership
@@ -528,7 +590,7 @@ records this implementation assignment for the saga and dependent efforts.
       explicitly and keep primary-persona limitations honest.
 - [x] Implement Grok Build user/project rules, skills and agents, plus session rules/personas; honor
       discovery exclusions and refuse unsupported interactive session skills explicitly.
-- [ ] Validate artifact-specific native options and reject launch overrides that disable or replace
+- [x] Validate artifact-specific native options and reject launch overrides that disable or replace
       generated carriers. Verify native discovery and resume behavior against actual executables,
       without model calls or external marketplace dependencies.
 
@@ -545,7 +607,7 @@ records this implementation assignment for the saga and dependent efforts.
 - [x] Prove inspection does not acquire sources, invoke integrations, contact remotes, expose bodies
       or secrets, or mutate state. Reject contradictory selectors and preserve admin/agent
       separation.
-- [ ] Exercise create, restart/resume, failure before teardown, deletion, source/reference removal,
+- [x] Exercise create, restart/resume, failure before teardown, deletion, source/reference removal,
       name reuse and two actual users sharing one workspace. Verify private paths and safe cleanup
       from observed state, not only return codes.
 
@@ -558,9 +620,9 @@ records this implementation assignment for the saga and dependent efforts.
       deterministic website builds. Record actual exits and distinguish local, CI and live evidence.
 - [x] Run independent project, Muntz and general correctness/security reviews on isolated pinned
       work trees; critically assess and resolve material findings before handoff.
-- [ ] Run scoped live acceptance using an operator-provided inventory and budget; snapshot first,
+- [x] Run scoped live acceptance using an operator-provided inventory and budget; snapshot first,
       exercise the public CLI and native placement boundaries, and independently verify cleanup.
-- [ ] Audit R1-R10 and the complete approved matrix against evidence, complete owned cleanup and
+- [x] Audit R1-R10 and the complete approved matrix against evidence, complete owned cleanup and
       record remaining limitations honestly. Lock this SDD only when its work is actually complete.
 - [x] Push the complete implementation once, update the PR around shipped behavior and evidence, and
       mark ready without `review-requested`. Do not merge or enable automatic merging.
@@ -1423,7 +1485,7 @@ after this round until the operator resolves it.
       the resulting correction within its agreed boundary.
 - [x] Run the three private review lanes and required gates on the corrected exact head; publish the
       complete handoff with the appropriate draft/ready signal (completed by round 2 below).
-- [ ] Audit independent live acceptance against every retained requirement and finish promotion and
+- [x] Audit independent live acceptance against every retained requirement and finish promotion and
       both locks. Unit tests and CI alone do not close the live obligations above.
 
 Round 1's independent corrections are reviewed clean through `eb1a081`, whose production code is
@@ -1477,7 +1539,7 @@ ownership engine. Empty session/run directories may remain after owned-file reti
 - [x] Complete all three private review lanes and integrated gates, then publish the exact head
       ready with the retained acceptance matrix and no checkpoint label.
 - [x] Assess that ready handoff's full feedback batch. One authorized public fix round remains.
-- [ ] Audit final-head live evidence, close every retained requirement, promote remaining durable
+- [x] Audit final-head live evidence, close every retained requirement, promote remaining durable
       content and add both locks. No unit or fixture result alone closes a real-VM obligation.
 
 Native fixture validation observed Claude Code 2.1.316 and Codex 0.166.0. The focused native slice
@@ -1532,7 +1594,7 @@ belongs to the ready head, not the correction still under development.
       ambiguity, not a second request for the already-authorized FRD amendments.
 - [x] Run all three private review lanes and full gates on the integrated head, then publish the
       appropriate complete handoff. This round exhausts the three-round public correction allowance.
-- [ ] Audit final live acceptance against every retained requirement and create both locks only
+- [x] Audit final live acceptance against every retained requirement and create both locks only
       after the remaining actual-scope evidence exists.
 
 The independent corrections do not wait on the pipeline policy choice. Missing native declarations,
@@ -1621,7 +1683,7 @@ launch safety remains unchanged.
       publish a coherent exact-head handoff.
 - [x] Dispose the later published workspace permission/adoption and native status findings under
       authenticated direction; the exhausted feedback budget does not authorize another fix round.
-- [ ] Audit the expanded live evidence from PR comment `6575184960` against retained requirements
+- [x] Audit the expanded live evidence from PR comment `6575184960` against retained requirements
       and close remaining acceptance gaps before creating either lockfile.
 
 The later live report exercised prerequisite/readiness fixtures, real agent-reinit cancellation,
@@ -1676,8 +1738,8 @@ edits. This consumes the single additional round, not a standing allowance for l
 - [x] Align recovery guidance, developer/operator guides, fixtures and acceptance milestones with
       the corrected behavior.
 - [x] Integrate the changes, complete all three private review lanes and required local checks.
-- [ ] Publish the exact green ready handoff and audit the separate full integration-test result.
-- [ ] Reconcile the expanded live evidence and any later findings against retained requirements
+- [x] Publish the exact green ready handoff and audit the separate full integration-test result.
+- [x] Reconcile the expanded live evidence and any later findings against retained requirements
       before final promotion and locking. Feedback arriving mid-round is a later batch.
 
 The copied-workspace `template="copied"` resolution failure exists in current main: copy records
@@ -1775,9 +1837,9 @@ Proxmox/workstation report `6652928141`. The start is recorded in PR comment `66
       missing explicit route IDs through fresh active receivers without fabricating payloads.
       Restore the capability import boundary and remove the redundant join wrapper.
 - [x] Complete the three private reviews, required integrated gates and final collateral audit.
-- [ ] Publish the exact green ready handoff without `review-requested`, then assess the separate
+- [x] Publish the exact green ready handoff without `review-requested`, then assess the separate
       full live result within the remaining one-round allowance.
-- [ ] Finish the requirement-by-requirement acceptance and promotion audit and create both locks
+- [x] Finish the requirement-by-requirement acceptance and promotion audit and create both locks
       only after the remaining contracts are proven.
 
 ### Scope and remaining evidence
@@ -1863,11 +1925,11 @@ main `c8d4dfb` and return to draft. The separate full live report was not publis
 - [x] Correct the related tmux liveness probe to target the exact pane and accept only valid native
       observations. Exercise an actual private server alive then dead at status 23; malformed
       successful output remains unverified rather than falsely alive.
-- [ ] Complete the three independent private lanes and required integrated gates on the corrected
+- [x] Complete the three independent private lanes and required integrated gates on the corrected
       head, and update permanent collateral wherever the correction changes an operator contract.
-- [ ] Publish the exact green ready handoff without `review-requested`, reporting the exhausted
+- [x] Publish the exact green ready handoff without `review-requested`, reporting the exhausted
       correction allowance and the still-required independent live acceptance.
-- [ ] Reconcile final acceptance against every retained requirement, promote any actual remaining
+- [x] Reconcile final acceptance against every retained requirement, promote any actual remaining
       guidance, and create both locks only when that evidence proves completion.
 
 Supersession: the earlier completed branch-only codec work is truthful history; the final writer
@@ -1960,9 +2022,9 @@ failure does not invalidate confirmed routing. No persisted format change or anc
 is introduced. The report's actual-scope positive evidence is retained at its stated head/config; it
 does not establish the failing paths or authorize either lock.
 
-- [ ] Complete the joint correction, private review and exact-head validation in the companion plan,
+- [x] Complete the joint correction, private review and exact-head validation in the companion plan,
       updating this effort's permanent guides and support matrix with the corrected behavior.
-- [ ] Reconcile the subsequent full report against R1-R10 and the predecessor's retained
+- [x] Reconcile the subsequent full report against R1-R10 and the predecessor's retained
       obligations, then finish permanent promotion and create both locks only when the evidence
       proves completion.
 
@@ -1984,7 +2046,7 @@ remain absent until requirement-level evidence and permanent promotion establish
 - [x] Complete native settings and session-startup corrections with the companion effort and run
       common-candidate private reviews and gates. The companion final validation record supplies the
       exact source heads and scoped evidence for the ready handoff.
-- [ ] Reconcile R1-R10 and the companion R1-R16 obligations with the next live evidence, preserving
+- [x] Reconcile R1-R10 and the companion R1-R16 obligations with the next live evidence, preserving
       all missing cells explicitly, and finish both locks in the final closeout PR.
 
 All three private lanes cleared `26a4904a` and the final simulated-runtime fixture correction
@@ -2018,7 +2080,7 @@ useful at their actual scope, not blanket current-head acceptance.
       preserving recognized configuration and independent/native outer-scope behavior. Update the
       support matrix and permanent worked two-session example without introducing another format.
 - [x] Complete the private review and isolated local gates recorded in the companion round 9 plan.
-- [ ] Complete final-head CI and the normal ready handoff, then scoped report reconciliation. Finish
+- [x] Complete final-head CI and the normal ready handoff, then scoped report reconciliation. Finish
       both owned SDD locks only after all retained requirements and permanent teaching are proved;
       an intermediate correction merge does not end this ownership.
 

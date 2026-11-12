@@ -235,7 +235,7 @@ def test_list_consoles_with_counts_workspace_and_agent_filters(db: Database) -> 
         "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "
         "VALUES ('ws-2', 'vm1', '/home/me/ws-2', 'ws-ws-2')"
     )
-    db._conn.execute("INSERT INTO vms (name, site, hostname, admin_username) VALUES ('vm2', 'wsl', 'h', 'admin')")
+    db.insert_vm("vm2", "wsl", "h", admin_username="admin")
     db._conn.execute(
         "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "
         "VALUES ('ws-other', 'vm2', '/home/me/ws-other', 'ws-ws-other')"

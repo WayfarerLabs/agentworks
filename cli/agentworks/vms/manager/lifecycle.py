@@ -27,7 +27,7 @@ from agentworks import output
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform.base import RetainedProvisioningError
 from agentworks.config import validate_admin_username
-from agentworks.db import InitStatus, ProvisioningStatus
+from agentworks.db import DesiredRuntimeState, InitStatus, ProvisioningStatus
 from agentworks.debian import CURRENT_DEBIAN_RELEASE
 from agentworks.errors import (
     AgentworksError,
@@ -437,6 +437,7 @@ def create_vm(
                     disk_gib=resolved_disk,
                     swap_gib=vm_tmpl.swap,
                     admin_username=resolved_admin_username,
+                    desired_runtime_state=DesiredRuntimeState.RUNNING,
                 )
                 overlay_outcome = persist_vm_creation_overlays(db, vm_name, desired_overlays)
             log = RealizationLog()

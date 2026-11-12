@@ -19,6 +19,7 @@ import pytest
 from agentworks.capabilities.git_credential.base import StoredCredential
 from agentworks.capabilities.vm_platform import ProvisionResult
 from agentworks.config import load_config
+from agentworks.db import DesiredRuntimeState as Target
 from agentworks.db import VersionedPayload, VMStatus
 from agentworks.debian import DebianRelease
 from agentworks.errors import ConfigError, ExternalError, ProvisioningError, StateError, UserAbort, ValidationError
@@ -1442,14 +1443,16 @@ def test_reinit_refuses_an_operator_stopped_vm_at_the_gate(
 
     config = make_config()
     _seed_provisioned_vm(db)
-    db.set_operator_stopped("rvm", True)
+    db.set_vm_desired_runtime_state(
+        "rvm", Target.STOPPED, expected_vm_uuid=next(vm.vm_uuid for vm in db.list_vms() if vm.name == "rvm")
+    )
     monkeypatch.setattr(LimaPlatform, "status", lambda self, vm, ctx: VMStatus.STOPPED)
 
     def _no_init(*a: object, **k: object) -> None:
         raise AssertionError("init ran despite the refusal")
 
     monkeypatch.setattr(vm_manager, "run_initialization", _no_init)
-    with pytest.raises(StateError, match="manually stopped") as exc:
+    with pytest.raises(StateError) as exc:
         vm_manager.reinit_vm(db, config, "rvm", interaction=TtyInteractionPolicy.REFUSE)
     assert "agw vm start rvm" in (exc.value.hint or "")
 

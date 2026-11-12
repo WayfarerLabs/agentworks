@@ -31,7 +31,7 @@ def captured_skill(tmp_path: Path) -> ArtifactInput:
 def altered_payload(original: ArtifactInput, altered: ArtifactInput) -> dict[str, object]:
     """Tamper with a readable wire record, retaining hashes valid for the altered values."""
     payload = encode_inputs(group(original))
-    row = cast("dict[str, dict[str, object]]", payload[original.content.type.value + "s"])[original.content.name]
+    row = cast("dict[str, dict[str, object]]", payload[original.content.type.map_name])[original.content.name]
     row["content"] = {
         **asdict(altered.content),
         "digest": altered.content.digest,
@@ -112,7 +112,7 @@ def test_decode_accepts_git_provenance_without_source_access(tmp_path: Path) -> 
             commit="a" * 40,
         ),
     )
-    assert decode_inputs(encode_inputs(group(altered))) == (3, group(altered))
+    assert decode_inputs(encode_inputs(group(altered))) == (4, group(altered))
 
 
 @pytest.mark.parametrize("field", ["hooks", "mcpServers", "mcp_servers"])

@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.db import PID_STOPPED, SessionMode, SessionRow, SessionRuntimeSnapshot, SessionStatus
-from agentworks.errors import ConnectivityError, NotFoundError, StateError
+from agentworks.errors import ConnectivityError, StateError
 from agentworks.execution.errors import TrustMissing
 from agentworks.execution.trust import HOST_TRUST
 from agentworks.sessions.manager import (
@@ -162,15 +162,17 @@ def test_batch_all_missing_pid() -> None:
     assert batch_check_status(sessions, target=_FakeTarget()) == {}
 
 
-def test_session_observer_preserves_missing_workspace_as_structural_failure() -> None:
+def test_session_observer_treats_disappeared_workspace_as_unknown() -> None:
     class _DB:
         def get_workspace(self, _name: str) -> None:
             return None
 
-    with pytest.raises(NotFoundError) as caught:
-        observe_session_statuses([_session("s1", socket_path="/sock")], db=_DB(), config=object())  # type: ignore[arg-type]
-    assert caught.value.entity_kind == "workspace"
-    assert caught.value.entity_name == "ws"
+    statuses = observe_session_statuses(
+        [_session("s1", socket_path="/sock")],
+        db=_DB(),
+        config=object(),  # type: ignore[arg-type]
+    )
+    assert statuses == {"s1": SessionStatus.UNKNOWN}
 
 
 def test_session_observer_preserves_corrupt_ssh_applied_state(

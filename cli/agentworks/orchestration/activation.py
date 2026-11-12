@@ -4,10 +4,10 @@ span.
 Ordinary singular commands that touch an EXISTING VM converge its power
 state before their preflight and boundary resolve, so every readiness
 probe that reaches the target queries a live environment. Their gate
-OPENS after build and BEFORE the preflight sweep. Batch session status is
-the deliberate inverse: it completes one shared preflight and boundary
-resolve before opening each VM gate, then serves the gate credentials from
-that cache. In either ordering the gate is a SPAN, not a point: it stays open through
+OPENS after build and BEFORE the preflight sweep. Batch lifecycle preparation
+also resolves gate names before its shared workload boundary, reusing the
+same operation Resolver across VM families.
+The gate is a SPAN, not a point: it stays open through
 the command (WSL2 must be HELD active, not merely started) and closes at
 the end, on success or failure, after any unwind.
 
@@ -27,11 +27,10 @@ Three properties are load-bearing:
   auto-started for a command that later fails stays up; the span just
   closes), and it does not bend "preflight-all before any mutation",
   which governs the command's PLAN.
-- **The node is the authority on auto-start.** Auto-start applies only
-  to an auto-stopped VM; a manually stopped one (``operator_stopped``)
-  refuses with a typed error raised within the node's own scope
-  (:meth:`GateTarget.auto_start`), including the same re-read-the-flag
-  race guard the retired imperative ``ensure_active`` carried.
+- **The node is the authority on auto-start.** Stopped runtime intent
+  prohibits automatic power-on. The node checks its current identity and
+  intent under the same VM-family guard used by lifecycle mutations.
+  Hold admission shares that guard because a backend hold can itself boot.
 - **Gate secrets are delivered just-in-time, with caller ordering explicit.**
   Observing and starting a stopped VM may need the platform's API credential.
   For an ordinary singular command, the gate opens before preflight and
@@ -44,10 +43,10 @@ Three properties are load-bearing:
   arise. :func:`gate_secret_resolver` SEEDS each value into the later boundary
   resolver as it lands, so no secret resolves or prompts twice.
 
-  Batch session status is deliberately different: its shared preflight and
-  boundary resolve complete first, then each VM gate reads its gate
-  credentials from that boundary cache (``Resolver.get``), which refuses any
-  name outside the union. Nothing resolves after the boundary.
+  In batch preparation, infrastructure failures stay local to their dependent
+  families; Resolver remembers value-free failures and rejects a workload
+  union requiring one before any further source call. Nothing resolves after
+  a boundary.
 
   The gate resolves nothing else. A started VM that does not answer over SSH
   fails naming ``agw vm recover``, whose own boundary resolves the Tailscale
@@ -88,7 +87,7 @@ class GateTarget(Protocol):
     def confirmed_active(self) -> bool:
         """Cheap, secret-free fast path: ``True`` only when the target
         is positively known active (today's Tailscale reachability
-        probe, skipped when the row already says manually stopped).
+        probe, skipped when the row already records stopped intent).
         ``False`` means unknown: ask the backend."""
         ...
 
@@ -103,10 +102,10 @@ class GateTarget(Protocol):
     def auto_start(self, gate_secrets: SecretReader) -> None:
         """Start an auto-stopped target and wait for it to answer,
         failing with guidance when it does not. ``gate_secrets`` serves
-        only the gate's own names. The node re-reads its
-        operator-stopped intent here and REFUSES a manually stopped
-        target with a typed error and the explicit-start hint: the node,
-        not the helper, is the authority."""
+        only the gate's own names. The node re-reads its runtime intent
+        here and REFUSES a target with stopped intent with a typed error
+        and the explicit-start hint: the node, not the helper, is the
+        authority."""
         ...
 
     def hold_active(self) -> contextlib.AbstractContextManager[None]:
@@ -121,10 +120,10 @@ def ensure_active(target: GateTarget, resolve_secret: Callable[[str], str]) -> d
 
     Fast path first (no secret touched); otherwise resolve the
     target's gate secrets just-in-time and drive observe-then-start,
-    with the operator-stopped refusal raised from the node's own
+    with the stopped-intent refusal raised from the node's own
     ``auto_start``. Returns every gate-resolved value (empty on the fast
     path). A singular pre-boundary caller's resolve callback seeds its
-    later boundary as each value lands; a batch post-boundary caller
+    later boundary as each value lands; a post-boundary caller (rekey)
     serves its completed cache and never seeds after resolution.
     """
     if target.confirmed_active():

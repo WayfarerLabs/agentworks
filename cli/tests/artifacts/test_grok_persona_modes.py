@@ -36,7 +36,10 @@ def test_personas_remain_unhandled_in_every_mode(args: Sequence[str], workaround
 
 @pytest.mark.parametrize("args", [[], ["--single", "task"]])
 def test_unhandled_personas_do_not_block_independent_rules_and_hints(args: Sequence[str]) -> None:
-    hint, rule, skill, agent = (artifact(kind, name=kind.value) for kind in ArtifactType)
+    hint, rule, skill, agent = (
+        artifact(kind, name=kind.value)
+        for kind in (ArtifactType.HINT, ArtifactType.RULE, ArtifactType.SKILL, ArtifactType.AGENT)
+    )
     prepared = context(agent, rule, hint, skill)
     result = session_artifacts(
         prepared,

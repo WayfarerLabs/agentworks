@@ -8,7 +8,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Literal, cast
 
 from agentworks import output
-from agentworks.db import SYSTEM_SLUG_KEY, VMStatus
+from agentworks.db import SYSTEM_SLUG_KEY, DesiredRuntimeState, VMStatus
 from agentworks.db.projections import (
     project_session_mode,
     project_vm_initialization_status,
@@ -55,6 +55,7 @@ class VMListRow:
     session_count: int
     tailscale_host: str | None
     created_at: str
+    desired_runtime_state: DesiredRuntimeState = DesiredRuntimeState.RUNNING
     debian_release: str | None = None
     debian_release_observed_at: str | None = None
     observed_status: str | None = None
@@ -167,7 +168,7 @@ class VMDetailFacts:
     hostname: str
     created_at: str
     last_seen_at: str | None
-    operator_stopped: bool
+    desired_runtime_state: DesiredRuntimeState
     debian_release: str | None = None
     debian_release_observed_at: str | None = None
     debian_support: str | None = None
@@ -191,7 +192,7 @@ class VMDetailFacts:
             hostname=vm.hostname,
             created_at=vm.created_at,
             last_seen_at=vm.last_seen_at,
-            operator_stopped=vm.operator_stopped,
+            desired_runtime_state=vm.desired_runtime_state,
             debian_release=vm.debian_release.value if vm.debian_release is not None else None,
             debian_release_observed_at=vm.debian_release_observed_at,
             debian_support=classify_release(vm.debian_release).value if vm.debian_release is not None else None,
@@ -266,6 +267,7 @@ def vm_listing_data(listing: VMListing) -> JsonObject:
                 "session_count": vm.session_count,
                 "tailscale_host": vm.tailscale_host,
                 "created_at": vm.created_at,
+                "desired_runtime_state": vm.desired_runtime_state.value,
                 "debian_release": vm.debian_release,
                 "debian_release_observed_at": vm.debian_release_observed_at,
                 "observed_status": vm.observed_status,
@@ -284,6 +286,7 @@ def vm_description_data(description: VMDescription) -> JsonObject:
         "vm": {
             "name": vm.name,
             "created_at": vm.created_at,
+            "desired_runtime_state": vm.desired_runtime_state.value,
             "last_started_at": description.last_started_at,
             "uptime_seconds": description.uptime_seconds,
             "site": vm.site,
@@ -291,7 +294,7 @@ def vm_description_data(description: VMDescription) -> JsonObject:
             "backend": description.backend,
             "observed_status": description.observed_status,
             "status_disposition": description.status_disposition,
-            "operator_stopped": vm.operator_stopped,
+            "operator_stopped": vm.desired_runtime_state is DesiredRuntimeState.STOPPED,
             "hostname": vm.hostname,
             "system_slug": description.system_slug,
             "system_slug_state": description.system_slug_state,
@@ -413,7 +416,7 @@ def vm_listing(
         {
             vm.name: project_vm_status(
                 statuses.get(vm.name, VMStatus.UNKNOWN),
-                operator_stopped=vm.operator_stopped,
+                desired_runtime_state=vm.desired_runtime_state,
             )
             for vm in vm_rows
         }
@@ -434,6 +437,7 @@ def vm_listing(
                 session_count=db.count_sessions_on_vm(vm.name),
                 tailscale_host=vm.tailscale_host,
                 created_at=vm.created_at,
+                desired_runtime_state=vm.desired_runtime_state,
                 debian_release=vm.debian_release.value if vm.debian_release is not None else None,
                 debian_release_observed_at=vm.debian_release_observed_at,
                 observed_status=projected_statuses[vm.name][0] if include_status else None,
@@ -470,7 +474,7 @@ def render_vm_listing(
         return
 
     # Keep the VM-name cap so a legacy over-cap row cannot distort the table.
-    headers = ["NAME", "SITE", "TEMPLATE", "PROV", "INIT", "WS/AG/SE", "DEBIAN", "TAILSCALE", "CREATED"]
+    headers = ["NAME", "SITE", "TEMPLATE", "PROV", "INIT", "WS/AG/SE", "DEBIAN", "TAILSCALE", "CREATED", "DESIRED"]
     if include_status:
         headers.append("STATUS")
     rows: list[tuple[str, ...]] = []
@@ -486,6 +490,7 @@ def render_vm_listing(
             vm.debian_release or "-",
             vm.tailscale_host or "-",
             vm.created_at,
+            vm.desired_runtime_state.value,
         )
         status = vm.observed_status or VMStatus.UNKNOWN.value
         if vm.status_disposition:
@@ -673,7 +678,7 @@ def vm_description(
                         observed = platform.status(vm, ops_ctx)
                         observed_status, status_disposition = project_vm_status(
                             observed,
-                            operator_stopped=vm.operator_stopped,
+                            desired_runtime_state=vm.desired_runtime_state,
                         )
                     except UserAbort:
                         raise

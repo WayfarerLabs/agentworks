@@ -45,7 +45,7 @@ def test_restart_stages_disjoint_home_packages_before_teardown(home_lifecycle, m
         assert current.db.get_session("s1").run_id == before.run_id
         observed.append(True)
 
-    monkeypatch.setattr("agentworks.sessions.manager._lifecycle._teardown_session", stop)
+    monkeypatch.setattr("agentworks.sessions.manager._teardown_session", stop)
     current.restart()
     assert observed == [True]
     assert current.db.get_session("s1").run_id != before.run_id

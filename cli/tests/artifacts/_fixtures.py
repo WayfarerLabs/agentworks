@@ -7,9 +7,9 @@ from agentworks.artifacts.model import ArtifactGroup, ArtifactInput, ArtifactInp
 
 def group(*items: ArtifactInput, owner: ArtifactOwner | None = None) -> ArtifactGroup:
     scope = owner or (items[0].origin.owner if items else ArtifactOwner("session", "session", "s1"))
-    maps: dict[str, dict[str, ArtifactInput]] = {kind.value + "s": {} for kind in ArtifactType}
+    maps: dict[str, dict[str, ArtifactInput]] = {kind.map_name: {} for kind in ArtifactType}
     for item in items:
-        entries = maps[item.content.type.value + "s"]
+        entries = maps[item.content.type.map_name]
         if item.content.name in entries:
             raise ValueError("duplicate fixture artifact key")
         entries[item.content.name] = item

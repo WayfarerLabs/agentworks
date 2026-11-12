@@ -1,5 +1,87 @@
 # Harness Scope Framework: Implementation Plan
 
+## Joint closeout, 2026-11-11
+
+The operator approved the sequence: close both existing SDDs, then MCP artifacts, then
+single-session workspaces. PR [871](https://github.com/WayfarerLabs/agentworks/pull/871) merged at
+`dc3fb557`. Its
+[final integration report](https://github.com/WayfarerLabs/agentworks/pull/871#issuecomment-6770963076)
+cleared exact source `fe2209cf` with no new material finding. This closes the earlier report wait;
+merge alone is not the acceptance evidence.
+
+This follow-up starts from main `834eb715`, including the separate Shell/env placeholder
+compatibility correction and dependency update. It owns the two accepted post-handoff Muntz fixes,
+the final acceptance and promotion audit, and both locks. It introduces no new artifact type or
+workspace mode.
+
+- [x] Read the complete final integration report and retain its exact source, native discovery, real
+      lifecycle and cleanup observations and stated limits.
+- [x] Finish the two accepted Muntz corrections without changing launch, cleanup authority,
+      persistence or parent-deletion behavior.
+- [x] Reconcile every retained requirement and historical unchecked task with its actual evidence;
+      finish any remaining permanent promotion.
+- [x] Run required gates and independent project, Muntz and correctness review of the combined
+      closeout; correct material findings before locking.
+- [x] Record final acceptance, reconcile the plans and create both `locked.md` files after the
+      evidence and closeout review establish completion.
+- [x] Prepare the complete closeout handoff and preserve the normal ready/report feedback workflow
+      under the operator's standing allowance.
+
+Earlier checked records stay immutable. The dated acceptance records and the final reconciliation
+distinguish historical handoffs, corrected or superseded behavior, and the final supported contract.
+MCP and single-session workspace work belong to separate efforts after this closeout.
+
+## Final task and validation record, 2026-11-11
+
+The historical unchecked tasks below are closed by their recorded handoffs and the final accepted
+contract. This does not turn an earlier defective or partial candidate into an accepted release. The
+dated findings, supersessions and source/mode limits remain in place; previously checked records are
+unchanged.
+
+| Historical work                                  | Handoff and later disposition                                                                                                                                                                                                                                                                                                                                                                                                            |
+| ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Initial facet/independence handoff, `72923b64`   | [6554528670](https://github.com/WayfarerLabs/agentworks/pull/862#issuecomment-6554528670), with report [6555206914](https://github.com/WayfarerLabs/agentworks/pull/862#issuecomment-6555206914). Later corrections supply the final behavior.                                                                                                                                                                                           |
+| Additional round, `1e0d2fe0`                     | [6643136662](https://github.com/WayfarerLabs/agentworks/pull/862#issuecomment-6643136662), report [6646701174](https://github.com/WayfarerLabs/agentworks/pull/862#issuecomment-6646701174), reading [6651844728](https://github.com/WayfarerLabs/agentworks/pull/862#issuecomment-6651844728).                                                                                                                                          |
+| Two subsequent rounds, `082437fe` and `b14302bc` | Handoffs [6665699842](https://github.com/WayfarerLabs/agentworks/pull/862#issuecomment-6665699842) and [6668868841](https://github.com/WayfarerLabs/agentworks/pull/862#issuecomment-6668868841); report [6676063798](https://github.com/WayfarerLabs/agentworks/pull/862#issuecomment-6676063798) retains its mixed-head limits, assessed in [6676418997](https://github.com/WayfarerLabs/agentworks/pull/862#issuecomment-6676418997). |
+| Round 7, `41bc36fe`                              | Handoff [6677721507](https://github.com/WayfarerLabs/agentworks/pull/862#issuecomment-6677721507), late partial report [6688937883](https://github.com/WayfarerLabs/agentworks/pull/862#issuecomment-6688937883), reading [6689997796](https://github.com/WayfarerLabs/agentworks/pull/862#issuecomment-6689997796). It is not relabeled as final acceptance.                                                                            |
+| Round 8, `7fb588cb`                              | Handoff [6694298850](https://github.com/WayfarerLabs/agentworks/pull/862#issuecomment-6694298850), full report [6701131033](https://github.com/WayfarerLabs/agentworks/pull/862#issuecomment-6701131033), reading [6701270166](https://github.com/WayfarerLabs/agentworks/pull/862#issuecomment-6701270166). Its later lifecycle/redaction corrections are attributed to the next head.                                                  |
+| Round 9, `eddf7501`                              | Handoff [6701862296](https://github.com/WayfarerLabs/agentworks/pull/862#issuecomment-6701862296), clean scoped report [6719171109](https://github.com/WayfarerLabs/agentworks/pull/862#issuecomment-6719171109), reading [6724351948](https://github.com/WayfarerLabs/agentworks/pull/862#issuecomment-6724351948), merged through PR 862 at `89bb63e4`.                                                                                |
+| Native delivery round 1, `b8c03be5`              | Handoff [6754668830](https://github.com/WayfarerLabs/agentworks/pull/871#issuecomment-6754668830), report [6755957164](https://github.com/WayfarerLabs/agentworks/pull/871#issuecomment-6755957164), reading [6755998854](https://github.com/WayfarerLabs/agentworks/pull/871#issuecomment-6755998854). The deletion veto was superseded by the existing best-effort contract.                                                           |
+| Native delivery round 2, `fe2209cf`              | Handoff [6757331508](https://github.com/WayfarerLabs/agentworks/pull/871#issuecomment-6757331508), final clean report [6770963076](https://github.com/WayfarerLabs/agentworks/pull/871#issuecomment-6770963076), merged through PR 871 at `dc3fb557`.                                                                                                                                                                                    |
+
+The six framework behavior tasks are reconciled in [acceptance.md](acceptance.md): actual
+unsupported activation/session-only Shell behavior; five-scope env and explicit maps/null; two
+users/workspaces and all settings policies; actual-user prerequisites including pending creation;
+state convergence, interruption, concurrency, drift, failed cleanup and deletion; and core workspace
+unwind versus retained owners after optional facet failure. Real reports establish the owning
+vertical and lifecycle; local controls establish pure map/codec/schema and adversarial boundary
+cases. Their coverage is not exchanged or inflated.
+
+Current closeout implementation is `5bc9823e`; documentation correction `aba5250a` changes only
+Markdown. Full frozen CLI validation returned **12,084 passed, 34 skipped**, exit 0; full mypy
+checked 971 files. Ruff/format and exact CI Typer isolation passed. A focused conformance check
+returned 168 passed and 26 explicit non-interactive sh/dash startup-file skips; it overlaps the full
+suite. Website Python/Node tests, both deterministic double builds/diffs, Rulesync and lock checks
+passed. File lint initially failed on one format and one spelling issue; both were corrected and the
+complete lint replay returned 0. The original failures remain recorded.
+
+Fresh locked-runtime wheel/source archive and installed guide/help/sample checks passed, with all
+483 package files identical across source, wheel and installation. An attempted reuse of the earlier
+verification environment was refused; a fresh environment passed. It was a harness setup failure,
+not a product correction. The separate unconstrained Typer issue 880 remains qualified.
+
+All three independent private lanes cleared the combined source: project 20 focused cases, Muntz 110
+and four meaningful sanitizer-removal failures, generic correctness 88 plus five adversarial
+diagnostic probes. Counts overlap the full suite and one another. No lane claims a new VM or model
+measurement. The project reviewer verified all 317 original checked task blocks and both unchanged
+FRDs. The final lock/checkbox delta receives a separate pinned record review before handoff.
+
+Permanent promotion now includes acquisition restrictions and operation budgets in the artifact
+README/imported guide, correct capture codec teaching in the database README and inheritance across
+capability hosts. Issue [869](https://github.com/WayfarerLabs/agentworks/issues/869) is closed with
+the merged native-file response and actual report; direct native prompt settings retain their
+separate resume semantics. Both locks summarize the completed contracts and retained limitations.
+
 ## Native delivery feedback, round 2 of 3, 2026-11-10
 
 PR 871's
@@ -14,9 +96,9 @@ main remains `438c4546`.
 - [x] Restore framework R9's no-deletion-prerequisite contract while safely retiring known shared
       exclusions where possible. Correct supported rehome through the verified owning lifecycle;
       preserve native association and file-safety boundaries.
-- [ ] Complete the companion's effective-argument guards and permanent author-contract correction,
+- [x] Complete the companion's effective-argument guards and permanent author-contract correction,
       then validate and hand off the exact combined change through all three private lanes.
-- [ ] Reconcile corrected-head acceptance against R1-R16 and the companion's R1-R10, finish actual
+- [x] Reconcile corrected-head acceptance against R1-R16 and the companion's R1-R10, finish actual
       remaining promotion and create both locks. The separate workspace-mode PR is not a gate.
 
 The earlier framework reconciliation retains its unchanged-API and live-vertical evidence. The
@@ -47,9 +129,9 @@ earlier clean intermediate merge.
 
 - [x] Assess the final report and preserve its tested-head, native, workstation and authentication
       limits. Rebase onto main `438c4546` without undoing runtime-context behavior.
-- [ ] Complete the companion's literal guidance and safe shared-exclusion deletion corrections,
+- [x] Complete the companion's literal guidance and safe shared-exclusion deletion corrections,
       smaller review fixes, current gates and three independent private review lanes.
-- [ ] Reconcile the next report against retained R1-R16 and companion R1-R10, then add both locks
+- [x] Reconcile the next report against retained R1-R16 and companion R1-R10, then add both locks
       only when the final evidence proves completion. Workspace modes remain a separate PR.
 
 ## Acceptance reconciliation, 2026-11-08
@@ -62,12 +144,12 @@ earlier clean intermediate merge.
       `08827b56` through the project and Muntz lanes; neither found a material correction for that
       draft. File lint passed. These are draft-document results, not final lock or code-change
       reviews.
-- [ ] Complete the companion's delivery reassessment and the approved implementation before joint
+- [x] Complete the companion's delivery reassessment and the approved implementation before joint
       closeout. Exact interactive Codex/Grok probes retain initial guidance despite changed launch
       arguments; the operator requested a broader file/skill-based design response. The clean
       intermediate correction PR #862 merged at `89bb63e4`; this audit does not reopen that
       correction.
-- [ ] Record final acceptance and plan dispositions, review and validate the actual final change,
+- [x] Record final acceptance and plan dispositions, review and validate the actual final change,
       then add both locks. Neither SDD is locked by this reconciliation.
 
 ## Facet independence and closeout, 2026-11-01
@@ -94,11 +176,11 @@ Transport work remains with its owner; this implementation uses today's transpor
       freshness gate, recapture, implicit setup or duplicate delivery; preserve own-facet errors.
 - [x] Align artifact publication, permanent guides and diagnostics with the amended contract.
 - [x] Complete private project, complexity and correctness reviews and the required gates.
-- [ ] Publish the complete ready handoff with the full live-test emphasis; critically assess and
+- [x] Publish the complete ready handoff with the full live-test emphasis; critically assess and
       incorporate or rebut feedback within the three-round allowance.
-- [ ] Audit the independent live evidence against every retained acceptance requirement, reconcile
+- [x] Audit the independent live evidence against every retained acceptance requirement, reconcile
       completed follow-up handoffs with their merge evidence, and close actual remaining gaps.
-- [ ] Promote remaining load-bearing guidance, audit all requirements and create `locked.md` only
+- [x] Promote remaining load-bearing guidance, audit all requirements and create `locked.md` only
       once both efforts' retained obligations are complete.
 
 - Status: Implementation authorized by the operator after design review on 2026-09-07
@@ -203,7 +285,7 @@ env; the integration lane receives the resource's assembled env through its full
       standalone and session-created workspaces; no workspace reinit or residue-adoption path.
 - [x] Add typed required/recommended upstream gaps to session readiness using actual bindings,
       current completion evidence and inexpensive native probes; report owning remediation.
-- [ ] Exercise unsupported setup refusal and shell session launch through the real CLI, plus setup
+- [x] Exercise unsupported setup refusal and shell session launch through the real CLI, plus setup
       env delivery through implemented facets and absence of implicit ancestor setup at
       start/restart.
 
@@ -256,17 +338,17 @@ dispatch. Read the integration-testing and agw-test-env skills and establish the
 and budget before creating live resources. Native CLI research can use isolated local homes and
 fixtures, without touching the operator's installed plugins or authentication.
 
-- [ ] Prove VM, admin, agent, workspace and session env and facet mapping, explicit enablement,
+- [x] Prove VM, admin, agent, workspace and session env and facet mapping, explicit enablement,
       multiple independent configurations, inherited activation maps and explicit null opt-outs
       (R1-R6, R8).
-- [ ] Observe two users and two workspaces for native plugin/settings applicability and all four
+- [x] Observe two users and two workspaces for native plugin/settings applicability and all four
       mapping policies; verify session-only compatibility (R3, R13-R15).
-- [ ] Observe required/recommended/absent prerequisites for the actual user, including stale and
+- [x] Observe required/recommended/absent prerequisites for the actual user, including stale and
       failed setup and pending explicit resource creation (R10).
-- [ ] Exercise repeat setup, one-entry removal, removal of an integration activation, interruption,
+- [x] Exercise repeat setup, one-entry removal, removal of an integration activation, interruption,
       concurrent mutation, native drift, unknown codec versions, failed cleanup and owner deletion
       (R9).
-- [ ] Prove core workspace creation failures unwind under standalone and session-created paths and
+- [x] Prove core workspace creation failures unwind under standalone and session-created paths and
       retry refuses unexplained residue. Under the 2026-11-04 ruling, facet execution failures
       instead retain the created owner and partial records while independent work continues (R13).
 - [x] Run full repository gates and focused native Windows tests from the current CI selection;
@@ -275,7 +357,7 @@ fixtures, without touching the operator's installed plugins or authentication.
       material findings, and validate the final integrated head.
 - [x] Publish a coherent implementation handoff and consume published feedback only within operator
       authorization. Never treat a review report as authority to widen the effort.
-- [ ] Verify cleanup independently at all layers used by testing, update the plan with evidence, and
+- [x] Verify cleanup independently at all layers used by testing, update the plan with evidence, and
       complete lock/promotion only when all retained requirements are proven.
 
 ## Local implementation evidence
@@ -641,7 +723,7 @@ after this round until the operator resolves it.
       the resulting correction within its agreed boundary.
 - [x] Run the three private review lanes and required gates on the corrected exact head; publish the
       complete handoff with the appropriate draft/ready signal (completed by round 2 below).
-- [ ] Audit independent live acceptance against every retained requirement and finish promotion and
+- [x] Audit independent live acceptance against every retained requirement and finish promotion and
       both locks. Unit tests and CI alone do not close the live obligations above.
 
 Round 1's independent corrections are reviewed clean through `eb1a081`, whose production code is
@@ -695,7 +777,7 @@ ownership engine. Empty session/run directories may remain after owned-file reti
 - [x] Complete all three private review lanes and integrated gates, then publish the exact head
       ready with the retained acceptance matrix and no checkpoint label.
 - [x] Assess that ready handoff's full feedback batch. One authorized public fix round remains.
-- [ ] Audit final-head live evidence, close every retained requirement, promote remaining durable
+- [x] Audit final-head live evidence, close every retained requirement, promote remaining durable
       content and add both locks. No unit or fixture result alone closes a real-VM obligation.
 
 Native fixture validation observed Claude Code 2.1.316 and Codex 0.166.0. The focused native slice
@@ -750,7 +832,7 @@ belongs to the ready head, not the correction still under development.
       ambiguity, not a second request for the already-authorized FRD amendments.
 - [x] Run all three private review lanes and full gates on the integrated head, then publish the
       appropriate complete handoff. This round exhausts the three-round public correction allowance.
-- [ ] Audit final live acceptance against every retained requirement and create both locks only
+- [x] Audit final live acceptance against every retained requirement and create both locks only
       after the remaining actual-scope evidence exists.
 
 The independent corrections do not wait on the pipeline policy choice. Missing native declarations,
@@ -839,7 +921,7 @@ launch safety remains unchanged.
       publish a coherent exact-head handoff.
 - [x] Dispose the later published workspace permission/adoption and native status findings under
       authenticated direction; the exhausted feedback budget does not authorize another fix round.
-- [ ] Audit the expanded live evidence from PR comment `6575184960` against retained requirements
+- [x] Audit the expanded live evidence from PR comment `6575184960` against retained requirements
       and close remaining acceptance gaps before creating either lockfile.
 
 The later live report exercised prerequisite/readiness fixtures, real agent-reinit cancellation,
@@ -894,8 +976,8 @@ edits. This consumes the single additional round, not a standing allowance for l
 - [x] Align recovery guidance, developer/operator guides, fixtures and acceptance milestones with
       the corrected behavior.
 - [x] Integrate the changes, complete all three private review lanes and required local checks.
-- [ ] Publish the exact green ready handoff and audit the separate full integration-test result.
-- [ ] Reconcile the expanded live evidence and any later findings against retained requirements
+- [x] Publish the exact green ready handoff and audit the separate full integration-test result.
+- [x] Reconcile the expanded live evidence and any later findings against retained requirements
       before final promotion and locking. Feedback arriving mid-round is a later batch.
 
 The copied-workspace `template="copied"` resolution failure exists in current main: copy records
@@ -993,9 +1075,9 @@ Proxmox/workstation report `6652928141`. The start is recorded in PR comment `66
       missing explicit route IDs through fresh active receivers without fabricating payloads.
       Restore the capability import boundary and remove the redundant join wrapper.
 - [x] Complete the three private reviews, required integrated gates and final collateral audit.
-- [ ] Publish the exact green ready handoff without `review-requested`, then assess the separate
+- [x] Publish the exact green ready handoff without `review-requested`, then assess the separate
       full live result within the remaining one-round allowance.
-- [ ] Finish the requirement-by-requirement acceptance and promotion audit and create both locks
+- [x] Finish the requirement-by-requirement acceptance and promotion audit and create both locks
       only after the remaining contracts are proven.
 
 ### Scope and remaining evidence
@@ -1081,11 +1163,11 @@ main `c8d4dfb` and return to draft. The separate full live report was not publis
 - [x] Correct the related tmux liveness probe to target the exact pane and accept only valid native
       observations. Exercise an actual private server alive then dead at status 23; malformed
       successful output remains unverified rather than falsely alive.
-- [ ] Complete the three independent private lanes and required integrated gates on the corrected
+- [x] Complete the three independent private lanes and required integrated gates on the corrected
       head, and update permanent collateral wherever the correction changes an operator contract.
-- [ ] Publish the exact green ready handoff without `review-requested`, reporting the exhausted
+- [x] Publish the exact green ready handoff without `review-requested`, reporting the exhausted
       correction allowance and the still-required independent live acceptance.
-- [ ] Reconcile final acceptance against every retained requirement, promote any actual remaining
+- [x] Reconcile final acceptance against every retained requirement, promote any actual remaining
       guidance, and create both locks only when that evidence proves completion.
 
 Supersession: the earlier completed branch-only codec work is truthful history; the final writer
@@ -1190,9 +1272,9 @@ both locks. The artifact companion tracks this same joint correction through thi
       reclamation or a new journal.
 - [x] Disposition every reported should-fix and incidental finding against its current caller,
       including exact Transport/SSH overlap, and update permanent collateral with actual behavior.
-- [ ] Strengthen the identified behavioral regression boundaries and native CI prerequisite, run all
+- [x] Strengthen the identified behavioral regression boundaries and native CI prerequisite, run all
       three private lanes and required integrated gates, and publish one exact green ready handoff.
-- [ ] Wait up to six hours for the next full integration report, assess earlier arrival promptly,
+- [x] Wait up to six hours for the next full integration report, assess earlier arrival promptly,
       and reconcile every retained requirement before final promotion and either lock.
 
 Independent scouts confirm that input IDs include content digests, so an old non-null input table is
@@ -1364,7 +1446,7 @@ positives remain evidence only for their actual head, configuration and scope.
 - [x] Complete common-candidate independent project, complexity and correctness reviews, required
       gates and collateral review. Publish the exact green ready handoff with the evidence below;
       await the next integration report before spending the remaining authorized round.
-- [ ] Finish the retained R1-R16 and companion R1-R10 acceptance reconciliation after the bounded
+- [x] Finish the retained R1-R16 and companion R1-R10 acceptance reconciliation after the bounded
       correction, including remaining live gaps and permanent promotion. Publish both SDD locks only
       when that evidence establishes completion, in a follow-up if the correction merges first.
 
@@ -1471,8 +1553,8 @@ remains uncertain. No new persisted identity, journal, provider API or Transport
       and force/consent behavior in the PR body. Keep permanent teaching independent of the SDDs.
 - [x] Complete independent project, complexity and correctness reviews of the combined candidate and
       required isolated local gates.
-- [ ] Publish the final green head and exact-head ready handoff without `review-requested`.
-- [ ] Reconcile the subsequent actual-scope report and retained evidence against all 26
+- [x] Publish the final green head and exact-head ready handoff without `review-requested`.
+- [x] Reconcile the subsequent actual-scope report and retained evidence against all 26
       requirements, complete permanent promotion and create both `locked.md` files only when
       completion is proved.
 

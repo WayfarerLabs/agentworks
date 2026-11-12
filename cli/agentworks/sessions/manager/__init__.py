@@ -48,8 +48,11 @@ from ._env import (
 from ._env import (
     _session_secret_target_pre_create as _session_secret_target_pre_create,
 )
-from ._lifecycle import (
-    _execute_stop as _execute_stop,
+from ._intent import (
+    accept_session_runtime_state as accept_session_runtime_state,
+)
+from ._intent import (
+    set_session_desired_runtime_state as set_session_desired_runtime_state,
 )
 from ._lifecycle import (
     _teardown_session as _teardown_session,
@@ -139,15 +142,6 @@ from ._queries import (
     session_listing as session_listing,
 )
 from ._scope import (
-    _batch_vm_boundary as _batch_vm_boundary,
-)
-from ._scope import (
-    _best_effort_batch_vm_boundary as _best_effort_batch_vm_boundary,
-)
-from ._scope import (
-    _distinct_vms_for_sessions as _distinct_vms_for_sessions,
-)
-from ._scope import (
     _filter_sessions_with_registry as _filter_sessions_with_registry,
 )
 from ._scope import (
@@ -195,6 +189,7 @@ from ._status import (
 
 __all__ = [
     "create_session",
+    "set_session_desired_runtime_state",
     "describe_session",
     "list_sessions",
     "stop_session",
@@ -221,3 +216,35 @@ __all__ = [
     "_require_workspace",
     "transport",
 ]
+
+from ._execute import execute_session_start as execute_session_start
+from ._runtime import (
+    PreparedSessionLaunch as PreparedSessionLaunch,
+)
+from ._runtime import (
+    PreparedSessionStop as PreparedSessionStop,
+)
+from ._runtime import (
+    SessionLaunchDefinition as SessionLaunchDefinition,
+)
+from ._runtime import (
+    execute_session_stop as execute_session_stop,
+)
+from ._runtime import (
+    observe_session_runtime as observe_session_runtime,
+)
+from ._runtime import (
+    prepare_session_definition as prepare_session_definition,
+)
+from ._runtime import (
+    prepare_session_launch as prepare_session_launch,
+)
+from ._runtime import (
+    prepare_session_stop as prepare_session_stop,
+)
+from ._runtime import (
+    validate_session_observed_policy as validate_session_observed_policy,
+)
+from ._runtime import (
+    validate_session_values as validate_session_values,
+)

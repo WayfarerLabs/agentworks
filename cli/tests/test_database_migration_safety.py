@@ -84,8 +84,15 @@ def test_latest_schema_enforces_atomic_debian_release_observation(tmp_path: Path
     build_schema(path, LATEST_VERSION)
     connection = sqlite3.connect(path)
     connection.execute(
-        "INSERT INTO vms (name, site, hostname, template) VALUES (?, ?, ?, ?)",
-        ("release-witness", "lima-local", "lima--release-witness", None),
+        "INSERT INTO vms (name, site, hostname, template, desired_runtime_state, vm_uuid) VALUES (?, ?, ?, ?, ?, ?)",
+        (
+            "release-witness",
+            "lima-local",
+            "lima--release-witness",
+            None,
+            "running",
+            "00112233-4455-6677-8899-aabbccddeeff",
+        ),
     )
 
     with pytest.raises(sqlite3.IntegrityError):

@@ -38,6 +38,7 @@ def render_vm_description(description: VMDescription) -> None:
     output.info(f"Platform:       {site_platform}")
     output.info(f"Backend:        {backend_label}")
     output.info(f"Status:         {status_label}")
+    output.info(f"Desired State:  {vm.desired_runtime_state.value}")
     output.info(f"Hostname:       {vm.hostname}")
     slug = description.system_slug
     slug_label = slug or ("(none)" if description.system_slug_state == "declined" else "-")

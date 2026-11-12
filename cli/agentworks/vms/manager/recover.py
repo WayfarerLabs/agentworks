@@ -10,6 +10,7 @@ answer over SSH; then record the configured SSH identity as the VM's.
 
 from __future__ import annotations
 
+import contextlib
 from functools import partial
 from typing import TYPE_CHECKING
 
@@ -17,7 +18,7 @@ import agentworks.execution as execution
 from agentworks import output
 from agentworks.capabilities.vm_platform.base import offers_native_shell
 from agentworks.capabilities.vm_platform.tailscale_join import read_tailnet_address, settle_tailnet_address
-from agentworks.db import VMStatus
+from agentworks.db import DesiredRuntimeState, VMStatus
 from agentworks.errors import ConnectivityError, StateError, UserAbort
 from agentworks.execution import reachability, trust
 from agentworks.execution.access import Admin
@@ -48,7 +49,7 @@ def recover_vm(db: Database, config: Config, name: str, *, interaction: TtyInter
     with no wait for SSH, since recover reaches it through the platform's own
     channel: a VM with no host-key record could otherwise never be recovered
     once it stopped, since start's own wait refuses it. Like an explicit
-    start, that clears the operator-stopped flag. The auth key resolves in the
+    start, that records running intent. The auth key resolves in the
     boundary, since the repair joins the tailnet when the node needs a login.
     """
     import agentworks.vms.manager as _mgr
@@ -76,65 +77,79 @@ def recover_vm(db: Database, config: Config, name: str, *, interaction: TtyInter
     prepared = prepare_configured_ssh_identity(config.operator.ssh_public_key, config.operator.ssh_private_key)
     authorized_keys = authorized_keys_content(prepared.public_text, config.operator.extra_ssh_public_keys)
 
-    vm_node, _resolver, ops_ctx, auth_key = _auth_key_boundary(db, config, vm, interaction=interaction)
-    platform = vm_node.site.platform
-    status = platform.status(vm, ops_ctx)
-    _require_known_power_state(status, name)
+    from agentworks.harness_setup.locking import native_mutation_guard
 
-    with _operation_log(name, "recover", redactions=(auth_key,)) as log:
-        # Started before the hold, as start_vm does: WSL2's keepalive boots a
-        # stopped distro as a side effect of holding it.
-        if status is not VMStatus.RUNNING:
-            log.step("Start the VM")
-            db.set_operator_stopped(name, False)
-            platform.start(vm, ops_ctx)
-            db.record_vm_started(name)
-            output.info(f"VM '{name}' was {status.value}; started it")
-        with vm_node.hold_active():
-            if not trust.has_record(name):
-                log.step("Record the host keys")
-                _reestablish_trust(db, config, vm, platform, ops_ctx)
+    # The VM family's guard spans the repair, as it does every lifecycle change;
+    # the live node's hold shares it.
+    with native_mutation_guard(db.path, name) as guard, contextlib.ExitStack() as cleanup:
+        selected = _require_vm(db, name)
+        if selected.vm_uuid != vm.vm_uuid:
+            raise StateError("selected VM was replaced", entity_kind="vm", entity_name=name)
+        vm = selected
+        vm_node, resolver, ops_ctx, auth_key = _auth_key_boundary(
+            db, config, vm, interaction=interaction, held_native_guard=guard
+        )
+        cleanup.callback(resolver.close)
+        platform = vm_node.site.platform
+        status = platform.status(vm, ops_ctx)
+        _require_known_power_state(status, name)
 
-            log.step("Repair")
-            output.info("Repairing SSH access, python3 and Tailscale (this may take several minutes)...")
-            result = recovery.repair(
-                platform, vm, ops_ctx, authorized_keys=authorized_keys, auth_key=auth_key, log=log.record
-            )
-            recovery.require_success(result, script="repair", vm_name=name, hint=_repair_hint(platform, name, result))
-            joined = recovery.joined(result)
+        with _operation_log(name, "recover", redactions=(auth_key,)) as log:
+            # Started before the hold, as start_vm does: WSL2's keepalive boots a
+            # stopped distro as a side effect of holding it.
+            if status is not VMStatus.RUNNING:
+                log.step("Start the VM")
+                db.set_vm_desired_runtime_state(name, DesiredRuntimeState.RUNNING, expected_vm_uuid=vm.vm_uuid)
+                platform.start(vm, ops_ctx)
+                db.record_vm_started(name)
+                output.info(f"VM '{name}' was {status.value}; started it")
+            with vm_node.hold_active():
+                if not trust.has_record(name):
+                    log.step("Record the host keys")
+                    _reestablish_trust(db, config, vm, platform, ops_ctx)
 
-            log.step("Read the tailnet address")
-            run_as_root = partial(platform.run_as_root, vm, ops_ctx)
-            if joined:
-                output.info("Tailscale node rejoined the tailnet")
-                address = settle_tailnet_address(
-                    run_as_root, node=vm.hostname, rerun_hint=f"Run 'agw vm recover {name}'.", log=log.record
+                log.step("Repair")
+                output.info("Repairing SSH access, python3 and Tailscale (this may take several minutes)...")
+                result = recovery.repair(
+                    platform, vm, ops_ctx, authorized_keys=authorized_keys, auth_key=auth_key, log=log.record
                 )
-            else:
-                # A flaky channel never logs out a node that was working.
-                try:
-                    address = read_tailnet_address(run_as_root, node=vm.hostname, log=log.record)
-                except ConnectivityError as error:
-                    error.add_hint(f"Run 'agw vm logs {name}' for what each read reported.")
-                    raise
-            if address != vm.tailscale_host:
-                db.update_vm_tailscale(name, address)
-            # Whatever the address did: the repair installed the configured key, which may be a new one.
-            # The VM is repaired by now, so a failed local write warns rather than failing the recover.
-            sync_ssh_config_or_warn(config, db)
-
-            log.step("Wait for SSH")
-            wording = reachability.Wording.RECONNECT if joined else reachability.Wording.VERIFY
-            access = execution.vm_access(_require_vm(db, name), config, Admin(), log=log.record)
-            if not reachability.wait(access, wording=wording):
-                raise ConnectivityError(
-                    f"VM '{name}' was repaired but does not answer over SSH at {address}",
-                    entity_kind="vm",
-                    entity_name=name,
-                    hint="Check tailnet sharing and ACLs; if it still does not answer, delete and recreate the VM.",
+                recovery.require_success(
+                    result, script="repair", vm_name=name, hint=_repair_hint(platform, name, result)
                 )
-            log.step("Record the SSH identity")
-            _record_ssh_identity(db, name, prepared)
+                joined = recovery.joined(result)
+
+                log.step("Read the tailnet address")
+                run_as_root = partial(platform.run_as_root, vm, ops_ctx)
+                if joined:
+                    output.info("Tailscale node rejoined the tailnet")
+                    address = settle_tailnet_address(
+                        run_as_root, node=vm.hostname, rerun_hint=f"Run 'agw vm recover {name}'.", log=log.record
+                    )
+                else:
+                    # A flaky channel never logs out a node that was working.
+                    try:
+                        address = read_tailnet_address(run_as_root, node=vm.hostname, log=log.record)
+                    except ConnectivityError as error:
+                        error.add_hint(f"Run 'agw vm logs {name}' for what each read reported.")
+                        raise
+                if address != vm.tailscale_host:
+                    db.update_vm_tailscale(name, address)
+                # Whatever the address did: the repair installed the configured key, which may be a new one.
+                # The VM is repaired by now, so a failed local write warns rather than failing the recover.
+                sync_ssh_config_or_warn(config, db)
+
+                log.step("Wait for SSH")
+                wording = reachability.Wording.RECONNECT if joined else reachability.Wording.VERIFY
+                access = execution.vm_access(_require_vm(db, name), config, Admin(), log=log.record)
+                if not reachability.wait(access, wording=wording):
+                    raise ConnectivityError(
+                        f"VM '{name}' was repaired but does not answer over SSH at {address}",
+                        entity_kind="vm",
+                        entity_name=name,
+                        hint="Check tailnet sharing and ACLs; if it still does not answer, delete and recreate the VM.",
+                    )
+                log.step("Record the SSH identity")
+                _record_ssh_identity(db, name, prepared)
     output.result(f"VM '{name}' recovered")
     _note_agent_keys(db, name)
 

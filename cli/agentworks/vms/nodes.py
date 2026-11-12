@@ -29,14 +29,15 @@ boilerplate is an explicit design decision deferred until they land.
 
 from __future__ import annotations
 
+from contextlib import ExitStack, contextmanager
 from typing import TYPE_CHECKING
 
-from agentworks.db import VMStatus
+from agentworks.db import DesiredRuntimeState, VMStatus
 from agentworks.errors import StateError
 from agentworks.execution import trust
 
 if TYPE_CHECKING:
-    from contextlib import AbstractContextManager
+    from collections.abc import Iterator
 
     from agentworks.capabilities.base import RunContext, SecretReader
     from agentworks.capabilities.vm_platform import VMPlatform
@@ -44,6 +45,7 @@ if TYPE_CHECKING:
     from agentworks.db import Database, VMRow
     from agentworks.debian import DebianRelease
     from agentworks.git_credentials.nodes import GitCredentialNode
+    from agentworks.harness_setup.locking import NativeMutationGuard
     from agentworks.orchestration.node import Node
     from agentworks.resources.reference import ResourceReference
     from agentworks.resources.registry import Registry
@@ -126,12 +128,15 @@ class LiveVMNode:
         registry: Registry,
         row: VMRow,
         site: VMSiteNode,
+        *,
+        held_native_guard: NativeMutationGuard | None = None,
     ) -> None:
         self._db = db
         self._config = config
         self._registry = registry
         self._row = row
         self._site = site
+        self._held_native_guard = held_native_guard
         self._observed: VMStatus | None = None
 
     @property
@@ -142,6 +147,11 @@ class LiveVMNode:
     def row(self) -> VMRow:
         """The backing DB row (a live node's data is its row)."""
         return self._row
+
+    @property
+    def held_native_guard(self) -> NativeMutationGuard | None:
+        """The explicit operation token shared with nested lifecycle cleanup."""
+        return self._held_native_guard
 
     @property
     def site(self) -> VMSiteNode:
@@ -187,16 +197,18 @@ class LiveVMNode:
         from agentworks.vms.manager import _is_tailscale_reachable
 
         row = self._row
-        # A row already marked manually stopped skips the reachability
+        # A row that already records stopped intent skips the reachability
         # probe: pinging a stopped VM burns the probe's full timeout
         # just to reach the refusal (the backend answers directly).
         # Truthiness on the host, matching the oracle: an empty string
         # takes the slow path, never a probe of "".
         host = row.tailscale_host
-        return bool(not row.operator_stopped and host and _is_tailscale_reachable(host))
+        return bool(
+            row.desired_runtime_state is not DesiredRuntimeState.STOPPED and host and _is_tailscale_reachable(host)
+        )
 
     def observed_stopped(self, gate_secrets: SecretReader) -> bool:
-        observed = self._site.platform.status(self._row, self._gate_ops_ctx(gate_secrets))
+        observed = self._site.platform.status(self.reload_row(), self._gate_ops_ctx(gate_secrets))
         self._observed = observed
         # RUNNING or UNKNOWN proceeds: a transient status failure must
         # not trigger a spurious start; the real op surfaces the error.
@@ -210,44 +222,67 @@ class LiveVMNode:
         # answer. Same stance as that platform's fatal runup.
         return observed in (VMStatus.STOPPED, VMStatus.DEALLOCATED)
 
-    def auto_start(self, gate_secrets: SecretReader) -> None:
-        from agentworks import output
-        from agentworks.vms.manager import _await_tailnet
-
-        # Re-read the intent flag: the row this node was built from may
-        # predate a concurrent `vm stop` / `vm start` in another
-        # terminal, and auto-starting a VM the operator just stopped is
-        # the one mistake the flag exists to prevent.
+    def reload_row(self) -> VMRow:
+        """Refuse a deleted or same-name replacement VM before runtime work."""
         current = self._db.get_vm(self._row.name)
-        manually_stopped = current.operator_stopped if current else self._row.operator_stopped
-        if manually_stopped:
+        if current is None or current.vm_uuid != self._row.vm_uuid:
             raise StateError(
-                f"VM '{self._row.name}' was manually stopped so it will not be auto-started",
+                "selected VM no longer exists or was replaced",
                 entity_kind="vm",
                 entity_name=self._row.name,
-                hint=f"start it with: agw vm start {self._row.name}",
             )
-        # The commands that open this gate refuse a VM with no host-key record
-        # earlier, through require_vm_ssh_boundary, before any secret resolves.
-        # This is the last check ahead of the start for a gate opened without
-        # that precondition: an earlier one would have to live in
-        # confirmed_active, a boolean query, and the start is the first thing
-        # that spends anything (with no record the wait after it could only
-        # fail).
-        trust.require_record(self._row.name)
-        observed = self._observed.value if self._observed else "stopped"
-        output.info(f"VM '{self._row.name}' is {observed}. Starting...")
-        platform = self._site.platform
-        platform.start(self._row, self._gate_ops_ctx(gate_secrets))
-        if self._observed in (VMStatus.STOPPED, VMStatus.DEALLOCATED):
-            self._db.record_vm_started(self._row.name)
+        self._row = current
+        return current
 
-        # A VM that does not answer fails naming 'agw vm recover'.
-        with platform.vm_active(self._row, config=self._config):
-            _await_tailnet(self._db, self._config, self._row, already_running=False)
+    def auto_start(self, gate_secrets: SecretReader) -> None:
+        from agentworks import output
+        from agentworks.harness_setup.locking import native_mutation_guard
+        from agentworks.vms.manager import _await_tailnet
 
-    def hold_active(self) -> AbstractContextManager[None]:
-        return self._site.platform.vm_active(self._row, config=self._config)
+        with native_mutation_guard(self._db.path, self._row.name, held=self._held_native_guard):
+            row = self.reload_row()
+            if row.desired_runtime_state is DesiredRuntimeState.STOPPED:
+                raise StateError(
+                    f"VM '{row.name}' has stopped intent so it will not be auto-started",
+                    entity_kind="vm",
+                    entity_name=row.name,
+                    hint=f"start it with: agw vm start {row.name}",
+                )
+            # The commands that open this gate refuse a VM with no host-key record
+            # earlier, through require_vm_ssh_boundary, before any secret resolves.
+            # This is the last check ahead of the start for a gate opened without
+            # that precondition, and persisted trust may have changed since the
+            # command's preflight: the start is the first thing that spends
+            # anything, and with no record the wait after it could only fail.
+            trust.require_record(row.name)
+            platform = self._site.platform
+            ctx = self._gate_ops_ctx(gate_secrets)
+            observed = platform.status(row, ctx)
+            self._observed = observed
+            # Another completed activation may have won the admission race.
+            # An indeterminate provider observation never authorizes power-on.
+            if observed not in (VMStatus.STOPPED, VMStatus.DEALLOCATED):
+                return
+            output.info(f"VM '{row.name}' is {observed.value}. Starting...")
+            platform.start(row, ctx)
+            self._db.record_vm_started(row.name)
+            # A VM that does not answer fails naming 'agw vm recover'.
+            with platform.vm_active(row, config=self._config):
+                _await_tailnet(self._db, self._config, row, already_running=False)
+
+    @contextmanager
+    def hold_active(self, *, held_native_guard: NativeMutationGuard | None = None) -> Iterator[None]:
+        """Admit a possibly booting hold atomically, then release admission locking."""
+        from agentworks.harness_setup.locking import native_mutation_guard
+
+        with ExitStack() as holds:
+            with native_mutation_guard(
+                self._db.path, self._row.name, held=held_native_guard or self._held_native_guard
+            ):
+                row = self.reload_row()
+                if row.desired_runtime_state is not DesiredRuntimeState.STOPPED:
+                    holds.enter_context(self._site.platform.vm_active(row, config=self._config))
+            yield
 
 
 class VMTemplateNode:
@@ -430,6 +465,7 @@ def live_vm_node(
     row: VMRow,
     *,
     site_nodes: dict[str, VMSiteNode] | None = None,
+    held_native_guard: NativeMutationGuard | None = None,
 ) -> LiveVMNode:
     """Build the ``vm/<name>`` node from its DB row. The row's ``site``
     field translates to the live edge (row fields become edges): the
@@ -454,7 +490,7 @@ def live_vm_node(
             memoized = vm_site_node(registry, row.site)
             site_nodes[row.site] = memoized
         site = memoized
-    return LiveVMNode(db, config, registry, row, site)
+    return LiveVMNode(db, config, registry, row, site, held_native_guard=held_native_guard)
 
 
 def vm_template_node(tmpl: ResolvedVMTemplate) -> VMTemplateNode:

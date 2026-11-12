@@ -15,11 +15,14 @@ from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.tmux import capture_output
 from agentworks.ssh import SSHResult
 from tests.conftest import stub_build_registry, stub_vm_ssh_identity
+from tests.sessions._workload_secrets import register_workload_secret
 from tests.sessions.test_create_start_restart_orchestrated import _create_stubs, _restart_fixture
 
 
 @pytest.mark.parametrize("operation", ["create", "restart"])
-def test_admin_session_launch_redacts_resolved_values_in_actual_command_log(tmp_path, monkeypatch, operation):
+def test_admin_session_launch_redacts_resolved_values_in_actual_command_log(
+    tmp_path, monkeypatch, operation, make_config, resolve_counter
+):
     from agentworks.db import SessionMode
     from agentworks.sessions import manager, tmux
     from agentworks.sessions.manager import _create
@@ -45,7 +48,8 @@ def test_admin_session_launch_redacts_resolved_values_in_actual_command_log(tmp_
         return {**values, "fixture": secret}, agent
 
     monkeypatch.setattr(_create, "_preflight_and_resolve", resolve)
-    monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *args, **kwargs: {"fixture": secret})
+    if operation == "restart":
+        register_workload_secret(db, monkeypatch, name="fixture", value=secret)
     monkeypatch.setattr(manager, "_resolve_session_env", lambda *args, **kwargs: {"TOKEN": kwargs["values"]["fixture"]})
 
     def transport(*args, logger=None, **kwargs):
@@ -60,7 +64,12 @@ def test_admin_session_launch_redacts_resolved_values_in_actual_command_log(tmp_
     monkeypatch.setattr(manager, "transport", transport)
 
     def create(*args, run_command, env, **kwargs):
+        kwargs["before_spawn"]()
         assert env["TOKEN"] == secret
+        if operation == "restart":
+            from agentworks.db import SessionStatus
+
+            monkeypatch.setattr(manager, "check_session_status", lambda *a, **k: SessionStatus.RUNNING)
         run_command(f"tmux new-session -e TOKEN={env['TOKEN']}")
         return "/run/agentworks/admin-tmux-sockets/admin/s1.sock", 4243
 
@@ -72,7 +81,8 @@ def test_admin_session_launch_redacts_resolved_values_in_actual_command_log(tmp_
                 db, config, name="s1", workspace="ws1", admin=True, interaction=TtyInteractionPolicy.REFUSE
             )
         else:
-            manager.restart_session(db, config, name="s1", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+            manager.restart_session(db, make_config(), name="s1", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+            assert sum("fixture" in names for names in resolve_counter) == 1
         assert db.get_session("s1") is not None
         logs = [path.read_text() for path in log_root.glob("*.log")]
         assert logs and any("tmux new-session" in text for text in logs)

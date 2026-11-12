@@ -1,9 +1,43 @@
 ---
-description: Migrate retired Agentworks resource settings into current declarative manifests.
+description: Adopt desired runtime intent after upgrade and migrate retired resource settings.
 index-order: 60
 ---
 
-# Resource model migration
+# Migration
+
+## Adopt desired runtime intent
+
+Schema migration 39 preserves the old VM policy: manually stopped becomes stopped, and permitted
+automatic activation becomes on-demand. Existing sessions and named consoles have no target until
+the operator adopts them; old PIDs, timestamps, or current absence do not establish intent. New
+creates record running, and explicit VM start now records running even when already live. Use
+`agw vm set-desired-state NAME on-demand` when returning to permission-only activation is intended.
+
+Inspect local inventory, establish each requested target from known operator intent, then use the
+owning `set-desired-state` command. Preview the authorized recovery scope with
+`agw vm reconcile NAME --dry-run`; execute it only when runtime changes for that scope are intended.
+If intent is unknown, leave targets unset and report what is missing. Session and console start/stop
+can also adopt accepted targets, including ordinary batch no-ops. Runtime exit never clears a
+target.
+
+**Breaking batch behavior:** session start/restart now gathers all eligible workload secrets before
+changing any selected runtime. One required workload secret failure prevents the entire deferred
+batch instead of leaving earlier sessions restarted. Required VM activation may already have
+happened and is not rolled back. An infrastructure credential failure blocks only dependent families
+unless an eligible workload also requires that credential. Accepted targets survive later failure or
+cancellation.
+
+On WSL2, live stopped-intent guests receive no idle protection during access or management commands
+and may stop mid-command. Use `vm set-desired-state NAME on-demand` or `running` only when both
+normal holds and future activation are intended. This is a policy change, not a keepalive-only
+switch.
+
+Keep the normal pre-migration database snapshot. An older binary refuses the newer schema; rollback
+requires a full compatible pre-migration backup and the matching release. Restore does not undo
+external runtime changes. Use `agw database --help` for backup and restore operations and
+`agw guide show concept-management` for recovery signposts. Refresh completions after upgrading.
+
+## Retired resource model
 
 Agentworks 0.14 moved resource declarations out of `config.toml` and into YAML manifests. This is an
 exceptional resource-model migration, not a general upgrade checklist or an automated migrator. Work
@@ -12,10 +46,11 @@ from the installed model: `agw resource sample KIND` provides a manifest shape, 
 
 ## Keep state-database recovery separate
 
-This procedure backs up config and resource manifests. It does not replace the automatic snapshot
-offered before a SQLite state-schema migration. A normal command owns that migration and its
-recovery instructions; `agw doctor` only inspects. Restore a schema-compatible snapshot before a
-downgrade, and refresh generated completions with `agw completion install` after upgrading.
+The resource-model procedure below backs up config and resource manifests. It does not replace the
+automatic snapshot offered before a SQLite state-schema migration. A normal command owns that
+migration and its recovery instructions; `agw doctor` only inspects. Restore a schema-compatible
+snapshot before a downgrade, and refresh generated completions with `agw completion install` after
+upgrading.
 
 ## Inventory and preserve inputs
 

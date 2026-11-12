@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.capabilities.vm_platform import tailscale_join
-from agentworks.db import ProvisioningStatus, VMStatus
+from agentworks.db import DesiredRuntimeState, ProvisioningStatus, VMStatus
 from agentworks.db.instance_state import AppliedStateKey
 from agentworks.errors import ConnectivityError, StateError, UserAbort, ValidationError
 from agentworks.execution import reachability, trust
@@ -359,7 +359,9 @@ def test_a_stopped_vm_is_started_before_the_hold_then_repaired(
     host-key record is not sent back to a start whose own wait refuses it. The start precedes the hold, as an explicit
     start's does, and the hold covers everything after it."""
     _seed(db, record=record)
-    db.set_operator_stopped("box", True)
+    seeded = db.get_vm("box")
+    assert seeded is not None
+    db.set_vm_desired_runtime_state("box", DesiredRuntimeState.STOPPED, expected_vm_uuid=seeded.vm_uuid)
     events: list[str] = []
     guest = _guest(monkeypatch, status=status, events=events)
     monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, vm, ctx: events.append("start"))
@@ -374,7 +376,8 @@ def test_a_stopped_vm_is_started_before_the_hold_then_repaired(
     assert events[-1] == "hold-close"
     assert any(_is_repair(payload) for payload in guest.payloads)
     row = db.get_vm("box")
-    assert row is not None and row.operator_stopped is False and row.last_started_at is not None
+    assert row is not None and row.desired_runtime_state is DesiredRuntimeState.RUNNING
+    assert row.last_started_at is not None
 
 
 class _BootingGuestAgent:

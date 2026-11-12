@@ -11,9 +11,10 @@ import re
 import shlex
 import subprocess
 import sys
+import time
 import urllib.request
 from pathlib import Path, PureWindowsPath
-from typing import TYPE_CHECKING, Any, ClassVar, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, NoReturn
 
 from agentworks import output
 from agentworks.capabilities.vm_platform.base import (
@@ -479,125 +480,168 @@ def _windows_status(code: int) -> str:
     return str(code)
 
 
-@contextlib.contextmanager
-def _keepalive(distro_name: str) -> Iterator[None]:
-    """Anchor a WSL2 distro for the duration of the context.
+_KEEPER_READY = b"agentworks-wsl-keeper-ready\n"
+_KEEPER_ENTRY_SECONDS = 300.0
+_KEEPER_CLEANUP_SECONDS = 0.5
+_KEEPER_FAILURE_SECONDS = 2.0
+"""How long a keeper that did not attach gets to finish printing and exit, so a failing
+``wsl.exe`` can be reported with what it printed and its status."""
 
-    Spawns ``wsl --distribution NAME -- sleep infinity`` as a background
-    subprocess. While that wsl.exe is attached, Windows' WSL idle timer
-    (``vmIdleTimeout`` in .wslconfig, default ~60s) doesn't fire, so the
-    distro stays up regardless of whether anything else is talking to it.
-    If the distro happens to be stopped on entry, the same subprocess
-    boots it.
 
-    This is a pure power-hold: it anchors and (if needed) boots the
-    distro, nothing more. Verifying Tailscale connectivity is NOT this
-    function's job; the shared paths handle that uniformly across all
-    platforms (``_await_tailnet`` on ``vm start`` and gate
-    auto-start, the gate itself on the generic held-active span), and
-    every one of them runs inside this hold, so the anchor covers the
-    verification without duplicating it here.
+def _await_keeper_attachment(proc: subprocess.Popen[bytes], distro_name: str) -> None:
+    """Require this keeper's guest acknowledgement using bounded nonblocking reads."""
+    assert proc.stdout is not None
+    os.set_blocking(proc.stdout.fileno(), False)
+    deadline = time.monotonic() + _KEEPER_ENTRY_SECONDS
+    received = bytearray()
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise StateError("WSL keeper guest attachment timed out", entity_kind="vm")
+        try:
+            chunk = os.read(proc.stdout.fileno(), len(_KEEPER_READY) + 1 - len(received))
+        except BlockingIOError:
+            chunk = None
+        if chunk == b"":
+            _refuse_unattached(proc, distro_name, received, "WSL keeper ended before guest attachment was acknowledged")
+        if chunk:
+            received.extend(chunk)
+            if not _KEEPER_READY.startswith(received):
+                _refuse_unattached(proc, distro_name, received, "WSL keeper guest acknowledgement is malformed")
+            if received == _KEEPER_READY:
+                if proc.poll() is not None:
+                    raise StateError("WSL keeper exited during guest attachment", entity_kind="vm")
+                return
+        if proc.poll() is not None:
+            _refuse_unattached(
+                proc, distro_name, received, "WSL keeper exited before guest attachment was acknowledged"
+            )
+        time.sleep(min(0.01, remaining))
 
-    The hold does no connectivity retry, deliberately. One gate path has
-    no reachability wait around it: when ``ensure_active`` finds the VM
-    not confirmed-active (tailscale ping failed) but not observed-stopped
-    either (``status()`` reports RUNNING anyway, e.g. tailscaled
-    mid-reattach), it skips ``auto_start`` and enters this hold and the
-    op directly. The earlier WSL2 wait was a safety net there; without
-    it, WSL2 surfaces a plain SSHError on that path like every other
-    platform. That parity is the point of the uniformity change, not a
-    regression: do not re-add a wait here to paper over it.
 
-    On exit: ``terminate()`` the subprocess (TerminateProcess on Windows;
-    SIGTERM on POSIX, though this code path is Windows-only in practice),
-    wait briefly, then ``kill()`` if it hasn't exited. The distro is then
-    free to idle out on Windows' normal schedule.
+def _refuse_unattached(proc: subprocess.Popen[bytes], distro_name: str, received: bytearray, reason: str) -> NoReturn:
+    """Raise for a keeper that did not acknowledge attachment.
 
-    The subprocess is also assigned to a Win32 Job Object with
-    ``KILL_ON_JOB_CLOSE``, so if this Python process dies in a way that
-    skips the ``finally:`` (SIGKILL, console window closed, hard crash),
-    the kernel closes the job handle and kills the orphan for us.
+    A keeper that exits non-zero is ``wsl.exe`` failing to attach (a distro
+    unregistered outside Agentworks, a WSL service hiccup), and the error
+    quotes what it printed: ``wsl.exe`` prints its own errors on stdout, which
+    the keeper shares with stderr. Anything else is ``reason``.
     """
-    # Both streams share one pipe, read only on the fast-fail path: wsl.exe prints its own errors on stdout.
-    proc = subprocess.Popen(
-        [_WSL, "--distribution", distro_name, "--", "sleep", "infinity"],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
+    assert proc.stdout is not None
+    printed = bytearray(received)
+    deadline = time.monotonic() + _KEEPER_FAILURE_SECONDS
+    while time.monotonic() < deadline:
+        try:
+            chunk = os.read(proc.stdout.fileno(), 4096)
+        except BlockingIOError:
+            if proc.poll() is not None:
+                break
+            time.sleep(0.01)
+            continue
+        if not chunk:
+            break
+        printed.extend(chunk)
+    try:
+        status = proc.wait(timeout=max(0.0, deadline - time.monotonic()))
+    except subprocess.TimeoutExpired:
+        status = None
+    if status is None or status == 0:
+        raise StateError(reason, entity_kind="vm")
+    text = sanitize_terminal_output(printed.decode("utf-8", errors="replace").replace("\x00", "").strip())
+    raise WSLCommandFailed(
+        f"WSL2 distro '{distro_name}' could not be held running: "
+        f"'wsl --distribution {distro_name}' exited with status {_windows_status(status)}: {text or 'no output'}",
+        hint=(
+            f"Check that 'wsl --list --verbose' lists '{distro_name}'. A distro unregistered outside "
+            "Agentworks leaves a VM that only 'agw vm delete' can remove."
+        ),
     )
-    # Bind the subprocess to a Job Object so a hard-kill of this Python
-    # process still tears down the wsl.exe orphan (the OS closes the job
-    # handle, which kills every process in the job). Best-effort: if the
-    # Win32 calls fail (older Windows / unusual perms / non-Windows), we
-    # fall back to terminate-only cleanup and warn so the operator knows
-    # the orphan-on-hard-kill risk is live.
-    # Popen._handle is the Windows-only process HANDLE; absent from typeshed
-    # (and from Popen on POSIX), hence getattr instead of attribute access.
-    h_proc: int | None = getattr(proc, "_handle", None)
-    h_job: int | None = _create_kill_on_close_job() if h_proc is not None else None
-    if h_job is not None and h_proc is not None and not _assign_process_to_job(h_job, int(h_proc)):
-        _close_handle(h_job)
-        h_job = None
-    # Only surface the orphan-risk note on Windows where Job Object SHOULD
-    # work but didn't (older Windows / unusual perms / ctypes import failed).
-    # On other platforms _kernel32 is always None by design, so the note
-    # would just be noise on every keepalive entry.
-    if h_job is None and sys.platform == "win32":
-        output.detail("(note: Win32 Job Object unavailable; a hard-kill of this command may leave an orphan wsl.exe.)")
 
-    def _close_output() -> None:
-        # Popen with stdout=PIPE leaves a read-end fd open until the Popen
-        # object is GC'd. On the fast-fail path we already read and won't
-        # touch it again; on the normal-exit path the subprocess has been
-        # waited on so the pipe is at EOF. Either way the fd is dead weight.
+
+def _release_keeper(proc: subprocess.Popen[bytes]) -> bool:
+    """Bound terminate, kill, and reap; always close the owned acknowledgement pipe."""
+    try:
+        with contextlib.suppress(OSError):
+            proc.terminate()
+        try:
+            proc.wait(timeout=_KEEPER_CLEANUP_SECONDS)
+        except subprocess.TimeoutExpired:
+            with contextlib.suppress(OSError):
+                proc.kill()
+            try:
+                proc.wait(timeout=_KEEPER_CLEANUP_SECONDS)
+            except (OSError, subprocess.TimeoutExpired):
+                return False
+        except OSError:
+            return False
+        return True
+    finally:
         if proc.stdout is not None:
             with contextlib.suppress(OSError):
                 proc.stdout.close()
 
-    # Fast-fail check: if wsl.exe couldn't attach (wrong distro name, WSL
-    # service hiccup, etc.), `sleep infinity` exits within milliseconds.
-    # Without this check the keepalive silently becomes a no-op and the
-    # caller hits confusing idle-shutdown timeouts mid-operation.
+
+@contextlib.contextmanager
+def _keepalive(distro_name: str) -> Iterator[None]:
+    """Anchor the guest after this keeper acknowledges attachment, without connection repair.
+
+    The same guest shell emits an exact marker before becoming the keeper sleep.
+    Entry can boot a stopped distro. Client liveness alone does not prove guest
+    attachment. Cleanup bounds local process termination without promising that
+    every guest effect was cancelled. A Win32 kill-on-close job protects against
+    an orphaned client when the parent dies without running cleanup.
+
+    This is a pure power-hold. Verifying the VM answers is the shared paths'
+    job (``_await_tailnet`` on ``vm start`` and gate auto-start), which run
+    inside this hold, so the anchor covers the verification without
+    duplicating it here.
+    """
+    # Both streams share one pipe: wsl.exe prints its own errors on stdout.
+    proc = subprocess.Popen(
+        [
+            _WSL,
+            "--distribution",
+            distro_name,
+            "--",
+            "sh",
+            "-c",
+            "printf 'agentworks-wsl-keeper-ready\\n'; exec sleep infinity",
+        ],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        bufsize=0,
+    )
+    h_job: int | None = None
+    interruption: BaseException | None = None
     try:
-        rc = proc.wait(timeout=0.5)
-    except subprocess.TimeoutExpired:
-        rc = None  # still running, which is what we want
-    if rc is not None:
-        printed = proc.stdout.read().decode("utf-8", errors="replace") if proc.stdout else ""
-        _close_output()
-        _close_handle(h_job)
-        reason = sanitize_terminal_output(printed.replace("\x00", "").strip()) or "no output"
-        raise WSLCommandFailed(
-            f"WSL2 distro '{distro_name}' could not be held running: "
-            f"'wsl --distribution {distro_name} -- sleep infinity' exited with status {_windows_status(rc)}: {reason}",
-            hint=(
-                f"Check that 'wsl --list --verbose' lists '{distro_name}'. A distro unregistered outside "
-                "Agentworks leaves a VM that only 'agw vm delete' can remove."
-            ),
-        )
-    output.detail(f"Preventing idle-shutdown of WSL2 distro {distro_name!r} for the duration of this command...")
-    try:
+        # Popen._handle is the Windows-only process HANDLE; absent from typeshed
+        # (and from Popen on POSIX), hence getattr instead of attribute access.
+        h_proc: int | None = getattr(proc, "_handle", None)
+        h_job = _create_kill_on_close_job() if h_proc is not None else None
+        if h_job is not None and h_proc is not None and not _assign_process_to_job(h_job, int(h_proc)):
+            _close_handle(h_job)
+            h_job = None
+        if h_job is None and sys.platform == "win32":
+            output.detail(
+                "(note: Win32 Job Object unavailable; a hard-kill of this command may leave an orphan wsl.exe.)"
+            )
+        _await_keeper_attachment(proc, distro_name)
+        output.detail(f"Preventing idle-shutdown of WSL2 distro {distro_name!r} for the duration of this command...")
         yield
+    except BaseException as error:
+        interruption = error
+        raise
     finally:
-        # Cleanup is best-effort. If the wsl.exe subprocess has already
-        # exited (WSL service reset, distro `wsl --terminate`'d by hand,
-        # WSL2 vmIdleTimeout finally fired during a hang), terminate() /
-        # kill() raise OSError / ProcessLookupError on POSIX. Suppress so
-        # we don't either mask the caller's exception or turn a successful
-        # command into a failure on the way out. wait() on an already-
-        # reaped Popen just returns the cached returncode, so it doesn't
-        # need the same guard.
-        with contextlib.suppress(OSError):
-            proc.terminate()
         try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            with contextlib.suppress(OSError):
-                proc.kill()
-            with contextlib.suppress(subprocess.TimeoutExpired):
-                proc.wait(timeout=5)
-        _close_output()
-        _close_handle(h_job)
+            cleaned = _release_keeper(proc)
+        finally:
+            _close_handle(h_job)
+        if not cleaned:
+            if interruption is not None:
+                interruption.add_note("Local WSL keeper cleanup did not complete within its bound.")
+            else:
+                raise StateError("local WSL keeper cleanup did not complete within its bound", entity_kind="vm")
         output.detail("Idle-shutdown prevention stopped.")
 
 

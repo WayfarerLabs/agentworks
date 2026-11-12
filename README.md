@@ -153,6 +153,11 @@ reinitialized to pick up changes without being replaced. Existing VMs record the
 Debian release. Distribution upgrades and provider recovery remain operator-led; after either one,
 `vm confirm-release` explicitly adopts the live release before a separate `vm reinit`.
 
+VMs record running, stopped, or on-demand runtime intent. Creation and explicit start select
+running; dependency activation preserves on-demand. Stopping a VM preserves its child targets and
+blocks their activation. VM start restores the VM alone; use a separate `agw vm reconcile NAME` to
+restore its desired-running children.
+
 ### Workspaces - The Project
 
 A workspace is the **project scope**: a root directory, optionally cloned from a git repository,
@@ -192,6 +197,14 @@ the workload. A unique name, persistent tmux session, and integration-specific c
 semantics let the operator create, start, restart, stop, attach to, and delete any number of
 concurrent workloads. Tmux always owns the pane and its tty; the harness integration only decides
 what runs inside it.
+
+Session exit does not complete or retire its recorded running intent. Explicit stop selects stopped
+intent while retaining the session definition. `agw vm reconcile NAME` restores the VM and its
+desired-running sessions and named consoles after an outage, preserving healthy runtimes. Use
+`--dry-run` to preview and the owning `set-desired-state NAME STATE` command to adopt intent without
+runtime work. This is explicit recovery, with no background controller. See
+[Desired runtime state and recovery](docs/guides/desired-runtime-state.md) for adoption and the
+shared workload-secret failure boundary.
 
 Session templates make workload configuration reusable. Harness integrations keep workload-specific
 logic outside the core session lifecycle.

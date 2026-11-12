@@ -178,7 +178,7 @@ def test_create_stopped_vm_gate_resolves_once_and_seeds_the_boundary(
     workspace_manager.create_workspace(db, config, name="ws1", vm_name="box", interaction=TtyInteractionPolicy.REFUSE)
 
     assert resolve_counter == [["proxmox-token"]]
-    assert events == ["status", "start", "tailscale"]  # the gate ran
+    assert events == ["status", "status", "start", "tailscale"]  # the gate ran
     assert mutation["ws_name"] == "ws1"
     row = db.get_workspace("ws1")
     assert row is not None and row.workspace_path == "/srv/ws1"

@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 import agentworks.sessions.manager as _mgr
 from agentworks import output
+from agentworks.db import DesiredRuntimeState
 from agentworks.errors import StateError
 from agentworks.harness_setup.outcomes import SetupFailure, raise_setup_failures
 
@@ -382,67 +383,83 @@ def create_session(
     # boundary secret union onto the resolver, and the operation scope.
     # No SSH, no DB writes, no secret resolution (that waits for the
     # gate).
-    graph = _build_session_graph(
-        db,
-        config,
-        registry=registry,
-        plan=plan,
-        template_name=template_name,
-        session_overlay=session_overlay,
-        workspace_overlay=workspace_overlay,
-        agent_overlay=agent_overlay,
-        interaction=interaction,
-    )
+    from dataclasses import replace
 
-    from agentworks.orchestration.activation import (
-        activation_gate,
-        gate_secret_resolver,
-    )
+    from agentworks.harness_setup.locking import native_mutation_guard
 
-    # The activation gate replaces this command's imperative
-    # ensure_active + vm_active holds: opened once, before the
-    # preflight sweep (so every probe reaches a live target), held
-    # through the whole command, with its just-in-time values seeding
-    # the boundary resolver so nothing resolves or prompts twice.
-    from agentworks.vms.manager import require_vm_ssh_boundary
-
-    require_vm_ssh_boundary(db, config, graph.vm_node.row)
-    with activation_gate(graph.vm_node, gate_secret_resolver(config, registry, graph.resolver)):
-        vm = _reload_vm(db, plan.target_vm_name)
-        # Preflight precedes secret resolution and carries no workload values.
-        # Build the logged mutation target only once its redactions are known.
-        target = _mgr.transport(vm, config)
-
-        secret_values, agent_target = _preflight_and_resolve(
-            db,
-            config,
-            plan=plan,
-            graph=graph,
-            vm=vm,
-            target=target,
-            interaction=interaction,
-        )
-        target, run_command = _build_live_transport(vm, config, redactions=tuple(secret_values.values()))
-
-        # ===== Dependency-ordered roll-forward (S11) ========================
-        #
-        # Realize the ephemerals then the session's own slice, unwinding
-        # the realized ephemerals on core failures. Required setup retains
-        # completed owners for repair. The two-level rollback
-        # (session-slice teardown, then ephemeral unwind) and the emit
-        # order live in _roll_forward.
-        setup_failures: list[SetupFailure] = []
-        _roll_forward(
+    with native_mutation_guard(db.path, plan.target_vm_name) as guard:
+        current_vm = _reload_vm(db, plan.target_vm_name)
+        if current_vm.vm_uuid != plan.vm.vm_uuid:
+            raise StateError("session VM changed during preparation", entity_kind="vm", entity_name=plan.target_vm_name)
+        if current_vm.desired_runtime_state is DesiredRuntimeState.STOPPED:
+            raise StateError(
+                "session parent has stopped desired state",
+                entity_kind="vm",
+                entity_name=current_vm.name,
+            )
+        plan = replace(plan, vm=current_vm)
+        graph = _build_session_graph(
             db,
             config,
             registry=registry,
             plan=plan,
-            graph=graph,
-            vm=vm,
-            target=target,
-            run_command=run_command,
-            agent_target=agent_target,
-            secret_values=secret_values,
-            setup_failures=setup_failures,
+            template_name=template_name,
+            session_overlay=session_overlay,
+            workspace_overlay=workspace_overlay,
+            agent_overlay=agent_overlay,
+            interaction=interaction,
+            held_native_guard=guard,
         )
-        raise_setup_failures(setup_failures)
+
+        from agentworks.orchestration.activation import (
+            activation_gate,
+            gate_secret_resolver,
+        )
+
+        # The activation gate replaces this command's imperative
+        # ensure_active + vm_active holds: opened once, before the
+        # preflight sweep (so every probe reaches a live target), held
+        # through the whole command, with its just-in-time values seeding
+        # the boundary resolver so nothing resolves or prompts twice.
+        from agentworks.vms.manager import require_vm_ssh_boundary
+
+        require_vm_ssh_boundary(db, config, graph.vm_node.row)
+        with activation_gate(graph.vm_node, gate_secret_resolver(config, registry, graph.resolver)):
+            vm = _reload_vm(db, plan.target_vm_name)
+            # Preflight precedes secret resolution and carries no workload values.
+            # Build the logged mutation target only once its redactions are known.
+            target = _mgr.transport(vm, config)
+
+            secret_values, agent_target = _preflight_and_resolve(
+                db,
+                config,
+                plan=plan,
+                graph=graph,
+                vm=vm,
+                target=target,
+                interaction=interaction,
+            )
+            target, run_command = _build_live_transport(vm, config, redactions=tuple(secret_values.values()))
+
+            # ===== Dependency-ordered roll-forward (S11) ========================
+            #
+            # Realize the ephemerals then the session's own slice, unwinding
+            # the realized ephemerals on core failures. Required setup retains
+            # completed owners for repair. The two-level rollback
+            # (session-slice teardown, then ephemeral unwind) and the emit
+            # order live in _roll_forward.
+            setup_failures: list[SetupFailure] = []
+            _roll_forward(
+                db,
+                config,
+                registry=registry,
+                plan=plan,
+                graph=graph,
+                vm=vm,
+                target=target,
+                run_command=run_command,
+                agent_target=agent_target,
+                secret_values=secret_values,
+                setup_failures=setup_failures,
+            )
+            raise_setup_failures(setup_failures)

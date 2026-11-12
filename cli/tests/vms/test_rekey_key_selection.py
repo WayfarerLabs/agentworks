@@ -183,3 +183,109 @@ def test_cli_rejects_removed_ignore_env_option() -> None:
     from agentworks.cli.commands.vm import vm_app
 
     assert CliRunner().invoke(vm_app, ["rekey", "box", "--ignore-env"]).exit_code == 2
+
+
+@pytest.mark.parametrize("target", ["running", "on-demand"])
+def test_forced_prompt_rekey_reuses_guard_and_cache_for_racing_activation(
+    db, make_config, resolve_counter, monkeypatch, target
+) -> None:
+    from agentworks.db import DesiredRuntimeState
+    from agentworks.errors import StateError
+    from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
+    from agentworks.plugins.proxmox.platform import ProxmoxPlatform
+    from agentworks.secrets.resolver import Resolver
+
+    config = make_config('[secret_config]\nsources = ["env-var"]\n')
+    _seed_vm(db)
+    before = db.get_vm("box")
+    db.set_vm_desired_runtime_state("box", DesiredRuntimeState(target), expected_vm_uuid=before.vm_uuid)
+    monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", "stale-key")
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    prompts = []
+
+    def prompt(label, **kwargs):
+        with pytest.raises(NativeSetupBusyError), native_mutation_guard(db.path, "box"):
+            pytest.fail("another mutation entered during the secret prompt")
+        prompts.append(label)
+        return "fresh-key"
+
+    monkeypatch.setattr(output, "prompt_secret", prompt)
+    _reachable(monkeypatch, False)
+    events = _fake_status(monkeypatch, VMStatus.RUNNING)
+    statuses = iter((VMStatus.RUNNING, VMStatus.STOPPED, VMStatus.STOPPED))
+    monkeypatch.setattr(ProxmoxPlatform, "status", lambda *args: next(statuses))
+
+    def await_tailnet(*args, **kwargs):
+        with pytest.raises(NativeSetupBusyError), native_mutation_guard(db.path, "box"):
+            pytest.fail("another mutation entered during the activation's wait")
+        events.append("wait")
+
+    monkeypatch.setattr(manager, "_await_tailnet", await_tailnet)
+    monkeypatch.setattr(Resolver, "resolve_gate", lambda *args: pytest.fail("late source resolution"))
+    closed = []
+    original_close = Resolver.close
+
+    def close(resolver):
+        original_close(resolver)
+        closed.append(resolver)
+
+    monkeypatch.setattr(Resolver, "close", close)
+    guest = _fake_rekey_channel(monkeypatch)
+
+    manager.rekey_vm(db, config, "box", prompt=True, interaction=TtyInteractionPolicy.ALLOW)
+
+    assert len(prompts) == 1
+    assert resolve_counter == [["tailscale-auth-key", "proxmox-token"]]
+    assert events == ["start", "wait"]
+    assert [b"fresh-key" in script for script in guest.scripts] == [True, False]
+    after = db.get_vm("box")
+    assert (after.vm_uuid, after.desired_runtime_state, after.template) == (
+        before.vm_uuid,
+        DesiredRuntimeState(target),
+        before.template,
+    )
+    assert len(closed) == 1
+    with pytest.raises(StateError):
+        closed[0].get("tailscale-auth-key")
+    with native_mutation_guard(db.path, "box"):
+        pass
+
+
+def test_forced_prompt_cancellation_preserves_intent_and_releases_guard(db, make_config, monkeypatch) -> None:
+    from agentworks.db import DesiredRuntimeState
+    from agentworks.errors import StateError, UserAbort
+    from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
+    from agentworks.secrets.resolver import Resolver
+
+    config = make_config('[secret_config]\nsources = ["env-var"]\n')
+    _seed_vm(db)
+    before = db.get_vm("box")
+    db.set_vm_desired_runtime_state("box", DesiredRuntimeState.ON_DEMAND, expected_vm_uuid=before.vm_uuid)
+    before = db.get_vm("box")
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+
+    def prompt(label, **kwargs):
+        with pytest.raises(NativeSetupBusyError), native_mutation_guard(db.path, "box"):
+            pytest.fail("another mutation entered during the secret prompt")
+        raise UserAbort("cancelled")
+
+    monkeypatch.setattr(output, "prompt_secret", prompt)
+    events = _fake_status(monkeypatch, VMStatus.RUNNING)
+    closed = []
+    original_close = Resolver.close
+
+    def close(resolver):
+        original_close(resolver)
+        closed.append(resolver)
+
+    monkeypatch.setattr(Resolver, "close", close)
+    with pytest.raises(UserAbort):
+        manager.rekey_vm(db, config, "box", prompt=True, interaction=TtyInteractionPolicy.ALLOW)
+
+    assert db.get_vm("box") == before
+    assert events == []
+    assert len(closed) == 1
+    with pytest.raises(StateError):
+        closed[0].get("tailscale-auth-key")
+    with native_mutation_guard(db.path, "box"):
+        pass

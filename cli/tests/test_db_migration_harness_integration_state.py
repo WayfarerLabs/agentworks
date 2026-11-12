@@ -171,7 +171,7 @@ def test_malformed_blob_degrades_to_empty_with_a_warning(
 ) -> None:
     db = Database(tmp_path / "bad.db")
     try:
-        db._conn.execute("INSERT INTO vms (name, site, hostname, admin_username) VALUES ('vm1', 'lima', 'h', 'admin')")
+        db.insert_vm("vm1", site="lima", hostname="h", admin_username="admin")
         db._conn.execute(
             "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "
             "VALUES ('ws1', 'vm1', '/home/me/ws1', 'ws-ws1')"

@@ -25,7 +25,7 @@ from pathlib import Path
 
 import pytest
 
-from agentworks.db import Database
+from agentworks.db import Database, ProvisioningStatus
 
 from .conftest import stub_build_registry, stub_vm_gates
 
@@ -64,10 +64,9 @@ def _stub_target() -> object:
 def _seed_basic_db(tmp_path: Path) -> Database:
     """VM + workspace seeded; no agent. Enough for an admin-mode session."""
     db = Database(tmp_path / "test.db")
-    db._conn.execute(
-        "INSERT INTO vms (name, site, hostname, admin_username, tailscale_host, provisioning_status) "
-        "VALUES ('vm1', 'lima', 'h', 'admin', '100.64.0.5', 'complete')"
-    )
+    db.insert_vm("vm1", "lima", "h", admin_username="admin")
+    db.update_vm_tailscale("vm1", "100.64.0.5")
+    db.update_vm_provisioning_status("vm1", ProvisioningStatus.COMPLETE)
     db._conn.execute(
         "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "
         "VALUES ('ws1', 'vm1', '/home/me/ws1', 'ws-ws1')"

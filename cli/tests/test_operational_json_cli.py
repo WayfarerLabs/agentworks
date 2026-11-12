@@ -141,6 +141,7 @@ def test_nonempty_operational_lists_have_exact_ordered_json(monkeypatch: pytest.
                 "session_count": row.session_count,
                 "tailscale_host": row.tailscale_host,
                 "created_at": row.created_at,
+                "desired_runtime_state": row.desired_runtime_state.value,
                 "debian_release": row.debian_release,
                 "debian_release_observed_at": row.debian_release_observed_at,
                 "observed_status": row.observed_status,
@@ -180,6 +181,7 @@ def test_nonempty_operational_lists_have_exact_ordered_json(monkeypatch: pytest.
                 "mode": row.mode,
                 "agent_name": row.agent_name,
                 "status": row.status,
+                "desired_runtime_state": row.desired_runtime_state,
             }
             for row in session_rows
         ]
@@ -191,6 +193,7 @@ def test_nonempty_operational_lists_have_exact_ordered_json(monkeypatch: pytest.
                 "vm_name": row.vm_name,
                 "session_count": row.session_count,
                 "status": row.status,
+                "desired_runtime_state": row.desired_runtime_state,
             }
             for row in console_rows
         ]
@@ -255,7 +258,6 @@ def test_nonempty_operational_describes_have_exact_safe_json(monkeypatch: pytest
         debian_release=DebianRelease.TRIXIE,
         debian_release_observed_at="2026-01-02T12:00:00Z",
         platform_metadata={"unsafe": unsafe},
-        operator_stopped=False,
     )
     workspace_row = WorkspaceRow("workspace-a", "box", None, "/srv/workspace-a", "2026-01-03", "ws-a")
     vm_state = stub_instance_state("vm", "admin")
@@ -369,6 +371,7 @@ def test_nonempty_operational_describes_have_exact_safe_json(monkeypatch: pytest
         "vm": {
             "name": "box",
             "created_at": "2026-01-01",
+            "desired_runtime_state": "running",
             "last_started_at": "2026-01-01T00:00:00Z",
             "uptime_seconds": 3_723,
             "site": "site-a",
@@ -478,6 +481,7 @@ def test_nonempty_operational_describes_have_exact_safe_json(monkeypatch: pytest
             "mode": "agent",
             "agent_name": "agent-a",
             "status": "running",
+            "desired_runtime_state": None,
             "pid": 4242,
             "created_at": "2026-01-07",
             "last_started_at": "2026-01-07T00:00:00Z",
@@ -500,6 +504,7 @@ def test_nonempty_operational_describes_have_exact_safe_json(monkeypatch: pytest
             "uptime_seconds": 3_723,
             "updated_at": "2026-01-10",
             "status": "running",
+            "desired_runtime_state": None,
             "sessions": [
                 {
                     "position": 2,

@@ -18,11 +18,12 @@ from agentworks.name_filters import validate_name_filters
 from agentworks.vms.manager import gated_vm_boundary
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Sequence
+    from collections.abc import Iterator
 
     from agentworks.capabilities.base import OperationScope
     from agentworks.config import Config
     from agentworks.db import Database, SessionRow, VMRow, WorkspaceRow
+    from agentworks.harness_setup.locking import NativeMutationGuard
     from agentworks.resources import Registry
     from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.sessions.tmux import RunCommand
@@ -81,6 +82,7 @@ def _prepare_vm(
     session: SessionRow,
     *,
     operation: str | None = None,
+    held_native_guard: NativeMutationGuard | None = None,
     interaction: TtyInteractionPolicy,
 ) -> Iterator[tuple[WorkspaceRow, VMRow, RunCommand, RunCommand, Transport]]:
     """The singular session ops' composition root (stop / delete /
@@ -120,6 +122,7 @@ def _prepare_vm(
         vm,
         scope=_session_scope(db, session, ws, vm),
         interaction=interaction,
+        held_native_guard=held_native_guard,
     ):
         logger = SSHLogger(vm.name, operation) if operation else None
         target = _mgr.transport(vm, config, logger=logger)
@@ -304,145 +307,3 @@ def _available_harness_integrations(
         else:
             ready.append(name)
     return frozenset(ready)
-
-
-def _distinct_vms_for_sessions(db: Database, sessions: list[SessionRow]) -> list[VMRow]:
-    """Resolve the distinct set of VMs that host the given sessions.
-
-    Used by the batch session operations (stop_all_sessions and start_all_sessions)
-    to feed `_batch_vm_boundary` with exactly the VMs whose SSH
-    transports will be touched. Order is insertion order keyed by VM name so
-    gate and keepalive entry messages render in a stable order.
-    """
-    distinct: list[VMRow] = []
-    seen: set[str] = set()
-    for s in sessions:
-        ws = db.get_workspace(s.workspace_name)
-        if ws is None or ws.vm_name in seen:
-            continue
-        vm = db.get_vm(ws.vm_name)
-        if vm is None:
-            continue
-        distinct.append(vm)
-        seen.add(ws.vm_name)
-    return distinct
-
-
-@contextlib.contextmanager
-def _batch_vm_boundary_impl(
-    db: Database,
-    config: Config,
-    vms: Sequence[VMRow],
-    *,
-    interaction: TtyInteractionPolicy,
-) -> Iterator[None]:
-    """The batch session ops' composition root (stop_all_sessions,
-    start_all_sessions): ONE boundary
-    over the distinct VMs, then each VM's activation gate and
-    held-active span.
-
-    Mirrors the imperative batch order exactly (preflight + one
-    resolve covering the whole batch, THEN per-VM gate + hold),
-    orchestrated: one multi-root walk over the live VM nodes, with one
-    shared site node per distinct site via the factory's ``site_nodes``
-    memo (one held platform instance per site, the old by-site dedup),
-    the walk union registered once on ONE resolver, a SYSTEM-level
-    scope (one level per COMMAND, never per node; each VM's identity
-    comes from its own node), one preflight sweep, ONE boundary
-    resolve, and only then the gates in VM order on an ExitStack. A
-    failing gate (an operator-stopped VM) propagates and aborts the
-    whole batch, exactly as the imperative per-VM gate loop did.
-
-    The gate callback SERVES the boundary's cached values
-    (``resolver.get``): the union already covers every gate secret, so
-    two stopped VMs sharing a site cost exactly ONE backend pass
-    (a per-gate just-in-time resolve would re-resolve the shared
-    site's secret, and ``Resolver.seed`` after the boundary raises by
-    design). ``Resolver.get`` refuses any name outside the union, so no
-    gate target can late-resolve a secret per VM.
-
-    An empty VM set stays a complete no-op (no registry, no resolver,
-    no gate), preserving the imperative lifecycle path's lazy-bind
-    property for empty selections.
-    """
-    if not vms:
-        yield
-        return
-
-    from agentworks.bootstrap import load_request_registry
-    from agentworks.capabilities.base import (
-        OperationScope,
-        RunContext,
-        ScopeLevel,
-    )
-    from agentworks.db import SYSTEM_SLUG_KEY
-    from agentworks.orchestration.activation import activation_gate
-    from agentworks.orchestration.readiness import preflight_all
-    from agentworks.orchestration.secrets import secret_union
-    from agentworks.orchestration.walk import walk
-    from agentworks.secrets.resolver import Resolver
-    from agentworks.vms.nodes import VMSiteNode, live_vm_node
-
-    registry = load_request_registry(config, live_database=db)
-    resolver = Resolver(config, registry, interaction=interaction)
-    site_nodes: dict[str, VMSiteNode] = {}
-    vm_nodes = [live_vm_node(db, config, registry, vm, site_nodes=site_nodes) for vm in vms]
-    nodes = walk(*vm_nodes)
-    for secret_name in secret_union(nodes):
-        resolver.register_name(secret_name)
-    scope = OperationScope(
-        level=ScopeLevel.SYSTEM,
-        system_slug=db.get_setting(SYSTEM_SLUG_KEY) or None,
-    )
-    preflight_all(
-        nodes,
-        RunContext(config=config, operation_scope=scope),
-        registry=registry,
-        interaction=interaction,
-    )
-    resolver.resolve()
-
-    with contextlib.ExitStack() as stack:
-        for vm_node in vm_nodes:
-            stack.enter_context(activation_gate(vm_node, resolver.get))
-        yield
-
-
-@contextlib.contextmanager
-def _batch_vm_boundary(
-    db: Database,
-    config: Config,
-    vms: Sequence[VMRow],
-    *,
-    interaction: TtyInteractionPolicy,
-) -> Iterator[None]:
-    """Open a strict batch gate after proving every VM's SSH identity."""
-    from agentworks.vms.manager import require_vm_ssh_boundary
-
-    for vm in vms:
-        require_vm_ssh_boundary(db, config, vm)
-    with _batch_vm_boundary_impl(db, config, vms, interaction=interaction):
-        yield
-
-
-@contextlib.contextmanager
-def _best_effort_batch_vm_boundary(
-    db: Database,
-    config: Config,
-    vms: Sequence[VMRow],
-    *,
-    interaction: TtyInteractionPolicy,
-) -> Iterator[frozenset[str]]:
-    """Open gates only for VMs whose canonical SSH identity is usable."""
-    from agentworks.errors import AgentworksError
-    from agentworks.vms.manager import require_vm_ssh_boundary
-
-    usable_vms: list[VMRow] = []
-    for vm in vms:
-        try:
-            require_vm_ssh_boundary(db, config, vm)
-        except AgentworksError:
-            continue
-        usable_vms.append(vm)
-    with _batch_vm_boundary_impl(db, config, usable_vms, interaction=interaction):
-        yield frozenset(vm.name for vm in usable_vms)

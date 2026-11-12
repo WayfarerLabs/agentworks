@@ -15,7 +15,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from agentworks.db import Database
+from agentworks.db import Database, InitStatus
 from agentworks.errors import ValidationError
 from agentworks.secrets.policy import TtyInteractionPolicy
 
@@ -489,10 +489,9 @@ def test_ephemeral_agent_name_defaults_to_session_name(tmp_path: Path, monkeypat
     from agentworks.sessions.manager import create_session
 
     db = Database(tmp_path / "test.db")
-    db._conn.execute(
-        "INSERT INTO vms (name, site, hostname, admin_username, tailscale_host, init_status) "
-        "VALUES ('bbvm1', 'lima', 'h', 'admin', '100.64.0.5', 'complete')"
-    )
+    db.insert_vm("bbvm1", "lima", "h", admin_username="admin")
+    db.update_vm_tailscale("bbvm1", "100.64.0.5")
+    db.update_vm_init_status("bbvm1", InitStatus.COMPLETE)
     db._conn.commit()
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000), paths=SimpleNamespace(vm_workspaces="/srv"))
 

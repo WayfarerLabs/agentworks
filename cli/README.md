@@ -56,7 +56,7 @@ agw session attach my-session
 # Use tmux's 'detach' command (default Ctrl-b unless overridden by config) to disconnect while
 # leaving everything running on the VM.
 agw session attach my-session    # You'll pick up right where you left off
-agw session stop my-session      # Sessions can be stopped (or can exit on their own)
+agw session stop my-session      # Records stopped intent; an external exit would retain running intent
 agw session list                 # Fast local inventory
 agw session list --status        # Add bounded, non-activating live status
 agw session start my-session
@@ -184,6 +184,36 @@ List commands default to alphabetical order. Use `--sort KEY[,KEY...]` for the a
 command-specific orderings documented in the
 [list-ordering reference](command-reference.md#list-ordering).
 
+## Recover intended runtimes
+
+VMs, sessions, and named consoles retain desired runtime state across an external shutdown or
+runtime exit. Creation/start/restart selects running; explicit stop selects stopped. VMs also
+support on-demand, which permits activation without requiring an idle VM to run. Targets live in the
+instance database, not templates or configuration. Legacy session and console targets require
+adoption from known operator intent.
+
+```console
+agw session set-desired-state my-session running
+agw console set-desired-state my-console running
+agw vm reconcile my-vm --dry-run
+agw vm reconcile my-vm
+```
+
+A VM name selects its stored workload family; `agw vm reconcile --all` explicitly selects the fleet.
+Focused `session reconcile NAME` or `console reconcile NAME` retries only that workload's existing
+target. Console recovery does not start its member sessions. `vm start` selects running and restores
+the VM connection, then a separate reconcile can restore its children. Stopped parent intent blocks
+running children without clearing their targets. There is no background controller.
+
+Batch session start/restart and reconciliation collect eligible workload secrets before any deferred
+runtime changes. A required workload secret failure prevents that complete deferred batch; VM
+activation may already have completed. An infrastructure credential failure blocks only dependent
+families unless an eligible workload also requires that name. Accepted targets survive later
+execution failure or cancellation. Dry run changes no targets or runtimes and does not preview or
+resolve workload secrets, though provider observation may require credentials. Read
+[Desired runtime state and recovery](../docs/guides/desired-runtime-state.md) for adoption, failure
+boundaries, WSL2 access limits, and rollback.
+
 ## Configuration
 
 Configuration splits into two surfaces:
@@ -258,6 +288,13 @@ Agent artifact declarations and their native placement have a dedicated read-onl
 fetching content or exposing bodies. Start with `agw guide show concept-agent-artifacts` or the
 [artifact documentation](agentworks/artifacts/README.md) for bundle sources, explicit facet
 activation, worked manifests, and native delivery limits.
+
+Bundles include an explicit `mcp_servers` map for portable stdio and Streamable HTTP definitions.
+Workstation/Git JSON(C) sources select a same-named entry from `mcpServers`; only that definition is
+captured. Credentials stay unresolved env references. User/workspace facets register entries in
+native config, while session-only delivery requires its documented workaround. Registration does not
+establish connectivity, authentication or tool availability. See the
+[MCP artifact guide](agentworks/artifacts/README.md#mcp-servers) for accepted fields and examples.
 
 Env vars ride their owning resource, as an `env` map in the template's `spec` (the removed TOML
 shape used `[<scope>.env]` subsections), at vm / workspace / admin / agent / session scope. The
@@ -529,8 +566,9 @@ spec:
 Use `agw guide show concept-harness-integrations` for scopes, facets, activation and deferred
 application, or read [the harness integration guide](../docs/guides/harness-facets.md). See
 [native harness setup](../docs/guides/native-harness-setup.md) for settings policies and native
-ownership, and [the Claude setup migration guide](../docs/guides/migrating-claude-setup.md) for
-existing declarations and stored instance overlays.
+ownership and MCP entry cleanup, and
+[the Claude setup migration guide](../docs/guides/migrating-claude-setup.md) for existing
+declarations and stored instance overlays.
 
 ### Optional Apt / Install-Command Catalogs
 
@@ -644,6 +682,13 @@ Completions include dynamic VM, vm-site, workspace, session, secret, and templat
 `agw secret verify` completes registered secret names at every positional argument.
 
 ## State
+
+Schema 39 maps the old VM manual-stop flag to stopped intent and its false value to on-demand.
+Legacy session/console targets remain null until explicit adoption; new creates record running.
+Explicit VM start now selects running even for an already-live VM; use
+`agw vm set-desired-state NAME on-demand` to return to permission-only activation. Missing required
+workload secrets now prevent the entire deferred batch session start/restart instead of allowing
+partially launched batches. These targets require no new config or sample setting.
 
 All state is stored in `~/.config/agentworks/agentworks.db` (SQLite). Schema migrations are
 forward-only and run automatically when a normal Agentworks command opens stale state. Before the

@@ -76,6 +76,66 @@ def _retire_vm_checkpoints(conn: sqlite3.Connection, _context: MigrationContext)
     conn.execute("DROP TABLE vm_checkpoints")
 
 
+def _add_desired_runtime_state(conn: sqlite3.Connection, _context: MigrationContext) -> None:
+    """Replace VM activation policy and leave legacy workloads awaiting adoption."""
+    conn.execute("BEGIN IMMEDIATE")
+    invalid = conn.execute(
+        "SELECT 1 FROM vms WHERE typeof(operator_stopped) != 'integer' OR operator_stopped NOT IN (0, 1) LIMIT 1"
+    ).fetchone()
+    if invalid is not None:
+        raise MigrationBlockedError("legacy VM intent is malformed", entity_kind="database")
+    conn.execute("""
+        CREATE TABLE vms_new (
+            name                TEXT PRIMARY KEY,
+            site                TEXT NOT NULL,
+            template            TEXT,
+            extra_packages      TEXT,
+            provisioning_status TEXT NOT NULL DEFAULT 'pending',
+            init_status         TEXT NOT NULL DEFAULT 'pending',
+            ssh_public_key      TEXT,
+            tailscale_host      TEXT,
+            cpus                INTEGER,
+            memory_gib          INTEGER,
+            disk_gib            INTEGER,
+            swap_gib            INTEGER,
+            admin_username      TEXT NOT NULL DEFAULT 'agentworks',
+            hostname            TEXT NOT NULL,
+            platform_metadata   TEXT NOT NULL DEFAULT '{}',
+            desired_runtime_state TEXT NOT NULL
+                CHECK (desired_runtime_state IN ('running', 'stopped', 'on-demand')),
+            vm_uuid             TEXT NOT NULL UNIQUE,
+            created_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+            last_seen_at        TEXT,
+            admin_template      TEXT,
+            debian_release      TEXT,
+            debian_release_observed_at TEXT
+                CHECK ((debian_release IS NULL) = (debian_release_observed_at IS NULL)),
+            last_started_at     TEXT
+        )
+    """)
+    columns = (
+        "name, site, template, extra_packages, provisioning_status, init_status, ssh_public_key, "
+        "tailscale_host, cpus, memory_gib, disk_gib, swap_gib, admin_username, hostname, "
+        "platform_metadata, created_at, last_seen_at, admin_template, debian_release, "
+        "debian_release_observed_at, last_started_at"
+    )
+    for row in conn.execute(f"SELECT {columns}, operator_stopped FROM vms").fetchall():
+        values = tuple(row)[:-1]
+        target = "stopped" if row[-1] else "on-demand"
+        placeholders = ", ".join("?" for _ in range(len(values) + 2))
+        conn.execute(
+            f"INSERT INTO vms_new ({columns}, desired_runtime_state, vm_uuid) VALUES ({placeholders})",
+            (*values, target, str(uuid4())),
+        )
+    conn.execute("DROP TABLE vms")
+    conn.execute("ALTER TABLE vms_new RENAME TO vms")
+    for table in ("sessions", "consoles"):
+        conn.execute(
+            f"ALTER TABLE {table} ADD COLUMN desired_runtime_state TEXT "
+            "CHECK (desired_runtime_state IN ('running', 'stopped'))"
+        )
+
+
 def _add_session_identity(conn: sqlite3.Connection, _context: MigrationContext) -> None:
     """Assign each legacy session one durable UUID without inventing a managed run."""
     # Rebuild to enforce NOT NULL and uniqueness without a fabricated SQL default.
@@ -769,6 +829,7 @@ MIGRATIONS: dict[int, str | Callable[[sqlite3.Connection, MigrationContext], Non
         ALTER TABLE consoles ADD COLUMN last_started_at TEXT;
     """,
     38: _add_session_identity,
+    39: _add_desired_runtime_state,
 }
 
 LATEST_VERSION = max(MIGRATIONS)
@@ -899,6 +960,11 @@ _SCHEMA_SENTINEL_ADDITIONS: dict[int, dict[str, tuple[str, ...]]] = {
         "consoles": ("last_started_at",),
     },
     38: {"sessions": ("session_uuid", "run_id")},
+    39: {
+        "vms": ("desired_runtime_state", "vm_uuid"),
+        "sessions": ("desired_runtime_state",),
+        "consoles": ("desired_runtime_state",),
+    },
 }
 
 _SCHEMA_SENTINEL_REMOVED_TABLES: dict[int, tuple[str, ...]] = {
@@ -920,6 +986,7 @@ _SCHEMA_SENTINEL_REMOVED_COLUMNS: dict[int, dict[str, tuple[str, ...]]] = {
     },
     28: {"workspaces": ("last_seen_at",)},
     31: {"sessions": ("harness_state",)},
+    39: {"vms": ("operator_stopped",)},
 }
 
 

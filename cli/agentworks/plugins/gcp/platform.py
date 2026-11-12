@@ -470,9 +470,19 @@ class GCEPlatform(PublicAddressPlatform):
         current = self._owned_instance(instances, identity)
         if current is None:
             raise StateError(f"GCE instance '{identity.instance_name}' no longer exists")
+        if str(current.status).upper() in {"STOPPING", "SUSPENDING"}:
+            current = wait_for_instance_status(
+                instances,
+                project_id=identity.project_id,
+                zone=identity.zone,
+                instance_name=identity.instance_name,
+                resource_id=identity.instance_id,
+                accepted=("TERMINATED", "SUSPENDED", "RUNNING"),
+                timeout=_RUNNING_TIMEOUT_SECONDS,
+            )
         if str(current.status).upper() == "RUNNING":
             return
-        self._power(instances, identity, action="start")
+        self._power(instances, identity, action="resume" if str(current.status).upper() == "SUSPENDED" else "start")
         wait_for_instance_status(
             instances,
             project_id=identity.project_id,
@@ -665,6 +675,18 @@ class GCEPlatform(PublicAddressPlatform):
             operation = call_google(
                 lambda: instances.start(request=request, retry=None),
                 operation="requesting instance start",
+                resource=f"instance {identity.project_id}/{identity.zone}/{identity.instance_name}",
+            )
+        elif action == "resume":
+            request = compute_v1.ResumeInstanceRequest(
+                project=identity.project_id,
+                zone=identity.zone,
+                instance=identity.instance_name,
+                request_id=request_id,
+            )
+            operation = call_google(
+                lambda: instances.resume(request=request, retry=None),
+                operation="requesting instance resume",
                 resource=f"instance {identity.project_id}/{identity.zone}/{identity.instance_name}",
             )
         elif action == "stop":

@@ -223,6 +223,7 @@ def test_operational_describe_json_commands_are_deterministic_and_exclude_opaque
             [
                 "name",
                 "created_at",
+                "desired_runtime_state",
                 "last_started_at",
                 "uptime_seconds",
                 "site",
@@ -286,6 +287,7 @@ def test_operational_describe_json_commands_are_deterministic_and_exclude_opaque
                 "mode",
                 "agent_name",
                 "status",
+                "desired_runtime_state",
                 "pid",
                 "created_at",
                 "last_started_at",
@@ -308,6 +310,7 @@ def test_operational_describe_json_commands_are_deterministic_and_exclude_opaque
                 "uptime_seconds",
                 "updated_at",
                 "status",
+                "desired_runtime_state",
                 "sessions",
             ],
         ),

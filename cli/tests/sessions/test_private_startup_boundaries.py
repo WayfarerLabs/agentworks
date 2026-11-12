@@ -16,6 +16,7 @@ from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import manager, tmux
 from agentworks.sessions.manager._lifecycle import _redacted_launch_errors
 
+from ._runtime_assertions import assert_runtime_preserved
 from .test_create_start_restart_orchestrated import _restart_fixture
 from .test_create_start_restart_orchestrated import _stub_build_registry as _stub_build_registry
 from .test_native_startup import _NATIVE_CAPTURE, _NATIVE_FINALIZE, NativeTarget, launch
@@ -98,7 +99,7 @@ def test_redirected_managed_socket_preserves_other_runtime_and_row(tmp_path, mon
     try:
         with pytest.raises(AgentworksError):
             manager.stop_session(db, SimpleNamespace(), name="s1", interaction=TtyInteractionPolicy.REFUSE)
-        assert db.get_session("s1") == before
+        assert_runtime_preserved(db, before, operation="stop_session")
         assert Path(owned_socket).is_symlink()
         assert native.native("list-sessions").ok
         assert not any(
@@ -146,7 +147,12 @@ def test_recovery_rechecks_identity_after_secret_resolution(tmp_path, monkeypatc
     fingerprint = record_native_runtime(db, native)
     mutation_boundary = []
 
-    def resolve(*args, **kwargs):
+    from agentworks.secrets.resolver import Resolver
+
+    original_resolve = Resolver.resolve
+
+    def resolve(self: Resolver) -> None:
+        original_resolve(self)
         if replace_runtime:
             native.native("kill-server")
             deadline = time.monotonic() + 3
@@ -155,9 +161,8 @@ def test_recovery_rechecks_identity_after_secret_resolution(tmp_path, monkeypatc
             assert not Path(f"/proc/{fingerprint.pid}").exists()
             launch(native, "sleep 30", is_admin=False)
         mutation_boundary.append(len(native.calls))
-        return {"token": uuid4().hex}
 
-    monkeypatch.setattr("agentworks.secrets.resolve_for_command", resolve)
+    monkeypatch.setattr(Resolver, "resolve", resolve)
     try:
         if replace_runtime:
             with pytest.raises(StateError):
