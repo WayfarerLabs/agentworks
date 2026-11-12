@@ -40,8 +40,8 @@ Before declaring a site:
 
 1. Enable the Compute Engine API (`compute.googleapis.com`) in the target project.
 2. Give the selected host identity permission to read the project, zone, machine/image/disk types,
-   network and firewall state, and to create, start, stop, and delete instances, their boot disks,
-   and classic VPC firewall rules. The predefined `Compute Instance Admin (v1)` and
+   network and firewall state, and to create, start, resume, stop, and delete instances, their boot
+   disks, and classic VPC firewall rules. The predefined `Compute Instance Admin (v1)` and
    `Compute Security Admin` roles are a straightforward starting point. The list below is the
    effective permission set, plus one network-mode addition. A target-project custom role covers
    target resources; Google's public-image access supplies `compute.images.getFromFamily` and
@@ -60,6 +60,7 @@ Before declaring a site:
    compute.instances.create
    compute.instances.delete
    compute.instances.get
+   compute.instances.resume
    compute.instances.setMetadata
    compute.instances.setTags
    compute.instances.start
@@ -239,6 +240,12 @@ credential. After its durable success marker appears, Agentworks sends the Tails
 through fixed-command SSH stdin. The resulting VM row records the original canonical operator SSH
 source prefixes so later cleanup can reconstruct the create-time allow independently; it still does
 not store the VM's external IPv4.
+
+Starting a GCE VM resumes a suspended instance and starts a terminated instance. If shutdown or
+suspension is still in progress, Agentworks waits within the power-state timeout for it to settle
+before choosing the operation. An instance that is already running needs no power operation. Each
+read verifies the stored provider instance ID; operation responses must match the expected request
+and provider target. Power operations preserve the VM's identity and initialization state.
 
 If Google Cloud reports insufficient zonal instance capacity, Agentworks treats that completed
 operation as a definitive failure, names the selected zone, and rolls back the partial create. Retry

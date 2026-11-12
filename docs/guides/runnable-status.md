@@ -9,6 +9,12 @@ agw session list
 agw console list
 ```
 
+All three lists show the stored desired runtime target separately from live status. A null target
+for a legacy session or console means adoption is required; it is not proof that the resource should
+be stopped. Targets do not change when a runtime exits. See
+[Desired runtime state and recovery](desired-runtime-state.md) for adoption, preview, and explicit
+reconciliation.
+
 Add `--status` when current runtime state is needed. Agentworks selects and validates rows first,
 prints one progress line in human mode, and then observes only those rows. The status request cannot
 be combined with `--names-only`, so completion remains a local one-name-per-line operation.
@@ -82,11 +88,13 @@ derived. Human and names-only lists remain the complete recovery inventory for t
 | Session  | `running`, `stopped`, `residual`, `broken`, `unknown` | Exact managed tmux session, dedicated server, then stored process identity |
 | Console  | `running`, `stopped`, `residual`, `unknown`           | Exact canonical and reserved staging names from one tmux enumeration       |
 
-A stopped or deallocated VM also shows `manual` when `agw vm stop` recorded operator intent, or
-`idle` when Agentworks may start it on demand. Session `residual` means the dedicated tmux server is
-present without the canonical managed session. Session `broken` means same-boot process evidence is
-live while tmux is unreachable. Console `residual` means its reserved staging session exists,
-whether or not the canonical console also exists.
+A stopped or deallocated VM shows `manual` for stopped intent and `idle` for on-demand intent.
+Running intent has no disposition even when the VM is currently off, making the difference between
+target and observation visible. Running and unknown VM observations also have no disposition.
+Session `residual` means the dedicated tmux server is present without the canonical managed session.
+Session `broken` means same-boot process evidence is live while tmux is unreachable. Console
+`residual` means its reserved staging session exists, whether or not the canonical console also
+exists.
 
 The status describes Agentworks-owned runtime state. It does not claim that an agent harness has
 useful work in progress.
@@ -117,6 +125,12 @@ and console list records carry `"status":"unavailable"`; requested inconclusive 
 `"status":"unknown"`. Plain VM list records carry null `observed_status` and `status_disposition`;
 requested inconclusive observations carry `"observed_status":"unknown"`. Describe never uses a
 not-requested sentinel because it always observes.
+
+The current producer also emits `desired_runtime_state` on runnable list and describe records:
+`running`, `stopped`, or `on-demand` for VMs; `running`, `stopped`, or null for sessions and
+consoles. The VM describe compatibility field `operator_stopped` is derived as true exactly when its
+desired target is `stopped`. Unsupported persisted targets remain typed state errors rather than
+being guessed from runtime state.
 
 The current producer emits the VM and console status fields on every applicable record. They remain
 additive JSON v1 fields: consumers must tolerate their absence when reading output from an older v1

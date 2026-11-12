@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Annotated
 
+import click
 import typer
 
 from agentworks.cli._app import app
@@ -17,6 +18,8 @@ vm_app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(vm_app)
+
+_DESIRED_STATE_CHOICES = click.Choice(["running", "stopped", "on-demand"])
 
 
 @vm_app.command("create")
@@ -220,6 +223,40 @@ def vm_verify_connection(
     registry = load_request_registry(config, live_database=db)
     result = verify_vm_connection(db, config, registry, name)
     output.result(f"VM '{result.name}' connection verified via {result.transport}.")
+
+
+@vm_app.command("set-desired-state")
+def vm_set_desired_state(
+    name: Annotated[str, typer.Argument(help="VM name")],
+    state: Annotated[
+        str,
+        typer.Argument(help="Desired runtime state", click_type=_DESIRED_STATE_CHOICES),
+    ],
+) -> None:
+    """Set the stored runtime target without changing the running state."""
+    from agentworks.vms.manager import set_vm_desired_runtime_state
+
+    set_vm_desired_runtime_state(get_db(), name=name, state=state)
+
+
+@vm_app.command("reconcile")
+def vm_reconcile(
+    name: Annotated[str | None, typer.Argument(help="VM name")] = None,
+    all_vms: Annotated[bool, typer.Option("--all", help="Reconcile all VMs and their stored children")] = False,
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Observe and report without changing runtime")] = False,
+) -> None:
+    """Converge selected VMs and their children to stored runtime targets."""
+    from agentworks.config import load_config
+    from agentworks.runtime_state import reconcile_vm
+
+    reconcile_vm(
+        get_db(),
+        load_config(),
+        name=name,
+        all_vms=all_vms,
+        dry_run=dry_run,
+        interaction=ordinary_tty_interaction_policy(),
+    )
 
 
 @vm_app.command("import-host-keys")

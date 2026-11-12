@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from agentworks.errors import ConnectivityError, NotFoundError, ValidationError
+from agentworks.errors import ConnectivityError, NotFoundError, StateError, ValidationError
 from agentworks.naming import MAX_FREEFORM_NAME_LENGTH, validate_name
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from agentworks.config import Config
     from agentworks.db import ConsoleRow, Database, SessionRow, ShellEntry
+    from agentworks.harness_setup.locking import NativeMutationGuard
 
 TMUX_PREFIX = "aw-console-"
 TMUX_STAGING_PREFIX = "aw-console-build+"
@@ -212,3 +216,25 @@ def _shell_summary(shells: list[ShellEntry]) -> str:
         user_tag = "admin" if s["admin"] else "agent"
         parts.append(f"{user_tag}:{cwd}")
     return f"{len(shells)} shell(s): " + ", ".join(parts)
+
+
+@contextmanager
+def guarded_console_selection(
+    db: Database,
+    name: str,
+    *,
+    held_native_guard: NativeMutationGuard | None = None,
+) -> Iterator[tuple[ConsoleRow, NativeMutationGuard]]:
+    """Select a definition under its family guard, refusing a changed parent."""
+    from agentworks.harness_setup.locking import native_mutation_guard
+
+    parent_name = _require_console(db, name).vm_name
+    with native_mutation_guard(db.path, parent_name, held=held_native_guard) as guard:
+        console = _require_console(db, name)
+        if console.vm_name != parent_name:
+            raise StateError(
+                f"console '{name}' changed VM while selecting it",
+                entity_kind="console",
+                entity_name=name,
+            )
+        yield console, guard

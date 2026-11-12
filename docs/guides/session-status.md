@@ -93,12 +93,26 @@ any operator-added sessions, windows, or panes on that dedicated server. Older s
 use an exact-name `kill-session` and verify that exact session is absent. Agentworks never signals a
 stored numeric PID.
 
+An off parent makes a session currently inactive. Agentworks retains its last known PID, boot ID,
+process start time and socket because suspended guest memory can survive. An off-parent stop records
+stopped intent and returns without guest access or a runtime-field write. After the parent is
+reachable, reconciliation can verify the retained identity and stop that original runtime if it
+survived; a changed boot follows the ordinary safe absence/recovery path. Retained evidence does not
+imply that a session is currently running or that process death was verified while the guest was
+unreachable.
+
 `agw session stop --all` runs complete-fingerprint dedicated teardown operations concurrently, with
 a fixed ceiling of eight active sessions. Each worker owns one fresh transport and performs only
 remote identity validation, tmux teardown, absence proof, and exact socket cleanup. The invoking
 thread retains database and output ownership, persists verified results before announcing success,
 and runs incomplete dedicated or shared-server compatibility work serially after the concurrent
 lane. A failure in one session does not cancel its siblings.
+
+Before submission, an actionable unknown runtime refuses the entire destructive batch. Stopped
+intent accepted by the command remains recorded for retry. Safe PID repair and fresh observation
+precede that decision after shared workload preparation; a failed repair write prevents status or
+teardown from continuing with stale identity. Named stop remains synchronous, and an off parent is
+never activated solely to stop its children.
 
 Named and batch teardown share the same remote protocol for complete-fingerprint runtimes. Every
 teardown stopped-state update, including incomplete-runtime recovery, stopped-row socket cleanup,
@@ -109,8 +123,9 @@ cleanup or make a row eligible for parallel teardown.
 
 An interrupt cancels teardown that has not started but cannot terminate a running worker safely.
 Agentworks visibly drains bounded in-flight work, persists every verified result, and then exits as
-interrupted. During a quiet concurrent wait it reports completed, active, and queued counts every
-five seconds.
+interrupted. Known native, persistence and completion-recording failures remain failed even when a
+sibling is interrupted. Queued work that never ran remains blocked. During a quiet concurrent wait
+it reports completed, active, and queued counts every five seconds.
 
 `--force` is intentionally narrow. It permits stale dedicated-socket cleanup only after the stored
 boot/PID/start-time fingerprint proves the old server process is absent. It does not turn unknown

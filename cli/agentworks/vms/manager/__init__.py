@@ -33,7 +33,6 @@ from ._helpers import (
     _guard_failed_vm,
     _human_bytes,
     _init_log_hint,
-    _lookup_or_synthesize_secret,
     _query_live_resources,
     _require_vm,
     _resolve_system_slug,
@@ -60,8 +59,15 @@ from .inspect import (
 )
 from .lifecycle import create_vm, reinit_vm
 from .port_forward import port_forward_vm
-from .power import delete_vm, rekey_vm, start_vm, stop_vm
+from .power import delete_vm, rekey_vm, set_vm_desired_runtime_state, start_vm, stop_vm
 from .release import confirm_vm_release, verified_vm_release
+from .runtime import (
+    VMRuntimeContext,
+    activate_vm_runtime,
+    execute_vm_stop,
+    observe_vm_runtime,
+    prepare_vm_runtime,
+)
 from .tailscale import (
     _ensure_tailscale,
     _is_tailscale_reachable,
@@ -81,7 +87,6 @@ __all__ = [
     "_is_tailscale_reachable",
     "_tailscale_rejoin_required",
     "_live_vm_boundary",
-    "_lookup_or_synthesize_secret",
     "_query_live_resources",
     "_require_vm",
     "_resolve_system_slug",
@@ -91,6 +96,11 @@ __all__ = [
     "_vm_scope",
     "_vm_secret_target",
     "_warned_tailscale_missing",
+    "activate_vm_runtime",
+    "execute_vm_stop",
+    "observe_vm_runtime",
+    "prepare_vm_runtime",
+    "VMRuntimeContext",
     "bootstrap_vm",
     "confirm_vm_release",
     "create_vm",
@@ -109,6 +119,7 @@ __all__ = [
     "run_initialization",
     "shell_vm",
     "start_vm",
+    "set_vm_desired_runtime_state",
     "stop_vm",
     "validate_slug",
     "verify_vm_connection",

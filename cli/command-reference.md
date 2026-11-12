@@ -264,7 +264,7 @@ omit static non-candidates. The default preview permits no backend-classified op
 
 ```text
 {vms: [{name, site, template, provisioning_status, initialization_status,
-        workspace_count, agent_count, session_count, tailscale_host, created_at,
+        workspace_count, agent_count, session_count, tailscale_host, created_at, desired_runtime_state,
         debian_release, debian_release_observed_at, observed_status,
         status_disposition}]}
 ```
@@ -278,8 +278,10 @@ domain enums gain members. In this VM list JSON projection, `unknown` is the sta
 invalid persisted value and never echoes that stored value. The current producer always emits the
 additive nullable v1 fields `observed_status` and `status_disposition`; a v1 consumer must tolerate
 their absence from older producers. Plain list emits null for both. With `--status`, observed status
-is `running`, `stopped`, `deallocated`, or `unknown`; disposition is `manual` or `idle` only for
-stopped or deallocated VMs.
+is `running`, `stopped`, `deallocated`, or `unknown`. For stopped/deallocated observations,
+disposition is `manual` for stopped intent, `idle` for on-demand, and null for running intent.
+Running and unknown observations also have null disposition. The additive `desired_runtime_state`
+field is `running`, `stopped`, or `on-demand`; older JSON v1 producers may omit it.
 
 The VM, workspace, agent, and session description records append the JSON v1 `instance_state`
 object. Current producers always include it; older JSON v1 producers may omit this additive field:
@@ -316,7 +318,7 @@ recorded-fact section `Lifecycle evidence`.
 this ordered shape:
 
 ```text
-{name, created_at, last_started_at, uptime_seconds, site, platform, backend,
+{name, created_at, desired_runtime_state, last_started_at, uptime_seconds, site, platform, backend,
  observed_status, status_disposition,
  operator_stopped, hostname, system_slug, system_slug_state, template, admin_template,
  admin_username, provisioning_status, initialization_status, tailscale_host, last_seen_at,
@@ -329,12 +331,13 @@ this ordered shape:
 `debian_release_observed_at`, and `live_resources` are nullable. Older JSON v1 producers may also
 emit a null `observed_status`; the current producer always emits `running`, `stopped`,
 `deallocated`, or `unknown` because describe requests observation. Non-null release observations
-have the same recognized-codename and timestamp semantics as VM list. `status_disposition` is
-`manual` or `idle` only for stopped or deallocated VMs; and `system_slug_state` is `set`,
-`declined`, or `unset`. `provisioned_resources` is `{cpus, memory_gib, disk_gib, swap_gib}` with
-nullable integers. It is the provisioning request recorded by Agentworks, not provider-observed
-realized hardware. Human VM describe labels these persisted values `Requested`. `live_resources` is
-null or this record:
+have the same recognized-codename and timestamp semantics as VM list. `desired_runtime_state` and
+`status_disposition` follow the VM list rules above. `operator_stopped` is a compatibility boolean
+derived as true exactly when desired state is `stopped`; it is not stored or used as a second intent
+authority. `system_slug_state` is `set`, `declined`, or `unset`. `provisioned_resources` is
+`{cpus, memory_gib, disk_gib, swap_gib}` with nullable integers. It is the provisioning request
+recorded by Agentworks, not provider-observed realized hardware. Human VM describe labels these
+persisted values `Requested`. `live_resources` is null or this record:
 
 ```text
 {cpus, load_average, memory_total, memory_used, memory_percent, swap_total,
@@ -393,7 +396,7 @@ programming or infrastructure failures still fail the command.
 #### Session and console JSON schemas
 
 `agw session list --output json` uses `session.list` and `{sessions}`. Each session is
-`{name, workspace_name, vm_name, template, harness_integration, mode, agent_name, status}`.
+`{name, workspace_name, vm_name, template, harness_integration, mode, agent_name, status, desired_runtime_state}`.
 `harness_integration` and `agent_name` are nullable; mode is `admin`, `agent`, or `unknown`; status
 is exactly `running`, `stopped`, `residual`, `broken`, `unknown`, or `unavailable`. Plain list emits
 `unavailable`; `list --status` emits a live state and uses `unknown` when observation is
@@ -409,7 +412,7 @@ order, alphabetical by name by default. `agw session describe NAME --output json
 
 ```text
 {name, workspace_name, vm_name, template, harness_integration, mode, agent_name,
- status, pid, created_at, last_started_at, uptime_seconds, updated_at, consoles, instance_state}
+ status, desired_runtime_state, pid, created_at, last_started_at, uptime_seconds, updated_at, consoles, instance_state}
 ```
 
 `pid` and `uptime_seconds` are nonnegative integers or null; `pid` is positive when present.
@@ -421,18 +424,29 @@ console associations; older v1 producers may omit this additive field under the 
 contract below.
 
 `agw console list --output json` uses `console.list` and
-`{consoles: [{name, vm_name, session_count, status}]}`. Rows retain the selected service-layer
-order, alphabetical by name by default. Current producers always emit the additive v1 console
-`status` field; a v1 consumer must tolerate its absence from older producers. Status is
-`unavailable` for plain list; with `--status` it is `running`, `stopped`, `residual`, or `unknown`.
-`agw console describe NAME --output json` uses `console.describe` and `{console}`. Console is
-`{name, vm_name, admin_shell, created_at, last_started_at, uptime_seconds, updated_at, status, sessions}`.
+`{consoles: [{name, vm_name, session_count, status, desired_runtime_state}]}`. Rows retain the
+selected service-layer order, alphabetical by name by default. Current producers always emit the
+additive v1 console `status` field; a v1 consumer must tolerate its absence from older producers.
+Status is `unavailable` for plain list; with `--status` it is `running`, `stopped`, `residual`, or
+`unknown`. `agw console describe NAME --output json` uses `console.describe` and `{console}`.
+Console is:
+
+```text
+{name, vm_name, admin_shell, created_at, last_started_at, uptime_seconds, updated_at,
+ status, desired_runtime_state, sessions}
+```
+
 Describe status uses the console live vocabulary and never `unavailable`. Members are
 `{position, session_name, shells}` in ascending position, and shells are `{cwd, admin}` in
 configured shell order. `cwd` is nullable and all booleans remain JSON booleans. Console inspection
 preserves configured database membership even when its non-activating live observation is unknown. A
 console whose referenced VM row is missing retains its directly stored string `vm_name` and uses
 `unknown` when status is requested.
+
+Session and console list/describe records add nullable `desired_runtime_state`: `running`,
+`stopped`, or null when a legacy definition awaits adoption. Older JSON v1 producers may omit the
+field. Unsupported persisted targets are typed state errors, not an additional status or a guessed
+target. Target changes and runtime exit do not alter the meaning of observed status.
 
 For all three runnable describes, `last_started_at` is the raw nullable UTC timestamp persisted
 after a successful start. `uptime_seconds` is a nullable nonnegative integer derived at inspection
@@ -604,6 +618,60 @@ credentials. The static JSON v1 resolution-category vocabulary remains `attempta
 when the current TTY-only path does not emit it. Do not rely on `--non-interactive` as a general
 provider-work prohibition.
 
+### Desired runtime state and reconciliation
+
+The VM, session, and console groups each expose `set-desired-state NAME STATE` and `reconcile`.
+Targets are per-instance database intent, separate from templates, instance specs, initialization
+evidence, and live observations. VMs accept `running`, `stopped`, and `on-demand`; sessions and
+consoles accept `running` or `stopped`. Legacy workload targets may be null until explicitly
+adopted. The setters perform no observation, activation, repair, or secret resolution.
+
+`agw vm reconcile NAME` selects that VM and its stored sessions and consoles;
+`agw vm reconcile --all` explicitly selects the managed fleet. Exactly one of name or `--all` is
+required. `agw session reconcile NAME` and `agw console reconcile NAME` select only that workload
+and its required parent activation; focused console recovery never starts member sessions. Add
+`--dry-run` to any form to preview without applying changes. These commands have no new operational
+JSON family or saved-plan input.
+
+Reconciliation applies existing targets without changing them. It preserves healthy runtimes and
+ordinary harness continuation, blocks unknown or unsafe recovery, and creates no missing durable
+definitions. A running-intent VM is restored even without running children. On-demand permits
+activation for selected running workloads; stopped intent blocks those children while retaining
+their targets. An off VM is not activated solely to stop children. Provider shutdown retains the
+platform's ordinary stop policy. Sessions run before console builds; a console's membership never
+owns session intent. `vm start` establishes running intent but does not restore its children; follow
+it with explicit `vm reconcile` when child recovery is intended.
+
+Create/start/restart records running and explicit stop records stopped, including accepted no-ops.
+Local validation, known read-only policy conflicts, and required confirmation precede acceptance;
+execution or credential failure and later cancellation retain the accepted target. A valid child
+start under a stopped parent accepts running but reports blocked with a nonzero exit. Runtime exit,
+attach, status, reinit, and membership changes do not independently change targets.
+
+Reconciliation and batch session start/restart collect the complete eligible workload-secret union
+before any deferred runtime changes, including VM stops and console staging cleanup. A required
+workload secret failure prevents that entire deferred batch. Required VM activation and conditional
+Tailscale repair may already have happened and are not rolled back. An infrastructure credential
+failure blocks dependent families while independent families continue; if an eligible workload also
+requires that credential, the global workload-secret barrier still fails. Execution and final
+observation use supplied values without later secret prompts. Cancellation stops further work and
+reports completed effects honestly. Results distinguish unchanged, changed, failed, and blocked;
+selected failed or blocked targets produce a nonzero exit. Bounded final observations are not an
+uptime or useful-work guarantee.
+
+Dry run performs no activation, repair, workload-secret preview/resolution, PID-evidence write,
+staging change, target write, or mutation-guard creation. Provider observation may need its ordinary
+credentials. Off-guest checks remain conditional on later activation. Mutating operations share a
+VM-family guard: secret prompts and console delete confirmation can keep a family busy, and brief
+hold admission can report busy even for live diagnostic access. A newly acquired admission guard
+does not span the interactive body.
+
+See [Desired runtime state and recovery](../docs/guides/desired-runtime-state.md) for adoption,
+worked recovery and retry, migration, and WSL2 stopped-intent access limits. Migration 39 preserves
+old VM manual-stop/on-demand policy and leaves legacy session/console targets awaiting adoption; new
+resources start with running intent. Explicit VM start now records running, and batch workload
+secret failure now prevents all deferred changes instead of launching one session at a time.
+
 ### VMs
 
 Manage virtual machines across declared vm-sites (Lima local or remote, Azure, AWS EC2, Google
@@ -625,11 +693,13 @@ just a vm-site.
 
 > **Note on WSL2:** WSL2 distros share the Windows workstation's lifecycle. They idle-shut after
 > ~60s of no `wsl.exe` activity (`vmIdleTimeout` in `.wslconfig`) and do not survive workstation
-> shutdown or sleep. Agentworks holds a `wsl.exe` keepalive for the duration of each VM-touching
-> command, so individual `agw` operations work cleanly, but agents and sessions on WSL2 are not
-> suitable for unattended background workflows. Use a site on a different platform that provides
-> true long-lived VMs (e.g. Lima, Azure, Proxmox, etc.) if you need a VM that survives independent
-> of your workstation.
+> shutdown or sleep. Agentworks normally holds a guest-attached keeper through VM-touching work when
+> the VM permits activation. A live VM with stopped intent receives no idle protection during access
+> or management commands and may stop mid-command. Select `agw vm set-desired-state NAME on-demand`
+> (or `running`) only when both normal holds and future activation are intended; this is not a
+> keepalive-only switch. WSL2 agents and sessions are not suitable for unattended background
+> workflows. Use a site on a different platform that provides true long-lived VMs (e.g. Lima, Azure,
+> Proxmox, etc.) if you need a VM that survives independent of your workstation.
 
 | Command                                             | Description                                                    |
 | --------------------------------------------------- | -------------------------------------------------------------- |
@@ -639,7 +709,9 @@ just a vm-site.
 | `agw vm verify-connection <name>`                   | Test the canonical admin connection without starting the VM    |
 | `agw vm shell <name> [--workspace <ws>]`            | Admin shell on a VM (optionally rooted in a workspace)         |
 | `agw vm exec <name> [--workspace <ws>] -- <cmd...>` | Run a one-shot command as admin (optionally from a workspace)  |
-| `agw vm start <name>`                               | Start a stopped VM and clear its manual-stop intent            |
+| `agw vm start <name>`                               | Record running intent and start or repair the VM               |
+| `agw vm set-desired-state <name> <state>`           | Record running, stopped, or on-demand without runtime work     |
+| `agw vm reconcile [<name>] [--all] [--dry-run]`     | Apply the named VM scope or explicitly selected fleet          |
 | `agw vm stop <name>`                                | Stop a VM and keep it stopped (no auto-start)                  |
 | `agw vm reinit <name>`                              | Re-run initialization on a provisioned VM                      |
 | `agw vm confirm-release <name>`                     | Observe and explicitly record the live Debian release          |
@@ -656,11 +728,13 @@ interactively. These options are mutually exclusive. `--prompt` requires usable 
 `--wait-for-share` when moving the VM to a different tailnet and sharing it back before
 verification.
 
-**Power-state semantics:** a VM that stopped on its own (idle timeout, host reboot) is started
-automatically, on demand, by any command that needs it live. A VM stopped with `agw vm stop` is
-different: that records your intent, so it stays down and commands that would need it refuse with a
-hint until you run `agw vm start`, which clears the intent. `agw vm describe` shows which case a
-stopped VM is in: its status reads `stopped (manual)` versus `stopped (idle)`.
+**Power-state semantics:** running and on-demand targets permit automatic activation for commands
+that need a live VM. Reconciliation also restores an idle running-intent VM; on-demand alone does
+not require that. Stopped intent prevents automatic power-on. Ordinary diagnostics and cleanup may
+still access a guest already running out of band, with the WSL2 limitation above. `vm start` records
+running; `vm stop` records stopped. Use the pure setter to select another target without a power
+operation. Describe and `list --status` show target and observation independently: an off VM shows
+`manual` for stopped intent, `idle` for on-demand, and no disposition for running intent.
 
 Plain `vm list` is a local inventory read. Add `--status` to query each selected VM platform for
 current power state; this never starts a VM. The human table adds `STATUS` only for that request,
@@ -916,20 +990,22 @@ unchanged, so your own `ssh` keeps working until you run `agw vm import-host-key
 
 ### Sessions
 
-Manage sessions (persistent tmux sessions running in workspaces). Session names are globally unique
--- no `--workspace` flag needed for most commands.
+Manage sessions (persistent tmux sessions running in workspaces). Session names are globally unique;
+no `--workspace` flag is needed for most commands.
 
-| Command                       | Description                    |
-| ----------------------------- | ------------------------------ |
-| `agw session create <name>`   | Create and start a session     |
-| `agw session describe <name>` | Show session details           |
-| `agw session list`            | List configured sessions       |
-| `agw session attach <name>`   | Attach to a running session    |
-| `agw session stop <name>`     | Stop a running session         |
-| `agw session start <name>`    | Start a stopped session        |
-| `agw session restart <name>`  | Replace the session runtime    |
-| `agw session delete <name>`   | Stop and delete a session      |
-| `agw session logs <name>`     | Dump session scrollback buffer |
+| Command                                        | Description                                        |
+| ---------------------------------------------- | -------------------------------------------------- |
+| `agw session create <name>`                    | Create and start a session                         |
+| `agw session describe <name>`                  | Show session details                               |
+| `agw session list`                             | List configured sessions                           |
+| `agw session attach <name>`                    | Attach to a running session                        |
+| `agw session stop <name>`                      | Stop a running session                             |
+| `agw session start <name>`                     | Start a stopped session                            |
+| `agw session set-desired-state <name> <state>` | Record running or stopped without runtime work     |
+| `agw session reconcile <name> [--dry-run]`     | Apply the session target without changing siblings |
+| `agw session restart <name>`                   | Replace the session runtime                        |
+| `agw session delete <name>`                    | Stop and delete a session                          |
+| `agw session logs <name>`                      | Dump session scrollback buffer                     |
 
 `session list` accepts `--workspace`, `--vm`, `--agent`, `--harness-integration`, and `--admin` to
 narrow the result set. Filters compose with AND. The name filters accept a single value or a
@@ -954,29 +1030,36 @@ commands remain strict. Relationship-based filters select only rows reachable th
 existing relationship; unfiltered inventory is the broad recovery view.
 
 `session stop`, `session start`, and `session restart` operate on a single session by default. Pass
-`--all` to batch over matching sessions. By default, session start --all dispatches only matches
-observed as stopped. The batch form accepts `--vm <vm>`, `--workspace <ws>`, `--agent <agent>`,
-`--harness-integration <integration>`, `--console <console>`, and `--admin` to narrow the set;
-filters compose with AND and require `--all`. The name filters accept a single value or a
-comma-separated list (`--vm vm1,vm2`); commas within a filter are OR-ed together, and an unknown
-name in a filter is an error, not an empty result. Harness-integration filtering uses the same
-effective-template and availability rules as `session list`. `--console` selects sessions belonging
-to any of the given consoles. `--agent` matches agent-mode sessions only; `--admin` matches
-admin-mode sessions only (the two are mutually exclusive). Pass `--force` only to recover broken
-state after Agentworks proves the prior managed tmux server is absent; Agentworks never signals a
-stored numeric PID. Restart asks before replacing a live running session; `--yes` or `-y` skips that
-confirmation. Batch restart asks once for all running matches and does not prompt when every match
-is non-running. If live status cannot be determined, restart refuses instead of assuming the session
-is safe to replace. `--force` does not skip confirmation. Start and restart resume the harness
-conversation when possible. `--resume-only` refuses unless the integration can resume existing
-state; `--force-new` requires a fresh conversation when the operation launches a runtime. The two
-options are mutually exclusive. A running `session start` remains a no-op under the default or
-resume-only policy; a running `session start --force-new` is refused rather than silently replacing
-the runtime. A restart obtains the integration's launch decision before teardown, so an unsupported
-policy or unavailable strict resume leaves the managed tmux runtime and integration-owned state
-intact. Normal lifecycle preparation may already have persisted observed PID, boot, or stopped
-facts. The built-in `shell` integration does not implement `--resume-only` because an arbitrary
-shell command cannot prove that it resumed harness state.
+`--all` to batch over matching sessions. Ordinary batch start adopts running intent for every
+accepted match, including already-running no-ops; stopped and domain-safe residual runtimes can be
+started without replacing healthy peers. Batch stop adopts accepted absent no-ops too. Known
+read-only policy refusals leave targets unchanged. Start/restart gathers the complete eligible
+workload-secret union before any selected runtime changes. A required workload secret failure
+prevents the whole deferred batch; earlier infrastructure activation/repair may remain. Stop uses
+non-activating parent observation and does not boot an off VM solely for cleanup. The batch form
+accepts `--vm <vm>`, `--workspace <ws>`, `--agent <agent>`, `--harness-integration <integration>`,
+`--console <console>`, and `--admin` to narrow the set; filters compose with AND and require
+`--all`. The name filters accept a single value or a comma-separated list (`--vm vm1,vm2`); commas
+within a filter are OR-ed together, and an unknown name in a filter is an error, not an empty
+result. Harness-integration filtering uses the same effective-template and availability rules as
+`session list`. `--console` selects sessions belonging to any of the given consoles. `--agent`
+matches agent-mode sessions only; `--admin` matches admin-mode sessions only (the two are mutually
+exclusive). Pass `--force` only to recover broken state after Agentworks proves the prior managed
+tmux server is absent; Agentworks never signals a stored numeric PID. Restart asks before replacing
+a live running session; `--yes` or `-y` skips that confirmation. Batch restart asks once for all
+running matches and does not prompt when every match is non-running. If live status cannot be
+determined, restart refuses instead of assuming the session is safe to replace. `--force` does not
+skip confirmation. Start and restart resume the harness conversation when possible. `--resume-only`
+refuses unless the integration can resume existing state; `--force-new` requires a fresh
+conversation when the operation launches a runtime. The two options are mutually exclusive. A
+running `session start` remains a no-op under the default or resume-only policy; a running
+`session start --force-new` is refused rather than silently replacing the runtime. A restart obtains
+the integration's launch decision before teardown, so an unsupported policy or unavailable strict
+resume leaves the managed tmux runtime and integration-owned state intact. A refusal known before
+acceptance also preserves the target; a failure discovered after acceptance retains running intent.
+Runtime evidence repair is independent of desired state. The built-in `shell` integration does not
+implement `--resume-only` because an arbitrary shell command cannot prove that it resumed harness
+state.
 
 Batch stop overlaps teardown for dedicated sessions whose persisted runtime identity is complete,
 with at most eight teardown operations active at once. Incomplete dedicated rows and older
@@ -997,7 +1080,7 @@ for `--force`.
 `[Create new workspace]` -- filtered to the known VM when `--vm` or `--agent` already pins one (the
 prompt prints `Only showing workspaces on VM 'X'` when a filter is active). If `--admin` / `--agent`
 / `--new-agent` is omitted, you are prompted with `admin`, the existing agents on the resolved VM,
-and `[Create new agent]`. The prompts always fire when the flags are absent -- there is no
+and `[Create new agent]`. The prompts always fire when the flags are absent; there is no
 single-option auto-select for workspace or mode, since both are part of the session's identity.
 `--vm` works differently: it auto-selects when exactly one usable VM exists (logged as
 `Using VM 'X'`), prompts when multiple, and is required only in non-interactive mode when no
@@ -1009,8 +1092,8 @@ required prompt raises a `ValidationError` directing you to pass the correspondi
 `--agent-template`; `--agent-name` defaults to the session name); the new agent is provisioned on
 the workspace's VM. `--workspace-spec` and `--agent-spec` apply only to those matching newly created
 owners. When a session created with `--new-workspace` or `--new-agent` is later deleted, you are
-offered the option to delete the workspace and/or agent as well -- the workspace if no other
-sessions remain on it, the agent if it has no other sessions and no explicit grants.
+offered the option to delete the workspace and/or agent as well: the workspace if no other sessions
+remain on it, the agent if it has no other sessions and no explicit grants.
 
 <!-- Linked from the top-level README; rename only if you also update README.md. -->
 
@@ -1028,6 +1111,8 @@ panes you want preloaded into a session's window.
 | `agw console start <name>`                          | Start a stopped console                                           |
 | `agw console restart <name>`                        | Rebuild a console                                                 |
 | `agw console stop <name>`                           | Stop a running console                                            |
+| `agw console set-desired-state <name> <state>`      | Record running or stopped without runtime work                    |
+| `agw console reconcile <name> [--dry-run]`          | Restore only the console view, preserving member targets          |
 | `agw console attach <name>`                         | Attach to a running console                                       |
 | `agw console delete <name>`                         | Tear down and remove the console                                  |
 | `agw console add-sessions <name> <sessions...>`     | Add session windows (accepts `--to-index N`)                      |
@@ -1113,6 +1198,11 @@ refuses, pointing you at `console restart`, when the fix would require destroyin
 panes live than configured, shell panes it can't map back to the config (untagged, duplicated, or
 out of range), or a window whose session pane itself was killed (the console then shows a plain
 shell where the session should be).
+
+Console start/restart records running intent and stop records stopped intent, including accepted
+no-ops. A console rebuild uses stored order, shell panes, and the optional admin shell without
+starting member sessions. Stopping or editing membership does not change those sessions' targets.
+Focused reconciliation restores the view only; choose a VM scope when sessions should recover too.
 
 Memberships and shell layouts persist in the database. `agw console create` stores the definition
 and builds it, `console start` realizes a stopped definition, `console restart` rebuilds it, and

@@ -455,7 +455,8 @@ def test_repository_writes_join_an_enclosing_transaction(db: Database) -> None:
 
 def test_transaction_joins_an_existing_implicit_transaction(db: Database) -> None:
     db._conn.execute(  # noqa: SLF001
-        "INSERT INTO vms (name, site, hostname) VALUES ('pending', 'local', 'pending')"
+        "INSERT INTO vms (name, site, hostname, desired_runtime_state, vm_uuid) "
+        "VALUES ('pending', 'local', 'pending', 'running', '00112233-4455-6677-8899-aabbccddeeff')"
     )
 
     with pytest.raises(RuntimeError), db.transaction():

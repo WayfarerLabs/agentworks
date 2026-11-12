@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
-from agentworks.errors import StateError
+from agentworks.errors import SecretUnavailableError, StateError, UserAbort
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.secrets.resolver import Resolver
 
@@ -121,3 +121,136 @@ def test_seeding_after_the_pass_is_a_loud_error(backend: _ResolveSpy) -> None:
     resolver.resolve()
     with pytest.raises(StateError, match="seeded after"):
         resolver.seed({"proxmox-token": "pve"})
+
+
+def test_shared_gate_success_is_reused_by_gates_and_workload_boundary(backend: _ResolveSpy) -> None:
+    resolver = _resolver()
+
+    assert resolver.resolve_gate("shared") == "ghtok"
+    assert resolver.resolve_gate("shared") == "ghtok"
+    resolver.register_name("shared")
+    resolver.register_name("workload")
+    resolver.resolve()
+
+    assert backend.calls == [["shared"], ["workload"]]
+    assert resolver.values == {"shared": "ghtok", "workload": "ghtok"}
+    with pytest.raises(StateError):
+        resolver.resolve_gate("shared")
+    assert backend.calls == [["shared"], ["workload"]]
+
+
+def _failing_gate_backend(
+    monkeypatch: pytest.MonkeyPatch,
+    backend: _ResolveSpy,
+) -> None:
+    from agentworks.secrets import resolve as secrets_resolve
+
+    def resolve(secrets: list[SecretDecl], sources: object, **kwargs: object) -> _FakeBatch:
+        if any(secret.name == "failed" for secret in secrets):
+            backend.calls.append([secret.name for secret in secrets])
+            raise SecretUnavailableError("unsafe-source-detail-that-must-not-be-memoized")
+        return backend(secrets, sources, **kwargs)
+
+    monkeypatch.setattr(secrets_resolve, "resolve_batch", resolve)
+
+
+def test_failed_gate_is_not_retried_or_registered_as_an_unrelated_workload(
+    monkeypatch: pytest.MonkeyPatch,
+    backend: _ResolveSpy,
+) -> None:
+    _failing_gate_backend(monkeypatch, backend)
+    resolver = _resolver()
+    with pytest.raises(SecretUnavailableError):
+        resolver.resolve_gate("failed")
+    with pytest.raises(SecretUnavailableError) as cached:
+        resolver.resolve_gate("failed")
+
+    assert "unsafe-source-detail-that-must-not-be-memoized" not in str(cached.value)
+    assert cached.value.__cause__ is None
+    assert backend.calls == [["failed"]]
+    resolver.register_name("independent")
+    resolver.resolve()
+    assert backend.calls == [["failed"], ["independent"]]
+    assert resolver.values == {"independent": "ghtok"}
+
+
+@pytest.mark.parametrize("registered_before_gate", [False, True])
+def test_workload_requiring_failed_gate_stops_before_any_new_source_call(
+    monkeypatch: pytest.MonkeyPatch,
+    backend: _ResolveSpy,
+    registered_before_gate: bool,
+) -> None:
+    _failing_gate_backend(monkeypatch, backend)
+    resolver = _resolver()
+    if registered_before_gate:
+        resolver.register_name("failed")
+    with pytest.raises(SecretUnavailableError):
+        resolver.resolve_gate("failed")
+    resolver.register_name("new-workload")
+    resolver.register_name("failed")
+
+    with pytest.raises(SecretUnavailableError):
+        resolver.resolve()
+
+    assert not resolver.resolved
+    assert backend.calls == [["failed"]]
+    with pytest.raises(StateError):
+        resolver.get("new-workload")
+
+
+def test_gate_cancellation_is_not_memoized_as_credential_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    backend: _ResolveSpy,
+) -> None:
+    from agentworks.secrets import resolve as secrets_resolve
+
+    cancelled = False
+
+    def resolve(secrets: list[SecretDecl], sources: object, **kwargs: object) -> _FakeBatch:
+        nonlocal cancelled
+        if not cancelled:
+            cancelled = True
+            backend.calls.append([secret.name for secret in secrets])
+            raise UserAbort("cancelled")
+        return backend(secrets, sources, **kwargs)
+
+    monkeypatch.setattr(secrets_resolve, "resolve_batch", resolve)
+    resolver = _resolver()
+    with pytest.raises(UserAbort):
+        resolver.resolve_gate("shared")
+
+    assert resolver.resolve_gate("shared") == "ghtok"
+    resolver.resolve()
+    assert backend.calls == [["shared"], ["shared"]]
+    assert resolver.values == {"shared": "ghtok"}
+
+
+@pytest.mark.parametrize("phase", ["initial", "gate", "boundary"])
+def test_disposal_prevents_source_access_and_cached_value_reads(
+    backend: _ResolveSpy,
+    phase: str,
+) -> None:
+    resolver = _resolver()
+    if phase != "initial":
+        resolver.resolve_gate("shared")
+    if phase == "boundary":
+        resolver.resolve()
+    completed_calls = list(backend.calls)
+
+    resolver.close()
+    resolver.close()
+
+    assert not resolver.resolved
+    with pytest.raises(StateError):
+        resolver.get("shared")
+    with pytest.raises(StateError):
+        _ = resolver.values
+    with pytest.raises(StateError):
+        resolver.resolve_gate("new")
+    with pytest.raises(StateError):
+        resolver.resolve()
+    with pytest.raises(StateError):
+        resolver.register_name("new")
+    with pytest.raises(StateError):
+        resolver.seed({"new": "unused"})
+    assert backend.calls == completed_calls

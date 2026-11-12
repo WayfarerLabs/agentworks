@@ -20,6 +20,8 @@ from agentworks.db.models import (
     VMRow,
     WorkspaceRow,
     _canonical_session_identity,
+    _canonical_vm_identity,
+    _runtime_state,
 )
 from agentworks.debian import DebianRelease, profile_for_release
 from agentworks.errors import StateError
@@ -97,7 +99,8 @@ def _to_vm(row: sqlite3.Row) -> VMRow:
         debian_release=debian_release,
         debian_release_observed_at=observed_at,
         platform_metadata=platform_metadata,
-        operator_stopped=bool(row["operator_stopped"]),
+        desired_runtime_state=_runtime_state(row["desired_runtime_state"], "vm"),
+        vm_uuid=_canonical_vm_identity(row["vm_uuid"]),
         last_started_at=row["last_started_at"],
     )
 
@@ -195,6 +198,7 @@ def _to_session(row: sqlite3.Row) -> SessionRow:
         last_started_at=row["last_started_at"],
         session_uuid=session_uuid,
         run_id=run_id,
+        desired_runtime_state=_runtime_state(row["desired_runtime_state"], "session", nullable=True),
     )
 
 
@@ -248,6 +252,7 @@ def _to_console(row: sqlite3.Row) -> ConsoleRow:
         created_at=row["created_at"],
         updated_at=row["updated_at"],
         last_started_at=row["last_started_at"],
+        desired_runtime_state=_runtime_state(row["desired_runtime_state"], "console", nullable=True),
     )
 
 

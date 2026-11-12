@@ -62,10 +62,8 @@ def _write_parity_config(tmp_path: Path) -> Path:
 
 def _seed_parity_db(tmp_path: Path) -> Database:
     db = Database(tmp_path / "parity.db")
-    db._conn.execute(
-        "INSERT INTO vms (name, site, hostname, admin_username, tailscale_host, template) "
-        "VALUES ('vm1', 'lima', 'h', 'admin', '100.64.0.5', 'default')"
-    )
+    db.insert_vm("vm1", "lima", "h", admin_username="admin", template="default")
+    db.update_vm_tailscale("vm1", "100.64.0.5")
     db._conn.execute(
         "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group, template) "
         "VALUES ('ws1', 'vm1', '/home/me/ws1', 'ws-ws1', 'default')"

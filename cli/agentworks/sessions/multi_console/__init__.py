@@ -18,6 +18,8 @@ outgrew a single 500-line file. The submodules are organized by concern:
   building a console from scratch).
 - ``restore``: reconciling a session window's live tmux state against its
   configured shell list.
+- ``runtime``: guarded preparation and value-only runtime actions.
+- ``lifecycle``: explicit intent acceptance and VM/resolver composition.
 - ``attach``: live-tmux probing, VM target preparation, and the high-level
   lifecycle/list/describe entrypoints.
 
@@ -36,6 +38,7 @@ from ._helpers import (
     TMUX_STAGING_PREFIX,
     SessionSpec,
     default_shells,
+    guarded_console_selection,
     infer_vm_from_session_specs,
     parse_session_spec,
     running_session_names,
@@ -83,8 +86,10 @@ from .secrets_env import (
     _admin_only_secret_target,
     _console_build_secret_targets,
     _pane_secret_target,
+    _resolve_admin_env,
     _resolve_pane_env,
     _restore_session_secret_targets,
+    _validate_console_build_values,
 )
 from .tmux_build import (
     PreserveEnvMemo,
@@ -152,4 +157,35 @@ __all__ = [
     "running_session_names",
     "tmux_session_name",
     "tmux_staging_name",
+]
+
+from .runtime import (
+    ConsoleAction,
+    PreparedConsoleReconcile,
+    PreparedConsoleStop,
+    accept_console_running,
+    execute_console_reconcile,
+    execute_console_stop,
+    observe_prepared_console,
+    prepare_console_reconcile,
+    prepare_console_stop,
+    set_console_desired_runtime_state,
+    validate_console_values,
+)
+
+__all__ += [
+    "ConsoleAction",
+    "PreparedConsoleReconcile",
+    "PreparedConsoleStop",
+    "accept_console_running",
+    "execute_console_reconcile",
+    "execute_console_stop",
+    "observe_prepared_console",
+    "prepare_console_reconcile",
+    "prepare_console_stop",
+    "set_console_desired_runtime_state",
+    "validate_console_values",
+    "_validate_console_build_values",
+    "guarded_console_selection",
+    "_resolve_admin_env",
 ]

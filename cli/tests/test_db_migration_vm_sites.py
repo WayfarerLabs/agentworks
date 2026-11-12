@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.db import LATEST_VERSION, MIGRATIONS, Database, MigrationContext
+from agentworks.db import DesiredRuntimeState as Target
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -145,7 +146,7 @@ def test_backfill_and_site_rename(tmp_path: Path, captured_output: CapturedOutpu
         assert by_name["avm"].hostname == "azure--avm"
         assert by_name["pvm"].hostname == "proxmox--pvm"
 
-        assert all(not vm.operator_stopped for vm in by_name.values())
+        assert all(vm.desired_runtime_state is Target.ON_DEMAND for vm in by_name.values())
     finally:
         db.close()
 
@@ -159,7 +160,9 @@ def test_table_rebuild_shape(tmp_path: Path, captured_output: CapturedOutput) ->
         assert info["hostname"][3] == 1  # NOT NULL
         assert info["site"][3] == 1
         assert info["platform_metadata"][3] == 1
-        assert info["operator_stopped"][3] == 1
+        assert info["desired_runtime_state"][3] == 1
+        assert info["vm_uuid"][3] == 1
+        assert "operator_stopped" not in info
 
         tables = {row[0] for row in db._conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
         assert "vm_hosts" not in tables

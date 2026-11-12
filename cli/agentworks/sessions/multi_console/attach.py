@@ -30,23 +30,22 @@ from agentworks.errors import (
 )
 from agentworks.list_sorting import nullable_sort_value, sort_rows
 from agentworks.name_filters import validate_name_filters
-from agentworks.resources.access import named_console_template
 from agentworks.runtime_time import derive_uptime_seconds, format_uptime
 from agentworks.sessions.tmux import ProbeStatus, exact_tmux_target, tmux_cmd
-from agentworks.vms.manager import gated_vm_boundary
 
 from ._helpers import _require_console, _shell_summary, tmux_session_name, tmux_staging_name
-from ._status import ConsoleStatus, classify_console_status
-from .tmux_build import _build_console_tmux
+from ._status import ConsoleStatus
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
 
     from agentworks.config import Config
     from agentworks.db import Database, SessionRow, ShellEntry, VMRow
+    from agentworks.harness_setup.locking import NativeMutationGuard
     from agentworks.machine_output import JsonObject
     from agentworks.resources.registry import Registry
     from agentworks.secrets.policy import TtyInteractionPolicy
+    from agentworks.secrets.resolver import Resolver
     from agentworks.transports import Transport
 
 # NAME-column truncation cap for ``console list``. Console names are freeform
@@ -62,6 +61,7 @@ class ConsoleListRow:
     vm_name: str
     session_count: int
     status: str
+    desired_runtime_state: str | None = None
 
 
 @dataclass(frozen=True)
@@ -91,6 +91,7 @@ class ConsoleDescription:
     updated_at: str
     sessions: tuple[ConsoleMember, ...]
     status: str
+    desired_runtime_state: str | None = None
     last_started_at: str | None = None
     uptime_seconds: int | None = None
 
@@ -104,6 +105,7 @@ def console_listing_data(listing: ConsoleListing) -> JsonObject:
                 "vm_name": console.vm_name,
                 "session_count": console.session_count,
                 "status": console.status,
+                "desired_runtime_state": console.desired_runtime_state,
             }
             for console in listing.consoles
         ],
@@ -122,6 +124,7 @@ def console_description_data(description: ConsoleDescription) -> JsonObject:
             "uptime_seconds": description.uptime_seconds,
             "updated_at": description.updated_at,
             "status": description.status,
+            "desired_runtime_state": description.desired_runtime_state,
             "sessions": [
                 {
                     "position": member.position,
@@ -201,23 +204,30 @@ done
 def _tmux_session_presence(target: Transport, tmux_name: str) -> ProbeStatus:
     """Probe an exact console tmux name without conflating failure and absence."""
     from agentworks.sessions.tmux import _tmux_presence_from_result
+    from agentworks.status_observation import GUEST_OBSERVATION_ATTEMPTS, GUEST_OBSERVATION_TIMEOUT_SECONDS
 
     q = exact_tmux_target(tmux_name)
     return _tmux_presence_from_result(
-        target.run(f"tmux has-session -t {q}", check=False),
+        target.run(
+            f"tmux has-session -t {q}",
+            check=False,
+            tty=False,
+            timeout=GUEST_OBSERVATION_TIMEOUT_SECONDS,
+            retries=GUEST_OBSERVATION_ATTEMPTS,
+        ),
         missing_target_is_absent=True,
     )
 
 
 def _console_tmux_presence(target: Transport, console_name: str) -> ProbeStatus:
-    return _tmux_session_presence(target, tmux_session_name(console_name))
+    return _mc._tmux_session_presence(target, tmux_session_name(console_name))
 
 
 def _console_runtime_presence(target: Transport, console_name: str) -> tuple[ProbeStatus, ProbeStatus]:
     """Return canonical and staging presence, refusing no state implicitly."""
     return (
-        _console_tmux_presence(target, console_name),
-        _tmux_session_presence(target, tmux_staging_name(console_name)),
+        _mc._console_tmux_presence(target, console_name),
+        _mc._tmux_session_presence(target, tmux_staging_name(console_name)),
     )
 
 
@@ -349,48 +359,49 @@ def _prepare_vm_target(
     *,
     registry: Registry,
     interaction: TtyInteractionPolicy,
+    held_native_guard: NativeMutationGuard,
+    resolver: Resolver,
 ) -> Iterator[tuple[VMRow, Transport]]:
-    """Ensure the VM is running (starting it if needed) and yield
-    ``(vm, target)`` inside the activation gate's held-active span.
-
-    Use this for explicit user-driven console operations where booting a
-    stopped VM is acceptable. Raises on failure. Orchestrated
-    (``vms.manager.gated_vm_boundary``): the gate replaces the
-    imperative ``bind_platform`` + ``ensure_active`` pair (opening
-    BEFORE the preflight sweep), and the span it yields within is the
-    ``vm_active`` hold the callers used to open themselves, covering
-    their SSH-heavy bodies and interactive attaches. The console is
-    not a node: these operations provision nothing, so the graph is the live
-    VM alone, and no env-chain target registers (console build panes
-    resolve their own targets on the documented conditional-need
-    path).
-    """
+    """Prepare canonical guest access using the invocation's secret resolver."""
+    from agentworks.harness_setup.locking import native_mutation_guard
     from agentworks.transports import transport
+    from agentworks.vms.manager import require_vm_ssh_boundary
+    from agentworks.vms.manager.runtime import activate_vm_runtime, prepare_vm_runtime
+
+    from .lifecycle import preflight_console_vm
 
     vm = db.get_vm(vm_name)
     if vm is None:
-        raise NotFoundError(
-            f"VM '{vm_name}' not found",
-            entity_kind="vm",
-            entity_name=vm_name,
-        )
-    # Cheap row validation stays pre-gate: a VM with no Tailscale
-    # address can never be attached to, so it must fail with zero
-    # prompts and zero VM starts. (The imperative body checked this
-    # after its gate; the gate cannot populate the address on the
-    # already-loaded row, so this command's outcome is identical. The
-    # hoist does forgo one accidental heal: the post-gate order could
-    # start a stopped VM whose rejoin repopulated the row's address,
-    # letting a RETRY succeed; now the retry keeps failing until an
-    # explicit vm start or reinit.)
+        raise NotFoundError(f"VM '{vm_name}' not found", entity_kind="vm", entity_name=vm_name)
     if vm.tailscale_host is None:
-        raise StateError(
-            f"VM '{vm.name}' has no Tailscale address",
-            entity_kind="vm",
-            entity_name=vm.name,
-        )
-    with gated_vm_boundary(db, config, registry, vm, interaction=interaction):
-        yield vm, transport(vm, config)
+        raise StateError(f"VM '{vm.name}' has no Tailscale address", entity_kind="vm", entity_name=vm.name)
+    context = None
+    try:
+        with native_mutation_guard(db.path, vm_name, held=held_native_guard) as guard:
+            require_vm_ssh_boundary(db, config, vm)
+            node = preflight_console_vm(
+                db,
+                config,
+                registry,
+                vm,
+                held_native_guard=guard,
+                interaction=interaction,
+            )
+            context = prepare_vm_runtime(
+                db,
+                config,
+                registry,
+                vm,
+                resolve_secret=resolver.resolve_gate,
+                held_native_guard=guard,
+                vm_node=node,
+            )
+            activate_vm_runtime(context, resolve_secret=resolver.resolve_gate)
+            with context.node.hold_active():
+                yield vm, transport(vm, config)
+    finally:
+        if context is not None:
+            context.clear_values()
 
 
 def _live_target(db: Database, config: Config, vm_name: str) -> tuple[VMRow, Transport] | None:
@@ -496,6 +507,7 @@ def console_listing(
                 name=console.name,
                 vm_name=console.vm_name,
                 session_count=session_count,
+                desired_runtime_state=console.desired_runtime_state,
                 status=(statuses.get(console.name, ConsoleStatus.UNKNOWN).value if include_status else "unavailable"),
             )
             for console, session_count in consoles
@@ -529,11 +541,12 @@ def render_console_listing(
             console.name,
             console.vm_name,
             str(console.session_count),
+            console.desired_runtime_state or "adoption-required",
             console.status,
         )
         for console in consoles
     ]
-    headers = ["NAME", "VM", "SESSIONS"]
+    headers = ["NAME", "VM", "SESSIONS", "TARGET"]
     if include_status:
         headers.append("STATUS")
     projected_rows = [row if include_status else row[:-1] for row in rows]
@@ -578,6 +591,7 @@ def console_description(
         updated_at=console.updated_at,
         sessions=members,
         status=status.value,
+        desired_runtime_state=console.desired_runtime_state,
         last_started_at=console.last_started_at,
         uptime_seconds=derive_uptime_seconds(
             console.last_started_at,
@@ -601,6 +615,7 @@ def render_console_description(description: ConsoleDescription) -> None:
         f"{format_uptime(description.uptime_seconds, running=description.status == ConsoleStatus.RUNNING.value)}"
     )
     output.info(f"Updated:        {description.updated_at}")
+    output.info(f"Target:         {description.desired_runtime_state or 'adoption-required'}")
     output.info(f"Status:         {description.status}")
     output.info("")
     output.info(f"Configured sessions: {len(description.sessions)}")
@@ -666,62 +681,9 @@ def _realize_console(
     interaction: TtyInteractionPolicy,
 ) -> None:
     """Start a console, replacing its runtime only when requested."""
-    from agentworks.bootstrap import load_request_registry
-    from agentworks.secrets import resolve_for_command
+    from .lifecycle import realize_console
 
-    console = _require_console(db, name)
-    if not db.list_console_sessions(name) and not console.admin_shell:
-        raise StateError(
-            f"console '{name}' has no configured windows",
-            entity_kind="console",
-            entity_name=name,
-            hint="Add a session or enable the admin shell before starting it.",
-        )
-    registry = load_request_registry(config, live_database=db)
-    output.info(f"Checking console '{name}' runtime...")
-    with _mc._prepare_vm_target(
-        db,
-        config,
-        console.vm_name,
-        registry=registry,
-        interaction=interaction,
-    ) as (vm, target):
-        canonical, staging = _console_runtime_presence(target, name)
-        if ProbeStatus.UNKNOWN in {canonical, staging}:
-            raise StateError(
-                f"could not determine console '{name}' tmux state",
-                entity_kind="console",
-                entity_name=name,
-            )
-        runtime_status = classify_console_status(
-            canonical_present=canonical is ProbeStatus.PRESENT,
-            staging_present=staging is ProbeStatus.PRESENT,
-        )
-        if not replace_running:
-            if runtime_status is ConsoleStatus.RESIDUAL:
-                _teardown_console_staging(target, name)
-            if canonical is ProbeStatus.PRESENT:
-                output.result(f"Console '{name}' is already running")
-                return
-        secret_values = resolve_for_command(
-            _mc._console_build_secret_targets(db, registry, console=console, vm=vm),
-            config,
-            registry,
-            allow_transient_auto_declare=True,
-            interaction=interaction,
-        )
-        if replace_running:
-            _teardown_console_tmux(target, name)
-        _build_console_tmux(
-            target,
-            db,
-            registry,
-            console,
-            vm,
-            values=secret_values,
-            layout=named_console_template(registry).tmux_layout,
-        )
-    output.result(f"Console '{name}' {'restarted' if replace_running else 'started'}")
+    realize_console(db, config, name=name, replace_running=replace_running, interaction=interaction)
 
 
 def start_console(
@@ -751,20 +713,9 @@ def stop_console(
     name: str,
     interaction: TtyInteractionPolicy,
 ) -> None:
-    from agentworks.bootstrap import load_request_registry
+    from .lifecycle import stop_console_runtime
 
-    console = _require_console(db, name)
-    registry = load_request_registry(config, live_database=db)
-    output.info(f"Checking console '{name}' runtime...")
-    with _mc._prepare_vm_target(
-        db,
-        config,
-        console.vm_name,
-        registry=registry,
-        interaction=interaction,
-    ) as (_vm, target):
-        _teardown_console_tmux(target, name)
-    output.result(f"Console '{name}' stopped")
+    stop_console_runtime(db, config, name=name, interaction=interaction)
 
 
 def refuse_console_nesting(*, allow_nesting: bool) -> None:
@@ -792,49 +743,9 @@ def attach_console(
     """
     refuse_console_nesting(allow_nesting=allow_nesting)
 
-    from agentworks.bootstrap import load_request_registry
+    from .lifecycle import attach_running_console
 
-    console = _require_console(db, name)
-    registry = load_request_registry(config, live_database=db)
-    output.info(f"Checking console '{name}' runtime...")
-    # The gate's held-active span covers the build and the interactive
-    # attach (the hold this caller used to open itself).
-    with _mc._prepare_vm_target(
-        db,
-        config,
-        console.vm_name,
-        registry=registry,
-        interaction=interaction,
-    ) as (_vm, target):
-        canonical, staging = _console_runtime_presence(target, name)
-        if ProbeStatus.UNKNOWN in {canonical, staging}:
-            raise StateError(
-                f"could not determine console '{name}' tmux state",
-                entity_kind="console",
-                entity_name=name,
-                hint="Retry after transport access is reliable.",
-            )
-        runtime_status = classify_console_status(
-            canonical_present=canonical is ProbeStatus.PRESENT,
-            staging_present=staging is ProbeStatus.PRESENT,
-        )
-        if runtime_status is not ConsoleStatus.RUNNING:
-            raise StateError(
-                f"console '{name}' is not ready to attach",
-                entity_kind="console",
-                entity_name=name,
-                hint=f"Run `agw console start {name}`.",
-            )
-
-        from agentworks.terminal import clear_screen_on_detach
-
-        tmux_name = tmux_session_name(name)
-        # A console attach is a full-screen tmux; clear the local screen on
-        # detach where we don't trust the terminal to restore cleanly.
-        return target.interactive(
-            f"tmux attach -t {exact_tmux_target(tmux_name)}",
-            clear_screen_on_exit=clear_screen_on_detach(config.terminal.clear_on_detach),
-        )
+    return attach_running_console(db, config, name=name, interaction=interaction)
 
 
 def delete_console(
@@ -843,31 +754,37 @@ def delete_console(
     *,
     name: str,
     yes: bool = False,
+    held_native_guard: NativeMutationGuard | None = None,
 ) -> None:
     """Delete a console: tear down its tmux session (best-effort), then DB row."""
-    console = _require_console(db, name)
-    if not yes and not output.confirm(f"Delete console '{name}'?"):
-        raise UserAbort("delete cancelled")
+    from ._helpers import guarded_console_selection
 
-    # Best-effort tmux teardown. Don't block the DB delete on VM reachability.
-    teardown_failed = False
-    try:
-        live = _mc._live_target(db, config, console.vm_name)
-        if live is not None:
-            _vm, target = live
-            _teardown_console_tmux(target, name)
-    except Exception as exc:
-        teardown_failed = True
-        output.warn(f"failed to tear down tmux session for '{name}': {exc}")
+    with guarded_console_selection(db, name, held_native_guard=held_native_guard) as (console, _guard):
+        console = _require_console(db, name)
+        if not yes and not output.confirm(f"Delete console '{name}'?"):
+            raise UserAbort("delete cancelled")
 
-    db.delete_console(name)
-    if teardown_failed:
-        output.info(
-            f"Console '{name}' removed from database. Inspect the VM for stale "
-            f"'{tmux_session_name(name)}' or '{tmux_staging_name(name)}' tmux sessions."
-        )
-    else:
-        output.result(f"Console '{name}' deleted.")
+        # Best-effort tmux teardown. Don't block the DB delete on VM reachability.
+        teardown_failed = False
+        try:
+            live = _mc._live_target(db, config, console.vm_name)
+            if live is not None:
+                _vm, target = live
+                _teardown_console_tmux(target, name)
+        except UserAbort:
+            raise
+        except Exception as exc:
+            teardown_failed = True
+            output.warn(f"failed to tear down tmux session for '{name}': {exc}")
+
+        db.delete_console(name)
+        if teardown_failed:
+            output.info(
+                f"Console '{name}' removed from database. Inspect the VM for stale "
+                f"'{tmux_session_name(name)}' or '{tmux_staging_name(name)}' tmux sessions."
+            )
+        else:
+            output.result(f"Console '{name}' deleted.")
 
 
 def offer_delete_if_empty_consoles(
@@ -876,6 +793,7 @@ def offer_delete_if_empty_consoles(
     console_names: Iterable[str],
     *,
     yes: bool,
+    held_native_guard: NativeMutationGuard | None = None,
 ) -> None:
     """For each named console now left with no configured sessions, offer to
     delete it (interactive) or report-but-keep it (--yes / non-interactive).
@@ -903,18 +821,23 @@ def offer_delete_if_empty_consoles(
 
     from agentworks.sessions._resource_cleanup import cleanup_now_empty_resource
 
+    from ._helpers import guarded_console_selection
+
     for console_name in console_names:
-        if db.list_console_sessions(console_name):
+        if db.get_console(console_name) is None:
             continue
-        cleanup_now_empty_resource(
-            kind="console",
-            name=console_name,
-            created=False,
-            # Route through the package object so tests that monkeypatch
-            # ``multi_console.delete_console`` intercept the confirmed delete.
-            delete=partial(_mc.delete_console, db, config, name=console_name, yes=True),
-            manual_command=f"agw console delete {console_name}",
-            yes=yes,
-            empty_clause="has no configured sessions left",
-            report_clause="now has no configured sessions",
-        )
+        with guarded_console_selection(db, console_name, held_native_guard=held_native_guard) as (_console, guard):
+            if db.list_console_sessions(console_name):
+                continue
+            cleanup_now_empty_resource(
+                kind="console",
+                name=console_name,
+                created=False,
+                # Route through the package object so tests that monkeypatch
+                # ``multi_console.delete_console`` intercept the confirmed delete.
+                delete=partial(_mc.delete_console, db, config, name=console_name, yes=True, held_native_guard=guard),
+                manual_command=f"agw console delete {console_name}",
+                yes=yes,
+                empty_clause="has no configured sessions left",
+                report_clause="now has no configured sessions",
+            )

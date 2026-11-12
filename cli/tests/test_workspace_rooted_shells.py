@@ -55,14 +55,9 @@ def _seed_db(tmp_path: Path) -> Database:
     raise before any SSH work.
     """
     db = Database(tmp_path / "test.db")
-    db._conn.execute(
-        "INSERT INTO vms (name, site, hostname, admin_username, tailscale_host) "
-        "VALUES ('vm1', 'lima', 'h', 'admin', '100.64.0.5')"
-    )
-    db._conn.execute(
-        "INSERT INTO vms (name, site, hostname, admin_username, tailscale_host) "
-        "VALUES ('vm2', 'lima', 'h', 'admin', '100.64.0.6')"
-    )
+    for name, address in (("vm1", "100.64.0.5"), ("vm2", "100.64.0.6")):
+        db.insert_vm(name, site="lima", hostname="h", admin_username="admin")
+        db.update_vm_tailscale(name, address)
     db._conn.execute(
         "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "
         "VALUES ('ws1', 'vm1', '/opt/agentworks/workspaces/ws1', 'ws-ws1')"

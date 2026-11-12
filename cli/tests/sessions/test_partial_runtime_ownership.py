@@ -13,6 +13,7 @@ from agentworks.errors import AgentworksError
 from agentworks.sessions import manager, tmux
 from agentworks.sessions.manager import _pids
 
+from ._runtime_assertions import assert_runtime_preserved
 from .test_create_start_restart_orchestrated import _restart_fixture
 from .test_create_start_restart_orchestrated import _stub_build_registry as _stub_build_registry
 from .test_native_startup import _NATIVE_CAPTURE, launch
@@ -107,7 +108,7 @@ def test_partial_fingerprint_never_relearns_or_kills_unproven_native_server(
             act(db, native, operation)
         if operation in {"repair", "teardown"}:
             assert caught.value.hint
-        assert db.get_session("s1") == before
+        assert_runtime_preserved(db, before, operation=operation)
         assert _NATIVE_CAPTURE(target=native, socket_path=native.socket).fingerprint == observed
         assert native.native("has-session -t '=s1'").ok
         assert not any("kill-server" in command or "new-session" in command for command, _ in native.calls[first:])

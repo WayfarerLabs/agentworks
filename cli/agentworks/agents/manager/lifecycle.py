@@ -337,7 +337,7 @@ def delete_agent(
 
     from agentworks.harness_setup.locking import native_mutation_guard
 
-    with native_mutation_guard(db.path, vm.name):
+    with native_mutation_guard(db.path, vm.name, held=None if vm_node is None else vm_node.held_native_guard) as guard:
         from agentworks.ssh import SSHLogger
 
         ssh_logger = SSHLogger(vm.name, "agent-delete")
@@ -355,6 +355,7 @@ def delete_agent(
                     vm,
                     scope=agent_scope(db, vm.name, name),
                     interaction=interaction,
+                    held_native_guard=guard,
                 )
             else:
                 # The nested-teardown path: the caller's composition already
@@ -380,7 +381,7 @@ def delete_agent(
                         entity_kind="agent",
                         entity_name=name,
                     )
-                boundary = vm_node.hold_active()
+                boundary = vm_node.hold_active(held_native_guard=guard)
             with boundary:
                 # Kill running sessions for this agent (status-aware)
                 if agent_sessions:
@@ -615,7 +616,7 @@ def reinit_agent(
 
             resolver = Resolver(config, registry, interaction=interaction)
 
-            vm_node = live_vm_node(db, config, registry, vm)
+            vm_node = live_vm_node(db, config, registry, vm, held_native_guard=guard)
             agent_node = live_agent_node(agent, vm_node)
             tmpl_node = agent_template_node(registry, agent_tmpl)
             nodes = walk(agent_node, tmpl_node)

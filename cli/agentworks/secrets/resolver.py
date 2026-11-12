@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from agentworks.errors import StateError
+from agentworks.errors import AgentworksError, SecretUnavailableError, StateError, UserAbort
 from agentworks.secrets.policy import require_exact_tty_interaction_policy
 
 if TYPE_CHECKING:
@@ -69,13 +69,35 @@ class Resolver:
         self._decls: dict[str, SecretDecl] = {}
         self._targets: list[SecretTarget] = []
         self._seeded: dict[str, str] = {}
+        self._failed_gates: set[str] = set()
         self._values: dict[str, str] | None = None
+        self._closed = False
+
+    def close(self) -> None:
+        """Discard invocation-owned values and prevent later source access.
+
+        Composition roots call this on every exit, including failed preparation.
+        Consumers remain responsible for clearing their own supplied value copies.
+        """
+        self._closed = True
+        self._seeded.clear()
+        if self._values is not None:
+            self._values.clear()
+        self._values = None
+        self._failed_gates.clear()
+        self._decls.clear()
+        self._targets.clear()
+
+    def _require_open(self) -> None:
+        if self._closed:
+            raise StateError("the operation's secret resolver is closed")
 
     # -- registration --------------------------------------------------
 
     def register(self, decls: Iterable[SecretDecl]) -> None:
         """Add declarations to the operation's resolve set (first
         registration of a name wins; re-registration is a no-op)."""
+        self._require_open()
         for decl in decls:
             self._decls.setdefault(decl.name, decl)
 
@@ -94,6 +116,7 @@ class Resolver:
         the set, so a command's site secrets, provisioning secrets,
         and workload env secrets all land in the same prompt session.
         """
+        self._require_open()
         from agentworks.secrets.orchestration import compute_needed_secrets
 
         retained = list(targets)
@@ -116,6 +139,7 @@ class Resolver:
         chain must stay callable for well-known names (the same fallback
         the pre-resolver ``_collect_secrets`` used).
         """
+        self._require_open()
         existing = self._decls.get(name)
         if existing is not None:
             return existing
@@ -151,6 +175,7 @@ class Resolver:
         as registering after it (a value the pass never covered), so
         it raises instead of quietly widening the cache.
         """
+        self._require_open()
         if self._values is not None:
             raise StateError(
                 "secret values were seeded after the operation's resolve "
@@ -175,6 +200,7 @@ class Resolver:
         contract violation (it would mean a second prompt session), so
         it raises instead of quietly re-prompting.
         """
+        self._require_open()
         if self._values is not None:
             unresolved = [n for n in self._decls if n not in self._values]
             if unresolved:
@@ -188,6 +214,9 @@ class Resolver:
 
             validate_target_values(self._targets, self._values)
             return
+        # An independently failed VM may share a credential with an eligible
+        # workload. Fail its complete boundary before touching any new source.
+        self._check_failed_gates(self._decls)
         # Gate-seeded values are already resolved (by the gate's own
         # source-chain pass); the boundary loop covers only the rest.
         missing = [decl for name, decl in self._decls.items() if name not in self._seeded]
@@ -202,29 +231,41 @@ class Resolver:
         self._values = resolved
 
     def resolve_gate(self, name: str) -> str:
-        """Resolve and seed one declaration before the operation boundary."""
+        """Resolve one gate name once, memoizing success or value-free failure.
+
+        A failed infrastructure name is not itself a workload requirement.
+        Register it only on success, or when an eligible workload declares it.
+        """
+        self._require_open()
         if self._values is not None:
             raise StateError("a gate secret cannot resolve after the operation boundary")
-        decl = self.register_name(name)
+        self._check_failed_gates((name,))
         existing = self._seeded.get(name)
         if existing is not None:
             return existing
-        batch = self._resolve_declarations([decl])
-        projected = batch.complete_or_raise()
-        if tuple(projected) != (name,):
-            raise StateError("gate secret resolution returned an invalid singleton result")
+        decl = self._decls.get(name) or self._decl_for(name)
+        try:
+            batch = self._resolve_declarations([decl])
+            projected = batch.complete_or_raise()
+            if tuple(projected) != (name,):
+                raise StateError("gate secret resolution returned an invalid singleton result")
+        except UserAbort:
+            raise
+        except AgentworksError:
+            # Keep no exception, traceback, batch, or partial secret values.
+            self._failed_gates.add(name)
+            raise
+        self.register((decl,))
         self._seeded[name] = projected[name]
         return self._seeded[name]
 
-    def resolve_late_repair(self, decl: SecretDecl) -> str:
-        """Resolve one authorized repair secret without widening the cache."""
-        if self._values is None:
-            raise StateError("a late repair secret requires the operation boundary")
-        batch = self._resolve_declarations([decl])
-        projected = batch.complete_or_raise()
-        if tuple(projected) != (decl.name,):
-            raise StateError("late repair resolution returned an invalid singleton result")
-        return projected[decl.name]
+    def _check_failed_gates(self, names: Iterable[str]) -> None:
+        failed = sorted(self._failed_gates.intersection(names))
+        if failed:
+            raise SecretUnavailableError(
+                f"Secret resolution already failed in this operation: {', '.join(failed)}",
+                hint="Correct the earlier secret failure and retry the operation.",
+            ) from None
 
     def _resolve_declarations(self, decls: Sequence[SecretDecl]) -> ResolutionBatch:
         """Drive one authorized actual-resolution batch under current TTY facts."""
@@ -247,6 +288,7 @@ class Resolver:
     def get(self, name: str) -> str:
         """A resolved value, from the boundary pass's cache (or, before
         the pass, from the activation gate's seed; see :meth:`seed`)."""
+        self._require_open()
         if self._values is None:
             seeded = self._seeded.get(name)
             if seeded is not None:
@@ -268,7 +310,7 @@ class Resolver:
 
     @property
     def resolved(self) -> bool:
-        """Whether the boundary pass has run."""
+        """Whether the complete boundary values are currently available."""
         return self._values is not None
 
     @property
@@ -276,6 +318,7 @@ class Resolver:
         """The boundary pass's full resolved mapping, for consumers that
         take the whole set (``compose_env``'s ``values``). Same
         must-have-resolved contract as :meth:`get`."""
+        self._require_open()
         if self._values is None:
             raise StateError(
                 "resolved secret values requested before the operation's "

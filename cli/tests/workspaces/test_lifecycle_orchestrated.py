@@ -276,7 +276,7 @@ def test_repair_stopped_vm_gate_burst_seeds_the_whole_union(
 
     workspace_manager.repair_workspace(db, config, "ws1", interaction=TtyInteractionPolicy.REFUSE)
 
-    assert events == ["status", "start", "tailscale"]  # the gate ran
+    assert events == ["status", "status", "start", "tailscale"]  # the gate ran
     assert resolve_counter == [["proxmox-token"]]
     assert any("chmod -c 2770 /srv/ws1" in c for c in target.commands)
 
@@ -1008,7 +1008,7 @@ def test_delete_stopped_vm_gate_burst_seeds_the_whole_union(
 
     workspace_manager.delete_workspace(db, config, "ws1", yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
-    assert events == ["status", "start", "tailscale"]
+    assert events == ["status", "status", "start", "tailscale"]
     assert resolve_counter == [["proxmox-token"]]
     assert db.get_workspace("ws1") is None
 
@@ -1586,6 +1586,7 @@ def test_rehome_confirm_sits_inside_the_span_after_the_dir_checks(
         )
 
     assert events == [
+        "status",
         "status",
         "start",
         "tailscale",

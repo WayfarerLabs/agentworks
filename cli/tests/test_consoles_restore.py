@@ -393,7 +393,7 @@ def test_restore_session_refuses_when_session_pane_killed(db: Database, fake_tar
 
     # Read-only probes only: the window and its live panes are left exactly as
     # they were, so the operator decides whether to recreate.
-    assert fake_target.commands == [
+    assert [command for command in fake_target.commands if command.startswith("tmux ")] == [
         "tmux has-session -t '=aw-console-con'",
         "tmux list-windows -t '=aw-console-con' -F '#{window_name}'",
         "tmux list-panes -t '=aw-console-con':a -F '#{pane_id}|#{pane_index}|#{@agentworks-shell-index}'",

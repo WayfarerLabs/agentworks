@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     from agentworks.agents.templates import ResolvedAgentTemplate
     from agentworks.config import Config
     from agentworks.db import Database
+    from agentworks.harness_setup.locking import NativeMutationGuard
     from agentworks.instance_specs import InstanceOverlay
     from agentworks.resources.registry import Registry
     from agentworks.secrets.policy import TtyInteractionPolicy
@@ -60,6 +61,7 @@ def _build_session_graph(
     workspace_overlay: InstanceOverlay[BaseModel] | None,
     agent_overlay: InstanceOverlay[BaseModel] | None,
     interaction: TtyInteractionPolicy,
+    held_native_guard: NativeMutationGuard | None = None,
 ) -> SessionGraph:
     """Resolve the template and build the node graph, resolver union, and
     scope into a :class:`SessionGraph` (section S9)."""
@@ -141,7 +143,7 @@ def _build_session_graph(
 
     resolver = Resolver(config, registry, interaction=interaction)
 
-    vm_node = live_vm_node(db, config, registry, vm)
+    vm_node = live_vm_node(db, config, registry, vm, held_native_guard=held_native_guard)
 
     workspace_node: LiveWorkspaceNode | PendingWorkspaceNode
     pending_workspace: PendingWorkspaceNode | None = None
@@ -377,6 +379,7 @@ def _build_session_graph(
     )
 
     return SessionGraph(
+        held_native_guard=held_native_guard,
         vm_node=vm_node,
         agent_node=agent_node,
         session_node=session_node,

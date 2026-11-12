@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from agentworks.db import DesiredRuntimeState as Target
 from agentworks.db import VMStatus
 from agentworks.errors import AuthorizationError, ConfigError, StateError, UserAbort
 from agentworks.execution import trust
@@ -37,7 +38,9 @@ def _no_ssh_config(monkeypatch: pytest.MonkeyPatch) -> None:
 def _seed(db: Database, *, site: str = "proxmox") -> None:
     db.insert_vm("dvm", site=site, hostname="dvm")
     db.update_vm_tailscale("dvm", "100.64.0.3")
-    db.set_operator_stopped("dvm", True)  # must not matter: delete never gates
+    db.set_vm_desired_runtime_state(
+        "dvm", Target.STOPPED, expected_vm_uuid=next(vm.vm_uuid for vm in db.list_vms() if vm.name == "dvm")
+    )  # must not matter: delete never gates
 
 
 def _fake_backend(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:

@@ -250,7 +250,7 @@ def test_shell_stopped_vm_gate_burst_then_boundary_burst(
 
     assert agent_manager.shell_agent(db, config, name="a1", interaction=TtyInteractionPolicy.REFUSE) == 0
 
-    assert events == ["status", "start", "tailscale"]  # the gate ran
+    assert events == ["status", "status", "start", "tailscale"]  # the gate ran
     assert resolve_counter == [["proxmox-token"], ["agent-env-secret"]]
     assert len(vm_access_recorder.requests("attach")) == 1
 
@@ -273,7 +273,7 @@ def test_exec_stopped_vm_gate_burst_then_boundary_burst(
     )
 
     assert rc == 0
-    assert events == ["status", "start", "tailscale"]
+    assert events == ["status", "status", "start", "tailscale"]
     assert resolve_counter == [["proxmox-token"], ["agent-env-secret"]]
     (request,) = vm_access_recorder.requests("stream")
     assert isinstance(request, Script)

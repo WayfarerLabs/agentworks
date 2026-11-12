@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
+from agentworks.db import DesiredRuntimeState as Target
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
 from agentworks.errors import ConfigError, StateError, ValidationError
@@ -181,6 +182,7 @@ def test_auto_resume_starts_and_holds_through_tailscale(
     ensure_active(node, lambda name: "ts-key")
     assert platform.events == [
         "status",
+        "status",
         "start",
         "hold-open",
         "tailscale",
@@ -234,7 +236,7 @@ def test_auto_resume_healthy_probe_releases_without_auth_reader_access(
 
     ensure_active(node, _no_resolve)
 
-    assert platform.events[2:] == ["hold-open", "probe-false", "hold-close"]
+    assert platform.events[3:] == ["hold-open", "probe-false", "hold-close"]
 
 
 def test_auto_resume_rejoin_orders_probe_reader_ensure_inside_hold(
@@ -271,7 +273,7 @@ def test_auto_resume_rejoin_orders_probe_reader_ensure_inside_hold(
 
     values = ensure_active(node, _resolve)
 
-    assert platform.events[2:] == [
+    assert platform.events[3:] == [
         "hold-open",
         "probe-true",
         "repair-name",
@@ -324,6 +326,7 @@ def test_auto_resume_multiline_repair_key_preserves_host_after_real_probe(
         ensure_active(node, _resolve)
 
     assert platform.events == [
+        "status",
         "status",
         "start",
         "hold-open",
@@ -424,7 +427,7 @@ def test_auto_resume_tailscale_failure_matrix_releases_once_without_retry(
             "hold-close",
         ],
     }
-    assert platform.events[2:] == expected_inside_hold[failure_stage]
+    assert platform.events[3:] == expected_inside_hold[failure_stage]
     no_ensure_work = {"verify": 0, "native": 0, "rejoin": 0, "final-wait": 0, "sync": 0}
     expected_calls = {
         "probe": no_ensure_work,
@@ -442,7 +445,9 @@ def test_manually_stopped_raises_and_skips_the_ping(db: Database, monkeypatch: p
     probe (pinging a stopped VM would burn the timeout to reach the
     refusal)."""
     _seed(db)
-    db.set_operator_stopped("gvm", True)
+    db.set_vm_desired_runtime_state(
+        "gvm", Target.STOPPED, expected_vm_uuid=next(vm.vm_uuid for vm in db.list_vms() if vm.name == "gvm")
+    )
     vm = db.get_vm("gvm")
     assert vm is not None
 
@@ -462,7 +467,9 @@ def test_manually_stopped_but_running_out_of_band_proceeds(db: Database, monkeyp
     """Oracle: the flag is intent, not observed state; RUNNING proceeds
     without a start and without raising."""
     _seed(db)
-    db.set_operator_stopped("gvm", True)
+    db.set_vm_desired_runtime_state(
+        "gvm", Target.STOPPED, expected_vm_uuid=next(vm.vm_uuid for vm in db.list_vms() if vm.name == "gvm")
+    )
     vm = db.get_vm("gvm")
     assert vm is not None
     monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: False)
@@ -478,7 +485,9 @@ def test_flag_is_reread_before_auto_start(db: Database, monkeypatch: pytest.Monk
     """Oracle: a concurrent `vm stop` between the row load and the gate
     must not be auto-undone (the re-read race guard)."""
     vm = _seed(db)  # loaded with operator_stopped=False
-    db.set_operator_stopped("gvm", True)  # another terminal stops it
+    db.set_vm_desired_runtime_state(
+        "gvm", Target.STOPPED, expected_vm_uuid=next(vm.vm_uuid for vm in db.list_vms() if vm.name == "gvm")
+    )  # another terminal stops it
     monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: False)
     platform = _GatePlatform(status=VMStatus.STOPPED)
     node, _ = _node(db, platform, vm)
@@ -494,10 +503,14 @@ def test_concurrent_start_clears_the_flag_and_resumes(
     """Oracle: the mirror race; a `vm start` in another terminal
     cleared the flag after the row load, so the gate auto-resumes."""
     _seed(db)
-    db.set_operator_stopped("gvm", True)
+    db.set_vm_desired_runtime_state(
+        "gvm", Target.STOPPED, expected_vm_uuid=next(vm.vm_uuid for vm in db.list_vms() if vm.name == "gvm")
+    )
     vm = db.get_vm("gvm")  # loaded with operator_stopped=True
     assert vm is not None
-    db.set_operator_stopped("gvm", False)
+    db.set_vm_desired_runtime_state(
+        "gvm", Target.ON_DEMAND, expected_vm_uuid=next(vm.vm_uuid for vm in db.list_vms() if vm.name == "gvm")
+    )
     monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: False)
     monkeypatch.setattr(vm_manager, "_tailscale_rejoin_required", lambda *a, **k: True)
     monkeypatch.setattr(vm_manager, "_ensure_tailscale", lambda *a, **k: None)
@@ -724,3 +737,93 @@ def test_pending_vm_teardown_deletes_the_row(db: Database) -> None:
     node.mark_realized()
     node.teardown()
     assert db.get_vm("nvm") is None
+
+
+@pytest.mark.windows
+def test_auto_start_rechecks_power_with_family_guard(db, monkeypatch):
+    from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
+
+    vm = _seed(db)
+    platform = _GatePlatform(status=VMStatus.STOPPED)
+    node, _ = _node(db, platform, vm)
+    monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: False)
+    monkeypatch.setattr(vm_manager, "_tailscale_rejoin_required", lambda *a, **k: False)
+    statuses = iter((VMStatus.STOPPED, VMStatus.RUNNING))
+
+    def status(row, ctx):
+        return next(statuses)
+
+    monkeypatch.setattr(platform, "status", status)
+    ensure_active(node, _no_resolve)
+    assert platform.start_calls == 0
+    with native_mutation_guard(db.path, vm.name), pytest.raises(NativeSetupBusyError):
+        node.auto_start(cast("SecretReader", object()))
+    assert platform.start_calls == 0
+
+
+@pytest.mark.windows
+def test_hold_admission_is_guarded_but_interactive_body_is_unlocked(db, monkeypatch):
+    from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
+
+    vm = _seed(db)
+    platform = _GatePlatform()
+    node, _ = _node(db, platform, vm)
+
+    @contextlib.contextmanager
+    def delayed_attachment(row, *, config):
+        with pytest.raises(NativeSetupBusyError), native_mutation_guard(db.path, vm.name):
+            pytest.fail("stop admitted before keeper attachment")
+        yield
+
+    monkeypatch.setattr(platform, "vm_active", delayed_attachment)
+    with node.hold_active(), native_mutation_guard(db.path, vm.name):
+        pass
+
+
+@pytest.mark.windows
+def test_stopped_live_guest_access_skips_booting_hold_and_admission_can_be_busy(db, monkeypatch):
+    from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
+
+    vm = _seed(db)
+    db.set_vm_desired_runtime_state(vm.name, Target.STOPPED, expected_vm_uuid=vm.vm_uuid)
+    platform = _GatePlatform()
+    node, _ = _node(db, platform, vm)
+    with native_mutation_guard(db.path, vm.name), pytest.raises(NativeSetupBusyError), node.hold_active():
+        pytest.fail("live diagnostic skipped guarded admission")
+    with node.hold_active():
+        pass
+    assert platform.holds == 0
+
+
+@pytest.mark.windows
+def test_explicit_guard_token_reuses_outer_operation_for_auto_start_and_hold(db, monkeypatch):
+    from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
+
+    vm = _seed(db)
+    platform = _GatePlatform(status=VMStatus.STOPPED)
+    with native_mutation_guard(db.path, vm.name) as guard:
+        site = VMSiteNode("stub", cast("VMPlatform", platform), (), cast("Registry", object()))
+        node = LiveVMNode(db, cast("Config", object()), cast("Registry", object()), vm, site, held_native_guard=guard)
+        monkeypatch.setattr(vm_manager, "_tailscale_rejoin_required", lambda *a, **k: False)
+        node.auto_start(cast("SecretReader", object()))
+        with node.hold_active(), pytest.raises(NativeSetupBusyError), native_mutation_guard(db.path, vm.name):
+            pytest.fail("outer operation guard released")
+    assert platform.start_calls == 1
+    assert platform.holds == 2
+    with pytest.raises(StateError), node.hold_active():
+        pytest.fail("completed token accepted")
+
+
+@pytest.mark.parametrize("replaced", [False, True])
+def test_deleted_and_replaced_vm_node_never_uses_stale_row(db, replaced):
+    vm = _seed(db)
+    platform = _GatePlatform(status=VMStatus.STOPPED)
+    node, _ = _node(db, platform, vm)
+    db.delete_vm(vm.name)
+    if replaced:
+        _seed(db)
+    with pytest.raises(StateError):
+        node.auto_start(cast("SecretReader", object()))
+    with pytest.raises(StateError), node.hold_active():
+        pytest.fail("stale VM entered hold")
+    assert platform.start_calls == 0 and platform.holds == 0

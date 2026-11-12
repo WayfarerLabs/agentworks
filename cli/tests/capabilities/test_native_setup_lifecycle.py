@@ -1,5 +1,6 @@
 """Setup shares core ownership, eager inputs, and the owning row's commit."""
 
+from contextlib import nullcontext
 from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock
 
@@ -145,11 +146,13 @@ def native(monkeypatch, tmp_path):
     return SimpleNamespace(target=target, loggers=loggers, removed_agent=removed_agent, removed_project=removed_project)
 
 
+@pytest.mark.windows
+@pytest.mark.parametrize("nested", [False, True])
 @pytest.mark.parametrize("kind", ["agent", "workspace"])
 @pytest.mark.parametrize("fail_insert", [False, True])
 @pytest.mark.parametrize("fail_setup", [False, True])
 def test_fresh_owner_buffers_setup_until_atomic_row_commit(
-    db, registry, vm, native, monkeypatch, kind, fail_insert, fail_setup
+    db, registry, vm, native, monkeypatch, kind, fail_insert, fail_setup, nested
 ):
     name = "agent" if kind == "agent" else "project"
     env = _env(TOKEN={"secret": "setup-token"}, AGENTWORKS_SESSION="forged")
@@ -207,6 +210,7 @@ def test_fresh_owner_buffers_setup_until_atomic_row_commit(
                 credential_redactions=(),
                 setup_inputs=inputs,
                 setup_values={"setup-token": "private-value"},
+                held_native_guard=guard,
             )
         else:
             realize_workspace(
@@ -219,27 +223,29 @@ def test_fresh_owner_buffers_setup_until_atomic_row_commit(
                 template=ResolvedTemplate("default"),
                 setup_inputs=inputs,
                 setup_values={"setup-token": "private-value"},
+                held_native_guard=guard,
             )
 
         raise_setup_failures(failures)
 
-    if fail_insert:
-        with pytest.raises(ExternalError):
-            create()
-        assert read_native_setup(db, kind, name).records == ()
-        (native.removed_agent if kind == "agent" else native.removed_project).assert_called_once()
-    else:
-        if fail_setup:
-            with pytest.raises(StateError):
+    with native_mutation_guard(db.path, vm.name) if nested else nullcontext(None) as guard:
+        if fail_insert:
+            with pytest.raises(ExternalError):
                 create()
+            assert read_native_setup(db, kind, name).records == ()
+            (native.removed_agent if kind == "agent" else native.removed_project).assert_called_once()
         else:
-            create()
-        (record,) = read_native_setup(db, kind, name).records
-        assert record.complete is not fail_setup and record.claims == tuple(calls)
-        assert "private-value" not in record.model_dump_json()
-        assert (db.get_agent(name) if kind == "agent" else db.get_workspace(name)) is not None
-        (native.removed_agent if kind == "agent" else native.removed_project).assert_not_called()
-    assert calls and native.loggers[0].closed
+            if fail_setup:
+                with pytest.raises(StateError):
+                    create()
+            else:
+                create()
+            (record,) = read_native_setup(db, kind, name).records
+            assert record.complete is not fail_setup and record.claims == tuple(calls)
+            assert "private-value" not in record.model_dump_json()
+            assert (db.get_agent(name) if kind == "agent" else db.get_workspace(name)) is not None
+            (native.removed_agent if kind == "agent" else native.removed_project).assert_not_called()
+        assert calls and native.loggers[0].closed
 
 
 @pytest.mark.parametrize("existing", ["user", "home", "race", "absent"])

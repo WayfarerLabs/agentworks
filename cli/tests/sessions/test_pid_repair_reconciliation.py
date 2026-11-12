@@ -10,13 +10,20 @@ from uuid import uuid4
 
 import pytest
 
-from agentworks.db import PID_STOPPED, Database, DatabaseDriverError, SessionMode, SessionRuntimeSnapshot
+from agentworks.db import (
+    PID_STOPPED,
+    Database,
+    DatabaseDriverError,
+    DesiredRuntimeState,
+    SessionMode,
+    SessionRuntimeSnapshot,
+)
 from agentworks.errors import StateConflictError, StateError
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import manager, tmux
 from agentworks.sessions.manager import _lifecycle, _pids, _teardown
 
-from .test_session_batch_stop_parallelism import BOOT_ID, _seed_session, _Target
+from .test_session_batch_stop_parallelism import BOOT_ID, _prepared_stop_config, _seed_session, _Target
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -161,25 +168,36 @@ def test_repair_writes_respect_enclosing_transaction_rollback(
 @pytest.mark.parametrize("caller", ["named", "batch"])
 @pytest.mark.parametrize("enclosing_transaction", [False, True])
 def test_repair_conflict_refuses_callers_before_status_or_destructive_dispatch(
-    db: Database, monkeypatch: pytest.MonkeyPatch, branch: str, caller: str, enclosing_transaction: bool
+    db: Database, monkeypatch: pytest.MonkeyPatch, branch: str, caller: str, enclosing_transaction: bool, make_config
 ) -> None:
     session = _session(db, branch)
     with contextlib.closing(Database(db.path)) as other:
         changed: list[SessionRow | None] = []
         _observations(monkeypatch, branch, lambda: changed.append(_replace(other, session, "run_id")))
-        monkeypatch.setattr(manager, "_batch_vm_boundary", lambda *args, **kwargs: contextlib.nullcontext())
+        config = _prepared_stop_config(db, make_config, monkeypatch)
+        if enclosing_transaction:
+            # Isolate the post-accept repair boundary: a real acceptance write would
+            # upgrade this deliberately enclosing read transaction before the race.
+            db.set_session_desired_runtime_state(
+                session.name, DesiredRuntimeState.STOPPED, expected_session_uuid=session.session_uuid
+            )
+            accepted_session = db.get_session(session.name)
+            assert accepted_session is not None
+            session = accepted_session
+
+            def already_accepted(name, state, *, expected_session_uuid):
+                accepted = db.get_session(name)
+                assert accepted is not None
+                assert accepted.session_uuid == expected_session_uuid
+                assert accepted.desired_runtime_state is state is DesiredRuntimeState.STOPPED
+
+            monkeypatch.setattr(db, "set_session_desired_runtime_state", already_accepted)
         monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", lambda *args, **kwargs: None)
         monkeypatch.setattr(manager, "transport", lambda *args, **kwargs: _Target("repair"))
         workspace = db.get_workspace(session.workspace_name)
         assert workspace is not None
         vm = db.get_vm(workspace.vm_name)
         assert vm is not None
-        target = _Target("repair")
-        monkeypatch.setattr(
-            manager,
-            "_prepare_vm",
-            lambda *args, **kwargs: contextlib.nullcontext((workspace, vm, target.run, target.run, target)),
-        )
         monkeypatch.setattr(manager, "check_session_status", lambda *args, **kwargs: pytest.fail("stale named status"))
         monkeypatch.setattr(
             manager, "observe_session_statuses", lambda *args, **kwargs: pytest.fail("stale status dispatch")
@@ -192,13 +210,9 @@ def test_repair_conflict_refuses_callers_before_status_or_destructive_dispatch(
             db.transaction() if enclosing_transaction else contextlib.nullcontext(),
         ):
             if caller == "named":
-                _lifecycle.stop_session(
-                    db, cast("Config", SimpleNamespace()), name=session.name, interaction=TtyInteractionPolicy.REFUSE
-                )
+                _lifecycle.stop_session(db, config, name=session.name, interaction=TtyInteractionPolicy.REFUSE)
             else:
-                _lifecycle.stop_all_sessions(
-                    db, cast("Config", SimpleNamespace()), interaction=TtyInteractionPolicy.REFUSE
-                )
+                _lifecycle.stop_all_sessions(db, config, interaction=TtyInteractionPolicy.REFUSE)
         if enclosing_transaction:
             assert getattr(caught.value, "sqlite_errorcode", None) == sqlite3.SQLITE_BUSY_SNAPSHOT
         assert len(changed) == 1

@@ -1,0 +1,132 @@
+# Desired runtime state: completed
+
+Original closeout: 2026-11-10. Final follow-up source convergence: 2026-11-12. Delivered in
+[PR #885](https://github.com/WayfarerLabs/agentworks/pull/885).
+
+The implementation converged at `452eb0622520fcb816e6c9a0c6ff85f810ce5495`, containing main
+`1dd5a06dd330d947676fe130cc345fa93e64c797`. VMs, sessions and named consoles retain durable desired
+runtime state and support explicit scoped reconciliation and pure intent selection. Schema 39 fully
+replaces the VM intent flag, migrates existing VM policy and requires explicit adoption of ambiguous
+legacy workload intent. Batch workload secrets resolve before deferred runtime changes; healthy
+runtimes retain identities and runtime exit does not clear intent. Permanent guidance, CLI help,
+completion and JSON inspection are synchronized.
+
+The FRD and design each converged within two authorized fix rounds. Implementation converged after
+one of its two authorized rounds, with clean private and published reviews and completed separate
+integration reports. The operator's instruction to wait for each integration result before another
+iteration was followed. Current-main conflicts were resolved and the selected-key/forced-prompt
+rekey composition was tested without weakening identity guards or the shared secret boundary.
+
+[CI 42851513484](https://github.com/WayfarerLabs/agentworks/actions/runs/42851513484) passed all ten
+jobs at the converged head. The full suite passed 11,678 tests with 11 skips. Real Linux and Windows
+Server 2025 workstation campaigns against remote Lima each recovered two sessions and a named
+console after a new boot with one VM command, then preserved identities on repetition. Earlier
+native WSL admission/stop and migration results retain their original head attribution. Both live
+campaigns independently audited cleanup and credential disposal.
+
+[validation.md](validation.md) maps every requirement and acceptance criterion to code, behavioral
+tests, permanent guidance and actual reports, including platform and fault-injection limits.
+[plan.md](plan.md) records completed work and final closeout checks. Closeout changes only these SDD
+records; the tested application and permanent documentation remain unchanged.
+
+At the original closeout, no material finding or implementation work remained open. No PR merge is
+authorized or performed by this effort. The SDD lock becomes binding when this PR lands on main.
+
+## 2026-11-11: current-main integration follow-up
+
+The operator requested resolution of new conflicts after main advanced to
+`834eb715666d2d8539874a042484bf9da60fdb00`. The prior implementation and closeout results above
+remain attributed to their original heads. The unmerged PR is draft while its lifecycle, trust,
+artifact and compatibility integrations are resolved and independently reviewed. The
+[follow-up plan](plan.md#2026-11-11-operator-directed-current-main-integration) tracks new checks,
+handoff, separate integration evidence and cleanup. The integrated head requires fresh validation
+before its completion can be claimed. No new feature policy or PR merge is authorized.
+
+The main-integration handoff at `dbbbd31cc` received green CI and completed integration
+report 6786419851. Its fresh Linux/Windows-to-Lima recovery and artifact results retain that head's
+attribution. The report confirmed an R6 preview blocker omission. The final original implementation
+feedback round, two of two, corrects that omission and protects Console preacceptance. The operator
+also directed GCP suspend/resume recovery in the same PR. All three private reviews were clean at
+`98b957b40`, and all twelve required local gates passed with 12,366 tests and 34 skips in the
+non-overlapping root confirmation. Exact final-head CI, ready handoff and the associated separate
+integration result remain required. Earlier completion claims do not mark this follow-up complete or
+establish live GCP validation.
+
+The round-two ready handoff at `863c499aa` had green CI and clean final private delta reviews.
+Completed integration preflight 6787498628 then found main at `07feb4a45` and stopped on four
+conflicts before gates or native tests. The operator explicitly authorized one supplemental round
+and continued monitoring. Its main teardown integration and deterministic test clock are in
+development under the follow-up plan. New validation, handoff, actual integration evidence and
+feedback disposition remain required; the goal remains active. This historical lock does not mark
+the supplemental work complete.
+
+Implementation merge `d7260da42` is integrated with passing impacted/static checks from its owner.
+The complete combined candidate still requires independent source review, root gates, final CI,
+ready publication and its actual integration result. Monitoring and feedback disposition remain part
+of the active effort.
+
+Private adversarial review then found stop-error suppression, an inherited caller-interruption gap
+and session evidence loss across suspension. Corrections at `afe92857f` retain authoritative errors,
+completed-future reconciliation and last-known fingerprints while the parent is inactive. The owner
+passed 1,365 impacted tests and full static checks. Final independent review, root gates, CI, ready
+publication and actual integration evidence remain required; the goal remains active.
+
+A further private mixed failure/cancellation case is corrected at `33928add9` with one outcome
+observer preserving established success and failure receipts. The owner passed 1,389 impacted tests
+and full static checks. Final private delta reviews, root gates, exact-head CI and subsequent actual
+integration evidence remain pending. Publication alone will not finish this effort.
+
+The final private failure-observer correction at `d965d9233` fails closed after draining instead of
+returning apparent success when a failure receipt cannot be delivered. The owner passed 1,395
+impacted tests and full static checks; bounded queue fixtures keep regressions from hanging. Final
+private review, root gates, exact-head CI and actual integration feedback remain pending. The
+supplemental round and monitoring are still active.
+
+The complete supplemental candidate `efe9919a5` has clean project, complexity and cold correctness
+reviews, all twelve local gates and all ten jobs in CI 42982591220. Its non-overlapping root suite
+passed 12,611 tests with 34 skips. This evidence update must pass final CI before ready handoff; the
+actual associated integration report, critical feedback disposition and resource cleanup remain
+open. The original historical lock does not declare this follow-up finished. Monitoring stays
+active.
+
+On 2026-11-12, the operator authorized one more reporting loop. Completed report 6792039907 at
+`4825c99d1` passed all required gates and measured native GCP/Linux/Windows cases, but confirmed one
+Important provenance issue: inactive-parent results must disclose skipped guest inspection. The new
+round preserves validated fingerprints and power behavior, integrates current main `bc294be28`, and
+requires new independent review, gates, exact-head handoff and actual integration feedback. This
+historical lock does not close the active follow-up; the goal remains active through convergence,
+monitoring and cleanup.
+
+The reporting implementation at `de3efe4e1` integrates main `bc294be28` and adds observation-local
+provenance plus equivalent public Console reporting. The owner passed focused behavioral/static
+checks and reviewed actual output, with the trust-test fixture correction recorded in validation.
+New independent review, full root gates, exact-head CI, ready publication and its actual associated
+integration report remain open. No convergence or completion is claimed.
+
+Reporting candidate `2875b1246` now has all three private lanes clean, all twelve local gates and
+all ten jobs in CI 43274224880. Its unchanged, non-overlapping root suite passed 12,990 tests with
+35 skips. The incoming MCP test interception correction is verified without production changes. This
+evidence update requires its own green CI and artifact review before ready handoff; the new actual
+integration report, feedback disposition and final follow-up cleanup/lock remain open. The goal
+remains active and no additional fix round or PR merge is inferred.
+
+## Final follow-up lock, 2026-11-12
+
+The complete source converged at `0d98185ac6bd5a658aeebb1d4e0dcbd05d748694`, containing main
+`bc294be28b0ff1086e05222abc2a6eba63f1430a`. All three private lanes and final artifact checks were
+clean, all twelve local gates passed with 12,990 tests and 35 skips, and CI 43275870348 passed all
+ten jobs after the documented same-head Website retry. Actual integration report
+[6833682006](https://github.com/WayfarerLabs/agentworks/pull/885#issuecomment-6833682006) completed
+independent PR review, installed-build checks and fresh native Linux/Windows-to-Lima, WSL2 and
+GCP/Debian campaigns. It confirmed the reporting correction and found no new product blocker. Native
+Codex continuity used the owned loopback provider and establishes no paid inference or MCP tool
+execution. Coverage limits, original harness failures and independently verified cleanup remain
+explicit in [validation.md](validation.md).
+
+Critical reading 6833761926 closes the material reporting finding after the full collection
+interval. The original stages and separately authorized follow-ups have converged; no additional
+feature work is required by this SDD. The final closeout modifies only evidence/plan/lock records
+and preserves the tested source bytes. Private artifact review and task-owned resource retirement
+precede the final handoff, whose exact-head CI and actual pipeline answer remain delivery
+requirements. A merge recommendation supplies no merge authorization. The goal is not completed
+merely by publishing this lock, and no merge is performed.

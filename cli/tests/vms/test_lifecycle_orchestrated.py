@@ -1,682 +1,399 @@
-"""``vm start`` / ``vm stop`` through the orchestrated model: the
-lifecycle commands' shared derived graph, the boundary-burst parity
-(these commands open NO activation gate: the power op IS the
-operation), the operator-stopped flag semantics end to end, and the VM
-scope reaching node readiness.
-
-Real config, registry, resolver, and backend loop (env-var backend);
-the platform's backend power ops and the Tailscale verification are
-the fakes. ``vm delete`` shares the same composition root
-(``_live_vm_boundary``); its failure discipline and its no-gate /
-boundary-burst pins live in ``test_delete_vm_gating.py``.
-"""
+"""VM intent acceptance and prepared runtime operations using real resolution."""
 
 from __future__ import annotations
 
 import contextlib
-from types import SimpleNamespace
-from typing import TYPE_CHECKING, cast
+from collections.abc import Iterator
 
 import pytest
 
-from agentworks.db import VMStatus
+from agentworks.bootstrap import load_request_registry
+from agentworks.db import Database, VMRow, VMStatus
+from agentworks.db import DesiredRuntimeState as Target
+from agentworks.errors import ConnectivityError, StateError, UserAbort, ValidationError
 from agentworks.execution import trust
 from agentworks.execution.errors import TrustMissing
+from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
-from agentworks.secrets.policy import TtyInteractionPolicy
-from agentworks.vms import manager as vm_manager
+from agentworks.secrets.policy import TtyInteractionPolicy as Policy
+from agentworks.secrets.resolver import Resolver
+from agentworks.vms import manager
+from agentworks.vms.manager.runtime import activate_vm_runtime, execute_vm_stop, observe_vm_runtime, prepare_vm_runtime
 from tests.conftest import seed_vm_trust
 
-if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Iterator
 
-    from agentworks.capabilities.base import OperationScope, RunContext
-    from agentworks.db import Database
-
-
-def _seed_vm(db: Database, *, operator_stopped: bool = False) -> None:
-    db.insert_vm("box", site="proxmox", hostname="box")
+def _seed(db: Database, target: Target = Target.ON_DEMAND) -> VMRow:
+    vm = db.insert_vm("box", "proxmox", "box", desired_runtime_state=target)
     db.update_vm_tailscale("box", "100.64.0.9")
     seed_vm_trust("box")
-    if operator_stopped:
-        db.set_operator_stopped("box", True)
+    row = db.get_vm(vm.name)
+    assert row is not None
+    return row
 
 
-def _fake_power(monkeypatch: pytest.MonkeyPatch, status: VMStatus) -> list[str]:
-    """Fake the platform's backend power ops (recording the op order)
-    and the Tailscale verification; everything upstream of them
-    (registry, resolver, preflight, resolve) runs for real."""
-    events: list[str] = []
-    monkeypatch.setattr(
-        ProxmoxPlatform,
-        "status",
-        lambda self, row, ctx: events.append("status") or status,
-    )
-    monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: events.append("start"))
-    monkeypatch.setattr(ProxmoxPlatform, "stop", lambda self, row, ctx: events.append("stop"))
-    monkeypatch.setattr(vm_manager, "_tailscale_rejoin_required", lambda *a, **k: True)
-    monkeypatch.setattr(vm_manager, "_ensure_tailscale", lambda *a, **k: events.append("tailscale"))
-    return events
+@pytest.fixture
+def platform(monkeypatch):
+    events = []
+    state = [VMStatus.STOPPED]
 
+    def status(self, row, ctx):
+        assert ctx.secret("proxmox-token") == "pve-token"
+        events.append("status")
+        return state[0]
 
-# -- the derived graph --------------------------------------------------------
+    def start(self, row, ctx):
+        events.append("start")
+        state[0] = VMStatus.RUNNING
 
-
-def test_lifecycle_graph_derives_from_row(
-    db: Database,
-    make_config,  # noqa: ANN001
-) -> None:
-    """The lifecycle commands' shared graph (start / stop / delete all
-    build it through ``_live_vm_boundary``): the live VM whose row's
-    site field is the vm-site edge, nothing else, so the union is the
-    site's config secret alone. Each command's boundary-burst test
-    below pins that union per command."""
-    from agentworks.bootstrap import build_registry
-    from agentworks.orchestration.secrets import secret_union
-    from agentworks.orchestration.walk import walk
-    from agentworks.vms.nodes import live_vm_node
-
-    config = make_config()
-    _seed_vm(db)
-    vm = db.get_vm("box")
-    assert vm is not None
-    registry = build_registry(config)
-
-    nodes = walk(live_vm_node(db, config, registry, vm))
-
-    assert [n.key for n in nodes] == ["vm-site/proxmox", "vm/box"]
-    assert secret_union(nodes) == ("proxmox-token",)
-
-
-# -- vm start: boundary burst, flag clear, short-circuits ---------------------
-
-
-def test_start_stopped_vm_resolves_once_starts_and_clears_flag(
-    db: Database,
-    make_config,  # noqa: ANN001
-    resolve_counter: list[list[str]],
-    monkeypatch: pytest.MonkeyPatch,
-    captured_output,  # noqa: ANN001
-) -> None:
-    """The mirror of the tracer's gate-prompt parity, no-gate shape:
-    exactly ONE boundary burst covering the union, nothing resolved
-    twice, nothing after; the start drives through the node's held
-    platform; the operator-stopped flag is cleared (an explicit start
-    is operator intent)."""
-    config = make_config()
-    monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", "ts-key")
-    _seed_vm(db, operator_stopped=True)
-    events = _fake_power(monkeypatch, VMStatus.STOPPED)
-    record_vm_started = db.record_vm_started
-
-    def _record_started(name: str) -> None:
-        events.append("record-start")
-        record_vm_started(name)
-
-    monkeypatch.setattr(db, "record_vm_started", _record_started)
-
-    vm_manager.start_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
-
-    assert resolve_counter == [["proxmox-token"], ["tailscale-auth-key"]]
-    assert events == ["status", "start", "record-start", "tailscale"]
-    row = db.get_vm("box")
-    assert row is not None and row.operator_stopped is False
-    assert row.last_started_at is not None
-    assert not any("already running" in m for m in captured_output.info)
-
-
-def test_start_without_a_host_key_record_raises_before_resolving_or_touching_the_vm(
-    db: Database,
-    make_config,  # noqa: ANN001
-    resolve_counter: list[list[str]],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The reconnect check after a start could only fail for want of a record,
-    and its failure would send the repair path to spend a Tailscale auth key."""
-    config = make_config()
-    _seed_vm(db, operator_stopped=True)
-    trust.remove("box")
-    events = _fake_power(monkeypatch, VMStatus.STOPPED)
-
-    with pytest.raises(TrustMissing):
-        vm_manager.start_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
-
-    assert resolve_counter == []
-    assert events == []
-    row = db.get_vm("box")
-    assert row is not None and row.operator_stopped is True
-
-
-def test_start_running_vm_short_circuits_but_still_clears_flag(
-    db: Database,
-    make_config,  # noqa: ANN001
-    resolve_counter: list[list[str]],
-    monkeypatch: pytest.MonkeyPatch,
-    captured_output,  # noqa: ANN001
-) -> None:
-    """An already-running VM: no start op, Tailscale still verified, and the flag
-    still cleared; the boundary still costs exactly one burst."""
-    config = make_config()
-    monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", "ts-key")
-    _seed_vm(db, operator_stopped=True)
-    original_start = "2026-01-01T00:00:00Z"
-    db._conn.execute("UPDATE vms SET last_started_at = ? WHERE name = ?", (original_start, "box"))
-    db._conn.commit()
-    events = _fake_power(monkeypatch, VMStatus.RUNNING)
-
-    vm_manager.start_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
-
-    assert resolve_counter == [["proxmox-token"], ["tailscale-auth-key"]]
-    assert events == ["status", "tailscale"]
-    row = db.get_vm("box")
-    assert row is not None and row.operator_stopped is False
-    assert row.last_started_at == original_start
-    assert any("VM 'box' is already running" in m for m in captured_output.info)
-    assert not any("is ready" in m for m in captured_output.info)
-
-
-def test_start_with_unknown_status_clears_stale_start_observation(
-    db: Database,
-    make_config,  # noqa: ANN001
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    config = make_config()
-    monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", "ts-key")
-    _seed_vm(db)
-    original_start = "2026-01-01T00:00:00Z"
-    db._conn.execute("UPDATE vms SET last_started_at = ? WHERE name = ?", (original_start, "box"))
-    db._conn.commit()
-    events = _fake_power(monkeypatch, VMStatus.UNKNOWN)
-
-    vm_manager.start_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
-
-    assert events == ["status", "start", "tailscale"]
-    row = db.get_vm("box")
-    assert row is not None and row.last_started_at is None
-
-
-class _TrackedValues(dict[str, str]):
-    def __init__(self, events: list[str]) -> None:
-        super().__init__({"tailscale-auth-key": "ts-key"})
-        self._events = events
-
-    def clear(self) -> None:
-        self._events.append("values-clear")
-        super().clear()
-
-
-def _patch_recording_start_hold(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> None:
-    monkeypatch.setattr(ProxmoxPlatform, "status", lambda self, row, ctx: VMStatus.STOPPED)
-    monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: None)
+    def stop(self, row, ctx):
+        events.append("stop")
+        state[0] = VMStatus.STOPPED
 
     @contextlib.contextmanager
-    def _hold(self: object, row: object, *, config: object) -> Iterator[None]:
+    def hold(self, row, *, config):
         events.append("hold-enter")
         try:
             yield
         finally:
             events.append("hold-exit")
 
-    monkeypatch.setattr(ProxmoxPlatform, "vm_active", _hold)
+    monkeypatch.setattr(ProxmoxPlatform, "status", status)
+    monkeypatch.setattr(ProxmoxPlatform, "start", start)
+    monkeypatch.setattr(ProxmoxPlatform, "stop", stop)
+    monkeypatch.setattr(ProxmoxPlatform, "vm_active", hold)
+    monkeypatch.setattr(manager, "_tailscale_rejoin_required", lambda *a, **k: False)
+    return events, state
 
 
-def _patch_actual_ensure_sequence(
-    monkeypatch: pytest.MonkeyPatch,
-    events: list[str],
-    *,
-    failure_stage: str | None = None,
-    failure: BaseException | None = None,
-) -> dict[str, int]:
-    import agentworks.ssh_config as ssh_config
-    import agentworks.transports as transports
-    from agentworks.vms.manager.tailscale import _ensure_tailscale as actual_ensure
-
-    calls = {"verify": 0, "native": 0, "rejoin": 0, "final-wait": 0, "sync": 0}
-
-    def _raise_at(stage: str) -> None:
-        if failure_stage == stage:
-            assert failure is not None
-            raise failure
-
-    class _Target:
-        logger = None
-
-    def _verify() -> None:
-        calls["verify"] += 1
-
-    def _native(*args: object, **kwargs: object) -> _Target:
-        calls["native"] += 1
-        return _Target()
-
-    def _rejoin(*args: object, **kwargs: object) -> None:
-        calls["rejoin"] += 1
-        events.append("rejoin")
-        _raise_at("rejoin")
-        database = cast("Database", args[0])
-        name = cast("str", args[1])
-        database.update_vm_tailscale(name, "100.64.0.10")
-
-    def _final_wait(*args: object, **kwargs: object) -> bool:
-        calls["final-wait"] += 1
-        events.append("final-wait")
-        _raise_at("final-wait")
-        return True
-
-    def _sync(*args: object, **kwargs: object) -> None:
-        calls["sync"] += 1
-
-    monkeypatch.setattr(vm_manager, "verify_tailscale_available", _verify)
-    monkeypatch.setattr(vm_manager, "rejoin_tailscale", _rejoin)
-    monkeypatch.setattr(transports, "native_transport", _native)
-    monkeypatch.setattr(transports, "transport", lambda *args, **kwargs: object())
-    monkeypatch.setattr(transports, "wait_for_reconnect", _final_wait)
-    monkeypatch.setattr(ssh_config, "sync_ssh_config", _sync)
-
-    def _recording_ensure(*args: object, **kwargs: object) -> None:
-        events.append("ensure-enter")
-        cast("Callable[..., None]", actual_ensure)(*args, **kwargs)
-        events.append("ensure-return")
-
-    monkeypatch.setattr(vm_manager, "_ensure_tailscale", _recording_ensure)
-    return calls
+@contextlib.contextmanager
+def _prepared(db, config, vm) -> Iterator[tuple]:
+    registry = load_request_registry(config, live_database=db)
+    resolver = Resolver(config, registry, interaction=Policy.REFUSE)
+    with native_mutation_guard(db.path, vm.name) as guard:
+        context = prepare_vm_runtime(
+            db,
+            config,
+            registry,
+            vm,
+            resolve_secret=resolver.resolve_gate,
+            held_native_guard=guard,
+        )
+        try:
+            yield context, resolver
+        finally:
+            context.clear_values()
+            resolver.close()
 
 
-def test_start_healthy_probe_stays_inside_hold_and_never_acquires_auth(
-    db: Database,
-    make_config,  # noqa: ANN001
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import agentworks.secrets as secret_package
-
+def test_preparation_only_observes_and_execution_uses_supplied_values(db, make_config, platform, resolve_counter):
     config = make_config()
-    _seed_vm(db)
-    events: list[str] = []
-    _patch_recording_start_hold(monkeypatch, events)
-    monkeypatch.setattr(
-        vm_manager,
-        "_tailscale_rejoin_required",
-        lambda *args, **kwargs: events.append("probe-false") or False,
-    )
-    monkeypatch.setattr(
-        secret_package,
-        "resolve_for_command",
-        lambda *args, **kwargs: pytest.fail("healthy start acquired Tailscale auth"),
-    )
-
-    vm_manager.start_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
-
-    assert events == ["hold-enter", "probe-false", "hold-exit"]
-
-
-def test_start_rejoin_orders_acquisition_reader_ensure_cleanup_and_release(
-    db: Database,
-    make_config,  # noqa: ANN001
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import agentworks.orchestration.secrets as orchestration_secrets
-    import agentworks.secrets as secret_package
-    import agentworks.vms.manager.power as power
-    import agentworks.vms.templates as templates
-
-    config = make_config()
-    _seed_vm(db)
-    events: list[str] = []
-    _patch_recording_start_hold(monkeypatch, events)
-    monkeypatch.setattr(
-        vm_manager,
-        "_tailscale_rejoin_required",
-        lambda *args, **kwargs: events.append("probe-true") or True,
-    )
-    monkeypatch.setattr(
-        templates,
-        "resolve_template",
-        lambda registry, name: SimpleNamespace(tailscale_auth_key="tailscale-auth-key"),
-    )
-    monkeypatch.setattr(power, "_lookup_or_synthesize_secret", lambda *args: object())
-    values = _TrackedValues(events)
-    monkeypatch.setattr(
-        secret_package,
-        "resolve_for_command",
-        lambda *args, **kwargs: events.append("resolve") or values,
-    )
-
-    class _Reader:
-        def __init__(self, mapping: dict[str, str], names: object) -> None:
-            self._tracks_tailscale = tuple(cast("Iterable[str]", names)) == ("tailscale-auth-key",)
-            if self._tracks_tailscale:
-                events.append("reader-build")
-            self._mapping = mapping
-
-        def get(self, name: str) -> str:
-            if self._tracks_tailscale:
-                events.append("auth-read")
-            return self._mapping[name]
-
-    monkeypatch.setattr(orchestration_secrets, "ScopedSecrets", _Reader)
-
-    calls = _patch_actual_ensure_sequence(monkeypatch, events)
-
-    vm_manager.start_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
-
-    assert events == [
-        "hold-enter",
-        "probe-true",
-        "resolve",
-        "reader-build",
-        "ensure-enter",
-        "auth-read",
-        "rejoin",
-        "final-wait",
-        "ensure-return",
-        "values-clear",
-        "hold-exit",
-    ]
-    assert values == {}
-    assert calls == {"verify": 1, "native": 1, "rejoin": 1, "final-wait": 1, "sync": 1}
-
-
-def test_start_lazy_repair_validates_after_start_and_delivery_before_rejoin_work(
-    db: Database,
-    make_config,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import agentworks.secrets as secret_package
-    import agentworks.transports as transports
-    from agentworks.errors import ValidationError
-    from agentworks.secrets.orchestration import resolve_for_command as actual_resolve
-    from agentworks.vms.manager.tailscale import _ensure_tailscale as actual_ensure
-
-    auth_key = "tskey-prefix\r\ntskey-suffix\r\n"
-    config = make_config()
-    _seed_vm(db)
-    monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", auth_key)
-    events: list[str] = []
-    monkeypatch.setattr(
-        ProxmoxPlatform,
-        "status",
-        lambda self, row, ctx: events.append("status") or VMStatus.STOPPED,
-    )
-    monkeypatch.setattr(
-        ProxmoxPlatform,
-        "start",
-        lambda self, row, ctx: events.append("start"),
-    )
-    monkeypatch.setattr(
-        ProxmoxPlatform,
-        "vm_active",
-        lambda self, row, *, config: contextlib.nullcontext(),
-    )
-    monkeypatch.setattr(
-        transports,
-        "transport",
-        lambda *args, **kwargs: events.append("probe-transport") or object(),
-    )
-    monkeypatch.setattr(
-        transports,
-        "wait_for_reconnect",
-        lambda *args, **kwargs: events.append("repair-required") or False,
-    )
-
-    def _resolve(*args: object, **kwargs: object) -> dict[str, str]:
-        events.append("late-resolve")
-        return actual_resolve(*args, **kwargs)  # type: ignore[arg-type]
-
-    monkeypatch.setattr(secret_package, "resolve_for_command", _resolve)
-
-    def _ensure(*args: object, **kwargs: object) -> None:
-        events.append("ensure")
-        actual_ensure(*args, **kwargs)  # type: ignore[arg-type]
-
-    monkeypatch.setattr(vm_manager, "_ensure_tailscale", _ensure)
-    monkeypatch.setattr(
-        vm_manager,
-        "verify_tailscale_available",
-        lambda: pytest.fail("line-unsafe late key reached Tailscale availability work"),
-    )
-
-    with pytest.raises(ValidationError) as caught:
-        vm_manager.start_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
-
-    assert events == [
-        "status",
-        "start",
-        "probe-transport",
-        "repair-required",
-        "late-resolve",
-        "ensure",
-    ]
-    refreshed = db.get_vm("box")
-    assert refreshed is not None
-    assert refreshed.tailscale_host == "100.64.0.9"
-    assert "tskey-prefix" not in repr((caught.value.args, vars(caught.value)))
-    assert caught.value.__cause__ is None
-    assert caught.value.__context__ is None
-
-
-@pytest.mark.parametrize("failure_type", [RuntimeError, KeyboardInterrupt])
-@pytest.mark.parametrize("failure_stage", ["probe", "resolve", "reader-build", "auth-read", "rejoin", "final-wait"])
-def test_start_tailscale_failure_matrix_cleans_before_one_release_without_retry(
-    db: Database,
-    make_config,  # noqa: ANN001
-    monkeypatch: pytest.MonkeyPatch,
-    failure_stage: str,
-    failure_type: type[BaseException],
-) -> None:
-    import agentworks.orchestration.secrets as orchestration_secrets
-    import agentworks.secrets as secret_package
-    import agentworks.vms.manager.power as power
-    import agentworks.vms.templates as templates
-
-    config = make_config()
-    _seed_vm(db)
-    events: list[str] = []
-    _patch_recording_start_hold(monkeypatch, events)
-    failure = failure_type(failure_stage)
-
-    def _stage(name: str) -> None:
-        events.append(name)
-        if failure_stage == name:
-            raise failure
-
-    def _probe(*args: object, **kwargs: object) -> bool:
-        _stage("probe")
-        return True
-
-    monkeypatch.setattr(vm_manager, "_tailscale_rejoin_required", _probe)
-    monkeypatch.setattr(
-        templates,
-        "resolve_template",
-        lambda registry, name: SimpleNamespace(tailscale_auth_key="tailscale-auth-key"),
-    )
-    monkeypatch.setattr(power, "_lookup_or_synthesize_secret", lambda *args: object())
-    values = _TrackedValues(events)
-
-    def _acquire(*args: object, **kwargs: object) -> dict[str, str]:
-        assert kwargs["interaction"] is TtyInteractionPolicy.REFUSE
-        _stage("resolve")
-        return values
-
-    monkeypatch.setattr(secret_package, "resolve_for_command", _acquire)
-
-    class _Reader:
-        def __init__(self, mapping: dict[str, str], names: object) -> None:
-            self._tracks_tailscale = tuple(cast("Iterable[str]", names)) == ("tailscale-auth-key",)
-            if self._tracks_tailscale:
-                _stage("reader-build")
-            self._mapping = mapping
-
-        def get(self, name: str) -> str:
-            if self._tracks_tailscale:
-                _stage("auth-read")
-            return self._mapping[name]
-
-    monkeypatch.setattr(orchestration_secrets, "ScopedSecrets", _Reader)
-
-    calls = _patch_actual_ensure_sequence(
-        monkeypatch,
-        events,
-        failure_stage=failure_stage,
-        failure=failure,
-    )
-
-    with pytest.raises(failure_type) as caught:
-        vm_manager.start_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
-
-    assert caught.value is failure
-    assert events.count(failure_stage) == 1
-    assert events.count("hold-enter") == events.count("hold-exit") == 1
-    assert events[-1] == "hold-exit"
-    if failure_stage in {"reader-build", "auth-read", "rejoin", "final-wait"}:
-        assert events[-2] == "values-clear"
-        assert values == {}
-    else:
-        assert "values-clear" not in events
-
-    expected_before_release = {
-        "probe": ["hold-enter", "probe"],
-        "resolve": ["hold-enter", "probe", "resolve"],
-        "reader-build": ["hold-enter", "probe", "resolve", "reader-build", "values-clear"],
-        "auth-read": [
-            "hold-enter",
-            "probe",
-            "resolve",
-            "reader-build",
-            "ensure-enter",
-            "auth-read",
-            "values-clear",
-        ],
-        "rejoin": [
-            "hold-enter",
-            "probe",
-            "resolve",
-            "reader-build",
-            "ensure-enter",
-            "auth-read",
-            "rejoin",
-            "values-clear",
-        ],
-        "final-wait": [
-            "hold-enter",
-            "probe",
-            "resolve",
-            "reader-build",
-            "ensure-enter",
-            "auth-read",
-            "rejoin",
-            "final-wait",
-            "values-clear",
-        ],
-    }
-    assert events == [*expected_before_release[failure_stage], "hold-exit"]
-    no_ensure_work = {"verify": 0, "native": 0, "rejoin": 0, "final-wait": 0, "sync": 0}
-    expected_calls = {
-        "probe": no_ensure_work,
-        "resolve": no_ensure_work,
-        "reader-build": no_ensure_work,
-        "auth-read": no_ensure_work,
-        "rejoin": {"verify": 1, "native": 1, "rejoin": 1, "final-wait": 0, "sync": 0},
-        "final-wait": {"verify": 1, "native": 1, "rejoin": 1, "final-wait": 1, "sync": 0},
-    }
-    assert calls == expected_calls[failure_stage]
-
-
-# -- vm stop: boundary burst, flag set, short-circuits ------------------------
-
-
-def test_stop_running_vm_resolves_once_stops_and_sets_flag(
-    db: Database,
-    make_config,  # noqa: ANN001
-    resolve_counter: list[list[str]],
-    monkeypatch: pytest.MonkeyPatch,
-    captured_output,  # noqa: ANN001
-) -> None:
-    config = make_config()
-    _seed_vm(db)
-    events = _fake_power(monkeypatch, VMStatus.RUNNING)
-
-    vm_manager.stop_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
-
+    events, _ = platform
+    vm = _seed(db)
+    with _prepared(db, config, vm) as (context, resolver):
+        assert context.observed_status is VMStatus.STOPPED
+        assert events == ["status"]
+        assert not execute_vm_stop(context)
+        assert observe_vm_runtime(context) is VMStatus.STOPPED
+        assert not context.started and not context.repaired
     assert resolve_counter == [["proxmox-token"]]
-    assert events == ["status", "stop"]
-    row = db.get_vm("box")
-    assert row is not None and row.operator_stopped is True
-    assert any(m == "VM 'box' stopped" for m in captured_output.info)
+    assert db.get_vm("box") == vm
+    assert "hold-enter" not in events
 
 
-def test_stop_sets_flag_before_already_stopped_shortcut(
-    db: Database,
-    make_config,  # noqa: ANN001
-    resolve_counter: list[list[str]],
-    monkeypatch: pytest.MonkeyPatch,
-    captured_output,  # noqa: ANN001
-) -> None:
-    """Stopping an idle-stopped VM still records the intent, and the
-    message says so instead of the misleading bare 'already stopped'
-    (the command DID change something: auto-start is now off)."""
+@pytest.mark.parametrize("initial", [VMStatus.STOPPED, VMStatus.RUNNING])
+def test_explicit_start_adopts_running_and_repairs_conditionally(
+    db, make_config, platform, monkeypatch, resolve_counter, initial
+):
     config = make_config()
-    _seed_vm(db)
-    events = _fake_power(monkeypatch, VMStatus.STOPPED)
-
-    vm_manager.stop_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
-
-    row = db.get_vm("box")
-    assert row is not None and row.operator_stopped is True
-    assert events == ["status"]  # short-circuited, no stop op
-    assert resolve_counter == [["proxmox-token"]]
-    # The boundary resolve emits a "Resolved ..." info line of its own; the
-    # stop message is the remaining info line.
-    (message,) = [m for m in captured_output.info if not m.startswith("Resolved ")]
-    assert "stopped on its own" in message
-    assert "will not be auto-started" in message
-
-
-def test_stop_of_a_manually_stopped_vm_is_a_true_noop(
-    db: Database,
-    make_config,  # noqa: ANN001
-    resolve_counter: list[list[str]],
-    monkeypatch: pytest.MonkeyPatch,
-    captured_output,  # noqa: ANN001
-) -> None:
-    """Only when the intent was ALREADY recorded does 'already' apply,
-    and it names the manual state."""
-    config = make_config()
-    _seed_vm(db, operator_stopped=True)
-    _fake_power(monkeypatch, VMStatus.STOPPED)
-
-    vm_manager.stop_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
-
-    (message,) = [m for m in captured_output.info if not m.startswith("Resolved ")]
-    assert message == "VM 'box' is already manually stopped"
-
-
-# -- the operation scope reaches readiness ------------------------------------
-
-
-def test_vm_scope_reaches_node_readiness(
-    db: Database,
-    make_config,  # noqa: ANN001
-    monkeypatch: pytest.MonkeyPatch,
-    captured_output,  # noqa: ANN001
-) -> None:
-    from agentworks.capabilities.base import ScopeLevel
-
-    config = make_config()
+    events, state = platform
+    state[0] = initial
+    _seed(db, Target.STOPPED)
     monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", "ts-key")
-    _seed_vm(db)
-    _fake_power(monkeypatch, VMStatus.RUNNING)
-    scopes: list[OperationScope | None] = []
-    real = ProxmoxPlatform.preflight
+    monkeypatch.setattr(manager, "_tailscale_rejoin_required", lambda *a, **k: True)
 
-    def _recording(self: ProxmoxPlatform, ctx: RunContext) -> None:
-        scopes.append(ctx.operation_scope)
-        real(self, ctx)
+    def repair(*args, auth_keys, auth_key_name, **kwargs):
+        assert events[-1] == "hold-enter"
+        assert auth_keys.get(auth_key_name) == "ts-key"
+        events.append("repair")
 
-    monkeypatch.setattr(ProxmoxPlatform, "preflight", _recording)
+    monkeypatch.setattr(manager, "_ensure_tailscale", repair)
+    manager.start_vm(db, config, "box", interaction=Policy.REFUSE)
+    row = db.get_vm("box")
+    assert row.desired_runtime_state is Target.RUNNING
+    assert events.count("start") == (initial is VMStatus.STOPPED)
+    assert events[-3:] == ["hold-enter", "repair", "hold-exit"]
+    assert resolve_counter == [["proxmox-token"], ["tailscale-auth-key"]]
+    assert (row.last_started_at is not None) == (initial is VMStatus.STOPPED)
 
-    vm_manager.start_vm(db, config, "box", interaction=TtyInteractionPolicy.REFUSE)
 
-    (scope,) = scopes
-    assert scope is not None
-    assert scope.level is ScopeLevel.VM
-    assert scope.vm == "box"
-    assert scope.workspace is None and scope.agent is None and scope.session is None
+def test_healthy_start_does_not_collect_speculative_repair_secret(db, make_config, platform, resolve_counter):
+    config = make_config()
+    _seed(db)
+    manager.start_vm(db, config, "box", interaction=Policy.REFUSE)
+    assert resolve_counter == [["proxmox-token"]]
+
+
+@pytest.mark.parametrize("action,target", [(manager.start_vm, Target.RUNNING), (manager.stop_vm, Target.STOPPED)])
+@pytest.mark.parametrize(
+    "error", [ConnectivityError("failed credentials"), UserAbort("cancelled"), KeyboardInterrupt()]
+)
+def test_accepted_target_survives_credential_failure_or_cancellation(
+    db, make_config, monkeypatch, action, target, error
+):
+    config = make_config()
+    vm = _seed(db)
+
+    def fail(self, name):
+        raise error
+
+    monkeypatch.setattr(Resolver, "resolve_gate", fail)
+    with pytest.raises(type(error)) as caught:
+        action(db, config, "box", interaction=Policy.REFUSE)
+    assert caught.value is error
+    row = db.get_vm("box")
+    assert row.desired_runtime_state is target
+    assert row.vm_uuid == vm.vm_uuid
+    assert row.last_started_at is None
+
+
+def test_local_refusal_does_not_accept_target(db, make_config):
+    config = make_config()
+    vm = _seed(db)
+    from agentworks.db import ProvisioningStatus
+
+    db.update_vm_provisioning_status("box", ProvisioningStatus.FAILED)
+    with pytest.raises(StateError):
+        manager.start_vm(db, config, "box", interaction=Policy.REFUSE)
+    assert db.get_vm("box").desired_runtime_state is vm.desired_runtime_state
+
+
+@pytest.mark.parametrize("initial", [VMStatus.RUNNING, VMStatus.STOPPED, VMStatus.DEALLOCATED])
+def test_explicit_stop_accepts_target_without_booting_hold(db, make_config, platform, initial):
+    config = make_config()
+    events, state = platform
+    state[0] = initial
+    _seed(db, Target.RUNNING)
+    manager.stop_vm(db, config, "box", interaction=Policy.REFUSE)
+    assert db.get_vm("box").desired_runtime_state is Target.STOPPED
+    assert "hold-enter" not in events
+    assert events.count("stop") == (initial is VMStatus.RUNNING)
+
+
+def test_dependency_activation_preserves_on_demand_and_reports_partial_effects(db, make_config, platform, monkeypatch):
+    config = make_config()
+    events, _ = platform
+    vm = _seed(db)
+    error = UserAbort("repair cancelled")
+    monkeypatch.setattr(manager, "_tailscale_rejoin_required", lambda *a, **k: True)
+
+    def fail(name):
+        raise error
+
+    with _prepared(db, config, vm) as (context, _):
+        with pytest.raises(UserAbort) as caught:
+            activate_vm_runtime(context, resolve_secret=fail)
+        assert caught.value is error
+        assert context.started and not context.repaired
+        assert observe_vm_runtime(context) is VMStatus.RUNNING
+    assert events.count("hold-enter") == events.count("hold-exit") == 1
+    assert db.get_vm("box").desired_runtime_state is Target.ON_DEMAND
+    assert db.get_vm("box").last_started_at is not None
+
+
+def test_stopped_intent_and_unknown_observations_never_activate(db, make_config, platform):
+    config = make_config()
+    events, state = platform
+    vm = _seed(db, Target.STOPPED)
+    with _prepared(db, config, vm) as (context, resolver), pytest.raises(StateError):
+        activate_vm_runtime(context, resolve_secret=resolver.resolve_gate)
+    state[0] = VMStatus.UNKNOWN
+    vm = db.get_vm("box")
+    with _prepared(db, config, vm) as (context, resolver), pytest.raises(StateError):
+        execute_vm_stop(context)
+    assert "start" not in events and "stop" not in events and "hold-enter" not in events
+
+
+@pytest.mark.parametrize("change", ["delete", "replace", "target"])
+def test_prepared_provider_operations_reject_invalidated_selection(db, make_config, platform, change):
+    config = make_config()
+    vm = _seed(db)
+    with _prepared(db, config, vm) as (context, resolver):
+        if change in {"delete", "replace"}:
+            db.delete_vm("box")
+            if change == "replace":
+                _seed(db)
+        else:
+            db.set_vm_desired_runtime_state("box", Target.STOPPED, expected_vm_uuid=vm.vm_uuid)
+        with pytest.raises(StateError):
+            activate_vm_runtime(context, resolve_secret=resolver.resolve_gate)
+        with pytest.raises(StateError):
+            observe_vm_runtime(context)
+
+
+@pytest.mark.windows
+def test_native_guard_contention_prevents_public_acceptance_and_provider_actions(db, make_config, platform):
+    config = make_config()
+    vm = _seed(db)
+    with native_mutation_guard(db.path, "box"):
+        with pytest.raises(NativeSetupBusyError):
+            manager.start_vm(db, config, "box", interaction=Policy.REFUSE)
+        with pytest.raises(NativeSetupBusyError):
+            manager.stop_vm(db, config, "box", interaction=Policy.REFUSE)
+    assert db.get_vm("box") == vm
+    assert platform[0] == []
+
+
+def test_pure_setter_never_loads_registry_or_runtime(db, monkeypatch):
+    vm = _seed(db)
+    monkeypatch.setattr("agentworks.bootstrap.load_request_registry", lambda *a, **k: pytest.fail("registry loaded"))
+    manager.set_vm_desired_runtime_state(db, name="box", state="stopped")
+    assert db.get_vm("box").desired_runtime_state is Target.STOPPED
+    assert db.get_vm("box").vm_uuid == vm.vm_uuid
+    with pytest.raises(ValidationError):
+        manager.set_vm_desired_runtime_state(db, name="box", state="invalid")
+
+
+@pytest.mark.parametrize("action", [manager.start_vm, manager.stop_vm])
+def test_provider_failure_preserves_accepted_target(db, make_config, platform, monkeypatch, action):
+    config = make_config()
+    _, state = platform
+    state[0] = VMStatus.STOPPED if action is manager.start_vm else VMStatus.RUNNING
+    _seed(db)
+    error = ConnectivityError("provider unavailable")
+
+    def fail(*args):
+        raise error
+
+    monkeypatch.setattr(ProxmoxPlatform, "start" if action is manager.start_vm else "stop", fail)
+    with pytest.raises(ConnectivityError) as caught:
+        action(db, config, "box", interaction=Policy.REFUSE)
+    assert caught.value is error
+    assert db.get_vm("box").desired_runtime_state is (Target.RUNNING if action is manager.start_vm else Target.STOPPED)
+
+
+@pytest.mark.parametrize("action", [manager.start_vm, manager.stop_vm])
+def test_explicit_unknown_power_policy_is_preserved(db, make_config, platform, action):
+    config = make_config()
+    events, state = platform
+    state[0] = VMStatus.UNKNOWN
+    _seed(db)
+    db.record_vm_started("box")
+    action(db, config, "box", interaction=Policy.REFUSE)
+    assert ("start" if action is manager.start_vm else "stop") in events
+    if action is manager.start_vm:
+        assert db.get_vm("box").last_started_at is None
+
+
+@pytest.mark.parametrize("action", [manager.start_vm, manager.stop_vm])
+def test_known_local_site_refusal_leaves_target_unaccepted(db, make_config, resolve_counter, action):
+    from agentworks.errors import AgentworksError
+
+    config = make_config()
+    vm = db.insert_vm("box", "missing-site", "box", desired_runtime_state=Target.ON_DEMAND)
+    with pytest.raises(AgentworksError):
+        action(db, config, "box", interaction=Policy.REFUSE)
+    assert db.get_vm("box") == vm
+    assert resolve_counter == []
+
+
+def test_shared_failed_infrastructure_uses_one_resolver_attempt_without_preflight_prediction(
+    db, make_config, platform, monkeypatch, resolve_counter
+):
+    from agentworks.errors import SecretUnavailableError
+
+    config = make_config()
+    first = _seed(db)
+    second = db.insert_vm("peer", "proxmox", "peer", desired_runtime_state=Target.ON_DEMAND)
+    registry = load_request_registry(config, live_database=db)
+    monkeypatch.delenv("AW_SECRET_PROXMOX_TOKEN")
+    monkeypatch.setattr(
+        "agentworks.orchestration.secrets.require_predicted_refs",
+        lambda *a, **k: pytest.fail("prepared VM readiness predicted a source outside the Resolver"),
+    )
+    resolver = Resolver(config, registry, interaction=Policy.REFUSE)
+    try:
+        for vm in (first, second):
+            with native_mutation_guard(db.path, vm.name) as guard, pytest.raises(SecretUnavailableError):
+                prepare_vm_runtime(
+                    db,
+                    config,
+                    registry,
+                    vm,
+                    resolve_secret=resolver.resolve_gate,
+                    held_native_guard=guard,
+                )
+        assert resolve_counter == [["proxmox-token"]]
+        assert platform[0] == []
+    finally:
+        resolver.close()
+
+
+def test_source_free_vm_preflight_still_rejects_dangling_declared_secret(db, make_config, monkeypatch):
+    from agentworks.errors import ConfigError
+
+    config = make_config()
+    vm = _seed(db)
+    registry = load_request_registry(config, live_database=db)
+    lookup = registry.lookup
+
+    def without_secret(kind, name):
+        if kind == "secret" and name == "proxmox-token":
+            raise KeyError(name)
+        return lookup(kind, name)
+
+    monkeypatch.setattr(registry, "lookup", without_secret)
+    with native_mutation_guard(db.path, vm.name) as guard, pytest.raises(ConfigError):
+        prepare_vm_runtime(
+            db,
+            config,
+            registry,
+            vm,
+            resolve_secret=lambda name: pytest.fail("dangling declaration reached a source"),
+            held_native_guard=guard,
+        )
+
+
+@pytest.mark.parametrize("malformed", [None, "running", "provider-payload-sensitive"])
+@pytest.mark.parametrize("operation", ["activate", "stop"])
+def test_invalid_provider_power_result_refuses_runtime_mutation(db, make_config, platform, malformed, operation):
+    config = make_config()
+    events, state = platform
+    vm = _seed(db)
+    with _prepared(db, config, vm) as (context, resolver):
+        assert context.observed_status is VMStatus.STOPPED
+        state[0] = malformed
+        with pytest.raises(StateError) as caught:
+            if operation == "activate":
+                activate_vm_runtime(context, resolve_secret=resolver.resolve_gate)
+            else:
+                execute_vm_stop(context)
+        assert "provider-payload-sensitive" not in repr((caught.value.args, vars(caught.value)))
+        assert not context.started and not context.repaired
+    assert "start" not in events and "stop" not in events and "hold-enter" not in events
+    assert db.get_vm("box") == vm
+
+
+def test_start_without_host_key_refuses_before_intent_secrets_or_provider(db, make_config, platform, resolve_counter):
+    config = make_config()
+    original = _seed(db, Target.STOPPED)
+    trust.remove("box")
+    events, _ = platform
+    with pytest.raises(TrustMissing):
+        manager.start_vm(db, config, "box", interaction=Policy.REFUSE)
+    assert resolve_counter == []
+    assert events == []
+    assert db.get_vm("box") == original
+
+
+def test_runtime_activation_rechecks_host_key_before_power_or_repair(db, make_config, platform):
+    vm = _seed(db, Target.RUNNING)
+    events, _ = platform
+    with _prepared(db, make_config(), vm) as (context, resolver):
+        assert events == ["status"]
+        trust.remove(vm.name)
+        with pytest.raises(TrustMissing):
+            activate_vm_runtime(context, resolve_secret=resolver.resolve_gate)
+        assert events == ["status"]
+        assert not context.started
+        assert not context.repaired
+        assert db.get_vm(vm.name) == vm

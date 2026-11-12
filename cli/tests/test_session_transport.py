@@ -24,6 +24,7 @@ from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.tmux import FingerprintProbe, ProbeStatus, TmuxServerFingerprint
 
 from .conftest import (
+    seed_vm_trust,
     stub_build_registry,
     stub_session_resolvers,
     stub_vm_gates,
@@ -64,10 +65,9 @@ class _Target:
 
 def _seed_db(tmp_path: Path) -> Database:
     db = Database(tmp_path / "test.db")
-    db._conn.execute(
-        "INSERT INTO vms (name, site, hostname, admin_username, tailscale_host) "
-        "VALUES ('vm1', 'lima', 'h', 'admin', '100.64.0.5')"
-    )
+    db.insert_vm("vm1", "lima", "h", admin_username="admin")
+    seed_vm_trust("vm1")
+    db.update_vm_tailscale("vm1", "100.64.0.5")
     db._conn.execute(
         "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "
         "VALUES ('ws1', 'vm1', '/home/me/ws1', 'ws-ws1')"
@@ -636,19 +636,14 @@ class _NullCM:
 
 
 @pytest.mark.parametrize("operation_name", ["start_session", "restart_session"])
-def test_launch_migrates_legacy_session_to_per_session_socket(
+def test_legacy_runtime_is_preserved_until_confirmed_restart(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     operation_name: str,
 ) -> None:
-    """Legacy admin sessions (created on the VM's default tmux server,
-    ``socket_path=None``) used to surface ``check_session_status`` as a
-    typed ``StateError`` and force the operator into a delete-then-create
-    dance. Restart now migrates them: surgical ``tmux kill-session -t
-    <name>`` on the default server, then create a fresh session under
-    the per-session-socket model and persist the new socket_path.
+    """Start preserves a live legacy runtime; confirmed restart migrates it.
 
-    The kill primitive is load-bearing: legacy ``session.pid`` identifies
+    The kill primitive matters: legacy ``session.pid`` identifies
     the SHARED default tmux server, not this session. The old BROKEN
     handler's ``force_kill_tmux_server(pid)`` would SIGKILL the whole
     server -- nuking any other tmux session on it (ad-hoc work, other
@@ -696,9 +691,11 @@ def test_launch_migrates_legacy_session_to_per_session_socket(
     # Capture the surgical kill: ``tmux kill-session -t <name>`` runs
     # against the default server (socket_path=None).
     kill_calls: list[tuple[str, str | None]] = []
+    runtime = {"legacy": True, "dedicated": False}
 
     def _spy_kill_session(name, *, run_command, socket_path):  # type: ignore[no-untyped-def]
         kill_calls.append((name, socket_path))
+        runtime["legacy"] = False
         return True
 
     # ``kill_session`` is imported locally by the legacy teardown authority;
@@ -706,22 +703,10 @@ def test_launch_migrates_legacy_session_to_per_session_socket(
     monkeypatch.setattr(tmux_mod, "kill_session", _spy_kill_session)
     existence_calls: list[tuple[str, str | None]] = []
 
-    expected_presences = (
-        (
-            ProbeStatus.PRESENT,
-            ProbeStatus.PRESENT,
-            ProbeStatus.PRESENT,
-            ProbeStatus.PRESENT,
-            ProbeStatus.ABSENT,
-        )
-        if operation_name == "restart_session"
-        else (ProbeStatus.PRESENT, ProbeStatus.ABSENT)
-    )
-    presences = iter(expected_presences)
-
     def _spy_session_presence(name, *, run_command, socket_path):  # type: ignore[no-untyped-def]
         existence_calls.append((name, socket_path))
-        return next(presences)
+        present = runtime["legacy"] if socket_path is None else runtime["dedicated"]
+        return ProbeStatus.PRESENT if present else ProbeStatus.ABSENT
 
     monkeypatch.setattr(tmux_mod, "probe_tmux_session", _spy_session_presence)
     monkeypatch.setattr(
@@ -751,6 +736,7 @@ def test_launch_migrates_legacy_session_to_per_session_socket(
         if before_spawn is not None:
             before_spawn()
         create_calls.append({"name": name, "is_admin": is_admin})
+        runtime["dedicated"] = True
         return ("/run/agentworks/admin-tmux-sockets/admin/legacy.sock", 67890)
 
     monkeypatch.setattr(tmux_mod, "create_session", _capture_create)
@@ -791,19 +777,29 @@ def test_launch_migrates_legacy_session_to_per_session_socket(
             interaction=TtyInteractionPolicy.REFUSE,
         )  # type: ignore[arg-type]
 
+    refreshed = db.get_session("legacy")
+    assert refreshed is not None
+    assert existence_calls and all(name == "legacy" for name, _ in existence_calls)
+    if operation_name == "start_session":
+        assert kill_calls == []
+        assert create_calls == []
+        assert refreshed.socket_path is None
+        assert refreshed.pid == 12345
+        assert runtime == {"legacy": True, "dedicated": False}
+        db.close()
+        return
+
     assert kill_calls == [("legacy", None)], (
         "kill_session must be invoked with the legacy session name and "
         f"socket_path=None (default server); got {kill_calls}"
     )
-    assert existence_calls == [("legacy", None)] * len(expected_presences)
     assert len(create_calls) == 1, "create_tmux_session must run once"
     assert create_calls[0]["is_admin"] is True
 
     # Migration persisted: the row now carries a real socket_path.
-    refreshed = db.get_session("legacy")
-    assert refreshed is not None
     assert refreshed.socket_path == "/run/agentworks/admin-tmux-sockets/admin/legacy.sock"
     assert refreshed.pid == 67890
+    assert existence_calls[-1] == ("legacy", refreshed.socket_path)
 
     db.close()
 

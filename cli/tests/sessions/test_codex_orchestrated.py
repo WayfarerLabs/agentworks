@@ -33,9 +33,10 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.artifacts.declarations import ArtifactsConfig
-from agentworks.db import Database, SessionMode, SessionStatus
+from agentworks.db import Database, InitStatus, SessionMode, SessionStatus
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.tmux import FingerprintProbe, ProbeStatus, TmuxServerFingerprint
+from tests.conftest import seed_vm_trust
 
 from ..conftest import stub_build_registry, stub_session_resolvers, stub_vm_gates
 
@@ -107,10 +108,10 @@ class _CodexTarget:
 
 def _seed_db(tmp_path: Path) -> Database:
     db = Database(tmp_path / "test.db")
-    db._conn.execute(
-        "INSERT INTO vms (name, site, hostname, admin_username, tailscale_host, init_status) "
-        "VALUES ('vm1', 'lima', 'h', 'admin', '100.64.0.5', 'complete')"
-    )
+    db.insert_vm("vm1", "lima", "h", admin_username="admin")
+    seed_vm_trust("vm1")
+    db.update_vm_tailscale("vm1", "100.64.0.5")
+    db.update_vm_init_status("vm1", InitStatus.COMPLETE)
     db._conn.execute(
         "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "
         "VALUES ('ws1', 'vm1', '/home/me/ws1', 'ws-ws1')"
@@ -206,7 +207,7 @@ def _restart_stubs(
     def _spy_teardown(*args: object, **kwargs: object) -> None:
         events.append("kill")
 
-    monkeypatch.setattr("agentworks.sessions.manager._lifecycle._teardown_session", _spy_teardown)
+    monkeypatch.setattr("agentworks.sessions.manager._teardown_session", _spy_teardown)
     return db, captured
 
 
