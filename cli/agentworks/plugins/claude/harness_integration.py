@@ -12,17 +12,13 @@ Control; ``vim_mode`` and ``terminal_bell`` become session-local settings; and
 (the operator escape hatch for any flag the harness integration does not model). See
 ``claude-code-lld.md``.
 
-Addressing uses a stored per-session Claude session id (a v4 uuid) kept in
-the harness integration's state namespace under ``session_id``: minted once on the first
-``start`` and read back on every ``restart``, because the session manager
-persists the blob to the session row after each op. Resume-vs-launch is an
-op-time existence probe for that id's transcript on disk (slug-independent,
-so it does not reconstruct Claude's brittle cwd-slug directory name): a
-transcript present means the session is resumable, so ``--resume``; absent
-means launch fresh with ``--session-id``. That file-presence boundary was
-empirically confirmed to equal Claude's own resume boundary, so neither a
-blind resume of a nonexistent session nor a resume of an unresumable stub
-is possible.
+Addressing uses a stored per-session UUID in the integration's ``session_id``
+state. Normal launches detect explicit continuation and parked-job pointers
+before starting Claude, refusing with an actionable recovery when a target UUID
+is known. ``force_uuid`` adopts an exact existing conversation and suppresses
+detection until removed. Missing transcripts on previously started sessions warn
+before retaining the ordinary resume-or-new policy. No pointer is followed
+automatically and no conversation is deleted.
 """
 
 from __future__ import annotations
@@ -35,6 +31,7 @@ from typing import TYPE_CHECKING, Annotated, ClassVar, Literal
 
 from pydantic import Field
 
+from agentworks import output
 from agentworks.artifacts.application import ArtifactApplication, ArtifactDeferral
 from agentworks.artifacts.model import ArtifactType
 from agentworks.artifacts.native.common import (
@@ -59,7 +56,8 @@ from agentworks.errors import StateError
 from agentworks.plugins._harness_native.native import setup_user, setup_workspace
 from agentworks.plugins._harness_native.native_config import NativeUserConfig, NativeWorkspaceConfig
 from agentworks.plugins.claude.artifacts import outer_artifacts, session_artifacts
-from agentworks.schema import AgwModel, MergeStrategy
+from agentworks.plugins.claude.conversation_probe import probe_conversation
+from agentworks.schema import AgwModel, InstanceOnly, MergeStrategy
 from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
@@ -97,6 +95,16 @@ class ClaudeCodeConfig(AgwModel):
     The native workload flags, positional parser behavior, and ``/goal``
     composition were rechecked with Claude Code 2.1.231.
     """
+
+    force_uuid: Annotated[str | None, InstanceOnly()] = Field(
+        default=None,
+        pattern=r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+    )
+    """Adopt this exact existing Claude conversation on creation or start.
+    Session instance only; templates cannot set it. Requires a transcript or
+    live background job on the launch target. Suppresses detachment detection
+    and warns on every use; remove after adoption to restore detection.
+    An explicit force-new launch conflicts with this setting."""
 
     permission_mode: str | None = None
     """Forwarded as ``--permission-mode``."""
@@ -160,13 +168,6 @@ class ClaudeCodeConfig(AgwModel):
     contents are literal data."""
 
 
-# The transcript's config root. ``CLAUDE_CONFIG_DIR`` is the CLI's own
-# override env var (confirmed present in the v2.1.205 binary); the default
-# is ``$HOME/.claude``. Expanded by the target-side shell inside the
-# find probe, never here.
-_PROJECTS_DIR = "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects"
-
-
 class ClaudeCodeIntegration(HarnessIntegration):
     """Runs Claude Code, resuming or launching fresh per on-disk state."""
 
@@ -182,6 +183,12 @@ class ClaudeCodeIntegration(HarnessIntegration):
         ordinary `agw session start` or `agw session restart` and a reattach after a
         reboot behave the way an operator expects without either being configured.
 
+        Explicit continuation or parked-job evidence refuses launch with candidate UUIDs
+        and an instance-only `force_uuid` recovery setting. Set it to adopt an exact
+        existing conversation, then remove it to restore detection. Missing transcripts
+        after a prior start warn before following the ordinary launch policy. No branch
+        is selected automatically and no conversation is deleted.
+
         Ships as the opt-in `claude` system plugin, and needs the `claude` CLI on the
         session's target.
 
@@ -195,7 +202,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
         """,
     )
 
-    # Set by _resume_or_launch on each start/restart; drives the ordinary
+    # Set by _conversation on each start/restart; drives the ordinary
     # HarnessStart note. None until the op runs (nothing decided yet).
     _resumed: bool | None = None
     _artifact_plan: NativeSessionArtifacts = NativeSessionArtifacts()
@@ -403,6 +410,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
         intent: HarnessLaunchIntent = HarnessLaunchIntent.RESUME_OR_NEW,
     ) -> HarnessStart:
         """Choose the requested fresh, strict-resume, or fallback policy."""
+        sid, resume = self._conversation(ctx, intent=intent)
         self._rendered_extra_args = tuple(self.render_context_argv(token) for token in self.config.extra_args)
         artifact_context = self._session_binding.artifact_context
         runner = ctx.admin_target() if self._admin else ctx.agent_target()
@@ -432,35 +440,94 @@ class ClaudeCodeIntegration(HarnessIntegration):
                 (native_root, f"{self._workspace_path}/.claude", "/etc/claude-code/.claude"),
                 files=("/etc/claude-code/CLAUDE.md",),
             )
-        command = self._resume_or_launch(ctx, intent=intent)
+        command = self._resume_or_launch(sid, resume=resume)
         if intent is HarnessLaunchIntent.FORCE_NEW:
             note = "Fresh Claude Code session requested. Starting a new one without resuming prior state..."
-        elif intent is HarnessLaunchIntent.CREATE:
-            note = "Starting a new Claude Code session..."
         elif self._resumed:
             note = "Existing Claude Code session found. Resuming..."
+        elif intent is HarnessLaunchIntent.CREATE:
+            note = "Starting a new Claude Code session..."
         else:
             note = "No existing Claude Code session. Starting a new one..."
         if self._artifact_plan.argv:
             validate_native_command(command)
         return HarnessStart(command, note, self._artifact_plan.application)
 
-    def _resume_or_launch(self, ctx: RunContext, *, intent: HarnessLaunchIntent) -> str:
-        """Read (or mint) the stored session id, probe the launch target
-        for its transcript, and return the single ``sh -c`` pane command
-        that echoes the visible decision and ``exec``s ``claude``."""
+    def _conversation(self, ctx: RunContext, *, intent: HarnessLaunchIntent) -> tuple[str, bool]:
+        """Observe addressing before artifact preparation or any Claude invocation."""
         fresh = intent.starts_fresh
         resume_only = intent is HarnessLaunchIntent.RESUME_ONLY
         stored_sid = self._state.get("session_id")
-        if resume_only and not (isinstance(stored_sid, str) and stored_sid):
+        forced = self.config.force_uuid
+        if forced is not None:
+            forced = forced.lower()
+            output.warn(
+                "Claude force_uuid: This has been adopted, please remove it to avoid future problems."
+                if stored_sid == forced
+                else f"Claude force_uuid: adopting exact conversation {forced}; remove this setting after adoption."
+            )
+            if intent is HarnessLaunchIntent.FORCE_NEW:
+                raise StateError(
+                    "force_uuid conflicts with force-new; remove force_uuid before requesting a new conversation."
+                )
+        if resume_only and forced is None and not (isinstance(stored_sid, str) and stored_sid):
             raise self._resume_only_error()
-        sid = self._session_id(fresh=fresh)
+        sid = forced if forced is not None else self._session_id(fresh=fresh)
         launch_target = ctx.admin_target() if self._admin else ctx.agent_target()
-        resume = not fresh and launch_target is not None and self._transcript_exists(launch_target, sid)
+        resume = False
+        if (not fresh or forced is not None) and launch_target is not None:
+            try:
+                observed = probe_conversation(launch_target, sid, detect=forced is None)
+            except StateError as error:
+                raise StateError(
+                    f"session '{self._session_name}' on {self._target_label}: {error}",
+                    entity_kind="session",
+                    entity_name=self._session_name,
+                    hint=error.hint,
+                ) from error
+            resume = observed.transcript_exists or (forced is not None and observed.background_exists)
+            if forced is None:
+                if observed.candidates:
+                    settings = "; or ".join(
+                        f'harness_integration: {{name: claude-code, force_uuid: "{candidate}"}}'
+                        for candidate in observed.candidates
+                    )
+                    raise StateError(
+                        f"session '{self._session_name}': Claude conversation {sid} was handed off to "
+                        f"{', '.join(observed.candidates)}; refusing to resume the pinned conversation.",
+                        entity_kind="session",
+                        entity_name=self._session_name,
+                        hint=f"Set this on the session instance spec: {settings}. "
+                        "Choose the intended conversation, then remove force_uuid after adoption.",
+                    )
+                if observed.parked_job_ids:
+                    output.warn(
+                        f"session '{self._session_name}': Claude conversation {sid} has parked job(s) "
+                        f"{', '.join(observed.parked_job_ids)}, but their full conversation UUID "
+                        "could not be resolved. "
+                        "Inspect claude agents --json on the launch target before continuing work."
+                    )
+                elif not observed.transcript_exists and self._session_binding.last_started_at is not None:
+                    output.warn(
+                        f"session '{self._session_name}': previously started Claude conversation {sid} "
+                        "has no transcript on its launch target. It may have been backgrounded. "
+                        "Inspect claude agents --json and set force_uuid on this session to recover it."
+                    )
+        if forced is not None and not resume:
+            raise StateError(
+                f"force_uuid {forced}: no existing transcript or live background conversation on the launch target.",
+                entity_kind="session",
+                entity_name=self._session_name,
+            )
         if resume_only and not resume:
             raise self._resume_only_error()
+        if forced is not None:
+            self._state["session_id"] = sid
         self._resumed = resume
+        return sid, resume
 
+    def _resume_or_launch(self, sid: str, *, resume: bool) -> str:
+        """Render the selected addressing and prepared artifact flags as one pane command."""
         if resume:
             identity = ["--resume", sid]
             msg = f"agentworks harness integration (claude-code): resuming session {self._session_name}"
@@ -576,50 +643,6 @@ class ClaudeCodeIntegration(HarnessIntegration):
         if self.config.initial_prompt is not None:
             prompt += f"\n\nInitial guidance for this goal:\n{self.config.initial_prompt}"
         return prompt
-
-    def _transcript_exists(self, transport: Transport, sid: str) -> bool:
-        """True iff the stored session's transcript (``<sid>.jsonl``) exists
-        under the projects dir on the launch target. Slug-independent
-        (``find`` matches under ANY project directory); shell-neutral (no
-        glob reaches the shell). Runs through ``$SHELL -lic`` like the
-        readiness probe.
-
-        On restart this probe runs before the orchestrator tears down the old
-        runtime, which may still be live. No flush wait is needed: Claude
-        writes transcript turns to the ``.jsonl`` incrementally as work
-        happens rather than flushing them only on exit.
-
-        The exit code is read, not just ``.ok``, to keep a probe that could
-        not EXECUTE from masquerading as "no transcript". The inner command
-        keeps find's own failure distinguishable from a clean no-match: a
-        missing projects dir (Claude never ran here) exits 1 up front; a
-        printed match exits 0 (a found transcript is definitive even if
-        find also stumbled elsewhere); a find that FAILED without printing
-        one (an unreadable subdir, not a mere no-match) exits 6 rather
-        than folding into "no transcript". Anything but {0, 1} (the 6, an
-        SSH failure's 255, a shell that could not start) raises: guessing
-        "fresh" would launch ``--session-id <reserved-uuid>``, which
-        Claude rejects as already-in-use on a real session's restart and
-        the pane fails to start."""
-        needle = shlex.quote(f"{sid}.jsonl")
-        inner = (
-            f'[ -d "{_PROJECTS_DIR}" ] || exit 1; '
-            f'out=$(find "{_PROJECTS_DIR}" -name {needle} -print -quit 2>/dev/null); rc=$?; '
-            f'[ -n "$out" ] && exit 0; [ "$rc" -eq 0 ] || exit 6; exit 1'
-        )
-        result = transport.run(f'"$SHELL" -lic {shlex.quote(inner)}', check=False)
-        if result.returncode == 0:
-            return True  # transcript on disk: resume
-        if result.returncode == 1:
-            return False  # the probe ran, no match: launch fresh
-        raise StateError(
-            f"session '{self._session_name}': could not probe for the Claude "
-            f"transcript on {self._target_label} (exit {result.returncode}); "
-            f"refusing to guess resume-vs-launch.",
-            entity_kind="session",
-            entity_name=self._session_name,
-            hint="Retry once the launch target is reachable.",
-        )
 
     def _probe_target(self, transport: Transport) -> None:
         """Readiness proves only that ``claude`` is installed; it never

@@ -64,6 +64,7 @@ from agentworks.schema import (
     extract_references,
     filled_defaults,
 )
+from agentworks.schema.declaration_scope import validate_declaration_scope
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
@@ -184,7 +185,7 @@ def validate_capability_config(
         return None
     hint = reference_hint(kind, selected)
     if descriptor.config_schema.discriminator is None:
-        return _validated(
+        validated = _validated(
             config_model_for(impl, facet=facet),
             config,
             owner=owner,
@@ -192,11 +193,13 @@ def validate_capability_config(
             hint=hint,
             provenance=provenance,
         )
-    union = capability_config_union(kind, facet=facet)
-    validated = _validated(union, config, owner=owner, location=location, hint=hint, provenance=provenance)
-    # The union is a root model, so the thing the capability was written
-    # against is what it wraps, never the wrapper.
-    return cast("BaseModel", validated.root)  # type: ignore[attr-defined]
+    else:
+        union = capability_config_union(kind, facet=facet)
+        wrapper = _validated(union, config, owner=owner, location=location, hint=hint, provenance=provenance)
+        # The union wraps the implementation's own model.
+        validated = cast("BaseModel", wrapper.root)  # type: ignore[attr-defined]
+    validate_declaration_scope(validated, config, owner=owner, provenance=provenance, location=location, hint=hint)
+    return validated
 
 
 def validate_capability_mapping(
@@ -216,13 +219,10 @@ def validate_capability_mapping(
     model = capability_mapping_model(kind, name)
     if model is None:
         return None
-    return _validated(
-        model,
-        mapping,
-        owner=owner,
-        location=location,
-        hint=reference_hint(kind, name),
-    )
+    hint = reference_hint(kind, name)
+    validated = _validated(model, mapping, owner=owner, location=location, hint=hint)
+    validate_declaration_scope(validated, mapping, owner=owner, location=location, hint=hint)
+    return validated
 
 
 def validate_own_config(

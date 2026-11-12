@@ -36,6 +36,7 @@ def _harness_integration(
     session_name: str = "s1",
     state: dict[str, object] | None = None,
     admin: bool = True,
+    last_started_at: str | None = None,
 ) -> ClaudeCodeIntegration:
     return ClaudeCodeIntegration(
         "claude",
@@ -46,6 +47,7 @@ def _harness_integration(
         workspace_path="/srv/ws1",
         target=None,
         admin=admin,
+        last_started_at=last_started_at,
         state={"session_id": _SID} if state is None else state,
     )
 
@@ -228,32 +230,12 @@ def test_repeated_start_uses_the_same_state_based_decision() -> None:
     assert harness_integration.start(_op_ctx(target)) == harness_integration.start(_op_ctx(target))
 
 
-def test_probe_is_slug_independent_and_finds_by_stored_id() -> None:
-    target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(0)})
-    _harness_integration().start(_op_ctx(target))
-    (probe_cmd,) = target.commands
-    assert f"{_SID}.jsonl" in probe_cmd
-    assert "find" in probe_cmd
-    # Rooted at the CLI's config dir with its documented override.
-    assert "CLAUDE_CONFIG_DIR" in probe_cmd
-
-
-def test_probe_keeps_find_failure_distinct_from_a_clean_no_match() -> None:
-    """The inner command's structure: a missing projects dir short-circuits
-    to the clean no-match exit (1, fresh), while a find that FAILED without
-    printing a match exits 6, which the exit-code fork raises on rather
-    than folding into "no transcript". Pinned here because the fake target
-    answers by exit code alone; the structure is what guarantees those
-    codes mean what the fork thinks they mean."""
-    target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(0)})
-    _harness_integration().start(_op_ctx(target))
-    (probe_cmd,) = target.commands
-    assert "[ -d " in probe_cmd  # dir-missing is a clean no-match, not a find failure
-    assert "exit 6" in probe_cmd  # find failure stays distinguishable
-    # And the fork raises on that distinct code.
-    failing = _FakeTarget({f"{_SID}.jsonl": _FakeResult(6)})
-    with pytest.raises(StateError, match="could not probe"):
-        _harness_integration().start(_op_ctx(failing))
+def test_probe_failure_preserves_stored_conversation() -> None:
+    state: dict[str, object] = {"session_id": _SID}
+    target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(6)})
+    with pytest.raises(StateError):
+        _harness_integration(state=state).start(_op_ctx(target))
+    assert state == {"session_id": _SID}
 
 
 def test_probe_that_could_not_execute_raises_rather_than_guessing() -> None:
@@ -571,3 +553,151 @@ def test_readiness_missing_claude_is_a_typed_error() -> None:
     ctx = RunContext(operation_scope=_session_scope(), admin_target=target)
     with pytest.raises(StateError, match="'claude-code' harness integration.*requires 'claude'"):
         harness_integration.preflight(ctx)
+
+
+_NEXT_SID = "af0980f9-1111-4222-8333-444444444444"
+
+
+def _stub_observation(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    present: bool = True,
+    candidates: tuple[str, ...] = (),
+    parked: tuple[str, ...] = (),
+    background: bool = False,
+) -> list[tuple[str, bool]]:
+    from agentworks.plugins.claude.conversation_probe import ConversationProbe
+
+    calls: list[tuple[str, bool]] = []
+
+    def probe(target: object, sid: str, *, detect: bool = True) -> ConversationProbe:
+        calls.append((sid, detect))
+        return ConversationProbe(
+            transcript_exists=present, candidates=candidates, background_exists=background, parked_job_ids=parked
+        )
+
+    monkeypatch.setattr("agentworks.plugins.claude.harness_integration.probe_conversation", probe)
+    return calls
+
+
+@pytest.mark.parametrize("intent", [HarnessLaunchIntent.RESUME_OR_NEW, HarnessLaunchIntent.RESUME_ONLY])
+def test_detachment_refuses_without_changing_pin(monkeypatch: pytest.MonkeyPatch, intent: HarnessLaunchIntent) -> None:
+    _stub_observation(monkeypatch, candidates=(_NEXT_SID,))
+    state: dict[str, object] = {"session_id": _SID}
+    with pytest.raises(StateError) as error:
+        _harness_integration(state=state).start(_op_ctx(_FakeTarget()), intent=intent)
+    assert error.value.entity_name == "s1"
+    assert _SID in str(error.value) and _NEXT_SID in str(error.value)
+    assert _NEXT_SID in (error.value.hint or "")
+    assert state == {"session_id": _SID}
+
+
+@pytest.mark.parametrize(
+    "intent", [HarnessLaunchIntent.CREATE, HarnessLaunchIntent.RESUME_OR_NEW, HarnessLaunchIntent.RESUME_ONLY]
+)
+@pytest.mark.parametrize("present,background", [(True, False), (False, True)])
+def test_forced_adoption_is_exact_and_persists(
+    monkeypatch: pytest.MonkeyPatch, intent: HarnessLaunchIntent, present: bool, background: bool
+) -> None:
+    calls = _stub_observation(monkeypatch, present=present, background=background)
+    state: dict[str, object] = {}
+    result = _harness_integration({"force_uuid": _NEXT_SID.upper(), "initial_prompt": "fresh only"}, state=state).start(
+        _op_ctx(_FakeTarget()), intent=intent
+    )
+    assert _claude_argv(result)[:2] == ["--resume", _NEXT_SID]
+    assert "fresh only" not in _claude_argv(result)
+    assert state == {"session_id": _NEXT_SID}
+    assert calls == [(_NEXT_SID, False)]
+
+
+@pytest.mark.parametrize("intent", list(HarnessLaunchIntent))
+def test_failed_force_preserves_old_state(monkeypatch: pytest.MonkeyPatch, intent: HarnessLaunchIntent) -> None:
+    _stub_observation(monkeypatch, present=False)
+    state: dict[str, object] = {"session_id": _SID}
+    with pytest.raises(StateError):
+        _harness_integration({"force_uuid": _NEXT_SID}, state=state).start(_op_ctx(_FakeTarget()), intent=intent)
+    assert state == {"session_id": _SID}
+
+
+def test_force_without_launch_target_fails_without_minting() -> None:
+    state: dict[str, object] = {}
+    with pytest.raises(StateError):
+        _harness_integration({"force_uuid": _NEXT_SID}, state=state).start(RunContext())
+    assert state == {}
+
+
+@pytest.mark.parametrize("previously_started", [True, False])
+def test_missing_transcript_warns_only_after_prior_start(
+    monkeypatch: pytest.MonkeyPatch, previously_started: bool
+) -> None:
+    _stub_observation(monkeypatch, present=False)
+    warnings: list[str] = []
+    monkeypatch.setattr("agentworks.plugins.claude.harness_integration.output.warn", warnings.append)
+    result = _harness_integration(last_started_at="2026-11-01T00:00:00Z" if previously_started else None).start(
+        _op_ctx(_FakeTarget())
+    )
+    assert _claude_argv(result)[:2] == ["--session-id", _SID]
+    assert len(warnings) == int(previously_started)
+
+
+def test_unresolved_parked_job_warns_and_preserves_launch_policy(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_observation(monkeypatch, present=True, parked=("af0980f9",))
+    warnings: list[str] = []
+    monkeypatch.setattr("agentworks.plugins.claude.harness_integration.output.warn", warnings.append)
+    result = _harness_integration().start(_op_ctx(_FakeTarget()))
+    assert _claude_argv(result)[:2] == ["--resume", _SID]
+    assert len(warnings) == 1
+
+
+def test_force_warns_on_every_use(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_observation(monkeypatch)
+    warnings: list[str] = []
+    monkeypatch.setattr("agentworks.plugins.claude.harness_integration.output.warn", warnings.append)
+    harness = _harness_integration({"force_uuid": _NEXT_SID})
+    harness.start(_op_ctx(_FakeTarget()))
+    harness.start(_op_ctx(_FakeTarget()))
+    assert len(warnings) == 2
+    assert warnings[0] != warnings[1]
+
+
+@pytest.mark.parametrize("value", ["", "af0980f9", "../a", "not-a-uuid", 42])
+def test_force_uuid_rejects_invalid_address(value: object) -> None:
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        ClaudeCodeConfig.model_validate({"force_uuid": value})
+
+
+def test_force_uuid_rejected_by_template_declaration() -> None:
+    with pytest.raises(ConfigError):
+        _validate({"force_uuid": _NEXT_SID})
+
+
+def test_force_uuid_allowed_by_instance_declaration() -> None:
+    validate_capability_config(
+        kind="harness-integration",
+        name="claude-code",
+        config={"force_uuid": _NEXT_SID},
+        facet="session",
+        owner=RefOwner(kind="session", name="s1"),
+    )
+
+
+def test_detection_runs_before_artifact_preparation(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentworks.artifacts.native.common import NativeSessionArtifacts
+    from agentworks.plugins.claude.conversation_probe import ConversationProbe
+
+    events: list[str] = []
+
+    def detect(*args: object, **kwargs: object) -> ConversationProbe:
+        events.append("detect")
+        return ConversationProbe(True)
+
+    def prepare(*args: object, **kwargs: object) -> tuple[NativeSessionArtifacts, None]:
+        events.append("artifacts")
+        return NativeSessionArtifacts(), None
+
+    monkeypatch.setattr("agentworks.plugins.claude.harness_integration.probe_conversation", detect)
+    monkeypatch.setattr("agentworks.plugins.claude.harness_integration.prepare_session_delivery", prepare)
+    _harness_integration().start(_op_ctx(_FakeTarget()))
+    assert events == ["detect", "artifacts"]

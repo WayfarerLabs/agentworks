@@ -385,7 +385,7 @@ creating a session on it is refused with an "enable plugin `claude`" hint until 
 `[plugins] system = ["claude"]`. It selects the launch-and-resume conventions in one table instead
 of restating command strings: `session create` starts a new Claude conversation, while
 `session start` and `session restart` resume the bound conversation when its transcript still exists
-(and launch fresh when Claude never wrote one):
+(and ordinarily launch fresh when no transcript exists):
 
 ```yaml
 apiVersion: agentworks/v1
@@ -430,6 +430,35 @@ spec:
   every Claude launch, including a real resume, so the resumed process retains those settings. The
   flags, startup parser behavior, and `/goal` composition were checked locally with Claude Code
   2.1.231; Claude still owns agent discovery and validation.
+
+Claude can background a conversation under another UUID, including after the left-arrow agents
+shortcut is pressed while a tool is running. Agentworks checks explicit `continued-in` records and
+`parkedJobId` links before launching Claude. If a full candidate UUID is known, start or restart
+refuses and prints the pinned UUID, candidates, and a recovery setting. It never selects a branch by
+recency or follows a continuation automatically. An explicit `--force-new` still requests a new
+conversation without inspecting the old pin.
+
+To adopt a known conversation, set this on the **session instance's** `spec`, keeping its other
+fields. Do not put it on a session template:
+
+```yaml
+harness_integration:
+  name: claude-code
+  force_uuid: "af0980f9-1111-4222-8333-444444444444"
+```
+
+Use a UUID from the refusal or inspect `claude agents --json` on the launch target as the launch
+user. `force_uuid` requires an existing transcript or live background record for that exact UUID. It
+also works when creating a session onto an existing conversation. It suppresses detachment checks
+while set, warns on every use, and persists the adopted UUID after a successful launch. Remove the
+field after adoption to restore detection. It conflicts with an explicit `--force-new`. No
+conversation is stopped or deleted; unselected branches remain available through Claude.
+
+When a previously started session has no transcript, or a parked job's short ID cannot be resolved
+to a full UUID, Agentworks warns and retains its ordinary launch policy. Inspect Claude's agents
+before continuing work. Unreadable optional detection evidence preserves existing behavior; failures
+to establish transcript existence still refuse to guess. `--resume-only` continues to require a
+resumable conversation.
 
 The `codex` integration runs Codex the same way and ships as the opt-in `codex` system plugin.
 
