@@ -378,7 +378,7 @@ attribution and do not validate the new integration.
 - [x] Publish the complete green candidate to the same PR with a scoped ready handoff; wait for its
       associated separate integration report before any further iteration. Record actual results and
       coverage limits without converting previous reports into fresh evidence.
-- [ ] Retire this follow-up's owned worktrees, subordinate branches, caches and temporary outputs;
+- [x] Retire this follow-up's owned worktrees, subordinate branches, caches and temporary outputs;
       preserve the feature branch, PR and unrelated resources.
 
 Merge `5e9b8e90f` combines the prior PR head and the stated main commit. It preserves early SSH
@@ -657,7 +657,7 @@ work.
 - [x] Obtain clean independent reviews and all required gates on the pinned source candidate.
 - [x] Publish the exact green reporting head with the complete scoped handoff.
 - [x] Wait for the actual associated integration report and critically dispose of feedback.
-- [ ] Complete follow-up lock/cleanup after convergence.
+- [x] Complete follow-up lock/cleanup after convergence.
 
 Optional callback API simplification and route-check deletion are declined as unnecessary to this
 reporting correction. A real stop trust-boundary regression is useful coverage to assess with the
