@@ -332,7 +332,10 @@ place its `authorized_keys`; every later step runs as the agent, which cannot ru
   owner's stored spec makes. The describe commands' `instance_state` reports such a spec, and a
   saved harness activation list, as unavailable with reason `replacement-required` and issue
   `instance-spec-replacement-required`; an activation list used to read `unsupported-version` and
-  `instance-spec-unsupported`.
+  `instance-spec-unsupported`. JSON stays at schema version 1, since a reclassified case is not a
+  change of shape (see the command reference's
+  [compatibility rules](../../cli/command-reference.md#errors-and-compatibility)), so a consumer
+  that matched the old values must now accept the new ones.
 - **A remote written without `git::` is refused.** A source reference (`dotfiles_source`,
   `mise_lockfile`, an artifact's `source`, a harness settings `source`) holding `://` or `::`, or
   whose first path component holds a colon that is not a Windows drive letter (as in

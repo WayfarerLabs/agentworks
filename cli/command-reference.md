@@ -501,8 +501,13 @@ normal stderr message and nonzero exit status. Doctor is the exception: it conve
 failures into its complete report, emits that JSON document, then exits 1.
 
 JSON v1 is additive. New optional fields may be added while preserving existing meanings and types.
-Removing a field, changing a type, changing a value's meaning, changing collection order, or
-changing an enum spelling requires a new schema version and an explicit compatibility period.
+A release may also add a value to an enumerated field, such as a reason or an issue code, or move a
+case from one such value to another, under the same schema version; it says so in a
+`BREAKING CHANGE:` footer and in its upgrade guide. Consumers must accept values they do not
+recognize. An enumeration this reference documents as frozen, such as the VM list's provisioning and
+initialization statuses, does not gain values. Changing the document's shape (removing a field,
+changing a type, changing collection order, or renaming a field or a value) requires a new schema
+version and an explicit compatibility period.
 
 ### Top-Level
 
