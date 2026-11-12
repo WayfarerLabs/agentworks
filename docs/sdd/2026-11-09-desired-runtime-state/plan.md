@@ -12,12 +12,12 @@ on `feat/desired-runtime-state`, based on main. No split PR, stack, early merge,
 is authorized. Private implementation commits may be partial; each published handoff is complete for
 its checkpoint and green. The PR remains draft until the complete implementation handoff.
 
-| Stage                   | Signal                                      | Published fix allowance                                  | Current record                            |
-| ----------------------- | ------------------------------------------- | -------------------------------------------------------- | ----------------------------------------- |
-| FRD                     | Draft plus `review-requested`               | Up to two rounds                                         | Converged at `c6337609d`, two rounds used |
-| Complete design         | Draft plus `review-requested`               | Up to two rounds                                         | Converged at `32a176600`; two rounds used |
-| Complete implementation | Ready                                       | Two original rounds plus one explicit supplemental round | Supplemental round active                 |
-| Closeout                | Final lock in the same PR after convergence | No new feature/fix allowance inferred                    | Lock and closeout checks completed        |
+| Stage                   | Signal                                      | Published fix allowance                                | Current record                            |
+| ----------------------- | ------------------------------------------- | ------------------------------------------------------ | ----------------------------------------- |
+| FRD                     | Draft plus `review-requested`               | Up to two rounds                                       | Converged at `c6337609d`, two rounds used |
+| Complete design         | Draft plus `review-requested`               | Up to two rounds                                       | Converged at `32a176600`; two rounds used |
+| Complete implementation | Ready                                       | Two original rounds plus two separately granted rounds | Reporting round active                    |
+| Closeout                | Final lock in the same PR after convergence | No new feature/fix allowance inferred                  | Lock and closeout checks completed        |
 
 The FRD convergence reading is PR comment 6762771633. The final report accepted prior corrections;
 its remaining phrase suggestion was independently assessed as optional. The HLA states uniform
@@ -626,3 +626,41 @@ private documentation check precede ready publication. The actual associated int
 critical feedback disposition and owned-resource cleanup remain open. Native GCP suspension/resume
 and the combined teardown behavior have not received a new live pass in this round. The supplemental
 allowance is spent; monitoring remains active after handoff.
+
+## 2026-11-12: authorized result-provenance round
+
+The operator explicitly authorized one more loop and resumed the goal. This is reporting round one
+of one; both original implementation rounds and the earlier supplemental round remain spent. Start
+comment 6831108523 freezes review 6791153955, actual integration report 6792039907 and the
+non-finding Copilot quota notice. Critical readings 6791241385 and 6792079135 agree on the one
+material result-provenance defect. No inline threads or later findings were published. The actual
+report and collection interval were complete before this round; the PR was verified draft at
+unchanged `4825c99d1` before edits.
+
+Report 6792039907 passed all twelve gates and the measured native functional cases at `4825c99d1`.
+Real GCP suspension/resume retained the boot and complete fingerprints, while cold recovery and
+Linux/Windows-to-Lima recovery also passed. The result omitted that an inactive parent's guest was
+not inspected. Correct that reporting consistently without changing retention, power, statuses,
+intent, schema, failure outcomes or native teardown. Current and preview results must preserve that
+distinction, including named consoles and final observations. Behavioral tests cover structural
+provenance and guest-free boundaries; authored prose remains a review concern.
+
+Fresh main `bc294be28b0ff1086e05222abc2a6eba63f1430a` adds MCP artifacts and harness closeout.
+Protected rules and skills are unchanged. Actual merge-tree found one artifact lifecycle test
+conflict; integrate both sides and inspect the automatic production merges. Imported foreign SDDs
+remain byte-identical to main. This is ordinary feature integration in the same PR, not new MCP
+work.
+
+- [ ] Integrate current main and preserve both artifact delivery and the desired-state lifecycle.
+- [ ] Correct inactive-parent observation provenance across actual/preview session and named Console
+      results, preserving failure detail and replacing stale provenance after real observations.
+- [ ] Obtain clean independent reviews and all required gates, then publish the exact green head.
+- [ ] Wait for the actual associated integration report, critically dispose of feedback and complete
+      follow-up lock/cleanup only after convergence.
+
+Optional callback API simplification and route-check deletion are declined as unnecessary to this
+reporting correction. A real stop trust-boundary regression is useful coverage to assess with the
+focused tests. One isolated owner implements source/tests/permanent collateral; the lead owns the
+SDD, architecture and handoff. No further round or PR merge is inferred. Completed worker/scout
+trees and their integrated subordinate branch were retired after the preceding report; the three
+review trees remain available. The goal stays active through monitoring and disposition.

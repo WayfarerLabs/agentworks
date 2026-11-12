@@ -234,3 +234,36 @@ The following evidence-only SDD update requires its own green CI before ready ha
 native results keep their original tested-head attribution. No fresh native GCP or combined teardown
 pass is inferred from these local checks. The new ready-triggered integration report and feedback
 disposition remain required; publication does not finish the active effort.
+
+## Completed supplemental integration and reporting follow-up
+
+Actual report 6792039907 tested `4825c99d1634855f057b2983b139ab1d08fd5e04` against main `07feb4a45`,
+ready event 35775308963. All twelve gates returned zero on their first runs, including 12,611 tests
+passed and 34 skipped in 456.84 seconds. The noneditable wheel and all 499 installed members were
+verified, and six packaged CLI/provenance/help calls passed without repository fallback.
+
+Linux and Windows Server 2025 workstations against remote Lima passed routing, mixed-owner bulk
+teardown with a retained peer, actual cold recovery of two desired sessions plus a named Console,
+healthy identity preservation and artifacts. The two-worker overlap was measured at 4.458 and 10.734
+seconds respectively; CAS remained on the caller thread. Linux also passed a modeled
+provider-OFF/actually-running seam and a real missing-public-input workload barrier. The power seam
+is not native Lima suspension evidence.
+
+Linux against actual GCP/Debian 13 passed native suspension, guest-free OFF stop retaining all seven
+runtime fields, genuine trust refusal/import, real resume with stable instance/boot/fingerprints and
+peer, remembered stopped-target teardown, terminated/new-boot family recovery and healthy
+repetition. The only Important finding was unqualified result provenance: an OFF-derived STOPPED
+observation did not disclose skipped guest inspection. Review 6791153955 and independent source
+adjudication agree. Retention and native power behavior must remain intact while reporting is
+corrected.
+
+Native SUSPENDING was observed during induction, but the product settle branch was not exercised. No
+hard whole-operation HTTP deadline or fresh WSL/AWS/Azure/Proxmox/model-inference result is claimed.
+Tester helper and observer corrections retain their original attribution; saved witnesses do not
+imply replayed cold cycles. The legacy PID-null/access-grant fault remains outside this run.
+
+The report independently verified cleanup of all three guests, exact provider/process artifacts,
+databases, credentials/profiles and Windows roots. Unrelated retained fixtures were preserved. The
+operator then authorized one reporting round on 2026-11-12. Its updated main, new source,
+independent reviews, gates, exact-head CI and actual new integration report still require
+validation; the preceding native results are not silently transferred to a new head.

@@ -87,3 +87,11 @@ passed 12,611 tests with 34 skips. This evidence update must pass final CI befor
 actual associated integration report, critical feedback disposition and resource cleanup remain
 open. The original historical lock does not declare this follow-up finished. Monitoring stays
 active.
+
+On 2026-11-12, the operator authorized one more reporting loop. Completed report 6792039907 at
+`4825c99d1` passed all required gates and measured native GCP/Linux/Windows cases, but confirmed one
+Important provenance issue: inactive-parent results must disclose skipped guest inspection. The new
+round preserves validated fingerprints and power behavior, integrates current main `bc294be28`, and
+requires new independent review, gates, exact-head handoff and actual integration feedback. This
+historical lock does not close the active follow-up; the goal remains active through convergence,
+monitoring and cleanup.
