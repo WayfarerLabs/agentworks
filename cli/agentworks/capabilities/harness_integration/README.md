@@ -804,8 +804,8 @@ Known holes the current contract leaves open on purpose, so the boundaries read 
 
 - **Features and further artifact types.** Core provisioning prepares scoped env and declared
   artifact bundles before harness integrations handle or defer them. A future feature-emission stage
-  can fit between core and integrations. Core hint emission, hooks and MCP artifacts remain later
-  work; see [agent artifacts](../../artifacts/README.md) for the supported artifact types.
+  can fit between core and integrations. Core hint emission and hooks remain later work; see
+  [agent artifacts](../../artifacts/README.md) for the supported artifact types.
 - **Secrets and integration-owned environment.** The declare-and-receive secret plumbing is in place
   but no shipped integration declares a config secret. The session template's `env` chain, including
   secret-backed entries, is the supported way to put an env var (an API key, a tool config-dir
