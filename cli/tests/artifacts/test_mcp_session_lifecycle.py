@@ -82,7 +82,7 @@ def test_private_mcp_is_staged_before_teardown_and_committed_to_new_run_after(li
         assert server["env"] == {"TOKEN": "${TOKEN}"}
         observed.append(staged[0])
 
-    monkeypatch.setattr("agentworks.sessions.manager._lifecycle._teardown_session", teardown)
+    monkeypatch.setattr("agentworks.sessions.manager._teardown_session", teardown)
     lifecycle.restart()
     current = lifecycle.db.get_session("s1")
     assert current is not None and previous is not None
