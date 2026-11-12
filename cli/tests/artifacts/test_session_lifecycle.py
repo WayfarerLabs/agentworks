@@ -656,8 +656,8 @@ def test_real_native_probe_failure_preserves_existing_runtime_before_teardown(
     monkeypatch.setattr(module, "probe_native", observed)
     lifecycle.events.clear()
 
-    # The isolated transport's login shell rejects -lic, producing a real failed
-    # guest discovery process rather than a fabricated exception or inventory.
+    # A failed guest login produces a real process failure before native discovery.
+    (lifecycle.target.root / "login-shell").write_text("#!/bin/sh\nexit 9\n")
     with pytest.raises(StateError) as failure:
         lifecycle.restart()
     assert (failure.value.entity_kind, failure.value.entity_name) == ("session", "s1")

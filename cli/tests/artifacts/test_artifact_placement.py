@@ -20,7 +20,8 @@ from tests.artifacts.test_native_delivery import artifact
 def test_vm_plans_apply_supported_types_without_descendant_context(monkeypatch, integration_type):
     integration = integration_type.for_setup(owner_name="box", owner_kind="vm", facet="vm", config={})
     items = tuple(
-        replace(artifact(kind), origin=ArtifactOrigin("vm", "vm", "box", entry="review")) for kind in ArtifactType
+        replace(artifact(kind), origin=ArtifactOrigin("vm", "vm", "box", entry="review"))
+        for kind in (ArtifactType.HINT, ArtifactType.RULE, ArtifactType.SKILL, ArtifactType.AGENT)
     )
     if integration_type is not ShellIntegration:
         module = __import__(integration_type.__module__, fromlist=["probe_native"])

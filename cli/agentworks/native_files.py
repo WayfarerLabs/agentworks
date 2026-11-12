@@ -115,9 +115,10 @@ try:
     except FileNotFoundError:
         pass
     else:
+        if not stat.S_ISREG(os.fstat(source_fd).st_mode):
+            os.close(source_fd)
+            sys.exit(7)
         with os.fdopen(source_fd, 'rb') as source:
-            if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
-                sys.exit(7)
             metadata = os.fstat(source.fileno())
             mode = stat.S_IMODE(metadata.st_mode)
             if op == 'read':
@@ -227,10 +228,14 @@ _NON_REGULAR_PATH = 7
 _PATH_FAILURES = (_UNSUITABLE_PATH, _DENIED_PATH, _NON_DIRECTORY_PATH, _NON_REGULAR_PATH)
 
 
+class NativeFilePathError(StateError):
+    """A guarded guest path is unsuitable or inaccessible, without permitting unsafe I/O."""
+
+
 def _path_failure(subject: str, destination: str, returncode: int) -> StateError:
     """Name why a guarded path could not be used, from the guest program's status."""
     if returncode == _UNSUITABLE_PATH:
-        return StateError(
+        return NativeFilePathError(
             f"{subject} '{destination}' is a symlink",
             hint=(
                 "Agentworks never reads or writes through a link at this destination. Inspect the path and "
@@ -238,17 +243,17 @@ def _path_failure(subject: str, destination: str, returncode: int) -> StateError
             ),
         )
     if returncode == _NON_DIRECTORY_PATH:
-        return StateError(
+        return NativeFilePathError(
             f"{subject} '{destination}' requires real directories at every parent component",
             hint="Inspect the parent path components and restore the expected directory layout, then retry setup.",
         )
     if returncode == _NON_REGULAR_PATH:
-        return StateError(
+        return NativeFilePathError(
             f"{subject} '{destination}' is not a regular file",
             hint="Inspect the destination's file type and restore the expected regular file before retrying setup.",
         )
     if returncode == _DENIED_PATH:
-        return StateError(
+        return NativeFilePathError(
             f"{subject} '{destination}' cannot be accessed",
             hint="Check the ownership and mode of the file and each of its parent directories, then retry setup.",
         )

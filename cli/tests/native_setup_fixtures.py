@@ -10,10 +10,13 @@ from typing import cast
 
 import pytest
 
+from agentworks.artifacts.application import ArtifactApplication
 from agentworks.capabilities.harness_integration.setup import UserSetupInvocation
 from agentworks.db import VMRow
 from agentworks.harness_setup.model import NativeClaim, SetupRecord
+from agentworks.plugins._harness_native.native import setup_user
 from agentworks.plugins._harness_native.native_cli import NativeTool
+from agentworks.plugins._harness_native.native_config import NativeUserConfig
 from agentworks.ssh import SSHResult
 from agentworks.transports import Transport
 
@@ -30,7 +33,8 @@ class LocalFixtureTransport(Transport):
         # the host login shell here could read the operator's startup files.
         login_shell = root / "login-shell"
         login_shell.write_text(
-            '#!/bin/bash\n[ "$1" = "-lc" ] || exit 9\n. "$HOME/.profile"\nexec /bin/bash --noprofile --norc -c "$2"\n'
+            '#!/bin/bash\ncase "$1" in -lc|-lic) ;; *) exit 9 ;; esac\n'
+            '. "$HOME/.profile"\nexec /bin/bash --noprofile --norc -c "$2"\n'
         )
         login_shell.chmod(0o700)
         (self.home / ".profile").write_text('export PATH="$HOME/.local/bin:$PATH"\n')
@@ -106,6 +110,23 @@ def invocation(transport: LocalFixtureTransport, claims: list[tuple[NativeClaim,
         home=str(transport.home),
         environment=env or {},
     )
+
+
+def setup_fixture_user(
+    tool: NativeTool,
+    config: NativeUserConfig | None,
+    call: UserSetupInvocation,
+    *,
+    native_root: str | None = None,
+    mcp_destination: str | None = None,
+    skip_mcp: bool = False,
+) -> ArtifactApplication:
+    """Pass this fixture's selected paths without observing another login shell."""
+    target = cast(LocalFixtureTransport, call.runner)
+    variable = "CODEX_HOME" if tool == "codex" else "CLAUDE_CONFIG_DIR"
+    root = native_root or call.environment.get(variable) or target.environment[variable]
+    destination = mcp_destination or root + ("/config.toml" if tool == "codex" else "/.claude.json")
+    return setup_user(tool, config, call, native_root=root, mcp_destination=destination, skip_mcp=skip_mcp)
 
 
 def record(claims: tuple[NativeClaim, ...], tool: NativeTool) -> SetupRecord:

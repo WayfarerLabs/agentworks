@@ -6,7 +6,13 @@ from typing import TYPE_CHECKING, Annotated
 
 from pydantic import Field
 
-from agentworks.artifacts.declarations import AgentArtifactSpec, HintArtifactSpec, RuleArtifactSpec, SkillArtifactSpec
+from agentworks.artifacts.declarations import (
+    AgentArtifactSpec,
+    HintArtifactSpec,
+    MCPServerArtifactSpec,
+    RuleArtifactSpec,
+    SkillArtifactSpec,
+)
 from agentworks.artifacts.model import ArtifactType
 from agentworks.artifacts.names import ARTIFACT_NAME_PATTERN, MAX_ARTIFACT_NAME_LENGTH
 from agentworks.declared_resource import DeclaredResource
@@ -48,12 +54,16 @@ class ArtifactBundle(DeclaredResource):
     agents: dict[ArtifactName, AgentArtifactSpec] = Field(default_factory=dict)
     """Agent personas; each key must match the definition's frontmatter name."""
 
+    mcp_servers: dict[ArtifactName, MCPServerArtifactSpec] = Field(default_factory=dict)
+    """Canonical MCP server connections, keyed by artifact name."""
+
     def type_maps(self) -> tuple[tuple[ArtifactType, Mapping[str, ArtifactSpec]], ...]:
         return (
             (ArtifactType.HINT, self.hints),
             (ArtifactType.RULE, self.rules),
             (ArtifactType.SKILL, self.skills),
             (ArtifactType.AGENT, self.agents),
+            (ArtifactType.MCP_SERVER, self.mcp_servers),
         )
 
     def dependencies(self, context: FinalizeContext) -> list[ResourceReference]:

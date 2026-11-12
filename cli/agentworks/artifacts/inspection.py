@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.artifacts.bundle import resolve_bundle
+from agentworks.artifacts.model import ArtifactType
+from agentworks.artifacts.names import is_artifact_name, mcp_native_name
 from agentworks.errors import NotFoundError, StateError, ValidationError
 from agentworks.harness_setup.inputs import SetupInputs
 from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
@@ -26,6 +29,7 @@ if TYPE_CHECKING:
     )
     from agentworks.artifacts.routing import ArtifactOwnerView
     from agentworks.db import AgentRow, Database, SessionRow, VMRow, WorkspaceRow
+    from agentworks.harness_setup.model import NativeClaim
     from agentworks.machine_output import JsonObject
     from agentworks.resources.registry import Registry
 
@@ -93,7 +97,7 @@ class ArtifactMetadata:
     declared: bool
     input_id: str | None = None
     origin_id: str | None = None
-    native_name: str | None = None  # Canonical source name; recorded placements carry projected identities.
+    native_name: str | None = None  # Canonical source name, or the derived MCP registration key.
     source: str | None = None
     requested_ref: str | None = None
     revision: str | None = None
@@ -334,7 +338,7 @@ def _artifact_metadata(
                 declared,
                 item.identity,
                 item.origin_identity,
-                item.content.name,
+                mcp_native_name(item) if item.content.type is ArtifactType.MCP_SERVER else item.content.name,
                 item.provenance.source,
                 item.provenance.requested_ref or None,
                 item.provenance.commit or None,
@@ -381,7 +385,10 @@ def _integration_metadata(owner: SetupInputs, name: str, view: ArtifactOwnerView
     placements = (
         ()
         if record is None
-        else tuple(PlacementMetadata(item.path, item.native_identity, item.origins) for item in record.artifact_files)
+        else (
+            *(PlacementMetadata(item.path, item.native_identity, item.origins) for item in record.artifact_files),
+            *_mcp_placements(record.claims),
+        )
     )
     return IntegrationMetadata(
         name,
@@ -397,6 +404,21 @@ def _integration_metadata(owner: SetupInputs, name: str, view: ArtifactOwnerView
         destination if passthrough else None,
         skipped,
         () if record is None else record.incomplete_reasons,
+    )
+
+
+def _mcp_placements(claims: tuple[NativeClaim, ...]) -> tuple[PlacementMetadata, ...]:
+    """Project registration metadata only, including retained withdrawn entries."""
+    return tuple(
+        PlacementMetadata(claim.destination, claim.identifier, (claim.source,))
+        for claim in claims
+        if claim.role == "artifact-mcp-server"
+        and claim.source is not None
+        and re.fullmatch(r"[0-9a-f]{64}", claim.source) is not None
+        and is_artifact_name(claim.identifier)
+        and claim.destination.startswith("/")
+        and claim.destination.isprintable()
+        and all(part not in {"", ".", ".."} for part in claim.destination.split("/")[1:])
     )
 
 

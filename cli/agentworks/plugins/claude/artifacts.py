@@ -7,8 +7,9 @@ from typing import TYPE_CHECKING
 
 import yaml
 
-from agentworks.artifacts.application import ArtifactApplication, ArtifactFile
+from agentworks.artifacts.application import ArtifactApplication, ArtifactDeferral, ArtifactFile
 from agentworks.artifacts.model import ArtifactType
+from agentworks.artifacts.names import mcp_native_name
 from agentworks.artifacts.native.common import (
     NativeSessionArtifacts,
     ancestor_diagnostics,
@@ -17,15 +18,17 @@ from agentworks.artifacts.native.common import (
     json_text,
     persona_options,
     reject_flags,
+    select_inputs,
     select_session_artifacts,
     skill_files,
     validate_names,
     validate_native_argv,
 )
 from agentworks.artifacts.native.guidance import guidance_rules, guidance_skills
+from agentworks.artifacts.native.mcp import render_mcp
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Mapping, Sequence
 
     from agentworks.artifacts.application import SessionArtifactContext
     from agentworks.artifacts.model import ArtifactInput, ArtifactInputs
@@ -39,6 +42,7 @@ _SESSION_WORKAROUNDS = {
     ArtifactType.RULE: "session-skill-plugin",
     ArtifactType.SKILL: "session-skill-plugin",
     ArtifactType.AGENT: "session-agent-definitions",
+    ArtifactType.MCP_SERVER: "session-mcp-config",
 }
 
 
@@ -80,12 +84,21 @@ def session_artifacts(
     *,
     extra_args: Sequence[str],
     enabled_workarounds: Sequence[str] = (),
+    mcp_conflicts: Callable[[ArtifactInputs, SessionArtifactContext], Mapping[str, str]] | None = None,
 ) -> NativeSessionArtifacts:
     if context is None or not has_artifacts(context):
         return NativeSessionArtifacts()
     inputs, deferred = select_session_artifacts(context.inputs, enabled_workarounds, _SESSION_WORKAROUNDS)
+    mcp_inputs = select_inputs(
+        inputs, {item.identity for item in inputs.items() if item.content.type is ArtifactType.MCP_SERVER}
+    )
+    inputs = select_inputs(
+        inputs, {item.identity for item in inputs.items() if item.content.type is not ArtifactType.MCP_SERVER}
+    )
+    mcp = _session_mcp(context, mcp_inputs, extra_args, mcp_conflicts)
+    deferred = (*deferred, *mcp.application.deferred)
     if not inputs and not context.ancestor_files:
-        return NativeSessionArtifacts(ArtifactApplication(deferred=deferred))
+        return NativeSessionArtifacts(ArtifactApplication(mcp.application.files, deferred), mcp.argv)
     validate_names(inputs)
     if inputs:
         reject_flags(
@@ -99,7 +112,7 @@ def session_artifacts(
                 extra_args, {"--bare", "--settings", "--setting-sources", "--disable-slash-commands"}, "claude-code"
             )
     if not inputs:
-        return NativeSessionArtifacts(ArtifactApplication(deferred=deferred))
+        return NativeSessionArtifacts(ArtifactApplication(mcp.application.files, deferred), mcp.argv)
     plugin = f"{context.directory}/plugin"
     plugin_name = (
         "agentworks-"
@@ -119,7 +132,51 @@ def session_artifacts(
             files.extend(skill_files(f"{plugin}/skills", item, namespace=plugin_name + ":"))
         elif item.content.type is ArtifactType.AGENT:
             files.append(_persona_file(f"{plugin}/agents", item, namespace=plugin_name + ":"))
-    application = ArtifactApplication(tuple(files), deferred)
-    argv = ("--plugin-dir", plugin)
+    application = ArtifactApplication((*files, *mcp.application.files), deferred)
+    argv = ("--plugin-dir", plugin, *mcp.argv)
     validate_native_argv(argv)
     return NativeSessionArtifacts(application, argv)
+
+
+def _session_mcp(
+    context: SessionArtifactContext,
+    inputs: ArtifactInputs,
+    extra_args: Sequence[str],
+    inspect: Callable[[ArtifactInputs, SessionArtifactContext], Mapping[str, str]] | None,
+) -> NativeSessionArtifacts:
+    """Keep opted-in MCP configuration private to this invocation."""
+    items = tuple(inputs.items())
+    if not items:
+        return NativeSessionArtifacts()
+    conflicts = {token.split("=", 1)[0] for token in extra_args} & {
+        "--bare",
+        "--mcp-config",
+        "--strict-mcp-config",
+        "--",
+    }
+    if conflicts:
+        reason = "session-mcp-config conflicts with extra_args: " + ", ".join(sorted(conflicts))
+        return NativeSessionArtifacts(
+            ArtifactApplication(
+                deferred=tuple(
+                    ArtifactDeferral(input_id=item.identity, destination="session", reason=reason) for item in items
+                )
+            )
+        )
+    path = f"{context.directory}/mcp.json"
+    native_conflicts = {} if inspect is None else inspect(inputs, context)
+    servers = {}
+    selected = []
+    deferred = []
+    for item in items:
+        if item.identity in native_conflicts:
+            deferred.append(
+                ArtifactDeferral(input_id=item.identity, destination="session", reason=native_conflicts[item.identity])
+            )
+            continue
+        servers[mcp_native_name(item)] = render_mcp(item, "claude")
+        selected.append(item)
+    if not selected:
+        return NativeSessionArtifacts(ArtifactApplication(deferred=tuple(deferred)))
+    file = artifact_file(path, json_text({"mcpServers": servers}), tuple(selected))
+    return NativeSessionArtifacts(ArtifactApplication(files=(file,), deferred=tuple(deferred)), ("--mcp-config", path))

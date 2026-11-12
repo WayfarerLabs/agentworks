@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from agentworks.artifacts.application import OwnedArtifactFile
+from agentworks.artifacts.application import ArtifactApplication, OwnedArtifactFile
 from agentworks.artifacts.bundle import ArtifactBundle
 from agentworks.artifacts.capture import capture_artifacts
 from agentworks.artifacts.declarations import SkillArtifactSpec
@@ -32,7 +32,9 @@ def large_skill_setup(tmp_path, db, monkeypatch):
     login.write_text(
         login.read_text().replace('[ "$1" = "-lc" ] || exit 9', 'case "$1" in -lc|-lic) ;; *) exit 9 ;; esac')
     )
-    monkeypatch.setattr("agentworks.plugins.claude.harness_integration.setup_user", lambda *args: None)
+    monkeypatch.setattr(
+        "agentworks.plugins.claude.harness_integration.setup_user", lambda *args, **kwargs: ArtifactApplication()
+    )
     source = tmp_path / "source/review"
     (source / "support").mkdir(parents=True)
     (source / "SKILL.md").write_text("---\nname: review\ndescription: Review fixture\n---\nRead the fixture.\n")
