@@ -20,6 +20,7 @@ from agentworks.db import (
 from agentworks.errors import StateConflictError, StateError, UserAbort
 from agentworks.sessions import manager
 from agentworks.sessions.manager import _teardown
+from agentworks.vms.manager.boundary import require_vm_ssh_boundary
 from tests.runtime_state.test_composition import BOOT, REFUSE, seed_session, seed_vm
 from tests.runtime_state.test_composition import runtime as runtime
 
@@ -249,3 +250,29 @@ def test_real_public_acceptance_survives_failed_repair_before_status_or_teardown
     assert current.desired_runtime_state is DesiredRuntimeState.STOPPED
     assert current.session_uuid == selected.session_uuid
     assert current.pid is None and current.boot_id == BOOT
+
+
+@pytest.mark.parametrize("bulk", [False, True])
+def test_live_public_stop_without_host_trust_keeps_intent_and_refuses_guest_work(
+    db, make_config, runtime, monkeypatch, bulk
+):
+    from agentworks.execution import trust
+
+    seed_vm(db, "box")
+    _running(db, runtime[1], "work", "box")
+    trust.remove("box")
+    # The shared runtime fixture stubs this boundary for later lifecycle work.
+    # Restore the production boundary to exercise the actual refusal here.
+    monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", require_vm_ssh_boundary)
+    before = SessionRuntimeSnapshot.from_session(db.get_session("work"))
+    monkeypatch.setattr(manager, "transport", lambda *a, **k: pytest.fail("guest transport without trust"))
+    monkeypatch.setattr(manager, "_build_session_target", lambda *a, **k: pytest.fail("agent access without trust"))
+    monkeypatch.setattr(manager, "_teardown_session", lambda *a, **k: pytest.fail("teardown without trust"))
+    with pytest.raises(StateError):
+        if bulk:
+            manager.stop_all_sessions(db, make_config(), interaction=REFUSE)
+        else:
+            manager.stop_session(db, make_config(), name="work", interaction=REFUSE)
+    assert db.get_session("work").desired_runtime_state is DesiredRuntimeState.STOPPED
+    assert SessionRuntimeSnapshot.from_session(db.get_session("work")) == before
+    assert not runtime[2]

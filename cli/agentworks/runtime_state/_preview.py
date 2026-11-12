@@ -246,6 +246,7 @@ def _preview_sessions(invocation: RuntimeInvocation) -> None:
             invocation.results[("session", name)] = replace(
                 invocation.results[("session", name)],
                 observation=status,
+                observation_from_parent=power in OFF,
                 action=action,
                 reason=reason,
                 outcome=Outcome.CHANGED if changed else Outcome.UNCHANGED,
@@ -296,6 +297,7 @@ def _preview_consoles(invocation: RuntimeInvocation) -> None:
                 observation=classify_console_status(
                     canonical_present=canonical is ProbeStatus.PRESENT, staging_present=staging is ProbeStatus.PRESENT
                 ),
+                observation_from_parent=context.observed_status in OFF,
                 action=action,
                 outcome=Outcome.UNCHANGED if action == "unchanged" else Outcome.CHANGED,
             )

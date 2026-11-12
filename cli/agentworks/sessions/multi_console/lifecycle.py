@@ -200,16 +200,28 @@ def stop_console_runtime(
                             held_native_guard=guard,
                         )
                 _mc.execute_console_stop(prepared)
+                observation_from_parent = prepared.target is None
             except UserAbort:
                 raise
             except AgentworksError:
                 if observe_vm_runtime(context) not in {VMStatus.STOPPED, VMStatus.DEALLOCATED}:
                     raise
+                observation_from_parent = True
         finally:
             if context is not None:
                 context.clear_values()
             resolver.close()
-        output.result(f"Console '{name}' stopped")
+        _report_console_stop(name, observation_from_parent=observation_from_parent)
+
+
+def _report_console_stop(name: str, *, observation_from_parent: bool) -> None:
+    qualification = (
+        "; parent VM inactive, guest uninspected for this observation; "
+        "inactivity alone does not clear recorded runtime evidence"
+        if observation_from_parent
+        else ""
+    )
+    output.result(f"Console '{name}' stopped{qualification}")
 
 
 def attach_running_console(

@@ -42,10 +42,13 @@ class Outcome(StrEnum):
 
 @dataclass(frozen=True, kw_only=True)
 class RuntimeResult:
+    """One outcome with the source of its current observation, independent of earlier work."""
+
     kind: Kind
     name: str
     desired_runtime_state: DesiredRuntimeState | None
     observation: Observation = None
+    observation_from_parent: bool = False
     action: str = "inspect"
     outcome: Outcome = Outcome.UNCHANGED
     reason: str | None = None
@@ -107,6 +110,7 @@ class RuntimeInvocation:
         outcome: Outcome | None = None,
         action: str | None = None,
         observation: Observation = None,
+        observation_from_parent: bool = False,
         reason: str | None = None,
         desired_runtime_state: DesiredRuntimeState | None = None,
     ) -> None:
@@ -116,6 +120,9 @@ class RuntimeInvocation:
             outcome=outcome if outcome is not None else current.outcome,
             action=action if action is not None else current.action,
             observation=observation if observation is not None else current.observation,
+            observation_from_parent=observation_from_parent
+            if observation is not None
+            else current.observation_from_parent,
             reason=reason if reason is not None else current.reason,
             desired_runtime_state=desired_runtime_state
             if desired_runtime_state is not None
@@ -153,8 +160,15 @@ def render_results(results: tuple[RuntimeResult, ...], *, dry_run: bool = False)
         observed = result.observation.value if result.observation is not None else "unavailable"
         outcome = "would change" if dry_run and result.outcome is Outcome.CHANGED else result.outcome
         reason = f": {result.reason}" if result.reason else ""
+        qualification = (
+            "; parent VM inactive, guest uninspected for this observation; "
+            "inactivity alone does not clear recorded runtime evidence"
+            if result.observation_from_parent
+            else ""
+        )
         output.result(
-            f"{result.kind} '{result.name}': {outcome} ({result.action}; desired {target}; observed {observed}){reason}"
+            f"{result.kind} '{result.name}': {outcome} "
+            f"({result.action}; desired {target}; observed {observed}{qualification}){reason}"
         )
 
 

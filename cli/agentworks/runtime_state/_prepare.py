@@ -296,6 +296,7 @@ def prepare_infrastructure(invocation: RuntimeInvocation) -> None:
 def prepare_guest_workloads(invocation: RuntimeInvocation) -> None:
     import agentworks.sessions.manager as sessions
     import agentworks.sessions.multi_console as consoles
+    from agentworks.sessions.multi_console._status import ConsoleStatus
     from agentworks.transports import transport
     from agentworks.vms.manager import require_vm_ssh_boundary
 
@@ -342,6 +343,7 @@ def prepare_guest_workloads(invocation: RuntimeInvocation) -> None:
                     "session",
                     name,
                     observation=prepared_stop.observed_status,
+                    observation_from_parent=prepared_stop.parent_off,
                     action="checkpoint-runtime-identity" if prepared_stop.checkpoint_only else "stop",
                 )
         except UserAbort:
@@ -385,7 +387,13 @@ def prepare_guest_workloads(invocation: RuntimeInvocation) -> None:
                     invocation.db, console=console, vm=vm, target=target, held_native_guard=invocation.guards[vm.name]
                 )
                 invocation.console_stops[name] = prepared_console_stop
-                invocation.record("console", name, action="stop")
+                invocation.record(
+                    "console",
+                    name,
+                    action="stop",
+                    observation=ConsoleStatus.STOPPED if target is None else None,
+                    observation_from_parent=target is None,
+                )
         except UserAbort:
             raise
         except Exception as error:
@@ -396,6 +404,7 @@ def prepare_guest_workloads(invocation: RuntimeInvocation) -> None:
 
 
 def _guest_stop_failure(invocation: RuntimeInvocation, kind: Kind, name: str, vm_name: str, error: Exception) -> None:
+    from agentworks.sessions.multi_console._status import ConsoleStatus
     from agentworks.vms.manager import observe_vm_runtime
 
     try:
@@ -403,8 +412,12 @@ def _guest_stop_failure(invocation: RuntimeInvocation, kind: Kind, name: str, vm
             invocation.record(
                 kind,
                 name,
-                action="parent-off",
-                outcome=Outcome.CHANGED if name in invocation.accepted_changes else Outcome.UNCHANGED,
+                observation=SessionStatus.STOPPED if kind == "session" else ConsoleStatus.STOPPED,
+                observation_from_parent=True,
+                action="parent-off" if not invocation.unavailable(kind, name) else None,
+                outcome=(Outcome.CHANGED if name in invocation.accepted_changes else Outcome.UNCHANGED)
+                if not invocation.unavailable(kind, name)
+                else None,
             )
             return
     except UserAbort:

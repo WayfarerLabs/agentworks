@@ -52,6 +52,7 @@ def _completed(invocation: RuntimeInvocation, name: str, *, changed: bool) -> No
         "session",
         name,
         observation=SessionStatus.STOPPED,
+        observation_from_parent=invocation.stops[name].parent_off,
         outcome=Outcome.CHANGED if changed or name in invocation.accepted_changes else Outcome.UNCHANGED,
     )
     invocation.completed.add(("session", name))

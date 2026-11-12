@@ -196,7 +196,7 @@ def final_observations(invocation: RuntimeInvocation) -> None:
                 )
             else:
                 observed = SessionStatus.UNKNOWN
-            invocation.record("session", name, observation=observed)
+            invocation.record("session", name, observation=observed, observation_from_parent=power in OFF)
             if was_failed:
                 continue
             expected = (
@@ -240,7 +240,7 @@ def final_observations(invocation: RuntimeInvocation) -> None:
                 observed_console = consoles.observe_prepared_console(console_prepared)
             else:
                 observed_console = ConsoleStatus.UNKNOWN
-            invocation.record("console", name, observation=observed_console)
+            invocation.record("console", name, observation=observed_console, observation_from_parent=power in OFF)
             if was_failed:
                 continue
             expected_console = (

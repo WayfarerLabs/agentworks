@@ -113,6 +113,11 @@ session inactive without clearing that evidence. Once the VM is reachable, recon
 surviving runtime whose desired state is stopped. A real shutdown followed by a new boot uses the
 existing absence and recovery checks.
 
+Stop and reconciliation results qualify observations inferred from parent inactivity: the guest was
+not inspected for that observation, and inactivity alone does not clear recorded runtime evidence.
+This qualification also applies to previewed stopped targets. A fresh guest observation replaces
+that qualification; earlier native teardown in the same operation can still have cleared evidence.
+
 Named session stop stays synchronous. Bulk session stop runs complete-fingerprint dedicated runtimes
 concurrently and handles incomplete or shared-server compatibility work serially afterward. An
 actionable unknown runtime refuses destructive bulk teardown before any session is stopped; accepted

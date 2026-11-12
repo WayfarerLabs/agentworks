@@ -174,7 +174,10 @@ Cancellation propagates after reporting completed infrastructure effects. Every 
 provider and workload value copies, closes the Resolver, and releases holds and guards. `close()`
 clears owned values and refuses later reads or source calls, including when preparation never
 reached the workload boundary. Final observations are bounded checks of the current domain states,
-not an automatic retry loop or an uptime guarantee.
+not an automatic retry loop or an uptime guarantee. A result whose observation comes from parent
+inactivity discloses that the guest was not inspected for that observation. Result metadata updates
+retain this provenance; each fresh observation replaces it, even when the domain status is
+unchanged.
 
 Explicit named and bulk stops retain their selected rows through the shared boundary. Safe
 caller-thread PID repair then precedes status and teardown. Named stop retains its owning-user

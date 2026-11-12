@@ -175,6 +175,8 @@ def test_inactive_stop_retains_same_boot_memory_identity_for_later_safe_stop(
     peer_native = replace(model.residents["peer"])
     powers["box"] = VMStatus.STOPPED
     config = make_config()
+    rendered = []
+    monkeypatch.setattr("agentworks.runtime_state._service.render_results", lambda rows: rendered.extend(rows))
     if operation == "named":
         manager.stop_session(db, config, name="work", interaction=REFUSE)
     elif operation == "bulk":
@@ -182,6 +184,8 @@ def test_inactive_stop_retains_same_boot_memory_identity_for_later_safe_stop(
     else:
         reconcile_session(db, config, name="work", interaction=REFUSE)
 
+    result = next(row for row in rendered if row.kind == "session")
+    assert result.observation is SessionStatus.STOPPED and result.observation_from_parent
     inactive = db.get_session("work")
     assert inactive == replace(
         before, desired_runtime_state=DesiredRuntimeState.STOPPED, updated_at=inactive.updated_at
@@ -196,7 +200,10 @@ def test_inactive_stop_retains_same_boot_memory_identity_for_later_safe_stop(
 
     powers["box"] = VMStatus.RUNNING
     assert manager.check_session_status(inactive, target=_Target(model, "box")) is SessionStatus.RUNNING
+    rendered.clear()
     reconcile_session(db, config, name="work", interaction=REFUSE)
+    result = next(row for row in rendered if row.kind == "session")
+    assert result.observation is SessionStatus.STOPPED and not result.observation_from_parent
 
     assert model.killed == ["work"]
     assert not model.residents["work"].present
