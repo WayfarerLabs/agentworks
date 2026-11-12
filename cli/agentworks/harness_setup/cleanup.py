@@ -131,11 +131,21 @@ def _workspace_excludes(
                 if error is persistence_failure:
                     raise
                 incomplete(sanitize_setup_diagnostic(str(error), logger=target.logger if target is not None else None))
-        if incomplete_seen or any(
-            claim.role == GIT_EXCLUDE_ROLE and (new_path is None or claim.source != new_path)
+        retained = tuple(
+            claim
             for claim in current.claims
-        ):
+            if claim.role == GIT_EXCLUDE_ROLE and (new_path is None or claim.source != new_path)
+        )
+        if incomplete_seen or retained:
             failed.append(record.integration)
+            for claim in retained:
+                output.warn(
+                    sanitize_setup_diagnostic(
+                        f"Workspace '{workspace.name}' via {record.integration}: retained artifact exclusion "
+                        f"'{claim.identifier}' at recorded path '{claim.destination}'.",
+                        logger=target.logger if target is not None else None,
+                    )
+                )
     if failed:
         output.warn(
             f"Shared artifact exclusion cleanup for workspace '{workspace.name}' is unfinished "

@@ -650,11 +650,10 @@ sessions. Five rules, each earned:
   modeled argument, preserving literal profile names, model values, settings, and workload input.
 - **Render declared template fields in the integration.** Render designated `extra_args` once
   against the bound context with `self.render_context_argv`. Validate the effective vector and emit
-  those same values with ordinary shell quoting. `self.quote_context_argv` combines rendering and
-  quoting when the caller does not need to inspect the rendered value. A workspace path containing
-  an apostrophe remains one argument, and namespace-looking replacement data is not interpreted
-  twice. Shell renders its selected command field as operator-authored source with ordinary shell
-  quoting responsibilities. The manager never interpolates returned commands.
+  those same values with ordinary shell quoting. A workspace path containing an apostrophe remains
+  one argument, and namespace-looking replacement data is not interpreted twice. Shell renders its
+  selected command field as operator-authored source with ordinary shell quoting responsibilities.
+  The manager never interpolates returned commands.
 - **Model the common flags; leave the rest to `extra_args`.** A small optional vocabulary
   (`permission_mode`, `model`, `reasoning_effort`, workload inputs, and session preferences) plus an
   explicit `extra_args` list emitted after generated options keeps the integration useful without
