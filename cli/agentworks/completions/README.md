@@ -14,9 +14,9 @@ hashes it, and hands both to one of the three shell backends.
    this tree automatically; nothing here needs editing for the tree itself.
 
    Parameters use Typer's `type_descriptor.choices` for enum and literal values, and its argument
-   and option classes for flags and repeated operands. Groups recurse through `TyperGroup`.
-   These are Typer's classes, independent of the separate `click` dependency used for output and
-   prompts. Unsupported parameter classes fail generation explicitly.
+   and option classes for flags and repeated operands. Groups recurse through `TyperGroup`. These
+   are Typer's classes, independent of the separate `click` dependency used for output and prompts.
+   Unsupported parameter classes fail generation explicitly.
 
 2. **Dynamic values are not baked in.** `DYNAMIC_COMPLETIONS` in `spec.py` maps a
    `(command path, parameter name)` pair to an abstract completer id such as `workspaces`, `vms`, or
