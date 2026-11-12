@@ -398,6 +398,26 @@ reaching into private socket attributes, the operator chose:]
 
 > Round 8, document (Recommended)
 
+### 2026-11-12
+
+[Asked how console restore, start, create, add-sessions and add-shell should resolve their panes'
+secrets, which they resolved after the VM gate once live tmux showed which panes were missing,
+against ADR 0019's one boundary resolve per command, with the options to resolve every configured
+pane's secrets in the boundary pass (an operator may be prompted for panes that already exist, and a
+non-interactive run can fail on a secret it ends up not using), to probe tmux before the boundary
+and declare only the missing panes' secrets, or to keep the late resolves as a recorded exception,
+the operator chose:]
+
+> Resolve all up front (Recommended)
+
+[Asked whether the command reference's rule that JSON issue codes are fixed for schema version 1,
+and that changing a value's meaning needs a new schema version, should give way to practice (v0.19.0
+added `migration-pending` under v1, and this effort moves the activation-list case to the new
+`replacement-required` reason and issue code under v1 behind a BREAKING footer), or be followed by
+keeping the old values or bumping the schema version, the operator chose:]
+
+> Amend the contract text (Recommended)
+
 ### Rulings carried forward
 
 These predecessor rulings still hold, quoted from the transport-improv FRD.
