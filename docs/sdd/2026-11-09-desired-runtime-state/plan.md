@@ -12,12 +12,12 @@ on `feat/desired-runtime-state`, based on main. No split PR, stack, early merge,
 is authorized. Private implementation commits may be partial; each published handoff is complete for
 its checkpoint and green. The PR remains draft until the complete implementation handoff.
 
-| Stage                   | Signal                                      | Published fix allowance                                | Current record                                |
-| ----------------------- | ------------------------------------------- | ------------------------------------------------------ | --------------------------------------------- |
-| FRD                     | Draft plus `review-requested`               | Up to two rounds                                       | Converged at `c6337609d`, two rounds used     |
-| Complete design         | Draft plus `review-requested`               | Up to two rounds                                       | Converged at `32a176600`; two rounds used     |
-| Complete implementation | Ready                                       | Two original rounds plus two separately granted rounds | Reporting round active                        |
-| Closeout                | Final lock in the same PR after convergence | No new feature/fix allowance inferred                  | Original closeout recorded; follow-up pending |
+| Stage                   | Signal                                      | Published fix allowance                                | Current record                            |
+| ----------------------- | ------------------------------------------- | ------------------------------------------------------ | ----------------------------------------- |
+| FRD                     | Draft plus `review-requested`               | Up to two rounds                                       | Converged at `c6337609d`, two rounds used |
+| Complete design         | Draft plus `review-requested`               | Up to two rounds                                       | Converged at `32a176600`; two rounds used |
+| Complete implementation | Ready                                       | Two original rounds plus two separately granted rounds | Converged at `0d98185ac`                  |
+| Closeout                | Final lock in the same PR after convergence | No new feature/fix allowance inferred                  | Final source lock; cleanup tracked below  |
 
 The FRD convergence reading is PR comment 6762771633. The final report accepted prior corrections;
 its remaining phrase suggestion was independently assessed as optional. The HLA states uniform
@@ -509,7 +509,7 @@ permanent collateral. The incoming locked SDD remains untouched.
 - [x] Verify named versus filtered bulk stop, admin routing, strict bulk unknown refusal, original
       snapshot fencing, off-parent behavior, secret barriers and truthful interrupted completion.
       Obtain all three private lanes and required gates at one pinned candidate.
-- [ ] Publish the complete green supplemental handoff, wait for its actual associated integration
+- [x] Publish the complete green supplemental handoff, wait for its actual associated integration
       report and critically dispose of feedback before claiming convergence or finishing.
 
 This uses the one supplemental allowance. Later feedback belongs to a later batch and creates no new
@@ -655,9 +655,9 @@ work.
 - [x] Correct inactive-parent observation provenance across actual/preview session and named Console
       results, preserving failure detail and replacing stale provenance after real observations.
 - [x] Obtain clean independent reviews and all required gates on the pinned source candidate.
-- [ ] Publish the exact green final head with the complete scoped handoff.
-- [ ] Wait for the actual associated integration report, critically dispose of feedback and complete
-      follow-up lock/cleanup only after convergence.
+- [x] Publish the exact green reporting head with the complete scoped handoff.
+- [x] Wait for the actual associated integration report and critically dispose of feedback.
+- [ ] Complete follow-up lock/cleanup after convergence.
 
 Optional callback API simplification and route-check deletion are declined as unnecessary to this
 reporting correction. A real stop trust-boundary regression is useful coverage to assess with the
@@ -725,3 +725,39 @@ The following evidence-only update changes no source, tests, permanent teaching,
 policy. Its own CI and private artifact check precede ready publication. The new actual integration
 report, critical feedback disposition and follow-up lock/cleanup remain required. The reporting
 round allowance is spent; publication will not finish monitoring or the goal.
+
+## 2026-11-12: final follow-up convergence and closeout
+
+Reporting handoff 6832020300 published `0d98185ac6bd5a658aeebb1d4e0dcbd05d748694` and was verified
+ready at 18:14:57 UTC. CI 43275870348 passed all ten jobs. Its first Website attempt failed before
+the browser assertion because Chromium did not publish a DevTools endpoint. The isolated local case
+passed, and a Website-only retry plus the dependent aggregate passed on the same head. The original
+cause is unproven; no website source or workflow was changed.
+
+Actual integration report 6833682006 recommends that exact head as ready to merge against main
+`bc294be28`. It passed independent review of the feature/current-main composition, all twelve gates
+(12,990 tests passed and 35 skipped), installed wheel/member verification and fresh native
+campaigns. The reporting correction passed on Linux and Windows workstations, remote Lima, actual
+WSL2 and GCP/Debian 13.7. Native memory-preserving resume, cold recovery, named Consoles, healthy
+identity preservation, real batch secret barriers and strict Codex history continuation were
+measured. Codex used the owned loopback provider, not paid inference or MCP tool execution.
+
+Critical reading 6833761926 accepts that measured result with its explicit coverage and harness
+qualifications. The one-hour collection interval had elapsed; there are no open material findings.
+The previously carried importer race remains with its trust owner, and the GCP wall-clock caveat is
+not widened into a hard deadline claim. The report independently verified deletion of all five owned
+guests and their exact native/provider/database/credential artifacts while preserving standing beds.
+Full details and gaps remain in [validation.md](validation.md).
+
+This closes the authorized reporting round without another feature fix. The original FRD/design and
+implementation checkpoints, earlier directed follow-ups and the final reporting correction have
+converged in the same PR. The final source lock records that completed state. Only SDD closeout
+records change; application, tests, permanent guidance, dependencies and policy remain
+byte-identical to the tested head. The final evidence-only handoff still follows the normal
+exact-head CI and actual pipeline-answer contract; no further fix round or merge authority is
+inferred.
+
+The completed implementation branch and generic review tree were retired after source convergence.
+Project and complexity artifact review precede retirement of their worktrees. The cleanup boxes are
+checked only after the remaining task-owned worktrees, subordinate branches, caches and temporary
+build outputs are independently absent. The feature branch, PR and unrelated resources are retained.

@@ -315,3 +315,49 @@ The final evidence-only SDD update still needs its exact-head CI and artifact re
 handoff. Earlier native evidence remains attributed to `4825c99d1`; no live validation of this new
 reporting/main integration is inferred. Its actual ready-triggered report and critical disposition
 remain required, and the goal stays active through monitoring.
+
+## Final reporting convergence, 2026-11-12
+
+Report [6833682006](https://github.com/WayfarerLabs/agentworks/pull/885#issuecomment-6833682006)
+completed the actual ready-triggered pipeline at `0d98185ac6bd5a658aeebb1d4e0dcbd05d748694` against
+main `bc294be28`, recommending the tested head as ready to merge with no new product blocker.
+Independent review covered the feature delta and current-main composition. All twelve gates passed
+with 12,990 tests and 35 skips, 160 Python and 103 Node website tests and both deterministic build
+configurations. The installed wheel and its source-backed payload members matched the pinned source,
+and eleven installed CLI/version/help/guide calls passed without a release substitute.
+
+Fresh Linux aarch64 and Windows Server 2025 workstation campaigns covered remote Lima, actual WSL2
+3.0.3.0 and GCP/Debian 13.7. Both PowerShell generations were exercised. Actual/preview/stop output
+qualified parent-derived observations, preserved recorded evidence and reset provenance after fresh
+guest observations. GCP resume preserved instance, boot and complete session/Console fingerprints;
+terminated cold recovery preserved logical session UUIDs with fresh boot/run identities. Healthy
+repeats preserved native identities. Linux secret-failure cases had positive controls that then
+observed the intended session teardowns and provider stop. Strict Codex continuation preserved
+native history through two turns against an owned loopback provider, without paid inference or MCP
+tool execution.
+
+The explicit gaps remain Windows 11, fresh AWS/Azure/Proxmox/local-Lima backends, real-provider
+inference/OAuth, MCP tool execution, old-schema migration in this run and the named
+late-power/failure races. Existing source/tests and earlier native results retain their exact
+attribution. Native transition-settling and a hard whole-operation HTTP deadline are not inferred.
+Shared-engine WSL limits were measured without changing global configuration. Bed-specific SSH/SCP
+launchers retained explicit product trust arguments. Failed creates/rollback, observer
+serialization/socket/sentinel corrections and one rejected compound Shell command retain their
+original harness attribution. Complete old fingerprints can remain after verified absence; no manual
+database clearing was used. No full-guest scan with supplied private values is claimed. The
+initially over-delegated local join carrier and later omission remain a harness qualification, not a
+new product defect finding.
+
+Independent cleanup verified all five guests, native/provider/process absence, zeroed nine-table
+databases with integrity/FK checks, credential/profile retirement and Windows registry/VHDX/root
+absence. Standing resources were preserved. Critical reading
+[6833761926](https://github.com/WayfarerLabs/agentworks/pull/885#issuecomment-6833761926) accepts
+convergence with these limits; the existing importer race remains with its owner and is not waived.
+No material item remains open in the reporting batch.
+
+Final CI 43275870348 passed all ten jobs after one Website-only retry at unchanged `0d98185ac`. The
+original job failed before its browser assertion when Chromium did not publish its DevTools
+endpoint; the isolated local case and same-head retry passed. The cause remains unproven and no
+website/workflow source changed. The final closeout changes only SDD records and retains the tested
+source bytes, with artifact review, exact-head CI and the actual handoff answer required by
+delivery.

@@ -1,6 +1,7 @@
 # Desired runtime state: completed
 
-Date: 2026-11-10. Delivered in [PR #885](https://github.com/WayfarerLabs/agentworks/pull/885).
+Original closeout: 2026-11-10. Final follow-up source convergence: 2026-11-12. Delivered in
+[PR #885](https://github.com/WayfarerLabs/agentworks/pull/885).
 
 The implementation converged at `452eb0622520fcb816e6c9a0c6ff85f810ce5495`, containing main
 `1dd5a06dd330d947676fe130cc345fa93e64c797`. VMs, sessions and named consoles retain durable desired
@@ -108,3 +109,24 @@ all ten jobs in CI 43274224880. Its unchanged, non-overlapping root suite passed
 evidence update requires its own green CI and artifact review before ready handoff; the new actual
 integration report, feedback disposition and final follow-up cleanup/lock remain open. The goal
 remains active and no additional fix round or PR merge is inferred.
+
+## Final follow-up lock, 2026-11-12
+
+The complete source converged at `0d98185ac6bd5a658aeebb1d4e0dcbd05d748694`, containing main
+`bc294be28b0ff1086e05222abc2a6eba63f1430a`. All three private lanes and final artifact checks were
+clean, all twelve local gates passed with 12,990 tests and 35 skips, and CI 43275870348 passed all
+ten jobs after the documented same-head Website retry. Actual integration report
+[6833682006](https://github.com/WayfarerLabs/agentworks/pull/885#issuecomment-6833682006) completed
+independent PR review, installed-build checks and fresh native Linux/Windows-to-Lima, WSL2 and
+GCP/Debian campaigns. It confirmed the reporting correction and found no new product blocker. Native
+Codex continuity used the owned loopback provider and establishes no paid inference or MCP tool
+execution. Coverage limits, original harness failures and independently verified cleanup remain
+explicit in [validation.md](validation.md).
+
+Critical reading 6833761926 closes the material reporting finding after the full collection
+interval. The original stages and separately authorized follow-ups have converged; no additional
+feature work is required by this SDD. The final closeout modifies only evidence/plan/lock records
+and preserves the tested source bytes. Private artifact review and task-owned resource retirement
+precede the final handoff, whose exact-head CI and actual pipeline answer remain delivery
+requirements. A merge recommendation supplies no merge authorization. The goal is not completed
+merely by publishing this lock, and no merge is performed.
