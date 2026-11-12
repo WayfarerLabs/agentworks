@@ -455,10 +455,26 @@ receives an MCP amendment.
 
 - [x] Incorporate current main and resolve the sole conflict in native setup cleanup by preserving
       both common placement relocation and the new sanitized retained-exclusion warnings.
-- [ ] Validate the combined source and obtain project, Muntz and generic correctness reviews of the
+- [x] Validate the combined source and obtain project, Muntz and generic correctness reviews of the
       merge resolution before the new handoff.
-- [ ] Push the exact green head, update the PR description and handoff, and restore ready state
+- [x] Prepare the complete source and collateral update for exact pushed-head CI and a ready handoff
       without `review-requested` for the separate integration-test session.
+
+The combined runtime at `90474acd` passed 12,596 tests with 35 skips, full mypy across 992 files,
+Ruff/format, CI-equivalent Typer isolation and the fixture checks. Website checks passed 160 Python
+and 103 Node tests, with both deterministic build comparisons passing. Locks and Rulesync passed.
+The initial file check found line wrapping in the corrected database paragraph; formatting and its
+replay passed. Initial website builds refused an output path inside the checkout; the corrected
+builds used a separately owned directory, passed, and that directory was independently found absent.
+Original failed logs remain retained. No product code was changed for either validation correction.
+
+All three private lanes reviewed the source merge against both parents. They confirmed preservation
+of relocation, diagnostics, cancellation/persistence behavior and both locked predecessor trees.
+Muntz found that the database teaching brought in by closeout still described four artifact maps and
+capture v3. The correction describes five maps and v4 with v2/v3 readers; the integration README
+also stops calling MCP future work. These and the final records are documentation-only changes after
+the validated runtime. Final private follow-ups and the exact pushed CI/ready signal are verified
+before the public handoff; its comment records their actual outcome.
 
 The earlier integration report's missing managed resume evidence remains owed. Conflict resolution
 does not satisfy R6, complete phase 1, ship OAuth or justify the MCP SDD lock.
