@@ -448,11 +448,13 @@ harness_integration:
 ```
 
 Use a UUID from the refusal or inspect `claude agents --json` on the launch target as the launch
-user. `force_uuid` requires an existing transcript or live background record for that exact UUID. It
-also works when creating a session onto an existing conversation. It suppresses detachment checks
-while set, warns on every use, and persists the adopted UUID after a successful launch. Remove the
-field after adoption to restore detection. It conflicts with an explicit `--force-new`. No
-conversation is stopped or deleted; unselected branches remain available through Claude.
+user. `force_uuid` requires an existing transcript or a live background record for that exact UUID.
+Without a transcript, the Linux process start token and PID namespace must match the native record;
+missing or stale identity evidence fails explicit adoption. It also works when creating a session
+onto an existing conversation. It suppresses detachment checks while set, warns on every use, and
+persists the adopted UUID after verification, before launching the workload. Remove the field after
+adoption to restore detection. It conflicts with an explicit `--force-new`. No conversation is
+stopped or deleted; unselected branches remain available through Claude.
 
 When a previously started session has no transcript, or a parked job's short ID cannot be resolved
 to a full UUID, Agentworks warns and retains its ordinary launch policy. Inspect Claude's agents

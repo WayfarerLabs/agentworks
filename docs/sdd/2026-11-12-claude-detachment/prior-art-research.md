@@ -18,3 +18,9 @@ These existing boundaries support a plugin probe and a shared declaration marker
 
 Open verification limit: versioned Claude PID records are internal data; detection must degrade
 without changing transcript existence semantics when records are absent, malformed or unreadable.
+
+Native Claude Code 2.1.319's embedded registry reader was inspected locally. It addresses numeric
+PID filenames and records `procStart` and `pidDomain`. Linux identity combines `/etc/machine-id`
+with `/proc/self/ns/pid`; `procStart` is the starttime field of `/proc/PID/stat`. Forced adoption
+without a transcript requires these identities to match a live non-zombie process. Process existence
+alone cannot distinguish a reused PID. No operator registry records were inspected.

@@ -202,9 +202,6 @@ class ClaudeCodeIntegration(HarnessIntegration):
         """,
     )
 
-    # Set by _conversation on each start/restart; drives the ordinary
-    # HarnessStart note. None until the op runs (nothing decided yet).
-    _resumed: bool | None = None
     _artifact_plan: NativeSessionArtifacts = NativeSessionArtifacts()
     _rendered_extra_args: tuple[str, ...] = ()
 
@@ -441,9 +438,10 @@ class ClaudeCodeIntegration(HarnessIntegration):
                 files=("/etc/claude-code/CLAUDE.md",),
             )
         command = self._resume_or_launch(sid, resume=resume)
+        self._state["session_id"] = sid
         if intent is HarnessLaunchIntent.FORCE_NEW:
             note = "Fresh Claude Code session requested. Starting a new one without resuming prior state..."
-        elif self._resumed:
+        elif resume:
             note = "Existing Claude Code session found. Resuming..."
         elif intent is HarnessLaunchIntent.CREATE:
             note = "Starting a new Claude Code session..."
@@ -472,12 +470,19 @@ class ClaudeCodeIntegration(HarnessIntegration):
                 )
         if resume_only and forced is None and not (isinstance(stored_sid, str) and stored_sid):
             raise self._resume_only_error()
-        sid = forced if forced is not None else self._session_id(fresh=fresh)
+        sid = forced or (stored_sid if not fresh and isinstance(stored_sid, str) and stored_sid else str(uuid.uuid4()))
         launch_target = ctx.admin_target() if self._admin else ctx.agent_target()
         resume = False
         if (not fresh or forced is not None) and launch_target is not None:
             try:
-                observed = probe_conversation(launch_target, sid, detect=forced is None)
+                context = self._session_binding.artifact_context
+                observed = probe_conversation(
+                    launch_target,
+                    sid,
+                    detect=forced is None,
+                    environment=context.environment if context is not None else {},
+                    redactions=context.redactions if context is not None else (),
+                )
             except StateError as error:
                 raise StateError(
                     f"session '{self._session_name}' on {self._target_label}: {error}",
@@ -521,9 +526,6 @@ class ClaudeCodeIntegration(HarnessIntegration):
             )
         if resume_only and not resume:
             raise self._resume_only_error()
-        if forced is not None:
-            self._state["session_id"] = sid
-        self._resumed = resume
         return sid, resume
 
     def _resume_or_launch(self, sid: str, *, resume: bool) -> str:
@@ -578,25 +580,6 @@ class ClaudeCodeIntegration(HarnessIntegration):
             entity_name=self._session_name,
             hint="Retry without --resume-only to allow a new Claude Code conversation.",
         )
-
-    def _session_id(self, *, fresh: bool = False) -> str:
-        """The stored Claude session id, minted (and recorded in the state
-        blob) on first use. A v4 uuid: Claude accepts any valid uuid at
-        ``--session-id``, and global uniqueness keeps the transcript probe
-        slug-independent. ``self._state`` rides inside the session node's
-        full namespaced blob, which the manager persists after the op, so
-        a minted id survives to the next restart."""
-        sid = None if fresh else self._state.get("session_id")
-        if not isinstance(sid, str):
-            # If the op raises after this mint but before the manager
-            # persists the blob, the id is lost. That window is benign: it
-            # can only happen on a pre-migration session's FIRST restart
-            # (a create always persists its minted id with the new row);
-            # there, neither the old nor a re-minted id has a transcript,
-            # so the retry launches fresh either way, no history is lost.
-            sid = str(uuid.uuid4())
-            self._state["session_id"] = sid
-        return sid
 
     def _managed_flags(self) -> list[str]:
         """Managed argv tokens for this launch.

@@ -661,7 +661,7 @@ def test_real_native_probe_failure_preserves_existing_runtime_before_teardown(
     with pytest.raises(StateError) as failure:
         lifecycle.restart()
     assert (failure.value.entity_kind, failure.value.entity_name) == ("session", "s1")
-    assert observed.called
+    assert observed.called is (tool != "claude")
     current = lifecycle.db.get_session("s1")
     assert current is not None and previous is not None
     assert (current.session_uuid, current.run_id, current.pid) == (previous.session_uuid, previous.run_id, previous.pid)

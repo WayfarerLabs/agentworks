@@ -11,7 +11,7 @@ from pydantic import Field
 from agentworks.capabilities.config import validate_capability_config, validate_own_config
 from agentworks.errors import ConfigError
 from agentworks.plugins import Plugin, seated_plugin
-from agentworks.schema import AgwModel, InstanceOnly, RefOwner
+from agentworks.schema import AgwModel, InstanceOnly, RefOwner, ScalarShorthand, UnionScalarShorthand
 from agentworks.schema.declaration_scope import validate_declaration_scope
 from agentworks.source_location import SourceLocation
 from tests.plugins._fixtures import ConformingVMPlatform
@@ -151,3 +151,24 @@ def test_authored_model_instances_cannot_bypass_scope(authored: object) -> None:
 def test_unset_model_instance_defaults_are_not_declarations() -> None:
     authored = Child()
     validate_declaration_scope(authored, authored, owner=RefOwner(kind="session-template", name="parent"))
+
+
+class ShorthandChild(Child):
+    scalar_shorthand: ClassVar[ScalarShorthand] = ScalarShorthand(annotation=str, field="adopted")
+    kind: Literal["shorthand"] = "shorthand"
+
+
+class ShorthandConfig(AgwModel):
+    child: ShorthandChild | None = None
+    choice: (
+        Annotated[Ordinary | ShorthandChild, UnionScalarShorthand(discriminator="kind", arm=ShorthandChild)] | None
+    ) = None
+    children: list[ShorthandChild] = Field(default_factory=list)
+
+
+@pytest.mark.parametrize("raw", [{"child": "conversation"}, {"choice": "conversation"}, {"children": ["conversation"]}])
+def test_shorthand_cannot_bypass_template_restriction(raw: dict[str, object]) -> None:
+    validated = ShorthandConfig.model_validate(raw)
+    with pytest.raises(ConfigError):
+        validate_declaration_scope(validated, raw, owner=RefOwner(kind="session-template", name="parent"))
+    validate_declaration_scope(validated, raw, owner=RefOwner(kind="session", name="instance"))

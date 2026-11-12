@@ -363,8 +363,15 @@ def test_native_launch_carries_literal_artifact_guidance_on_new_and_resumed_thre
         state={"session_id": "939b1597-7c61-5ace-80f4-14617b7b4257"},
         artifact_context=context(item),
     )
-    method = "_transcript_exists" if implementation is ClaudeCodeIntegration else "_session_exists"
-    monkeypatch.setattr(integration, method, lambda *_args: resume)
+    if implementation is ClaudeCodeIntegration:
+        from agentworks.plugins.claude.conversation_probe import ConversationProbe
+
+        monkeypatch.setattr(
+            "agentworks.plugins.claude.harness_integration.probe_conversation",
+            lambda *args, **kwargs: ConversationProbe(resume),
+        )
+    else:
+        monkeypatch.setattr(integration, "_session_exists", lambda *_args: resume)
     result = integration.start(
         RunContext(admin_target=_FakeTarget()),
         intent=HarnessLaunchIntent.RESUME_OR_NEW if resume else HarnessLaunchIntent.CREATE,

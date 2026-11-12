@@ -570,7 +570,7 @@ def _stub_observation(
 
     calls: list[tuple[str, bool]] = []
 
-    def probe(target: object, sid: str, *, detect: bool = True) -> ConversationProbe:
+    def probe(target: object, sid: str, *, detect: bool = True, **kwargs: object) -> ConversationProbe:
         calls.append((sid, detect))
         return ConversationProbe(
             transcript_exists=present, candidates=candidates, background_exists=background, parked_job_ids=parked

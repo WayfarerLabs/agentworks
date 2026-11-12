@@ -8,9 +8,12 @@ import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from agentworks.errors import StateError
+from agentworks.errors import AgentworksError, StateError
+from agentworks.harness_setup.outcomes import sanitize_setup_error
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable, Mapping
+
     from agentworks.transports import Transport
 
 
@@ -43,42 +46,58 @@ def identity(value):
 def load_record(path):
     try:
         with path.open('rb') as stream:
-            data = stream.read(limit + 1)
-        return json.loads(data) if len(data) <= limit else None
+            data = stream.read(262145)
+        return json.loads(data) if len(data) <= 262144 else None
     except (OSError, ValueError, UnicodeError, RecursionError):
         return None
 
-def live(pid):
-    if type(pid) is not int or pid <= 0:
+try:
+    machine = pathlib.Path('/etc/machine-id').read_text().strip()
+    namespace = os.readlink('/proc/self/ns/pid')
+    domain = 'linux:' + machine + ':' + namespace if machine and namespace else None
+except OSError:
+    domain = None
+
+def live(record, pid):
+    # Native PID records bind a process start token and PID namespace, not
+    # merely an alive PID which another process may have reused.
+    expected = record.get('procStart')
+    if (domain is None or record.get('pidDomain') != domain
+            or not isinstance(expected, str) or not expected.isascii() or not expected.isdecimal()):
         return False
     try:
         os.kill(pid, 0)
-        return True
-    except PermissionError:
-        return True
-    except (OSError, OverflowError):
+        stat = pathlib.Path('/proc/%s/stat' % pid).read_text()
+        fields = stat[stat.rfind(')') + 2:].split(' ')
+        return fields[19] == expected and fields[0] not in ('Z', 'X')
+    except (OSError, ValueError, IndexError, OverflowError):
         return False
 
 records = []
 try:
     with os.scandir(root / 'sessions') as entries:
         for entry in entries:
-            if entry.name.endswith('.json'):
-                record = load_record(pathlib.Path(entry.path))
-                if isinstance(record, dict):
-                    records.append(record)
+            stem = entry.name.removesuffix('.json')
+            if not entry.name.endswith('.json') or not stem.isascii() or not stem.isdecimal():
+                continue
+            pid = int(stem)
+            if pid <= 1 or str(pid) != stem:
+                continue
+            record = load_record(pathlib.Path(entry.path))
+            if isinstance(record, dict):
+                records.append((pid, record))
 except OSError:
     pass
 background = any(record.get('kind') == 'bg' and record.get('sessionId') == sid
-                 and live(record.get('pid')) for record in records)
+                 and live(record, pid) for pid, record in records)
 parked = set()
 candidates = set()
 if detect:
-    for record in records:
+    for pid, record in records:
         job = record.get('parkedJobId')
         if record.get('sessionId') == sid and isinstance(job, str) and job and len(job) <= 128:
             parked.add(job)
-    for record in records:
+    for pid, record in records:
         candidate = identity(record.get('sessionId'))
         if (record.get('kind') == 'bg' and isinstance(record.get('jobId'), str)
                 and record['jobId'] in parked and candidate and candidate != sid):
@@ -123,13 +142,20 @@ if detect and path:
     except OSError:
         pass
 print('\nAGW_CLAUDE_CONVERSATION=' + json.dumps({
-    'transcript_exists': bool(path), 'candidates': sorted(candidates),
+    'candidates': sorted(candidates),
     'background_exists': background, 'parked_job_ids': sorted(parked)
 }, separators=(',', ':')))
 """
 
 
-def probe_conversation(transport: Transport, sid: str, *, detect: bool = True) -> ConversationProbe:
+def probe_conversation(
+    transport: Transport,
+    sid: str,
+    *,
+    detect: bool = True,
+    environment: Mapping[str, str] | None = None,
+    redactions: Iterable[str] = (),
+) -> ConversationProbe:
     """Probe exact stored UUID addressing in one login-shell round trip.
 
     Transcript existence failures raise. Optional metadata detection fails soft,
@@ -148,11 +174,16 @@ def probe_conversation(transport: Transport, sid: str, *, detect: bool = True) -
         f'out=$(find "$root" -name {shlex.quote(sid + ".jsonl")} -print -quit 2>/dev/null); rc=$?; '
         '[ -n "$out" ] || [ "$rc" -eq 0 ] || exit 6; fi; '
         'exists=0; [ -z "$out" ] || exists=1; '
-        'printf "\\nAGW_CLAUDE_TRANSCRIPT=%s\\n" "$exists"; '
         f'if command -v python3 >/dev/null 2>&1; then {program} "$out" {shlex.quote(sid)} '
         f'{"1" if detect else "0"}; fi; [ "$exists" -eq 1 ]'
     )
-    result = transport.run(f'"$SHELL" -lic {shlex.quote(inner)}', check=False)
+    try:
+        result = transport.run(
+            f'"$SHELL" -lic {shlex.quote(inner)}', check=False, env=dict(environment or {}), tty=False
+        )
+    except AgentworksError as error:
+        sanitize_setup_error(error, redactions=redactions, logger=transport.logger)
+        raise
     if result.returncode not in (0, 1):
         raise StateError(
             f"could not probe for the Claude transcript (exit {result.returncode}); "
@@ -160,9 +191,7 @@ def probe_conversation(transport: Transport, sid: str, *, detect: bool = True) -
             hint="Retry once the launch target is reachable.",
         )
     lines = result.stdout.splitlines()
-    exists = next((line.endswith("=1") for line in lines if line.startswith("AGW_CLAUDE_TRANSCRIPT=")), None)
-    if exists is None:
-        exists = result.returncode == 0
+    exists = result.returncode == 0
     fallback = ConversationProbe(exists)
     try:
         payload = next(

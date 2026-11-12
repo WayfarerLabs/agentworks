@@ -32,7 +32,8 @@ class _LocalTarget:
 
     def run(self, command: str, **kwargs: object) -> subprocess.CompletedProcess[str]:
         self.commands.append(command)
-        return subprocess.run(command, shell=True, env=self.env, capture_output=True, text=True, timeout=20)
+        environment = {**self.env, **cast(dict[str, str], kwargs.get("env") or {})}
+        return subprocess.run(command, shell=True, env=environment, capture_output=True, text=True, timeout=20)
 
 
 def _probe(target: _LocalTarget, *, detect: bool = True, sid: str = _SID) -> ConversationProbe:
@@ -110,58 +111,58 @@ def test_invalid_target_uuid_is_ignored(target: _LocalTarget) -> None:
 
 def test_parked_link_joins_exact_background_job(target: _LocalTarget) -> None:
     _transcript(target.root, [])
-    _session(target.root, "foreground.json", {"sessionId": _SID, "parkedJobId": "12ab3456"})
-    _session(target.root, "bg.json", {"kind": "bg", "jobId": "12ab3456", "sessionId": _PARKED})
+    _session(target.root, "101.json", {"sessionId": _SID, "parkedJobId": "12ab3456"})
+    _session(target.root, "102.json", {"kind": "bg", "jobId": "12ab3456", "sessionId": _PARKED})
     assert _probe(target) == ConversationProbe(True, (_PARKED,), False, ("12ab3456",))
 
 
 def test_parked_and_continuation_are_independent(target: _LocalTarget) -> None:
     _transcript(target.root, [_link()])
-    _session(target.root, "foreground.json", {"sessionId": _SID, "parkedJobId": "12ab3456"})
-    _session(target.root, "bg.json", {"kind": "bg", "jobId": "12ab3456", "sessionId": _PARKED})
+    _session(target.root, "101.json", {"sessionId": _SID, "parkedJobId": "12ab3456"})
+    _session(target.root, "102.json", {"kind": "bg", "jobId": "12ab3456", "sessionId": _PARKED})
     result = _probe(target)
     assert set(result.candidates) == {_NEXT, _PARKED}
     assert result.parked_job_ids == ("12ab3456",)
 
 
 def test_unresolved_short_job_id_remains_separate_from_uuid_candidates(target: _LocalTarget) -> None:
-    _session(target.root, "foreground.json", {"sessionId": _SID, "parkedJobId": "12ab3456"})
+    _session(target.root, "101.json", {"sessionId": _SID, "parkedJobId": "12ab3456"})
     assert _probe(target) == ConversationProbe(False, (), False, ("12ab3456",))
 
 
 def test_unrelated_and_prewarmed_background_records_are_excluded(target: _LocalTarget) -> None:
-    _session(target.root, "other.json", {"sessionId": _NEXT, "parkedJobId": "12ab3456"})
-    _session(target.root, "bg.json", {"kind": "bg", "jobId": "12ab3456", "sessionId": _PARKED})
-    _session(target.root, "prewarm.json", {"kind": "bg", "jobId": "aabbccdd", "sessionId": _NEXT})
+    _session(target.root, "103.json", {"sessionId": _NEXT, "parkedJobId": "12ab3456"})
+    _session(target.root, "102.json", {"kind": "bg", "jobId": "12ab3456", "sessionId": _PARKED})
+    _session(target.root, "104.json", {"kind": "bg", "jobId": "aabbccdd", "sessionId": _NEXT})
     assert _probe(target) == ConversationProbe(False)
 
 
 def test_force_can_verify_live_background_without_transcript(target: _LocalTarget) -> None:
-    _session(target.root, "bg.json", {"kind": "bg", "sessionId": _SID, "pid": os.getpid()})
+    _session(target.root, f"{os.getpid()}.json", _live_record())
     assert _probe(target, detect=False) == ConversationProbe(False, (), True)
 
 
 def test_force_ignores_links_and_parked_metadata(target: _LocalTarget) -> None:
     _transcript(target.root, [_link()])
-    _session(target.root, "foreground.json", {"sessionId": _SID, "parkedJobId": "12ab3456"})
+    _session(target.root, "101.json", {"sessionId": _SID, "parkedJobId": "12ab3456"})
     assert _probe(target, detect=False) == ConversationProbe(True)
 
 
 @pytest.mark.parametrize("pid", [None, -1, 0, "123", True, 2147483647])
 def test_force_cannot_verify_dead_or_malformed_pid(target: _LocalTarget, pid: object) -> None:
-    _session(target.root, "bg.json", {"kind": "bg", "sessionId": _SID, "pid": pid})
+    _session(target.root, "102.json", {"kind": "bg", "sessionId": _SID, "pid": pid})
     assert _probe(target, detect=False) == ConversationProbe(False)
 
 
 def test_foreground_pid_cannot_verify_background(target: _LocalTarget) -> None:
-    _session(target.root, "foreground.json", {"sessionId": _SID, "pid": os.getpid()})
+    _session(target.root, "101.json", {"sessionId": _SID, "pid": os.getpid()})
     assert _probe(target, detect=False) == ConversationProbe(False)
 
 
 def test_malformed_session_file_does_not_hide_valid_link(target: _LocalTarget) -> None:
     _transcript(target.root, [_link()])
-    _session(target.root, "malformed.json", {})
-    (target.root / "sessions" / "malformed.json").write_text("{")
+    _session(target.root, "105.json", {})
+    (target.root / "sessions" / "105.json").write_text("{")
     assert _probe(target) == ConversationProbe(True, (_NEXT,))
 
 
@@ -213,9 +214,9 @@ def test_no_claude_invocation_occurs(target: _LocalTarget, tmp_path: Path) -> No
 
 
 def test_bad_job_id_in_other_record_does_not_hide_parked_link(target: _LocalTarget) -> None:
-    _session(target.root, "foreground.json", {"sessionId": _SID, "parkedJobId": "12ab3456"})
+    _session(target.root, "101.json", {"sessionId": _SID, "parkedJobId": "12ab3456"})
     _session(target.root, "bad.json", {"kind": "bg", "jobId": [], "sessionId": _NEXT})
-    _session(target.root, "bg.json", {"kind": "bg", "jobId": "12ab3456", "sessionId": _PARKED})
+    _session(target.root, "102.json", {"kind": "bg", "jobId": "12ab3456", "sessionId": _PARKED})
     assert _probe(target).candidates == (_PARKED,)
 
 
@@ -247,3 +248,35 @@ def test_existence_survives_detection_program_failure(target: _LocalTarget, tmp_
     shell.chmod(0o700)
     target.env["SHELL"] = str(shell)
     assert _probe(target) == ConversationProbe(True)
+
+
+def test_configured_launch_environment_selects_probe_root(target: _LocalTarget, tmp_path: Path) -> None:
+    alternate = tmp_path / "configured-root"
+    _transcript(alternate, [_link()])
+    observed = probe_conversation(cast(Transport, target), _SID, environment={"CLAUDE_CONFIG_DIR": str(alternate)})
+    assert observed == ConversationProbe(True, (_NEXT,))
+
+
+def _live_record() -> dict[str, object]:
+    if not sys.platform.startswith("linux"):
+        pytest.skip("Native process identity verification targets Linux guests")
+    stat = Path(f"/proc/{os.getpid()}/stat").read_text()
+    start = stat[stat.rfind(")") + 2 :].split(" ")[19]
+    domain = "linux:" + Path("/etc/machine-id").read_text().strip() + ":" + os.readlink("/proc/self/ns/pid")
+    return {"kind": "bg", "sessionId": _SID, "pid": -1, "procStart": start, "pidDomain": domain}
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [("procStart", "0"), ("procStart", None), ("pidDomain", "different-host-or-namespace"), ("pidDomain", None)],
+)
+def test_force_rejects_stale_process_identity(target: _LocalTarget, field: str, value: object) -> None:
+    record = _live_record()
+    record[field] = value
+    _session(target.root, f"{os.getpid()}.json", record)
+    assert _probe(target, detect=False) == ConversationProbe(False)
+
+
+def test_non_pid_registry_filename_cannot_verify_background(target: _LocalTarget) -> None:
+    _session(target.root, "background.json", _live_record())
+    assert _probe(target, detect=False) == ConversationProbe(False)

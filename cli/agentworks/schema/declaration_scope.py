@@ -11,6 +11,7 @@ from pydantic import BaseModel, RootModel
 from agentworks.errors import ConfigError
 from agentworks.schema._shape import spine_metadata
 from agentworks.schema.errors import located
+from agentworks.schema.shorthand import scalar_shorthand_of
 from agentworks.value_provenance import longest_prefix_value
 
 if TYPE_CHECKING:
@@ -65,6 +66,8 @@ def validate_declaration_scope(
             raw = raw.root
         elif isinstance(raw, BaseModel):
             raw = {name: getattr(raw, name) for name in raw.model_fields_set}
+        if isinstance(value, BaseModel) and (shorthand := scalar_shorthand_of(type(value))) is not None:
+            raw = shorthand.folded(raw)
         if isinstance(value, RootModel):
             pending.append((value.root, raw, path))
         elif isinstance(value, BaseModel) and isinstance(raw, Mapping):
