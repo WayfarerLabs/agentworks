@@ -699,13 +699,14 @@ docstring's `Transport.run` half goes.
 **Two tighter bounds** (decision 5). `check_session_status` and pid repair are unbounded today, so a
 VM that stops answering stalls `session stop`, `session delete`, `session attach` and every status
 listing's repair pass. Their reads take the 10-second bound their bounded siblings already have
-(`_pending_launch_is_owned`, `session_description`); a read that runs out reads as unknown, which
-every caller already treats as fail-closed (`d193e48fd`). The batch status script loses its inner
-`sudo -n` and runs elevated as a whole (HLA D4: elevation is the whole operation). That rests on
-root being allowed to connect to an admin-owned tmux server, which tmux 3.3's `server-access` manual
-reads as always allowed for the owner and root; it is not measured yet, so batch C's first test runs
-the script as root against a real admin-owned tmux server, and if root is refused the batch is two
-requests, the admin's rows unelevated and the agents' elevated.
+(`_pending_launch_is_owned`, `session_description`); a read that runs out raises
+`ExecutionIncomplete` (`access_run_command`), which a listing reports as unknown and a lifecycle
+command surfaces before it changes anything, so both fail closed (`d193e48fd`). The batch status
+script loses its inner `sudo -n` and runs elevated as a whole (HLA D4: elevation is the whole
+operation). That rests on root being allowed to connect to an admin-owned tmux server, which tmux
+3.3's `server-access` manual reads as always allowed for the owner and root; it is not measured yet,
+so batch C's first test runs the script as root against a real admin-owned tmux server, and if root
+is refused the batch is two requests, the admin's rows unelevated and the agents' elevated.
 
 ### Consoles
 

@@ -90,7 +90,9 @@ def check_session_status(
 
     Every read runs on ``admin`` as one dispatch within the observation
     deadline (``observation_run_command``); one that does not complete raises
-    its typed error, which callers read as an unknown state.
+    its typed error (``ExecutionIncomplete`` for a missed deadline), which a
+    listing reports as unknown and a lifecycle command surfaces before it
+    changes anything.
 
     No DB side effects. Raises ``StateError`` when the session row predates
     the per-session-socket model introduced by the env-and-secrets SDD
