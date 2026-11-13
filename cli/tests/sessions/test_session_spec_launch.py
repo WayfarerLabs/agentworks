@@ -73,6 +73,8 @@ def test_omitted_spec_retains_stored_layer(db, make_config, runtime):
 @pytest.mark.parametrize(
     "raw",
     [
+        "",
+        " \t",
         "not-json",
         "[]",
         '{"inherits":["default"]}',
@@ -121,14 +123,13 @@ def test_rejected_restart_consent_preserves_overlay(db, make_config, runtime, mo
     assert runtime[2] == []
 
 
-@pytest.mark.parametrize("raw", ["{}", ""])
 @pytest.mark.parametrize(
     "payload", [VersionedPayload(1, {"unknown": "private-value"}), VersionedPayload(99, {"opaque": "private-value"})]
 )
-def test_clear_supersedes_unsupported_selected_overlay(db, make_config, runtime, captured_output, raw, payload):
+def test_clear_supersedes_unsupported_selected_overlay(db, make_config, runtime, captured_output, payload):
     _seed(db)
     db.instance_state.put_desired_overlay("session", "work", payload)
-    manager.start_session(db, make_config(), name="work", spec=raw, interaction=REFUSE)
+    manager.start_session(db, make_config(), name="work", spec="{}", interaction=REFUSE)
     assert _value(db) is None
     assert ("session-start", "work") in runtime[2]
     rendered = repr(captured_output.lines)

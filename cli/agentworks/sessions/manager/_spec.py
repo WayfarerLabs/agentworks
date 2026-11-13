@@ -111,7 +111,7 @@ def launch_with_spec(
     from ._lifecycle import _confirm_running_restart
 
     require_exact_tty_interaction_policy(interaction)
-    overlay = parse_instance_spec("session", "{}" if spec == "" else spec)
+    overlay = parse_instance_spec("session", spec)
     selected = _mgr._require_session(db, name)
     workspace = _mgr._require_workspace(db, selected.workspace_name)
     vm = _mgr._require_vm_for_workspace(db, workspace)
