@@ -609,7 +609,8 @@ Definition of done: create and reinit run entirely on the new transport.
       `_create_roll.py`, `_pids.py`) to `_assert_agent_access_works`, and delete the legacy probe.
 - [ ] Move `tests/workspaces/test_lifecycle_orchestrated.py` from substring matches over legacy
       command strings to assertions on the typed requests, as `test_backend_git_identity.py` did in
-      batch B. Batch C, once `delete_workspace` has no legacy target left.
+      batch B. Batch C, once `delete_workspace` has no legacy target left. Split the file by command
+      while moving it: at about 2,440 lines it is well past the repository's 1,000-line ceiling.
 - [ ] Re-prove incident rows I6a and I8.
 - [ ] Supersede ADR 0017.
 - [x] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
