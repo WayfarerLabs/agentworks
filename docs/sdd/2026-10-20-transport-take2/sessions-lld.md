@@ -572,14 +572,33 @@ then not absolute and normalized (`guest_path`'s rule) is a `ValidationError`, s
 (`normalized_guest_path`: empty and `.` components dropped, a leading `//` included, `..` kept)
 before the equality and overlap checks. Those checks compare spellings, and a link can make two
 spellings one directory, so inside the held span, after the directory checks and before the confirm,
-one admin probe resolves both on the guest (`realpath -z -e` of the source, `realpath -z -m` of the
-target, which need not exist) and the overlap check runs again on the resolved paths, with the same
-refusal. The walk itself stops at any path that is not absolute and has a 30-second deadline.
-`paths.vm_workspaces` is refused at load when it is not absolute, is `/`, or has a `..` component,
-which collapsing would move past a link, and is stored normalized. A stored workspace path is
-normalized for its tmuxinator config, so an earlier release's row such as `/data/ws/` still
-regenerates, and delete compares the console link's target normalized, and only an absolute one,
-since `realpath` would read a relative target from the request's directory.
+one probe resolves both on the guest as root, as the copy runs (`realpath -z -e` of the source,
+`realpath -z -m` of the target, which need not exist, and which prints a component it cannot search
+unresolved), and the overlap check runs again on the resolved paths, with the same refusal. The walk
+itself stops at any path that is not absolute and has a 30-second deadline. `paths.vm_workspaces` is
+refused at load when it is not absolute, is `/`, or has a `..` component, which collapsing would
+move past a link, and is stored normalized.
+
+**Stored workspace paths.** A row is persisted state, so it is read through one of two checks in
+`workspaces/guest.py`. `stored_workspace_path` normalizes it and refuses one that is not absolute;
+`addressable_workspace_path` refuses a `..` component too, which names a directory only once the VM
+resolves it and which the file operations never resolve. Migration 40 anchors a relative row to
+`managed_home(admin)/<path>` normalized, as 0.19's sudo ran from the admin's home, and leaves a `~`
+row as it is. The rows they treat differently:
+
+- A `~` row names no one directory. Rehome refuses it before anything runs. Delete warns, keeps the
+  directory and the config in it, and removes the row, sessions, grants, the console link (its path
+  needs only the admin's home and the name; only a link is removed, never followed) and the group.
+- A `..` row names its directory on the VM. Rehome takes it as a source, its probe resolving it, and
+  stores the target; that is its repair. Delete removes the directory on the stored spelling, and
+  the console link while its target and the stored config path agree canonicalized on both sides
+  (`realpath -s -m`); a relative target is never ours, since `realpath` would read it from the
+  request's directory.
+- The session commands' tmuxinator regeneration checks `addressable_workspace_path` before anything
+  runs and warns with the refusal's next step for either; a `ValidationError` from the requests
+  themselves still raises. `config_path` builds from the same check, so an earlier release's row
+  such as `/data/ws/` regenerates in its normalized spelling, and the Git exclusion work of delete
+  and rehome reads the row through `stored_workspace_path`.
 
 ### Workspace copy
 
