@@ -128,7 +128,7 @@ if detect and path:
             found = False
             for line in lines:
                 found = continuation(line) or found
-            if not found and start and not candidates:
+            if not found and start:
                 stream.seek(0)
                 while True:
                     line = stream.readline(limit + 1)

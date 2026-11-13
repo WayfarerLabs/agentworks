@@ -7,6 +7,10 @@ records; no directory recency or conversation-name inference is permitted. Scan 
 with bounded memory, using the tail as a fast path and the full stream when necessary. Return
 addressing metadata only, never prompt content.
 
+A parked candidate does not replace transcript evidence. If the tail contains no continuation, scan
+the full transcript even when the registry already supplied a candidate. The read saving applies
+when a continuation is found in the tail; ordinary restarts still require the full scan.
+
 The integration decides refusal, warning, forced adoption, and ordinary resume/new launch before
 runtime teardown. Core passes existing `last_started_at` into the session binding. No migration or
 new persistent history field is needed. The existing namespaced blob stores explicit adoption.

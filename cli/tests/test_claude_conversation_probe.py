@@ -116,8 +116,13 @@ def test_parked_link_joins_exact_background_job(target: _LocalTarget) -> None:
     assert _probe(target) == ConversationProbe(True, (_PARKED,), False, ("12ab3456",))
 
 
-def test_parked_and_continuation_are_independent(target: _LocalTarget) -> None:
-    _transcript(target.root, [_link()])
+@pytest.mark.parametrize("buried", [False, True])
+def test_parked_and_continuation_are_independent(target: _LocalTarget, buried: bool) -> None:
+    transcript = _transcript(target.root, [_link()])
+    if buried:
+        with transcript.open("a") as stream:
+            for _ in range(5000):
+                stream.write(json.dumps({"type": "assistant", "message": "x" * 80}) + "\n")
     _session(target.root, "101.json", {"sessionId": _SID, "parkedJobId": "12ab3456"})
     _session(target.root, "102.json", {"kind": "bg", "jobId": "12ab3456", "sessionId": _PARKED})
     result = _probe(target)
@@ -196,6 +201,7 @@ def test_probe_execution_failure_never_becomes_fresh(status: int) -> None:
         {"candidates": [1]},
         {"parked_job_ids": [""]},
         {"parked_job_ids": ["a" * 129]},
+        {"parked_job_ids": "abc"},
         {"background_exists": 1},
     ],
 )

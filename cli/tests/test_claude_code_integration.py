@@ -674,6 +674,18 @@ def test_force_warns_on_every_use(monkeypatch: pytest.MonkeyPatch) -> None:
     assert len(warnings) == 2
 
 
+def test_forced_background_without_transcript_emits_only_force_warning(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _stub_observation(monkeypatch, present=False, background=True)
+    warnings: list[str] = []
+    monkeypatch.setattr("agentworks.plugins.claude.harness_integration.output.warn", warnings.append)
+    result = _harness_integration({"force_uuid": _NEXT_SID}, last_started_at="2026-11-01T00:00:00Z").start(
+        _op_ctx(_FakeTarget())
+    )
+    assert _claude_argv(result)[:2] == ["--resume", _NEXT_SID]
+    assert calls == [(_NEXT_SID, False)]
+    assert len(warnings) == 1
+
+
 @pytest.mark.parametrize("value", ["", "af0980f9", "../a", "not-a-uuid", 42])
 def test_force_uuid_rejects_invalid_address(value: object) -> None:
     from pydantic import ValidationError

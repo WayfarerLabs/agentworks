@@ -220,8 +220,7 @@ def validate_capability_mapping(
     if model is None:
         return None
     hint = reference_hint(kind, name)
-    validated = _validated(model, mapping, owner=owner, location=location, hint=hint)
-    return validated
+    return _validated(model, mapping, owner=owner, location=location, hint=hint)
 
 
 def validate_own_config(

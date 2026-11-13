@@ -142,9 +142,11 @@ before guard acquisition, while the transaction check protects the later prepara
 Direct harness start also needs its own force-new preflight even with existing transcript evidence.
 New regressions cover both, malformed host probe output, and real Claude conversation/native-probe
 failure stages. Warning frequency remains behavioral coverage; the authored-text comparison is gone.
-A measured 11,850,142-byte transcript required only 131,072 transcript bytes on the tail fast path,
-justifying its retention. No supported guest predating Python 3.9 was found: the managed release
-registry is Debian 12/13, with distro Python installed by initialization.
+A measured 11,850,142-byte transcript with a continuation in its tail required only 131,072
+transcript bytes on that fast path, justifying its retention for this case. An ordinary restart
+without a pointer, or a buried continuation, still requires a full scan after the tail read. No
+supported guest predating Python 3.9 was found: the managed release registry is Debian 12/13, with
+distro Python installed by initialization.
 
 The isolated real CLI accepted an ordinary template, rejected direct and inherited forced UUIDs, and
 rendered valid session-template schema after removal of the unused extension. Its temporary home was

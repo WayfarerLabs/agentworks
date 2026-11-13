@@ -10,7 +10,8 @@ two signals independently. Versions do not predict which residue appears.
 
 File mtime, assistant output and unfiltered user records cannot establish human activity. No recency
 predicate is used. A tail-only scan misses continuation records buried beneath later work, so a
-streaming full scan is necessary when cheaper evidence yields no candidate.
+streaming full scan is necessary when the tail yields no continuation. A parked candidate must not
+suppress that fallback: the independent signals can name different conversations.
 
 The existing code at base 2253a6819 performs an exact UUID filename probe, keeps conversation
 addressing in harness namespaces, and validates effective config with declaring-owner provenance.
