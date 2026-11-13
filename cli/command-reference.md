@@ -1062,6 +1062,9 @@ source's owners and then gives it to the admin and the workspace group; an extra
 is interrupted leaves the partial tree in the new directory and no workspace row, so remove the
 directory before retrying.
 
+`workspace rehome <name>` moves the workspace to `--target`, an absolute path on the VM (a trailing
+`/` is dropped), or to the configured workspace directory without it.
+
 `workspace list` accepts `--vm` to narrow the result set to one VM's workspaces. An unknown name in
 the filter is an error, not an empty result.
 

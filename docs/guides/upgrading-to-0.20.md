@@ -244,6 +244,9 @@ the VM once no backup is running.
   failed request, now warns and leaves the session command's result standing, where a failure of the
   regeneration used to fail the command. To put workspaces on a data volume, mount it, or bind-mount
   a directory of it, at `paths.vm_workspaces` instead of linking it there.
+- **`workspace rehome --target` takes an absolute path.** A relative path, a `host:path`, the root,
+  or a path with an empty, `.` or `..` component is refused before anything runs; a trailing `/` is
+  dropped.
 - **`workspace copy` refuses an occupied destination.** A directory, file or link already at the new
   workspace's path is refused before anything is extracted, as `workspace create` refuses it, where
   the copy used to extract into it.
