@@ -9,7 +9,6 @@ import yaml
 
 from agentworks.artifacts.application import ArtifactApplication, ArtifactDeferral, ArtifactFile
 from agentworks.artifacts.model import ArtifactType
-from agentworks.artifacts.names import mcp_native_name
 from agentworks.artifacts.native.common import (
     NativeSessionArtifacts,
     ancestor_diagnostics,
@@ -25,7 +24,7 @@ from agentworks.artifacts.native.common import (
     validate_native_argv,
 )
 from agentworks.artifacts.native.guidance import guidance_rules, guidance_skills
-from agentworks.artifacts.native.mcp import render_mcp
+from agentworks.artifacts.native.mcp import mcp_input_conflicts, render_mcp
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -164,7 +163,10 @@ def _session_mcp(
             )
         )
     path = f"{context.directory}/mcp.json"
-    native_conflicts = {} if inspect is None else inspect(inputs, context)
+    input_conflicts = mcp_input_conflicts(inputs, "claude")
+    inspect_inputs = select_inputs(inputs, {item.identity for item in items if item.identity not in input_conflicts})
+    native_conflicts = {} if inspect is None or not inspect_inputs else inspect(inspect_inputs, context)
+    native_conflicts = {**native_conflicts, **input_conflicts}
     servers = {}
     selected = []
     deferred = []
@@ -174,7 +176,7 @@ def _session_mcp(
                 ArtifactDeferral(input_id=item.identity, destination="session", reason=native_conflicts[item.identity])
             )
             continue
-        servers[mcp_native_name(item)] = render_mcp(item, "claude")
+        servers[item.content.name] = render_mcp(item, "claude")
         selected.append(item)
     if not selected:
         return NativeSessionArtifacts(ArtifactApplication(deferred=tuple(deferred)))

@@ -17,7 +17,6 @@ from agentworks.artifacts.declarations import ArtifactsConfig
 from agentworks.artifacts.inspection import inspect_artifacts, inspection_data, render_artifacts
 from agentworks.artifacts.mcp import content_from_definition, parse_definition
 from agentworks.artifacts.model import ArtifactInput, ArtifactOrigin, ArtifactProvenance
-from agentworks.artifacts.names import mcp_native_name
 from agentworks.artifacts.native.shell import filesystem_artifacts
 from agentworks.artifacts.reporting import report_applied, report_deferrals
 from agentworks.artifacts.state import capture_owner, write_capture
@@ -170,7 +169,7 @@ def recorded_mcp(db: Database) -> tuple[Registry, CapturedArtifacts, SetupRecord
         claims=tuple(
             NativeClaim(
                 role="artifact-mcp-server",
-                identifier=mcp_native_name(item),
+                identifier=item.content.name,
                 destination="/home/user/config.json",
                 source=item.origin_identity,
                 sha256="a" * 64,
@@ -197,7 +196,7 @@ def test_inspection_projects_only_registration_metadata_without_io_or_secret_res
     monkeypatch.setattr(subprocess, "Popen", forbid)
     result = inspect_artifacts(db, registry, vm_name="vm")
     owner = result.owners[0]
-    assert [item.native_name for item in owner.artifacts] == [mcp_native_name(item) for item in snapshot.inputs.items()]
+    assert [item.native_name for item in owner.artifacts] == [item.content.name for item in snapshot.inputs.items()]
     placements = owner.integrations[0].placements
     assert len(placements) == 2
     assert [(item.path, item.native_identity, item.origins) for item in placements] == [
