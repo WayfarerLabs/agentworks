@@ -549,10 +549,10 @@ instead of `SSHLogger`.
 | Rehome probes                 | `test -d` old and new, `which rsync`, `test -d`, `rehome.py:180`, `:189`, `:235`, `:242`                                                                                                                    | `Command`s                                                                                                                                                    | admin                   |         | 10                        |
 | Rehome copy                   | `mkdir -p`, `chown`, `rsync -a` or `cp -a`, `:227-239`                                                                                                                                                      | `Command`s                                                                                                                                                    | root, admin for `rsync` |         | 600 for the copy          |
 | Rehome permissions            | `chown`, `chmod`, `find`, the traversal loop, `:253-277`                                                                                                                                                    | `Command`s; the loop a `Script(Shell.SH)` with the path as `$1`                                                                                               | root                    |         | 120 for `find`            |
-| Rehome tmuxinator             | `:292-302`                                                                                                                                                                                                  | as create; `remove_config` below                                                                                                                              | admin                   | content | 10                        |
+| Rehome tmuxinator             | `:292-302`                                                                                                                                                                                                  | as create, but `ln -sf` replaces the link to the old path, as today (`:301-304`); `remove_config` below                                                       | admin                   | content | 10                        |
 | Rehome remove old             | `rm -rf`, `:321`                                                                                                                                                                                            | `Command`                                                                                                                                                     | root                    |         | 60                        |
 | Repair                        | `which setfacl`, `apt-get install acl`, `getent`, `groupadd`, `id -nG`, `usermod`, `chown -R -c`, `chmod -c`, `find`, `getfacl -R` twice, the traversal loop, git identity, grant sync, `repair.py:130-433` | `Command`s, `env={"DEBIAN_FRONTEND": "noninteractive"}` for `apt-get` as `packages.py` sets it; the group and loop lines `Script(Shell.SH)`                   | root, admin for git     |         | today's: 60, 120          |
-| `remove_config`               | `rm -f <ws>/.tmuxinator.yml ~/.config/tmuxinator/<s>.yml`, `workspaces/tmuxinator.py:37`                                                                                                                    | `Command(("rm", "-f", "--", cfg, link))` on the admin's access; it takes `access: VMAccess`                                                                   | admin                   |         | 10                        |
+| `remove_config`               | `rm -f <ws>/.tmuxinator.yml ~/.config/tmuxinator/<s>.yml`, `workspaces/tmuxinator.py:37`                                                                                                                    | `Command(("rm", "-f", "--", cfg, link))` on the admin's access; it takes `access: VMAccess` and the admin's home, for the link                                | admin                   |         | 10                        |
 
 The tmuxinator mode is 0600 because `write_file` copies a 0600 local temporary file with `scp`
 (`transports/base.py:296-300`), which keeps that mode without `-p`; batch B confirms it on a VM
@@ -595,9 +595,10 @@ directory and no workspace row, since the row is inserted after the extraction (
 today; the operator removes the directory before retrying.
 
 The group, directory, `chown -R` and `find` steps (`:171-193`) are `Command`s as in the workspaces
-table, and the tmuxinator write (`:230-233`) is as create's. The operation log is the destination's,
-closed in a `finally` as today (`fbf3ed505`); the source read is recorded in it too. Copying within
-one VM still goes through the workstation, as today.
+table, and the tmuxinator write (`:230-233`) is as create's, its link replaced with `ln -sf` as
+today (`:234`). The operation log is the destination's, closed in a `finally` as today
+(`fbf3ed505`); the source read is recorded in it too. Copying within one VM still goes through the
+workstation, as today.
 
 ### Sessions: the tmux primitives
 
