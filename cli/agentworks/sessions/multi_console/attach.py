@@ -396,7 +396,7 @@ def _prepare_vm_target(
                 held_native_guard=guard,
                 vm_node=node,
             )
-            activate_vm_runtime(context, resolve_secret=resolver.resolve_gate)
+            activate_vm_runtime(context)
             with context.node.hold_active():
                 yield vm, transport(vm, config)
     finally:

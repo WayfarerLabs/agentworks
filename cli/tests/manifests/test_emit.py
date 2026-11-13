@@ -48,6 +48,7 @@ from agentworks.manifests.spec_model import declarable_kinds, spec_model
 from agentworks.plugins import Plugin, seated_plugin
 from agentworks.schema import REF_SCHEMA_KEY, AgwModel, AgwRootModel, iter_field_docs
 from tests._emitted_schema import ref_extension
+from tests.conftest import fake_installed_programs
 from tests.manifests.conftest import uncomment
 from tests.plugins._fixtures import ConformingSecretBackend, ConformingVMPlatform
 
@@ -802,7 +803,10 @@ def test_a_capability_key_the_schema_rejects_is_rejected_on_every_host(
     from agentworks.config import load_config
     from agentworks.errors import ConfigError
 
-    monkeypatch.setattr("shutil.which", lambda name, found=limactl: found if name == "limactl" else None)
+    def which(name: str) -> str | None:
+        return limactl if name == "limactl" else None
+
+    fake_installed_programs(monkeypatch, which)
     typo = _a_document("vm-site", {"platform": {"name": "lima", "placement": {"mode": "ssh", "hst": "me@box"}}})
     assert _errors(document_schema("vm-site"), typo), "premise: the schema must reject this document"
 

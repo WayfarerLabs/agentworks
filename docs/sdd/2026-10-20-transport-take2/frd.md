@@ -301,6 +301,19 @@ script source stays out of logs, the operator chose:]
 
 > Sensitive qualifies all three (Recommended)
 
+### 2026-11-01, latest
+
+[Asked whether each slice should move its own commands onto the new code as it lands, or whether
+everything should be built in parallel, unused, and switched over in one go at the end, the operator
+chose:]
+
+> Per slice (Recommended)
+
+[Asked how to handle a VM created with an ephemeral Tailscale auth key whose node expired while it
+was stopped, which under the `vm start` ruling no longer rejoins on start, the operator chose:]
+
+> Document it (Recommended)
+
 ### 2026-11-04
 
 [Asked how to treat the cells the integration tester could not cover for PR A (I4 live, Debian 12
@@ -317,6 +330,53 @@ chose:]
 
 > Carry forward too (Recommended)
 
+### 2026-11-05
+
+[Told that agw cannot create a Debian 12 VM on any platform (create always uses the current release,
+by design under ADR 0025), so the carried Debian 12 cells can never be closed, and asked what should
+happen to them, the operator chose:]
+
+> Drop them (Recommended)
+
+[Asked what should happen to the OpenSSH 8.5 client cell, which only a shim faking the version
+string has exercised, the operator chose:]
+
+> Accept the shim (Recommended)
+
+### 2026-11-08
+
+[Told that #862's approved disposition had `vm delete` stop logging the node out of Tailscale, so
+every delete left an offline node behind, and offered three options (restore R7's logout through the
+root channel after the cheap checks and before the provider delete, with `vm rekey` recovering a VM
+whose delete then fails; remove the node through the Tailscale API after a confirmed delete; or keep
+warning only), the operator chose the first:]
+
+> Yes, I agree with your #1. Truthfully, if a user deletes a VM, they want it gone. It being off
+> Tailscale at that point really isn't a problem imho and "solving" for getting it back on Tailscale
+> isn't really a concern (rekey is perfect).
+
+[On the error a delete that fails after the logout raises:]
+
+> And again, the error should assume that you want to continue with the deletion. The primary
+> instruction should be how to finish the delete manually. rekey should only be provided as a "to
+> get this node back on Tailscale.." aside.
+
+[On fixing findings during review rounds:]
+
+> And issues are fine if it really doesn't make sense to fix them at this time. I'm generally going
+> to lean towards ripping the bandaid now if it's at all related, though. It all has to work
+> together at the end of the day, right?
+
+### 2026-11-11
+
+[Asked whether #866 may take an eighth feedback round for the round 7 integration report, and how to
+handle a Proxmox API response that keeps arriving past a root call's deadline (the HTTP client
+bounds each socket wait, not a whole response), with the options to document the per-wait bound in
+the platform contract and LLD, or to enforce a whole-response bound by replacing `urllib` or
+reaching into private socket attributes, the operator chose:]
+
+> Round 8, document (Recommended)
+
 ### Rulings carried forward
 
 These predecessor rulings still hold, quoted from the transport-improv FRD.
@@ -325,7 +385,7 @@ On guest cancellation (2026-09-17):
 
 > Yeah, I'm confortable deferring cancellation for now.
 
-<!-- cspell:ignore confortable concious -->
+<!-- cspell:ignore confortable concious bandaid -->
 
 On shell selection (2026-09-18):
 

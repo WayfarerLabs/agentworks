@@ -2,25 +2,28 @@
 
 from __future__ import annotations
 
-import contextlib
 from typing import TYPE_CHECKING
 
-from agentworks.errors import StateError
+from agentworks.errors import StateError, ValidationError
 
 from ._helpers import (
-    _guard_failed_vm,
+    _guard_incomplete_vm,
     _require_vm,
     _resolve_workspace_for_vm,
 )
 from .boundary import (
     gated_vm_boundary,
-    gated_vm_platform_recovery_boundary,
+    gated_vm_platform_channel_boundary,
 )
 
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database
     from agentworks.secrets.policy import TtyInteractionPolicy
+
+# ssh's status for a dropped connection, and a status a shell's last command
+# can exit with too, so the notice names it without claiming the cause.
+_STATUS_CONNECTION_MAY_HAVE_DROPPED = 255
 
 # NOTE on ``_resolve_vm_admin_env_scopes`` / ``_vm_secret_target``: both
 # are defined in ``_helpers.py``, and tests monkeypatch them as
@@ -37,25 +40,20 @@ def shell_vm(
     config: Config,
     name: str,
     *,
-    platform_transport: bool = False,
+    native_shell: bool = False,
     workspace_name: str | None = None,
     interaction: TtyInteractionPolicy,
 ) -> int:
-    """Open a shell on a VM as the admin user.
+    """Open a shell on a VM as the admin user, or as Lima's own guest user under ``--platform`` on Lima.
 
     Returns the interactive session's exit code; the CLI layer owns the
     translation to process exit (check 9: no sys.exit in the service),
     mirroring :func:`exec_vm`.
 
     By default attaches over SSH through ``agentworks.execution``. Pass
-    ``platform_transport=True`` (the ``vm shell --platform`` flag) to
-    use the platform-native transport instead (``limactl shell`` for
-    Lima, ``wsl.exe`` for WSL2, SSH via public IP for Azure). That is
-    the right choice when Tailscale connectivity is the thing you need
-    to fix (e.g. healing the issue #117 latched DNS state, which
-    involves restarting tailscaled itself). The native shell is the
-    legacy part of the command, in ``platform_shell.py``, until the
-    platform surface moves.
+    ``native_shell=True`` (the ``vm shell --platform`` flag) to open the
+    platform's own shell instead (:func:`_shell_native`), the way in when
+    Tailscale itself is what needs fixing.
 
     When ``workspace_name`` is set, the shell ``cd``s into the workspace
     directory and the workspace template's env joins the env chain. The
@@ -73,16 +71,18 @@ def shell_vm(
     from agentworks.execution.access import Admin
     from agentworks.execution.requests import LoginShell
 
-    if not platform_transport:
-        # Before any database read or guard: an unsupported client refuses first.
-        execution.resolve_ssh()
+    if native_shell:
+        return _shell_native(db, config, name, workspace_name=workspace_name, interaction=interaction)
+
+    # Before any database read or guard: an unsupported client refuses first.
+    execution.resolve_ssh()
     vm = _require_vm(db, name)
     # Init failure warns instead of blocks: shelling into a partially-
     # initialized VM is exactly the kind of operation that lets the
     # operator diagnose what failed or apply a manual fix (e.g. healing
     # the issue #117 latched DNS state) before re-running reinit. Same
     # rationale applies to `vm exec` (see exec_vm below).
-    _guard_failed_vm(vm, allow_failed_init=True)
+    _guard_incomplete_vm(vm, allow_failed_init=True)
 
     # Resolve workspace before the transport-state guard: a cross-VM
     # mismatch is more diagnostic than "no Tailscale", so it should
@@ -90,7 +90,7 @@ def shell_vm(
     # secret resolution.
     ws = _resolve_workspace_for_vm(db, vm, workspace_name)
 
-    if not platform_transport and vm.tailscale_host is None:
+    if vm.tailscale_host is None:
         raise StateError(
             f"VM '{name}' has no Tailscale IP",
             entity_kind="vm",
@@ -98,8 +98,8 @@ def shell_vm(
             hint=(
                 "VM init may not be complete; check 'vm describe' for status. "
                 "If Tailscale itself is the problem you're trying to reach the "
-                "VM to fix, run with --platform to use the platform-native "
-                "transport instead."
+                "VM to fix, run with --platform to use the platform's own shell "
+                "instead, or 'agw vm recover' to repair it."
             ),
         )
 
@@ -116,32 +116,16 @@ def shell_vm(
     from agentworks.bootstrap import load_request_registry
 
     registry = load_request_registry(config, live_database=db)
-    if platform_transport:
-        from agentworks.vms.sites import resolve_site
-
-        platform = resolve_site(vm.site, registry)
-        if platform.native_shell_unavailable_hint is not None:
-            raise StateError(
-                f"VM platform '{platform.name}' does not provide an interactive native shell.",
-                entity_kind="vm",
-                entity_name=vm.name,
-                hint=platform.native_shell_unavailable_hint,
-            )
     scopes = _mgr._resolve_vm_admin_env_scopes(db, registry, vm, ws=ws)
 
-    boundary = gated_vm_platform_recovery_boundary if platform_transport else gated_vm_boundary
-    with contextlib.ExitStack() as stack:
-        vm_node, resolver, ops_ctx = stack.enter_context(
-            boundary(
-                db,
-                config,
-                registry,
-                vm,
-                targets=[_mgr._vm_secret_target(scopes, label=f"vm-shell={vm.name}")],
-                interaction=interaction,
-            )
-        )
-
+    with gated_vm_boundary(
+        db,
+        config,
+        registry,
+        vm,
+        targets=[_mgr._vm_secret_target(scopes, label=f"vm-shell={vm.name}")],
+        interaction=interaction,
+    ) as (_vm_node, resolver, _ops_ctx):
         from agentworks.vms.sites import site_platform_name
 
         ctx = ResourceContext(
@@ -159,25 +143,69 @@ def shell_vm(
             workspace=scopes.workspace,
             admin=scopes.admin,
         )
-
-        if platform_transport:
-            # --platform builds the platform-native transport, which on a
-            # cloud backend is an authenticated call: it gets the boundary's
-            # op-start context (site secrets scoped to the site's declared
-            # names), the same one the no-gate power commands hand their ops.
-            from .platform_shell import attach_via_native_transport
-
-            return attach_via_native_transport(
-                vm,
-                vm_node.site.platform,
-                config,
-                ctx=ops_ctx,
-                stack=stack,
-                workspace_path=ws.workspace_path if ws else None,
-                env=env,
-            )
         access = execution.vm_access(vm, config, Admin())
         return access.attach(LoginShell(cwd=ws.workspace_path if ws else None, env=env))
+
+
+def _shell_native(
+    db: Database,
+    config: Config,
+    name: str,
+    *,
+    workspace_name: str | None,
+    interaction: TtyInteractionPolicy,
+) -> int:
+    """``vm shell --platform``: the platform's own shell, which works without the VM's Tailscale.
+
+    Refused, before anything resolves, when combined with a workspace (the
+    native shell carries no environment and no working directory) and on a
+    platform that offers no native shell. The boundary composes no
+    environment target, so no environment secret resolves: the shell
+    gets the account's own login environment. Inside the platform-channel
+    gate, the platform runs the shell under the terminal guard with the
+    boundary's op-start context, which a cloud needs for its route.
+    ``SIGTERM`` and ``SIGHUP`` raise ``KeyboardInterrupt`` meanwhile, so what
+    the command holds is released.
+    """
+    from agentworks import output
+    from agentworks.bootstrap import load_request_registry
+    from agentworks.capabilities.vm_platform.base import require_native_shell
+    from agentworks.interrupts import termination_as_interrupt
+    from agentworks.terminal import guarded_terminal
+    from agentworks.vms.sites import resolve_site
+
+    if workspace_name is not None:
+        raise ValidationError(
+            "--workspace cannot be combined with --platform",
+            entity_kind="vm",
+            entity_name=name,
+            hint="Open the native shell without --workspace, then 'cd' into the workspace directory inside it.",
+        )
+    vm = _require_vm(db, name)
+    _guard_incomplete_vm(vm, allow_failed_init=True)
+    registry = load_request_registry(config, live_database=db)
+    require_native_shell(resolve_site(vm.site, registry), vm.name)
+
+    # A closed terminal or a SIGTERM unwinds like Ctrl-C, so the hold and a
+    # cloud's temporary firewall allow are released.
+    with (
+        termination_as_interrupt(),
+        gated_vm_platform_channel_boundary(db, config, registry, vm, interaction=interaction) as (
+            vm_node,
+            _resolver,
+            ops_ctx,
+        ),
+    ):
+        with guarded_terminal() as guard:
+            code = vm_node.site.platform.native_shell(vm, ops_ctx)
+            guard.clean_exit = code == 0
+        # After the guard: its exit pass leaves the alternate screen, which
+        # would wipe anything written before it closes.
+        if code == _STATUS_CONNECTION_MAY_HAVE_DROPPED:
+            output.warn(
+                f"the native shell ended with status {code} (the connection may have dropped); terminal restored."
+            )
+        return code
 
 
 def exec_vm(
@@ -224,7 +252,7 @@ def exec_vm(
     # twin of shell: both are diagnostic primitives, and running
     # `agw vm exec failed-vm cat /var/log/cloud-init.log` is precisely
     # the kind of investigation an operator does on a failed-init VM.
-    _guard_failed_vm(vm, allow_failed_init=True)
+    _guard_incomplete_vm(vm, allow_failed_init=True)
 
     ws = _resolve_workspace_for_vm(db, vm, workspace_name)
 

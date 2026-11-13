@@ -1,35 +1,35 @@
-"""Tests for ``agw vm shell --platform``.
+"""Tests for ``agw vm shell``'s routing and guards, and ``--platform``'s native shell.
 
-The platform-shell path uses the platform-native transport (limactl
-shell, wsl.exe, Azure SSH via public IP) instead of Tailscale SSH. It
-exists primarily so an operator can reach a VM to fix Tailscale itself
-(e.g. the issue #117 latched DNS state, whose heal involves stopping
-tailscaled and would terminate a Tailscale-SSH session mid-sequence).
-
-These tests pin the branching behavior in ``shell_vm`` and the early
-execution-only refusal. They mock the attach layer (a recording ``VMAccess``) so the
-tests stay hermetic.
+``--platform`` opens the platform's own shell (``native_shell``) instead of
+SSH to the tailnet address, so an operator can reach a VM to fix Tailscale
+itself. These tests pin its refusals before the boundary, its routing to the
+platform, and the terminal guard around it. They mock the attach layer (a
+recording ``VMAccess``) and the platform, so they stay hermetic.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
-from types import ModuleType, SimpleNamespace
+import contextlib
+import os
+import signal
+import sys
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.capabilities.base import RunContext
 from agentworks.db import Database, InitStatus, ProvisioningStatus
-from agentworks.errors import StateError
+from agentworks.errors import StateError, ValidationError
 from agentworks.execution.access import Admin
-from agentworks.execution.trust import HOST_TRUST
+from agentworks.execution.errors import FeatureUnavailable
 from agentworks.secrets.policy import TtyInteractionPolicy
 from tests.conftest import empty_secret_target, stub_build_registry, stub_vm_gates
 from tests.vm_access_support import AccessRecorder
 
 if TYPE_CHECKING:
-    pass
+    from collections.abc import Iterator
+    from pathlib import Path
+    from types import ModuleType
 
 
 @pytest.fixture(autouse=True)
@@ -44,7 +44,7 @@ def _seed_db(
     platform: str = "lima",
     tailscale_host: str | None = "100.64.0.5",
     init_status: InitStatus | None = None,
-    provisioning_status: ProvisioningStatus | None = None,
+    provisioning_status: ProvisioningStatus = ProvisioningStatus.COMPLETE,
 ) -> Database:
     """VM row in a fresh sqlite db. Defaults paint a healthy Lima VM;
     override individual fields to exercise other-platform branches or
@@ -55,37 +55,8 @@ def _seed_db(
         db.update_vm_tailscale("vm1", tailscale_host)
     if init_status is not None:
         db.update_vm_init_status("vm1", init_status)
-    if provisioning_status is not None:
-        db.update_vm_provisioning_status("vm1", provisioning_status)
+    db.update_vm_provisioning_status("vm1", provisioning_status)
     return db
-
-
-def _stub_target() -> object:
-    """Full transport double accepted by the platform-shell narrowing.
-
-    ``run`` returns an SSHResult-shaped object so ``target.run('echo ok',
-    timeout=10)`` succeeds without invoking a real subprocess.
-    ``interactive`` is the polymorphic method the shell flow calls.
-    """
-    from agentworks.transports import SSHTransport
-
-    target = SSHTransport(trust=HOST_TRUST, host="203.0.113.8")
-    target.run = lambda *_a, **_k: SimpleNamespace(  # type: ignore[method-assign, assignment]
-        returncode=0,
-        stdout="ok",
-        stderr="",
-        ok=True,
-    )
-    target.interactive = lambda *_a, **_k: 0  # type: ignore[method-assign, assignment]
-    return target
-
-
-class _NullCM:
-    def __enter__(self) -> None:
-        return None
-
-    def __exit__(self, *_a: object) -> None:
-        return None
 
 
 def _make_config() -> object:
@@ -149,442 +120,193 @@ def test_shell_vm_raises_when_no_tailscale_host_and_no_platform_flag(
     db.close()
 
 
-def test_shell_vm_platform_flag_bypasses_tailscale_check(
+# -- --platform: the native shell ---------------------------------------------
+
+
+def _forbidden(*_args: object, **_kwargs: object) -> object:
+    raise AssertionError("reached work the native shell must not do")
+
+
+def _native_shell_platform(monkeypatch: pytest.MonkeyPatch, status: int, calls: list[str]) -> None:
+    """Give the gates' stub platform a native shell that records each VM it opens and exits ``status``."""
+    platform = stub_vm_gates(monkeypatch)
+
+    def native_shell(_platform: object, vm: object, ctx: object) -> int:
+        calls.append(getattr(vm, "name", "?"))
+        return status
+
+    monkeypatch.setattr(type(platform), "native_shell", native_shell, raising=False)
+
+
+def test_platform_shell_opens_the_native_shell_with_no_tailnet_address_and_no_environment(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """--platform is the path operators use when Tailscale isn't
-    available (or is the thing they're trying to fix). The function must
-    not raise the no-Tailscale-IP error when the flag is set."""
+    """A VM with no tailnet address still gets its native shell, and no environment is composed (R7)."""
     from agentworks.vms import manager as vm_manager
 
     db = _seed_db(tmp_path, tailscale_host=None)
-    interactive_log: list[bool] = []
-    _patch_common(monkeypatch, vm_manager, interactive_log=interactive_log)
+    attach_log: list[bool] = []
+    _patch_common(monkeypatch, vm_manager, interactive_log=attach_log)
+    calls: list[str] = []
+    _native_shell_platform(monkeypatch, 0, calls)
+    monkeypatch.setattr(vm_manager, "_resolve_vm_admin_env_scopes", _forbidden)
+    monkeypatch.setattr(vm_manager, "_vm_secret_target", _forbidden)
 
-    def _stub_platform_factory(*_a: object, **_k: object) -> object:
-        t = _stub_target()
-        t.interactive = lambda *_a, **_k: interactive_log.append(True) or 0  # type: ignore[attr-defined]
-        return t
-
-    monkeypatch.setattr(
-        "agentworks.transports.native_transport",
-        _stub_platform_factory,
+    status = vm_manager.shell_vm(
+        db,
+        _make_config(),  # type: ignore[arg-type]
+        "vm1",
+        native_shell=True,
+        interaction=TtyInteractionPolicy.REFUSE,
     )
 
-    # shell_vm returns interactive()'s exit code (0, stubbed); the CLI
-    # layer owns the process exit.
-    rc = vm_manager.shell_vm(  # type: ignore[arg-type]
-        db, _make_config(), "vm1", platform_transport=True, interaction=TtyInteractionPolicy.REFUSE
-    )
-    assert rc == 0
-    assert interactive_log == [True], "the interactive shell should have been opened"
+    assert status == 0
+    assert calls == ["vm1"]
+    assert attach_log == []  # never the SSH attach
     db.close()
 
 
-# -- Native-platform routing ----------------------------------------------
-
-
-def test_shell_vm_platform_uses_native_transport(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """When --platform is set, shell_vm must route through
-    ``transports.native_transport`` (fed by the bridge-dispatched
-    platform's ``native_transport``), NOT the canonical
-    ``transports.transport`` (which would go via Tailscale)."""
-    import contextlib
-
+def test_platform_shell_with_a_workspace_is_refused_before_anything_else(tmp_path: Path) -> None:
+    """Refused before the VM is even looked up: the database holds no VM, so any later check would fail differently."""
     from agentworks.vms import manager as vm_manager
 
-    db = _seed_db(tmp_path)  # tailscale_host populated; should still route via the native platform
-    interactive_log: list[bool] = []
-    _patch_common(monkeypatch, vm_manager, interactive_log=interactive_log)
+    db = Database(tmp_path / "test.db")
 
-    platform_calls: list[tuple[str, object]] = []
-
-    class _StubPlatform:
-        name = "stub"
-        native_shell_unavailable_hint = None
-
-        def preflight(self, ctx: object) -> None:
-            return None
-
-        def native_transport(self, vm: object, ctx: object, *, config: object | None = None) -> object:
-            platform_calls.append((getattr(vm, "name", "?"), config))
-            return _stub_target()
-
-        @contextlib.contextmanager  # type: ignore[arg-type]
-        def transient_route(self, vm: object, ctx: object, *, config: object | None = None):  # type: ignore[no-untyped-def]
-            yield
-
-        def vm_active(self, vm: object, *, config: object | None = None):  # type: ignore[no-untyped-def]
-            return contextlib.nullcontext()
-
-    # The orchestrated root reaches the platform through the node's
-    # site edge, whose only constructor is resolve_site; override the
-    # conftest stub (installed by _patch_common) with this test's
-    # platform-shaped stub.
-    monkeypatch.setattr(
-        "agentworks.vms.sites.resolve_site",
-        lambda name, registry: _StubPlatform(),
-    )
-
-    # Also pin the Tailscale path so it would explode if accidentally taken.
-    def _transport_must_not_be_called(*_a: object, **_k: object) -> object:
-        raise AssertionError(
-            "transports.transport must not be called when --platform is set",
+    with pytest.raises(ValidationError) as caught:
+        vm_manager.shell_vm(
+            db,
+            _make_config(),  # type: ignore[arg-type]
+            "vm1",
+            native_shell=True,
+            workspace_name="ws1",
+            interaction=TtyInteractionPolicy.REFUSE,
         )
 
-    monkeypatch.setattr(
-        "agentworks.transports.transport",
-        _transport_must_not_be_called,
-    )
-
-    assert (
-        vm_manager.shell_vm(  # type: ignore[arg-type]
-            db, _make_config(), "vm1", platform_transport=True, interaction=TtyInteractionPolicy.REFUSE
-        )
-        == 0
-    )
-
-    assert len(platform_calls) == 1
-    assert platform_calls[0][0] == "vm1"
+    assert caught.value.hint
     db.close()
 
 
-# -- Execution-only platform refusal -----------------------------------------
-
-
-def test_shell_vm_refuses_execution_only_platform_before_boundary_work(
+def test_a_platform_without_a_native_shell_is_refused_before_the_boundary_resolves_anything(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A declared lack of interaction refuses before secret or provider work."""
+    from agentworks.plugins.proxmox.platform import ProxmoxPlatform
     from agentworks.vms import manager as vm_manager
+    from tests._proxmox_fakes import PROXMOX_CONFIG
 
     db = _seed_db(tmp_path, platform="proxmox")
-    from agentworks.plugins.proxmox.platform import ProxmoxPlatform
-
-    platform = SimpleNamespace(
-        name="proxmox",
-        native_shell_unavailable_hint=ProxmoxPlatform.native_shell_unavailable_hint,
-    )
+    platform = ProxmoxPlatform("proxmox", dict(PROXMOX_CONFIG))
     monkeypatch.setattr("agentworks.vms.sites.resolve_site", lambda *_a, **_k: platform)
+    monkeypatch.setattr("agentworks.vms.manager.exec.gated_vm_platform_channel_boundary", _forbidden)
+    monkeypatch.setattr("agentworks.secrets.resolve_for_command", _forbidden)
 
-    def forbidden(*_args: object, **_kwargs: object) -> object:
-        raise AssertionError("early native-shell refusal reached boundary work")
-
-    monkeypatch.setattr(vm_manager, "gated_vm_platform_recovery_boundary", forbidden)
-    monkeypatch.setattr(vm_manager, "_resolve_vm_admin_env_scopes", forbidden)
-    monkeypatch.setattr("agentworks.transports.native_transport", forbidden)
-
-    with pytest.raises(StateError):
+    with pytest.raises(FeatureUnavailable) as caught:
         vm_manager.shell_vm(
             db,
             _make_config(),  # type: ignore[arg-type]
             "vm1",
-            platform_transport=True,
+            native_shell=True,
             interaction=TtyInteractionPolicy.REFUSE,
         )
 
-    db.close()
-
-
-def test_shell_vm_rejects_execution_only_transport_after_construction(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A platform declaration cannot substitute for the returned full type."""
-    from agentworks.vms import manager as vm_manager
-    from tests.native_exec_support import ExecutionOnlyTransport
-
-    db = _seed_db(tmp_path)
-    interactive_log: list[bool] = []
-    _patch_common(monkeypatch, vm_manager, interactive_log=interactive_log)
-    target = ExecutionOnlyTransport()
-    native_calls: list[str] = []
-
-    def _execution_only(*_args: object, **_kwargs: object) -> ExecutionOnlyTransport:
-        native_calls.append("called")
-        return target
-
-    monkeypatch.setattr("agentworks.transports.native_transport", _execution_only)
-
-    with pytest.raises(StateError) as caught:
-        vm_manager.shell_vm(
-            db,
-            _make_config(),  # type: ignore[arg-type]
-            "vm1",
-            platform_transport=True,
-            interaction=TtyInteractionPolicy.REFUSE,
-        )
-
-    assert caught.value.entity_kind == "vm"
     assert caught.value.entity_name == "vm1"
-    assert native_calls == ["called"]
-    assert target.calls == []
-    assert interactive_log == []
+    assert caught.value.hint == ProxmoxPlatform.native_shell_unavailable_hint
     db.close()
 
 
-def test_native_transport_opens_route_and_registers_close_for_azure(
+@pytest.mark.parametrize("status", [0, 1, 255])
+def test_the_native_shell_runs_under_the_terminal_guard_and_255_is_noted_after_it(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    status: int,
 ) -> None:
-    """On Azure, the native platform shell must open the scoped SSH route
-    (heal a missing public IP, converge the NSG, poke the ephemeral
-    allow) AND register the allow removal as an ExitStack callback. The
-    allow must come down regardless of how shell_vm unwinds (success,
-    SSH failure, ^C)."""
-    import contextlib
-
-    from agentworks.plugins.azure.platform import AzureVMPlatform
-    from agentworks.transports import SSHTransport, Transport
-    from agentworks.transports import native_transport as _native_transport
+    """The guard's exit pass leaves the alternate screen, so the 255 notice must come after it (I6)."""
     from agentworks.vms import manager as vm_manager
 
     db = _seed_db(tmp_path)
+    _patch_common(monkeypatch, vm_manager, interactive_log=[])
+    events: list[str] = []
+    calls: list[str] = []
+    _native_shell_platform(monkeypatch, status, calls)
+    clean_exits: list[bool] = []
 
-    open_calls: list[str] = []
-    close_calls: list[str] = []
+    @contextlib.contextmanager
+    def guard() -> Iterator[object]:
+        events.append("guard-enter")
+        handle = type("Guard", (), {"clean_exit": False})()
+        try:
+            yield handle
+        finally:
+            clean_exits.append(handle.clean_exit)
+            events.append("guard-exit")
 
-    class _FakeAzurePlatform(AzureVMPlatform):
-        # Chain super with a minimal valid config (validate re-runs
-        # at construct, so a bare {} would fail) so the base's cache slots
-        # exist even though the overrides below never touch Azure.
-        def __init__(self) -> None:  # noqa: D401
-            super().__init__(
-                "az-test",
-                {"subscription_id": "sub", "resource_group": "rg", "region": "eastus", "auth": {"mode": "ambient"}},
-            )
+    monkeypatch.setattr("agentworks.terminal.guarded_terminal", guard)
+    monkeypatch.setattr("agentworks.output.warn", lambda message: events.append("warn"))
 
-        def _ensure_public_ip(self, vm: object, ctx: object) -> None:
-            open_calls.append(f"heal:{getattr(vm, 'name', '?')}")
+    assert (
+        vm_manager.shell_vm(
+            db,
+            _make_config(),  # type: ignore[arg-type]
+            "vm1",
+            native_shell=True,
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+        == status
+    )
 
-        def _converge_nsg(self, vm: object, ctx: object) -> None:
-            open_calls.append(f"converge:{getattr(vm, 'name', '?')}")
-
-        def _poke_ssh_allow(
-            self, vm: object, ctx: object, extra_cidrs: list[str] | None = None
-        ) -> tuple[str, list[str]]:
-            open_calls.append(f"poke:{getattr(vm, 'name', '?')}")
-            return ("allow-ssh-transient-cafe0123", ["203.0.113.9/32"])
-
-        def _remove_ssh_allow(self, vm: object, ctx: object, rule_name: str, prefixes: list[str] | None = None) -> None:
-            close_calls.append(getattr(vm, "name", "?"))
-
-        def native_transport(self, vm: object, ctx: object, *, config: object | None = None) -> Transport:
-            # The factory probes ``target.run('echo ok', ...)``; the real
-            # SSHTransport.run would invoke a subprocess, so we wrap one
-            # whose ``run`` is a stub. Subclass so isinstance(target,
-            # SSHTransport) still narrows correctly.
-            t = SSHTransport(trust=HOST_TRUST, host="203.0.113.42")
-            t.run = lambda *_a, **_k: SimpleNamespace(  # type: ignore[method-assign, assignment]
-                returncode=0,
-                stdout="ok",
-                stderr="",
-                ok=True,
-            )
-            return t
-
-    vm = vm_manager._require_vm(db, "vm1")
-    with contextlib.ExitStack() as stack:
-        target = _native_transport(
-            vm,
-            _FakeAzurePlatform(),
-            _make_config(),
-            ctx=RunContext(),
-            stack=stack,
-        )  # type: ignore[arg-type]
-        # Heal, converge, poke must have run inside the stack scope.
-        assert open_calls == ["heal:vm1", "converge:vm1", "poke:vm1"]
-        # The allow removal must NOT have run yet; it fires on stack exit.
-        assert close_calls == []
-        assert isinstance(target, SSHTransport)
-        assert target.host == "203.0.113.42"
-
-    # Stack exited: the allow removal must have run exactly once.
-    assert close_calls == ["vm1"]
+    assert len(calls) == 1
+    assert events == ["guard-enter", "guard-exit", *(["warn"] if status == 255 else [])]
+    assert clean_exits == [status == 0]
     db.close()
 
 
-def test_native_transport_closes_allow_on_exception_for_azure(
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
+@pytest.mark.parametrize("signal_name", ["SIGTERM", "SIGHUP"])
+def test_a_terminated_native_shell_unwinds_so_what_it_holds_is_released(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    signal_name: str,
 ) -> None:
-    """The allow removal must be registered BEFORE any post-open call
-    that could raise, so the ephemeral SSH allow comes down regardless
-    of how the function unwinds. Without this contract a future refactor
-    that entered ``transient_route`` after ``native_transport`` would
-    silently leave the scoped allow in place on every error path.
-
-    Test: make ``native_transport`` raise after the route opened;
-    assert the allow removal still fired when the surrounding ExitStack
-    closes."""
-    import contextlib
-
-    from agentworks.plugins.azure.platform import AzureVMPlatform
-    from agentworks.transports import Transport
-    from agentworks.transports import native_transport as _native_transport
+    """Python ends on an unhandled SIGTERM or SIGHUP without running ``finally``, which would leave a cloud's
+    temporary firewall allow open. The shell turns them into an interrupt, so the route closes."""
     from agentworks.vms import manager as vm_manager
 
     db = _seed_db(tmp_path)
-    close_calls: list[str] = []
+    _patch_common(monkeypatch, vm_manager, interactive_log=[])
+    platform = stub_vm_gates(monkeypatch)
+    events: list[str] = []
+    number = getattr(signal, signal_name)
+    before = signal.getsignal(number)
 
-    class _AzureRaisesAfterOpen(AzureVMPlatform):
-        # Chain super with a minimal valid config; see _FakeAzurePlatform.
-        def __init__(self) -> None:  # noqa: D401
-            super().__init__(
-                "az-test",
-                {"subscription_id": "sub", "resource_group": "rg", "region": "eastus", "auth": {"mode": "ambient"}},
-            )
+    def native_shell(_platform: object, vm: object, ctx: object) -> int:
+        with _route(events):
+            os.kill(os.getpid(), number)
+            raise AssertionError(f"{signal_name} was not delivered as an interrupt")
 
-        def _ensure_public_ip(self, vm: object, ctx: object) -> None:
-            return None
+    monkeypatch.setattr(type(platform), "native_shell", native_shell, raising=False)
 
-        def _converge_nsg(self, vm: object, ctx: object) -> None:
-            return None
+    with pytest.raises(KeyboardInterrupt):
+        vm_manager.shell_vm(
+            db,
+            _make_config(),  # type: ignore[arg-type]
+            "vm1",
+            native_shell=True,
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
 
-        def _poke_ssh_allow(
-            self, vm: object, ctx: object, extra_cidrs: list[str] | None = None
-        ) -> tuple[str, list[str]]:
-            return ("allow-ssh-transient-cafe0123", ["203.0.113.9/32"])
-
-        def _remove_ssh_allow(self, vm: object, ctx: object, rule_name: str, prefixes: list[str] | None = None) -> None:
-            close_calls.append(getattr(vm, "name", "?"))
-
-        def native_transport(self, vm: object, ctx: object, *, config: object | None = None) -> Transport:
-            raise RuntimeError("simulated post-open failure")
-
-    vm = vm_manager._require_vm(db, "vm1")
-    with contextlib.ExitStack() as stack:
-        with pytest.raises(RuntimeError, match="simulated post-open failure"):
-            _native_transport(
-                vm,
-                _AzureRaisesAfterOpen(),
-                _make_config(),
-                ctx=RunContext(),
-                stack=stack,
-            )  # type: ignore[arg-type]
-        # ExitStack still open; the removal fires on stack exit, not before.
-        assert close_calls == []
-
-    # After stack exit, the allow removal fired despite the RuntimeError.
-    # This is the load-bearing invariant.
-    assert close_calls == ["vm1"]
+    assert events == ["route-open", "route-close"]
+    assert signal.getsignal(number) == before
     db.close()
 
 
-def test_native_transport_retries_reachability_probe(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """After Azure's transient_route opens the SSH route (pokes the
-    scoped ephemeral allow, or heals a missing public IP), the change
-    can take a few seconds to propagate through the SDN. The function
-    probes the target with target.run('echo ok', ...) and retries on
-    SSHError, so the operator's interactive ssh sees a reachable target
-    rather than Connection refused on the first attempt. Matches the
-    rekey_vm pattern."""
-    import contextlib
-
-    from agentworks.ssh import SSHError
-    from agentworks.transports import SSHTransport
-    from agentworks.transports import native_transport as _native_transport
-    from agentworks.vms import manager as vm_manager
-
-    db = _seed_db(tmp_path)
-
-    # Stub time.sleep so the retry loop doesn't add real wall-time.
-    # The function imports `time` inside the function body (not at module
-    # level), so patch the module's sleep directly.
-    import time as _time
-
-    monkeypatch.setattr(_time, "sleep", lambda *_a: None)
-    # Counter for run() calls so we can simulate "fails first 3 attempts,
-    # succeeds on the 4th."
-    run_call_count = {"n": 0}
-
-    def flaky_run(*_a: object, **_k: object) -> object:
-        run_call_count["n"] += 1
-        if run_call_count["n"] < 4:
-            raise SSHError("simulated propagation delay")
-        return SimpleNamespace(returncode=0, stdout="ok", stderr="", ok=True)
-
-    class _FlakyProvisioner:
-        name = "stub"
-
-        def native_transport(self, vm: object, ctx: object, *, config: object | None = None) -> object:
-            t = SSHTransport(trust=HOST_TRUST, host="203.0.113.42")
-            t.run = flaky_run  # type: ignore[method-assign, assignment]
-            return t
-
-        @contextlib.contextmanager  # type: ignore[arg-type]
-        def transient_route(self, vm: object, ctx: object, *, config: object | None = None):  # type: ignore[no-untyped-def]
-            yield
-
-    vm = vm_manager._require_vm(db, "vm1")
-    with contextlib.ExitStack() as stack:
-        target = _native_transport(
-            vm,
-            _FlakyProvisioner(),
-            _make_config(),
-            ctx=RunContext(),
-            stack=stack,
-        )  # type: ignore[arg-type]
-
-    # The probe retried until the 4th attempt succeeded; the function
-    # returned the now-reachable target rather than raising.
-    assert run_call_count["n"] == 4
-    assert isinstance(target, SSHTransport)
-    assert target.host == "203.0.113.42"
-    db.close()
-
-
-def test_native_transport_raises_defensively_on_empty_host(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Defensive guard: if a platform returns an SSHTransport with host=""
-    (e.g. an Azure NIC with no public IP whose heal silently failed, or a
-    future platform has a bug), surface a clear StateError rather than
-    letting interactive() hang trying to ssh to an empty hostname.
-
-    Uses a non-Azure stub platform so the route-opening path doesn't
-    fire; we want to test the empty-host guard in isolation."""
-    import contextlib
-
-    from agentworks.transports import SSHTransport
-    from agentworks.transports import native_transport as _native_transport
-    from agentworks.vms import manager as vm_manager
-
-    db = _seed_db(tmp_path)
-
-    class _BrokenProvisioner:
-        name = "stub"
-
-        def native_transport(self, vm: object, ctx: object, *, config: object | None = None) -> object:
-            return SSHTransport(trust=HOST_TRUST, host="")
-
-        @contextlib.contextmanager  # type: ignore[arg-type]
-        def transient_route(self, vm: object, ctx: object, *, config: object | None = None):  # type: ignore[no-untyped-def]
-            yield
-
-    vm = vm_manager._require_vm(db, "vm1")
-    with contextlib.ExitStack() as stack, pytest.raises(StateError) as exc_info:
-        _native_transport(
-            vm,
-            _BrokenProvisioner(),
-            _make_config(),
-            ctx=RunContext(),
-            stack=stack,
-        )  # type: ignore[arg-type]
-
-    err = exc_info.value
-    assert err.entity_kind == "vm"
-    assert "no host" in str(err) or "not be reachable" in str(err)
-    db.close()
+@contextlib.contextmanager
+def _route(events: list[str]) -> Iterator[None]:
+    events.append("route-open")
+    try:
+        yield
+    finally:
+        events.append("route-close")
 
 
 # -- Failed-init handling -----------------------------------------------------
@@ -634,6 +356,36 @@ def test_shell_vm_still_raises_on_failed_provisioning(
     err = exc_info.value
     assert "failed provisioning" in str(err)
     assert "vm delete" in (err.hint or "")
+    db.close()
+
+
+@pytest.mark.parametrize("status", [ProvisioningStatus.PENDING, ProvisioningStatus.IN_PROGRESS])
+@pytest.mark.parametrize("allow_failed_init", [False, True])
+def test_a_vm_whose_provisioning_never_completed_is_refused(
+    tmp_path: Path, status: ProvisioningStatus, allow_failed_init: bool
+) -> None:
+    """A killed create can leave a row pending or in progress with no arm run: never attested, so gated."""
+    from agentworks.vms.manager import _guard_incomplete_vm
+
+    db = _seed_db(tmp_path, provisioning_status=status)
+    vm = db.get_vm("vm1")
+    assert vm is not None
+
+    with pytest.raises(StateError) as caught:
+        _guard_incomplete_vm(vm, allow_failed_init=allow_failed_init)
+
+    assert caught.value.entity_name == "vm1"
+    db.close()
+
+
+def test_a_completed_vm_passes_the_gate(tmp_path: Path) -> None:
+    from agentworks.vms.manager import _guard_incomplete_vm
+
+    db = _seed_db(tmp_path)
+    vm = db.get_vm("vm1")
+    assert vm is not None
+
+    _guard_incomplete_vm(vm)
     db.close()
 
 

@@ -10,11 +10,11 @@
 A VM platform is a backend that provisions and manages virtual machines (VMs) for Agentworks. It
 abstracts the underlying infrastructure, allowing operators to create and manage VMs on different
 environments without changing the way they interact with Agentworks. The platform handles the
-creation, starting, stopping, and deletion of VMs, as well as providing a transport for executing
-commands on the VMs. On the full-control cloud platforms it also owns the VM's network exposure,
-locking it down by default and opening access only in a controlled, scoped way; on operator-managed
-hosts the existing perimeter stays authoritative and the platform does not touch it (see Security
-Posture below).
+creation, starting, stopping, and deletion of VMs, as well as providing its own channel for running
+core's root scripts on the VMs without Tailscale. On the full-control cloud platforms it also owns
+the VM's network exposure, locking it down by default and opening access only in a controlled,
+scoped way; on operator-managed hosts the existing perimeter stays authoritative and the platform
+does not touch it (see Security Posture below).
 
 ### Relationship to VM Sites
 
@@ -74,11 +74,11 @@ A vm-platform stands up a machine and hands Agentworks an administrative foothol
   matches.
 - **MUST NOT** gate existing-VM operations on the current creation release or image catalog.
 - **MUST** create the configured admin with passwordless `sudo`, SSH-key access, and no password.
-- **MUST** provide a native administrative `ExecTransport` that runs bounded, non-interactive
-  commands as the admin or root without depending on the VM's Tailscale state or identity.
-- Native interactive shell, streaming, and file transfer are optional. A platform that lacks native
-  interaction **MUST** declare `native_shell_unavailable_hint` with usable provider-console
-  guidance.
+- **MUST** implement `run_as_root`, core's channel for its own root scripts, which works without the
+  VM's Tailscale state or identity, and declare `recovery_needs_guest_sshd` (below).
+- A native interactive shell is optional: a platform offers one by overriding `native_shell`. A
+  platform without one **SHOULD** declare `native_shell_unavailable_hint` with usable
+  provider-console guidance.
 - **MUST** complete the Tailscale join before returning from `create()`.
 - **MUST** honor requested CPU, memory, and disk, rounding up to an available shape if needed. A
   backend that cannot set a per-VM shape **MUST** warn instead
@@ -159,8 +159,8 @@ replicating it in another category would cross the platform's ownership boundary
 3. **Local platforms** (local Lima, `wsl2`). The host is the operator's own machine and exposure is
    inherently host-local (Lima forwards guest SSH to a local port, `localPort: 0` in
    `LIMA_TEMPLATE`; WSL2 traffic rides `wsl.exe` into a NAT'd virtual network). There is nothing to
-   arm or lift, which is why `secure_failed_vm` and `probe_failure_hint` correctly stay at their
-   defaults here.
+   arm or lift, which is why `close_provisioning_access` correctly stays at its default here and the
+   clouds' private route machinery has no counterpart.
 
 ### The Platform Surface
 
@@ -178,8 +178,8 @@ and DB migration.
   treats a failed collision query as absence
   ([#719](https://github.com/WayfarerLabs/agentworks/issues/719)). A create that cannot confirm
   rollback raises `RetainedProvisioningError` with addressable platform metadata; core persists that
-  metadata and retains the provisional row so `vm delete` can finish cleanup. EC2 currently
-  implements this retained-cleanup handoff; the other platforms are tracked in
+  metadata and retains the provisional row so `vm delete` can finish cleanup. EC2, Proxmox, Lima and
+  WSL2 implement this retained-cleanup handoff; Azure and GCE are tracked in
   [#718](https://github.com/WayfarerLabs/agentworks/issues/718).
 - `start(vm, ctx)`, `stop(vm, ctx)`, `delete(vm, ctx)` are flagged `@idempotent_op` and must land in
   the same place run twice as run once. The marker is inherited through the MRO, so an override does
@@ -192,82 +192,113 @@ and DB migration.
   an account-bound row; an ambiguous legacy `NotFound` retains the row. A delete that cannot remove
   the backend VM must raise because core drops the row only on success (#329). Azure confirms VM
   absence, GCE confirms instance absence before removing its lifetime deny, and EC2 verifies account
-  and ownership before terminating, waiting, and deleting its security group. Lima, WSL2, and
-  Proxmox remain fire-and-forget (#356).
+  and ownership before terminating, waiting, and deleting its security group. Proxmox first confirms
+  the guest at the VMID carries the name its create gave it, since a freed VMID is reissued, and
+  counts it gone when `/cluster/nextid` says nothing holds the VMID or another guest holds it, and
+  Lima relies on `limactl delete --force`, which fails unless the instance is gone or was never
+  there. WSL2 counts the distro gone only when `wsl --list` does not name it and either
+  `wsl --unregister` or the listing exited 0, or the listing reports that no distro is installed at
+  all; a listing that fails shows nothing.
 - `status(vm, ctx) -> VMStatus` is a read-only query.
 - `display_backend_name(vm) -> str` is pure display and takes no `ctx`.
+- `run_as_root(vm, ctx, script, deadline) -> RawRun` **MUST** run `/bin/bash -s` as root through the
+  platform's own channel, independent of the VM's Tailscale state, with `script` on its stdin and
+  nowhere else, **MUST** run it once, and **MUST** return both streams without a status. A channel
+  that waits for the VM to answer before it dispatches anything (the clouds' public SSH and
+  Proxmox's guest agent each wait about two minutes) **MUST** raise `root_script.ChannelUnreachable`
+  when that wait runs out, since nothing was dispatched: callers then stop instead of retrying, and
+  do not try a logout they could not deliver. Any other channel failure raises `ConnectivityError`,
+  whose outcome is unknown. Its docstring in `base.py` is the full contract. The clouds inherit
+  theirs from `public_ssh.PublicAddressPlatform`, supplying how to read the live public address, the
+  console hint for a VM without one, and their route (below).
+- `read_host_keys(vm, ctx)` has a default over `run_as_root`; the clouds' base reads under an
+  Unverified provisioning file and refuses a VM that already has a record.
+- `native_shell(vm, ctx) -> int` is optional: the default offers no shell, and a platform offers one
+  by overriding it to run an interactive login shell on the operator's terminal through its own
+  channel and return the exit status. Core checks for the override on the class before the operation
+  boundary (`base.require_native_shell`), so `vm shell --platform` on a platform without one is
+  refused with `FeatureUnavailable` before any credential resolves, its hint the platform's
+  `native_shell_unavailable_hint`. Core owns the terminal guard around the call. Lima runs
+  `limactl shell` (through the placement host's `ssh -t` for an `ssh` placement), WSL2 runs
+  `wsl.exe` as the admin, the clouds' base runs an interactive SSH to the public address inside its
+  route, and Proxmox offers none.
+- `recovery_needs_guest_sshd` **MUST** be declared (no default): `True` when the root channel goes
+  through the guest's sshd.
 
-Vm-platform is an internal capability API. Its complete bundled contract remains version 1, and all
-six implementations change atomically with the descriptor. Exact registration conformance rejects an
-inconsistent version or missing abstract implementation as a curation error. Returning unsupported
-or implementing a no-op still violates the contract and must be caught by review and provider tests;
-registration does not attempt to infer method semantics or ask a platform to interpret Debian's
-current release.
+Vm-platform is the contract that third-party VM platforms implement, as the bundled ones do. Its
+complete contract is version 2, and the six bundled implementations change atomically with the
+descriptor. Exact registration conformance rejects an inconsistent version or missing abstract
+implementation as a curation error. Returning unsupported or implementing a no-op still violates the
+contract and must be caught by review and provider tests; registration does not attempt to infer
+method semantics or ask a platform to interpret Debian's current release.
 
-**Transport and lifecycle hooks.** `native_transport` is required; the remaining hooks have sensible
-defaults. All are entered by callers that gate first, so on entry the VM is running or was just
-started. The three transport hooks take `ctx: RunContext` for the same reason the ops do: opening a
-route to a cloud VM is a backend call, so a platform reads any credential it needs from
-`ctx.secret(name)` here exactly as in an op. Lima and WSL2 accept and ignore it (their transports
-are local); Azure, EC2, GCE, and Proxmox use it:
+**The clouds' route.** `public_ssh.PublicAddressPlatform`, the clouds' shared base, opens its own
+route around every `run_as_root`, `read_host_keys` and `native_shell` call and closes it before the
+call returns, so no firewall allow outlives one call; `SIGTERM`, `SIGHUP` and, on Windows,
+`SIGBREAK` (Ctrl-Break) unwind like Ctrl-C while the route may be open, so they close it too. Once
+the route has closed, the base also calls `close_provisioning_access` (below). Each cloud supplies
+it privately, as an abstract member of that base: `_transient_route(vm, ctx)`, a context manager
+that opens this call's own SSH allow scoped to the operator's egress prefixes (widened by
+`ctx.config.operator.ssh_allow_cidrs`) and removes exactly it in a `finally`, under
+`interrupts_deferred`, so an interrupt that lands during the removal waits for it; Azure and GCP
+bound that wait, warning that the rule may remain when the provider has not answered in time. When
+the VM never answers, `PublicSSH.wait_until_answering` warns `public_ssh.PROBE_FAILURE_HINT`, the
+`ssh_allow_cidrs` advice, unless the address refused the last probe's connection: the allow let it
+through, and the `ChannelUnreachable` it raises names a restart for an SSH server that is not
+running. Azure also heals a missing public IP and converges the NSG onto the baseline-deny model on
+enter; concurrent operations on one VM each own an independent rule, so they never cross-remove. EC2
+needs no public-IP heal (a running instance receives an address automatically), but its rule model
+forces a divergence: an EC2 ingress rule's identity is its `(protocol, port, cidr)` tuple, not a
+name, so two concurrent routes from one operator egress share ONE rule rather than owning
+independent ones. The poke is therefore idempotent (tolerate `InvalidPermission.Duplicate`) and the
+per-op remove tolerant (tolerate `InvalidPermission.NotFound`, or a success that lists the rule
+under `UnknownIpPermissions`), failing CLOSED (the deny baseline), never open; see
+`plugins/aws/network.py`. GCE uses a distinct UUID-suffixed firewall rule and provider ID for each
+route, so concurrent routes close independently. The route's calls read the credential from `ctx`,
+so a credentials-configured site authenticates as itself with no ambient fallback.
 
-- `native_transport(vm, ctx, *, config=None) -> ExecTransport`. The required result remains usable
-  when the VM's Tailscale state or identity is unavailable. The
-  `agentworks.transports.native_transport` factory wraps the call in `transient_route` and probes
-  reachability with an `echo ok` retry loop. Lima, WSL2, Azure, EC2, and GCE return their full
-  interactive `Transport`: local platform CLIs for Lima and WSL2, and SSH against the current public
-  IP for the cloud platforms. Proxmox returns an execution-only QEMU Guest Agent transport. Core
-  uses only `ExecTransport` for native bootstrap and recovery. `vm shell --platform` is the sole
-  caller that requires the full subtype; it checks `native_shell_unavailable_hint` before route,
-  credential, transport, or probe work.
-- `transient_route(vm, ctx, *, config=None) -> context manager` (default `nullcontext()`). Azure
-  opens a scoped SSH route on enter (heals a missing public IP, converges the NSG onto the
-  baseline-deny model, pokes this operation's own ephemeral allow rule scoped to the operator's
-  egress prefixes) and deletes exactly that rule in a `finally`, bounding the exposure window to the
-  transport's lifetime; concurrent native ops on one VM each own an independent rule, so they never
-  cross-remove. EC2 does the same with a security-group ingress rule and needs no public-IP heal (a
-  running instance receives an address automatically), but its rule model forces a divergence: an
-  EC2 ingress rule's identity is its `(protocol, port, cidr)` tuple, not a name, so two concurrent
-  routes from one operator egress share ONE rule rather than owning independent ones. The poke is
-  therefore idempotent (tolerate `InvalidPermission.Duplicate`) and the per-op remove tolerant
-  (tolerate `InvalidPermission.NotFound`), failing CLOSED (the deny baseline), never open; see
-  `plugins/aws/network.py`. GCE uses a distinct UUID-suffixed firewall rule and provider ID for each
-  route, so concurrent routes close independently. Those calls read the credential from `ctx`, so a
-  credentials-configured site authenticates as itself with no ambient fallback.
+**Lifecycle hooks** have sensible defaults. All are entered by callers that gate first, so on entry
+the VM is running or was just started:
+
 - `vm_active(vm, *, config=None) -> context manager` (default `nullcontext()`). WSL2 returns a
   keepalive that holds the distro against Windows' idle-shutdown for the span of a command, with
   Win32 Job-Object orphan-proofing for a hard-killed `agw`. No `ctx`: every hold that exists is
-  local and makes no backend call. A cloud hold that did would thread it like the transport hooks.
-- `post_tailscale_ready(vm, ctx) -> None` (default no-op). The contract is "close provisioning
-  access": it fires the instant Tailscale is reachable. Azure deletes the ephemeral bootstrap SSH
-  allow rule here, leaving the VM with zero inbound exposure behind its permanent deny-all-inbound
-  baseline (the public IP itself stays attached for the VM's whole lifetime); EC2 revokes exactly
-  the bootstrap allow's tuples (recorded in platform_metadata at create) to the same end, so a
-  concurrent native route's distinct allow survives; GCE removes its provider-ID-owned stable allow
-  and retains its priority-1 all-ingress deny. The asymmetry with `transient_route` is intentional:
-  the bootstrap ingress opens inside `create()` (cloud-init needs inbound SSH from the operator),
-  and neither that nor this closing point is context-manager-shaped.
-- `secure_failed_vm(vm, ctx) -> None` (default no-op). Same contract as `post_tailscale_ready`, for
-  the paths where a completed create is kept after Phase A Tailscale SSH verification fails (row
-  marked FAILED) or the operator interrupts verification (row status untouched); the success-only
-  hook never fired on either. Create-time bootstrap failure stays inside the platform rollback
-  window and never reaches this hook. Azure and GCE delete the owned fixed-name bootstrap allow and
-  EC2 revokes the recorded bootstrap tuples, so the VM defaults to zero inbound exposure; debugging
-  survives via `vm shell --platform` (a fresh per-operation allow) and the platform's serial console
-  (not firewall-gated).
+  local and makes no backend call. A cloud hold that did would take `ctx` as the ops do.
+- `close_provisioning_access(vm, ctx) -> None` (default no-op). Phase A calls it once, from a
+  `finally` around its span, so it runs whether the VM contract passed, Phase A failed (the row is
+  marked FAILED) or the operator interrupted it (the row stays incomplete). The clouds' base calls
+  it again each time a route closes, so an allow a failed close left is removed by the next
+  `vm recover`, `vm rekey`, delete's logout or `vm shell --platform`; a close with nothing left to
+  remove must therefore be a silent no-op. Both callers go through
+  `close_provisioning_access_or_warn`, which holds Ctrl-C and the terminations until the close
+  returns and then raises the interrupt, so one that lands mid-close cannot leave the allow open. A
+  create that fails before it returns rolls back its own ingress inside the platform's rollback
+  window and never reaches this hook. Azure deletes the ephemeral bootstrap SSH allow rule here,
+  leaving the VM with zero inbound exposure behind its permanent deny-all-inbound baseline (the
+  public IP itself stays attached for the VM's whole lifetime); EC2 revokes exactly the bootstrap
+  allow's tuples (recorded in platform_metadata at create) to the same end, so a concurrent native
+  route's distinct allow survives; GCE removes its provider-ID-owned stable allow and retains its
+  priority-1 all-ingress deny. The asymmetry with the per-call route is intentional: the bootstrap
+  ingress opens inside `create()` (cloud-init needs inbound SSH from the operator), and neither that
+  nor this closing point is context-manager-shaped. The hook must not assume the VM is reachable or
+  complete, and callers treat it as best effort: a failure warns with what the hook raised, so an
+  error should name the rule it left, and the warning adds the command that finishes the close; an
+  error or interrupt already propagating keeps going. The ordinary-command gate refuses a VM Phase A
+  did not complete, `vm shell --platform` included, so debugging such a VM goes through the
+  platform's serial console (not firewall-gated); `vm delete`'s logout opens its own per-operation
+  allow.
 
-The two closing hooks and `transient_route` take `ctx` because opening or closing the firewall route
-(an Azure NSG rule, an EC2 security-group rule) is a backend call; the caller (Phase A's
-`bootstrap_vm` for the two closing hooks, the transports factory for `transient_route`) passes the
-create/op's own scoped context, whose secrets are already resolved before Phase A begins, so even
-the interrupt path never resolves a secret for the first time.
+The closing hook and the route take `ctx` because opening or closing the firewall route (an Azure
+NSG rule, an EC2 security-group rule) is a backend call; Phase A (`phase_a.bootstrap`) passes the
+closing hook the create's own scoped context, whose secrets are already resolved before Phase A
+begins, so even the interrupt path never resolves a secret for the first time.
 
 Callers must pass the context their composition root already built for the platform's ops
 (`gated_vm_boundary` and `_live_vm_boundary` in `agentworks.vms.manager.boundary` both hand one out;
 the activation gate builds its own from the gate's scoped reader), never a freshly constructed empty
 one. `vm shell --platform` is the case that makes this load-bearing: on a running VM the gate's
 happy path is a pure Tailscale reachability probe, so nothing has touched the platform with a
-context before the transport is built. A platform must never depend on an earlier op in the same
+context before a cloud's route opens. A platform must never depend on an earlier op in the same
 process having warmed a credential cache.
 
 **Gates** (cheap, offline, distinct from preflight):
@@ -298,21 +329,20 @@ the descriptor and every bundled implementation must change atomically.
 - `legacy_platform_metadata(cls, row, legacy) -> dict[str, str]` maps pre-migration DB rows into the
   `platform_metadata` shape, consumed only by the one-shot DB migration.
 
-**Inputs and outputs** are uniform under vm-platform contract version 1. Every `create` receives the
+**Inputs and outputs** are uniform under vm-platform contract version 2. Every `create` receives the
 same `ProvisionRequest`, including the concrete core-selected `debian_release`, a required resolved
 Tailscale auth key, and a required value-free bootstrap-progress sink. The platform resolves the
 release through its local artifact map before backend mutation. A missing code-owned mapping names
 the out-of-date Agentworks build; a missing operator-owned mapping names the exact vm-site field.
-Neither has a fallback. A successful `ProvisionResult` carries the native transport, an optional
-Tailscale IP, and `platform_metadata`. Core treats the result as a runtime conformance boundary:
-after persisting the metadata, it probes the returned transport and persists only that live
-observation. This is not a security sandbox for in-process plugin code. The metadata is written
+Neither has a fallback. A successful `ProvisionResult` carries the required `tailnet_address` and
+`platform_metadata`, and no transport. Core treats the result as a runtime conformance boundary:
+after persisting the metadata, Phase A validates the address again before recording it, reaches the
+VM over SSH there, and observes the live release as the VM contract's first check, persisting only
+that observation. This is not a security sandbox for in-process plugin code. The metadata is written
 verbatim to `vms.platform_metadata` and read back only by the owning platform (Lima stores
 `instance_name`, WSL2 `distro_name`, Azure `resource_id`, Proxmox `vmid` + `node`, EC2
 `instance_id` + `security_group_id` + `region` + `backend_name` + `account_id` as its
-provider-identity subset, and never the public IP, which it reads live). An omitted IP means
-discovery failed after a successful join, not that bootstrap is incomplete. Phase A retries only
-`tailscale ip -4` before it records the address and verifies Tailscale SSH.
+provider-identity subset, and never the public IP, which it reads live).
 
 Before the create boundary resolves secrets, the pending VM node calls
 `validate_create_release(release)` with that same concrete core selection. The hook is pure and
@@ -321,9 +351,16 @@ overrides it so a missing create entry fails before authenticated `runup`. `crea
 mapping again before mutation. This timing does not make the current artifact a load-time config
 requirement, so a legacy site can still load for operations on existing VMs.
 
+Beside it, and as part of contract version 2, the pending node calls
+`validate_create_hostname(hostname)` with the hostname core composed for the VM (`{slug}-{name}`, or
+the bare name). It is pure and offline too, and its default accepts every hostname; a platform whose
+backend would change some hostnames refuses them here with a `ValidationError`, before any secret
+resolves or the VM's row exists. WSL2 refuses a hostname with an underscore or consecutive hyphens,
+which its init would rewrite.
+
 An operator-owned artifact is also untrusted until the live guest proves what it contains. Core
-applies the same returned-transport probe regardless of who owns the artifact map. A mismatch leaves
-the backend identity addressable for explicit deletion. Do not add a configuration bypass for this
+applies the same release check regardless of who owns the artifact map. A mismatch leaves the
+backend identity addressable for explicit deletion. Do not add a configuration bypass for this
 check.
 
 Add a platform-specific **input** by adding a field to `ProvisionRequest`, not by changing the
@@ -488,10 +525,10 @@ so Agentworks always reads it live. In both cases, inbound exposure is controlle
 rather than using address attachment as an access switch. The baseline is deny-all-inbound; SSH
 happens only through ephemeral rules on TCP/22 scoped to the operator's detected public IPv4 address
 as a `/32`, plus any addresses or CIDR ranges in `operator.ssh_allow_cidrs`. The rules open for the
-bootstrap window and each native-transport session and close afterward. The shared operator-egress
-detection and the `ssh_allow_cidrs` fold live in `capabilities/vm_platform/ssh_exposure.py` so all
-three platforms use one detector and one policy; the per-platform rule mechanics stay in each
-plugin's `network.py`.
+bootstrap window and each root script or native shell and close afterward. The shared
+operator-egress detection and the `ssh_allow_cidrs` fold live in
+`capabilities/vm_platform/ssh_exposure.py` so all three platforms use one detector and one policy;
+the per-platform rule mechanics stay in each plugin's `network.py`.
 
 Two asymmetries are worth calling out. Azure must install an explicit `deny-all-inbound` rule (an
 NSG carries permissive defaults, and the deny has to outrank any allow), so its baseline is a rule
@@ -509,7 +546,7 @@ requires both its persisted provider ID and that independent full shape before a
 a same-ID rule whose shape changed is retained and reported. In both platforms a concurrent
 `vm shell --platform` route's distinct allow survives (nothing serializes commands per VM). The
 other EC2-native divergence (tuple-identity rules, so concurrent same-egress routes share one rule
-and the poke/remove are idempotent/tolerant and fail closed) is covered under `transient_route`
+and the poke/remove are idempotent/tolerant and fail closed) is covered under the clouds' route
 above and in `network.py`.
 
 ### Resources on a Cloud Platform: Per-VM Resources and Shared State
@@ -559,24 +596,28 @@ and the operator-facing command banners that the rest of the codebase calls "pha
   creation time to get the VM reachable over Tailscale. The shared payload is `bootstrap_script.py`
   (admin user, packages, SSH key, swap, hostname, the Apple-vz SVE grub mask, Tailscale). Lima
   instance YAML, Azure `custom_data`, EC2 `UserData`, and GCE `Instance.metadata` retain
-  credential-free forms of that payload. GCE's startup wrapper checks a durable success marker
-  before any mutation and is rejected when its exact UTF-8 value exceeds 256 KiB. After the payload
-  installs Tailscale, `create()` sends the resolved key through one fixed guest command on the
-  provisioning transport's stdin. The value is absent from provider-retained configuration and
-  host-side argv; the guest `tailscale` process necessarily receives its `--auth-key` argument
-  transiently. Delivery is byte-exact, so the guest `read -r` binds exactly the resolved value: the
-  stdin pipe runs in byte mode because a text-mode pipe rewrites LF to the host's line ending and
-  would append a carriage return to the key on Windows (see `agentworks/subprocess_io.py`). Proxmox
-  runs the key-bearing bootstrap from a private guest-agent staging file inside `create()`. WSL2
-  runs its generated bootstrap from private local and guest staging inside `create()`. Each staging
-  file receives one verified removal attempt. `create()` returns only after bootstrap succeeds and
-  Tailscale joins, or it raises after rolling back partial backend resources. **This stage runs
+  credential-free forms of that payload; WSL2 and Proxmox run the same key-free script through
+  `run_as_root`. Lima runs its provisioners and GCE its `startup-script` on every boot, so both
+  carry the payload inside `run_once_script`, which checks a durable success marker before any
+  mutation and sets it only after the payload succeeds: a later boot changes nothing in the guest.
+  GCE's wrapper is rejected when its exact UTF-8 value exceeds 256 KiB. After the payload installs
+  Tailscale, `create()` joins through its own `run_as_root` with `tailscale_join.join_tailscale`
+  (the clouds through `complete_cloud_bootstrap`, which first waits for the provider's bootstrap),
+  the only script that carries the key. The key travels inside that script on the channel's stdin
+  and reaches Tailscale through `--auth-key=file:/dev/stdin`, so it is in no argv on the workstation
+  or the guest and absent from provider-retained configuration. `create()` then reads the address
+  with `settle_tailnet_address`, which retries a failed read and, when the reads are exhausted, logs
+  the node out over the same channel and raises: core never enrolled its host key, so nothing could
+  log it out later. `create()` returns only after bootstrap succeeds, Tailscale joins and the
+  address is read, or it raises after rolling back partial backend resources. **This stage runs
   once, at create.**
-- **Phase A** receives only the returned optional Tailscale IP and the provisioning transport. If
-  the platform could not discover an IP after joining, Phase A runs only `tailscale ip -4` over that
-  transport. It then records the IP and provisioning state, verifies Tailscale SSH, closes temporary
-  provisioning access, and syncs SSH config. It never receives the Tailscale key as a bootstrap
-  input, generates a bootstrap script, or touches bootstrap staging.
+- **Phase A** (`agentworks.vms.initializer.phase_a`) receives the returned `tailnet_address`. It
+  validates and records the address, makes the first contact over SSH there in Enroll mode (the only
+  connections that may record the VM's host key), and runs the VM contract's base checks, release
+  first; provisioning is complete only once they pass. Then it closes temporary provisioning access
+  and syncs SSH config. It never receives the Tailscale key, generates a bootstrap script, or reads
+  the address itself. A failure before the contract passes leaves the VM failed, and an interrupt
+  leaves it incomplete; every ordinary command refuses either, and the guidance names delete.
 - **Initialization** is `run_initialization` (`agentworks.vms.initializer`) plus VM hardening
   (`agentworks.vms.hardening`), run over a `Transport` against the created VM. It is
   platform-agnostic. **It is re-runnable and is exactly what `agw vm reinit` re-runs.** The Phase A
@@ -589,11 +630,12 @@ the key and its value-free progress surface in the request. This is separate fro
 secrets delivered through `ctx.secret(name)`. The manager owns and closes the same logger exactly
 once after platform bootstrap, Phase A, and initialization.
 
-A platform-native configuration that the provider retains must never contain the resolved key. The
-six final-inspection surfaces are Lima instance YAML, WSL2 and Proxmox bootstrap staging, Azure
-`OSProfile.custom_data`, EC2 `RunInstances.UserData`, and GCE `Instance.metadata`. The
-provider-faithful test inspects that final submitted or staged surface and, for temporary staging,
-verifies removal.
+A platform-native configuration that the provider retains must never contain the resolved key, and
+no generated bootstrap can: the generator takes no key. The provider-faithful test
+(`cli/tests/test_create_auth_key_boundaries.py`) runs each of the six creates with its root channel
+faked and inspects the retained surfaces (Lima instance YAML, Azure `OSProfile.custom_data`, EC2
+`RunInstances.UserData`, GCE `Instance.metadata`), every argv, the progress sink and the errors: the
+key appears in exactly one root script, the join's.
 
 The seam between the two stages is the source of the most important gotcha below.
 
@@ -686,8 +728,10 @@ VNet / disk creation and calls `cleanup_vm_resources` on any exception). The sam
 an operator interrupt (`KeyboardInterrupt`) across the whole create span, including any inline
 readiness or bootstrap wait: warn with "Ctrl-C again to abandon" guidance, tear down what this
 create made, and re-raise the ORIGINAL interrupt; a second Ctrl-C abandons the cleanup loudly,
-naming the exact manual removal (Azure's `rollback_create_on_interrupt`; Proxmox, Lima, WSL2, and
-EC2 do the same over their single VM / instance / distro). That is distinct from, and composes
+naming the exact manual removal (Azure's `rollback_create_on_interrupt`). A platform that implements
+the retained-cleanup handoff (EC2, Proxmox, Lima and WSL2) raises `RetainedProvisioningError`
+instead whenever its cleanup, after a failure or an interrupt, is abandoned or cannot show the
+backend clean, so core keeps the row for `vm delete` to finish. That is distinct from, and composes
 under, the orchestrator's DB-row unwind (ADR 0019's `RealizationLog` / node `teardown`), which rolls
 back the persisted VM row. The platform's sweep undoes backend-side resources created inside
 `create()`; the orchestrator undoes the Agentworks-side record on top of it.
@@ -706,9 +750,9 @@ YAML block scalar, remote shell). Two traps that have already occurred:
 ### Adding a New Platform
 
 1. A new implementation subclasses `VMPlatform` and implements the ops. Every op except
-   `display_backend_name` takes `ctx: RunContext`, as do the three transport hooks; declared secrets
-   are read via `ctx.secret(name)`, and the instance never holds a resolver or raw reader. A backend
-   with a persistent client memoizes the derived client, not the secret (the Proxmox `_api`
+   `display_backend_name` takes `ctx: RunContext`, as do `run_as_root` and `native_shell`; declared
+   secrets are read via `ctx.secret(name)`, and the instance never holds a resolver or raw reader. A
+   backend with a persistent client memoizes the derived client, not the secret (the Proxmox `_api`
    pattern). `create` is intentionally not `@idempotent_op`; the idempotent ops must land in-state
    themselves.
 2. `config_model` declares the shape of the platform's own config block, with a `SecretRef` marker
@@ -719,14 +763,16 @@ YAML block scalar, remote shell). Two traps that have already occurred:
 4. `unsupported_reason` identifies platforms that cannot run on some hosts (WSL2 off Windows), while
    the non-constructing `not_ready(config)` handles per-site tool checks (Lima with no `limactl`).
    `legacy_platform_metadata` is needed only when pre-migration rows must be mapped.
-5. Only the transport and lifecycle hooks required by the backend override their defaults.
+5. Only the lifecycle hooks required by the backend override their defaults, and `native_shell` only
+   where the backend's own channel can give the operator a terminal. A cloud whose root channel is
+   SSH to a public address subclasses `public_ssh.PublicAddressPlatform` and supplies its route.
 6. An operator-owned release catalog overrides `validate_create_release(release)` with a pure
    lookup, while `create()` resolves `request.debian_release` again before mutation, completes
-   Tailscale bootstrap, and returns a transport through which core verifies and records the live
-   release. Use `bootstrap_script.py` / `cloud_init.py` for the create-time payload instead of a
-   platform-specific reinvention. Keep any provider-retained payload credential-free and deliver the
-   resolved key through the platform's ephemeral mechanism. Return an optional IP only after a
-   successful join; Phase A owns IP-only rediscovery and Tailscale SSH verification.
+   Tailscale bootstrap, and returns the address at which core verifies and records the live release
+   over SSH. Use `bootstrap_script.py` / `cloud_init.py` for the create-time payload instead of a
+   platform-specific reinvention. Join with `tailscale_join.join_tailscale` over `run_as_root`, and
+   return the address `settle_tailnet_address` reads over the same channel, inside the create's
+   rollback window so an address that cannot be read rolls the backend back.
 7. Dispatch, idempotency, and, where applicable, template-render tests belong under
    `cli/tests/vms/`; the next section lists the existing references.
 8. The implementation is checked against the preceding platform-development considerations before it
@@ -756,24 +802,25 @@ The existing tests under `cli/tests/vms/` are the templates to copy from:
 - `test_lima_template.py`: `yaml.safe_load` over a rendered template with tripwires for the baked-in
   hardening rules (`mounts: []`, subuid cap present and first).
 
-A new `Transport` subclass belongs under `cli/tests/transports/` alongside the platform.
-
 ### Cross-References
 
 - [`../README.md`](../README.md): the capability lifecycle contract (read this first).
 - `base.py`: the `VMPlatform` ABC, `ProvisionRequest`, `ProvisionResult`.
 - `../base.py`: the `Capability` base and `RunContext`.
 - `bootstrap_script.py`, `cloud_init.py`, `skel.py`: shared create-time payload.
-- `agentworks.vms.initializer`: the two-phase init driver (`bootstrap_vm` for Phase A provisioning
-  state recording, optional IP-only rediscovery, and Tailscale SSH verification;
-  `run_initialization` for Phase B initialization).
+- `tailscale_join.py`: the join, the address read and settle, and the clouds'
+  `complete_cloud_bootstrap`, all over `run_as_root`.
+- `agentworks.vms.initializer`: the two-phase init driver (`bootstrap_vm`, which runs `phase_a` for
+  the address check, first contact and the VM contract; `run_initialization` for Phase B
+  initialization).
+- `agentworks.vms.contract`: the VM contract's base checks, which Phase A and reinit run.
 - `agentworks.vms.hardening`: the hardening steps, and the model for idempotent reconciliation that
   reaches existing VMs via `reinit`.
 - `agentworks.vms.sites`: how a `vm-site` binds a platform to config.
 - `agentworks.vms.nodes`: the `vm-site` / live-VM nodes that hold and drive a platform instance
   under the orchestration layer.
-- `agentworks.transports`: the `ExecTransport` and full `Transport` ABCs, plus the
-  `native_transport` factory that wraps `transient_route`.
+- `public_ssh.py`: the clouds' shared base and their SSH to the public address.
+- `lima_host.py`: where Lima's `limactl` runs, its root channel and native shell.
 - `docs/guides/idempotency.md`: the canonical table of what `vm reinit` reconciles.
 - ADR 0012: VM hardening at init.
 - ADR 0016: the `vm-platform` capability / `vm-site` declarable split.

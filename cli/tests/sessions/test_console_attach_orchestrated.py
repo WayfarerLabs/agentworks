@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.db import DesiredRuntimeState, SessionMode, VMStatus
+from agentworks.db import DesiredRuntimeState, ProvisioningStatus, SessionMode, VMStatus
 from agentworks.errors import StateError, ValidationError
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
@@ -41,6 +41,7 @@ def _outside_tmux(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _seed_vm(db: Database) -> None:
     db.insert_vm("box", site="proxmox", hostname="box")
+    db.update_vm_provisioning_status("box", ProvisioningStatus.COMPLETE)
     db.update_vm_tailscale("box", "100.64.0.9")
     seed_vm_trust("box")
 
@@ -56,15 +57,13 @@ def _reachable(monkeypatch: pytest.MonkeyPatch, value: bool) -> None:
 
 def _stop_the_vm(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> None:
     _reachable(monkeypatch, False)
-    monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", "repair-key")
     monkeypatch.setattr(
         ProxmoxPlatform,
         "status",
         lambda self, row, ctx: events.append("status") or VMStatus.STOPPED,
     )
     monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: events.append("start"))
-    monkeypatch.setattr(vm_manager, "_tailscale_rejoin_required", lambda *a, **k: True)
-    monkeypatch.setattr(vm_manager, "_ensure_tailscale", lambda *a, **k: events.append("tailscale"))
+    monkeypatch.setattr("agentworks.vms.manager._await_tailnet", lambda *a, **k: events.append("tailscale"))
 
 
 class _FakeTarget:
@@ -139,7 +138,7 @@ def test_named_console_attach_holds_across_the_interactive_attach(
     _seed_named_console(db)
     _reachable(monkeypatch, True)
     monkeypatch.setattr(ProxmoxPlatform, "status", lambda self, row, ctx: VMStatus.RUNNING)
-    monkeypatch.setattr(vm_manager, "_tailscale_rejoin_required", lambda *a, **kw: False)
+    monkeypatch.setattr(vm_manager, "_await_tailnet", lambda *a, **kw: None)
     events: list[str] = []
 
     @contextlib.contextmanager
@@ -187,7 +186,7 @@ def test_console_restart_multiline_environment_secret_refuses_before_rebuild(
     db.insert_console("c1", "box", admin_shell=True)
     _reachable(monkeypatch, True)
     monkeypatch.setattr(ProxmoxPlatform, "status", lambda self, row, ctx: VMStatus.RUNNING)
-    monkeypatch.setattr(vm_manager, "_tailscale_rejoin_required", lambda *a, **kw: False)
+    monkeypatch.setattr(vm_manager, "_await_tailnet", lambda *a, **kw: None)
     monkeypatch.setattr(multi_console, "_console_tmux_presence", lambda *args: ProbeStatus.PRESENT)
     rebuilds: list[str] = []
     monkeypatch.setattr(
@@ -228,7 +227,7 @@ def test_named_console_stopped_vm_gate_burst_seeds_the_boundary(
     assert multi_console.attach_console(db, config, name="c1", interaction=TtyInteractionPolicy.REFUSE) == 0
 
     assert events == ["status", "status", "start", "tailscale"]
-    assert resolve_counter == [["proxmox-token"], ["tailscale-auth-key"]]
+    assert resolve_counter == [["proxmox-token"]]
     assert target.interactive_calls == ["tmux attach -t '=aw-console-c1'"]
 
 
@@ -240,6 +239,7 @@ def test_named_console_no_tailscale_fails_with_zero_resolves_and_zero_gate(
 ) -> None:
     config = make_config()
     db.insert_vm("box", site="proxmox", hostname="box")  # no tailscale host
+    db.update_vm_provisioning_status("box", ProvisioningStatus.COMPLETE)
     _seed_named_console(db)
     _reachable(monkeypatch, False)
 
@@ -310,7 +310,7 @@ def test_restore_session_stopped_vm_drives_the_real_gated_composition(
     )
 
     assert events == ["status", "status", "start", "tailscale"]  # the gate ran
-    assert resolve_counter == [["proxmox-token"], ["tailscale-auth-key"]]
+    assert resolve_counter == [["proxmox-token"]]
     assert any("has-session -t '=aw-console-c1'" in c for c in fake.commands)
     assert any("list-windows -t '=aw-console-c1'" in c for c in fake.commands)
     # The no-op landing focus still fires (post-restore focus parity).
@@ -336,10 +336,7 @@ def test_console_attach_with_stopped_parent_intent_is_live_diagnostics_only(
     monkeypatch.setattr(ProxmoxPlatform, "status", lambda *a: status)
     monkeypatch.setattr(ProxmoxPlatform, "start", lambda *a: pytest.fail("diagnostic attach started its parent"))
     monkeypatch.setattr(ProxmoxPlatform, "vm_active", lambda *a, **k: pytest.fail("stopped intent acquired idle hold"))
-    monkeypatch.setattr(
-        vm_manager, "_tailscale_rejoin_required", lambda *a, **k: pytest.fail("diagnostic attach repaired")
-    )
-    monkeypatch.setattr(vm_manager, "_ensure_tailscale", lambda *a, **k: pytest.fail("diagnostic attach rejoined"))
+    monkeypatch.setattr(vm_manager, "_await_tailnet", lambda *a, **k: pytest.fail("diagnostic attach waited"))
     attach = target.interactive
 
     def unlocked_attach(command, **kwargs):

@@ -45,13 +45,18 @@ def _authorization_denied() -> Exception:
 
 
 class _Poller:
-    """A begin_* long-running-operation stub: ``.result()`` yields a value."""
+    """A begin_* long-running-operation stub: ``.result()`` yields a value, or with
+    ``finishes=False`` stands for an operation still running when its wait ends."""
 
-    def __init__(self, value: object) -> None:
+    def __init__(self, value: object, *, finishes: bool = True) -> None:
         self._value = value
+        self._finishes = finishes
 
-    def result(self) -> object:
-        return self._value
+    def result(self, timeout: float | None = None) -> object:
+        return self._value if self._finishes else None
+
+    def done(self) -> bool:
+        return self._finishes
 
 
 class _FakeSecurityRules:

@@ -8,11 +8,20 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.db import PID_STOPPED, DesiredRuntimeState, InitStatus, SessionMode, SessionStatus, VMStatus
+from agentworks.db import (
+    PID_STOPPED,
+    DesiredRuntimeState,
+    InitStatus,
+    ProvisioningStatus,
+    SessionMode,
+    SessionStatus,
+    VMStatus,
+)
 from agentworks.errors import AgentworksError, ValidationError
 from agentworks.harness_setup.locking import native_mutation_guard
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.runtime_state import reconcile_console, reconcile_session, reconcile_vm
+from agentworks.runtime_state._models import Outcome
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import manager, tmux
 from agentworks.sessions import multi_console as mc
@@ -32,6 +41,7 @@ def seed_vm(
     db: Database, name: str, *, target: DesiredRuntimeState = DesiredRuntimeState.RUNNING, site: str = "proxmox"
 ) -> VMRow:
     row = db.insert_vm(name, site, name, admin_username="admin", desired_runtime_state=target)
+    db.update_vm_provisioning_status(name, ProvisioningStatus.COMPLETE)
     db.update_vm_tailscale(name, "100.64.0.5")
     seed_vm_trust(name)
     db.update_vm_init_status(name, InitStatus.COMPLETE)
@@ -92,7 +102,7 @@ def runtime(monkeypatch):
     monkeypatch.setattr(ProxmoxPlatform, "start", start)
     monkeypatch.setattr(ProxmoxPlatform, "stop", stop)
     monkeypatch.setattr(ProxmoxPlatform, "vm_active", hold)
-    monkeypatch.setattr("agentworks.vms.manager._tailscale_rejoin_required", lambda *a, **k: False)
+    monkeypatch.setattr("agentworks.vms.manager._await_tailnet", lambda *a, **k: None)
     monkeypatch.setattr(manager, "check_session_status", lambda row, **k: statuses.get(row.name, SessionStatus.STOPPED))
     monkeypatch.setattr(
         manager,
@@ -246,21 +256,25 @@ def test_dry_run_has_no_native_guard_or_workload_sources(db, make_config, runtim
     assert not (db.path.parent / f".{db.path.name}.native-locks").exists()
 
 
-def unavailable_site() -> ManifestDoc:
+def proxmox_site(name: str, token_secret: str) -> ManifestDoc:
     return ManifestDoc(
         "vm-site",
-        "unavailable",
+        name,
         {
             "platform": {
                 "name": "proxmox",
-                "api_url": "https://unavailable:8006",
+                "api_url": f"https://{name}:8006",
                 "node": "pve1",
                 "token_id": "agw@pam!agw",
-                "token_secret": "shared-unavailable",
+                "token_secret": token_secret,
                 "template_vmids": {"trixie": 9001},
             }
         },
     )
+
+
+def unavailable_site() -> ManifestDoc:
+    return proxmox_site("unavailable", "shared-unavailable")
 
 
 def test_shared_failed_gate_is_attempted_once_and_isolates_unrelated_family(db, make_config, runtime, resolve_counter):
@@ -301,21 +315,53 @@ def test_failed_gate_overlap_blocks_complete_union_without_retry_or_other_lookup
     assert not any(action == "session-start" for action, _ in runtime[2])
 
 
-def test_shared_conditional_repair_key_resolves_once(db, make_config, runtime, resolve_counter, monkeypatch):
-    seed_vm(db, "a")
-    seed_vm(db, "b")
-    monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", "shared-rejoin-value")
-    monkeypatch.setattr("agentworks.vms.manager._tailscale_rejoin_required", lambda *a, **k: True)
-    repaired = []
+@pytest.mark.parametrize("dry_run", [True, False], ids=["preview", "apply"])
+@pytest.mark.parametrize(
+    "provisioning", [ProvisioningStatus.PENDING, ProvisioningStatus.IN_PROGRESS], ids=["pending", "in-progress"]
+)
+def test_incomplete_provisioning_blocks_its_family_before_any_effect(
+    db, make_config, runtime, resolve_counter, monkeypatch, provisioning, dry_run
+):
+    """A trusted VM a killed create left unattested is refused before its provider, credential, hold or guest
+    is touched; the complete VM beside it still previews or converges."""
+    powers, _, events = runtime
+    monkeypatch.setenv("AW_SECRET_INCOMPLETE_TOKEN", "would-resolve")
+    monkeypatch.setattr(
+        ProxmoxPlatform,
+        "status",
+        lambda self, row, ctx: events.append(("status", row.name)) or powers.get(row.name, VMStatus.RUNNING),
+    )
+    rendered: list = []
+    monkeypatch.setattr("agentworks.runtime_state._preview.render_results", lambda rows, **k: rendered.extend(rows))
+    monkeypatch.setattr("agentworks.runtime_state._service.render_results", lambda rows, **k: rendered.extend(rows))
+    seed_vm(db, "incomplete", site="incomplete-site")
+    seed_session(db, "work-incomplete", "incomplete")
+    db.update_vm_provisioning_status("incomplete", provisioning)
+    db.update_vm_init_status("incomplete", InitStatus.PENDING)
+    seed_vm(db, "healthy")
+    seed_session(db, "work-healthy", "healthy")
+    powers.update({"incomplete": VMStatus.STOPPED, "healthy": VMStatus.STOPPED})
+    original_vm = db.get_vm("incomplete")
+    original_session = db.get_session("work-incomplete")
+    config = make_config(manifests=[proxmox_site("incomplete-site", "incomplete-token")])
 
-    def repair(db_, config, row, *args, **kwargs):
-        assert kwargs["auth_keys"].get(kwargs["auth_key_name"]) == "shared-rejoin-value"
-        repaired.append(row.name)
+    with pytest.raises(AgentworksError):
+        reconcile_vm(db, config, all_vms=True, dry_run=dry_run, interaction=REFUSE)
 
-    monkeypatch.setattr("agentworks.vms.manager._ensure_tailscale", repair)
-    reconcile_vm(db, make_config(), all_vms=True, interaction=REFUSE)
-    assert repaired == ["a", "b"]
-    assert sum(call == ["tailscale-auth-key"] for call in resolve_counter) == 1
+    results = {(row.kind, row.name): row for row in rendered}
+    assert results[("vm", "incomplete")].outcome is Outcome.FAILED
+    assert results[("session", "work-incomplete")].outcome is Outcome.BLOCKED
+    assert all(name != "incomplete" for _, name in events)
+    assert not any("incomplete-token" in call for call in resolve_counter)
+    assert db.get_vm("incomplete") == original_vm
+    assert db.get_session("work-incomplete") == original_session
+    healthy = results[("vm", "healthy")]
+    assert (healthy.outcome, healthy.action) == (Outcome.CHANGED, "start")
+    if dry_run:
+        assert all(action == "status" for action, _ in events)
+    else:
+        assert ("vm-start", "healthy") in events
+        assert ("session-start", "work-healthy") in events
 
 
 def test_activation_precedes_unrelated_missing_workload_and_preserves_completed_effects(db, make_config, runtime):
@@ -453,3 +499,32 @@ def test_console_stop_requires_host_key_only_for_live_guest(db, make_config, mon
         original_console.vm_name,
         original_console.created_at,
     )
+
+
+def test_a_vm_that_does_not_answer_blocks_its_family_naming_recover_and_resolves_no_key(
+    db, make_config, runtime, resolve_counter, monkeypatch, captured_output
+):
+    """Activation waits for each VM to answer and never repairs: a silent VM blocks its own family with a
+    failure naming recover, the other family converges, and no Tailscale key resolves, whatever the source holds."""
+    from agentworks.vms.manager.tailscale import VMNotAnswering
+
+    powers, _, events = runtime
+    monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", "unused")
+    for name in ("silent", "healthy"):
+        seed_vm(db, name)
+        seed_session(db, f"work-{name}", name)
+        powers[name] = VMStatus.STOPPED
+
+    def wait(db_, config, vm, **kwargs):
+        if vm.name == "silent":
+            raise VMNotAnswering(vm.name, vm.tailscale_host)
+
+    monkeypatch.setattr("agentworks.vms.manager._await_tailnet", wait)
+    with pytest.raises(AgentworksError):
+        reconcile_vm(db, make_config(), all_vms=True, interaction=REFUSE)
+
+    (silent,) = [line for _, _, line in captured_output.lines if line.startswith("vm 'silent'")]
+    assert "agw vm recover silent" in silent
+    assert ("session-start", "work-healthy") in events
+    assert ("session-start", "work-silent") not in events
+    assert not any("tailscale-auth-key" in call for call in resolve_counter)

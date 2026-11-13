@@ -2,15 +2,16 @@
 
 This package preserves the flat ``agentworks.vms.manager`` import surface
 that predates the split into submodules (``_helpers``, ``boundary``,
-``tailscale``, ``port_forward``, ``lifecycle``, ``inspect``, ``power``, ``exec``): every name below is
-re-exported here so ``from agentworks.vms.manager import create_vm`` (and
-the many ``agentworks.vms.manager.<name>`` attribute / monkeypatch
-references across the codebase and test suite) keep working unchanged.
+``tailscale``, ``port_forward``, ``lifecycle``, ``reinit``, ``recover``,
+``inspect``, ``power``, ``exec``): every name below is re-exported here
+so ``from agentworks.vms.manager import create_vm`` (and the many
+``agentworks.vms.manager.<name>`` attribute / monkeypatch references
+across the codebase and test suite) keep working unchanged.
 
 The four names imported from ``agentworks.vms.initializer`` are the
 canonical entry point into that package from ``manager``: submodules that
-call them (``lifecycle.py``'s ``create_vm`` / ``reinit_vm``,
-``tailscale.py``'s ``_ensure_tailscale``) do so via
+call them (``lifecycle.py``'s ``create_vm``, ``reinit.py``'s ``reinit_vm``,
+``recover.py``'s ``recover_vm``) do so via
 ``import agentworks.vms.manager as _mgr`` at call time rather than
 importing these names directly, so that tests which monkeypatch e.g.
 ``agentworks.vms.manager.verify_tailscale_available`` affect every
@@ -23,14 +24,13 @@ from __future__ import annotations
 from agentworks.vms.initializer import (
     VMInitializationOperation,
     bootstrap_vm,
-    rejoin_tailscale,
     run_initialization,
     verify_tailscale_available,
 )
 
 from ._helpers import (
     _SLUG_PROMPT,
-    _guard_failed_vm,
+    _guard_incomplete_vm,
     _human_bytes,
     _init_log_hint,
     _query_live_resources,
@@ -46,7 +46,7 @@ from ._helpers import (
 from .boundary import (
     _live_vm_boundary,
     gated_vm_boundary,
-    gated_vm_platform_recovery_boundary,
+    gated_vm_platform_channel_boundary,
     require_vm_ssh_boundary,
 )
 from .exec import exec_vm, shell_vm
@@ -57,10 +57,12 @@ from .inspect import (
     vm_description,
     vm_listing,
 )
-from .lifecycle import create_vm, reinit_vm
+from .lifecycle import create_vm
 from .port_forward import port_forward_vm
 from .power import delete_vm, rekey_vm, set_vm_desired_runtime_state, start_vm, stop_vm
-from .release import confirm_vm_release, verified_vm_release
+from .recover import recover_vm
+from .reinit import reinit_vm
+from .release import confirm_vm_release, reconcile_release
 from .runtime import (
     VMRuntimeContext,
     activate_vm_runtime,
@@ -69,10 +71,9 @@ from .runtime import (
     prepare_vm_runtime,
 )
 from .tailscale import (
-    _ensure_tailscale,
+    _await_tailnet,
     _is_tailscale_reachable,
     _tailscale_logout,
-    _tailscale_rejoin_required,
     _warned_tailscale_missing,
 )
 from .verification import VMConnectionVerification, verify_vm_connection
@@ -80,12 +81,11 @@ from .verification import VMConnectionVerification, verify_vm_connection
 __all__ = [
     "_SLUG_PROMPT",
     "_VmAdminEnvScopes",
-    "_ensure_tailscale",
-    "_guard_failed_vm",
+    "_await_tailnet",
+    "_guard_incomplete_vm",
     "_human_bytes",
     "_init_log_hint",
     "_is_tailscale_reachable",
-    "_tailscale_rejoin_required",
     "_live_vm_boundary",
     "_query_live_resources",
     "_require_vm",
@@ -108,11 +108,12 @@ __all__ = [
     "describe_vm",
     "exec_vm",
     "gated_vm_boundary",
-    "gated_vm_platform_recovery_boundary",
+    "gated_vm_platform_channel_boundary",
     "list_vms",
     "port_forward_vm",
+    "recover_vm",
     "reinit_vm",
-    "rejoin_tailscale",
+    "reconcile_release",
     "rekey_vm",
     "render_vm_listing",
     "require_vm_ssh_boundary",
@@ -124,7 +125,6 @@ __all__ = [
     "validate_slug",
     "verify_vm_connection",
     "verify_tailscale_available",
-    "verified_vm_release",
     "VMConnectionVerification",
     "VMInitializationOperation",
     "vm_description",

@@ -2,7 +2,7 @@
 operator egress-IP detection and the ``operator.ssh_allow_cidrs`` fold.
 
 Every cloud platform that opens an ephemeral, scoped SSH route to a VM
-during bootstrap and native transport needs the SAME notion of "which
+during bootstrap and around its root channel needs the SAME notion of "which
 source prefixes may reach port 22": the operator's detected public egress
 address, plus any explicit ``operator.ssh_allow_cidrs`` extras. This
 module owns that computation so azure (NSG rules) and aws (security-group
@@ -82,9 +82,8 @@ def normalize_allow_cidrs(entries: Sequence[str]) -> list[str]:
 
 def config_allow_cidrs(config: Config | None) -> list[str]:
     """The ``operator.ssh_allow_cidrs`` extras from an operator
-    config, or none when no config was threaded in. Same defensive
-    getattr chain as a platform's ``native_transport`` identity-file
-    read (callers may thread partial config stand-ins)."""
+    config, or none when no config was threaded in. A defensive getattr
+    chain, since callers may thread partial config stand-ins."""
     operator = getattr(config, "operator", None)
     return list(getattr(operator, "ssh_allow_cidrs", None) or [])
 

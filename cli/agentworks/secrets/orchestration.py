@@ -35,9 +35,7 @@ Usage at a manager entry point:
     # ... thread `values` down to every compose_env(values=...) site.
 
 The orchestrator is generic: it doesn't know about VMs, workspaces, or
-agents. It just walks env dicts. Future legacy-prompt migrations
-(Tailscale auth key, git credentials) hook in via ``extra_decls`` rather
-than special-casing them in the orchestrator.
+agents. It just walks env dicts.
 
 Plaintext interpolation leaves secret-reference names unchanged, so the secret
 union depends only on the winning entries' secret arms.
@@ -61,7 +59,7 @@ from agentworks.errors import StateError
 from agentworks.secrets.policy import TtyInteractionPolicy, require_exact_tty_interaction_policy
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping, Sequence
+    from collections.abc import Mapping, Sequence
 
     from agentworks.config import Config
     from agentworks.env.entry import EnvEntry
@@ -138,7 +136,6 @@ def compute_needed_secrets(
     targets: Sequence[SecretTarget],
     registry: Registry,
     *,
-    extra_decls: Iterable[SecretDecl] = (),
     allow_transient_auto_declare: bool = False,
 ) -> list[SecretDecl]:
     """Union of ``SecretDecl``s referenced across the candidate target set.
@@ -147,13 +144,10 @@ def compute_needed_secrets(
     (preserving the scope precedence ladder
     ``session > (agent | admin) > workspace > vm``), collects the declared
     secrets those merged env dicts reference, and unions the results
-    across all targets. ``extra_decls`` adds decls that aren't referenced
-    by any target's env chain: a hook for legacy-prompt migrations
-    (e.g. Tailscale auth key, git credentials) that need eager resolution
-    without being modeled as env-table entries today.
+    across all targets.
 
-    The result preserves first-encounter order across targets, then
-    extras, for deterministic prompting order. Referenced names are
+    The result preserves first-encounter order across targets, for
+    deterministic prompting order. Referenced names are
     looked up against the registry's ``secret`` rows, which, after
     finalize, cover operator-declared AND auto-declared secrets, so
     every name a published template's env references has a decl here.
@@ -189,10 +183,6 @@ def compute_needed_secrets(
                         f"is a registry-construction bug, not an operator error.",
                     )
             seen.add(name)
-            out.append(decl)
-    for decl in extra_decls:
-        if decl.name not in seen:
-            seen.add(decl.name)
             out.append(decl)
     return out
 
@@ -254,7 +244,6 @@ def resolve_for_command(
     config: Config,
     registry: Registry,
     *,
-    extra_decls: Iterable[SecretDecl] = (),
     allow_transient_auto_declare: bool = False,
     interaction: TtyInteractionPolicy,
 ) -> dict[str, str]:
@@ -288,7 +277,6 @@ def resolve_for_command(
     decls = compute_needed_secrets(
         targets,
         registry,
-        extra_decls=extra_decls,
         allow_transient_auto_declare=allow_transient_auto_declare,
     )
     if not decls:

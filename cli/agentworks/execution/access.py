@@ -3,8 +3,9 @@
 ``vm_access`` copies names and paths and resolves nothing (R9): no key is read,
 no trust file is opened and nothing is spawned until an operation runs. Each
 operation then runs in one order, so everything before the spawn raises with
-nothing dispatched: resolve the client, encode the request, build the options
-(which reads the trust record), spawn, pump, classify.
+nothing dispatched: refuse an agent's elevated request, resolve the client,
+encode the request, build the options (which reads the trust record), spawn,
+pump, classify.
 """
 
 from __future__ import annotations
@@ -15,17 +16,17 @@ import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from agentworks import ssh_identity
+from agentworks import output
 from agentworks.errors import StateError
 from agentworks.execution import attach as attach_module
 from agentworks.execution import client, envelope, forwarding, pump, ssh_process
 from agentworks.execution.agw_launch import refusal_status
-from agentworks.execution.errors import CommandFailed, ExecutionIncomplete, describe_refusal
+from agentworks.execution.errors import CommandFailed, ExecutionIncomplete, PermissionDenied, describe_refusal
 from agentworks.execution.results import Completed, NotDelivered, NotDeliveredReason, Result, Unknown, UnknownReason
 from agentworks.execution.trust import TrustBinding, TrustMode
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Sequence
+    from collections.abc import Callable, Iterator, Sequence
     from pathlib import Path
     from typing import BinaryIO
 
@@ -55,7 +56,16 @@ Identity = Admin | Agent
 
 
 class VMAccess:
-    """Run, stream, attach and forward as one identity on one VM."""
+    """Run, stream, attach and forward as one identity on one VM.
+
+    ``identity`` is the account the access was built for, with no default,
+    so a directly constructed access chooses; ``run`` and ``stream`` refuse an
+    elevated request on an agent-bound one. ``trust_mode`` is ``VM`` except for
+    the access :func:`enrollment_access` builds. ``log`` is an operation log's
+    record callable (``SSHLogger.record``), which ``run`` calls once per
+    request. ``stream``, ``attach`` and ``forward`` serve operator commands that
+    keep no log.
+    """
 
     def __init__(
         self,
@@ -63,14 +73,22 @@ class VMAccess:
         vm_name: str,
         host: str | None,
         user: str,
+        identity: Identity,
         identity_file: Path,
         port: int = 22,
+        trust_mode: TrustMode = TrustMode.VM,
+        log: Callable[[RunRequest, Result], None] | None = None,
     ) -> None:
+        if isinstance(identity, Agent) and user != identity.linux_user:
+            raise ValueError("an agent-bound access connects as the agent's Linux user")
         self.vm_name = vm_name
+        self.identity = identity
+        self.trust_mode = trust_mode
         self._host = host
         self._user = user
         self._identity_file = identity_file
         self._port = port
+        self._log = log
 
     # -- Operations ------------------------------------------------------------
 
@@ -80,11 +98,17 @@ class VMAccess:
         The client closes ssh's stdin right after the request. Each stream is
         read up to one pump constant (1 MiB); more is ``Unknown(OUTPUT_LIMIT)``.
         With ``check`` a result that is not ``Completed(0)`` raises its typed error.
+        The access's operation log, when it has one, records every request
+        that reaches an outcome, before raising for a bad one. A request that
+        raises before it is dispatched (no client, no trust record) is not
+        logged.
         """
         stdout, stderr = pump.Capture(), pump.Capture()
         with self._passphrase_hint_on_connection_failure():
             result = self._execute(request, stdin=None, on_stdout=stdout, on_stderr=stderr)
             result = Result(result.completion, bytes(stdout.data), bytes(stderr.data), result.client_log_tail)
+            if self._log is not None:
+                self._log(request, result)
             if check and result.require_completed(self.vm_name) != 0:
                 assert isinstance(result.completion, Completed)
                 raise CommandFailed(self.vm_name, result.completion.status, result)
@@ -169,34 +193,28 @@ class VMAccess:
             return forwarding.run_forward(argv, vm_name=self.vm_name, log=log)
 
     def passphrase_hint(self) -> str | None:
-        """How to load the operator's key into the SSH agent, or ``None`` unless that is the likely fix.
-
-        ssh runs in batch mode, so an encrypted key that is not loaded in the
-        agent fails as a plain connection failure. There is no hint for a key
-        the agent already holds. This reads the key file and may run
-        ``ssh-add``, so callers ask only after a connection failure.
-        """
-        hint = ssh_identity.passphrase_hint(self._identity_file)
-        if hint is None or client.identity_is_loaded(client.resolve_ssh(), self._identity_file):
-            return None
-        return hint
+        """:func:`client.agent_load_hint` for the operator's key; ask only after a connection failure."""
+        return client.agent_load_hint(self._identity_file)
 
     # -- Internals -------------------------------------------------------------
 
     @contextlib.contextmanager
     def _passphrase_hint_on_connection_failure(self) -> Iterator[None]:
-        """Add :meth:`passphrase_hint` to a connection failure, reading the key only after one."""
+        """Add :meth:`passphrase_hint` to a connection or authentication failure, reading the key only after one.
+
+        An encrypted key the agent does not hold is refused like any other, so
+        it fails as ``AUTH_FAILED`` when ssh logs the refusal and as
+        ``CONNECTION`` when it does not.
+        """
         try:
             yield
         except ExecutionIncomplete as error:
-            if error.result.completion == Unknown(UnknownReason.CONNECTION):
-                hint = self.passphrase_hint()
-                if hint is not None:
-                    error.hint = f"{error.hint} {hint}" if error.hint else hint
+            if error.result.completion in (Unknown(UnknownReason.CONNECTION), Unknown(UnknownReason.AUTH_FAILED)):
+                error.add_hint(self.passphrase_hint())
             raise
 
     def _policy(self) -> ssh_process.VMPolicy:
-        return ssh_process.VMPolicy(self._identity_file, TrustBinding(TrustMode.VM, self.vm_name))
+        return ssh_process.VMPolicy(self._identity_file, TrustBinding(self.trust_mode, self.vm_name))
 
     def _destination(self) -> ssh_process.Destination:
         # The first use of a persisted value: a VM with no address is a state
@@ -218,13 +236,21 @@ class VMAccess:
         on_stdout: pump.Sink,
         on_stderr: pump.Sink,
     ) -> Result:
+        # R3: only the admin elevates, whatever the guest's sudoers says.
+        if request.elevated and not isinstance(self.identity, Admin):
+            raise PermissionDenied(self.vm_name, self._user)
         ssh = client.resolve_ssh()
         nonce = envelope.new_nonce()
         wire = envelope.message(request, nonce=nonce)
         policy, destination = self._policy(), self._destination()
         with ssh_process.client_log() as log:
             argv = ssh_process.build_argv(
-                ssh, policy, destination, ssh_process.ArgvMode.PIPE, ssh_process.stage0_command(), client_log=log
+                ssh,
+                policy,
+                destination,
+                ssh_process.ArgvMode.PIPE,
+                ssh_process.stage0_command(elevated=request.elevated),
+                client_log=log,
             )
             with pump.PipeSession(
                 argv,
@@ -269,29 +295,49 @@ def _flush_or_point_at_null_device(stream: BinaryIO) -> OSError | None:
     Bytes that could not be flushed to a departed consumer (``| head``) stay
     in the stream's buffer and would fail again at interpreter shutdown,
     turning the exit status into 120 with a traceback; the null device gives
-    shutdown somewhere to write them. Any other flush failure is returned for
-    the caller to raise, not raised.
+    shutdown somewhere to write them (:func:`output.tolerating_dead_sink`).
+    Any other flush failure is returned for the caller to raise, not raised.
     """
     try:
-        stream.flush()
+        with output.tolerating_dead_sink(stream):
+            stream.flush()
     except OSError as error:
-        if not pump.consumer_left(error):
-            return error
-        with contextlib.suppress(OSError, ValueError):
-            null = os.open(os.devnull, os.O_WRONLY)
-            try:
-                os.dup2(null, stream.fileno())
-            finally:
-                os.close(null)
+        return error
     return None
 
 
-def vm_access(vm: VMRow, config: Config, identity: Identity) -> VMAccess:
+def vm_access(
+    vm: VMRow, config: Config, identity: Identity, *, log: Callable[[RunRequest, Result], None] | None = None
+) -> VMAccess:
     """The access object for ``identity`` on ``vm``. Passive: it copies names and paths and nothing else."""
     user = vm.admin_username if isinstance(identity, Admin) else identity.linux_user
     return VMAccess(
         vm_name=vm.name,
         host=vm.tailscale_host,
         user=user,
+        identity=identity,
         identity_file=config.operator.ssh_private_key,
+        log=log,
+    )
+
+
+def enrollment_access(
+    vm: VMRow, config: Config, *, log: Callable[[RunRequest, Result], None] | None = None
+) -> VMAccess:
+    """The admin's access in Enroll mode: the only access that may record a new host key.
+
+    Create's first contact is its only caller. Every connection it makes runs
+    under ``accept-new`` against the VM's freshly reset store file, so the
+    first one that reaches sshd records the key and the rest verify against
+    it. Like :func:`vm_access` it copies the row's address at construction, so
+    pass a row read after the address was recorded.
+    """
+    return VMAccess(
+        vm_name=vm.name,
+        host=vm.tailscale_host,
+        user=vm.admin_username,
+        identity=Admin(),
+        identity_file=config.operator.ssh_private_key,
+        trust_mode=TrustMode.ENROLL,
+        log=log,
     )

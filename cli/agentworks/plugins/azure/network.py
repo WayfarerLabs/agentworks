@@ -23,7 +23,7 @@ priority band [100, 199] under the deny:
   confirmed or the create fails/aborts. The fixed name is what lets the
   close hooks delete it without any in-process state.
 - ``allow-ssh-transient-<nonce>`` (per operation): poked by
-  ``transient_route`` at the lowest free slot in the band and removed
+  ``_transient_route`` at the lowest free slot in the band and removed
   by name on exit. Per-operation rules are what make concurrent native
   ops on one VM safe: the old single well-known rule meant one op's
   exit could remove the allow another op still relied on; now each op
@@ -53,7 +53,8 @@ from agentworks.capabilities.vm_platform.ssh_exposure import (
     normalize_allow_cidrs,
     operator_ssh_prefixes,
 )
-from agentworks.errors import AuthorizationError, ProvisioningError
+from agentworks.errors import AgentworksError, AuthorizationError, ProvisioningError
+from agentworks.interrupts import interrupts_deferred
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -95,7 +96,7 @@ DENY_ALL_INBOUND_RULE_PRIORITY = 200
 # The ephemeral SSH allows: TCP/22 from the operator's egress prefixes
 # only, created when a route is needed and deleted after. Bootstrap uses
 # the FIXED name (one bootstrap per VM, and the close hooks must know
-# the name without in-process state); every native-transport session
+# the name without in-process state); every root script and native shell
 # pokes its own PREFIX+nonce rule so concurrent ops cannot cross-remove.
 # Both allocate priorities from the band below (bootstrap takes 100 by
 # construction: the NSG is created fresh with it).
@@ -115,6 +116,11 @@ ALLOW_RULE_DESCRIPTION_MARKER = "agentworks transient SSH allow"
 # the next free slot.
 _POKE_ALLOCATION_ATTEMPTS = 5
 
+# How long a rule removal waits for Azure. It runs with interrupts deferred,
+# so this bound is also how long a Ctrl-C can wait; GCP bounds its firewall
+# operations the same way.
+_RULE_REMOVAL_TIMEOUT_SECONDS = 300.0
+
 # The old scheme's standing world-open SSH allow, deleted on
 # convergence (see converge_nsg).
 LEGACY_SSH_RULE_NAME = "SSH"
@@ -130,8 +136,9 @@ class AzureError(ProvisioningError):
     The optional entity / hint keywords are the base ``AgentworksError``
     ones, forwarded so a failure that KNOWS which resource it is about
     can say so (the service-principal credential build names its site and
-    its secret). :func:`wrap_azure_error`, which converts an arbitrary SDK
-    exception, has no such knowledge and passes none.
+    its secret). :func:`wrap_azure_error`, which converts an arbitrary
+    exception, has no such knowledge and passes only the hint of an
+    Agentworks error it wraps.
     """
 
     def __init__(
@@ -149,7 +156,7 @@ class AzureError(ProvisioningError):
 
 
 def wrap_azure_error(exc: Exception) -> AzureError:
-    """Convert an Azure SDK exception into an AzureError."""
+    """Convert an Azure SDK exception into an AzureError, keeping a wrapped Agentworks error's hint."""
     from azure.core.exceptions import HttpResponseError
 
     if isinstance(exc, HttpResponseError):
@@ -165,7 +172,7 @@ def wrap_azure_error(exc: Exception) -> AzureError:
         summary = f"{code}: {_trim_message(str(message))}" if code else _trim_message(str(message))
         return AzureError(summary, detail=str(exc))
 
-    return AzureError(str(exc), detail=str(exc))
+    return AzureError(str(exc), detail=str(exc), hint=exc.hint if isinstance(exc, AgentworksError) else None)
 
 
 def _trim_message(message: str) -> str:
@@ -334,7 +341,10 @@ def poke_ssh_allow(network: NetworkManagementClient, rg: str, name: str, prefixe
     swallowed) before moving on: the create may have succeeded
     server-side even though the client-side wait failed, and only this
     function knows the nonce name, so the cleanup cannot be left to the
-    caller's exit path.
+    caller's exit path. An interrupt during the create removes the rule
+    the same way and propagates. Each of those removals holds interrupts
+    until it is done, since the route's own exit never runs for a poke
+    that did not return.
     """
     from uuid import uuid4
 
@@ -351,9 +361,15 @@ def poke_ssh_allow(network: NetworkManagementClient, rg: str, name: str, prefixe
                 _allow_ssh_rule(rule_name, prefixes, priority),
             ).result()
         except Exception as exc:
-            remove_ssh_allow(network, rg, name, rule_name, prefixes)
+            with interrupts_deferred():
+                remove_ssh_allow(network, rg, name, rule_name, prefixes)
             last_exc = exc
             continue
+        except BaseException:
+            # An interrupt mid-create: the rule may exist, and only this name finds it.
+            with interrupts_deferred():
+                remove_ssh_allow(network, rg, name, rule_name, prefixes)
+            raise
         return rule_name
     assert last_exc is not None  # the loop only falls through via the except arm
     raise wrap_azure_error(last_exc) from last_exc
@@ -371,10 +387,10 @@ def remove_ssh_allow(
     operations' transient rules are untouched).
 
     ``rule_name`` is the fixed ``allow-ssh-bootstrap`` on the hook paths
-    and the poke's nonce name on the ``transient_route`` exit and the
-    poke's own attempt cleanup. A 404 is fine (the rule was already
-    gone: a hook re-run, a VM that never had it, or a create that never
-    landed server-side). Any other failure warns instead of raising:
+    and the poke's nonce name on the ``_transient_route`` exit and the
+    poke's own attempt cleanup. A 404 is fine and silent (the rule was
+    already gone: a hook re-run, a VM that never had it, or a create that
+    never landed server-side). Any other failure warns instead of raising:
     every call site must keep unwinding, and the warning names the rule
     and states the actual residual exposure: the rule's scoped source
     prefixes, not the world (pass ``prefixes`` when known so the warning
@@ -385,22 +401,38 @@ def remove_ssh_allow(
     the platform instance just to sharpen a warning string is not worth
     the coupling; the rule NAME, by contrast, is always known (fixed for
     bootstrap, returned by the poke), so it is always named.
+
+    The removal waits at most ``_RULE_REMOVAL_TIMEOUT_SECONDS`` for Azure,
+    since a caller that holds interrupts around it (``interrupts_deferred``:
+    the poke's own cleanup, the route's exit, ``close_provisioning_access_or_warn``)
+    makes the operator wait that long; an operation still running then is an
+    outcome nobody saw, so it warns that the rule may remain. This function
+    does not hold interrupts itself.
     """
     from azure.core.exceptions import ResourceNotFoundError
 
-    output.info(f"Closing SSH route (removing allow rule '{rule_name}')...")
+    scope = f"source(s) {', '.join(prefixes)}" if prefixes else "the rule's scoped source addresses"
     try:
-        network.security_rules.begin_delete(rg, f"{name}-nsg", rule_name).result()
+        poller = network.security_rules.begin_delete(rg, f"{name}-nsg", rule_name)
+        poller.result(timeout=_RULE_REMOVAL_TIMEOUT_SECONDS)
     except ResourceNotFoundError:
-        pass
+        return
     except Exception as exc:
         err = wrap_azure_error(exc)
-        scope = f"source(s) {', '.join(prefixes)}" if prefixes else "the rule's scoped source addresses"
         output.warn(
             f"could not remove the '{rule_name}' rule on NSG "
             f"'{name}-nsg': {err.summary}. The VM's SSH port stays open to "
             f"{scope}; delete the rule manually to restore zero inbound exposure."
         )
+        return
+    if not poller.done():
+        output.warn(
+            f"Azure did not confirm the removal of the '{rule_name}' rule on NSG '{name}-nsg' within "
+            f"{_RULE_REMOVAL_TIMEOUT_SECONDS:.0f}s, so the VM's SSH port may remain open to {scope}; check "
+            "the rule and delete it manually if it is still there."
+        )
+        return
+    output.info(f"Closed SSH route (removed allow rule '{rule_name}')")
 
 
 def ensure_public_ip(
@@ -726,11 +758,10 @@ def rollback_create_on_interrupt(
     The second interrupt is absorbed so the caller re-raises the
     ORIGINAL one; either way a KeyboardInterrupt propagates to
     ``create_vm``, whose unwind then deletes the DB row it no longer
-    needs. A VM delete failure inside the teardown warns here (the
-    proxmox rollbacks' ``_warn_if_vm_remains`` precedent, using the
-    captured failure instead of a probe): this path is already
-    unwinding on the operator's interrupt, so raising like the delete
-    op does would replace it, but a silent orphan is never acceptable.
+    needs. A VM delete failure inside the teardown warns here, using the
+    captured failure: this path is already unwinding on the operator's
+    interrupt, so raising like the delete op does would replace it, but a
+    silent orphan is never acceptable.
     """
     output.warn(
         f"Interrupted: cleaning up partial Azure resources for '{name}', please wait (Ctrl-C again to abandon them)..."

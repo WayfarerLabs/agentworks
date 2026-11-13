@@ -326,6 +326,7 @@ def resource_edit(
     from agentworks import output
     from agentworks.bootstrap import load_request_registry
     from agentworks.config import load_config
+    from agentworks.programs import resolve_program
     from agentworks.resources.access import parse_resource_identity
     from agentworks.resources.inspect import edit_location
 
@@ -365,10 +366,9 @@ def resource_edit(
         if found.location is None:
             if found.unreadable:
                 files = ", ".join(format_host_path(p) for p in found.unreadable)
-                exc.hint = (
-                    f"{exc.hint + ' ' if exc.hint else ''}Also: {files} "
-                    f"failed to parse and could not be searched; edit "
-                    f"the file directly if the resource lives there."
+                exc.add_hint(
+                    f"Also: {files} failed to parse and could not be searched; "
+                    "edit the file directly if the resource lives there."
                 )
             raise
         output.warn(f"config is currently failing validation ({exc}); opening the declaring manifest anyway")
@@ -378,7 +378,7 @@ def resource_edit(
     # simple, per the maintainer's scope ruling.) Framed by the shared
     # helper so this reads the same as the errors that sent them here.
     output.info(f"Editing {kind}/{name} ({location_text(SourceLocation(file=path, line=line))})")
-    raise typer.Exit(subprocess.call([editor, str(path)]))
+    raise typer.Exit(subprocess.call([resolve_program(editor), str(path)]))
 
 
 @resource_app.command("sample")

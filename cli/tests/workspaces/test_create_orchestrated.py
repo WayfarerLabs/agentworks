@@ -87,8 +87,7 @@ def _stop_the_vm(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> None:
         lambda self, row, ctx: events.append("status") or _VMStatus.STOPPED,
     )
     monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: events.append("start"))
-    monkeypatch.setattr(vm_manager, "_tailscale_rejoin_required", lambda *a, **k: True)
-    monkeypatch.setattr(vm_manager, "_ensure_tailscale", lambda *a, **k: events.append("tailscale"))
+    monkeypatch.setattr("agentworks.vms.manager._await_tailnet", lambda *a, **k: events.append("tailscale"))
 
 
 def test_create_refuses_ssh_identity_before_activation_or_mutation(
@@ -461,6 +460,7 @@ def test_native_failure_preserves_workspace_and_continues_sibling_and_grants(db,
     monkeypatch.setattr(
         "agentworks.workspaces.backends.vm.delete_vm_workspace", lambda *a, **k: pytest.fail("workspace unwound")
     )
+    monkeypatch.setattr("agentworks.workspaces.manager.create.resolve_program", lambda name: name)
     monkeypatch.setattr("agentworks.workspaces.manager.create.subprocess.run", lambda *a, **k: events.append("open"))
     with pytest.raises(StateError):
         workspace_manager.create_workspace(

@@ -511,7 +511,6 @@ def test_second_interrupt_after_partial_ordinary_rollback_is_only_abandon_signal
     assert "instance:delete" not in log
     assert "firewall:delete:vm-a-deny" not in log
     message = "\n".join(warnings)
-    assert "Cleanup abandoned" in message
     assert "project 'project-a', zone 'us-central1-a', instance 'vm-a'" in message
     assert "expected provider IDs: instance '201', allow '101', deny '102'" in message
     assert "Manual cleanup" in message
@@ -556,7 +555,6 @@ def test_second_interrupt_abandons_promptly_with_exact_safe_actions(monkeypatch:
 
     assert caught.value is primary
     message = "\n".join(warnings)
-    assert "Cleanup abandoned" in message
     assert "project 'project-a'" in message
     assert "zone 'us-central1-a'" in message
     assert "instance 'vm-a'" in message

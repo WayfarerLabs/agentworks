@@ -11,6 +11,7 @@ import ast
 import io
 import os
 import subprocess
+import tempfile
 import threading
 import time
 from dataclasses import dataclass
@@ -30,7 +31,7 @@ from agentworks.execution.results import (
     Unknown,
     UnknownReason,
 )
-from tests.execution.conformance.lanes import Lane, LocalLane, SSHDLane
+from tests.execution.conformance.lanes import Lane, LocalFilesystem, LocalLane, SSHDLane, sudo_granted, unavailable
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -474,6 +475,19 @@ def memfd_that_cannot_be_created_is_not_delivered(lane: Lane) -> None:
     assert not account.exists(marker)
 
 
+def wrong_identity_is_an_authentication_failure(lane: Lane) -> None:
+    from tests.execution.conformance.lanes import generate_key
+
+    if isinstance(lane, LocalLane):
+        pytest.skip("the local lane has no sshd to refuse a key")
+    with tempfile.TemporaryDirectory(prefix="agw-conformance-key-") as directory:
+        stranger = lane.access_with_identity(generate_key(Path(directory) / "unauthorized"))
+
+        result = stranger.run(cmd("true"))
+
+    assert result.completion == Unknown(UnknownReason.AUTH_FAILED)  # A1
+
+
 # -- S only -----------------------------------------------------------------------------
 
 
@@ -646,6 +660,67 @@ def handover_shell_starts_with_clean_dispositions(lane: Lane) -> None:
     assert terminal.stdout.decode().splitlines() == ["SigBlk:\t0000000000000000", "SigIgn:\t0000000000000000"]
 
 
+# -- Elevation (E1, E2, E4, E6) ----------------------------------------------------------
+
+
+def needs_sudo(lane: Lane) -> None:
+    """A local guest elevates only where the runner grants passwordless sudo: CI does, so it fails there without it."""
+    if isinstance(lane, LocalFilesystem) and not sudo_granted():
+        unavailable("the elevation vectors need passwordless sudo")
+
+
+def elevated_runs_as_root_in_the_rebuilt_environment(lane: Lane) -> None:
+    needs_sudo(lane)
+    if isinstance(lane, LocalLane) and lane.shell_name in ("bash", "zsh"):
+        lane.startup(startup_file(lane), "export AGW_FROM_STARTUP=1\n")
+
+    identity = lane.run(cmd("id", "-u", elevated=True))
+    environment = lane.run(cmd("env", elevated=True))
+
+    assert (identity.completion, identity.stdout) == (Completed(0), b"0\n")
+    assert environment.completion == Completed(0)
+    names = dict(line.split("=", 1) for line in environment.stdout.decode().splitlines() if "=" in line)
+    # A local guest is this machine, whose root may live elsewhere; a VM is Debian. Only a local
+    # lane reads the passwd database, so a Windows workstation's V lane needs no pwd.
+    if isinstance(lane, LocalFilesystem):
+        import pwd
+
+        root_home = pwd.getpwuid(0).pw_dir
+    else:
+        root_home = "/root"
+    assert (names.get("HOME"), names.get("USER")) == (root_home, "root")
+    assert not [name for name in names if name.startswith("SUDO_")]
+    assert "AGW_FROM_STARTUP" not in names
+
+
+def elevated_stdin_positioning(lane: Lane) -> None:
+    needs_sudo(lane)
+    data = b"0000000005hello" + bytes(range(256)) * 1024
+
+    streamed = lane.stream(cmd("cat", elevated=True), stdin=data)
+
+    assert (streamed.status, streamed.stdout) == (0, data)
+
+
+def elevated_under_the_default_sudoers(lane: Lane) -> None:
+    # On a fresh VM: use_pty, as Debian ships it, must leave the launcher's stream check passing.
+    assert lane.run(cmd("true", elevated=True)).completion == Completed(0)
+    version = lane.run(cmd("sudo", "-V", elevated=True))
+    assert version.completion == Completed(0)
+    print(version.stdout.decode(errors="replace"))  # the evidence the cell records
+
+
+def elevated_background_child_holds_both_streams(lane: Lane) -> None:
+    needs_sudo(lane)
+    started = time.monotonic()
+
+    result = lane.run(script("sleep 5 &\necho done", elevated=True))
+
+    assert time.monotonic() - started < 4
+    assert result.completion == Completed(0)
+    assert result.stdout == b"done\n"
+
+
 # -- The list ---------------------------------------------------------------------------
 
 
@@ -687,6 +762,11 @@ def build() -> list[Vector]:
         Vector("handover-wait-expires", "LSV", handover_gives_up_after_its_wait),
         Vector("streams-left-non-blocking", "LSV", payload_leaves_the_shared_streams_non_blocking_and_full),
         Vector("host-key-mismatch", "S", host_key_mismatch_is_trust_mismatch),
+        Vector("wrong-identity-is-auth-failed", "SV", wrong_identity_is_an_authentication_failure),
+        Vector("E1-elevated-rebuilt-environment", "LV", elevated_runs_as_root_in_the_rebuilt_environment),
+        Vector("E2-elevated-stdin-positioning", "LV", elevated_stdin_positioning),
+        Vector("E4-elevated-default-sudoers", "V", elevated_under_the_default_sudoers),
+        Vector("E6-elevated-background-child", "LV", elevated_background_child_holds_both_streams),
     ]
     startup_exits = [
         Vector(

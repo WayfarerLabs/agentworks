@@ -7,9 +7,9 @@ and NO standing allow: SSH happens through ephemeral allows in the band
 [100, 199] (always outranking the deny), scoped to the detected operator
 egress IP plus the ``operator.ssh_allow_cidrs`` config extras.
 ``create`` opens the fixed-name bootstrap hole,
-``post_tailscale_ready`` / ``secure_failed_vm`` close it, and
-``transient_route`` pokes/removes a per-operation nonce-named rule
-around each native-transport session (concurrent ops each own theirs),
+``close_provisioning_access`` closes it, and
+``_transient_route`` pokes/removes a per-operation nonce-named rule
+around each root script or native shell (concurrent ops each own theirs),
 converging legacy VMs on the way.
 
 Azure is a real dependency in the test env, so the fakes are installed
@@ -23,6 +23,8 @@ no test hits the network.
 
 from __future__ import annotations
 
+import signal
+from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock, patch
@@ -31,9 +33,8 @@ import pytest
 
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import ProvisionRequest, ssh_exposure
-from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
 from agentworks.debian import DebianRelease
-from agentworks.errors import ConfigError, ConnectivityError
+from agentworks.errors import ConfigError, ConnectivityError, ProvisioningError
 from agentworks.plugins.azure import network as azure_network
 from agentworks.plugins.azure.network import (
     ALLOW_PRIORITY_BAND_END,
@@ -77,7 +78,10 @@ def _stub_egress_detection(monkeypatch: pytest.MonkeyPatch) -> None:
     the failure branches."""
     monkeypatch.setattr(ssh_exposure, "_egress_ip_cache", None)
     monkeypatch.setattr(ssh_exposure, "detect_egress_ip", lambda: _DETECTED)
-    monkeypatch.setattr(EphemeralTailscaleBootstrap, "complete", lambda self, auth_key: "100.64.0.5")
+    monkeypatch.setattr(
+        "agentworks.plugins.azure.platform.complete_cloud_bootstrap",
+        lambda run_as_root, auth_key, **kwargs: "100.64.0.5",
+    )
 
 
 def _fail_detection(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -182,7 +186,7 @@ class TestCreate:
             system_slug=None,
             admin_username="agentworks",
             ssh_public_key="ssh-ed25519 AAAA test",
-            ssh_private_key=None,
+            ssh_private_key=Path("/dev/null"),
             provisioning_trust=provisioning_trust_for_tests("vm1"),
             tailscale_auth_key="tskey-test",
             progress=MagicMock(),
@@ -286,40 +290,69 @@ class TestPrefixAssembly:
 
 
 class TestCloseProvisioningAccessHooks:
-    def test_post_tailscale_ready_deletes_the_bootstrap_allow(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """The success hook deletes the fixed-name bootstrap allow (no
-        in-process state needed); the deny baseline is permanent, so
-        there is nothing to restore."""
+    def test_the_close_deletes_the_bootstrap_allow(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The hook deletes the fixed-name bootstrap allow (no in-process
+        state needed); the deny baseline is permanent, so there is nothing
+        to restore."""
         network = _install_fakes(monkeypatch).network
         vm: VMRow = _fake_vm()  # type: ignore[assignment]
 
-        _platform().post_tailscale_ready(vm, RunContext())
+        _platform().close_provisioning_access(vm, RunContext())
 
         assert network.security_rules.deletes() == [("rg1", "vm1-nsg", BOOTSTRAP_ALLOW_RULE_NAME)]
         assert network.security_rules.creates() == []
 
-    def test_secure_failed_vm_deletes_the_bootstrap_allow(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Fail closed: the kept-VM hook removes the fixed-name bootstrap
-        allow too, so a failed or interrupted create defaults to zero
-        inbound exposure."""
-        network = _install_fakes(monkeypatch).network
-        vm: VMRow = _fake_vm()  # type: ignore[assignment]
-
-        _platform().secure_failed_vm(vm, RunContext())
-
-        assert network.security_rules.deletes() == [("rg1", "vm1-nsg", BOOTSTRAP_ALLOW_RULE_NAME)]
-        assert network.security_rules.creates() == []
-
-    def test_hooks_tolerate_missing_allow(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """A 404 on the delete (hook re-run, already-closed VM) is fine."""
+    def test_the_close_tolerates_a_missing_allow_silently(
+        self, monkeypatch: pytest.MonkeyPatch, captured_output: Any
+    ) -> None:
+        """A 404 on the delete is fine: every root-channel route closes the provisioning access again."""
         from azure.core.exceptions import ResourceNotFoundError
 
         network = _install_fakes(monkeypatch).network
         network.security_rules.delete_error = ResourceNotFoundError("already gone")
         vm: VMRow = _fake_vm()  # type: ignore[assignment]
 
-        _platform().post_tailscale_ready(vm, RunContext())
-        _platform().secure_failed_vm(vm, RunContext())  # no raise either
+        _platform().close_provisioning_access(vm, RunContext())  # no raise
+
+        assert captured_output.info == []
+        assert captured_output.warnings == []
+
+    def test_a_close_whose_removal_does_not_finish_in_time_warns_instead_of_waiting(
+        self, monkeypatch: pytest.MonkeyPatch, captured_output: Any
+    ) -> None:
+        """The removal runs with interrupts deferred, so an unbounded wait on a hung operation made Ctrl-C useless."""
+        network = _install_fakes(monkeypatch).network
+        waits: list[float | None] = []
+
+        class _HungPoller(_Poller):
+            def result(self, timeout: float | None = None) -> object:
+                waits.append(timeout)
+                return super().result(timeout)
+
+        monkeypatch.setattr(network.security_rules, "begin_delete", lambda *_args: _HungPoller(None, finishes=False))
+        vm: VMRow = _fake_vm()  # type: ignore[assignment]
+
+        _platform().close_provisioning_access(vm, RunContext())  # no raise
+
+        assert len(waits) == 1
+        assert waits[0] is not None
+        assert captured_output.info == []  # not reported closed
+        (warning,) = captured_output.warnings
+        assert BOOTSTRAP_ALLOW_RULE_NAME in warning
+
+    def test_a_close_that_cannot_build_its_client_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The caller warns with what it raises, so the rule left open is named there, not lost."""
+        _install_fakes(monkeypatch)
+        platform = _platform()
+
+        def no_client(*_args: object, **_kwargs: object) -> None:
+            raise ConfigError("the site's client secret is unset")
+
+        monkeypatch.setattr(platform, "_network_client", no_client)
+        vm: VMRow = _fake_vm()  # type: ignore[assignment]
+
+        with pytest.raises(ProvisioningError):
+            platform.close_provisioning_access(vm, RunContext())
 
 
 class TestTransientRoute:
@@ -330,7 +363,7 @@ class TestTransientRoute:
         network = _install_fakes(monkeypatch, public_ip_attached=False).network
         vm: VMRow = _fake_vm()  # type: ignore[assignment]
 
-        with _platform().transient_route(vm, RunContext()):
+        with _platform()._transient_route(vm, RunContext()):
             assert network.public_ip_addresses.created == [("rg1", "vm1-ip")]
             assert len(network.network_interfaces.updated) == 1
             nic = network.network_interfaces.updated[0][2]
@@ -342,7 +375,7 @@ class TestTransientRoute:
         network = _install_fakes(monkeypatch, public_ip_attached=True).network
         vm: VMRow = _fake_vm()  # type: ignore[assignment]
 
-        with _platform().transient_route(vm, RunContext()):
+        with _platform()._transient_route(vm, RunContext()):
             assert network.public_ip_addresses.created == []
             assert network.network_interfaces.updated == []
 
@@ -363,7 +396,7 @@ class TestTransientRoute:
         )
         vm: VMRow = _fake_vm()  # type: ignore[assignment]
 
-        with _platform().transient_route(vm, RunContext(), config=_operator_config(["198.51.100.0/24"])):
+        with _platform()._transient_route(vm, RunContext(config=_operator_config(["198.51.100.0/24"]))):
             # Call order: deny re-pin (create), legacy SSH delete, allow poke.
             kinds = [(e[0], e[3]) for e in network.security_rules.events]
             transient = network.security_rules.transient_names()
@@ -394,6 +427,28 @@ class TestTransientRoute:
             transient[0],
         ]
 
+    def test_an_interrupt_during_the_routes_delete_waits_for_it(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Ctrl-C the moment the script ends: the rule's delete still reaches Azure, then the interrupt raises."""
+        network = _install_fakes(monkeypatch).network
+        rules = network.security_rules
+        delete = rules.begin_delete
+
+        armed = False
+
+        def interrupted_delete(rg: str, nsg: str, rule_name: str) -> Any:
+            if armed:
+                signal.raise_signal(signal.SIGINT)
+            return delete(rg, nsg, rule_name)
+
+        monkeypatch.setattr(rules, "begin_delete", interrupted_delete)
+        vm: VMRow = _fake_vm()  # type: ignore[assignment]
+
+        with pytest.raises(KeyboardInterrupt), _platform()._transient_route(vm, RunContext()):
+            armed = True
+
+        (transient,) = rules.transient_names()
+        assert ("rg1", "vm1-nsg", transient) in rules.deletes()
+
     def test_convergence_tolerates_absent_legacy_rule(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A 404 on the legacy SSH delete (an already-converged or
         new-scheme VM) is expected; the enter proceeds to the poke."""
@@ -413,7 +468,7 @@ class TestTransientRoute:
         vm: VMRow = _fake_vm()  # type: ignore[assignment]
 
         body_ran = False
-        with _platform().transient_route(vm, RunContext()):
+        with _platform()._transient_route(vm, RunContext()):
             body_ran = True
 
         assert body_ran
@@ -434,7 +489,7 @@ class TestTransientRoute:
         real_create = rules.begin_create_or_update
 
         class _ExplodingPoller(_Poller):
-            def result(self) -> object:
+            def result(self, timeout: float | None = None) -> object:
                 raise RuntimeError("client-side poll failure")
 
         def _create(rg: str, nsg: str, rule_name: str, rule: object) -> _Poller:
@@ -448,7 +503,7 @@ class TestTransientRoute:
         monkeypatch.setattr(rules, "begin_create_or_update", _create)
         vm: VMRow = _fake_vm()  # type: ignore[assignment]
 
-        with pytest.raises(AzureError), _platform().transient_route(vm, RunContext()):
+        with pytest.raises(AzureError), _platform()._transient_route(vm, RunContext()):
             pytest.fail("the body must not run when the poke fails")
 
         # Every attempted rule was created server-side and then removed
@@ -458,6 +513,63 @@ class TestTransientRoute:
         deleted = {d[2] for d in rules.deletes()}
         assert set(attempted) <= deleted
         assert not any(n.startswith(TRANSIENT_ALLOW_RULE_PREFIX) for n in rules.rules)
+
+    def test_an_interrupt_during_the_poke_removes_its_rule(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The route never learns the name of a rule whose create was interrupted, so the poke removes it."""
+        network = _install_fakes(monkeypatch).network
+        rules: _FakeSecurityRules = network.security_rules
+        real_create = rules.begin_create_or_update
+
+        class _InterruptedPoller(_Poller):
+            def result(self, timeout: float | None = None) -> object:
+                raise KeyboardInterrupt
+
+        def _create(rg: str, nsg: str, rule_name: str, rule: object) -> _Poller:
+            poller = real_create(rg, nsg, rule_name, rule)
+            if rule_name.startswith(TRANSIENT_ALLOW_RULE_PREFIX):
+                return _InterruptedPoller(rule)
+            return poller
+
+        monkeypatch.setattr(rules, "begin_create_or_update", _create)
+        vm: VMRow = _fake_vm()  # type: ignore[assignment]
+
+        with pytest.raises(KeyboardInterrupt), _platform()._transient_route(vm, RunContext()):
+            pytest.fail("the body must not run when the poke is interrupted")
+
+        (attempted,) = rules.transient_names()
+        assert ("rg1", "vm1-nsg", attempted) in rules.deletes()
+
+    def test_a_second_interrupt_during_the_pokes_cleanup_waits_for_it(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The route never learns the interrupted rule's name, so the poke's own delete must hold a second Ctrl-C."""
+        network = _install_fakes(monkeypatch).network
+        rules: _FakeSecurityRules = network.security_rules
+        real_create = rules.begin_create_or_update
+        real_delete = rules.begin_delete
+
+        class _InterruptedPoller(_Poller):
+            def result(self, timeout: float | None = None) -> object:
+                raise KeyboardInterrupt
+
+        def _create(rg: str, nsg: str, rule_name: str, rule: object) -> _Poller:
+            poller = real_create(rg, nsg, rule_name, rule)
+            if rule_name.startswith(TRANSIENT_ALLOW_RULE_PREFIX):
+                return _InterruptedPoller(rule)
+            return poller
+
+        def interrupted_delete(rg: str, nsg: str, rule_name: str) -> Any:
+            if rule_name.startswith(TRANSIENT_ALLOW_RULE_PREFIX):
+                signal.raise_signal(signal.SIGINT)
+            return real_delete(rg, nsg, rule_name)
+
+        monkeypatch.setattr(rules, "begin_create_or_update", _create)
+        monkeypatch.setattr(rules, "begin_delete", interrupted_delete)
+        vm: VMRow = _fake_vm()  # type: ignore[assignment]
+
+        with pytest.raises(KeyboardInterrupt), _platform()._transient_route(vm, RunContext()):
+            pytest.fail("the body must not run when the poke is interrupted")
+
+        (attempted,) = rules.transient_names()
+        assert ("rg1", "vm1-nsg", attempted) in rules.deletes()
 
     def test_poke_attempt_cleanup_failure_warns(
         self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
@@ -473,7 +585,7 @@ class TestTransientRoute:
         real_create = rules.begin_create_or_update
 
         class _ExplodingPoller(_Poller):
-            def result(self) -> object:
+            def result(self, timeout: float | None = None) -> object:
                 raise RuntimeError("client-side poll failure")
 
         def _create(rg: str, nsg: str, rule_name: str, rule: object) -> _Poller:
@@ -487,7 +599,7 @@ class TestTransientRoute:
         monkeypatch.setattr(rules, "begin_create_or_update", _create)
         vm: VMRow = _fake_vm()  # type: ignore[assignment]
 
-        with pytest.raises(AzureError), _platform().transient_route(vm, RunContext()):
+        with pytest.raises(AzureError), _platform()._transient_route(vm, RunContext()):
             pytest.fail("the body must not run when the poke fails")
 
         attempted = rules.transient_names()
@@ -504,7 +616,7 @@ class TestTransientRoute:
         network = _install_fakes(monkeypatch).network
         vm: VMRow = _fake_vm()  # type: ignore[assignment]
 
-        with pytest.raises(RuntimeError, match="kaboom"), _platform().transient_route(vm, RunContext()):
+        with pytest.raises(RuntimeError, match="kaboom"), _platform()._transient_route(vm, RunContext()):
             raise RuntimeError("kaboom")
 
         rule_name = network.security_rules.transient_names()[0]
@@ -520,7 +632,7 @@ class TestTransientRoute:
         vm: VMRow = _fake_vm()  # type: ignore[assignment]
 
         entered = False
-        with _platform().transient_route(vm, RunContext(), config=_operator_config(["198.51.100.0/24"])):
+        with _platform()._transient_route(vm, RunContext(config=_operator_config(["198.51.100.0/24"]))):
             entered = True
             # Poison ONLY the exit path's delete.
             network.security_rules.delete_error = RuntimeError("boom")
@@ -544,9 +656,9 @@ class TestPerOperationAllows:
         rules: _FakeSecurityRules = network.security_rules
         vm: VMRow = _fake_vm()  # type: ignore[assignment]
 
-        with _platform().transient_route(vm, RunContext()):
+        with _platform()._transient_route(vm, RunContext()):
             outer_name = rules.transient_names()[0]
-            with _platform().transient_route(vm, RunContext()):
+            with _platform()._transient_route(vm, RunContext()):
                 inner_name = rules.transient_names()[1]
                 assert inner_name != outer_name
                 outer_rule, inner_rule = rules.rules[outer_name], rules.rules[inner_name]
@@ -690,5 +802,5 @@ class TestEnsureDenyRaises:
         network.security_rules.create_error = RuntimeError("boom")
         vm: VMRow = _fake_vm()  # type: ignore[assignment]
 
-        with pytest.raises(AzureError), _platform().transient_route(vm, RunContext()):
+        with pytest.raises(AzureError), _platform()._transient_route(vm, RunContext()):
             pytest.fail("the body must not run when convergence fails")

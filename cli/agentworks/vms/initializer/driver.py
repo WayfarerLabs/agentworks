@@ -1,13 +1,13 @@
-"""The two-phase init driver: Phase A (record and verify, over the provisioning
-transport) and Phase B (setup, over Tailscale SSH,
-non-fatal-on-failure).
+"""The two-phase init driver: Phase A (first contact and the VM contract, over
+``agentworks.execution``) and Phase B (setup, over the legacy Tailscale SSH
+transport, non-fatal-on-failure).
 
 Phase A is provisioning: after the platform completes create-time bootstrap,
-``bootstrap_vm`` records the returned or rediscovered Tailscale IP, verifies
-Tailscale SSH, and syncs SSH config for a freshly provisioned VM. It returns
-the Tailscale transport and home for Phase B. Phase B is
-initialization: ``run_initialization`` runs it, both after ``bootstrap_vm``
-on ``vm create`` and standalone on ``vm reinit``.
+``bootstrap_vm`` runs ``phase_a.bootstrap`` (record the address, enroll the
+host key, check the contract) and syncs SSH config, then returns the Tailscale
+transport and home for Phase B. Phase B is initialization:
+``run_initialization`` runs it, both after ``bootstrap_vm`` on ``vm create``
+and standalone on ``vm reinit``.
 
 ``create_vm`` (in ``vms.manager.lifecycle``) drives ``bootstrap_vm`` inside
 its ``Provisioning`` output section and ``run_initialization`` after it, so
@@ -23,17 +23,16 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from agentworks import output
-from agentworks.db import InitStatus, ProvisioningStatus
+from agentworks.db import InitStatus
 from agentworks.env import ResourceContext, vm_stable_identity_env
-from agentworks.errors import ProvisioningError
 from agentworks.execution import trust
 from agentworks.git_config import ensure_safe_directory_wildcard
 from agentworks.git_credentials import configure_user_git_credentials
 from agentworks.linux_users import managed_home
-from agentworks.path_rendering import format_host_path
 from agentworks.ssh import SSHError, SSHLogger
-from agentworks.transports import ExecTransport, SSHTransport, Transport
+from agentworks.transports import SSHTransport, Transport
 
+from . import phase_a
 from .mise import (
     MISE_ACTIVATE_LINES,
     _fetch_mise_lockfile,
@@ -69,7 +68,7 @@ from .ssh_keys import (
 from .workspaces_dir import _setup_workspaces_directory
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Mapping
 
     from agentworks.capabilities.base import RunContext
     from agentworks.capabilities.vm_platform import VMPlatform
@@ -97,154 +96,54 @@ def bootstrap_vm(
     db: Database,
     config: Config,
     vm_name: str,
-    exec_target: ExecTransport,
     platform: VMPlatform,
     ctx: RunContext,
     logger: SSHLogger,
     *,
     admin_username: str,
-    tailscale_ip: str | None = None,
-    on_tailscale_ready: Callable[[], None] | None = None,
-) -> tuple[Transport, str]:
-    """Run Phase A provisioning state recording and connectivity verification.
+    tailnet_address: str,
+    expected_release: DebianRelease,
+) -> tuple[Transport, str, DebianRelease]:
+    """Run Phase A (``phase_a.bootstrap``), then hand Phase B its legacy target.
 
-    Runs over the provisioning transport after platform-owned bootstrap:
-    optional Tailscale IP rediscovery, Tailscale-SSH verification, the
-    post-Tailscale-ready hook plus reconnect wait, and finally the SSH-config
-    sync before the caller's explicit provisioning-complete line. Only the
-    IP discovery or verification is fatal to provisioning: a failure there means the VM is
-    unreachable, so it marks provisioning ``failed``, records the
-    ``provisioning_failed`` event, secures the kept VM via the platform's
-    best-effort ``secure_failed_vm`` hook (Azure deletes its ephemeral
-    bootstrap SSH allow so a failed VM defaults to zero inbound
-    exposure), points at the manager-owned log, and re-raises for
-    ``create_vm`` to map to a ProvisioningError (delete guidance). An
-    operator interrupt (KeyboardInterrupt) escapes that Exception arm but
-    still secures the kept VM best-effort before propagating; the row's
-    status is left as the abort found it (the caller's cancel handler
-    owns the messaging). The
-    connectivity cleanup and the SSH-config sync are non-fatal: they cannot
-    make an already-bootstrapped VM unhealthy, so a failure there warns and
-    continues into Phase B rather than stranding a reachable VM as FAILED.
+    Phase A records the platform's address, makes the first contact in Enroll
+    mode and runs the VM contract, release first, all over
+    ``agentworks.execution``; see :mod:`.phase_a` for its fail-closed span.
+    What stays here is what stays legacy until initialization moves: the
+    non-fatal SSH-config sync, and Phase B's VM-bound ``SSHTransport``.
 
-    Returns ``(ts_target, home)`` for Phase B (``run_initialization``).
-    The caller owns the keepalive hold spanning both phases (this function
-    does not open it) and the ``Provisioning`` output section (this function
-    emits into the ambient section, opening none of its own). The manager
-    constructs and closes ``logger``; this function only writes Phase A work
-    to it.
-
-    ``ctx`` is the create op's own scoped :class:`RunContext`, threaded
-    in so the ``secure_failed_vm`` hook (a backend NSG call on Azure)
-    reads its credential from it with no ambient fallback. It carries
-    already-resolved secrets: ``create_vm``'s boundary resolve ran, and
-    the ``platform_ctx`` it built, before this function is called, so
-    even the interrupt arm below never resolves a secret for the first
-    time.
+    Returns ``(ts_target, home, release)``: the target and home for
+    ``run_initialization``, and the release Phase A attested. The caller owns
+    the availability hold spanning both phases, the ``Provisioning`` output
+    section and ``logger``'s lifetime.
     """
-    home = managed_home(admin_username)
+    address, release = phase_a.bootstrap(
+        db,
+        config,
+        vm_name,
+        platform,
+        ctx,
+        logger,
+        admin_username=admin_username,
+        tailnet_address=tailnet_address,
+        expected_release=expected_release,
+    )
 
-    # Attach logger to the provisioning transport. ``ExecTransport`` declares
-    # ``logger`` on the ABC; the assignment is polymorphic.
-    exec_target.logger = logger
+    # The operator's ``ssh awvm--<name>`` aliases go in before Phase B's many
+    # connections, and a failed write continues into Phase B.
+    from agentworks.ssh_config import sync_ssh_config_or_warn
 
-    transport = exec_target.describe()
+    sync_ssh_config_or_warn(config, db)
 
-    vm_row = db.get_vm(vm_name)
-    assert vm_row is not None, "create_vm inserts the row before init"
-    # The fatal span is only IP discovery and Tailscale SSH verification. A
-    # failure means the VM is unreachable, so it is marked provisioning ``failed`` and
-    # routed to delete. The connectivity cleanup and the SSH-config sync below
-    # sit OUTSIDE this span deliberately: they cannot make an already-bootstrapped
-    # VM unhealthy, so a failure there must not flip a reachable VM to FAILED
-    # (which would foreclose ``vm reinit``, since reinit requires COMPLETE).
-    try:
-        db.insert_vm_event(vm_name, "provisioning_started", transport)
-        ts_target = _phase_a_bootstrap(
-            db,
-            config,
-            vm_name,
-            exec_target,
-            admin_username,
-            logger,
-            tailscale_ip=tailscale_ip,
-        )
-        db.insert_vm_event(
-            vm_name,
-            "provisioning_complete",
-            ts_target.host if isinstance(ts_target, SSHTransport) else None,
-        )
-    except Exception as e:
-        db.update_vm_provisioning_status(vm_name, ProvisioningStatus.FAILED)
-        db.insert_vm_event(vm_name, "provisioning_failed", str(e))
-        # Fail closed: the VM is kept for debugging, so close its
-        # provisioning access now (Azure deletes the ephemeral bootstrap
-        # SSH allow; other platforms no-op). The success-path hook
-        # (on_tailscale_ready) never fired here, so without this a
-        # failed Azure VM would keep its bootstrap ingress indefinitely.
-        # Best-effort: the original failure must keep propagating, and
-        # the operator can still reach the VM via `vm shell --platform`
-        # (a fresh transient allow) or the platform's serial console
-        # (not NSG-gated).
-        try:
-            platform.secure_failed_vm(vm_row, ctx)
-        except Exception as secure_error:
-            output.warn(f"could not secure the failed VM: {secure_error}")
-        output.warn(f"Log: {logger.display_path}")
-        raise
-    except BaseException:
-        # An operator interrupt (KeyboardInterrupt) or another
-        # non-Exception unwind during connectivity verification. The
-        # row keeps whatever status the abort left (the caller's cancel
-        # handler owns the messaging; nothing here marks FAILED), but
-        # provisioning access must still close best-effort: without
-        # this, Ctrl-C would leave the Azure bootstrap allow standing
-        # indefinitely, since the Exception arm above never runs.
-        # UserAbort does NOT take this path (it is an AgentworksError,
-        # an Exception, so the arm above secures it); this arm exists
-        # for what genuinely escapes ``except Exception``. The hook
-        # failure warns and never masks the interrupt.
-        try:
-            platform.secure_failed_vm(vm_row, ctx)
-        except Exception as secure_error:
-            output.warn(f"could not secure the interrupted VM: {secure_error}")
-        raise
-
-    # Tailscale is up; the platform hook closes provisioning access
-    # (Azure deletes its ephemeral bootstrap SSH allow since Phase B
-    # uses Tailscale SSH). A route change can destabilize the network
-    # stack briefly, so we wait for Tailscale SSH to be reliably
-    # reachable before proceeding. Already non-fatal (its own try / a
-    # bounded wait); kept outside the FAILED-marking span above, as in
-    # the pre-split driver.
-    if on_tailscale_ready is not None:
-        try:
-            on_tailscale_ready()
-        except Exception as e:
-            output.warn(f"post-Tailscale-ready hook failed: {e}")
-
-        # Wait for Tailscale SSH to reconnect after network changes
-        from agentworks.transports import wait_for_reconnect
-
-        wait_for_reconnect(ts_target)
-
-    # Sync the operator's SSH config now that connectivity is verified. This is
-    # the last step of Phase A before the caller announces completion: the VM's
-    # Tailscale IP is recorded and the connection is
-    # confirmed, so operator-facing ``ssh awvm--<name>`` aliases are in place
-    # before Phase B's many SSH calls. Non-fatal: a local ``~/.ssh/config``
-    # write failure (permissions, read-only home) has nothing to do with VM
-    # health, so it warns and continues into Phase B rather than failing the
-    # create. Matches the caller's post-init re-sync handling.
-    try:
-        from agentworks.ssh_config import sync_ssh_config
-
-        sync_ssh_config(config, db)
-    except Exception as e:
-        output.warn(f"SSH config sync failed: {e}")
-        output.info("VM is likely still usable.")
-
-    return ts_target, home
+    ts_target = SSHTransport(
+        host=address,
+        trust=trust.TrustBinding(trust.TrustMode.VM, vm_name),
+        user=admin_username,
+        identity_file=config.operator.ssh_private_key,
+        default_timeout=60,
+        logger=logger,
+    )
+    return ts_target, managed_home(admin_username), release
 
 
 def run_initialization(
@@ -330,9 +229,9 @@ def run_initialization(
             output.warn(
                 f"SSH identity evidence for VM '{vm_name}' is unknown, so ordinary SSH commands "
                 "will refuse to connect. If the configured key still works, retry with "
-                f"'agw vm reinit {vm_name}'. Otherwise, use "
-                f"'agw vm shell {vm_name} --platform' where supported to restore access before "
-                "reinitializing. If platform recovery is unavailable, recreate the VM."
+                f"'agw vm reinit {vm_name}'. Otherwise, run 'agw vm recover {vm_name}', which "
+                "restores the configured key through the platform's own channel, then reinitialize. "
+                "If recovery cannot reach the VM, recreate it."
             )
 
         from agentworks.db.instance_state import AppliedStateKey
@@ -385,79 +284,6 @@ def run_initialization(
                     vm_name,
                     AppliedStateKey.SSH_IDENTITY,
                 )
-
-
-def _phase_a_bootstrap(
-    db: Database,
-    config: Config,
-    vm_name: str,
-    exec_target: ExecTransport,
-    admin_username: str,
-    logger: SSHLogger,
-    *,
-    tailscale_ip: str | None = None,
-) -> Transport:
-    """Phase A: record platform bootstrap and verify Tailscale SSH.
-
-    ``VMPlatform.create`` already completed bootstrap. If it could not
-    discover the joined node's IP, repeat only ``tailscale ip -4`` over the
-    returned provisioning transport. No bootstrap input or credential reaches
-    this function.
-
-    Returns the Tailscale ``Transport`` for Phase B.
-    """
-    db.update_vm_provisioning_status(vm_name, ProvisioningStatus.IN_PROGRESS)
-
-    logger.step("Bootstrap (platform)")
-    if not tailscale_ip:
-        logger.output("Tailscale joined; retrying IP discovery")
-        tailscale_ip = exec_target.run("tailscale ip -4", sudo=True).stdout.strip()
-    logger.output(f"Tailscale IP: {tailscale_ip}")
-    db.update_vm_tailscale(vm_name, tailscale_ip)
-    db.update_vm_provisioning_status(vm_name, ProvisioningStatus.COMPLETE)
-
-    # Switch to Tailscale SSH, carrying over the SSH logger. Create's first core
-    # connection enrolls the VM: it runs under ENROLL so its first success
-    # writes the host key to the VM's store file, and to nowhere else.
-    def _tailscale_ssh(mode: trust.TrustMode) -> SSHTransport:
-        return SSHTransport(
-            host=tailscale_ip,
-            trust=trust.TrustBinding(mode, vm_name),
-            user=admin_username,
-            identity_file=config.operator.ssh_private_key,
-            default_timeout=60,
-            logger=logger,
-        )
-
-    ts_target = _tailscale_ssh(trust.TrustMode.ENROLL)
-
-    # Verify Tailscale SSH works (retry: peer connection may take time)
-    logger.step("Verify Tailscale SSH")
-    output.info("Verifying Tailscale SSH...")
-    import time
-
-    for attempt in range(5):
-        try:
-            ts_target.run("echo ok", timeout=15)
-            break
-        except SSHError:
-            if attempt == 4:
-                raise
-            output.detail(f"Tailscale SSH not ready, retrying ({attempt + 1}/5)...")
-            time.sleep(3)
-
-    # A success that left no key behind would leave every later connection
-    # refused for want of a record, so fail here, where the cause is known.
-    if not trust.has_record(vm_name):
-        raise ProvisioningError(
-            f"the host key of VM '{vm_name}' could not be recorded in '{format_host_path(trust.store_file(vm_name))}'",
-            entity_kind="vm",
-            entity_name=vm_name,
-            hint=f"Run 'agw vm delete {vm_name}' and create it again.",
-        )
-
-    # ENROLL covers exactly this connection; everything after verifies.
-    return _tailscale_ssh(trust.TrustMode.VM)
 
 
 def _phase_b_setup(

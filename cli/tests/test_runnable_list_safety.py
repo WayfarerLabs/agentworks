@@ -16,7 +16,6 @@ from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.secrets.resolver import Resolver
 from agentworks.sessions import manager as session_manager
 from agentworks.sessions.multi_console import console_listing
-from agentworks.vms import manager as vm_manager
 from agentworks.vms.manager import inspect
 from tests._runtime_probes import framed_runtime_result
 
@@ -67,14 +66,14 @@ def _forbidden(seam: str):  # noqa: ANN202
 
 
 def _guard_mutating_seams(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Arm the shared activation, repair, and provider-mutation seams."""
+    """Arm the shared activation, post-start wait, and provider-mutation seams."""
     monkeypatch.setattr(
         "agentworks.orchestration.activation.activation_gate",
         _forbidden("activation"),
     )
     monkeypatch.setattr(ProxmoxPlatform, "start", _forbidden("provider start"))
     monkeypatch.setattr(ProxmoxPlatform, "stop", _forbidden("provider stop"))
-    monkeypatch.setattr(vm_manager, "_ensure_tailscale", _forbidden("Tailscale repair"))
+    monkeypatch.setattr("agentworks.vms.manager._await_tailnet", _forbidden("post-start wait"))
     monkeypatch.setattr(session_manager, "ensure_pids_batch", _forbidden("PID repair"))
     monkeypatch.setattr(session_manager, "_repair_session_pid", _forbidden("single PID repair"))
 

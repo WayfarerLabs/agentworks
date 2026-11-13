@@ -2,15 +2,26 @@
 
 from __future__ import annotations
 
+import contextlib
+import http.client
 import json
 import urllib.error
 from io import BytesIO
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agentworks.plugins.proxmox.api import ProxmoxAPI, ProxmoxAPIError, _InvalidQGAExecStatus
+from agentworks.plugins.proxmox.api import (
+    ERROR_BODY_LIMIT_BYTES,
+    REQUEST_TIMEOUT_SECONDS,
+    ProxmoxAPI,
+    ProxmoxAPIError,
+    _InvalidQGAExecStatus,
+)
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 @pytest.fixture()
@@ -108,6 +119,30 @@ class TestResponseParsing:
         assert result["status"] == "running"
         assert result["vmid"] == 100
 
+    @pytest.mark.parametrize(
+        "call",
+        [
+            lambda api: api.next_id(),
+            lambda api: api.list_vms("pve"),
+            lambda api: api.configure_vm("pve", 100, memory=2048),
+            lambda api: api.vm_status("pve", 100),
+            lambda api: api.vmid_in_use(100),
+            lambda api: api.guest_agent_ping("pve", 100),
+        ],
+        ids=["next_id", "list_vms", "configure_vm", "vm_status", "vmid_in_use", "guest_agent_ping"],
+    )
+    @patch("urllib.request.urlopen")
+    def test_a_request_whose_caller_sets_no_timeout_is_still_bounded(
+        self, mock_urlopen: MagicMock, api: ProxmoxAPI, call: Callable[[ProxmoxAPI], object]
+    ) -> None:
+        """An API that accepts the connection and never answers must fail the call, not hang it."""
+        mock_urlopen.return_value = _mock_response(100)
+
+        with contextlib.suppress(ProxmoxAPIError):  # 100 is not every call's well-formed answer
+            call(api)
+
+        assert mock_urlopen.call_args.kwargs["timeout"] == REQUEST_TIMEOUT_SECONDS
+
     @patch("urllib.request.urlopen")
     def test_vm_status_forwards_status_only_timeout(self, mock_urlopen: MagicMock, api: ProxmoxAPI) -> None:
         mock_urlopen.return_value = _mock_response({"status": "running"})
@@ -115,25 +150,6 @@ class TestResponseParsing:
         api.vm_status("pve", 100, timeout=10)
 
         assert mock_urlopen.call_args.kwargs["timeout"] == 10
-
-    @patch("urllib.request.urlopen")
-    def test_guest_agent_network(self, mock_urlopen: MagicMock, api: ProxmoxAPI) -> None:
-        net_data = {
-            "result": [
-                {
-                    "name": "lo",
-                    "ip-addresses": [{"ip-address": "127.0.0.1", "ip-address-type": "ipv4"}],
-                },
-                {
-                    "name": "eth0",
-                    "ip-addresses": [{"ip-address": "10.0.0.5", "ip-address-type": "ipv4"}],
-                },
-            ]
-        }
-        mock_urlopen.return_value = _mock_response(net_data)
-        result = api.guest_agent_network("pve", 100)
-        assert len(result) == 2
-        assert result[1]["name"] == "eth0"
 
     @patch("urllib.request.urlopen")
     def test_guest_agent_exec_sends_argv_and_optional_input(self, mock_urlopen: MagicMock, api: ProxmoxAPI) -> None:
@@ -207,32 +223,10 @@ class TestResponseParsing:
             api.guest_agent_exec_status("pve", 100, pid=42)
 
     @patch("urllib.request.urlopen")
-    def test_guest_agent_exec_wait_handles_numeric_running_and_exited_wire_status(
-        self,
-        mock_urlopen: MagicMock,
-        api: ProxmoxAPI,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        mock_urlopen.side_effect = [
-            _mock_response({"pid": 42}),
-            _mock_response({"exited": 0}),
-            _mock_response({"exited": 1, "exitcode": 0}),
-        ]
-        monkeypatch.setattr("agentworks.plugins.proxmox.api.time.sleep", lambda _seconds: None)
+    def test_guest_agent_exec_status_reads_a_running_status(self, mock_urlopen: MagicMock, api: ProxmoxAPI) -> None:
+        mock_urlopen.return_value = _mock_response({"exited": 0})
 
-        result = api.guest_agent_exec_wait("pve", 100, "/bin/true")
-
-        assert result == {"exited": True, "exitcode": 0}
-        assert mock_urlopen.call_count == 3
-
-    @patch("urllib.request.urlopen")
-    def test_guest_agent_exec_wait_does_not_dispatch_after_deadline(
-        self,
-        mock_urlopen: MagicMock,
-        api: ProxmoxAPI,
-    ) -> None:
-        assert api.guest_agent_exec_wait("pve", 100, "/bin/true", timeout=0) is None
-        mock_urlopen.assert_not_called()
+        assert api.guest_agent_exec_status("pve", 100, pid=42) == {"exited": False}
 
     @pytest.mark.parametrize(
         "status",
@@ -259,21 +253,20 @@ class TestResponseParsing:
         ],
     )
     @patch("urllib.request.urlopen")
-    def test_guest_agent_exec_wait_rejects_invalid_status(
+    def test_guest_agent_exec_status_rejects_invalid_status(
         self,
         mock_urlopen: MagicMock,
         api: ProxmoxAPI,
         status: dict[str, object],
     ) -> None:
-        mock_urlopen.side_effect = [_mock_response({"pid": 42}), _mock_response(status)]
+        mock_urlopen.return_value = _mock_response(status)
 
         with pytest.raises(_InvalidQGAExecStatus) as caught:
-            api.guest_agent_exec_wait("pve", 100, "/bin/true")
+            api.guest_agent_exec_status("pve", 100, pid=42)
 
         assert "pve" in str(caught.value)
         assert "100" in str(caught.value)
         assert "42" in str(caught.value)
-        assert mock_urlopen.call_count == 2
 
     @pytest.mark.parametrize("response", [None, [], "invalid"])
     @patch("urllib.request.urlopen")
@@ -322,8 +315,59 @@ class TestErrorHandling:
             api.next_id()
 
     @patch("urllib.request.urlopen")
+    def test_a_huge_error_body_is_read_only_in_part(self, mock_urlopen: MagicMock, api: ProxmoxAPI) -> None:
+        """Every message quotes the body, so a 2 MB one would reach the terminal whole."""
+        mock_urlopen.side_effect = _http_error(500, b"x" * 2_000_000)
+
+        with pytest.raises(ProxmoxAPIError) as caught:
+            api.next_id()
+
+        assert len(str(caught.value)) < 2 * ERROR_BODY_LIMIT_BYTES
+
+    @pytest.mark.parametrize("status", [None, "running", ["running"]])
+    @patch("urllib.request.urlopen")
+    def test_a_malformed_vm_status_is_typed(self, mock_urlopen: MagicMock, api: ProxmoxAPI, status: Any) -> None:
+        mock_urlopen.return_value = _mock_response(status)
+
+        with pytest.raises(ProxmoxAPIError):
+            api.vm_status("pve", 100)
+
+    @patch("urllib.request.urlopen")
     def test_transport_error_is_typed(self, mock_urlopen: MagicMock, api: ProxmoxAPI) -> None:
         source = urllib.error.URLError("provider unavailable")
+        mock_urlopen.side_effect = source
+
+        with pytest.raises(ProxmoxAPIError) as caught:
+            api.next_id()
+
+        assert caught.value.__cause__ is source
+
+    @pytest.mark.parametrize("body", ["truncated", "not-utf-8"])
+    @patch("urllib.request.urlopen")
+    def test_an_http_error_whose_body_cannot_be_read_keeps_its_code(
+        self, mock_urlopen: MagicMock, api: ProxmoxAPI, body: str
+    ) -> None:
+        class _Truncated(BytesIO):
+            def read(self, size: int | None = -1) -> bytes:
+                raise http.client.IncompleteRead(b"partial")
+
+        fp = _Truncated() if body == "truncated" else BytesIO(b"\xff\xfe bad")
+        mock_urlopen.side_effect = urllib.error.HTTPError(
+            url="https://pve.example.com:8006/api2/json/cluster/nextid",
+            code=503,
+            msg="Service Unavailable",
+            hdrs=None,  # type: ignore[arg-type]
+            fp=fp,
+        )
+
+        with pytest.raises(ProxmoxAPIError) as caught:
+            api.next_id()
+
+        assert caught.value.code == 503
+
+    @patch("urllib.request.urlopen")
+    def test_a_malformed_http_response_is_typed(self, mock_urlopen: MagicMock, api: ProxmoxAPI) -> None:
+        source = http.client.IncompleteRead(b"partial")
         mock_urlopen.side_effect = source
 
         with pytest.raises(ProxmoxAPIError) as caught:
@@ -356,6 +400,21 @@ class TestErrorHandling:
 
         with pytest.raises(ProxmoxAPIError):
             api.next_id()
+
+    @pytest.mark.parametrize("listing", [None, {"vmid": 100, "name": "dev"}, "dev"])
+    @patch("urllib.request.urlopen")
+    def test_a_malformed_vm_listing_is_typed(self, mock_urlopen: MagicMock, api: ProxmoxAPI, listing: Any) -> None:
+        """A listing that is not a list is the typed API error, not a crash in the code that reads its entries."""
+        mock_urlopen.return_value = _mock_response(listing)
+
+        with pytest.raises(ProxmoxAPIError):
+            api.list_vms("pve")
+
+    @patch("urllib.request.urlopen")
+    def test_a_vm_listing_is_returned(self, mock_urlopen: MagicMock, api: ProxmoxAPI) -> None:
+        mock_urlopen.return_value = _mock_response([{"vmid": 100, "name": "dev"}])
+
+        assert api.list_vms("pve") == [{"vmid": 100, "name": "dev"}]
 
     @patch("urllib.request.urlopen")
     def test_task_failure_raises(self, mock_urlopen: MagicMock, api: ProxmoxAPI) -> None:
@@ -411,11 +470,70 @@ class TestVMOperations:
 
     @patch("urllib.request.urlopen")
     def test_resize_disk(self, mock_urlopen: MagicMock, api: ProxmoxAPI) -> None:
-        mock_urlopen.return_value = _mock_response(None)
-        api.resize_disk("pve", 100, "scsi0", "+20G")
+        mock_urlopen.return_value = _mock_response("UPID:pve:resize")
+        assert api.resize_disk("pve", 100, "scsi0", "+20G") == "UPID:pve:resize"
         req = mock_urlopen.call_args[0][0]
         assert req.get_method() == "PUT"
         assert "/resize" in req.full_url
+
+    @patch("urllib.request.urlopen")
+    def test_resize_disk_without_a_task(self, mock_urlopen: MagicMock, api: ProxmoxAPI) -> None:
+        mock_urlopen.return_value = _mock_response(None)
+        assert api.resize_disk("pve", 100, "scsi0", "+20G") is None
+
+
+def _http_error(code: int, body: bytes) -> urllib.error.HTTPError:
+    return urllib.error.HTTPError(
+        url="https://pve.example.com:8006/api2/json/cluster/nextid?vmid=100",
+        code=code,
+        msg="error",
+        hdrs=None,  # type: ignore[arg-type]
+        fp=BytesIO(body),
+    )
+
+
+class TestVMIDInUse:
+    """``/cluster/nextid?vmid=N``, the one read any token may make about any VMID (measured on PVE 8 and 9)."""
+
+    @patch("urllib.request.urlopen")
+    def test_a_free_vmid_is_echoed(self, mock_urlopen: MagicMock, api: ProxmoxAPI) -> None:
+        mock_urlopen.return_value = _mock_response("100")
+
+        assert api.vmid_in_use(100) is False
+        assert mock_urlopen.call_args[0][0].full_url.endswith("/cluster/nextid?vmid=100")
+
+    @patch("urllib.request.urlopen")
+    def test_a_held_vmid_is_a_400_saying_it_exists(self, mock_urlopen: MagicMock, api: ProxmoxAPI) -> None:
+        mock_urlopen.side_effect = _http_error(400, b'{"errors":{"vmid":"VM 100 already exists"},"data":null}')
+
+        assert api.vmid_in_use(100) is True
+
+    @pytest.mark.parametrize(
+        ("code", "body"),
+        [
+            (400, b'{"errors":{"vmid":"value must be at least 100"},"data":null}'),
+            (400, b"not json"),
+            (401, b"authentication failure"),
+            (500, b'{"errors":{"vmid":"VM 100 already exists"}}'),
+        ],
+    )
+    @patch("urllib.request.urlopen")
+    def test_any_other_error_shows_neither(
+        self, mock_urlopen: MagicMock, api: ProxmoxAPI, code: int, body: bytes
+    ) -> None:
+        mock_urlopen.side_effect = _http_error(code, body)
+
+        with pytest.raises(ProxmoxAPIError) as caught:
+            api.vmid_in_use(100)
+
+        assert caught.value.code == code
+
+    @patch("urllib.request.urlopen")
+    def test_an_answer_for_another_vmid_shows_neither(self, mock_urlopen: MagicMock, api: ProxmoxAPI) -> None:
+        mock_urlopen.return_value = _mock_response("101")
+
+        with pytest.raises(ProxmoxAPIError):
+            api.vmid_in_use(100)
 
 
 class TestTaskOperations:

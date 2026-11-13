@@ -6,7 +6,7 @@ import contextlib
 import os
 import sqlite3
 import tempfile
-from collections.abc import Generator, Iterator
+from collections.abc import Callable, Generator, Iterator
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -72,15 +72,6 @@ requires_posix_shell = pytest.mark.skipif(
     not Path("/bin/sh").exists(),
     reason="requires a POSIX shell (skipped on the Windows controller)",
 )
-
-
-@pytest.fixture
-def verified_debian_release(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Make offline manager creates observe the release they requested."""
-    monkeypatch.setattr(
-        "agentworks.vms.manager.lifecycle.probe_debian_release",
-        lambda transport, *, expected=None: expected,
-    )
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -271,6 +262,10 @@ def _isolate_inherited_aw_secrets(
     for name in tuple(os.environ):
         if name.startswith("AW_SECRET_"):
             monkeypatch.delenv(name, raising=False)
+    # And those an earlier test's run of the entry point withheld.
+    from agentworks.capabilities.secret_backend import env_var
+
+    monkeypatch.setattr(env_var, "_withheld", {})
 
 
 @pytest.fixture
@@ -525,13 +520,7 @@ class _StubPlatform:
 
         return VMStatus.RUNNING
 
-    def transient_route(self, vm: object, ctx: object, *, config: object | None = None) -> AbstractContextManager[None]:
-        return contextlib.nullcontext()
-
-    def post_tailscale_ready(self, vm: object, ctx: object) -> None:
-        return None
-
-    def secure_failed_vm(self, vm: object, ctx: object) -> None:
+    def close_provisioning_access(self, vm: object, ctx: object) -> None:
         return None
 
 
@@ -595,6 +584,18 @@ def windows_home_env(home: Path) -> dict[str, str]:
     return {"HOME": str(home), "USERPROFILE": str(home), "HOMEDRIVE": drive, "HOMEPATH": tail}
 
 
+def isolate_home(monkeypatch: pytest.MonkeyPatch, home: Path) -> Path:
+    """Create ``home`` and point ``Path.home()`` / ``expanduser`` at it for the rest of the test.
+
+    For a test that runs a command which writes under the operator's home
+    (the managed ``~/.ssh/config`` sync, say), so the write lands in the
+    test's tmp directory instead of the real home."""
+    home.mkdir(parents=True, exist_ok=True)
+    for name, value in windows_home_env(home).items():
+        monkeypatch.setenv(name, value)
+    return home
+
+
 def normalize_lf(data: bytes) -> bytes:
     """Normalize the platform newline to LF for a human-output byte compare.
 
@@ -609,11 +610,13 @@ def stub_vm_gates(monkeypatch: pytest.MonkeyPatch) -> _StubPlatform:
     transport / rollback / env plumbing neither construct real platforms
     nor shell out to Tailscale.
 
-    Two seams: the node factories bind their platform through
-    ``resolve_site`` (the only constructor of platform instances), and
-    the activation gate's fast path probes Tailscale reachability. Stub
-    both so the gate fast-paths and holds via the stub platform's no-op
-    ``vm_active``. Returns the stub platform for assertions.
+    Three seams: the node factories bind their platform through
+    ``resolve_site`` (the only constructor of platform instances), the
+    activation gate's fast path probes Tailscale reachability, and
+    prepared activation waits for the VM to answer over SSH. Stub all
+    three so the gate fast-paths, activation answers at once, and holds
+    go through the stub platform's no-op ``vm_active``. Returns the stub
+    platform for assertions.
     """
     platform = _StubPlatform()
 
@@ -622,6 +625,7 @@ def stub_vm_gates(monkeypatch: pytest.MonkeyPatch) -> _StubPlatform:
 
     monkeypatch.setattr("agentworks.vms.sites.resolve_site", _fake_resolve_site)
     monkeypatch.setattr("agentworks.vms.manager._is_tailscale_reachable", lambda host: True)
+    monkeypatch.setattr("agentworks.vms.manager._await_tailnet", lambda *args, **kwargs: None)
     stub_vm_ssh_identity(monkeypatch)
     return platform
 
@@ -1028,6 +1032,17 @@ def _isolated_host_key_store(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) ->
     return store
 
 
+def fake_installed_programs(monkeypatch: pytest.MonkeyPatch, which: Callable[[str], str | None]) -> None:
+    """Decide which workstation programs count as installed: ``which`` answers as ``shutil.which`` would.
+
+    Both lookups get it: ``programs.is_installed``, which the presence checks
+    ask, and ``shutil.which``, which WSL2 still asks about ``wsl.exe``'s fixed
+    path.
+    """
+    monkeypatch.setattr("shutil.which", which)
+    monkeypatch.setattr("agentworks.programs.is_installed", lambda name: which(name) is not None)
+
+
 def provisioning_trust_for_tests(vm_name: str) -> TrustBinding:
     """An UNVERIFIED binding for a ``ProvisionRequest`` built by a test whose
     SSH is faked. The file is never opened."""
@@ -1044,11 +1059,12 @@ def ssh_enrolls_on_first_use(trust_binding: object) -> None:
 
 @pytest.fixture
 def vm_access_recorder(monkeypatch: pytest.MonkeyPatch) -> AccessRecorder:
-    """Route every ``execution.vm_access`` call to a recording fake, and resolve ssh without a client."""
+    """Route ``execution.vm_access`` and ``enrollment_access`` to a recording fake, and resolve ssh without a client."""
     from tests.vm_access_support import AccessRecorder
 
     recorder = AccessRecorder()
     monkeypatch.setattr("agentworks.execution.vm_access", recorder.vm_access)
+    monkeypatch.setattr("agentworks.execution.enrollment_access", recorder.enrollment_access)
     monkeypatch.setattr("agentworks.execution.resolve_ssh", lambda: recorder.client)
     return recorder
 

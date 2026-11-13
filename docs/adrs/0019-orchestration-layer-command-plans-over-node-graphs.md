@@ -8,6 +8,12 @@ Accepted. Builds on the capability/declarable resource split of
 [ADR 0016](0016-yaml-resource-manifests.md); the capability lifecycle contract this layer drives
 (validate/construct/preflight/runup/ops) is documented in `cli/agentworks/capabilities/README.md`.
 
+Amended: the Tailscale rejoin key's conditional late acquisition (Decision, the gate's ordering) is
+gone with the rejoin itself. `vm start` and the gate's auto-start only wait for the VM to answer and
+name `agw vm recover`, whose own boundary resolves the auth key with the site's secrets, so no gate
+resolves anything after its boundary and the batch gate serves only the boundary's cache. The gate's
+description below reflects the amended behavior; the decision stands.
+
 ## Context
 
 Every service-layer command used to hand-wire its own world. Each command bound its VM platform
@@ -99,11 +105,11 @@ read-only inspection (`vm describe`) never gate: they compose without one and dr
 directly. Compositions whose boundary resolve runs before their gate (`vm rekey`; the batch session
 ops, which run one boundary over the whole batch and then per-VM gates) hand the gate a callback
 that **serves the already-cached boundary values** instead of resolving, so the no-double-resolve
-property holds from the other direction. The Tailscale rejoin key keeps its conditional-need late
-acquisition (whether a rejoin is needed is only knowable after a start fails to reconnect). An
-explicit `vm start` owns one standalone resolution inside its active hold; gate-driven auto-start
-passes the unchanged gate reader inside its hold. The ensure helper accepts only that explicit
-reader and auth-key name and never resolves or consults ambient policy itself.
+property holds from the other direction. No start resolves the Tailscale auth key: an explicit
+`vm start` and gate-driven auto-start both start the VM and wait inside its active hold for it to
+answer, failing with a hint to run `agw vm recover`, whose own boundary resolves the key. The ensure
+helper resolves only the target's gate secrets, through the callback its caller hands it, and never
+consults ambient policy itself.
 
 ### Secrets: declare, union, predict centrally, resolve once, deliver scoped
 

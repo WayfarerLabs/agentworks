@@ -1,169 +1,259 @@
-"""Complete-or-raise Phase A records and verifies platform bootstrap."""
+"""Phase A over ``agentworks.execution``: the sequence, the status it leaves, and what fails closed."""
 
 from __future__ import annotations
 
-import inspect
-from dataclasses import fields
-from types import SimpleNamespace
-from typing import ClassVar
-from unittest.mock import MagicMock
+import signal
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from agentworks.capabilities.vm_platform import ProvisionRequest, ProvisionResult, tailscale_join
 from agentworks.db import ProvisioningStatus
-from agentworks.errors import ProvisioningError
-from agentworks.execution import trust
-from agentworks.vms.initializer import driver
-from tests.conftest import ssh_enrolls_on_first_use
+from agentworks.debian import DebianRelease
+from agentworks.errors import ProvisioningError, StateError
+from agentworks.execution import reachability, trust
+from agentworks.execution.errors import TrustMismatch
+from agentworks.execution.requests import Command, Script
+from agentworks.execution.results import Result, Unknown, UnknownReason
+from agentworks.interrupts import termination_as_interrupt
+from agentworks.vms.manager import _guard_incomplete_vm
+from tests.vm_access_support import Admin
+from tests.vms.phase_a_support import (
+    ADDRESS,
+    BOOKWORM_OS_RELEASE,
+    VM,
+    PhaseAHarness,
+    contract_outcomes,
+)
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
-class _TailscaleTransport:
-    """Stands in for the Tailscale ``SSHTransport``; every instance is recorded
-    so a test can see which trust each Phase A transport was bound to."""
-
-    built: ClassVar[list[_TailscaleTransport]] = []
-
-    def __init__(self, **kwargs: object) -> None:
-        self.kwargs = kwargs
-        self.commands: list[tuple[str, dict[str, object]]] = []
-        self.built.append(self)
-
-    def run(self, command: str, **kwargs: object) -> SimpleNamespace:
-        self.commands.append((command, kwargs))
-        ssh_enrolls_on_first_use(self.kwargs["trust"])
-        return SimpleNamespace(stdout="ok\n", returncode=0)
+    from agentworks.db import Database
+    from tests.vm_access_support import AccessRecorder
 
 
 @pytest.fixture(autouse=True)
-def _reset_built_transports() -> None:
-    _TailscaleTransport.built.clear()
+def _no_pauses(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("agentworks.execution.reachability.time.sleep", lambda seconds: None)
 
 
-def test_fallback_era_contract_shapes_are_structurally_absent() -> None:
-    request_fields = {item.name: item for item in fields(ProvisionRequest)}
-    result_fields = {item.name for item in fields(ProvisionResult)}
-
-    assert request_fields["tailscale_auth_key"].type == "str"
-    assert "progress" in request_fields
-    assert "bootstrap_complete" not in result_fields
-    assert not hasattr(tailscale_join, "BootstrapCompletion")
-
-    phase_a_parameters = set(inspect.signature(driver._phase_a_bootstrap).parameters)
-    assert phase_a_parameters == {
-        "db",
-        "config",
-        "vm_name",
-        "exec_target",
-        "admin_username",
-        "logger",
-        "tailscale_ip",
-    }
-    driver_source = inspect.getsource(driver)
-    assert "run_wsl2_bootstrap" not in driver_source
-    assert "generate_bootstrap_script" not in driver_source
+@pytest.fixture
+def phase(db: Database, vm_access_recorder: AccessRecorder) -> PhaseAHarness:
+    return PhaseAHarness(db, vm_access_recorder)
 
 
-@pytest.mark.parametrize("discovery_failure", [None, KeyboardInterrupt("stop")], ids=("success", "interrupt"))
-def test_missing_platform_ip_runs_only_ip_discovery(
-    monkeypatch: pytest.MonkeyPatch,
-    discovery_failure: BaseException | None,
-) -> None:
-    db = MagicMock()
-    logger = MagicMock()
-    exec_target = MagicMock()
-    if discovery_failure is None:
-        exec_target.run.return_value = SimpleNamespace(stdout="100.64.0.8\n")
-    else:
-        exec_target.run.side_effect = discovery_failure
-    config = SimpleNamespace(operator=SimpleNamespace(ssh_private_key="/tmp/test-key"))
-    monkeypatch.setattr(driver, "SSHTransport", _TailscaleTransport)
+def test_the_sequence_records_enrolls_checks_then_completes(phase: PhaseAHarness) -> None:
+    address, release = phase.bootstrap(tailnet_address=f" {ADDRESS}\n")
 
-    def call() -> _TailscaleTransport:
-        return driver._phase_a_bootstrap(
-            db,
-            config,
-            "myvm",
-            exec_target,
-            "agw",
-            logger,
-            tailscale_ip=None,
-        )  # type: ignore[return-value]
-
-    if discovery_failure is None:
-        ts_target = call()
-        assert ts_target.kwargs["host"] == "100.64.0.8"
-        verify = _TailscaleTransport.built[0]
-        assert verify.commands == [("echo ok", {"timeout": 15})]
-        db.update_vm_tailscale.assert_called_once_with("myvm", "100.64.0.8")
-        db.update_vm_provisioning_status.assert_any_call("myvm", ProvisioningStatus.COMPLETE)
-    else:
-        with pytest.raises(type(discovery_failure)) as caught:
-            call()
-        assert caught.value is discovery_failure
-
-    exec_target.run.assert_called_once_with("tailscale ip -4", sudo=True)
+    assert (address, release) == (ADDRESS, DebianRelease.TRIXIE)
+    # The first contact enrolls; then the contract, release first, over the admin's VM-mode access, and
+    # after the platform closes its provisioning access the reconnect probe over the same access.
+    assert phase.recorder.operations == [("enroll", "run")] + [("admin", "run")] * 4
+    first_contact, release_request, script, sudo, reconnect = phase.recorder.requests("run")
+    assert reconnect == reachability.PROBE
+    assert first_contact == reachability.PROBE
+    assert isinstance(release_request, Command)
+    assert release_request.argv == ("cat", "/etc/os-release")
+    assert isinstance(script, Script)
+    assert isinstance(sudo, Command)
+    assert sudo.elevated
+    # Both accesses were built from the row as it was after the address was recorded.
+    assert [row.tailscale_host for row in phase.recorder.rows] == [ADDRESS, ADDRESS]
+    assert phase.recorder.enrolled == [VM]
+    assert phase.recorder.built == [(VM, Admin())]
+    row = phase.row()
+    assert row.tailscale_host == ADDRESS
+    assert row.provisioning_status == ProvisioningStatus.COMPLETE.value
+    assert row.debian_release is DebianRelease.TRIXIE
+    assert trust.has_record(VM)
+    assert phase.events() == ["provisioning_started", "provisioning_complete"]
+    assert phase.platform.closed == [ProvisioningStatus.COMPLETE.value]
 
 
-def test_returned_platform_ip_skips_provisioning_transport(monkeypatch: pytest.MonkeyPatch) -> None:
-    db = MagicMock()
-    logger = MagicMock()
-    exec_target = MagicMock()
-    config = SimpleNamespace(operator=SimpleNamespace(ssh_private_key="/tmp/test-key"))
-    monkeypatch.setattr(driver, "SSHTransport", _TailscaleTransport)
+def test_the_requests_reach_the_operation_log(phase: PhaseAHarness) -> None:
+    phase.bootstrap()
 
-    ts_target = driver._phase_a_bootstrap(
-        db,
-        config,
-        "myvm",
-        exec_target,
-        "agw",
-        logger,
-        tailscale_ip="100.64.0.9",
-    )
-
-    exec_target.run.assert_not_called()
-    assert ts_target.kwargs["host"] == "100.64.0.9"  # type: ignore[attr-defined]
-    db.update_vm_tailscale.assert_called_once_with("myvm", "100.64.0.9")
+    assert all(log == phase.log.record for log in phase.recorder.logs)
+    assert phase.log.steps[-1] == "Check the VM contract"
 
 
-# -- Enrollment: Phase A's verify connection writes the VM's host key --------
-
-
-def _phase_a(monkeypatch: pytest.MonkeyPatch, *, transport: type = _TailscaleTransport) -> _TailscaleTransport:
-    config = SimpleNamespace(operator=SimpleNamespace(ssh_private_key="/tmp/test-key"))
-    monkeypatch.setattr(driver, "SSHTransport", transport)
-    return driver._phase_a_bootstrap(  # type: ignore[return-value]
-        MagicMock(),
-        config,  # type: ignore[arg-type]
-        "myvm",
-        MagicMock(),
-        "agw",
-        MagicMock(),
-        tailscale_ip="100.64.0.9",
-    )
-
-
-def test_the_verify_connection_enrolls_and_phase_b_verifies(monkeypatch: pytest.MonkeyPatch) -> None:
-    returned = _phase_a(monkeypatch)
-
-    verify, phase_b = _TailscaleTransport.built
-    assert verify.kwargs["trust"].mode is trust.TrustMode.ENROLL  # type: ignore[attr-defined]
-    assert verify.commands
-    assert trust.has_record("myvm")
-    assert returned is phase_b
-    assert phase_b.kwargs["trust"].mode is trust.TrustMode.VM  # type: ignore[attr-defined]
-    assert phase_b.kwargs["host"] == verify.kwargs["host"]
-    assert phase_b.commands == []
-
-
-def test_a_verify_connection_that_leaves_no_key_fails_create(monkeypatch: pytest.MonkeyPatch) -> None:
-    class _NoKeyWritten(_TailscaleTransport):
-        def run(self, command: str, **kwargs: object) -> SimpleNamespace:
-            self.commands.append((command, kwargs))
-            return SimpleNamespace(stdout="ok\n", returncode=0)
-
+def test_an_address_core_cannot_parse_fails_before_any_connection_and_closes_access(phase: PhaseAHarness) -> None:
     with pytest.raises(ProvisioningError):
-        _phase_a(monkeypatch, transport=_NoKeyWritten)
+        phase.bootstrap(tailnet_address="203.0.113.7.attacker")
 
-    assert not trust.has_record("myvm")
+    assert phase.recorder.calls == []
+    row = phase.row()
+    assert row.provisioning_status == ProvisioningStatus.FAILED.value
+    assert row.tailscale_host is None
+    assert phase.platform.closed == [ProvisioningStatus.FAILED.value]
+
+
+def _first_contact_times_out(phase: PhaseAHarness, monkeypatch: pytest.MonkeyPatch) -> None:
+    phase.enrollment.run_outcomes = [Result(Unknown(UnknownReason.CONNECTION))] * reachability.ATTEMPTS
+
+
+def _no_key_recorded(phase: PhaseAHarness, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("agentworks.execution.trust.has_record", lambda vm_name: False)
+
+
+def _release_mismatch(phase: PhaseAHarness, monkeypatch: pytest.MonkeyPatch) -> None:
+    phase.admin.run_outcomes = contract_outcomes(os_release=BOOKWORM_OS_RELEASE)
+
+
+def _base_failure(phase: PhaseAHarness, monkeypatch: pytest.MonkeyPatch) -> None:
+    phase.admin.run_outcomes = contract_outcomes(script=b"AGW-CHECK systemd x\nAGW-CHECK-END\n")
+
+
+@pytest.mark.parametrize("arrange", [_first_contact_times_out, _no_key_recorded, _release_mismatch, _base_failure])
+def test_a_failure_before_the_contract_passes_marks_failed_and_closes_access(
+    phase: PhaseAHarness, monkeypatch: pytest.MonkeyPatch, arrange: Callable[[PhaseAHarness, pytest.MonkeyPatch], None]
+) -> None:
+    arrange(phase, monkeypatch)
+
+    with pytest.raises((ProvisioningError, StateError)):
+        phase.bootstrap()
+
+    assert phase.row().provisioning_status == ProvisioningStatus.FAILED.value
+    assert phase.events()[-1] == "provisioning_failed"
+    assert phase.platform.closed == [ProvisioningStatus.FAILED.value]
+
+
+def test_a_failed_release_check_records_no_release(phase: PhaseAHarness) -> None:
+    phase.admin.run_outcomes = contract_outcomes(os_release=BOOKWORM_OS_RELEASE)
+
+    with pytest.raises(StateError):
+        phase.bootstrap(expected_release=DebianRelease.TRIXIE)
+
+    assert phase.row().debian_release is None
+
+
+@pytest.mark.parametrize("request_index", [0, 1, 2, 3], ids=["first-contact", "release", "script", "sudo"])
+def test_an_interrupt_before_the_contract_passes_closes_access_and_leaves_the_vm_gated(
+    phase: PhaseAHarness, request_index: int
+) -> None:
+    if request_index == 0:
+        phase.enrollment.run_outcomes = [KeyboardInterrupt()]
+    else:
+        outcomes = contract_outcomes()
+        outcomes[request_index - 1] = KeyboardInterrupt()
+        phase.admin.run_outcomes = outcomes
+
+    with pytest.raises(KeyboardInterrupt):
+        phase.bootstrap()
+
+    row = phase.row()
+    assert row.provisioning_status != ProvisioningStatus.COMPLETE.value
+    assert phase.platform.closed == [row.provisioning_status]
+    with pytest.raises(StateError):
+        _guard_incomplete_vm(row)
+
+
+def test_an_interrupt_while_closing_after_complete_leaves_the_vm_complete(phase: PhaseAHarness) -> None:
+    phase.platform.close_error = KeyboardInterrupt()
+
+    with pytest.raises(KeyboardInterrupt):
+        phase.bootstrap()
+
+    assert phase.row().provisioning_status == ProvisioningStatus.COMPLETE.value
+    assert phase.platform.closed == [ProvisioningStatus.COMPLETE.value]
+
+
+@pytest.mark.parametrize("signal_name", ["SIGINT", "SIGTERM"])
+@pytest.mark.parametrize("fails", [False, True], ids=["contract-passed", "contract-failed"])
+def test_an_interrupt_that_lands_during_the_close_waits_for_it_to_finish(
+    phase: PhaseAHarness, signal_name: str, fails: bool
+) -> None:
+    """Ctrl-C or SIGTERM the instant the row reads complete: the allow is still removed, then the interrupt raises."""
+    if fails:
+        phase.admin.run_outcomes = contract_outcomes(script=b"AGW-CHECK systemd x\nAGW-CHECK-END\n")
+    phase.platform.signal_during_close = getattr(signal, signal_name)
+
+    # vm create holds Phase A inside this block, which is what turns SIGTERM into an interrupt.
+    with pytest.raises(KeyboardInterrupt), termination_as_interrupt():
+        phase.bootstrap()
+
+    assert phase.platform.close_finished
+    expected = ProvisioningStatus.FAILED if fails else ProvisioningStatus.COMPLETE
+    assert phase.row().provisioning_status == expected.value
+
+
+def test_a_post_ready_wait_that_runs_out_warns_and_proceeds(phase: PhaseAHarness, captured_output: Any) -> None:
+    phase.admin.run_outcomes = [
+        *contract_outcomes(),
+        *[Result(Unknown(UnknownReason.CONNECTION))] * reachability.ATTEMPTS,
+    ]
+
+    address, _release = phase.bootstrap()
+
+    assert address == ADDRESS
+    assert phase.row().provisioning_status == ProvisioningStatus.COMPLETE.value
+    assert len(captured_output.warnings) == 1
+
+
+def test_the_post_ready_wait_is_on_the_vm_mode_access_and_never_enrolls(phase: PhaseAHarness) -> None:
+    phase.bootstrap()
+
+    assert phase.recorder.operations[-1] == ("admin", "run")
+    assert phase.recorder.requests("run")[-1] == reachability.PROBE
+    assert phase.recorder.enrolled == [VM]
+
+
+def test_a_post_ready_wait_that_raises_leaves_the_vm_complete_with_its_access_closed_once(
+    phase: PhaseAHarness,
+) -> None:
+    """The VM was attested seconds earlier: the raise propagates, and create maps it to reinit advice."""
+    phase.admin.run_outcomes = [*contract_outcomes(), Result(Unknown(UnknownReason.HOST_KEY))]
+
+    with pytest.raises(TrustMismatch):
+        phase.bootstrap()
+
+    assert phase.row().provisioning_status == ProvisioningStatus.COMPLETE.value
+    assert phase.platform.closed == [ProvisioningStatus.COMPLETE.value]
+
+
+def test_a_failing_write_in_the_failure_arm_neither_replaces_the_failure_nor_skips_the_close(
+    phase: PhaseAHarness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    phase.admin.run_outcomes = contract_outcomes(script=b"AGW-CHECK systemd x\nAGW-CHECK-END\n")
+    write = phase.db.update_vm_provisioning_status
+
+    def _refuse_failed(name: str, status: ProvisioningStatus) -> None:
+        if status is ProvisioningStatus.FAILED:
+            raise RuntimeError("database is locked")
+        write(name, status)
+
+    monkeypatch.setattr(phase.db, "update_vm_provisioning_status", _refuse_failed)
+
+    with pytest.raises(StateError):
+        phase.bootstrap()
+
+    assert len(phase.platform.closed) == 1
+
+
+def test_a_close_failure_does_not_mask_the_phase_a_failure(phase: PhaseAHarness) -> None:
+    """The close is best effort: its failure warns and the original Phase A error still propagates."""
+    phase.admin.run_outcomes = contract_outcomes(script=b"AGW-CHECK systemd x\nAGW-CHECK-END\n")
+    phase.platform.close_error = RuntimeError("hook exploded")
+
+    with pytest.raises(StateError):
+        phase.bootstrap()
+
+
+def test_a_close_failure_does_not_mask_the_interrupt(phase: PhaseAHarness) -> None:
+    phase.enrollment.run_outcomes = [KeyboardInterrupt()]
+    phase.platform.close_error = RuntimeError("hook exploded")
+
+    with pytest.raises(KeyboardInterrupt):
+        phase.bootstrap()
+
+
+def test_a_close_failure_after_the_contract_passed_warns_and_completes(
+    phase: PhaseAHarness, captured_output: Any
+) -> None:
+    phase.platform.close_error = RuntimeError("hook exploded")
+
+    address, _release = phase.bootstrap()
+
+    assert address == ADDRESS
+    assert phase.row().provisioning_status == ProvisioningStatus.COMPLETE.value
+    assert len(captured_output.warnings) == 1

@@ -9,17 +9,18 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from agentworks import output
-from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
+from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult
 from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
 from agentworks.capabilities.vm_platform.debian_release import (
     code_owned_release_value,
 )
+from agentworks.capabilities.vm_platform.public_ssh import PublicAddressPlatform, PublicSSH
 from agentworks.capabilities.vm_platform.ssh_exposure import config_allow_cidrs, operator_ssh_prefixes
-from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
+from agentworks.capabilities.vm_platform.tailscale_join import complete_cloud_bootstrap
 from agentworks.db import VMStatus
 from agentworks.errors import AgentworksError, ConnectivityError, StateError
-from agentworks.execution.trust import TrustBinding, TrustMode
+from agentworks.interrupts import interrupts_deferred
 from agentworks.plugins.gcp.auth import GcpClientCache
 from agentworks.plugins.gcp.bootstrap import (
     GCE_READINESS_COMMAND,
@@ -74,15 +75,12 @@ from agentworks.plugins.gcp.network import (
     resolve_network,
 )
 from agentworks.topics import TopicProse
-from agentworks.transports import SSHTransport
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
 
     from agentworks.capabilities.base import RunContext
-    from agentworks.config import Config
     from agentworks.db import VMRow
-    from agentworks.transports import Transport
 
 
 _OPERATION_TIMEOUT_SECONDS = 300.0
@@ -176,10 +174,10 @@ class _VMIdentity:
         )
 
 
-class GCEPlatform(VMPlatform):
+class GCEPlatform(PublicAddressPlatform):
     """Runs VMs on Google Compute Engine with provider-ID-owned cleanup."""
 
-    contract_version: ClassVar[int] = 1
+    contract_version: ClassVar[int] = 2
     name: ClassVar[str] = "gcp-gce"
     description: ClassVar[str] = "Google Compute Engine (project + zone)"
     config_model: ClassVar[type[GcpGCEConfig]] = GcpGCEConfig
@@ -193,9 +191,11 @@ class GCEPlatform(VMPlatform):
         owned priority-1 all-ingress deny remains for the VM lifetime.
 
         The startup metadata is credential-free. Agentworks waits for its
-        durable success marker, then sends the Tailscale auth key once through
-        fixed-command stdin. The external IPv4 remains attached for outbound
-        access but is read live and never persisted.
+        durable success marker, then joins Tailscale once over SSH as root, with
+        the auth key only on the join script's stdin, and reads the VM's
+        Tailscale address; an address that cannot be read logs the node out and
+        fails the create. The external IPv4 remains attached for outbound access
+        but is read live and never persisted.
 
         A definitive zonal instance-capacity failure names the selected zone.
         Retry later or select another compatible zone. A global capacity
@@ -217,10 +217,7 @@ class GCEPlatform(VMPlatform):
         `gcp-gce` vm-site becomes ready.
         """,
     )
-    probe_failure_hint: ClassVar[str | None] = (
-        "The transient GCE SSH allow is scoped to the detected public IP. "
-        "Set operator.ssh_allow_cidrs when SSH exits through another VPN, proxy, or NAT address."
-    )
+    public_address_hint = "Check the instance's external IP in the Google Cloud console, or use its serial console."
 
     def __init__(self, owner_name: str, config: Mapping[str, object]) -> None:
         super().__init__(owner_name, config)
@@ -305,7 +302,6 @@ class GCEPlatform(VMPlatform):
             admin_username=request.admin_username,
             ssh_public_key="",
             provisioning_packages=PROVISIONING_PACKAGES,
-            tailscale_auth_key=None,
             hostname=request.hostname,
             swap=request.swap_gib,
         )
@@ -345,8 +341,7 @@ class GCEPlatform(VMPlatform):
         allow_attempt = FirewallInsertAttempt.create(names.allow_rule)
         instance_attempt = InstanceInsertAttempt.create(names.backend_name)
         instance_possible = False
-        transport: Transport | None = None
-        tailscale_ip: str | None = None
+        tailnet_address: str | None = None
         ordinary_failure: Exception | None = None
         operator_interrupt: KeyboardInterrupt | None = None
 
@@ -408,19 +403,16 @@ class GCEPlatform(VMPlatform):
             verify_instance_network(running, network_url=network.network_url, subnet_url=network.subnet_url)
             external_ip = live_external_ipv4(running)
             request.progress.output(f"GCE instance '{names.backend_name}' is running")
-            transport = SSHTransport(
-                host=external_ip,
-                trust=request.provisioning_trust,
-                user=request.admin_username,
-                identity_file=request.ssh_private_key,
-            )
+            target = PublicSSH(external_ip, request.admin_username, request.ssh_private_key, request.provisioning_trust)
 
-            request.progress.step("Wait for GCE startup marker and join Tailscale through fixed stdin")
-            tailscale_ip = EphemeralTailscaleBootstrap(
-                transport,
+            request.progress.step("Wait for GCE startup marker and join Tailscale through the root channel")
+            tailnet_address = complete_cloud_bootstrap(
+                target,
+                request.tailscale_auth_key,
+                node=request.hostname,
                 readiness_command=GCE_READINESS_COMMAND,
                 readiness_label=GCE_READINESS_LABEL,
-            ).complete(request.tailscale_auth_key)
+            )
             request.progress.output("GCE credential-free bootstrap and Tailscale join completed")
         except KeyboardInterrupt as primary:
             operator_interrupt = primary
@@ -447,8 +439,8 @@ class GCEPlatform(VMPlatform):
                 deny_ownership=deny_attempt.ownership,
             )
 
-        if transport is None:  # pragma: no cover - both failure arms re-raise
-            raise AssertionError("successful GCE create has no native transport")
+        if tailnet_address is None:  # pragma: no cover - both failure arms re-raise
+            raise AssertionError("successful GCE create has no tailnet address")
         metadata = {
             "project_id": self.config.project_id,
             "zone": self.config.zone,
@@ -468,9 +460,8 @@ class GCEPlatform(VMPlatform):
         if network.subnet_url is not None:
             metadata["subnet_url"] = network.subnet_url
         return ProvisionResult(
-            native_transport=transport,
             platform_metadata=metadata,
-            tailscale_ip=tailscale_ip,
+            tailnet_address=tailnet_address,
         )
 
     def start(self, vm: VMRow, ctx: RunContext) -> None:
@@ -580,13 +571,13 @@ class GCEPlatform(VMPlatform):
         identity = _VMIdentity.from_row(vm)
         return f"{identity.instance_name}@{identity.zone}"
 
-    def native_transport(
-        self,
-        vm: VMRow,
-        ctx: RunContext,
-        *,
-        config: Config | None = None,
-    ) -> Transport:
+    def _public_address(self, vm: VMRow, ctx: RunContext) -> str:
+        """The instance's live external IPv4, after checking it is still ours and on its recorded network.
+
+        Never empty: ``live_external_ipv4`` raises ``GCEError`` with its own hint
+        for an instance with no external address, so ``public_address_hint``
+        only covers the shared base's check.
+        """
         identity = _VMIdentity.from_row(vm)
         instances = self._clients.client("instances", ctx)
         current = self._owned_instance(instances, identity)
@@ -597,24 +588,13 @@ class GCEPlatform(VMPlatform):
                 entity_name=vm.name,
             )
         verify_instance_network(current, network_url=identity.network_url, subnet_url=identity.subnet_url)
-        identity_file = None
-        if config is not None:
-            identity_file = getattr(getattr(config, "operator", None), "ssh_private_key", None)
-        return SSHTransport(
-            host=live_external_ipv4(current, access_config_name=identity.access_config_name),
-            trust=TrustBinding(TrustMode.VM, vm.name),
-            user=vm.admin_username,
-            identity_file=identity_file,
-        )
+        return live_external_ipv4(current, access_config_name=identity.access_config_name)
 
-    def post_tailscale_ready(self, vm: VMRow, ctx: RunContext) -> None:
-        self._close_stable_allow(vm, ctx)
-
-    def secure_failed_vm(self, vm: VMRow, ctx: RunContext) -> None:
+    def close_provisioning_access(self, vm: VMRow, ctx: RunContext) -> None:
         self._close_stable_allow(vm, ctx)
 
     @contextlib.contextmanager
-    def transient_route(self, vm: VMRow, ctx: RunContext, *, config: Config | None = None) -> Iterator[None]:
+    def _transient_route(self, vm: VMRow, ctx: RunContext) -> Iterator[None]:
         identity = _VMIdentity.from_row(vm)
         instances = self._clients.client("instances", ctx)
         current = self._owned_instance(instances, identity)
@@ -629,7 +609,7 @@ class GCEPlatform(VMPlatform):
             network_url=identity.network_url,
         )
         require_classic_first(live_network, project_id=identity.project_id)
-        prefixes = operator_ssh_prefixes(config_allow_cidrs(config))
+        prefixes = operator_ssh_prefixes(config_allow_cidrs(ctx.config))
         firewalls = self._clients.client("firewalls", ctx)
         route_name = transient_route_name(vm.hostname)
         require_firewall_name_available(firewalls, project_id=identity.project_id, rule_name=route_name)
@@ -650,13 +630,14 @@ class GCEPlatform(VMPlatform):
             )
             yield
         finally:
-            result = delete_matching_firewall(
-                firewalls,
-                project_id=identity.project_id,
-                expected=route,
-                ownership=attempt.ownership,
-                timeout=_OPERATION_TIMEOUT_SECONDS,
-            )
+            with interrupts_deferred():
+                result = delete_matching_firewall(
+                    firewalls,
+                    project_id=identity.project_id,
+                    expected=route,
+                    ownership=attempt.ownership,
+                    timeout=_OPERATION_TIMEOUT_SECONDS,
+                )
             if result.state is not FirewallState.ABSENT:
                 output.warn(
                     f"GCE transient SSH rule '{route_name}' was not proven absent in project "
@@ -769,4 +750,6 @@ class GCEPlatform(VMPlatform):
                     "do not delete a mismatched rule by name"
                 )
         except AgentworksError:
-            output.warn("Could not verify closure of the provider-ID-owned GCE provisioning allow; inspect it")
+            rule = vm.platform_metadata.get("allow_rule")
+            named = f" '{rule}'" if rule else ""
+            output.warn(f"Could not verify closure of the provider-ID-owned GCE provisioning allow{named}; inspect it")

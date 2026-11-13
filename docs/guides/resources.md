@@ -816,11 +816,8 @@ should you when reading them:
 
 Resolution is a pass over the chain in precedence order: the first source that produces a value
 wins. You are never prompted for the same secret twice in one command, and plan-wide prompting
-happens up front, before the command starts changing anything. Conditional Tailscale repair remains
-lazy so healthy and already-connected paths never ask for a repair key: a stopped VM may start
-before late key delivery, then Agentworks validates the key before any rejoin-specific mutation,
-transport, installation, or daemon action. The walk considers a lookup only when its source is
-**present, enabled, ready, active, and a candidate** for the secret.
+happens up front, before the command starts changing anything. The walk considers a lookup only when
+its source is **present, enabled, ready, active, and a candidate** for the secret.
 
 A **not-ready** active source is blocked and resolution continues with the next candidate. Ordinary
 missing also falls through. Invalid mapping, rejected lookup, authentication, connectivity, timeout,

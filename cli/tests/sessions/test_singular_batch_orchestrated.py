@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
-from agentworks.db import PID_STOPPED, SessionMode, SessionStatus, VMStatus
+from agentworks.db import PID_STOPPED, ProvisioningStatus, SessionMode, SessionStatus, VMStatus
 from agentworks.errors import NotFoundError, StateError
 from agentworks.execution.errors import TrustMissing
 from agentworks.output import Role
@@ -35,6 +35,7 @@ def _stub_ssh_identity(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _seed_vm(db: Database, name: str, host: str | None, *, site: str = "proxmox") -> None:
     db.insert_vm(name, site=site, hostname=name)
+    db.update_vm_provisioning_status(name, ProvisioningStatus.COMPLETE)
     if host is not None:
         db.update_vm_tailscale(name, host)
     seed_vm_trust(name)
@@ -66,7 +67,6 @@ def _reachable(monkeypatch: pytest.MonkeyPatch, value: bool) -> None:
 def _stop_the_vms(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> None:
     """Backend fakes for the stopped-VM gate path, recording per-VM."""
     _reachable(monkeypatch, False)
-    monkeypatch.setattr(vm_manager, "_tailscale_rejoin_required", lambda *a, **k: True)
     monkeypatch.setattr(
         ProxmoxPlatform,
         "status",
@@ -78,9 +78,8 @@ def _stop_the_vms(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> None:
         lambda self, row, ctx: events.append(f"start:{row.name}"),
     )
     monkeypatch.setattr(
-        vm_manager,
-        "_ensure_tailscale",
-        lambda db, config, vm, platform, ctx, **k: events.append(f"tailscale:{vm.name}"),
+        "agentworks.vms.manager._await_tailnet",
+        lambda db, config, vm, **k: events.append(f"tailscale:{vm.name}"),
     )
 
 

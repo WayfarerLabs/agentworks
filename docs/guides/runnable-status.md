@@ -107,7 +107,7 @@ not send fact data explicitly close stdin so non-interactive Windows SSH clients
 operator's console handle. Sessions use one compound probe per selected VM; consoles use one exact
 tmux session-name enumeration per selected VM. Independent VMs run with finite concurrency.
 
-VM observation uses the existing version-1 platform status operation. It may run that operation's
+VM observation uses the existing version-2 platform status operation. It may run that operation's
 provider preflight and resolve its declared credentials, but it does not run authenticated runup
 tests or use a guest transport. Status calls are serial within a provider site and may run in
 parallel across at most eight sites.

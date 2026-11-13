@@ -48,6 +48,7 @@ def main() -> None:
     # (or any other module-level import of `app`) would bind the name to the
     # original Typer instance and silently ignore the monkeypatch.
     from agentworks import cli as _cli
+    from agentworks.capabilities.secret_backend.env_var import withhold_carriers
     from agentworks.errors import (
         AgentworksError,
         AlreadyExistsError,
@@ -62,6 +63,8 @@ def main() -> None:
     )
     from agentworks.output import error, set_handler
 
+    # Before anything can start a child process: none inherits a secret carrier.
+    withhold_carriers()
     _reconfigure_std_streams()
     set_handler(TyperHandler())
 
@@ -183,3 +186,21 @@ def main() -> None:
                 err=True,
             )
         raise SystemExit(1) from None
+    finally:
+        _flush_quietly()
+
+
+def _flush_quietly() -> None:
+    """Flush both standard streams now, so the interpreter's own flush at exit has nothing left to fail on.
+
+    A stream whose reader has gone is pointed at the null device instead
+    (:func:`agentworks.output.tolerating_dead_sink`): unflushed bytes would
+    otherwise fail again at shutdown, print an ignored-exception traceback and
+    turn the exit status into 120.
+    """
+    from agentworks.output import tolerating_dead_sink
+
+    for stream in (sys.stdout, sys.stderr):
+        if stream is not None:
+            with tolerating_dead_sink(stream):
+                stream.flush()

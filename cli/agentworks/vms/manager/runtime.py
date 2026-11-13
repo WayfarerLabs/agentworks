@@ -5,13 +5,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from agentworks import output
 from agentworks.capabilities.base import RunContext
 from agentworks.db import DesiredRuntimeState, VMStatus
 from agentworks.errors import StateError
 from agentworks.execution import trust
 from agentworks.orchestration.secrets import ScopedSecrets
 
-from ._helpers import _guard_failed_vm, _vm_scope
+from ._helpers import _guard_incomplete_vm, _vm_scope
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -34,7 +35,6 @@ class VMRuntimeContext:
     ops_ctx: RunContext
     observed_status: VMStatus
     started: bool = False
-    repaired: bool = False
     _provider_values: dict[str, str] = field(default_factory=dict, repr=False)
 
     def clear_values(self) -> None:
@@ -57,7 +57,7 @@ def prepare_vm_runtime(
     from agentworks.orchestration.walk import walk
     from agentworks.vms.nodes import live_vm_node
 
-    _guard_failed_vm(vm)
+    _guard_incomplete_vm(vm)
     if vm_node is None:
         vm_node = live_vm_node(db, config, registry, vm, held_native_guard=held_native_guard, site_nodes=site_nodes)
     if vm_node.row.vm_uuid != vm.vm_uuid or vm_node.row.name != vm.name:
@@ -97,17 +97,26 @@ def observe_vm_runtime(context: VMRuntimeContext) -> VMStatus:
     return status
 
 
-def activate_vm_runtime(context: VMRuntimeContext, *, resolve_secret: Callable[[str], str]) -> bool:
-    """Prepare guest access, including conditional repair of provider-running VMs."""
-    return _start_vm_runtime(context, resolve_secret=resolve_secret, allow_unknown=False)
+def activate_vm_runtime(context: VMRuntimeContext) -> bool:
+    """Prepare guest access: start a provider-stopped VM, then wait for it to answer."""
+    return _start_vm_runtime(context, explicit=False)
 
 
-def start_vm_runtime(context: VMRuntimeContext, *, resolve_secret: Callable[[str], str]) -> bool:
-    """Apply an accepted explicit start, retaining the ordinary unknown-power policy."""
-    return _start_vm_runtime(context, resolve_secret=resolve_secret, allow_unknown=True)
+def start_vm_runtime(context: VMRuntimeContext) -> bool:
+    """Apply an accepted explicit start."""
+    return _start_vm_runtime(context, explicit=True)
 
 
-def _start_vm_runtime(context: VMRuntimeContext, *, resolve_secret: Callable[[str], str], allow_unknown: bool) -> bool:
+def _start_vm_runtime(context: VMRuntimeContext, *, explicit: bool) -> bool:
+    """Start the VM unless it is running, then wait inside a hold for it to answer over SSH.
+
+    A VM with no host-key record is refused before it is started, since the
+    wait could only fail, and a VM that does not answer fails naming
+    ``agw vm recover``, which repairs what a start cannot. An explicit start
+    differs from an activation two ways. It proceeds on an unknown power
+    observation. And it says what it did before the wait, so a failed wait
+    still reads as one on a running VM.
+    """
     import agentworks.vms.manager as manager
 
     row = _current_vm(context)
@@ -116,35 +125,24 @@ def _start_vm_runtime(context: VMRuntimeContext, *, resolve_secret: Callable[[st
     trust.require_record(row.name)
     platform = context.node.site.platform
     status = observe_vm_runtime(context)
-    if status is VMStatus.UNKNOWN and not allow_unknown:
+    if status is VMStatus.UNKNOWN and not explicit:
         raise StateError("VM power state is unknown", entity_kind="vm", entity_name=row.name)
+    # Started before the hold: WSL2's keepalive boots a stopped distro as a
+    # side effect of holding it, which would make the VM read as running.
     if status is not VMStatus.RUNNING:
         platform.start(row, context.ops_ctx)
         context.started = True
+        if explicit:
+            output.info(f"VM '{row.name}' started")
         if status is VMStatus.UNKNOWN:
             context.db.clear_vm_start_observation(row.name)
         else:
             context.db.record_vm_started(row.name)
+    elif explicit:
+        output.info(f"VM '{row.name}' is already running")
     with context.node.hold_active():
-        if manager._tailscale_rejoin_required(
-            context.db, context.config, row, already_running=status is VMStatus.RUNNING
-        ):
-            names = context.node.repair_secret_refs()
-            values = {name: resolve_secret(name) for name in names}
-            try:
-                manager._ensure_tailscale(
-                    context.db,
-                    context.config,
-                    row,
-                    platform,
-                    context.ops_ctx,
-                    auth_keys=ScopedSecrets(values, names),
-                    auth_key_name=names[0],
-                )
-            finally:
-                values.clear()
-            context.repaired = True
-    return context.started or context.repaired
+        manager._await_tailnet(context.db, context.config, row, already_running=status is VMStatus.RUNNING)
+    return context.started
 
 
 def execute_vm_stop(context: VMRuntimeContext) -> bool:

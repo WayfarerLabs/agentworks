@@ -527,7 +527,7 @@ def test_output_after_the_closing_lines_is_dropped() -> None:
 
 
 def test_a_client_that_cannot_start_is_a_typed_refusal() -> None:
-    session = PipeSession(["/nonexistent/agw-ssh"], request=b"", nonce=NONCE, on_stdout=Capture(), on_stderr=Capture())
+    session = PipeSession(["/nonexistent/bin/ssh"], request=b"", nonce=NONCE, on_stdout=Capture(), on_stderr=Capture())
 
     with pytest.raises(ClientUnsupported):
         session.start()

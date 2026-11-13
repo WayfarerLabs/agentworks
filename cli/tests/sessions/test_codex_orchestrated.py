@@ -33,7 +33,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.artifacts.declarations import ArtifactsConfig
-from agentworks.db import Database, InitStatus, SessionMode, SessionStatus
+from agentworks.db import Database, InitStatus, ProvisioningStatus, SessionMode, SessionStatus
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.tmux import FingerprintProbe, ProbeStatus, TmuxServerFingerprint
 from tests.conftest import seed_vm_trust
@@ -109,6 +109,7 @@ class _CodexTarget:
 def _seed_db(tmp_path: Path) -> Database:
     db = Database(tmp_path / "test.db")
     db.insert_vm("vm1", "lima", "h", admin_username="admin")
+    db.update_vm_provisioning_status("vm1", ProvisioningStatus.COMPLETE)
     seed_vm_trust("vm1")
     db.update_vm_tailscale("vm1", "100.64.0.5")
     db.update_vm_init_status("vm1", InitStatus.COMPLETE)

@@ -183,12 +183,9 @@ def import_host_keys(
         # Whatever was imported before a later VM failed has a record now, so
         # its managed entries must carry the store options.
         if any(o.status is ImportStatus.IMPORTED for o in outcomes):
-            from agentworks.ssh_config import sync_ssh_config
+            from agentworks.ssh_config import sync_ssh_config_or_warn
 
-            try:
-                sync_ssh_config(config, db)
-            except Exception as e:
-                output.warn(f"SSH config sync failed: {e}")
+            sync_ssh_config_or_warn(config, db)
     return tuple(outcomes)
 
 

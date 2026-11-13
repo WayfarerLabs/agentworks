@@ -650,14 +650,14 @@ attach, status, reinit, and membership changes do not independently change targe
 
 Reconciliation and batch session start/restart collect the complete eligible workload-secret union
 before any deferred runtime changes, including VM stops and console staging cleanup. A required
-workload secret failure prevents that entire deferred batch. Required VM activation and conditional
-Tailscale repair may already have happened and are not rolled back. An infrastructure credential
-failure blocks dependent families while independent families continue; if an eligible workload also
-requires that credential, the global workload-secret barrier still fails. Execution and final
-observation use supplied values without later secret prompts. Cancellation stops further work and
-reports completed effects honestly. Results distinguish unchanged, changed, failed, and blocked;
-selected failed or blocked targets produce a nonzero exit. Bounded final observations are not an
-uptime or useful-work guarantee.
+workload secret failure prevents that entire deferred batch. Required VM activation may already have
+happened and is not rolled back. An infrastructure credential failure blocks dependent families
+while independent families continue; if an eligible workload also requires that credential, the
+global workload-secret barrier still fails. Execution and final observation use supplied values
+without later secret prompts. Cancellation stops further work and reports completed effects
+honestly. Results distinguish unchanged, changed, failed, and blocked; selected failed or blocked
+targets produce a nonzero exit. Bounded final observations are not an uptime or useful-work
+guarantee.
 
 Dry run performs no activation, repair, workload-secret preview/resolution, PID-evidence write,
 staging change, target write, or mutation-guard creation. Provider observation may need its ordinary
@@ -708,8 +708,9 @@ just a vm-site.
 | `agw vm describe <name>`                            | Show VM details, workspaces, and event log                     |
 | `agw vm verify-connection <name>`                   | Test the canonical admin connection without starting the VM    |
 | `agw vm shell <name> [--workspace <ws>]`            | Admin shell on a VM (optionally rooted in a workspace)         |
+| `agw vm shell <name> --platform`                    | A shell through the platform's own channel, without Tailscale  |
 | `agw vm exec <name> [--workspace <ws>] -- <cmd...>` | Run a one-shot command as admin (optionally from a workspace)  |
-| `agw vm start <name>`                               | Record running intent and start or repair the VM               |
+| `agw vm start <name>`                               | Record running intent, start the VM, and wait for it to answer |
 | `agw vm set-desired-state <name> <state>`           | Record running, stopped, or on-demand without runtime work     |
 | `agw vm reconcile [<name>] [--all] [--dry-run]`     | Apply the named VM scope or explicitly selected fleet          |
 | `agw vm stop <name>`                                | Stop a VM and keep it stopped (no auto-start)                  |
@@ -718,6 +719,7 @@ just a vm-site.
 | `agw vm delete <name>`                              | Delete a VM (with confirmation)                                |
 | `agw vm backup <name>`                              | Back up a VM: metadata, agents, workspaces, and files          |
 | `agw vm rekey <name>`                               | Assign a new Tailscale auth key to a VM (logout + rejoin)      |
+| `agw vm recover <name>`                             | Repair a VM's SSH access, python3 and Tailscale node           |
 | `agw vm port-forward <name> <ports...>`             | Forward local port(s) to a VM (like kubectl port-forward)      |
 | `agw vm logs <name>`                                | Show SSH logs for a VM                                         |
 | `agw vm import-host-keys (--all \| <name>...)`      | Import VM host keys from `known_hosts` into the host-key store |
@@ -735,6 +737,13 @@ still access a guest already running out of band, with the WSL2 limitation above
 running; `vm stop` records stopped. Use the pure setter to select another target without a power
 operation. Describe and `list --status` show target and observation independently: an off VM shows
 `manual` for stopped intent, `idle` for on-demand, and no disposition for running intent.
+
+`vm start`, and the automatic start, start the VM and wait up to about four minutes for it to answer
+over SSH at its tailnet address. A VM that does not answer fails with a hint to run
+`agw vm recover <name>`; the VM is left running. Neither rejoins Tailscale, so a VM whose node was
+removed in the admin console, or whose ephemeral key's node expired while it was offline, fails this
+way, and `agw vm recover` rejoins it. `vm start` refuses a VM with no recorded host key before it
+starts it, naming recover, which starts a stopped VM and records the keys.
 
 Plain `vm list` is a local inventory read. Add `--status` to query each selected VM platform for
 current power state; this never starts a VM. The human table adds `STATUS` only for that request,
@@ -760,6 +769,29 @@ referenced packages, credentials, secrets, and install commands. Both final laye
 desired VM record and reapplied by `vm reinit`. Templates carry no `site`: placement is per-host, so
 it never travels inside a shared template.
 
+During provisioning, the platform joins the VM to the tailnet once, through its own channel, and
+then reads the VM's Tailscale address. If the address cannot be read, create logs the node out of
+the tailnet and fails, removing the partial VM; the error says whether the logout worked, and names
+the node for removal in the Tailscale admin console when it did not. The join has spent the auth key
+by then, so before running create again, replace a single-use key with a fresh one; a reusable key
+works as is. When create cannot remove the partial VM it made (on AWS, Proxmox, Lima or WSL2), it
+names what may remain and keeps the VM in a failed state, so `agw vm delete <name>` can retry the
+removal.
+
+Agentworks then reaches the VM over SSH at that address. Its first connection records the VM's host
+key, and the VM contract's base checks follow on verified connections: the Debian release first,
+then systemd, passwordless `sudo` for the admin, and the base tools Agentworks runs (`install`,
+`flock`, `nohup`, `setsid`, `tar`). The VM's provisioning is complete only once they pass. If any of
+this fails, the VM is kept in a failed state; if create is interrupted first (Ctrl-C, on macOS and
+Linux `SIGTERM` or `SIGHUP`, or on Windows Ctrl-Break), it is kept with its provisioning incomplete.
+Either way its temporary provisioning access is closed, and `vm start`, `vm stop`, `vm rekey`,
+`vm recover`, `vm reinit`, `vm exec`, `vm shell` (with `--platform` too), `vm port-forward`,
+`vm backup` and `vm confirm-release` refuse it, as they do a VM a killed create left in progress;
+`vm describe`, `vm list` and `vm verify-connection` still run. `agw vm delete <name>` removes it. A
+create killed before its platform finished (`SIGKILL`, or any kill on Windows) leaves a row that
+records nothing addressing the backend, so `vm delete` refuses it; `vm delete --force` then removes
+the row and its host-key record, as it does for any VM whose backend cannot be deleted.
+
 The first interactive `vm create` asks once for an optional **system slug** (3-20 chars, lowercase
 alphanumeric plus dash, no leading/trailing dash): a short identifier for this Agentworks
 installation, used to namespace VM hostnames and backend-side names (`{slug}-{vm-name}`) so installs
@@ -769,35 +801,113 @@ ask again. Non-interactive runs never prompt (a later interactive create still a
 
 `vm reinit` re-runs the initialization phase using the current config without reprovisioning the VM.
 Changes to config (new packages, different install commands, etc.) are picked up automatically. It
-consumes both stored VM and admin instance specs but cannot change or clear either one. It warns,
-without failing, when `/etc/environment`, `/etc/security/pam_env.conf` or the admin's
-`~/.pam_environment` (only where sshd reads it, as on Debian 12) holds settings, because Agentworks
-does not apply pam_env settings to the commands it runs.
+consumes both stored VM and admin instance specs but cannot change or clear either one.
+
+Reinit starts with the VM contract's base checks, before it changes anything. A live Debian release
+that differs from the recorded one refuses first, naming `vm confirm-release`. A VM without systemd,
+without passwordless `sudo` for the admin, or missing a base tool fails the contract: initialization
+cannot repair it, so the error lists every failure and names recreation. Two findings only warn:
+pam_env settings in `/etc/environment`, `/etc/security/pam_env.conf` or the admin's
+`~/.pam_environment` (only where sshd reads it, as on Debian 12), because Agentworks does not apply
+pam_env settings to the commands it runs; and an admin or agent account whose login shell is not
+`sh`, `dash`, `bash` or `zsh`, naming `agw vm reinit <vm>` for the admin and
+`agw agent reinit <agent>` for an agent. The checks run through Agentworks' SSH path, so a VM
+without `python3` cannot be reinitialized until `agw vm recover <name>` installs it.
 
 VMs created before SSH lifecycle-evidence tracking have no synthesized identity evidence. Ordinary
-canonical SSH commands refuse that unknown state until one successful `agw vm reinit <name>` proves
-and records the configured identity. After upgrading Agentworks, run that reinit while the installed
-key still works. If it no longer works, try `agw vm shell <name> --platform` where supported,
-restore the configured public key, and rerun reinit. A platform-native transport can itself depend
-on the configured key, so use provider-native recovery tooling or recreate the VM if it cannot
-connect.
+canonical SSH commands refuse that unknown state until one successful `agw vm reinit <name>` or
+`agw vm recover <name>` proves and records the configured identity. After upgrading Agentworks, run
+that reinit while the installed key still works. If it no longer works, or you changed
+`operator.ssh_private_key` so that the VM's recorded identity no longer matches,
+`agw vm recover <name>` restores the configured public key through the platform's own channel and
+records it as the VM's identity once the VM answers over SSH with it. Recover rewrites only the
+admin's `authorized_keys`: the VM's agent accounts keep the previous key until
+`agw agent reinit <agent>` runs for each, and recover names them when the VM has any. On a cloud
+that channel is SSH with the same key, so use the provider's console or recreate the VM when the VM
+refuses it.
 
-`vm confirm-release` reads `/etc/os-release` through the named VM's canonical live transport and
-shows the recorded and live Debian releases. A changed or previously unknown value requires a
-default-negative confirmation unless `--yes`/`-y` is supplied. On consent, Agentworks atomically
+`vm confirm-release` reads `/etc/os-release` over SSH at the VM's tailnet address, through the same
+path as `vm exec` (so the VM needs `python3`), and shows the recorded and live Debian releases. It
+runs only that read, not the rest of the VM contract. A changed or previously unknown value requires
+a default-negative confirmation unless `--yes`/`-y` is supplied. On consent, Agentworks atomically
 records the recognized live release and marks initialization pending. The command does not run
 `vm reinit`; run that separately to converge release-aware resources. A matching observation only
 refreshes its timestamp and leaves initialization state unchanged. See
 [Upgrading a Debian VM](../docs/guides/debian-vm-upgrades.md) for the operator-led upgrade and
 provider-recovery boundary.
 
+`vm recover` repairs what a start cannot, through the platform's own channel (`limactl shell`,
+`wsl.exe`, the Proxmox guest agent, or SSH to a cloud VM's public address), which works without the
+VM's Tailscale. It refuses a VM whose provisioning did not complete (delete and recreate it) and a
+VM whose power state the platform could not report. A stopped VM is started first, with no wait for
+SSH, and recover says so; like `vm start`, that clears a manual stop. The Tailscale auth key
+resolves up front, with the site's secrets. In one run it:
+
+1. Reads the VM's host keys through that channel when no record exists, shows each key's fingerprint
+   to compare with the VM's console, and records them only once you confirm. Without a terminal to
+   confirm on, recover refuses such a VM before resolving anything; import its keys from a verified
+   file with `agw vm import-host-keys <name> --known-hosts FILE` instead.
+2. Runs one repair script as root, in this order: it rewrites the admin's `authorized_keys` as
+   `vm reinit` does, with your SSH public key and `operator.extra_ssh_public_keys`, so a key they no
+   longer list (one you replaced, say) stops working; checks the SSH server's configuration (a
+   failed check stops the repair), then unmasks and enables it, clears a failed state left by a
+   crash loop, and restarts it, which ends no open session, so a stopped or masked server is
+   repaired even where the channel goes through it, as Lima's persistent connection can; installs
+   `python3` when it is missing or lacks its standard library; starts `tailscaled` if it is not
+   running and waits up to about 30 seconds for its state to settle; and rejoins Tailscale only when
+   the node needs a login. A missing Tailscale is reported, not installed.
+3. Reads the VM's tailnet address and records it, then rebuilds the SSH config, whose aliases name
+   that address and your configured key. After a rejoin, an address that cannot be read logs the
+   node out again, as create does.
+4. Waits once for the VM to answer over SSH.
+5. Records the configured SSH identity as the VM's, since the VM has just accepted it. A key file
+   replaced while recover ran is not recorded, and recover fails asking for a rerun.
+
+When the VM has agents, recover's output names them: their accounts' `authorized_keys` are not
+repaired, so after a change to `operator.ssh_private_key` they accept only the previous key until
+`agw agent reinit <agent>` runs for each.
+
+A failed step stops there and names the script; its output, such as the reason a configuration test
+failed, is in the operation log (`agw vm logs <name>`). A script that ran and failed went through a
+channel that works, so the hint names `agw vm shell --platform <name>`, which uses the same channel,
+for fixing it by hand (Proxmox has no native shell, so its hint names the web UI's console). On
+Lima, Remote Lima and the clouds the channel itself goes through the VM's SSH server, so when the
+outcome is unknown there, a broken server needs a way in that does not use it (a cloud provider's
+serial console) or recreation.
+
+`vm rekey` restarts `tailscaled`, logs the node out, joins with the new key and restarts it again,
+in one script through the platform's own channel, then reads and records the new address and waits
+for the VM to answer there. If the new address cannot be read, the node is logged out and the error
+names `agw vm recover`, which rejoins it. When the platform's channel cannot reach the VM at all
+(after its own wait of about two minutes), rekey stops at that first call and does not try a logout;
+the error says what gets the VM answering again (on a cloud, a restart with `agw vm stop` and
+`agw vm start`, or the provider's serial console) and to run the rekey again after that. A rekeyed
+VM that does not answer at its new address fails naming `agw vm recover`, as `vm start` does; the
+new address is recorded either way.
+
 `vm delete` requires `--force` if the VM has workspaces, agents, or sessions. The confirmation
-message shows what will be deleted. Pass `--yes` to skip the prompt. If backend binding fails, the
-command warns and removes local state without attempting remote deletion. A bound platform's delete
-exception aborts local removal. Check the provider's cleanup result; local removal alone does not
-prove the remote VM is gone. Whole-VM deletion does not first stop individual workloads or log out
-of Tailscale, so an external tailnet entry can remain for separate removal in the Tailscale admin
-console.
+message shows what will be deleted. Pass `--yes` to skip the prompt.
+
+Without `--force`, delete removes the VM's row and its host-key record only once its backend VM is
+deleted, since a backend that may still run needs the row to find it. A VM whose site cannot be
+bound (an unset token, a removed site or plugin), or whose backend delete fails (a locked Proxmox
+VM, an unreachable Lima host, a provider refusal), is kept, and the error names the backend
+identifiers the row holds: its hostname and platform metadata, such as a Proxmox VM ID, a cloud
+instance ID or a Lima instance name. Fix the cause and run `vm delete` again, or remove the backend
+yourself and run `vm delete --force`. `--force` deletes the VM as far as it can, also deleting its
+children, and removes the row and the host-key record whatever kept the backend delete from
+completing; it then warns with those identifiers and reports that the backend was not deleted. An
+operator abort keeps the row either way.
+
+Once the site binds, delete logs the VM's node out of the tailnet through the platform's own
+channel, then deletes the backend VM; it does not stop individual workloads first, since deleting
+the VM ends them. The logout is best effort: when it does not run or fails, delete goes on and, once
+the row is gone, names the node to remove in the Tailscale admin console. A VM that is stopped or
+deallocated is not logged out, since nothing reaches it (a stopped WSL2 distro is usually booted by
+the hold delete keeps on it, and is then logged out, unless the VM's intent is stopped, which admits
+no hold), and neither is a cloud VM whose host key was never recorded, since nothing could verify
+the VM that answered. When the node was logged out before a backend delete failed, the error says
+so, and `agw vm rekey <name>` puts the VM back on Tailscale if you would rather keep it.
 
 `vm backup` exports the VM row and exact owner tree of agents, workspaces, sessions, events, grants,
 desired instance specs, and workspace files. It does not create or copy a provider VM snapshot,
@@ -817,52 +927,72 @@ directory on this VM. The workspace's template env joins the env chain (between 
 into the workspace; the exec variant runs the command from the workspace directory. A workspace that
 lives on a different VM is rejected with a `ValidationError` before any SSH work.
 
-`vm shell`, `vm exec`, `vm verify-connection`, `vm port-forward`, `agent shell` and `agent exec`
-connect with the OpenSSH client on the workstation, version 8.5 or newer (`vm shell --platform` uses
-the platform's own path instead, and needs neither the client nor `python3`). Agentworks uses the
+`vm shell`, `vm exec`, `vm verify-connection`, `vm port-forward`, `agent shell` and `agent exec`,
+`vm start` and the automatic start of a stopped VM, `vm rekey` and `vm recover` for their final
+waits, and `vm create`, `vm reinit` and `vm confirm-release` for their checks of the VM, connect
+with the OpenSSH client on the workstation, version 8.5 or newer (`vm shell --platform` uses the
+platform's own path instead and needs no `python3`; Remote Lima and the clouds need the client, and
+check it only once they connect, a cloud inside its temporary network route). Agentworks uses the
 first `ssh` on `PATH`; on Windows it uses only the native Win32-OpenSSH under `System32\OpenSSH` or
 `Program Files\OpenSSH`, never the `ssh` bundled with Git for Windows. `agw doctor` shows which
-client was resolved, and an unsupported one is refused before anything else runs. These commands run
-`ssh -F none` in batch mode, so `~/.ssh/config` does not apply and an encrypted private key must be
-loaded in the SSH agent. The VM needs `python3`; a VM without it is reported as unable to run
-Agentworks requests, and `agw vm reinit <name>` installs it. A command that is not found exits 127,
-one that cannot run exits 126, and a missing workspace directory exits 125.
+client was resolved, and these commands, other than `vm shell --platform`, refuse an unsupported one
+before anything else runs. These commands run `ssh -F none` in batch mode, so `~/.ssh/config` does
+not apply and an encrypted private key must be loaded in the SSH agent. The VM needs `python3`; a VM
+without it is reported as unable to run Agentworks requests, and `agw vm recover <name>` installs
+it. A command that is not found exits 127, one that cannot run exits 126, and a missing workspace
+directory exits 125.
 
-`vm port-forward` runs until interrupted and exits 0 when stopped with Ctrl-C or `SIGTERM`. It exits
-non-zero when a forward cannot be set up, such as a busy local port.
+`vm port-forward` runs until interrupted and exits 0 when stopped with Ctrl-C, on macOS and Linux
+also with `SIGTERM` or `SIGHUP` (a closed terminal), and on Windows also with Ctrl-Break; started
+under `nohup`, it keeps running after its terminal closes. It exits non-zero when a forward cannot
+be set up, such as a busy local port.
 
 In both exec commands the `--` separator is only required when the remote command's first token
 starts with `-` (it stops Agentworks from reading the token as its own option); without it, a
 dash-led first token is rejected with a hint naming the recoveries. Bare commands need no `--`.
 
-Combining `--workspace` with `--platform` works (the shell still `cd`s into the workspace) but the
-workspace's template env and the `AGENTWORKS_WORKSPACE` identity vars are not delivered: the
-platform-native transports (`limactl shell`, `wsl.exe`) drop the `env=` kwarg by design. Treat
-`--platform` as a transport-repair escape hatch, not a routine combination.
+`agw vm shell --platform` opens a shell through the platform's own channel instead of Tailscale:
+`limactl shell` for Lima and Remote Lima (as Lima's own guest user), `wsl.exe` for WSL2, and SSH to
+the VM's public address for AWS, Azure and GCP. Use it when Tailscale itself is what you need to
+reach the VM to fix (the issue #117 latched DNS state is the canonical case: its heal restarts
+`tailscaled`, which would end a shell over the tailnet mid-sequence); `agw vm recover <name>`
+repairs the common cases without a shell. The shell gets the account's own login environment: no
+environment from the VM template or the admin settings, and no secret, is resolved for it. It takes
+no `--workspace`; combining the two is refused, so `cd` into the workspace directory inside the
+shell instead. A platform without a native shell is refused before anything is resolved: Proxmox's
+QEMU Guest Agent runs commands but provides no terminal, so use the Proxmox web UI's serial console
+(`VM > Console` in the Proxmox VE web UI) there.
 
-`agw vm shell --platform` opens the same shell over the platform-native transport (`limactl shell`
-for Lima, `wsl.exe` for WSL2, SSH via the VM's public IP for Azure) instead of Tailscale. Useful
-when Tailscale itself is the thing you need to reach the VM to fix (the issue #117 latched DNS state
-is the canonical case: its heal involves restarting tailscaled, which would terminate a
-Tailscale-SSH session mid-sequence). On Azure, the VM's firewall denies all inbound traffic at
-baseline; for the duration of the session an ephemeral SSH allow rule scoped to your detected public
-IP is created (one per session, so concurrent sessions never tear down each other's access), and
-removed again on exit (the public IP itself is permanent). If your SSH traffic egresses through a
-different address than the detection sees (VPN split tunnel, proxy, CGNAT), set `ssh_allow_cidrs` in
-the config's `[operator]` section to a list of IPv4 addresses and/or CIDRs to allow additionally; if
-detection fails entirely, those entries are used alone. Proxmox QGA supplies native non-interactive
-execution, but it does not provide the interactive terminal required by this flag. Use the Proxmox
-web UI's serial console (`VM > Console` in the Proxmox VE web UI) as the equivalent escape hatch.
+On a cloud VM the shell connects as every VM connection does (`ssh -F none`, your configured key,
+the VM's recorded host key), so it refuses a VM with no recorded host key before opening anything,
+and an encrypted key must be loaded in the SSH agent. Before the shell it checks that the VM answers
+by running `true` through `sudo -n`, so an admin without passwordless sudo is reported as such
+rather than as a VM that does not answer. The VM's firewall denies all inbound traffic at baseline;
+for the duration of the session a temporary SSH allow rule scoped to your detected public IP is
+created (one per session, so concurrent sessions never tear down each other's access) and removed
+again on exit, including when the session is ended by `SIGTERM` or a closed terminal on macOS and
+Linux, or by Ctrl-Break on Windows. The same holds for the routes `vm create`, `vm recover`,
+`vm rekey` and `vm delete` open on a cloud VM. On Windows, killing `agw` runs no cleanup, and
+closing the console window may start it, but Windows ends the process within seconds, so it cannot
+be relied on to finish. Either can leave the rule in place until you delete it from the VM's
+firewall in the provider's console, so end the session by exiting the shell. A VM whose address
+refuses the connection has no SSH server listening; that error names a restart (`agw vm stop`, then
+`agw vm start`) or the provider's serial console. If your SSH traffic egresses through a different
+address than the detection sees (VPN split tunnel, proxy, CGNAT), set `ssh_allow_cidrs` in the
+config's `[operator]` section to a list of IPv4 addresses and/or CIDRs to allow additionally; if
+detection fails entirely, those entries are used alone. A shell that ends with status 255 gets a
+notice that the connection may have dropped.
 
 #### Host keys
 
 Agentworks verifies every connection to a VM against a per-VM host-key store, never against your
 `~/.ssh/known_hosts`. The store is one file per VM under `~/.config/agentworks/known_hosts/`, keyed
 by VM name, so a VM keeps its trust across tailnet address changes. `vm create` records the key on
-its first connection and nowhere else; `vm delete` removes the file. A command that reaches a VM
-over SSH refuses a VM with no recorded key, with a hint naming the import, rather than trusting it
-on first use; describe and listing commands warn per VM and carry on. `vm delete` works without a
-record.
+its first connection and nowhere else; `vm delete` removes the file, and so does a `vm create` that
+fails and removes the VM's row. A command that reaches a VM over SSH refuses a VM with no recorded
+key, with a hint naming the import, rather than trusting it on first use; describe and listing
+commands warn per VM and carry on. `vm delete` still works without a record, but on a cloud VM it
+cannot then log the node out of Tailscale.
 
 `agw vm import-host-keys (--all | <name>...) [--known-hosts <path>]` copies keys you already trust
 into the store. It asks OpenSSH's own `ssh-keygen -F` which keys `~/.ssh/known_hosts` (or the file
@@ -897,7 +1027,9 @@ Manage workspaces on VMs.
 | `agw workspace delete <name>`        | Delete a workspace                  |
 
 `workspace create <name>` takes the workspace name as a required positional. Optional flags: `--vm`,
-`--template`, `--spec`, and `--open-vscode`.
+`--template`, `--spec`, and `--open-vscode`. `--open-vscode` opens the new workspace's VS Code
+workspace file with VS Code's `code` command; on Windows `agw` does not start VS Code and instead
+names the file to open.
 
 `workspace copy <source> <name>` copies a workspace to a new VM workspace. Accepts `--vm`. Source
 and destination can be the same VM (a clone) or different VMs.
@@ -979,7 +1111,9 @@ prefixes are configurable via `operator.ssh_host_prefix` (default `awvm--`) and
 `operator.ssh_agent_host_prefix` (default `awagent--`).
 
 Entries are rebuilt declaratively from the database on every agent / VM lifecycle operation, so a
-fresh `agw agent create` or `agw vm delete` keeps the file in sync without manual intervention. Run
+fresh `agw agent create` or `agw vm delete` keeps the file in sync without manual intervention. Each
+entry's `IdentityFile` is `operator.ssh_private_key`, so after changing that key, `agw vm recover`
+or `agw vm reinit` (which install the new key on the VM) rebuild the file too. Run
 `agw config sync-ssh-config` to force a rebuild.
 
 Entries for a VM that has a host-key record also carry `HostKeyAlias`, `UserKnownHostsFile` (the
@@ -1035,7 +1169,7 @@ accepted match, including already-running no-ops; stopped and domain-safe residu
 started without replacing healthy peers. Batch stop adopts accepted absent no-ops too. Known
 read-only policy refusals leave targets unchanged. Start/restart gathers the complete eligible
 workload-secret union before any selected runtime changes. A required workload secret failure
-prevents the whole deferred batch; earlier infrastructure activation/repair may remain. Stop uses
+prevents the whole deferred batch; earlier infrastructure activation may remain. Stop uses
 non-activating parent observation and does not boot an off VM solely for cleanup. The batch form
 accepts `--vm <vm>`, `--workspace <ws>`, `--agent <agent>`, `--harness-integration <integration>`,
 `--console <console>`, and `--admin` to narrow the set; filters compose with AND and require

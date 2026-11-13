@@ -14,11 +14,9 @@ from __future__ import annotations
 
 import contextlib
 import enum
-import errno
 import os
 import queue
 import subprocess
-import sys
 import threading
 import time
 from collections.abc import Callable
@@ -28,6 +26,7 @@ from typing import TYPE_CHECKING
 from agentworks.execution import ssh_process
 from agentworks.execution.envelope import StreamFilter
 from agentworks.execution.results import UnknownReason
+from agentworks.output import consumer_left
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -70,20 +69,9 @@ Sink = Callable[[bytes], None]
 A sink that cannot take them yet raises ``BlockingIOError`` with
 ``characters_written`` set to what it did take; the pump holds the rest and
 offers it again (an empty remainder asks the sink to finish, say a flush). An
-error for which :func:`consumer_left` holds means the consumer has gone; any
-other ``OSError`` propagates.
+error for which :func:`agentworks.output.consumer_left` holds means the
+consumer has gone; any other ``OSError`` propagates.
 """
-
-
-def consumer_left(error: OSError) -> bool:
-    """Whether a failed write or flush means the consumer at the other end has gone (``| head``).
-
-    That is ``BrokenPipeError`` or ``ConnectionResetError``, and on Windows
-    ``EINVAL``, which is how CPython reports a pipe whose reader closed there.
-    """
-    if isinstance(error, (BrokenPipeError, ConnectionResetError)):
-        return True
-    return sys.platform == "win32" and error.errno == errno.EINVAL
 
 
 class OutputLimitExceeded(Exception):
@@ -184,25 +172,25 @@ class PipeSession:
     unless ``hold_stdin_open`` keeps it open for :meth:`close_stdin` (a parked
     launcher treats its closing as the client leaving).
 
-    A write that fails to the client's stdin is the consumer ending early, not a
-    failure: the session stops sending and keeps reading. A sink that raises
-    an error for which :func:`consumer_left` holds is the consumer of that
-    stream leaving. The session discards the rest of that stream and closes
-    its read end once the guest writes to it again, so ssh sees ``EPIPE`` on
-    the write after that one, as it did when it held the operator's streams.
-    Once ssh's write to its stdout fails, ssh writes none of the stderr it
-    receives after that, so a quiet payload's closing line must not be what
-    meets the closed read end: kept open, it reaches ssh's stdout and the
-    trailer follows, so a quiet payload still reports its status. A guest that
-    writes once more after its consumer left and then goes quiet closes the
-    read end, and its closing line is then ssh's failed write; the trailer
-    survives only if it reaches ssh in the same batch, and otherwise the
-    result is ``Unknown(CONSUMER_LEFT)``. ssh does not end the channel
-    for a departed stderr, and the status travels on stderr, so :meth:`pump`
-    returns :attr:`StopReason.STDERR_CONSUMER_LEFT` once stdout has nothing
-    held for a slow consumer and the trailer has not already arrived (with it
-    in hand, stdout is pumped to its end and the status stands), and ending
-    the session kills the client.
+    ``nonce=None`` is for a process that speaks no marker protocol (a
+    platform's root channel): both streams pass through unfiltered, so the
+    session ends when the process exits and its pipes go quiet, at end of
+    file, at the deadline or at an output limit.
+
+    A write that fails to the client's stdin is the consumer ending early, not
+    a failure: the session stops sending and keeps reading. A sink that raises
+    an error for which :func:`agentworks.output.consumer_left` holds is the
+    consumer of that stream leaving. The session discards the next chunk of
+    that stream and then closes its read end, so ssh's write after that one
+    fails with ``EPIPE``, as it did when it held the operator's streams; the
+    read end stays open until then because ssh drops the stderr, status
+    included, that follows a failed write to its stdout (``execution-lld.md``
+    has the mechanism and its one edge). ssh does not end the channel for a
+    departed stderr, and the status travels on stderr, so :meth:`pump` returns
+    :attr:`StopReason.STDERR_CONSUMER_LEFT` once stdout has nothing held for a
+    slow consumer and the trailer has not already arrived (with it in hand,
+    stdout is pumped to its end and the status stands), and ending the session
+    kills the client.
     :attr:`stdout_abandoned` and :attr:`stderr_abandoned` say which left. A sink
     that raises ``BlockingIOError`` is waited on: the session stops reading that
     stream until the sink has taken what it was offered, so output is never
@@ -214,7 +202,7 @@ class PipeSession:
         argv: Sequence[str],
         *,
         request: bytes,
-        nonce: str,
+        nonce: str | None,
         stdin: BinaryIO | None = None,
         hold_stdin_open: bool = False,
         on_stdout: Sink,
@@ -350,7 +338,8 @@ class PipeSession:
         except OSError as error:
             if not consumer_left(error):
                 raise
-            # The consumer left; _read closes the stream once the guest writes to it again.
+            # Closed only when the guest writes again, so a quiet payload's closing line does not meet a
+            # closed read end.
             self._abandoned.add(which)
 
     def _close_unread(self, which: str) -> None:

@@ -2,14 +2,21 @@
 
 from __future__ import annotations
 
+import os
+import re
+import subprocess
+from pathlib import Path
+
 import pytest
 
 from agentworks.capabilities.vm_platform.bootstrap_script import (
     REBOOT_SENTINEL_PATH,
     generate_bootstrap_script,
-    parse_bootstrap_output,
+    parse_bootstrap_steps,
+    run_once_marker,
+    run_once_script,
 )
-from agentworks.errors import ValidationError
+from agentworks.execution import root_script
 from tests.conftest import requires_posix_shell
 
 
@@ -19,7 +26,6 @@ def test_generate_bootstrap_script_all_steps() -> None:
         admin_username="testuser",
         ssh_public_key="ssh-ed25519 AAAA testkey",
         provisioning_packages=["curl", "git"],
-        tailscale_auth_key="tskey-auth-test123",
         hostname="lima--myvm",
         swap=4,
     )
@@ -33,52 +39,8 @@ def test_generate_bootstrap_script_all_steps() -> None:
     assert "##STEP## Hostname" in script
     assert "##STEP## Mask SVE" in script
     assert "##STEP## Tailscale install" in script
-    assert "##STEP## Tailscale join" in script
-    assert "tskey-auth-test123" in script
     assert "SWAP_GB=4" in script
     assert "lima--myvm" in script
-
-
-def test_generate_bootstrap_script_can_omit_join_from_retained_payload() -> None:
-    """Lima's retained bootstrap shape installs Tailscale but omits the key."""
-    sentinel = "tskey-persistence-sentinel"
-    keyed_script = generate_bootstrap_script(
-        admin_username="testuser",
-        ssh_public_key="ssh-ed25519 AAAA testkey",
-        provisioning_packages=["curl", "git"],
-        tailscale_auth_key=sentinel,
-        hostname="lima--myvm",
-        swap=4,
-    )
-    script = generate_bootstrap_script(
-        admin_username="testuser",
-        ssh_public_key="ssh-ed25519 AAAA testkey",
-        provisioning_packages=["curl", "git"],
-        tailscale_auth_key=None,
-        hostname="lima--myvm",
-        swap=4,
-    )
-
-    assert sentinel in keyed_script
-    assert "TAILSCALE_AUTH_KEY=''" in script
-    assert "Tailscale join deferred to platform" in script
-    assert "tailscale up --auth-key" in script
-    assert sentinel not in script
-
-
-def test_generate_bootstrap_script_rejects_line_unsafe_tailscale_key() -> None:
-    auth_key = "prefix\nsuffix"
-    with pytest.raises(ValidationError) as caught:
-        generate_bootstrap_script(
-            admin_username="testuser",
-            ssh_public_key="ssh-ed25519 AAAA testkey",
-            provisioning_packages=["curl", "git"],
-            tailscale_auth_key=auth_key,
-            hostname="lima--myvm",
-            swap=4,
-        )
-
-    assert auth_key not in repr((caught.value.args, vars(caught.value)))
 
 
 def test_generate_bootstrap_script_masks_sve_gated_on_apple() -> None:
@@ -88,7 +50,6 @@ def test_generate_bootstrap_script_masks_sve_gated_on_apple() -> None:
         admin_username="testuser",
         ssh_public_key="ssh-ed25519 AAAA testkey",
         provisioning_packages=["curl"],
-        tailscale_auth_key="tskey-auth-test123",
         hostname="lima--myvm",
         swap=4,
     )
@@ -121,7 +82,6 @@ def test_sve_gate_matches_sve_and_sve2_as_whole_words() -> None:
         admin_username="testuser",
         ssh_public_key="ssh-ed25519 AAAA testkey",
         provisioning_packages=["curl"],
-        tailscale_auth_key="tskey-auth-test123",
         hostname="lima--myvm",
         swap=4,
     )
@@ -159,7 +119,6 @@ def test_generate_bootstrap_script_preserves_ssh_host_keys() -> None:
         admin_username="testuser",
         ssh_public_key="ssh-ed25519 AAAA testkey",
         provisioning_packages=["curl"],
-        tailscale_auth_key="tskey-auth-test123",
         hostname="lima--myvm",
         swap=4,
     )
@@ -176,7 +135,6 @@ def test_generate_bootstrap_script_swap_disabled() -> None:
         admin_username="testuser",
         ssh_public_key="ssh-ed25519 AAAA testkey",
         provisioning_packages=["curl", "git"],
-        tailscale_auth_key="tskey-auth-test123",
         hostname="azure--myvm",
         swap=0,
     )
@@ -201,7 +159,6 @@ def test_generate_bootstrap_script_writes_shell_rc_seeds() -> None:
         admin_username="testuser",
         ssh_public_key="ssh-ed25519 AAAA testkey",
         provisioning_packages=["curl"],
-        tailscale_auth_key="tskey-auth-test123",
         hostname="lima--myvm",
         swap=4,
     )
@@ -220,17 +177,16 @@ def test_generate_bootstrap_script_writes_shell_rc_seeds() -> None:
 def test_authorized_keys_install_is_idempotent() -> None:
     """The operator key install must not append a duplicate on re-run.
 
-    This bootstrap is a Lima provision.system provisioner, which Lima
-    re-executes on every guest boot. A bare ``echo ... >> authorized_keys``
-    would append a byte-identical duplicate on every stop/start (unbounded
-    managed-file growth). The install must instead be guarded so the append
-    only happens when the exact key line is absent.
+    A first run that failed part way runs again on the next boot under
+    ``run_once_script`` (Lima, GCE). A bare ``echo ... >> authorized_keys``
+    would append a byte-identical duplicate on that rerun. The install must
+    instead be guarded so the append only happens when the exact key line is
+    absent.
     """
     script = generate_bootstrap_script(
         admin_username="testuser",
         ssh_public_key="ssh-ed25519 AAAA testkey",
         provisioning_packages=["curl"],
-        tailscale_auth_key="tskey-auth-test123",
         hostname="lima--myvm",
         swap=4,
     )
@@ -256,7 +212,6 @@ def test_ssh_key_install_is_skipped_when_the_key_is_empty() -> None:
         admin_username="testuser",
         ssh_public_key="",
         provisioning_packages=["curl"],
-        tailscale_auth_key="tskey-auth-test123",
         hostname="lima--myvm",
         swap=4,
     )
@@ -272,7 +227,6 @@ def test_ssh_key_install_is_skipped_when_the_key_is_empty() -> None:
         admin_username="testuser",
         ssh_public_key="ssh-ed25519 AAAA testkey",
         provisioning_packages=["curl"],
-        tailscale_auth_key="tskey-auth-test123",
         hostname="lima--myvm",
         swap=4,
     )
@@ -292,7 +246,6 @@ def test_swap_fstab_append_is_guarded_against_re_execution() -> None:
         admin_username="testuser",
         ssh_public_key="ssh-ed25519 AAAA testkey",
         provisioning_packages=["curl"],
-        tailscale_auth_key="tskey-auth-test123",
         hostname="lima--myvm",
         swap=4,
     )
@@ -305,9 +258,10 @@ def test_swap_fstab_append_is_guarded_against_re_execution() -> None:
 
 @requires_posix_shell
 def test_generate_bootstrap_script_passes_bash_syntax_check() -> None:
-    """End-to-end: the generated script must syntactically parse as
-    bash. Catches any future template change that leaks an unescaped
-    brace, an unterminated heredoc, etc.
+    """End-to-end: the generated script, inside the root-script wrapper that
+    WSL2 and Proxmox run it in, must syntactically parse as bash. Catches any
+    future template change that leaks an unescaped brace, an unterminated
+    heredoc, or a parenthesis the wrapper's subshell cannot hold.
 
     Skips on Windows: the script targets the Linux VM guest, and the
     Git-for-Windows ``bash -n`` used on the Windows controller parses these
@@ -320,15 +274,15 @@ def test_generate_bootstrap_script_passes_bash_syntax_check() -> None:
         admin_username="testuser",
         ssh_public_key="ssh-ed25519 AAAA testkey",
         provisioning_packages=["curl", "tmux"],
-        tailscale_auth_key="tskey-auth-test123",
         hostname="lima--myvm",
         swap=2,
     )
+    wrapped = root_script.wrap(script, nonce="0" * 32, secret=None).decode()
     # Pass the script as a real file rather than /dev/stdin, which does not
     # resolve under the git-bash used on Windows. newline="\n" keeps it LF so
     # bash never sees a stray carriage return.
     with tempfile.NamedTemporaryFile("w", suffix=".sh", delete=False, newline="\n") as handle:
-        handle.write(script)
+        handle.write(wrapped)
         script_path = handle.name
     try:
         result = subprocess.run(
@@ -357,7 +311,6 @@ def test_generate_bootstrap_script_no_platform_specific_tailscale_config() -> No
         admin_username="testuser",
         ssh_public_key="ssh-ed25519 AAAA testkey",
         provisioning_packages=["curl"],
-        tailscale_auth_key="tskey-auth-test123",
         hostname="wsl2--myvm",
         swap=4,
     )
@@ -367,36 +320,72 @@ def test_generate_bootstrap_script_no_platform_specific_tailscale_config() -> No
     # bug). A comment mentioning the path is fine; an output redirect is not.
     assert "> /etc/default/tailscaled" not in script
     assert ">> /etc/default/tailscaled" not in script
-    assert "tailscale up --auth-key" in script
 
 
-def test_parse_bootstrap_output_success() -> None:
-    """Parse output from a successful bootstrap."""
+def test_parse_bootstrap_steps_reads_each_step_and_its_markers() -> None:
     output = (
+        "noise before any step\n"
+        "##SUCCESS## orphaned\n"
+        "##STEP## Hostname\n"
+        "##SUCCESS## hostname set to vm1\n"
         "##STEP## Tailscale install\n"
-        "##SUCCESS## tailscale installed\n"
-        "##STEP## Tailscale join\n"
-        "##SUCCESS## tailscale-ip=100.64.0.5\n"
+        "##WARN## slow mirror\n"
+        "##ERROR## curl failed\n"
     )
 
-    result = parse_bootstrap_output(output, 0)
+    steps = parse_bootstrap_steps(output)
 
-    assert result.ok
-    assert result.tailscale_ip == "100.64.0.5"
-    assert len(result.steps) == 2
-    assert result.steps[0].name == "Tailscale install"
-    assert result.steps[0].success_msg == "tailscale installed"
-    assert result.steps[1].name == "Tailscale join"
-    assert result.steps[1].success_msg == "tailscale-ip=100.64.0.5"
+    assert [(step.name, step.success_msg, step.warnings, step.error) for step in steps] == [
+        ("Hostname", "hostname set to vm1", [], None),
+        ("Tailscale install", None, ["slow mirror"], "curl failed"),
+    ]
 
 
-def test_parse_bootstrap_output_failure() -> None:
-    """Parse output from a failed bootstrap."""
-    output = "##STEP## Tailscale install\n##ERROR## curl failed\n"
+def _boot(wrapper: Path, ledger: Path) -> int:
+    """Run the wrapper as a backend's boot would; the toy bootstrap records each run in ``ledger``."""
+    env = {**os.environ, "LEDGER": str(ledger)}
+    return subprocess.run(["bash", str(wrapper)], env=env, capture_output=True, check=False).returncode
 
-    result = parse_bootstrap_output(output, 1)
 
-    assert not result.ok
-    assert result.tailscale_ip is None
-    assert len(result.steps) == 1
-    assert result.steps[0].error == "curl failed"
+@requires_posix_shell
+def test_run_once_script_runs_the_bootstrap_on_the_first_boot_only(tmp_path: Path) -> None:
+    """A boot after a successful one runs nothing: the operator's changes since then stand."""
+    ledger = tmp_path / "ledger"
+    wrapper = tmp_path / "wrapper.sh"
+    wrapper.write_text(
+        run_once_script(
+            '#!/bin/bash\necho ran >> "$LEDGER"\n',
+            stem=str(tmp_path / "state" / "bootstrap"),
+        ),
+        newline="\n",
+    )
+
+    assert [_boot(wrapper, ledger) for _ in range(3)] == [0, 0, 0]
+    assert ledger.read_text().splitlines() == ["ran"]
+
+
+@requires_posix_shell
+def test_run_once_script_runs_a_failed_bootstrap_again(tmp_path: Path) -> None:
+    """A first run that fails leaves no marker, so the next boot runs the bootstrap again."""
+    ledger = tmp_path / "ledger"
+    marker = Path(run_once_marker(str(tmp_path / "state" / "bootstrap")))
+    wrapper = tmp_path / "wrapper.sh"
+    wrapper.write_text(
+        run_once_script(
+            '#!/bin/bash\necho ran >> "$LEDGER"\nexit 3\n',
+            stem=str(tmp_path / "state" / "bootstrap"),
+        ),
+        newline="\n",
+    )
+
+    assert [_boot(wrapper, ledger) for _ in range(2)] == [3, 3]
+    assert ledger.read_text().splitlines() == ["ran", "ran"]
+    assert not marker.exists()
+
+
+def test_run_once_script_refuses_a_bootstrap_holding_its_delimiter() -> None:
+    """A line equal to the heredoc delimiter would end the copy early and run the rest as the wrapper."""
+    delimiter = re.search(r"<<'(\w+)'", run_once_script("", stem="/x"))
+    assert delimiter is not None
+    with pytest.raises(ValueError):
+        run_once_script(f"echo before\n{delimiter[1]}\necho after\n", stem="/x")

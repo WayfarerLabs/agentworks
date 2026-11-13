@@ -10,10 +10,7 @@ from agentworks.errors import StateError, UserAbort
 from ._models import Outcome
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from agentworks.db import SessionRow
-    from agentworks.vms.nodes import LiveVMNode
 
     from ._models import Kind, RuntimeInvocation
 
@@ -152,19 +149,6 @@ def prepare_local_workloads(invocation: RuntimeInvocation) -> None:
                 invocation.fail("console", name, error, blocked=True)
 
 
-def infrastructure_reader(invocation: RuntimeInvocation, node: LiveVMNode) -> Callable[[str], str]:
-    gate_names = frozenset(node.gate_secret_refs())
-
-    def resolve(name: str) -> str:
-        if name not in gate_names and name not in node.repair_secret_refs():
-            raise StateError(
-                "infrastructure requested an undeclared credential", entity_kind="vm", entity_name=node.row.name
-            )
-        return invocation.gate_value(name)
-
-    return resolve
-
-
 def _needs_running_guest(invocation: RuntimeInvocation, vm_name: str) -> bool:
     routes = dict(invocation.selection.session_routes)
     return any(
@@ -232,7 +216,7 @@ def prepare_infrastructure(invocation: RuntimeInvocation) -> None:
                 invocation.config,
                 invocation.registry,
                 vm,
-                resolve_secret=infrastructure_reader(invocation, invocation.nodes[name]),
+                resolve_secret=invocation.gate_value,
                 held_native_guard=invocation.guards[name],
                 vm_node=invocation.nodes[name],
             )
@@ -260,7 +244,7 @@ def prepare_infrastructure(invocation: RuntimeInvocation) -> None:
         if not _needs_running_vm(invocation, name):
             continue
         try:
-            changed = vms.activate_vm_runtime(context, resolve_secret=infrastructure_reader(invocation, context.node))
+            changed = vms.activate_vm_runtime(context)
             invocation.stack.enter_context(context.node.hold_active())
             context.observed_status = vms.observe_vm_runtime(context)
             if context.observed_status is not VMStatus.RUNNING:
@@ -273,24 +257,20 @@ def prepare_infrastructure(invocation: RuntimeInvocation) -> None:
                     "vm",
                     name,
                     observation=context.observed_status,
-                    action="start" if context.started else "repair" if context.repaired else "unchanged",
+                    action="start" if context.started else "unchanged",
                     outcome=Outcome.CHANGED if changed else Outcome.UNCHANGED,
                 )
                 invocation.completed.add(("vm", name))
         except (UserAbort, KeyboardInterrupt):
-            if context.started or context.repaired:
+            if context.started:
                 invocation.ensure_vm_result(name)
-                invocation.record("vm", name, action="start" if context.started else "repair", outcome=Outcome.CHANGED)
+                invocation.record("vm", name, action="start", outcome=Outcome.CHANGED)
                 invocation.completed.add(("vm", name))
             raise
         except Exception as error:
             _block_family(invocation, name, error)
-            if context.started or context.repaired:
-                invocation.record(
-                    "vm",
-                    name,
-                    action="start completed; guest preparation failed" if context.started else "repair completed",
-                )
+            if context.started:
+                invocation.record("vm", name, action="start completed; guest preparation failed")
 
 
 def prepare_guest_workloads(invocation: RuntimeInvocation) -> None:

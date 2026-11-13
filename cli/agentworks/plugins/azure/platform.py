@@ -7,16 +7,17 @@ import contextlib
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol
 
 from agentworks import output
-from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
+from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult
 from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES, generate_cloud_init
 from agentworks.capabilities.vm_platform.debian_release import (
     code_owned_release_value,
 )
-from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
+from agentworks.capabilities.vm_platform.public_ssh import PublicAddressPlatform, PublicSSH
+from agentworks.capabilities.vm_platform.tailscale_join import complete_cloud_bootstrap
 from agentworks.db import VMStatus
-from agentworks.errors import NotFoundError, StateError
-from agentworks.execution.trust import TrustBinding, TrustMode
+from agentworks.errors import NotFoundError, ProvisioningError, StateError
+from agentworks.interrupts import interrupts_deferred
 from agentworks.plugins.azure.auth import (
     _build_ambient_credential,
     _build_service_principal_credential,
@@ -52,7 +53,6 @@ from agentworks.plugins.azure.network import (
     wrap_azure_error,
 )
 from agentworks.topics import TopicProse
-from agentworks.transports import SSHTransport
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
@@ -62,9 +62,7 @@ if TYPE_CHECKING:
     from azure.mgmt.resource.resources import ResourceManagementClient
 
     from agentworks.capabilities.base import RunContext
-    from agentworks.config import Config
     from agentworks.db import VMRow
-    from agentworks.transports import Transport
 
 
 class _HasSubscriptionId(Protocol):
@@ -74,13 +72,13 @@ class _HasSubscriptionId(Protocol):
     def subscription_id(self) -> str: ...
 
 
-class AzureVMPlatform(VMPlatform):
+class AzureVMPlatform(PublicAddressPlatform):
     """Runs VMs on the Azure Virtual Machines service via the Azure
     Python SDK. Named ``azure-vm``, not ``azure``: the capability is
     one specific Azure service, and other Azure services could plausibly
     back platforms of their own someday."""
 
-    contract_version: ClassVar[int] = 1
+    contract_version: ClassVar[int] = 2
     name: ClassVar[str] = "azure-vm"
     description: ClassVar[str] = "Azure Virtual Machines (subscription + resource group)"
     config_model: ClassVar[type[AzureVMConfig]] = AzureVMConfig
@@ -102,24 +100,19 @@ class AzureVMPlatform(VMPlatform):
         site: a rejected client secret then fails the command rather than falling back.
 
         Azure retains a credential-free bootstrap payload. After cloud-init is ready,
-        creation sends the required Tailscale key through one fixed SSH command on stdin
-        and returns only after join succeeds. Failure rolls the new Azure resources back.
+        creation joins Tailscale over SSH to the public address as root, with the auth key
+        only on the join script's stdin, and returns only after it reads the VM's Tailscale
+        address; an address that cannot be read logs the node out. Failure rolls the new
+        Azure resources back.
 
         Ships as the opt-in `azure` system plugin, so a site stays not-ready until
         `[plugins] system` lists it.
         """,
     )
 
-    # Warned by the transports factory when every reachability probe
-    # fails: the ephemeral NSG allow is scoped to the DETECTED egress
-    # IP, so an operator whose SSH traffic leaves through a different
-    # address (VPN split tunnel, proxy, CGNAT) gets a hole that does
-    # not match and every probe times out.
-    probe_failure_hint: ClassVar[str | None] = (
-        "The transient Azure SSH allow is scoped to your detected "
-        "public IP; if your SSH traffic egresses elsewhere (VPN "
-        "split tunnel, proxy, CGNAT), add your address(es) to "
-        "operator.ssh_allow_cidrs in your agentworks config."
+    public_address_hint = (
+        "Check the VM's network configuration in the Azure portal (its NIC's public IP and the NSG's "
+        "transient SSH allow), or use the serial console (Connect > Serial console on the VM resource page)."
     )
 
     def __init__(self, owner_name: str, config: Mapping[str, object]) -> None:
@@ -411,14 +404,13 @@ class AzureVMPlatform(VMPlatform):
         if swap > 0:
             output.detail(f"Swap: {swap} GiB")
 
-        # Azure retains custom_data. Embed the complete bootstrap with an
-        # empty Tailscale key, then deliver the resolved key once over the
-        # post-boot provisioning transport below.
+        # Azure retains custom_data, and the bootstrap holds no secret; the
+        # Tailscale key is sent once, in the join over the VM's root channel
+        # below.
         bootstrap = generate_bootstrap_script(
             admin_username=admin_username,
             ssh_public_key=ssh_pub_key,
             provisioning_packages=PROVISIONING_PACKAGES,
-            tailscale_auth_key=None,
             hostname=request.hostname,
             swap=swap,
         )
@@ -489,10 +481,10 @@ class AzureVMPlatform(VMPlatform):
                 # Create the NSG: the permanent deny-all-inbound baseline plus
                 # the ephemeral bootstrap allow scoped to the operator's egress
                 # prefixes (cloud-init needs inbound SSH from the operator;
-                # post_tailscale_ready deletes the allow once Tailscale is up).
+                # close_provisioning_access deletes the allow when Phase A ends).
                 # The NSG create is what opens the bootstrap SSH route, so it
                 # announces the open with the transient poke's wording; the
-                # matching close line comes from the hooks' remove_ssh_allow
+                # matching close line comes from the hook's remove_ssh_allow
                 # (#350: the close was announced, the open was silent).
                 output.info(f"Opening SSH route (allow scoped to {', '.join(ssh_allow_prefixes)})...")
                 output.detail("Creating network security group...")
@@ -640,16 +632,11 @@ class AzureVMPlatform(VMPlatform):
             try:
                 output.detail(f"Azure VM '{vm_name}' provisioned (IP: {public_ip})")
 
-                prov_transport = SSHTransport(
-                    host=public_ip,
-                    trust=request.provisioning_trust,
-                    user=admin_username,
-                    identity_file=request.ssh_private_key,
-                )
-
                 # The provider-retained bootstrap installed Tailscale without
-                # a credential. Wait for it, then join once over stdin.
-                tailscale_ip = EphemeralTailscaleBootstrap(prov_transport).complete(tailscale_auth_key)
+                # a credential. Wait for it over the VM's root channel, then
+                # join once and settle the address.
+                target = PublicSSH(public_ip, admin_username, request.ssh_private_key, request.provisioning_trust)
+                tailnet_address = complete_cloud_bootstrap(target, tailscale_auth_key, node=request.hostname)
             except Exception as exc:
                 output.detail("Cleaning up resources...")
                 # The teardown captures a VM-delete failure rather than
@@ -672,9 +659,8 @@ class AzureVMPlatform(VMPlatform):
 
         metadata = {"resource_id": resource_id} if resource_id else {}
         return ProvisionResult(
-            native_transport=prov_transport,
             platform_metadata=metadata,
-            tailscale_ip=tailscale_ip,
+            tailnet_address=tailnet_address,
         )
 
     @staticmethod
@@ -724,13 +710,9 @@ class AzureVMPlatform(VMPlatform):
 
     def delete(self, vm: VMRow, ctx: RunContext) -> None:
         output.info(f"Deleting Azure VM '{vm.name}'...")
-        if not vm.platform_metadata.get("resource_id"):
-            # Row-only delete of a never-provisioned VM (nothing was
-            # created backend-side, so there is nothing to remove or
-            # verify); the caller deletes the row.
-            output.warn("no Azure resource ID, skipping Azure cleanup")
-            return
-
+        # A row with no resource ID (a create that ended before it
+        # returned) addresses nothing, so _resource_id refuses it rather
+        # than claim the resources its create may have left were deleted.
         rg, name, az_cfg = _parse_resource_id(_resource_id(vm))
         compute = self._compute_client(az_cfg, ctx)
         vm_delete_exc = delete_vm_and_resources(compute, self._network_client(az_cfg, ctx), rg, name)
@@ -745,7 +727,7 @@ class AzureVMPlatform(VMPlatform):
     # The route-state helpers below are thin delegates into the network
     # module (which owns the mechanics and full docstrings). They stay
     # as methods because the platform object is the seam callers and
-    # tests compose against: transient_route and the hooks call them on
+    # tests compose against: _transient_route and the hooks call them on
     # self, and the shell-provisioner tests spy on them as attributes.
 
     def _ensure_public_ip(self, vm: VMRow, ctx: RunContext) -> None:
@@ -790,13 +772,12 @@ class AzureVMPlatform(VMPlatform):
         _rg, name, _cfg = _parse_resource_id(resource_id)
         return name
 
-    def native_transport(
-        self,
-        vm: VMRow,
-        ctx: RunContext,
-        *,
-        config: Config | None = None,
-    ) -> Transport:
+    def _public_address(self, vm: VMRow, ctx: RunContext) -> str:
+        """The VM's public IP, read live off its NIC (never persisted), or ``""`` when it has none.
+
+        The IP is permanent for the VM's lifetime and ``_transient_route``
+        heals its absence on enter, so an empty result is a defensive corner.
+        """
         rg, name, az_cfg = _parse_resource_id(_resource_id(vm))
         compute = self._compute_client(az_cfg, ctx)
         network = self._network_client(az_cfg, ctx)
@@ -808,71 +789,36 @@ class AzureVMPlatform(VMPlatform):
             )
         except Exception as exc:
             raise wrap_azure_error(exc) from exc
+        return get_vm_public_ip(network, vm_info)
 
-        # Walk NICs to find the public IP, read live off the NIC (never
-        # persisted). The IP is permanent for the VM's lifetime and
-        # transient_route heals absence on enter, so an empty string here
-        # is a genuinely defensive corner; it propagates to
-        # ``SSHTransport(host="")`` which the transports.native_transport
-        # factory catches with a typed StateError.
-        public_ip = get_vm_public_ip(network, vm_info)
+    def close_provisioning_access(self, vm: VMRow, ctx: RunContext) -> None:
+        """Delete the bootstrap allow rule by its fixed name (no in-process state needed).
 
-        # Include identity file if config is available (needed for SSH auth
-        # via public IP, e.g., during Tailscale logout on delete).
-        identity_file = None
-        if config is not None:
-            identity_file = getattr(getattr(config, "operator", None), "ssh_private_key", None)
-
-        return SSHTransport(
-            host=public_ip,
-            trust=TrustBinding(TrustMode.VM, vm.name),
-            user=vm.admin_username,
-            identity_file=identity_file,
-        )
-
-    def post_tailscale_ready(self, vm: VMRow, ctx: RunContext) -> None:
-        """Close provisioning access now that Tailscale is up.
-
-        The VM comes out of :meth:`create` reachable only through the
-        ephemeral bootstrap allow rule (SSH scoped to the operator's
-        egress prefixes; the deny-all-inbound baseline is permanent).
-        This hook fires at the async Tailscale-ready point inside
-        ``bootstrap_vm`` (Phase A) and deletes that allow by its fixed
-        name (no in-process state needed), leaving zero inbound
-        exposure; the public IP stays for the VM's whole lifetime.
-
-        ``ctx`` is the create op's own scoped context (secrets already
-        resolved before Phase A): closing the allow is a network call
-        and reads the SP credential through it, with no ambient
-        fallback.
+        The VM comes out of :meth:`create` reachable only through that
+        ephemeral rule (SSH scoped to the operator's egress prefixes; the
+        deny-all-inbound baseline is permanent), so this leaves zero inbound
+        exposure; the public IP stays for the VM's whole lifetime. Phase A
+        calls it once, however it ends, with the create op's own scoped
+        context; on a service-principal site the network call authenticates
+        as the configured principal, with no ambient fallback. A kept VM
+        Phase A did not complete is debugged through the Azure serial
+        console, which is not NSG-gated; ``vm delete``'s logout pokes a fresh
+        transient allow via :meth:`_transient_route`. Every root-channel
+        route calls it again once it closes, so a rule an earlier close
+        left is removed then; a rule already gone is a silent no-op. A
+        failure before the delete raises naming the rule, and a refused
+        delete warns naming it.
         """
-        self._remove_ssh_allow(vm, ctx, BOOTSTRAP_ALLOW_RULE_NAME)
-
-    def secure_failed_vm(self, vm: VMRow, ctx: RunContext) -> None:
-        """Fail closed after kept post-create verification failure.
-
-        Mirrors :meth:`post_tailscale_ready`, which only fires on
-        success: a VM whose Tailscale SSH verification died (marked
-        FAILED) or was interrupted during verification (row status
-        untouched by the abort) is kept for debugging, and this hook deletes
-        the fixed-name bootstrap allow so it defaults to zero inbound
-        exposure. Create-time bootstrap failures roll back inside
-        :meth:`create` and never reach this hook. Debugging and recovery stay possible: ``vm
-        shell --platform`` and ``vm delete`` poke a fresh transient
-        allow via :meth:`transient_route`, and the Azure serial console
-        is not NSG-gated.
-
-        ``ctx`` is the create op's own scoped context, whose secrets
-        were resolved before Phase A began, so even the interrupt path
-        that reaches this hook never resolves a secret here for the
-        first time; on a service-principal site the network call
-        authenticates as the configured principal, with no ambient
-        fallback.
-        """
-        self._remove_ssh_allow(vm, ctx, BOOTSTRAP_ALLOW_RULE_NAME)
+        try:
+            self._remove_ssh_allow(vm, ctx, BOOTSTRAP_ALLOW_RULE_NAME)
+        except Exception as exc:
+            raise ProvisioningError(
+                f"could not close or check the '{BOOTSTRAP_ALLOW_RULE_NAME}' rule on the NSG of VM '{vm.name}', "
+                f"so it may remain open: {exc}"
+            ) from exc
 
     @contextlib.contextmanager
-    def transient_route(self, vm: VMRow, ctx: RunContext, *, config: Config | None = None) -> Iterator[None]:
+    def _transient_route(self, vm: VMRow, ctx: RunContext) -> Iterator[None]:
         """Open a scoped SSH route to the VM for the context's duration.
 
         Enter heals the public IP (:meth:`_ensure_public_ip`; legacy
@@ -880,32 +826,30 @@ class AzureVMPlatform(VMPlatform):
         (:meth:`_converge_nsg`; deny re-pin before any allow
         allocation), then pokes this operation's own nonce-named allow
         scoped to the operator's egress prefixes (widened by
-        ``config.operator.ssh_allow_cidrs``). The poke sits INSIDE the
+        ``ctx.config.operator.ssh_allow_cidrs``). The poke sits INSIDE the
         try and the finally removes exactly the poked rule by name on
         every unwind path, so concurrent native ops never cross-remove
         each other's allows; a poke that fails without returning a name
         has already cleaned up its own attempt, and a removal failure
         warns naming the rule and prefixes (both per the network
         module's ``poke_ssh_allow`` / ``remove_ssh_allow``, which carry
-        the full contracts). The
-        :func:`agentworks.transports.native_transport` factory wraps
-        this around the per-platform :meth:`native_transport` call so
-        the lifecycle stays polymorphic.
+        the full contracts).
 
-        ``ctx`` is the op-start context threaded from the factory (the
-        composition root's own): every NSG call below reads the SP
-        credential through it, with no ambient fallback.
+        ``ctx`` is the op-start context (the composition root's own):
+        every NSG call below reads the SP credential through it, with no
+        ambient fallback.
         """
         self._ensure_public_ip(vm, ctx)
         self._converge_nsg(vm, ctx)
         rule_name: str | None = None
         prefixes: list[str] | None = None
         try:
-            rule_name, prefixes = self._poke_ssh_allow(vm, ctx, config_allow_cidrs(config))
+            rule_name, prefixes = self._poke_ssh_allow(vm, ctx, config_allow_cidrs(ctx.config))
             yield
         finally:
             if rule_name is not None:
-                self._remove_ssh_allow(vm, ctx, rule_name, prefixes)
+                with interrupts_deferred():
+                    self._remove_ssh_allow(vm, ctx, rule_name, prefixes)
 
     def status(self, vm: VMRow, ctx: RunContext) -> VMStatus:
         if not vm.platform_metadata.get("resource_id"):

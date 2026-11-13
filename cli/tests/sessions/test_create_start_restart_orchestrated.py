@@ -31,7 +31,7 @@ from agentworks.artifacts.declarations import ArtifactsConfig
 from agentworks.bootstrap import build_registry as _real_build_registry
 from agentworks.bootstrap import load_request_registry as _real_load_request_registry
 from agentworks.capabilities.harness_integration import HarnessLaunchIntent, HarnessStart, ShellIntegration
-from agentworks.db import Database, InitStatus, SessionMode, SessionRuntimeSnapshot, SessionStatus
+from agentworks.db import Database, InitStatus, ProvisioningStatus, SessionMode, SessionRuntimeSnapshot, SessionStatus
 from agentworks.errors import AgentworksError, NotFoundError, StateError, UserAbort, ValidationError
 from agentworks.secrets.orchestration import (
     resolve_for_command as _real_resolve_for_command,
@@ -107,6 +107,7 @@ class _Target:
 def _seed_db(tmp_path: Path) -> Database:
     db = Database(tmp_path / "test.db")
     db.insert_vm("vm1", "lima", "h", admin_username="admin")
+    db.update_vm_provisioning_status("vm1", ProvisioningStatus.COMPLETE)
     seed_vm_trust("vm1")
     db.update_vm_tailscale("vm1", "100.64.0.5")
     db.update_vm_init_status("vm1", InitStatus.COMPLETE)
@@ -1653,12 +1654,11 @@ def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN20
     section baked in, and the module-wide autouse stubs un-stubbed."""
     monkeypatch.setenv("AW_SECRET_PROXMOX_TOKEN", "pve-token")
     monkeypatch.setenv("AW_SECRET_API_KEY", "shhh")
-    monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", "test-rejoin")
     from agentworks.db import VMStatus
     from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 
     monkeypatch.setattr(ProxmoxPlatform, "status", lambda *a: VMStatus.RUNNING)
-    monkeypatch.setattr("agentworks.vms.manager._tailscale_rejoin_required", lambda *a, **k: False)
+    monkeypatch.setattr("agentworks.vms.manager._await_tailnet", lambda *a, **k: None)
 
     # The module-wide autouse fixture stubs build_registry and
     # resolve_for_command for the SimpleNamespace-config tests; these
@@ -1679,6 +1679,7 @@ def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN20
 
 def _seed_stopped_proxmox_vm(db: Database) -> None:
     db.insert_vm("box", site="proxmox", hostname="box")
+    db.update_vm_provisioning_status("box", ProvisioningStatus.COMPLETE)
     db.update_vm_tailscale("box", "100.64.0.9")
     seed_vm_trust("box")
     db._conn.execute(
@@ -1691,7 +1692,7 @@ def _seed_stopped_proxmox_vm(db: Database) -> None:
 def _stop_the_vm(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> None:
     """The VM observes as stopped: the fast path fails, the gate's
     status/start ops run (needing the API token pre-boundary), and the
-    reconnect repair is a recorded no-op."""
+    wait for SSH is a recorded no-op."""
     from agentworks.db import VMStatus
     from agentworks.plugins.proxmox.platform import ProxmoxPlatform
     from agentworks.vms import manager as vm_manager
@@ -1705,8 +1706,7 @@ def _stop_the_vm(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> None:
         state[0] = VMStatus.RUNNING
 
     monkeypatch.setattr(ProxmoxPlatform, "start", start)
-    monkeypatch.setattr(vm_manager, "_tailscale_rejoin_required", lambda *a, **k: True)
-    monkeypatch.setattr(vm_manager, "_ensure_tailscale", lambda *a, **k: events.append("tailscale"))
+    monkeypatch.setattr(vm_manager, "_await_tailnet", lambda *a, **k: events.append("tailscale"))
 
 
 def _patch_session_ops(monkeypatch: pytest.MonkeyPatch, events: list[str], captured_env: dict[str, str]) -> None:
@@ -1999,7 +1999,7 @@ def test_restart_stopped_vm_gate_seeds_and_env_pass_is_the_only_other(
     # env chain's post-confirm pass. The boundary itself contributed no
     # pass (its union was fully seeded), no name resolves twice, and
     # nothing resolves after the env pass.
-    assert resolve_counter == [["proxmox-token"], ["tailscale-auth-key"], ["api-key"]]
+    assert resolve_counter == [["proxmox-token"], ["api-key"]]
     assert events.index("status") < events.index("start") < events.index("tailscale") < events.index("tmux_create")
     assert captured_env["API_KEY"] == "shhh"
     assert captured_env["RESUME_SPEC"] == "set"

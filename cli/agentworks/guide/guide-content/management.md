@@ -70,7 +70,7 @@ console recovery does not start member sessions. VM start alone does not restore
 If intent or recovery scope is unknown, inspect and report the adoption requirement or blocker
 instead of selecting targets or changing runtimes. A stopped parent blocks running children while
 retaining their targets. Read results before retrying: accepted intent survives later failure or
-cancellation, and infrastructure activation/repair may remain after workload-secret failure.
+cancellation, and infrastructure activation may remain after workload-secret failure.
 
 Batch start/restart collects eligible workload secrets before any deferred runtime changes. A
 required workload secret failure blocks that complete batch, including deferred VM stops during
