@@ -352,8 +352,8 @@ class DetachedRefused(StateError):
         self.running = running
         if running:
             message = f"detached launch {launch_id} on VM '{vm_name}' is still running, so it was not discarded"
-            hint = "Interrupt it first, or discard it once it has ended."
+            hint = "Wait for it to end, or stop it, then run the command again."
         else:
             message = f"detached launch {launch_id} already exists on VM '{vm_name}', so nothing was started"
-            hint = "Each launch takes a fresh id from new_launch; never reuse one."
+            hint = "Run the command again: it starts its work under a new id."
         super().__init__(message, entity_kind="vm", entity_name=vm_name, hint=hint)
