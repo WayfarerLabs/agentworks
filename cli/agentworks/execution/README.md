@@ -62,17 +62,19 @@ an existing path is a `ValidationError` with nothing sent and no newline is tran
 `on_progress` with the running byte count after each write. The file exists afterwards only for
 `Completed(0)`: any other completion, and any exception while the request runs (Ctrl-C included),
 removes it before `run` returns or raises. Plugins hold an access, so `run` checks what their types
-promise: input that is neither `NoInput()` nor `Bytes` of `bytes`, any other sink, a limit that is
-not a positive `int`, or a `ToFile` path that is not a `Path` is a `ValidationError` before anything
-resolves.
+promise: input that is not `NoInput()`, `Bytes` of `bytes` or a `FromFile` of a `Path`, any other
+sink, a limit that is not a positive `int`, or a `ToFile` path that is not a `Path` is a
+`ValidationError` before anything resolves.
 
 `Command`, `Script` and `PythonProgram` take the payload's input as `stdin`: `NoInput()`, the
-default, or `Bytes(data)`, which the client writes after the request and then closes, so the payload
-reads it from its first byte. Its size is bounded only by memory; the pump writes it to ssh in 64
-KiB pieces, as fast as ssh takes them, and the request's `deadline` bounds how long that takes.
-`stream` takes the operator's stdin as its own argument instead, and refuses a request that carries
-input with a `ValidationError`. Input is never formatted into a log record or an error, and `Bytes`
-keeps `data` out of its `repr`.
+default; `Bytes(data)`, which the client writes after the request and then closes, so the payload
+reads it from its first byte; or `FromFile(path)`, a workstation file `run` opens in binary mode
+before dispatch (one that cannot be opened is an `OSError` with nothing sent) and the pump copies to
+ssh as it reads it, until end of file. `Bytes` is bounded only by memory and `FromFile` only by the
+file; the pump writes either to ssh in 64 KiB pieces, as fast as ssh takes them, and the request's
+`deadline` bounds how long that takes. `stream` takes the operator's stdin as its own argument
+instead, and refuses a request that carries input with a `ValidationError`. Input is never formatted
+into a log record or an error, and `Bytes` keeps `data` out of its `repr`.
 
 They also take `elevated`, which runs the whole operation as root under `sudo -n`: it is the prefix
 of the constant first-stage command (below), not part of the request message, and the launcher

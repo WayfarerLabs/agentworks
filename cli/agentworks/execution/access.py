@@ -25,7 +25,7 @@ from agentworks.execution.agw_launch import refusal_status
 from agentworks.execution.detached import Detached
 from agentworks.execution.errors import CommandFailed, ExecutionIncomplete, PermissionDenied, describe_refusal
 from agentworks.execution.files import Files
-from agentworks.execution.requests import Bytes, CaptureOutput, DiscardOutput, NoInput, ToFile
+from agentworks.execution.requests import Bytes, CaptureOutput, DiscardOutput, FromFile, NoInput, ToFile
 from agentworks.execution.results import Completed, NotDelivered, NotDeliveredReason, Result, Unknown, UnknownReason
 from agentworks.execution.trust import TrustBinding, TrustMode
 
@@ -116,18 +116,22 @@ class VMAccess:
         before raising for a bad one. A request that raises before it is
         dispatched (no client, no trust record) is not logged.
 
+        A ``FromFile`` input is opened before dispatch, so a file that cannot
+        be opened raises its ``OSError`` with nothing sent.
+
         Plugins hold an access and call this directly, so it validates what
-        the type checker cannot promise them: ``stdin`` is ``NoInput()`` or
-        ``Bytes`` of ``bytes``, and each sink is a ``DiscardOutput``, a
-        ``CaptureOutput`` with a positive ``int`` limit or a ``ToFile`` of a
-        ``Path``. Anything else is a ``ValidationError`` before anything
-        resolves; so is a ``ToFile`` path that already exists.
+        the type checker cannot promise them: ``stdin`` is ``NoInput()``,
+        ``Bytes`` of ``bytes`` or a ``FromFile`` of a ``Path``, and each sink
+        is a ``DiscardOutput``, a ``CaptureOutput`` with a positive ``int``
+        limit or a ``ToFile`` of a ``Path``. Anything else is a
+        ``ValidationError`` before anything resolves; so is a ``ToFile`` path
+        that already exists.
         """
         _check_run_inputs(request, (stdout, stderr))
-        with _OutputFiles() as files:
+        with _OutputFiles() as files, _input_file(request.stdin) as stdin:
             on_stdout, on_stderr = files.sink(stdout), files.sink(stderr)
             with self._passphrase_hint_on_connection_failure():
-                result = self._execute(request, stdin=None, on_stdout=on_stdout, on_stderr=on_stderr)
+                result = self._execute(request, stdin=stdin, on_stdout=on_stdout, on_stderr=on_stderr)
                 result = Result(result.completion, _kept(on_stdout), _kept(on_stderr), result.client_log_tail)
                 if self._log is not None:
                     self._log(request, result)
@@ -315,10 +319,14 @@ class VMAccess:
 def _check_run_inputs(request: RunRequest, sinks: tuple[OutputSink, OutputSink]) -> None:
     """Refuse ``run`` input a plugin's untyped code could pass (see :meth:`VMAccess.run`)."""
     stdin = request.stdin
-    if not isinstance(stdin, NoInput | Bytes):
-        raise ValidationError(f"a request's stdin is NoInput() or Bytes(data), not {type(stdin).__name__}")
+    if not isinstance(stdin, NoInput | Bytes | FromFile):
+        raise ValidationError(
+            f"a request's stdin is NoInput(), Bytes(data) or FromFile(path), not {type(stdin).__name__}"
+        )
     if isinstance(stdin, Bytes) and type(stdin.data) is not bytes:
         raise ValidationError(f"Bytes data is bytes, not {type(stdin.data).__name__}")
+    if isinstance(stdin, FromFile) and not isinstance(stdin.path, Path):
+        raise ValidationError(f"a FromFile path is a Path, not {type(stdin.path).__name__}")
     for sink in sinks:
         if isinstance(sink, DiscardOutput):
             continue
@@ -332,6 +340,20 @@ def _check_run_inputs(request: RunRequest, sinks: tuple[OutputSink, OutputSink])
             raise ValidationError(f"a run sink is CaptureOutput, DiscardOutput or ToFile, not {type(sink).__name__}")
         if type(sink.limit) is not int or sink.limit <= 0:
             raise ValidationError("a CaptureOutput limit is a positive int")
+
+
+@contextlib.contextmanager
+def _input_file(stdin: NoInput | Bytes | FromFile) -> Iterator[BinaryIO | None]:
+    """The open file a ``FromFile`` input is read from, unbuffered, closed on exit; ``None`` for any other input.
+
+    The pump's input thread reads it to end of file, as it reads the
+    operator's stdin under ``stream``; ``Bytes`` travels with the request.
+    """
+    if not isinstance(stdin, FromFile):
+        yield None
+        return
+    with stdin.path.open("rb", buffering=0) as file:
+        yield file
 
 
 class _OutputFiles:

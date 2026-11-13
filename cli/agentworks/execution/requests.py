@@ -78,6 +78,20 @@ class Bytes:
     data: bytes = field(repr=False)
 
 
+@dataclass(frozen=True)
+class FromFile:
+    """Input read from a workstation file: the payload's stdin, from its first byte to the file's end.
+
+    ``run`` opens ``path`` in binary mode when it dispatches, so a file that
+    cannot be opened is an ``OSError`` with nothing sent, and the client
+    copies it to ssh as it reads it: its size is bounded only by the file,
+    and the request's deadline bounds the copy with the rest of the request.
+    Like ``Bytes``, the content never reaches a log record or an error.
+    """
+
+    path: Path
+
+
 @dataclass(frozen=True, kw_only=True)
 class BoundedRequestOptions(RequestOptions):
     """The options of a request that runs to a result, which a deadline can bound.
@@ -97,7 +111,7 @@ class BoundedRequestOptions(RequestOptions):
 
     deadline: float | None = None
     elevated: bool = False
-    stdin: NoInput | Bytes = NoInput()
+    stdin: NoInput | Bytes | FromFile = NoInput()
     log_streams: bool = True
 
 

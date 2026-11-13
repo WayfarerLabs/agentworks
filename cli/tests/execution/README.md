@@ -34,6 +34,9 @@ returns canned outcomes without ssh.
   interrupt, discard, and (under the sudo lane) the base's modes. Linux only.
 - `test_detached.py`: the detached client over the recording fake: each request, the follow-up after
   a connection outcome, and the boundary checks.
+- `test_from_file.py`: the `FromFile` input: a file that cannot be opened and a path that is not a
+  `Path` refused before dispatch, `stream` refusing it, and every byte reaching the payload on the L
+  lane.
 - `test_to_file.py`: the `ToFile` sink: an existing path refused before dispatch, bytes unchanged,
   and the file kept only for `Completed(0)`. Marked `windows`, where binary mode is what keeps CR
   LF.
