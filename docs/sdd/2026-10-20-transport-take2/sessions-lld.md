@@ -257,14 +257,22 @@ A launch directory, mode 0700, holds:
 ### States
 
 `observe` reads the directory as one of five states. The lock is the process identity: a held
-`flock` on `process` can only be held by the supervisor or the payload, so no pid is compared and a
-reused pid cannot read as running.
+`flock` on `process` is held only through the launch's own descriptors, by the launching process
+until it exits (step 7), the supervisor, and the payload's process tree, every descendant of which
+inherits the descriptor (tar's `zstd` child included). So no pid is compared and a reused pid cannot
+read as running. A descendant that left the payload's process group and outlived it would keep the
+launch `RUNNING`; tar starts no such process, so this is accepted for backup.
+
+**Read order.** `observe` tests the lock first and reads `status` only after finding the lock free.
+The supervisor writes `status` (by rename) before it exits and releases its hold, so a free lock
+with no `status` really is `LOST`; reading `status` first could straddle the supervisor's write and
+exit and report a complete launch as `LOST`.
 
 | State      | Evidence                                               | Means                                                                                   |
 | ---------- | ------------------------------------------------------ | --------------------------------------------------------------------------------------- |
 | `ABSENT`   | no launch directory                                    | never launched, or discarded                                                            |
 | `STARTING` | the directory, no `process`                            | `launch` is between its `mkdir` and its rename, or died there                           |
-| `RUNNING`  | `process` locked (a non-blocking shared `flock` fails) | the supervisor or the payload still lives                                               |
+| `RUNNING`  | `process` locked (a non-blocking shared `flock` fails) | the payload's process tree or its supervisor still lives                                |
 | `EXITED`   | `process` unlocked, `status` present                   | the payload ended and its status was recorded                                           |
 | `LOST`     | `process` unlocked, no `status`                        | the supervisor and the payload are both gone without a status: a reboot, or both killed |
 
@@ -309,8 +317,10 @@ VM"). Every other outcome raises its typed error at once, since the payload neve
    session makes its pid its process-group id, which `interrupt` signals. Because the payload holds
    the lock's descriptor too, a supervisor killed while tar runs does not make the launch read as
    `LOST`. The supervisor writes the payload's pid into `process.new`, renames it to `process`,
-   reports `started` (or the `exec` errno, after writing that as the `status`) over the pipe, and
-   waits; on exit it writes `status` by rename.
+   reports `started` over the pipe, and waits; on exit it writes `status` by rename. When the
+   payload cannot be executed it writes the refusal's status first and then renames `process.new` to
+   `process` too, before reporting the `exec` errno, so a recorded status always has a `process` and
+   the launch reads `EXITED`, never `STARTING` with a status.
 7. The launching process reads the report and exits: 0, or a refusal status naming the `exec`
    failure (`RequestRefused`'s codes). So `launch` returns only once the payload has started.
 
@@ -336,13 +346,15 @@ same way (R6); no command does, since no caller needs one.
 
 `interrupt(launch)`, while `process` is locked, reads the payload's pid from it, sends `SIGTERM` to
 that process group, waits up to `INTERRUPT_GRACE_SECONDS = 10` on the guest for the lock to be
-released, sends `SIGKILL` to the group if it has not been, and returns the observation. The
-supervisor is in its own session, outside the group, so it survives and records `128 + 15` or
-`128 + 9`. A launch that is not `RUNNING` is returned as it is with nothing signalled. The pid is
-read only while the lock shows the payload or its supervisor alive; the one residual window, a
-payload that exited while its supervisor writes `status`, signals a group that no longer exists. It
-is never dispatched again. Backup calls it from its `KeyboardInterrupt` handler, as it calls
-`kill -TERM -<pid>` today (`vms/backup.py:389-399`).
+released, sends `SIGKILL` to the group if it has not been and waits up to
+`INTERRUPT_KILL_WAIT_SECONDS = 5` more, so both waits fit the request's 30-second deadline, and
+returns the observation, which is `EXITED` unless a descendant outside the group still holds the
+lock (above). The supervisor is in its own session, outside the group, so it survives and records
+`128 + 15` or `128 + 9`. A launch that is not `RUNNING` is returned as it is with nothing signalled.
+The pid is read only while the lock shows the payload or its supervisor alive; the one residual
+window, a payload that exited while its supervisor writes `status`, signals a group that no longer
+exists. It is never dispatched again. Backup calls it from its `KeyboardInterrupt` handler, as it
+calls `kill -TERM -<pid>` today (`vms/backup.py:389-399`).
 
 ### Download and discard
 
@@ -418,11 +430,11 @@ tag is treated the same way, and so is an uncollected handover. `TrustMissing`, 
 `VMNotReady` and `PermissionDenied` propagate, since every later pane would fail the same way.
 
 **Agent access first.** An agent pane now connects as the agent over SSH, which needs the agent's
-`authorized_keys`, as an agent session already does. So each console operation that will park for an
-agent calls `_assert_agent_access_works(access, admin, agent)` (`agents/manager/access.py:44-89`)
-once per agent, before its first park, and an agent that predates the direct-SSH rollout gets that
-function's reinit hint instead of a failed pane. Today's `sudo --login` panes did not need it; the
-upgrade guide says so.
+`authorized_keys`, as an agent session already does. So each console operation calls
+`_assert_agent_access_works(access, admin, agent)` (`agents/manager/access.py:44-89`) once for every
+agent it will park for, before the operation's first mutation, and an agent that predates the
+direct-SSH rollout gets that function's reinit hint instead of a failed pane. Today's `sudo --login`
+panes did not need it; the upgrade guide says so.
 
 **What replaces the sudo carry.** Today an agent pane runs
 `exec sudo --login --preserve-env=<keys> -u <agent> bash -c '<bootstrap>'`
@@ -454,11 +466,14 @@ live code, each justified by a comment as a conditional-need exception. Per comm
 | `console restore-session`, panes missing  | only the missing indices' secrets, after the validation guards (`restore.py:385-399`) | the same targets as above, every configured shell; the late resolve goes                                                                        |
 | `console add-sessions`, `add-shell`       | resolve once, with no gate (`crud.py:306`, `:620`)                                    | unchanged                                                                                                                                       |
 
-`_prepare_vm_target` (`multi_console/attach.py:345-389`) takes the `targets` and passes them to
-`gated_vm_boundary`, whose `targets` parameter already exists (`vms/manager/boundary.py:196`), and
-yields `resolver.values` beside the access. Its docstring's "documented conditional-need path"
-(`:362-366`) goes. Every console resolve is then the one boundary pass, before the first mutation,
-as ADR 0019 promises.
+`_prepare_vm_target` (`multi_console/attach.py:345-389`) takes `targets` as a function of the
+`VMRow`, since both builders need the row (`sessions/multi_console/secrets_env.py:178`, `:237`) and
+`_prepare_vm_target` is where it is fetched (`attach.py:378`). So the not-found and
+Tailscale-address refusals stay in one place before the gate, with nothing resolved, and it calls
+the function and passes the result to `gated_vm_boundary`, whose `targets` parameter already exists
+(`vms/manager/boundary.py:196`), then yields `resolver.values` beside the access. Its docstring's
+"documented conditional-need path" (`:362-366`) goes. Every console resolve is then the one boundary
+pass, before the first mutation, as ADR 0019 promises.
 
 **The cost, stated plainly.** `console start` of a running console, which today asks for nothing,
 resolves every pane secret and may prompt for each; a non-interactive `console start` of a running
@@ -487,7 +502,11 @@ guide states each.
   one dispatch.
 - **Logging.** Every access is built with the operation's log, the agent's included: today every
   `agent_transport` in `sessions/` is built with no log, so agent-session launches and probes now
-  reach the log, with environment names only (HLA D13).
+  reach the log, with environment names only (HLA D13). Stop-all, which today keeps no log at all,
+  gets one per VM (`session-stop-all`); its concurrent teardown plans share it, and
+  `SSHLogger._write` opens a handler per write and keeps it in an attribute (`ssh.py:297-320`), so
+  the record callable `operation_log` hands out takes a lock around each write, which a test drives
+  from several threads.
 - **Errors.** A handler that caught `SSHError` catches what that covered: `ExecutionIncomplete`,
   `CommandFailed` and `RequestRefused`, and `PathRefused`, `FileConflict` and `FileLockTimeout`
   around a file operation. `TrustMissing`, `TrustMismatch`, `VMNotReady` and `PermissionDenied`
@@ -595,25 +614,25 @@ docstring's `Transport.run` half goes.
 
 ### Sessions: the manager
 
-| Operation                                     | Today                                                                                                                   | Access and elevation                                                                                           | Deadline                                                                                   | Replaces                                                                             |
-| --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
-| Create: the agent probe                       | `_assert_agent_ssh_works` on an ephemeral `agent_transport`, `_create.py:195-196`, `_create_roll.py:210-211`            | `_assert_agent_access_works(access, admin, agent)` (`agents/manager/access.py:44`)                             | its own (`access.py:60`, `:67`)                                                            | the legacy probe                                                                     |
-| Create: config, launch, fingerprint, finalize | `_create_roll.py:398-471`                                                                                               | admin for the config; owner for the rest                                                                       | none, as today                                                                             | `deploy_restricted_config(run_command)`, `session_run_command`, `fingerprint_target` |
-| Create: rollback absence proof                | `_create_roll.py:486-487`                                                                                               | owner                                                                                                          | none                                                                                       | the same with `target=`                                                              |
-| Start, restart                                | `_lifecycle.py:502-942`                                                                                                 | admin (logged from the start, where today the first requests are not logged, `:502-503`), owner for the launch | none, except the status reads                                                              | the log-free `transport(vm, config)` and `_build_session_target`                     |
-| Status of one session                         | `check_session_status`, `_status.py:89-112`, and `_check_dedicated_session`, `:139-170`, unbounded                      | root for an agent session, admin for an admin session                                                          | 10                                                                                         | `partial(target.run, sudo=agent)`                                                    |
-| Status, bounded                               | `_BoundedStatusTarget`, `_status.py:50-56`, `:196-216`, `_queries.py:478-481`                                           | as above                                                                                                       | 10                                                                                         | `_BoundedStatusTarget`, which goes                                                   |
-| Batch status                                  | `batch_check_status`, `_status.py:240-247`, `input_data=` lines, an inner `sudo -n` per agent row                       | one root `Script(Shell.SH)` per VM, the rows on stdin as `Bytes`, no inner `sudo` (decision 5)                 | 10                                                                                         | the script's own `sudo -n tmux` and `sudo -n sh -c`                                  |
-| Legacy rows in a status fan-out               | `_status.py:476`, `:498-500`, an unbounded probe on the main thread                                                     | owner, through `_assert_agent_access_works` for an agent                                                       | 10                                                                                         | `_build_session_target`'s `true`                                                     |
-| Pid repair                                    | `_repair_session_pid`, `_pids.py:122-422`, unbounded                                                                    | admin, root for an agent session                                                                               | 10 for every read                                                                          | `target.run`, `partial(target.run, sudo=agent)`                                      |
-| The agent probe in `_build_session_target`    | `_pids.py:86-87`                                                                                                        | `_assert_agent_access_works`                                                                                   | its own                                                                                    | `_assert_agent_ssh_works`                                                            |
-| Stop, delete, teardown                        | `_teardown.py:208-414`, `_lifecycle.py:117-153`, `:288-305`                                                             | owner; root when the caller does not own the session (agent and workspace delete, stop-all's agent rows)       | none for single stops; `DEDICATED_TEARDOWN_TIMEOUT_SECONDS` in stop-all's concurrent plans | `DedicatedTeardownPlan.target` and `sudo` become `access` and `elevated`             |
-| Stop-all                                      | `_lifecycle.py:1053-1078`                                                                                               | admin, root for agent rows                                                                                     | 10 in the concurrent plans                                                                 | `transport(..., default_timeout=10, retries=1)`; no log, as today (`:1056`)          |
-| Attach                                        | `target.interactive("tmux -S S attach -t '=N'")`, `_queries.py:961`                                                     | admin; `TerminalCommand(("tmux", "-S", socket, "attach", "-t", "=" + name))`, or without `-S` for a legacy row | none                                                                                       | `Transport.interactive`                                                              |
-| Logs                                          | `capture_output`, `_logs.py:80`                                                                                         | admin                                                                                                          | none                                                                                       | the admin `run`                                                                      |
-| tmuxinator regeneration                       | `_scope.py:150-165`                                                                                                     | admin, `files.write` and `remove_config` as for workspaces                                                     | 10                                                                                         | `write_file` and `remove_config(target)`                                             |
-| `_scope._prepare_vm`                          | `_scope.py:124-128`: a log with no redactions, and a `run_as_root` no caller uses                                       | yields the admin's access; the log takes the operation's redactions                                            |                                                                                            | `run_command`, `run_as_root`                                                         |
-| Agent delete                                  | `_mgr.transport` into `_teardown_session` and `kill_session_windows`, `agents/manager/lifecycle.py:389-398`, `:423-425` | root for the teardown (`target_owns_session=False`), admin for the windows                                     | none                                                                                       | `_mgr.transport`                                                                     |
+| Operation                                     | Today                                                                                                                   | Access and elevation                                                                                           | Deadline                                                                                   | Replaces                                                                                           |
+| --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------- |
+| Create: the agent probe                       | `_assert_agent_ssh_works` on an ephemeral `agent_transport`, `_create.py:195-196`, `_create_roll.py:210-211`            | `_assert_agent_access_works(access, admin, agent)` (`agents/manager/access.py:44`)                             | its own (`access.py:60`, `:67`)                                                            | the legacy probe                                                                                   |
+| Create: config, launch, fingerprint, finalize | `_create_roll.py:398-471`                                                                                               | admin for the config; owner for the rest                                                                       | none, as today                                                                             | `deploy_restricted_config(run_command)`, `session_run_command`, `fingerprint_target`               |
+| Create: rollback absence proof                | `_create_roll.py:486-487`                                                                                               | owner                                                                                                          | none                                                                                       | the same with `target=`                                                                            |
+| Start, restart                                | `_lifecycle.py:502-942`                                                                                                 | admin (logged from the start, where today the first requests are not logged, `:502-503`), owner for the launch | none, except the status reads                                                              | the log-free `transport(vm, config)` and `_build_session_target`                                   |
+| Status of one session                         | `check_session_status`, `_status.py:89-112`, and `_check_dedicated_session`, `:139-170`, unbounded                      | root for an agent session, admin for an admin session                                                          | 10                                                                                         | `partial(target.run, sudo=agent)`                                                                  |
+| Status, bounded                               | `_BoundedStatusTarget`, `_status.py:50-56`, `:196-216`, `_queries.py:478-481`                                           | as above                                                                                                       | 10                                                                                         | `_BoundedStatusTarget`, which goes                                                                 |
+| Batch status                                  | `batch_check_status`, `_status.py:240-247`, `input_data=` lines, an inner `sudo -n` per agent row                       | one root `Script(Shell.SH)` per VM, the rows on stdin as `Bytes`, no inner `sudo` (decision 5)                 | 10                                                                                         | the script's own `sudo -n tmux` and `sudo -n sh -c`                                                |
+| Legacy rows in a status fan-out               | `_status.py:476`, `:498-500`, an unbounded probe on the main thread                                                     | owner, through `_assert_agent_access_works` for an agent                                                       | 10                                                                                         | `_build_session_target`'s `true`                                                                   |
+| Pid repair                                    | `_repair_session_pid`, `_pids.py:122-422`, unbounded                                                                    | admin, root for an agent session                                                                               | 10 for every read                                                                          | `target.run`, `partial(target.run, sudo=agent)`                                                    |
+| The agent probe in `_build_session_target`    | `_pids.py:86-87`                                                                                                        | `_assert_agent_access_works`                                                                                   | its own                                                                                    | `_assert_agent_ssh_works`                                                                          |
+| Stop, delete, teardown                        | `_teardown.py:208-414`, `_lifecycle.py:117-153`, `:288-305`                                                             | owner; root when the caller does not own the session (agent and workspace delete, stop-all's agent rows)       | none for single stops; `DEDICATED_TEARDOWN_TIMEOUT_SECONDS` in stop-all's concurrent plans | `DedicatedTeardownPlan.target` and `sudo` become `access` and `elevated`                           |
+| Stop-all                                      | `_lifecycle.py:1053-1078`                                                                                               | admin, root for agent rows                                                                                     | 10 in the concurrent plans                                                                 | `transport(..., default_timeout=10, retries=1)`; logged to a `session-stop-all` log per VM (above) |
+| Attach                                        | `target.interactive("tmux -S S attach -t '=N'")`, `_queries.py:961`                                                     | admin; `TerminalCommand(("tmux", "-S", socket, "attach", "-t", "=" + name))`, or without `-S` for a legacy row | none                                                                                       | `Transport.interactive`                                                                            |
+| Logs                                          | `capture_output`, `_logs.py:80`                                                                                         | admin                                                                                                          | none                                                                                       | the admin `run`                                                                                    |
+| tmuxinator regeneration                       | `_scope.py:150-165`                                                                                                     | admin, `files.write` and `remove_config` as for workspaces                                                     | 10                                                                                         | `write_file` and `remove_config(target)`                                                           |
+| `_scope._prepare_vm`                          | `_scope.py:124-128`: a log with no redactions, and a `run_as_root` no caller uses                                       | yields the admin's access; the log takes the operation's redactions                                            |                                                                                            | `run_command`, `run_as_root`                                                                       |
+| Agent delete                                  | `_mgr.transport` into `_teardown_session` and `kill_session_windows`, `agents/manager/lifecycle.py:389-398`, `:423-425` | root for the teardown (`target_owns_session=False`), admin for the windows                                     | none                                                                                       | `_mgr.transport`                                                                                   |
 
 **Two tighter bounds** (decision 5). `check_session_status` and pid repair are unbounded today, so a
 VM that stops answering stalls `session stop`, `session delete`, `session attach` and every status
@@ -641,7 +660,7 @@ access; the gate and the SSH boundary are as today, with the pane secrets as the
 | Attach                                    | `target.interactive("tmux attach -t '=aw-console-<c>'")`, `:830-833`                                                | `attach(TerminalCommand(("tmux", "attach", "-t", "=aw-console-" + name)))`                   | none                                   |
 | Build                                     | `new-session` for the admin-shell window, the placeholder, `kill-window`, `rename-session`, `tmux_build.py:529-579` | the admin-shell window through `park` (above); the rest `Script(Shell.SH)`, `check=True`     | none                                   |
 | Session window                            | `new-window ... '<attach loop>'`, `tmux_build.py:426`                                                               | `Script(Shell.SH)`                                                                           | none                                   |
-| Agent access check                        | none                                                                                                                | `_assert_agent_access_works`, once per agent before the first park                           | its own                                |
+| Agent access check                        | none                                                                                                                | `_assert_agent_access_works`, once per agent, before the first mutation                      | its own                                |
 | Shell pane                                | `split-window -e K=V ...` with `env=pane_env`, `:282`; tag, `:302`                                                  | `park` on the pane identity's access, then `split-window ... <handover command>` and the tag | parking: 60 to `parked`, 35 to collect |
 | The `--preserve-env` probe                | `tmux_build.py:134`                                                                                                 | none: deleted                                                                                |                                        |
 | Layout, focus, panes, reorder             | `multi_console_layout.py:76-444`, `tmux_build.py:334`, `restore.py:140`                                             | `Script(Shell.SH)`                                                                           | none                                   |
@@ -699,8 +718,9 @@ discovery, which is how a failed install already behaves.
 In the order they land, each with its tests:
 
 1. **`remote_exec.py`** (batch A, decision 2). Its only caller is backup (`vms/backup.py:357`),
-   which moves to `detached`. The module and `cli/tests/test_remote_exec.py` go; the static check
-   covers `vms/backup.py`.
+   which moves to `detached`. The module and `cli/tests/test_remote_exec.py` go, and so do its names
+   in `cli/tests/execution/legacy_modules.py:8` and `cli/agentworks/execution/README.md:277`; the
+   static check covers `vms/backup.py`.
 2. **`_assert_agent_ssh_works`** (batch C). Its three callers
    (`sessions/manager/_create.py:191-196`, `_create_roll.py:207-211`, `_pids.py:83-87`) call
    `_assert_agent_access_works(access, admin, agent)`; the function
@@ -717,13 +737,22 @@ In the order they land, each with its tests:
    `sessions/manager/__init__.py:19`, with the patches of them (`cli/tests/conftest.py:679-688`,
    `cli/tests/agents/test_delete_grant_revoke_orchestrated.py:153`), which patch
    `execution.vm_access` instead.
-4. **`_BoundedStatusTarget`, `GUEST_OBSERVATION_ATTEMPTS`, `DEDICATED_TEARDOWN_ATTEMPTS`** (batch
-   C), with the tests that build the bounded target (`cli/tests/test_session_liveness.py:29`,
-   `:226`).
-5. **`_tmux_env_flags`** (batch C), with its tests in `cli/tests/test_sessions_tmux_create.py`,
-   `secrets/test_quoted_logging.py` and `sessions/test_startup_recovery.py`, which assert that no
-   launch request's argv or script holds an environment value instead.
+4. **`_BoundedStatusTarget` and `DEDICATED_TEARDOWN_ATTEMPTS`, and the sessions' use of
+   `GUEST_OBSERVATION_ATTEMPTS`** (batch C). Tests: those that build the bounded target
+   (`cli/tests/test_session_liveness.py:29`, `:226`), and the retry assertions in
+   `cli/tests/sessions/test_round8_startup.py:21`, `:97` and
+   `cli/tests/sessions/test_session_batch_stop_parallelism.py:22`, `:461-462`, which assert the
+   deadline and one dispatch instead. The constant itself stays until console status stops using it
+   (`sessions/multi_console/_status.py:12-13`, `:59`), in deletion 6.
+5. **Session creation's `-e` flags** (batch C): `create_session` stops calling `_tmux_env_flags`
+   (`sessions/tmux.py:918`, `:975`). Its tests in `cli/tests/test_sessions_tmux_create.py`,
+   `secrets/test_quoted_logging.py` and `sessions/test_startup_recovery.py` assert instead that no
+   launch request's argv or script holds an environment value. The function stays for the console
+   panes until deletion 6.
 6. **The console's environment carry and its sudoers grant** (batch D):
+   - `_tmux_env_flags` (`sessions/tmux.py:630-648`), whose last callers are `_split_shell_pane`'s
+     (`sessions/multi_console/tmux_build.py:213`, `:231`), and `GUEST_OBSERVATION_ATTEMPTS`
+     (`status_observation.py:14`), whose last user is console status.
    - `_sudo_can_preserve_env`, `PreserveEnvMemo` and the `--preserve-env` branch
      (`sessions/multi_console/tmux_build.py:77-155`, `:268-280`), `_SUDO_PRESERVE_PROBE_VAR`
      (`sessions/multi_console/secrets_env.py:42`), and every `preserve_memo` parameter. Tests:
@@ -805,13 +834,29 @@ None restates the implementation or our prose (`no-prose-policing-tests`).
   and raises naming the id when it is `ABSENT` or the follow-up fails; after `NotDelivered` it makes
   no follow-up; a request with `stdin`, `cwd` or a `deadline`, or not elevated, is refused.
 - The program's states: `STARTING` before the rename, `RUNNING` while the lock is held, `LOST` when
-  it is released with no status, and the prune removing old `EXITED`, `LOST` and `STARTING`
-  directories but no `RUNNING` one.
+  it is released with no status, `EXITED` with a `process` after an `exec` failure, and the prune
+  removing old `EXITED`, `LOST` and `STARTING` directories but no `RUNNING` one. The read order: an
+  observer stopped between its lock test and its `status` read while the supervisor writes `status`
+  and exits reports `RUNNING` or `EXITED`, never `LOST`.
+- `interrupt` of a payload that ignores `SIGTERM` returns `EXITED` with 137 after the kill wait.
 - `park`: a split that raises closes the parking stdin at once; an uncollected handover reports
   `collected=False`; `Handover.command` puts `sudo -n -u` in front only for another account; a `cwd`
   refusal parks again in the home and warns.
 - Backup's outcomes: `LOST` and a non-zero `EXITED` raise `BackupError`; the `finally` discards the
   launch's id even when `launch` raised.
+- Pane secrets in the boundary (decision 6), one pin each for `console create`, `restart`, `start`,
+  and `restore-session` with a missing window and with missing panes: the command registers its
+  targets on the boundary resolver, makes no `resolve_for_command` call, and resolves before its
+  first mutation (no tmux request and no database write precede the resolve). Two refusal pins, a
+  console not found and a VM with no Tailscale address, resolve nothing and dispatch nothing.
+- Stop-all's shared log takes every concurrent plan's records without interleaving.
+
+**Tests that change in batch D because their path no longer calls `resolve_for_command`:**
+`cli/tests/test_console_lifecycle.py:161`
+(`test_restart_resolves_inputs_before_destroying_running_runtime`), whose invariant is re-pinned
+through the boundary, not dropped; `test_secrets_eager_resolve_console.py:149`, `:277` and `:519`,
+which patch the late resolve; and `test_consoles_orchestration.py:89`, a start on a running console,
+which now resolves every pane secret, the accepted cost.
 
 **The guest programs.** `test_detached_program.py` beside `test_file_program.py`, on Linux CI, both
 interpreters. agw-launch's `TerminalCommand` and the inherited `TERM` join the conformance suite as
@@ -960,13 +1005,13 @@ Five batches, each green on its own, in the order they land in PR C. The rule fr
 batch that removes it. Each batch adds its migrated files to the static check and carries the
 collateral it makes stale.
 
-| Batch                            | Contents                                                                                                                                                                                                                                                                                                                              | Size                                                                    |
-| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| **A. Detached work and backup**  | The inventory rows I80 to I89 in the HLA, first; `ToFile`; `detached.py` and `detached_program.py` with the plan's four tests; `operation_log`; backup on them; `vm describe`'s live resources; `remote_exec.py` and its tests deleted                                                                                                | M: about 450 lines of code, 550 of tests                                |
-| **B. Workspaces**                | `FromFile`; workspace backends, copy, rehome, repair and delete's own requests; `tmuxinator.py` with its session caller                                                                                                                                                                                                               | M: 400 and 500                                                          |
-| **C. Sessions**                  | The real-tmux tests, first; `TerminalCommand`; every tmux primitive on `access_run_command`; create, start, restart, status, pid repair, teardown, stop-all, attach and logs; `kill_session_windows` with its callers; agent delete; `_assert_agent_ssh_works` and both `transport` re-exports deleted; the codex recorder            | XL: 1,100 and 1,400; can split at status and pid repair if review wants |
-| **D. Consoles and the handover** | `park` and `Parked`; pane secrets in the boundary; the agent access check; the pane and admin-window handovers; every console request; console attach; the `--preserve-env` carry deleted; `_remove_sudoers_console_setenv`; ADR 0017 superseded and ADR 0014 amended; the slice 6 test bridges and the legacy-target bridges removed | L: 650 and 750                                                          |
-| **E. Closure**                   | The newline refusals and `ENVIRONMENT_REVEAL`, with `env show`'s escaping                                                                                                                                                                                                                                                             | S: 120 and 200                                                          |
+| Batch                            | Contents                                                                                                                                                                                                                                                                                                                                                                                  | Size                                                                    |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| **A. Detached work and backup**  | The inventory rows I80 to I89 in the HLA, first; `ToFile`; `detached.py` and `detached_program.py` with the plan's four tests; `operation_log`; backup on them; `vm describe`'s live resources; `remote_exec.py` and its tests deleted                                                                                                                                                    | M: about 450 lines of code, 550 of tests                                |
+| **B. Workspaces**                | `FromFile`; workspace backends, copy, rehome, repair and delete's own requests; `tmuxinator.py` with its session caller                                                                                                                                                                                                                                                                   | M: 400 and 500                                                          |
+| **C. Sessions**                  | The real-tmux tests, first; `TerminalCommand`; every tmux primitive on `access_run_command`; create, start, restart, status, pid repair, teardown, stop-all, attach and logs; `kill_session_windows` with its callers; agent delete; `_assert_agent_ssh_works`, both `transport` re-exports, `_BoundedStatusTarget` and `DEDICATED_TEARDOWN_ATTEMPTS` deleted; the codex recorder         | XL: 1,100 and 1,400; can split at status and pid repair if review wants |
+| **D. Consoles and the handover** | `park` and `Parked`; pane secrets in the boundary; the agent access check; the pane and admin-window handovers; every console request; console attach; the `--preserve-env` carry, `_tmux_env_flags` and `GUEST_OBSERVATION_ATTEMPTS` deleted; `_remove_sudoers_console_setenv`; ADR 0017 superseded and ADR 0014 amended; the slice 6 test bridges and the legacy-target bridges removed | L: 650 and 750                                                          |
+| **E. Closure**                   | The newline refusals and `ENVIRONMENT_REVEAL`, with `env show`'s escaping                                                                                                                                                                                                                                                                                                                 | S: 120 and 200                                                          |
 
 **Bridges.**
 
