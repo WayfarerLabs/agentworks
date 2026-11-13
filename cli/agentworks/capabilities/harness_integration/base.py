@@ -201,6 +201,7 @@ class SessionBinding:
     target: _Target | None
     admin: bool
     state: dict[str, object]
+    last_started_at: str | None = None
     artifact_context: SessionArtifactContext | None = None
     context_values: Mapping[str, str] = field(default_factory=dict)
     launch_intent: HarnessLaunchIntent = HarnessLaunchIntent.RESUME_OR_NEW
@@ -229,6 +230,14 @@ class HarnessIntegration(Capability):
             raise StateError("harness config requires an explicit facet")
         return cls.config_model if facet == "session" else None
 
+    @classmethod
+    def validate_launch_config(cls, config: Mapping[str, object], *, intent: HarnessLaunchIntent) -> None:
+        """Reject local config/intent conflicts before accepting desired state.
+
+        Config shape is already validated. This optional preflight performs no
+        target work or state mutation; the default adds no policy.
+        """
+
     def __init__(
         self,
         owner_name: str,  # the session-template name (config owner)
@@ -242,6 +251,7 @@ class HarnessIntegration(Capability):
         admin: bool,  # admin mode (uses ctx.admin_target())
         state: dict[str, object],  # this harness integration's OWN namespace of the persisted blob (mutated in place)
         artifact_context: SessionArtifactContext | None = None,
+        last_started_at: str | None = None,
     ) -> None:
         super().__init__(owner_name, config, facet="session")
         self._session: SessionBinding | None = SessionBinding(
@@ -253,6 +263,7 @@ class HarnessIntegration(Capability):
             admin=admin,
             state=state,
             artifact_context=artifact_context,
+            last_started_at=last_started_at,
         )
         self._probed = False
 

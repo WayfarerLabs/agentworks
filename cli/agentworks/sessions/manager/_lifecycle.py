@@ -332,9 +332,25 @@ def start_session(
     force: bool = False,
     force_new: bool = False,
     resume_only: bool = False,
+    spec: str | None = None,
     interaction: TtyInteractionPolicy,
 ) -> None:
     intent = _requested_launch_intent(force_new=force_new, resume_only=resume_only)
+    if spec is not None:
+        from ._spec import launch_with_spec
+
+        launch_with_spec(
+            db,
+            config,
+            name=name,
+            spec=spec,
+            operation="start",
+            force=force,
+            intent=intent,
+            yes=False,
+            interaction=interaction,
+        )
+        return
     from agentworks.runtime_state import run_session_batch
 
     run_session_batch(
@@ -357,11 +373,27 @@ def restart_session(
     force: bool = False,
     force_new: bool = False,
     resume_only: bool = False,
+    spec: str | None = None,
     yes: bool = False,
     interaction: TtyInteractionPolicy,
 ) -> None:
     """Restart a session, confirming first when its runtime is live."""
     intent = _requested_launch_intent(force_new=force_new, resume_only=resume_only)
+    if spec is not None:
+        from ._spec import launch_with_spec
+
+        launch_with_spec(
+            db,
+            config,
+            name=name,
+            spec=spec,
+            operation="restart",
+            force=force,
+            intent=intent,
+            yes=yes,
+            interaction=interaction,
+        )
+        return
     session = _mgr._require_session(db, name)
     consent_status = _mgr.observe_session_statuses(
         [session],

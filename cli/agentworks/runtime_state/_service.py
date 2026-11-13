@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from agentworks.capabilities.harness_integration import HarnessLaunchIntent
     from agentworks.config import Config
     from agentworks.db import Database
+    from agentworks.harness_setup.locking import NativeMutationGuard
     from agentworks.secrets.policy import TtyInteractionPolicy
 
     from ._models import RuntimeSelection, SessionOperation
@@ -32,6 +33,7 @@ def run_selected(
     operation: SessionOperation | None = None,
     force: bool = False,
     authorized_running: frozenset[str] = frozenset(),
+    held_native_guard: NativeMutationGuard | None = None,
 ) -> None:
     from agentworks.bootstrap import load_request_registry
     from agentworks.secrets.resolver import Resolver
@@ -51,6 +53,7 @@ def run_selected(
             operation=operation,
             force=force,
             authorized_running=authorized_running,
+            held_native_guard=held_native_guard,
         )
         seed_results(invocation)
         try:

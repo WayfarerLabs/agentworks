@@ -311,6 +311,7 @@ def _harness_integration_for_template(
     vm: LiveVMNode,
     workspace: WorkspaceNode,
     state: dict[str, object],
+    last_started_at: str | None = None,
 ) -> HarnessIntegration:
     """Build the harness integration the session node holds, from the resolved
     template's ``(harness_integration, harness_integration_config)`` pair.
@@ -369,6 +370,7 @@ def _harness_integration_for_template(
         target=target,
         admin=admin,
         state=namespace,
+        last_started_at=last_started_at,
     )
 
 
@@ -475,6 +477,7 @@ def live_session_node(
         vm=vm,
         workspace=workspace,
         state=harness_integration_state,
+        last_started_at=row.last_started_at,
     )
     return LiveSessionNode(
         row,

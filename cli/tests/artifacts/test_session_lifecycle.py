@@ -629,15 +629,16 @@ def test_upstream_placement_readiness_is_reported_without_blocking_restart(lifec
 
 
 @pytest.mark.parametrize(
-    "tool,integration,workaround",
+    "tool,integration,workaround,stage",
     [
-        ("claude", "claude-code", "session-skill-plugin"),
-        ("codex", "codex", "session-home-skills"),
-        ("grok", "grok-build", "session-home-skills"),
+        ("claude", "claude-code", "session-skill-plugin", "conversation"),
+        ("claude", "claude-code", "session-skill-plugin", "native"),
+        ("codex", "codex", "session-home-skills", "native"),
+        ("grok", "grok-build", "session-home-skills", "native"),
     ],
 )
-def test_real_native_probe_failure_preserves_existing_runtime_before_teardown(
-    lifecycle, monkeypatch, tool, integration, workaround
+def test_real_launch_probe_failure_preserves_existing_runtime_before_teardown(
+    lifecycle, monkeypatch, tool, integration, workaround, stage
 ):
     from importlib import import_module
     from unittest.mock import Mock
@@ -654,6 +655,10 @@ def test_real_native_probe_failure_preserves_existing_runtime_before_teardown(
     observed = Mock(wraps=native.probe_native)
     monkeypatch.setattr(native, "probe_native", observed)
     monkeypatch.setattr(module, "probe_native", observed)
+    if tool == "claude" and stage == "native":
+        from agentworks.plugins.claude.conversation_probe import ConversationProbe
+
+        monkeypatch.setattr(module, "probe_conversation", lambda *a, **k: ConversationProbe(True))
     lifecycle.events.clear()
 
     # A failed guest login produces a real process failure before native discovery.
@@ -661,7 +666,7 @@ def test_real_native_probe_failure_preserves_existing_runtime_before_teardown(
     with pytest.raises(StateError) as failure:
         lifecycle.restart()
     assert (failure.value.entity_kind, failure.value.entity_name) == ("session", "s1")
-    assert observed.called
+    assert observed.called is (stage == "native")
     current = lifecycle.db.get_session("s1")
     assert current is not None and previous is not None
     assert (current.session_uuid, current.run_id, current.pid) == (previous.session_uuid, previous.run_id, previous.pid)

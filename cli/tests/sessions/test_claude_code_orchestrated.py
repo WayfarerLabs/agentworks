@@ -498,3 +498,83 @@ def test_substitution_preserves_workload_values_and_substitutes_extra_args(
     assert argv[argv.index("--future-path") + 1] == workspace_path
     assert argv[argv.index("--literal") + 1] == "${agw:session_name}"
     db.close()
+
+
+def test_detachment_refusal_precedes_teardown(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentworks.errors import StateError
+    from agentworks.plugins.claude.conversation_probe import ConversationProbe
+    from agentworks.sessions.manager import restart_session
+
+    sid = "939b1597-7c61-5ace-80f4-14617b7b4257"
+    successor = "af0980f9-1111-4222-8333-444444444444"
+    state = {"claude-code": {"session_id": sid}, "other": {"conversation": "untouched"}}
+    db, events, captured = _restart_stubs(tmp_path, monkeypatch, transcript_present=True, stored_state=state)
+    db.record_session_started("s1")
+    before = db.get_session("s1")
+    assert before is not None
+    observed_history: list[str | None] = []
+    from agentworks.plugins.claude.harness_integration import ClaudeCodeIntegration
+
+    original = ClaudeCodeIntegration._conversation
+
+    def observe(self: ClaudeCodeIntegration, *args: object, **kwargs: object) -> tuple[str, bool]:
+        observed_history.append(self._session_binding.last_started_at)
+        return original(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(ClaudeCodeIntegration, "_conversation", observe)
+    monkeypatch.setattr(
+        "agentworks.plugins.claude.harness_integration.probe_conversation",
+        lambda *args, **kwargs: ConversationProbe(True, candidates=(successor,)),
+    )
+    with pytest.raises(StateError):
+        restart_session(
+            db,
+            SimpleNamespace(session=SimpleNamespace(history_limit=1)),
+            name="s1",
+            yes=True,
+            interaction=TtyInteractionPolicy.REFUSE,
+        )  # type: ignore[arg-type]
+    assert "kill" not in events
+    assert "tmux_create" not in events
+    assert not captured
+    after = db.get_session("s1")
+    assert after is not None
+    assert after.harness_integration_state == state
+    assert after.pid == before.pid
+    assert after.last_started_at == before.last_started_at
+    assert observed_history == [before.last_started_at]
+    assert before.last_started_at is not None
+    db.close()
+
+
+def test_force_adoption_persists_without_changing_other_namespaces(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from agentworks.plugins.claude.conversation_probe import ConversationProbe
+    from agentworks.sessions.manager import restart_session
+
+    old = "939b1597-7c61-5ace-80f4-14617b7b4257"
+    adopted = "af0980f9-1111-4222-8333-444444444444"
+    db, events, captured = _restart_stubs(
+        tmp_path,
+        monkeypatch,
+        transcript_present=True,
+        stored_state={"claude-code": {"session_id": old}, "other": {"x": 1}},
+    )
+    _harness_integration_template(monkeypatch, {"force_uuid": adopted})
+    monkeypatch.setattr(
+        "agentworks.plugins.claude.harness_integration.probe_conversation",
+        lambda *args, **kwargs: ConversationProbe(False, background_exists=True),
+    )
+    restart_session(
+        db,
+        SimpleNamespace(session=SimpleNamespace(history_limit=1)),
+        name="s1",
+        yes=True,
+        interaction=TtyInteractionPolicy.REFUSE,
+    )  # type: ignore[arg-type]
+    assert f"--resume {adopted}" in captured["command"]
+    after = db.get_session("s1")
+    assert after is not None
+    assert after.harness_integration_state == {"claude-code": {"session_id": adopted}, "other": {"x": 1}}
+    db.close()

@@ -315,6 +315,14 @@ missing any of them, naming the plugin:
   config.
 - `name` / `description`: the registry row's identity.
 
+#### Launch Configuration Preflight
+
+`validate_launch_config(config, intent=...)` is an optional class method for local conflicts between
+validated, untagged config and a launch intent. The default accepts every combination. Core calls it
+before accepting desired runtime state. The spec-replacement path also calls it before runtime
+observation, restart consent or persisting the replacement. Implementations perform no target work
+or state mutation here. The launch operation also enforces its policy when called directly.
+
 #### Setup Binding
 
 VM, admin, agent, and workspace templates explicitly select native setup integrations through
@@ -339,7 +347,8 @@ identifies its config and secret references. A removed activation binds with `co
 
 `vm_init`, `user_init`, and `workspace_init` receive their corresponding typed setup invocations.
 The base methods have no native effects or claims. Session construction retains its existing
-arguments and stores them in a `SessionBinding`; setup access to session identity or state raises
+arguments and stores them in a `SessionBinding`, including the existing row's optional
+`last_started_at` for launch-history decisions; setup access to session identity or state raises
 `StateError`. An integration's setup methods read their bound facet model through `_config_as`; its
 existing session `config` property may continue narrowing to the session model.
 
