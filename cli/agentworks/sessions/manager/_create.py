@@ -109,11 +109,12 @@ def _publish_pending_plan(
 
 
 def _reload_vm(db: Database, target_vm_name: str) -> VMRow:
-    """Reload the VM row inside the gate and assert it has an address.
+    """Reload the VM row under the VM family guard and assert it has an address.
 
-    A concurrent ``agw vm recover`` or ``vm rekey`` may have updated
-    ``vms.tailscale_host``. The in-memory ``vm`` from the pre-check would
-    otherwise read stale and the address check below could spuriously
+    The row read before the guard can be stale: an ``agw vm recover`` or
+    ``vm rekey`` that finished before this command took the guard may have
+    updated ``vms.tailscale_host``, and neither can run while the guard is
+    held. Without the reload the address check below could spuriously
     raise. (The pre-create
     SecretTarget read only ``vm.template``, which a refresh cannot
     change, so the pre-refresh row was safe to target; the nodes keep

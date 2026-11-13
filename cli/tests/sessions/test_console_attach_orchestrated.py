@@ -57,7 +57,6 @@ def _reachable(monkeypatch: pytest.MonkeyPatch, value: bool) -> None:
 
 def _stop_the_vm(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> None:
     _reachable(monkeypatch, False)
-    monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", "repair-key")
     monkeypatch.setattr(
         ProxmoxPlatform,
         "status",

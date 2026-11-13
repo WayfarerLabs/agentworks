@@ -1654,7 +1654,6 @@ def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN20
     section baked in, and the module-wide autouse stubs un-stubbed."""
     monkeypatch.setenv("AW_SECRET_PROXMOX_TOKEN", "pve-token")
     monkeypatch.setenv("AW_SECRET_API_KEY", "shhh")
-    monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", "test-rejoin")
     from agentworks.db import VMStatus
     from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 
