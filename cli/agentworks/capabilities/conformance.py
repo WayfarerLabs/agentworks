@@ -26,6 +26,7 @@ from pydantic import BaseModel
 from agentworks.capabilities.descriptor import ConfigContract, ModelInputDomain
 from agentworks.schema import (
     RefMarker,
+    interpolation_marker_error,
     merge_contract_error,
     model_is_complete,
     reference_marker_error,
@@ -205,6 +206,9 @@ def _model_error(
     placement = reference_marker_error(model)
     if placement is not None:
         return f"its {attribute_name} declares a reference marker nothing can honor: {placement}"
+    interpolation = interpolation_marker_error(model)
+    if interpolation is not None:
+        return f"its {attribute_name} declares interpolation nothing can honor: {interpolation}"
     shorthand = union_scalar_shorthand_error(model)
     if shorthand is not None:
         return f"its {attribute_name} declares an inconsistent union scalar shorthand: {shorthand}"
