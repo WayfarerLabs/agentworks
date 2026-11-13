@@ -682,12 +682,11 @@ over SSH at ADDRESS") whose hint is `Run 'agw vm recover x'.`; the wait's own ra
   with `_await_tailnet` inside the same `hold_active()`. Before anything resolves it runs
   `verify_tailscale_available()` and `execution.resolve_ssh()`, as rekey and recover do, since its
   wait reaches the VM over the tailnet with the OpenSSH client. The `trust.require_record` before
-  the boundary goes (`:53-56`): a stopped VM with no record must still start, so that its wait
-  raises `TrustMissing` naming recover, which starts a stopped VM itself (below). A start that
-  booted the VM says so before the wait, so a failed wait still reads as a running VM. Otherwise an
-  idle-stopped VM from before the host-key store could neither start nor be recovered.
-  `LiveVMNode.auto_start` keeps its check, since the gating commands' own boundary refuses such a VM
-  earlier.
+  the boundary stays: a VM with no record is refused before its intent is accepted or anything
+  resolves, with `TrustMissing`, whose hint names recover, which starts a stopped VM and reads its
+  keys itself (below). A start that booted the VM says so before the wait, so a failed wait still
+  reads as a running VM. `LiveVMNode.auto_start` keeps its check, since the gating commands' own
+  boundary refuses such a VM earlier.
 - `LiveVMNode.auto_start` replaces `_tailscale_rejoin_required` and `_ensure_tailscale`
   (`vms/nodes.py:265-282`) with `_await_tailnet(..., already_running=False)` inside `vm_active`.
 - `_ensure_tailscale` and `_tailscale_rejoin_required` are deleted (`tailscale.py:69-191`);
@@ -729,11 +728,11 @@ start failure is the signal. The README and ADR 0003 are updated to say so (Coll
    `STOPPED` or `DEALLOCATED` is started in step 5, before the hold as `start_vm` starts before its
    own (`power.py:63-67`, since WSL2's keepalive boots a stopped distro itself), through
    `platform.start` with no wait for SSH, recording running intent as an explicit start does and
-   printing that it did. Refusing it instead loops for a VM with no record: start boots it and its
-   wait raises `TrustMissing` naming recover, and a WSL2 distro can idle out again after start's
-   hold ends, before recover runs. Recover needs no wait of its own because each remote root channel
-   waits about two minutes for a VM that has just started: the clouds' `wait_until_answering` and
-   Proxmox's guest-agent ping.
+   printing that it did. Refusing it instead would leave a stopped VM with no record no way back,
+   since `vm start` refuses such a VM naming recover, and a WSL2 distro can idle out again after
+   start's hold ends, before recover runs. Recover needs no wait of its own because each remote root
+   channel waits about two minutes for a VM that has just started: the clouds'
+   `wait_until_answering` and Proxmox's guest-agent ping.
 4. The operation log, from a factory in `vms/manager/_helpers.py` (a legacy file, which owns
    `LOG_DIR`'s other uses) that constructs an `SSHLogger` for the `recover` stem with the auth key
    in its redaction set. `recover.py` types it with slice 3's small log Protocol (contract-lld,
@@ -886,9 +885,10 @@ structure and adapts its rules as follows.
 
 - **Start and activation.** `vm start` accepts running intent and runs main's prepared runtime
   (`vms/manager/runtime.py`) under the VM family guard. Its start and activation, and the gate's
-  `auto_start`, end in `_await_tailnet` inside the hold, as above, and resolve no Tailscale key. An
-  explicit start proceeds on an unknown power state, boots a VM with no host-key record, and says
-  what it did before the wait; an activation refuses both, as the gate does.
+  `auto_start`, end in `_await_tailnet` inside the hold, as above, and resolve no Tailscale key.
+  Both refuse a VM with no host-key record before its power is read, `vm start` before it accepts
+  intent, as #885 does. An explicit start proceeds on an unknown power state and says what it did
+  before the wait; an activation refuses an unknown power state, as the gate does.
 - **Incomplete VMs.** `prepare_vm_runtime` runs `_guard_incomplete_vm`, so start, stop and the
   console paths refuse a VM whose provisioning did not complete, and reconciliation and its preview
   block that VM's family, as every other command but delete does.
@@ -902,16 +902,6 @@ structure and adapts its rules as follows.
   `agw vm recover`), there are none to acquire: activation waits, and a VM that does not answer
   blocks its family with a failure naming recover. That SDD is locked, so the supersession is
   recorded here.
-- **Explicit start without a host-key record.** #885 refuses `vm start` on a VM with no host-key
-  record before it accepts intent or resolves a secret
-  ([plan.md:384-386](../2026-11-09-desired-runtime-state/plan.md)), and its
-  `test_start_without_host_key_refuses_before_intent_secrets_or_provider` pinned that refusal. This
-  slice reverses it deliberately: an explicit start boots the VM, and its wait then refuses for want
-  of the record, naming `agw vm recover`, which reads the keys through the platform (Start and
-  activation, above). The merge `a2dc144c7` replaced that test on purpose with
-  `test_a_stopped_vm_without_a_host_key_record_starts_then_fails_naming_recover_which_can_then_run`
-  (`tests/vms/test_lifecycle_orchestrated.py`). Activation keeps the refusal. This supersession is
-  recorded here for the same reason.
 
 ## Error mapping
 
