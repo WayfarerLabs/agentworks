@@ -48,6 +48,7 @@ from agentworks.capabilities.harness_integration.base import (
     require_commands,
 )
 from agentworks.errors import StateError
+from agentworks.execution.requests import Script, Shell
 from agentworks.plugins.grok.artifacts import outer_artifacts, session_artifacts
 from agentworks.schema import AgwModel, MergeStrategy
 from agentworks.topics import TopicProse
@@ -63,7 +64,7 @@ if TYPE_CHECKING:
         VMSetupInvocation,
         WorkspaceSetupInvocation,
     )
-    from agentworks.transports import Transport
+    from agentworks.execution.access import VMAccess
 
 
 class GrokBuildSetupConfig(AgwModel):
@@ -134,12 +135,31 @@ class GrokBuildConfig(AgwModel):
 # ``xai-grok-home`` crate: a non-empty ``GROK_HOME`` verbatim, otherwise
 # ``$HOME/.grok``. Sessions are stored below that same root.
 _SESSIONS_DIR = "${GROK_HOME:-$HOME/.grok}/sessions"
+_FIND_FAILED_EXIT = 6  # find itself failed (not a mere no-match): raise
+
+
+def session_probe(sid: str) -> Script:
+    """Whether a persisted Grok session ``sid`` exists: exit 0 found, 1 not, 6 when ``find`` failed.
+
+    Grok treats a UUID directory as resumable only when it holds a regular
+    ``summary.json`` (``sessions/<encoded-cwd>/<uuid>/summary.json``). The
+    probe runs in the launch target's login and interactive shell, so
+    ``GROK_HOME`` resolves as the pane's Grok resolves it.
+    """
+    summary_path = shlex.quote(f"*/{sid}/summary.json")
+    inner = (
+        f'[ -d "{_SESSIONS_DIR}" ] || exit 1; '
+        f'out=$(find "{_SESSIONS_DIR}" -mindepth 3 -maxdepth 3 -type f '
+        f"-path {summary_path} -print -quit 2>/dev/null); rc=$?; "
+        f'[ -n "$out" ] && exit 0; [ "$rc" -eq 0 ] || exit {_FIND_FAILED_EXIT}; exit 1'
+    )
+    return Script(inner, Shell.USER_DEFAULT, login=True, interactive=True)
 
 
 class GrokBuildIntegration(HarnessIntegration):
     """Run Grok Build, resuming its persisted session when one exists."""
 
-    contract_version: ClassVar[int] = 7
+    contract_version: ClassVar[int] = 8
     name: ClassVar[str] = "grok-build"
     description: ClassVar[str] = "Run Grok Build, resuming its session when one exists"
     config_model: ClassVar[type[GrokBuildConfig]] = GrokBuildConfig
@@ -202,10 +222,10 @@ class GrokBuildIntegration(HarnessIntegration):
             item.content.type is not ArtifactType.MCP_SERVER for item in invocation.artifacts.items()
         ):
             probe_native(
-                invocation.runner,
+                invocation.access,
                 tool="grok",
-                environment=invocation.environment,
-                redactions=invocation.secrets.values(),
+                environment=invocation.request_environment(),
+                redactions=invocation.redactions,
                 home=invocation.home,
                 native_root=root,
                 check_policy=False,
@@ -227,10 +247,10 @@ class GrokBuildIntegration(HarnessIntegration):
                 plan,
                 invocation,
                 lambda files: probe_native(
-                    invocation.runner,
+                    invocation.access,
                     tool="grok",
-                    environment=invocation.environment,
-                    redactions=invocation.secrets.values(),
+                    environment=invocation.request_environment(),
+                    redactions=invocation.redactions,
                     home=invocation.home,
                     native_root=root,
                     files=files,
@@ -261,10 +281,10 @@ class GrokBuildIntegration(HarnessIntegration):
                 plan,
                 invocation,
                 lambda files: probe_native(
-                    invocation.runner,
+                    invocation.access,
                     tool="grok",
-                    environment=invocation.environment,
-                    redactions=invocation.secrets.values(),
+                    environment=invocation.request_environment(),
+                    redactions=invocation.redactions,
                     workspace=invocation.root,
                     files=files,
                     workspace_only=True,
@@ -291,13 +311,13 @@ class GrokBuildIntegration(HarnessIntegration):
         """Choose the requested fresh, strict-resume, or fallback policy."""
         self._rendered_extra_args = tuple(self.render_context_argv(token) for token in self.config.extra_args)
         artifact_context = self._session_binding.artifact_context
-        runner = ctx.admin_target() if self._admin else ctx.agent_target()
+        access = ctx.admin_access() if self._admin else ctx.agent_access()
 
         def resolve_home(current: SessionArtifactContext) -> str:
-            if runner is None:
+            if access is None:
                 raise StateError("artifact delivery requires the actual native launch target")
             return probe_native(
-                runner,
+                access,
                 tool="grok",
                 environment=current.environment,
                 redactions=current.redactions,
@@ -306,7 +326,7 @@ class GrokBuildIntegration(HarnessIntegration):
             )
 
         self._artifact_plan, native_root = prepare_session_delivery(
-            runner,
+            access,
             tool="grok",
             integration=self.name,
             context=artifact_context,
@@ -346,7 +366,7 @@ class GrokBuildIntegration(HarnessIntegration):
         if resume_only and not (isinstance(stored_sid, str) and stored_sid):
             raise self._resume_only_error()
         sid = self._session_id(fresh=fresh)
-        launch_target = ctx.admin_target() if self._admin else ctx.agent_target()
+        launch_target = ctx.admin_access() if self._admin else ctx.agent_access()
         resume = not fresh and launch_target is not None and self._session_exists(launch_target, sid)
         if resume_only and not resume:
             raise self._resume_only_error()
@@ -433,7 +453,7 @@ class GrokBuildIntegration(HarnessIntegration):
             prompt += f"\n\nInitial guidance for this goal:\n{self.config.initial_prompt}"
         return prompt
 
-    def _session_exists(self, transport: Transport, sid: str) -> bool:
+    def _session_exists(self, access: VMAccess, sid: str) -> bool:
         """Check Grok's own persisted-session boundary for ``sid``.
 
         Grok treats a UUID directory as resumable only when it contains a
@@ -443,36 +463,36 @@ class GrokBuildIntegration(HarnessIntegration):
         to reproduce Grok's cwd encoder. Verified against Grok Build 1.0.4;
         re-verify the boundary after a major upstream update.
 
-        Exit 1 is a clean absence. Exit 6 keeps a failed ``find`` distinct, so
-        an unreadable session root or transport failure never becomes an
-        accidental fresh launch over a persisted UUID.
+        Exit 1 is a clean absence (:func:`session_probe`). Exit 6 keeps a
+        failed ``find`` distinct, and a probe that may not have run raises its
+        typed execution error, so an unreadable session root or transport
+        failure never becomes an accidental fresh launch over a persisted UUID.
         """
-        summary_path = shlex.quote(f"*/{sid}/summary.json")
-        inner = (
-            f'[ -d "{_SESSIONS_DIR}" ] || exit 1; '
-            f'out=$(find "{_SESSIONS_DIR}" -mindepth 3 -maxdepth 3 -type f '
-            f"-path {summary_path} -print -quit 2>/dev/null); rc=$?; "
-            f'[ -n "$out" ] && exit 0; [ "$rc" -eq 0 ] || exit 6; exit 1'
-        )
-        result = transport.run(f'"$SHELL" -lic {shlex.quote(inner)}', check=False)
-        if result.returncode == 0:
+        status = access.run(session_probe(sid)).require_completed(access.vm_name)
+        if status == 0:
             return True
-        if result.returncode == 1:
+        if status == 1:
             return False
         raise StateError(
             f"session '{self._session_name}': could not probe for the Grok Build "
-            f"session on {self._target_label} (exit {result.returncode}); "
+            f"session on {self._target_label} (exit {status}); "
             "refusing to guess resume-vs-launch.",
             entity_kind="session",
             entity_name=self._session_name,
-            hint="Retry once the launch target and its Grok session directory are readable.",
+            hint=(
+                "Check that the Grok session directory ($GROK_HOME/sessions, by default ~/.grok/sessions) "
+                "is readable by the launch user, then retry."
+                if status == _FIND_FAILED_EXIT
+                else "Check that the launch user's login and interactive shell startup files run to "
+                "completion without exiting or failing, then retry."
+            ),
         )
 
-    def _probe_target(self, transport: Transport) -> None:
+    def _probe_target(self, access: VMAccess) -> None:
         """Readiness proves only that the Grok Build CLI is installed."""
         require_commands(
             ("grok",),
-            transport,
+            access,
             harness_integration_name=self.name,
             template_name=self.owner_name,
             session_name=self._session_name,

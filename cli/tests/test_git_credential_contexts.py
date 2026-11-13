@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, Literal
 from unittest.mock import MagicMock
 
 import pytest
@@ -17,9 +17,10 @@ from agentworks.git_credentials import credential_requests, materialize_credenti
 from agentworks.git_credentials.nodes import git_credential_node
 from agentworks.orchestration.secrets import ScopedSecrets, secret_union
 from tests.conftest import ManifestDoc, write_manifests
+from tests.vm_access_support import Admin, RecordingVMAccess
 
 if TYPE_CHECKING:
-    from agentworks.transports import Transport
+    pass
 
 
 def _config(tmp_path: Path, *documents: ManifestDoc):  # noqa: ANN202
@@ -104,19 +105,19 @@ def test_request_context_is_scoped_to_each_provider_declaration(tmp_path: Path) 
     def scoped(
         names: tuple[str, ...],
         *,
-        admin_target=None,  # noqa: ANN001
-        agent_target=None,  # noqa: ANN001
+        admin_access=None,  # noqa: ANN001
+        agent_access=None,  # noqa: ANN001
     ) -> RunContext:
         context = RunContext(
-            admin_target=admin_target,
-            agent_target=agent_target,
+            admin_access=admin_access,
+            agent_access=agent_access,
             secrets=ScopedSecrets(values, names),
         )
         contexts.append(context)
         return context
 
     first, second = credential_requests(nodes, scoped)
-    assert all(context.admin_target() is None and context.agent_target() is None for context in contexts)
+    assert all(context.admin_access() is None and context.agent_access() is None for context in contexts)
     first_context = first.context()
     second_context = second.context()
     first_material = first.provider.credential_material(first_context)
@@ -128,15 +129,14 @@ def test_request_context_is_scoped_to_each_provider_declaration(tmp_path: Path) 
     with pytest.raises(StateError):
         first_context.secret("second-input")
     assert len({id(context) for context in contexts}) == 4
-    assert first_context.admin_target() is second_context.admin_target() is None
-    assert first_context.agent_target() is second_context.agent_target() is None
+    assert first_context.admin_access() is second_context.admin_access() is None
+    assert first_context.agent_access() is second_context.agent_access() is None
 
 
 @pytest.mark.parametrize("target_role", ["admin", "agent"])
 def test_materialization_reassembles_current_target_context(
     target_role: Literal["admin", "agent"],
 ) -> None:
-    target = cast("Transport", MagicMock())
     provider = MagicMock()
     provider.credential_scopes.return_value = (HttpsCredentialScope("example.com"),)
     provider.credential_material.return_value = StoredCredential("user", "credential")
@@ -152,23 +152,24 @@ def test_materialization_reassembles_current_target_context(
     def scoped(
         names: tuple[str, ...],
         *,
-        admin_target=None,  # noqa: ANN001
-        agent_target=None,  # noqa: ANN001
+        admin_access=None,  # noqa: ANN001
+        agent_access=None,  # noqa: ANN001
     ) -> RunContext:
         context = RunContext(
             config=config,
             operation_scope=scope,
-            admin_target=admin_target,
-            agent_target=agent_target,
+            admin_access=admin_access,
+            agent_access=agent_access,
             secrets=ScopedSecrets({"input": "value"}, names),
         )
         contexts.append(context)
         return context
 
     requests = credential_requests((node,), scoped)
+    access = RecordingVMAccess([], Admin())
     state = materialize_credential_state(
         requests,
-        target,
+        access,
         target_role,
         config,
     )
@@ -177,14 +178,10 @@ def test_materialization_reassembles_current_target_context(
     assert len(contexts) == 3
     validation_context, runup_context, material_context = contexts
     assert len({id(context) for context in contexts}) == 3
-    assert validation_context.admin_target() is None
-    assert validation_context.agent_target() is None
-    expected_admin = target if target_role == "admin" else None
-    expected_agent = target if target_role == "agent" else None
-    assert runup_context.admin_target() is expected_admin
-    assert runup_context.agent_target() is expected_agent
-    assert material_context.admin_target() is None
-    assert material_context.agent_target() is None
+    assert validation_context.admin_access() is validation_context.agent_access() is None
+    assert runup_context.admin_access() is (access if target_role == "admin" else None)
+    assert runup_context.agent_access() is (access if target_role == "agent" else None)
+    assert material_context.admin_access() is material_context.agent_access() is None
     assert validation_context.config is runup_context.config is material_context.config is config
     assert (
         validation_context.operation_scope is runup_context.operation_scope is material_context.operation_scope is scope

@@ -5,7 +5,9 @@ and consoles need explicit adoption before reconciliation can restore them. It a
 connection to a VM against a host-key store of its own instead of trusting whatever it sees first.
 Existing VMs need a one-time host-key import before most commands will connect to them. Third-party
 VM platform plugins must move to vm-platform contract version 2 (see
-[Third-party VM platforms](#third-party-vm-platforms)).
+[Third-party VM platforms](#third-party-vm-platforms)), and third-party harness integrations, Git
+credential providers and secret backends to new contract versions as well (see
+[their section](#third-party-harness-integrations-git-credential-providers-and-secret-backends)).
 
 ## Adopt desired runtime state
 
@@ -70,18 +72,20 @@ agw vm reconcile workstation
 
 Applying may start or stop the selected VM and its children according to their targets. A stopped VM
 target blocks children that request running; it does not discard their intent. If that VM should run
-again, explicitly start it with `agw vm start workstation`, then reconcile it to recover its
+again, explicitly start it with `agw vm start workstation`, then reconcile it to restore its
 children. VM start alone does not restore sessions or consoles. A focused `session reconcile NAME`
-or `console reconcile NAME` is available when only that resource should be recovered.
+or `console reconcile NAME` is available when only that resource should be restored.
 
 ### Lifecycle changes to account for
 
-- Explicit `vm start` now records `running` intent even when the VM is already running. Use
-  `agw vm set-desired-state NAME on-demand` to return to activation only when needed. Explicit
-  session start/stop commands also record intent, including accepted batch no-ops. Named-console
-  start/stop commands record intent for the console view.
+- Explicit `vm start` now records `running` intent even when the VM is already running, and
+  `vm recover` records it when it starts a stopped VM. Use `agw vm set-desired-state NAME on-demand`
+  to return to activation only when needed. Explicit session start/stop commands also record intent,
+  including accepted batch no-ops. Named-console start/stop commands record intent for the console
+  view.
 - A VM shutting down or suspending itself, a session exiting, or a console disappearing does not
-  clear intent. Recovery requires an explicit reconcile command; there is no background controller.
+  clear intent. Restoring intended state requires an explicit reconcile command; there is no
+  background controller.
 - On WSL2, a live VM with `stopped` intent receives no idle-shutdown protection during access or
   management commands and may stop mid-command. Select `on-demand` or `running` only when normal
   holds and future activation are both intended.
@@ -194,24 +198,34 @@ store only. Your `~/.ssh/known_hosts` is no longer touched. `vm delete` removes 
 ## Connecting through the new layer
 
 `agw vm exec`, `vm shell`, `agent exec`, `agent shell`, `vm verify-connection`, `vm port-forward`,
-`vm create`, `vm reinit`, `vm confirm-release`, `vm start`, `vm rekey` and `vm recover` now reach
-the VM through a new connection layer that sends each request over the OpenSSH client's standard
-input instead of on the `ssh` command line. For `vm create` that is everything after the platform
-has created the VM and joined it to the tailnet; for `vm reinit`, its checks of the VM (see
-[Create, reinit and the VM contract](#create-reinit-and-the-vm-contract)). `vm start`, and the
-automatic start of a VM that stopped on its own, use it to wait for the VM to answer; `vm rekey` and
-`vm recover` use it for the same wait after their scripts, which run through the platform's own
-channel (see [Start, recover, rekey and delete](#start-recover-rekey-and-delete)).
-`vm shell --platform` uses the platform's own channel instead and needs no `python3`; on a cloud VM
-that channel is SSH to its public address under the same rules. Everything else keeps its current
-path for now.
+`vm create`, `vm reinit`, `vm confirm-release`, `vm start`, `vm rekey`, `vm recover` and `vm backup`
+now reach the VM through a new connection layer that sends each request over the OpenSSH client's
+standard input instead of on the `ssh` command line. For `vm create` that is the checks of the VM
+after the platform has created it and joined it to the tailnet; for `vm reinit`, its checks of the
+VM (see [Create, reinit and the VM contract](#create-reinit-and-the-vm-contract)). For both it is
+also every step of initialization, and `agent create` and `agent reinit` run all of agent
+initialization, as the admin and then as the agent, through it (see
+[Initialization steps](#initialization-steps)). `agent delete` and the workspace group grants run
+through it. `workspace create`, `workspace repair`, `workspace rehome` and `workspace copy` run all
+their work on the VM through it (see [Workspaces](#workspaces)), and so do `workspace delete`'s own
+removal and the session commands' regeneration of a workspace's tmuxinator config; `session create`
+and the session launches set up the tmux socket directories through it. `vm backup` runs its checks,
+its workspace archive and the archive's download through it (see [Backups](#backups)). `vm describe`
+reads the VM's live resources through it, as one request bounded at 30 seconds where it made up to
+three attempts before. `vm start`, and the automatic start of a VM that stopped on its own, use it
+to wait for the VM to answer; `vm rekey` and `vm recover` use it for the same wait after their
+scripts, which run through the platform's own channel (see
+[Start, recover, rekey and delete](#start-recover-rekey-and-delete)). `vm shell --platform` uses the
+platform's own channel instead and needs no `python3`; on a cloud VM that channel is SSH to its
+public address under the same rules. Everything else keeps its current path for now.
 
 ### What these commands need
 
 Each of them checks the client first, so an unsupported one is refused before `vm create` builds a
 VM, `vm start` starts one, or `vm rekey` and `vm recover` spend a Tailscale auth key. The automatic
-start, which other commands trigger, is the exception: it checks the client at its wait, once the VM
-has started.
+start, which other commands trigger, is one exception: it checks the client at its wait, once the VM
+has started. `vm describe` is the other: it warns and leaves the live resources out instead of
+refusing.
 
 - **OpenSSH 8.5 or newer on the workstation.** Agentworks uses the first `ssh` on your `PATH`
   (ignoring empty and relative `PATH` entries) and checks its version once per run. A missing or
@@ -226,13 +240,13 @@ has started.
   directory before `PATH`, and on POSIX an empty or relative `PATH` entry means the current
   directory. Agentworks now starts every workstation program by its path in an absolute `PATH`
   directory: `tailscale`, PowerShell, the 1Password CLI `op`, `git`, `taskkill`, local Lima's
-  `limactl`, VS Code's `code`, your `EDITOR`, and the `ssh` and `scp` of the commands that still use
-  the older SSH path (VM and agent initialization, sessions, workspaces and backups). A program
-  found only in the current directory counts as not installed, so `agw doctor` and the 1Password
-  backend's readiness no longer vouch for one. An `EDITOR` given as a path is run as given. On
-  Windows, `workspace create --open-vscode` does not start VS Code: its `code` command is a batch
-  file, which only `cmd.exe` can run, and `cmd.exe` parses the workspace path by its own rules. The
-  warning names the workspace file to open in VS Code yourself.
+  `limactl`, VS Code's `code`, your `EDITOR`, and the `ssh` and `scp` of the requests that still use
+  the older SSH path (sessions). A program found only in the current directory counts as not
+  installed, so `agw doctor` and the 1Password backend's readiness no longer vouch for one. An
+  `EDITOR` given as a path is run as given. On Windows, `workspace create --open-vscode` does not
+  start VS Code: its `code` command is a batch file, which only `cmd.exe` can run, and `cmd.exe`
+  parses the workspace path by its own rules. The warning names the workspace file to open in VS
+  Code yourself.
 - **`python3` on the VM.** Every request starts a small Python program on the VM. A VM without
   `python3`, or with one that lacks its standard library, is reported as unable to run Agentworks
   requests. New VMs get it at provisioning. `vm reinit` and `vm confirm-release` now connect the
@@ -299,6 +313,72 @@ has started.
   keeps running after its terminal closes. It exits non-zero when a forward cannot be set up (a busy
   local port, for example) instead of running with nothing forwarded.
 
+### Backups
+
+`vm backup` archives the workspaces as detached work on the VM, so the archive keeps running when
+the connection drops, and the backup says when it loses the connection and when it regains it, then
+downloads the archive once it is complete. Nothing is staged in `/var/tmp` any more: the archive is
+built in a root-only directory under `/var/lib/agentworks/detached`, which is removed when the
+backup ends. One that a killed backup left behind is removed, once its archive has ended, by the
+first backup on that VM a week or more later. Ctrl-C stops the archive's whole process group on the
+VM, and an interrupted download leaves no partial file. A backup by an earlier release that was
+killed part way may have left `/var/tmp/agentworks-backup-*`, `/var/tmp/_aw_detached_*` or
+`/var/tmp/_aw_paths_*.txt` on the VM; this release does not look for them, so remove them as root on
+the VM once no backup is running.
+
+### Workspaces
+
+- **Links are not followed.** A workspace's generated `.tmuxinator.yml` and the admin's
+  `~/.config/tmuxinator` directory are written by the file program, which refuses a symbolic link at
+  the file or any parent, so a workspace path below a link (most likely a `paths.vm_workspaces` that
+  is, or lies under, a symbolic link on the VM), or a linked `~/.config` or `~/.config/tmuxinator`,
+  now fails `workspace create`, `workspace copy` and `workspace rehome` where it was followed. A
+  failed `workspace create` removes what it created, as for any other failure. A refused
+  `workspace copy` leaves the extracted tree in the new directory and no workspace row, so remove
+  that directory before retrying. A refused `workspace rehome` leaves the copied tree at the new
+  path and the workspace where it was, its error naming both; remove the new directory before
+  retrying. The session commands regenerate the config as a convenience: a refusal there, or any
+  failed request, now warns and leaves the session command's result standing, where a failure of the
+  regeneration used to fail the command. To put workspaces on a data volume, mount it, or bind-mount
+  a directory of it, at `paths.vm_workspaces` instead of linking it there.
+- **`paths.vm_workspaces` must be an absolute directory below the root.** A relative value, `/`
+  itself, or a value with a `..` component is refused when the configuration loads, since every
+  workspace path on the VM is built from it; `workspace rehome --target` follows the same rule. An
+  accepted value is normalized: empty and `.` components are dropped, so a trailing `/` goes and a
+  leading `//` reads as `/`. A workspace created under a relative value is rewritten, when the state
+  database migrates, to the absolute path it already had on the VM, under the VM admin's home, where
+  agents cannot reach it, as in 0.19; `agw workspace rehome <name>` moves it to
+  `paths.vm_workspaces`. Its harness setup was recorded against the relative spelling, so its setup
+  record is stale until the workspace is rehomed; rehome records the setup at the new path. One
+  created under a value starting with `~` keeps its stored path, since which home it named is not
+  recorded. `workspace rehome` refuses such a path before anything runs, and the session commands
+  warn instead of updating its tmuxinator config and defer delivering MCP servers to its sessions.
+  `workspace delete` removes its row, sessions, grants, group and tmuxinator link, but nothing the
+  path names, warning that its directory and tmuxinator config are left on the VM to check by hand;
+  the workspace can then be recreated under the same name. A stored path with a `..` component, from
+  an absolute value typed with one or a relative value such as `../ws` once rewritten, names its
+  directory only once the VM resolves it: the session commands warn instead of updating its
+  tmuxinator config and defer delivering MCP servers to its sessions, `workspace delete` removes its
+  directory and link, and `workspace rehome` moves it to a path without one.
+- **`workspace rehome --target` takes an absolute path.** A relative path, a `host:path`, the root,
+  or a path with an empty, `.` or `..` component is refused before anything runs; a trailing `/` is
+  dropped. A target that is the workspace's directory, inside it, or around it once the VM resolves
+  symbolic links is refused before the confirmation, where the copy used to run into its own source.
+- **`workspace copy` refuses an occupied destination.** A directory, file or link already at the new
+  workspace's path is refused before anything is extracted, as `workspace create` refuses it, where
+  the copy used to extract into it.
+- **`workspace copy` stages nothing on the VM.** The source tree travels through the workstation as
+  a compressed tar stream that is never unpacked there, and the destination extracts it from the
+  request's input as root instead of from a file in its `/var/tmp`. Extracted files are root's until
+  the copy gives the tree to the admin and the workspace group, rather than keeping the source's
+  owners in between. The extraction has no time limit, where the upload and the unpack were bounded
+  at 300 and 120 seconds. The source read is written to its own operation log on the source VM,
+  `workspace-copy-source`, beside the destination's `workspace-copy`.
+- **`workspace repair` reads up to 64 MiB of a recursive step's output.** On a tree so large or so
+  damaged that `chown -c` or `chmod -c` prints more, the ownership step stops reading and warns; it
+  may have stopped part way, and running repair again continues it. A `getfacl` listing larger than
+  that leaves the ACL comparison not verified, as a failed listing does.
+
 ## Create, reinit and the VM contract
 
 `vm create`, `vm reinit` and `vm confirm-release` reach the VM through the same connection layer.
@@ -328,8 +408,154 @@ has started.
   names recreation. The pam_env settings and an unsupported login shell only warn.
 - **The operation log** records each of these requests by its shape: the command's arguments, or a
   script's shell, with the working directory, the names of its environment variables and its
-  deadline. A script's text and an environment variable's value are not written. Commands still on
-  the old path log as before.
+  deadline. A script's text and an environment variable's value are not written. Requests still on
+  the older SSH path (sessions) log as before.
+
+### Initialization steps
+
+Every step of `vm create` and `vm reinit` initialization, and of `agent create` and `agent reinit`,
+runs through the new layer. Agent initialization runs as the admin only to create the account and
+place its `authorized_keys`; every later step runs as the agent, which cannot run anything as root.
+
+- **System files are written without following links.** The files initialization owns under `/etc`
+  (the cloud-init host-key drop-in, the sysctl baseline, `/etc/fstab`'s `/proc` line, the tailscaled
+  drop-in, the sshd and sudoers fragments, the identity profile, the `/etc/zsh/zprofile` block, the
+  skel seeds, the grub SVE drop-in and the apt source lists) are written by the file program, which
+  refuses a symbolic link at the file or any parent; a sudoers fragment is staged that way and
+  renamed into place once `visudo` accepts it. A refused file is a step warning, and the link's
+  target is left as it is.
+- **sshd is reloaded only when its fragment changes.** The sshd fragment is written, checked with
+  `sshd -t` and sshd reloaded only when its content differs, where every initialization used to
+  reload sshd. It leaves no `.bak` file.
+- **A file whose reload fails is put back.** When `sshd -t` or the sshd reload, loading the sysctl
+  baseline (now `sysctl -p` of that file alone, not `sysctl --system`), or `systemctl daemon-reload`
+  after the tailscaled drop-in fails, times out or is interrupted, the file gets its previous
+  content back (or is removed if it is new), with a warning, so the next `vm reinit` tries again. If
+  putting it back fails, a separate warning names the file, which then holds content that is not in
+  effect and that the next `vm reinit` will not retry: put its previous content back or remove it,
+  then reinit. If something else changed the file in the meantime, nothing is put back and the next
+  `vm reinit` tries again.
+- **`/etc/fstab` keeps its owner, group and mode** when its `/proc` line changes, and a `hidepid`
+  value already on that line is kept, a name such as `hidepid=invisible` included; only a missing
+  `hidepid`, `hidepid=0` or `hidepid=off` becomes `hidepid=1`.
+- **Step warnings show what failed.** A failed step's warning ends with the last three lines of the
+  command's error output, with secrets removed.
+- **The DNS check warns when it cannot run.** A DNS probe that fails to run or times out warns and
+  initialization goes on. The issue #117 latch still stops it. A mise lockfile step that cannot
+  create its directory warns too.
+- **Some failures stop initialization instead of warning.** A host key that does not match the VM's
+  record, a VM with no record, and a VM that cannot run Agentworks requests fail initialization at
+  the first request, with that error, instead of turning every later step into a warning. A failed
+  install of the required system packages stops it, as before.
+- **Linked rc files are not written through.** The source lines that make `~/.profile`, `~/.bashrc`,
+  `~/.zprofile` and `~/.zshrc` load the Agentworks fragments are never appended through a symbolic
+  link. When one of those files is a link (for example into a dotfiles checkout) and the file it
+  links to already sources the fragment, initialization accepts it. When it does not, initialization
+  warns, naming the line to add, and stays partial: until that line is in your dotfiles, that
+  account's login shells lack `AGENTWORKS_AGENT` and the `PATH` entries of its install commands and
+  mise. Add the line from the warning, such as `. /home/agentworks/.agentworks-profile.sh`, to the
+  file the link points to, then reinit. The old behavior edited the checkout through the link, which
+  then blocked its next `git pull`.
+- **Other links in a home are refused too.** The profile and rc fragments, the mise config and
+  lockfile, `authorized_keys` and the agent's `.ssh` are written by the file program, which refuses
+  a link at the file or any parent. A mise config that is a link (or sits in a linked directory) is
+  not written, with its own warning, so `mise_packages` does not reach it until the template drops
+  `mise_packages` or the dotfiles drop the link. A local dotfiles destination that is a link is
+  refused, and a git-sourced `mise.lock` that is a link in its repository is refused with a warning.
+  Git checkouts and the apt key downloads follow links, as before.
+- **A source line that cannot be added warns.** A failed source-line append used to be silent; it
+  now warns and leaves initialization partial. A bash account no longer gets a `~/.zprofile` or
+  `~/.zshrc` created for it.
+- **Files in the home get a fixed mode.** The admin's profile and rc fragments and mise config, and
+  the mise lockfile from either source, are written 0644. A `PATH` entry contributed twice keeps the
+  precedence of its last occurrence for the admin too, as it already did for agents.
+- **Local dotfiles are replaced through a temporary copy.** A local `dotfiles_source` directory is
+  unpacked beside the destination first, and the previous tree is put back if the upload fails or is
+  interrupted; a run killed outright leaves the previous tree beside the destination, and the next
+  reinit moves it back. The replacement no longer leaves the reinit partial.
+- **`dotfiles_destination` is checked when the template loads.** It is a path in the home (`dots` or
+  `~/dots`) or an absolute path. It may not name the home itself or one of its parents, may not be,
+  hold or lie inside a path Agentworks manages in that account's home (`~/.ssh`, `~/.agentworks`,
+  `~/.agentworks-artifacts` and the `~/.agentworks-*.sh` fragments, and for the admin also the
+  workspaces' `~/.config/tmuxinator`, so an admin's `~/.config` is refused too), and may not contain
+  an empty, `.` or `..` component; a trailing `/` is dropped, and only its leading `~` is expanded.
+  A stored destination such as `dots` keeps meaning `~/dots`.
+- **Git source URLs may not carry credentials.** A `git::https://` source whose URL holds a user
+  name or token, such as `https://user:token@github.com/...`, is refused when the template loads,
+  without echoing it; declare a `git-credential` resource for the host instead. A subpath with an
+  empty or `.` component is refused too, as one with `..` was.
+- **Replace a stored spec whose source reference is now refused.** An agent created or reinitialized
+  with `--spec`, or a VM created with `--admin-spec`, holding a source reference this release
+  refuses (a `git::https://` URL with a user name or token in it, a remote written without `git::`,
+  or such a harness settings `source`) keeps that spec stored. Every command that uses that agent's
+  or VM's spec, a plain `agw agent reinit <name>` or `agw vm reinit <name>` among them, refuses it,
+  naming the field but not the value; other commands, deletes and listings included, work as before.
+  Supersede it with `agw agent reinit <name> --spec '<complete replacement spec>'` or
+  `agw vm reinit <name> --admin-spec '<complete replacement admin spec>'`, or clear it with
+  `--spec '{}'` or `--admin-spec '{}'`; `agw doctor` names the same repair. `vm reinit` now takes
+  `--admin-template` and `--admin-spec`, as `agent reinit` takes `--update-template` and `--spec`.
+  While a record awaits its replacement, inspection output (`resource show`, `resource list`'s
+  used-by count, `secret describe`, and `graph show`'s dependents) leaves out the references that
+  owner's stored spec makes. The describe commands' `instance_state` reports such a spec, and a
+  saved harness activation list, as unavailable with reason `replacement-required` and issue
+  `instance-spec-replacement-required`; an activation list used to read `unsupported-version` and
+  `instance-spec-unsupported`. JSON stays at schema version 1, since a reclassified case is not a
+  change of shape (see the command reference's
+  [compatibility rules](../../cli/command-reference.md#errors-and-compatibility)), so a consumer
+  that matched the old values must now accept the new ones.
+- **A remote written without `git::` is refused.** A source reference (`dotfiles_source`,
+  `mise_lockfile`, an artifact's `source`, a harness settings `source`) holding `://` or `::`, or
+  whose first path component holds a colon that is not a Windows drive letter (as in
+  `user@host:path`), which used to be read as a local path, is refused when it loads; write a git
+  remote as `git::https://...` or `git::git@host:path`.
+- **A git dotfiles checkout follows its `ref`.** Every sync, fresh clone or reinit, fetches the
+  template's `ref` (the remote's default branch when there is none) and checks it out detached, so a
+  changed or dropped `ref` takes effect, a branch advances and a tag is checked out. A commit `ref`
+  must be the full hash. The admin used to pull whatever branch the clone was on, so a local branch
+  in the checkout is no longer advanced; commit your dotfiles changes upstream. A failed sync now
+  skips the dotfiles install for agents too, as it does for the admin, instead of running it over
+  the previous checkout.
+- **A dotfiles clone whose origin holds a credential is refused.** An existing checkout must be a
+  clone of the `dotfiles_source` URL itself; one cloned from a URL with a user name or token in it
+  is refused, without echoing either URL. Point it at the plain URL with
+  `git -C <dotfiles_destination> remote set-url origin <url>` and declare a `git-credential`
+  resource for the host.
+- **The admin's dotfiles install runs in a login shell,** in the checkout, as the agent's always
+  has, with the new layer's environment and fixed `PATH` underneath it.
+- **Git credentials reconcile under bash** for every account, so an admin or agent whose login shell
+  is `sh` or `dash` gets its credentials.
+- **Agent install commands check completion as the admin's do.** An agent's `test_exec` check runs
+  in an interactive login shell (`-lic`), as the admin's always has, and the agent's mise config,
+  lockfile and install follow the admin's steps; its profile, rc and mise warnings now also reach
+  the agent's operation log.
+- **Agents follow the admin's mise and install-command order.** An agent now gets the mise config
+  from `mise_packages`, then its dotfiles sync, then the mise lockfile and install, then its user
+  install commands, as the admin always has. Three things change for agents:
+  - A template with `mise_packages` whose dotfiles also provide `~/.config/mise/config.toml` now
+    ends with the dotfiles' config, where the template's used to overwrite it. Drop `mise_packages`
+    if the dotfiles own the config, or stop shipping it in the dotfiles.
+  - Dotfiles that supply a mise config without `mise_packages` or `mise_lockfile` now get a
+    `mise install`, and a prune on reinit when `mise_prune_on_reinit` is on.
+  - User install commands run after the mise install instead of before the dotfiles, so they see
+    what the dotfiles installed and mise's tools. The profile always carries mise's shims on `PATH`,
+    behind the install commands' own `PATH` entries, as the admin's does; an install command's
+    directory now takes precedence over a mise shim of the same name, where the shims used to win.
+- **Every account's profile and rc fragments are written first.** Each account's profile, with
+  mise's shims and every declared install-command `path`, and its rc fragment are written before its
+  dotfiles sync, and their source lines are ensured again after the dotfiles install and the mise
+  install, before the user install commands, and at the end. A user install command that fails
+  warns, and its paths leave the profile once the account's install commands finish.
+  - An agent's user install commands and their `test_exec` checks now find mise's shims and their
+    declared paths on their login shell's `PATH`, on create and reinit alike; at v0.19.0 they found
+    neither.
+  - The admin's find them on a first create too, where they used to only from the next reinit. An
+    admin install command or check that looks up a tool mise also provides can now find mise's on a
+    first create.
+  - The admin's dotfiles installer and mise install see the profile on a first create as well,
+    including its `umask 027`, as they already did on reinit.
+- **A missing login shell warns.** Setting the admin's login shell to one that is not installed
+  fails the shell configuration step with a warning, instead of running `usermod` with an empty
+  shell.
 
 ## Start, recover, rekey and delete
 
@@ -422,6 +648,57 @@ before they resolve the auth key.
   terminal itself), the rest of that output is dropped and the command carries on to the end, a
   create's rollback included, with the exit status it would have had. Output redirected to a file
   that cannot be written, such as on a full disk, still fails the command.
+
+## Native harness setup
+
+Artifact discovery for Claude Code, Codex and Grok Build runs the VM's `/usr/bin/python3` after the
+account's login and interactive startup files. It no longer runs the first `python3` on the login
+`PATH`, so an interpreter a version manager puts first is not used for it.
+
+Artifact files, generated instruction sections and mapped native settings are published, checked and
+retired by one small Python program per operation, with the content sent on its input instead of
+staged in a temporary directory on the VM. Every such write on a VM, by any account, takes one lock,
+`/run/lock/agentworks-files.lock`; one that cannot take it within 30 seconds fails, saying that
+another Agentworks operation is writing files on the VM, and changes nothing.
+
+## Third-party harness integrations, Git credential providers and secret backends
+
+Every capability's stages receive a `RunContext`, whose execution accessors changed: a stage that
+needs to reach the VM reads `ctx.admin_access()` or `ctx.agent_access()`, each that identity's
+`VMAccess` from `agentworks.execution` or `None`, and `ctx.admin_target()` and `ctx.agent_target()`
+are gone. Registration matches contract versions exactly, so each kind's version moved and an
+implementation that still declares the old one is refused. Every shipped implementation already
+declares the new one.
+
+| Kind                | Old version | New version |
+| ------------------- | ----------- | ----------- |
+| harness-integration | 7           | 8           |
+| git-credential      | 3           | 4           |
+| secret-backend      | 1           | 3           |
+
+Secret-backend skips 2, the number of the incompatible 0.14 contract, so no implementation written
+for it can register. Beyond the version and the accessors:
+
+- **Harness integrations.** `_probe_target(access)` receives the launch target's `VMAccess` and
+  passes it to `require_commands(commands, access, ...)`. A setup facet's invocation carries
+  `access`, `files`, that access's file operations under setup's per-request bound, and
+  `redactions`, every secret the operation resolved or logs, to sanitize any guest text an error
+  quotes, in place of `runner`; `request_environment(local)` gives a request's `env`, the setup
+  environment with the facet's own variables but never an `AGENTWORKS_*` one, which the runner
+  applied to every command. `SetupReadiness` no longer carries a runner. `probe_native` takes a
+  `VMAccess` first and the invocation's `redactions`. `check_required_commands` and
+  `run_user_shell_command` take a `VMAccess` and an optional `deadline` in seconds, and
+  `run_user_shell_command` returns the command's exit status.
+- **Git credential providers.** A provider's runup check reads the access the same way.
+- **Secret backends.** Nothing else changes.
+
+For a harness integration's or a Git credential provider's command checks, an indeterminate check
+raises `ExternalError` and a request that may not have run raises its typed execution error. Code
+that only warns catches `ConnectivityError`, `ExternalError` and `VMNotReady`, as the shipped
+providers do, and lets every other error propagate; `VMNotReady` is on the list because a VM without
+`python3` counts as indeterminate.
+
+The capability READMEs under `cli/agentworks/capabilities/` describe each contract in full.
 
 ## Third-party VM platforms
 

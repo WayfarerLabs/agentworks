@@ -56,7 +56,8 @@ def test_ancestor_claim_sources_are_retained_without_retaining_removed_local_def
     checkpoints: list[tuple[NativeClaim, ...]] = []
     invocation = UserSetupInvocation(
         vm=vm,
-        runner=target,
+        access=(access := target.access()),
+        files=access.files(),
         prior=None,
         checkpoint=checkpoints.append,
         username="fixture",
@@ -148,7 +149,8 @@ def test_shared_name_keeps_ancestor_source_across_dispatch_retries_local_changes
     checkpoints: list[tuple[NativeClaim, ...]] = []
     invocation = UserSetupInvocation(
         vm=vm,
-        runner=target,
+        access=(access := target.access()),
+        files=access.files(),
         prior=None,
         checkpoint=checkpoints.append,
         username="fixture",

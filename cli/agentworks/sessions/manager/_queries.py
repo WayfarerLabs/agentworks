@@ -245,7 +245,9 @@ def _delete_session_runtime(
 
             from agentworks.artifacts.session import cleanup_session_artifacts
 
-            cleanup_session_artifacts(db, session, session_target)
+            cleanup_session_artifacts(
+                db, session, _mgr._session_access(session, vm=vm, config=config, db=db, logger=admin_target.logger)
+            )
             _require_selected_session(db, name, selected_session_uuid)
             db.delete_session(name)
 

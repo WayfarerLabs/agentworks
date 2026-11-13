@@ -136,6 +136,7 @@ class SSHLogger:
         command_stem: str,
         *,
         redactions: tuple[str, ...] = (),
+        path: Path | None = None,
     ) -> None:
         from datetime import UTC, datetime
 
@@ -143,9 +144,10 @@ class SSHLogger:
 
         timestamp = datetime.now(tz=UTC).strftime("%Y%m%dT%H%M%SZ")
         self.vm_name = vm_name
-        self.path = LOG_DIR / f"{vm_name}-{timestamp}-{command_stem}.log"
+        self.path = path or LOG_DIR / f"{vm_name}-{timestamp}-{command_stem}.log"
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._active_handler: _PropagatingFileHandler | None = None
+        self._secrets = tuple(dict.fromkeys(secret for secret in redactions if secret))
         normalized: list[str] = []
         for secret in redactions:
             if not secret:
@@ -181,16 +183,18 @@ class SSHLogger:
         """
         return format_host_path(self.path)
 
-    def sanitize(self, text: str, *, normalize: Callable[[str], str] | None = None) -> str:
-        """Redact operation secrets, optionally matching already-normalized text."""
-        patterns = (
-            self._redact
-            if normalize is None
-            else tuple(
-                sorted({value for secret in self._redact if (value := normalize(secret))}, key=len, reverse=True)
-            )
-        )
-        for secret in patterns:
+    @property
+    def redactions(self) -> tuple[str, ...]:
+        """The secrets registered at construction, for text this operation reports outside its log.
+
+        A guest diagnostic quoted in an error never passes through the log's
+        sink, so code that builds one sanitizes it with these.
+        """
+        return self._secrets
+
+    def sanitize(self, text: str) -> str:
+        """Redact operation secrets."""
+        for secret in self._redact:
             text = text.replace(secret, "[REDACTED]")
         return text
 

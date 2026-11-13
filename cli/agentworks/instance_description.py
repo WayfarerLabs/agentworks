@@ -25,6 +25,10 @@ if TYPE_CHECKING:
 
 
 type InstanceSpecStatus = Literal["absent", "present", "unavailable"]
+type InstanceSpecUnavailableReason = Literal[
+    "malformed", "unsupported-version", "replacement-required", "migration-pending"
+]
+"""Why a stored instance spec is unavailable; ``replacement-required`` is ``ExplicitReplacementRequired``."""
 type LifecycleEvidenceStatus = Literal["recorded", "not-recorded", "unavailable"]
 type InstanceComparisonState = Literal["not-recorded", "unverifiable", "match", "drift"]
 
@@ -36,7 +40,7 @@ class InstanceSpec:
     status: InstanceSpecStatus
     recorded_at: str | None = None
     spec: JsonObject | None = None
-    reason: Literal["malformed", "unsupported-version", "migration-pending"] | None = None
+    reason: InstanceSpecUnavailableReason | None = None
 
     def __post_init__(self) -> None:
         if self.status == "absent":
@@ -113,6 +117,7 @@ class InstanceStateIssueCode(StrEnum):
 
     INSTANCE_SPEC_MALFORMED = "instance-spec-malformed"
     INSTANCE_SPEC_UNSUPPORTED = "instance-spec-unsupported"
+    INSTANCE_SPEC_REPLACEMENT_REQUIRED = "instance-spec-replacement-required"
     INSTANCE_SPEC_MIGRATION_PENDING = "instance-spec-migration-pending"
     CURRENT_DECLARATION_UNRESOLVED = "current-declaration-unresolved"
     REGISTRY_UNAVAILABLE = "registry-unavailable"
@@ -233,6 +238,7 @@ def single_declaration_instance_state[T: BaseModel, R](
     """Collect one non-VM declaration slot from a singular DB inspection."""
     from agentworks.errors import NotFoundError, StateError
     from agentworks.instance_specs import (
+        ExplicitReplacementRequired,
         InstanceOverlay,
         UnsupportedStoredOverlayError,
         decode_stored_overlay,
@@ -281,6 +287,12 @@ def single_declaration_instance_state[T: BaseModel, R](
             instance_spec = InstanceSpec("unavailable", reason="migration-pending")
             issues.append(
                 InstanceStateIssue(InstanceStateIssueCode.INSTANCE_SPEC_MIGRATION_PENDING, slot=instance_kind)
+            )
+        except ExplicitReplacementRequired:
+            unavailable = True
+            instance_spec = InstanceSpec("unavailable", reason="replacement-required")
+            issues.append(
+                InstanceStateIssue(InstanceStateIssueCode.INSTANCE_SPEC_REPLACEMENT_REQUIRED, slot=instance_kind)
             )
         except UnsupportedStoredOverlayError:
             unavailable = True

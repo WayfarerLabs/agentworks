@@ -5,8 +5,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from agentworks import output
-from agentworks.errors import NotFoundError, StateError, UserAbort
+from agentworks.errors import NotFoundError, StateError, UserAbort, ValidationError
+from agentworks.vms.home_layout import AGENTWORKS_ARTIFACTS
 from agentworks.vms.manager import gated_vm_boundary
+from agentworks.workspaces.guest import stored_workspace_path
 from agentworks.workspaces.manager._common import _workspace_scope
 
 if TYPE_CHECKING:
@@ -58,6 +60,16 @@ def delete_workspace(
             entity_kind="workspace",
             entity_name=name,
         )
+    # A stored path that names no one directory (a '~' row the state migration
+    # left relative) is never acted on: the row, its sessions, grants, group and
+    # console link still go, so the name can be reused, and the VM's files are
+    # left for the operator to check.
+    try:
+        stored_workspace_path(ws.workspace_path)
+    except ValidationError:
+        path_known = False
+    else:
+        path_known = True
 
     # Check for sessions
     session_count = len(db.list_sessions(workspace_name=name))
@@ -69,11 +81,20 @@ def delete_workspace(
             hint="Delete the sessions first, or pass --force to also delete them.",
         )
 
-    if not yes:
-        msg = (
-            f"Delete workspace '{name}' and its files? "
-            "Uncommitted changes, untracked files, stashes and commits not pushed elsewhere will be lost."
+    if not path_known:
+        output.warn(
+            f"Workspace '{name}' has the stored path {ws.workspace_path!r}, which names no one directory on the VM, "
+            "so its directory and tmuxinator config are not touched. Check the VM for them by hand."
         )
+
+    if not yes:
+        if path_known:
+            msg = (
+                f"Delete workspace '{name}' and its files? "
+                "Uncommitted changes, untracked files, stashes and commits not pushed elsewhere will be lost."
+            )
+        else:
+            msg = f"Delete workspace '{name}'? Its files on the VM are kept."
         if session_count > 0:
             msg += f" ({session_count} session(s) will also be deleted)"
         if not output.confirm(msg):
@@ -84,7 +105,10 @@ def delete_workspace(
     with native_mutation_guard(
         db.path, ws.vm_name, held=None if vm_node is None else vm_node.held_native_guard
     ) as guard:
-        # Create SSH logger for VM operations
+        # The operation's log. It is an SSHLogger, not vms.manager.operation_log,
+        # only because session teardown and kill_session_windows still take a
+        # legacy transport, which logs through one; they move in transport take
+        # 2's sessions batch.
         import contextlib
 
         from agentworks.ssh import SSHLogger
@@ -178,15 +202,20 @@ def delete_workspace(
                             entity_name=name,
                             hint="Resolve the stuck sessions manually before retrying.",
                         )
-                if vm is not None:
+                if vm is not None and path_known:
                     from agentworks.harness_setup.cleanup import cleanup_workspace_excludes
-                    from agentworks.transports import transport
+                    from agentworks.sessions.manager import _identity_access
 
-                    cleanup_workspace_excludes(db, ws, lambda: target or transport(vm, config, logger=ssh_logger))
+                    cleanup_workspace_excludes(
+                        db,
+                        ws,
+                        lambda: _identity_access(vm, config, None, logger=ssh_logger),
+                        redactions=ssh_logger.redactions,
+                    )
                 if vm is not None and target is not None:
                     from agentworks.artifacts.session import cleanup_session_artifacts
                     from agentworks.harness_setup.state import read_native_setup
-                    from agentworks.sessions.manager import _build_session_target
+                    from agentworks.sessions.manager import _session_access
 
                     for session in db.list_sessions(workspace_name=name):
                         try:
@@ -195,14 +224,13 @@ def delete_workspace(
                                 for record in read_native_setup(db, "session", session.name).records
                             ):
                                 continue
-                            session_target = _build_session_target(
-                                session, vm=vm, config=config, db=db, admin_target=target
+                            cleanup_session_artifacts(
+                                db, session, _session_access(session, vm=vm, config=config, db=db, logger=ssh_logger)
                             )
-                            cleanup_session_artifacts(db, session, session_target)
                         except Exception:
                             output.warn(
                                 f"Private artifact cleanup for session '{session.name}' could not finish. "
-                                f"Check ~/.agentworks-artifacts/session/{session.session_uuid} in that session user's "
+                                f"Check ~/{AGENTWORKS_ARTIFACTS}/session/{session.session_uuid} in that session user's "
                                 "home; remaining files will no longer have managed cleanup evidence after deletion."
                             )
                 db.delete_sessions_for_workspace(name)
@@ -221,10 +249,14 @@ def delete_workspace(
 
                     revoke_workspace_grants(db, config, name, vm)
 
-                if vm is not None:
+                if vm is not None and path_known:
                     from agentworks.workspaces.backends.vm import delete_vm_workspace
 
                     delete_vm_workspace(vm, config, name, ws.workspace_path, ws.linux_group, logger=ssh_logger)
+                elif vm is not None:
+                    from agentworks.workspaces.backends.vm import delete_vm_workspace_keeping_files
+
+                    delete_vm_workspace_keeping_files(vm, config, name, ws.linux_group, logger=ssh_logger)
 
                 # Remove .code-workspace file
                 vscode_path = config.paths.vscode_workspaces / f"{name}.code-workspace"

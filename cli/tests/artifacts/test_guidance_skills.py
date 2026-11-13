@@ -271,15 +271,15 @@ def test_generated_guidance_supporting_file_is_updated_and_retired_with_its_entr
     target = LocalFixtureTransport(tmp_path / "guest")
     item = artifact(ArtifactType.RULE)
     initial = guidance_skills(str(target.home / "skills"), received(item))
-    owned = publish_artifacts(target, initial, (), lambda files: None, roots=(str(target.home),)).files
+    owned = publish_artifacts(target.files(), initial, (), lambda files: None, roots=(str(target.home),)).files
     assert len(owned) == 2
     changed = replace(item, content=replace(item.content, text="Revised literal body.\n"))
     desired = guidance_skills(str(target.home / "skills"), received(changed))
-    updated = publish_artifacts(target, desired, owned, lambda files: None, roots=(str(target.home),)).files
+    updated = publish_artifacts(target.files(), desired, owned, lambda files: None, roots=(str(target.home),)).files
     assert {file.path for file in owned} == {file.path for file in updated}
     for file in desired:
         assert Path(file.path).read_bytes() == file.data
     assert all(before.sha256 != after.sha256 for before, after in zip(owned, updated, strict=True))
-    retired = publish_artifacts(target, (), updated, lambda files: None, roots=(str(target.home),))
+    retired = publish_artifacts(target.files(), (), updated, lambda files: None, roots=(str(target.home),))
     assert not retired.files and not retired.skipped
     assert all(not Path(file.path).exists() for file in desired)

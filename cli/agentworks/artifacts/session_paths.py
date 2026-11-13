@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from agentworks.artifacts.names import is_artifact_name
 from agentworks.errors import StateError
-from agentworks.native_files import native_path
+from agentworks.execution.files import guest_path
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -35,17 +35,17 @@ def session_publication_roots(
     Outside the private directory, only a standalone skill package whose native
     identity and directory carry this session's namespace is authorized.
     """
-    native_path(home)
-    roots = [native_path(directory)]
+    guest_path(home)
+    roots = [guest_path(directory)]
     prefix = session_package_prefix(session_uuid, run_id)
     entry = session_package_prefix(session_uuid) + "entry"
     for file in files:
-        path = native_path(file.path)
+        path = guest_path(file.path)
         if path.startswith(directory + "/"):
             continue
         package = file.package_root
         if package is not None:
-            package = native_path(package)
+            package = guest_path(package)
             name = PurePosixPath(package).name
             parent = str(PurePosixPath(package).parent)
             if (

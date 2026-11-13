@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, ClassVar, Literal, cast
 from unittest.mock import MagicMock
@@ -20,16 +19,32 @@ from agentworks.capabilities.git_credential.base import (
 from agentworks.capabilities.git_credential.github import _GH_AUTH_CHECK, GitHubCredentialProvider
 from agentworks.command_checks import run_user_shell_command
 from agentworks.errors import StateError, TokenRejectedError, ValidationError
+from agentworks.execution.errors import RequestRefused, TrustMismatch, TrustMissing
+from agentworks.execution.results import (
+    Completed,
+    NotDelivered,
+    NotDeliveredReason,
+    Result,
+    Unknown,
+    UnknownReason,
+)
 from agentworks.git_credentials import CredentialRequest, materialize_credential_state
 from agentworks.orchestration.secrets import ScopedSecrets
 from agentworks.plugins.azure.azdo import _AZ_AUTH_CHECK, AzDOCredentialProvider
 from agentworks.schema import AgwModel, NonEmptyStr, SecretRef
-from agentworks.ssh import SSHError, SSHResult
 from tests.conftest import requires_posix_shell
+from tests.vm_access_support import (
+    Admin,
+    Agent,
+    RecordingVMAccess,
+    account_shell,
+    answer_command_checks,
+    local_vm_access,
+)
 
 if TYPE_CHECKING:
+    from agentworks.execution.access import VMAccess
     from agentworks.git_credentials.nodes import GitCredentialNode
-    from agentworks.transports import Transport
 
 
 def _probe(status: int, body: bytes = b"{}", headers: dict[str, str] | None = None):  # noqa: ANN202
@@ -66,13 +81,13 @@ def _request(
     def scoped_context(
         names: tuple[str, ...],
         *,
-        admin_target=None,  # noqa: ANN001
-        agent_target=None,  # noqa: ANN001
+        admin_access=None,  # noqa: ANN001
+        agent_access=None,  # noqa: ANN001
     ) -> RunContext:
         assert names == allowed
         return RunContext(
-            admin_target=admin_target,
-            agent_target=agent_target,
+            admin_access=admin_access,
+            agent_access=agent_access,
             secrets=ScopedSecrets(values, names),
         )
 
@@ -84,37 +99,12 @@ def _request(
     )
 
 
-class _ShellTarget:
-    def __init__(self, bin_dir: Path, args_path: Path, status: int) -> None:
-        self.bin_dir = bin_dir
-        self.args_path = args_path
-        self.status = status
-        self.home = bin_dir.parent / "home"
-        self.home.mkdir()
-        self.shell = bin_dir.parent / "login-shell"
-        self.shell.write_text(
-            '#!/bin/sh\ntest "$1" = -lic || exit 90\nPATH="$AGW_TEST_LOGIN_PATH" exec /bin/sh -c "$2"\n'
-        )
-        self.shell.chmod(0o755)
-
-    def run(self, command: str, **kwargs: object) -> SSHResult:
-        assert kwargs["check"] is False
-        assert kwargs["discard_output"] is True
-        result = subprocess.run(
-            ["/bin/sh", "-c", command],
-            check=False,
-            capture_output=True,
-            text=True,
-            env={
-                "PATH": "/usr/bin:/bin",
-                "HOME": str(self.home),
-                "SHELL": str(self.shell),
-                "AGW_TEST_LOGIN_PATH": str(self.bin_dir),
-                "AGW_TEST_ARGS": str(self.args_path),
-                "AGW_TEST_STATUS": str(self.status),
-            },
-        )
-        return SSHResult(result.returncode, result.stdout, result.stderr)
+def _cli_account(monkeypatch: pytest.MonkeyPatch, bin_dir: Path, args_path: Path, status: int) -> VMAccess:
+    """A local account whose login ``PATH`` is ``bin_dir`` alone, where a stub CLI records its arguments."""
+    home = bin_dir.parent / "home"
+    home.mkdir()
+    (home / ".profile").write_text(f'export PATH="{bin_dir}" AGW_TEST_ARGS="{args_path}" AGW_TEST_STATUS="{status}"\n')
+    return local_vm_access(monkeypatch, home=home, shell=account_shell(bin_dir.parent))
 
 
 def _stub_cli(bin_dir: Path, name: str) -> None:
@@ -176,13 +166,13 @@ def test_cli_runup_checks_current_target_without_forwarding_process_output(
     args_path = tmp_path / "args"
     if installed:
         _stub_cli(bin_dir, command_name)
-    target = _ShellTarget(bin_dir, args_path, status)
+    access = _cli_account(monkeypatch, bin_dir, args_path, status)
     details: list[str] = []
     warnings: list[str] = []
     monkeypatch.setattr("agentworks.output.detail", details.append)
     monkeypatch.setattr("agentworks.output.warn", warnings.append)
 
-    provider.runup(RunContext(agent_target=cast("Transport", target), secrets=ScopedSecrets({}, ())))
+    provider.runup(RunContext(agent_access=access, secrets=ScopedSecrets({}, ())))
 
     assert bool(details) is (role == "detail")
     assert bool(warnings) is (role == "warning")
@@ -203,22 +193,70 @@ def test_cli_runup_checks_current_target_without_forwarding_process_output(
 @pytest.mark.parametrize(
     "outcomes",
     [
-        (SSHError("untrusted transport detail"),),
-        (SSHResult(0, "", ""), SSHResult(255, "untrusted stdout", "untrusted stderr")),
+        (Result(Unknown(UnknownReason.CONNECTION), b"", b"", "untrusted transport detail"),),
+        (Result(NotDelivered(NotDeliveredReason.PYTHON_MISSING), b"untrusted stdout", b"untrusted stderr"),),
+        (Result(Completed(0), b"untrusted stdout", b"untrusted stderr"),),
     ],
 )
-def test_cli_runup_suppresses_transport_diagnostics(
+def test_cli_runup_warns_without_quoting_an_indeterminate_check(
     monkeypatch: pytest.MonkeyPatch,
     provider: GitCredentialProvider,
-    outcomes: tuple[SSHError | SSHResult, ...],
+    outcomes: tuple[Result, ...],
 ) -> None:
-    target = MagicMock()
-    target.run.side_effect = outcomes
+    access = RecordingVMAccess([], Agent("dev", "agent-dev"))
+    access.answer = answer_command_checks(status=None)  # the CLI is present; its auth check gets ``outcomes``
+    access.run_outcomes = list(outcomes)
     warnings: list[str] = []
     monkeypatch.setattr("agentworks.output.warn", warnings.append)
-    provider.runup(RunContext(agent_target=cast("Transport", target), secrets=ScopedSecrets({}, ())))
+    provider.runup(RunContext(agent_access=access, secrets=ScopedSecrets({}, ())))
     assert len(warnings) == 1
     assert "untrusted" not in warnings[0]
+
+
+@pytest.mark.parametrize(
+    "provider",
+    [
+        GitHubCredentialProvider("gh", {"source": {"mode": "gh-cli"}}),
+        AzDOCredentialProvider("ado", {"org": "my-org", "source": {"mode": "az-cli"}}),
+    ],
+)
+@pytest.mark.parametrize(
+    ("outcome", "error"),
+    [
+        (Result(Unknown(UnknownReason.HOST_KEY)), TrustMismatch),
+        (TrustMissing("box"), TrustMissing),
+        (Result(NotDelivered(NotDeliveredReason.REFUSED, "cwd")), RequestRefused),
+    ],
+    ids=["host-key-mismatch", "no-host-key-record", "refused"],
+)
+def test_cli_runup_lets_a_state_error_propagate(
+    monkeypatch: pytest.MonkeyPatch,
+    provider: GitCredentialProvider,
+    outcome: Result | BaseException,
+    error: type[Exception],
+) -> None:
+    access = RecordingVMAccess([], Agent("dev", "agent-dev"))
+    access.default_outcome = outcome
+    warnings: list[str] = []
+    monkeypatch.setattr("agentworks.output.warn", warnings.append)
+    with pytest.raises(error):
+        provider.runup(RunContext(agent_access=access, secrets=ScopedSecrets({}, ())))
+    assert warnings == []
+
+
+@pytest.mark.parametrize(
+    "provider",
+    [
+        GitHubCredentialProvider("gh", {"source": {"mode": "gh-cli"}}),
+        AzDOCredentialProvider("ado", {"org": "my-org", "source": {"mode": "az-cli"}}),
+    ],
+)
+def test_cli_runup_checks_are_bounded_by_a_deadline(provider: GitCredentialProvider) -> None:
+    access = RecordingVMAccess([], Agent("dev", "agent-dev"))
+    access.answer = answer_command_checks()
+    provider.runup(RunContext(agent_access=access, secrets=ScopedSecrets({}, ())))
+    assert access.requests()
+    assert all(request.deadline is not None for request in access.requests())
 
 
 @requires_posix_shell
@@ -237,10 +275,7 @@ def test_github_cli_checks_active_status_support_before_authentication(
 
     args_path = tmp_path / "args"
     provider.runup(
-        RunContext(
-            agent_target=cast("Transport", _ShellTarget(bin_dir, args_path, 0)),
-            secrets=ScopedSecrets({}, ()),
-        )
+        RunContext(agent_access=_cli_account(monkeypatch, bin_dir, args_path, 0), secrets=ScopedSecrets({}, ()))
     )
 
     assert not details
@@ -255,43 +290,48 @@ def test_github_cli_checks_active_status_support_before_authentication(
 @requires_posix_shell
 def test_cli_auth_probe_does_not_treat_native_status_21_as_auth_failure(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
     auth_check: str,
     command_name: str,
 ) -> None:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     _stub_cli(bin_dir, command_name)
-    target = cast("Transport", _ShellTarget(bin_dir, tmp_path / "args", 21))
+    access = _cli_account(monkeypatch, bin_dir, tmp_path / "args", 21)
 
-    assert run_user_shell_command(auth_check, target, timeout=10).returncode == 22
+    assert run_user_shell_command(auth_check, access, deadline=10) == 22
 
 
 @requires_posix_shell
-def test_cli_runup_warning_keeps_managed_helper(tmp_path: Path) -> None:
+def test_cli_runup_warning_keeps_managed_helper(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
+    _stub_cli(bin_dir, "gh")
+    warnings: list[str] = []
+    monkeypatch.setattr("agentworks.output.warn", warnings.append)
     provider = GitHubCredentialProvider("gh", {"source": {"mode": "gh-cli"}})
     request = _request(provider, {}, ())
     state = materialize_credential_state(
         (request,),
-        cast("Transport", _ShellTarget(bin_dir, tmp_path / "args", 1)),
+        _cli_account(monkeypatch, bin_dir, tmp_path / "args", 1),
         "agent",
         _config(),
     )
+    assert len(warnings) == 1
     assert state.has_credentials
 
 
 def test_disabled_runup_skips_cli_readiness_but_keeps_managed_helper() -> None:
     provider = GitHubCredentialProvider("gh", {"source": {"mode": "gh-cli"}})
-    target = MagicMock()
+    access = RecordingVMAccess([], Admin())
     state = materialize_credential_state(
         (_request(provider, {}, ()),),
-        cast("Transport", target),
+        access,
         "admin",
         _config(runup=False),
     )
     assert state.has_credentials
-    target.run.assert_not_called()
+    assert access.calls == []
 
 
 def test_github_secret_runup_uses_declared_input_and_authenticated_probe(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -355,7 +395,7 @@ class _ExchangeConfig(AgwModel):
 
 
 class _ExchangeProvider(GitCredentialProvider):
-    contract_version: ClassVar[int] = 3
+    contract_version: ClassVar[int] = 4
     name: ClassVar[str] = "exchange"
     description: ClassVar[str] = "test exchange provider"
     config_model: ClassVar[type[_ExchangeConfig]] = _ExchangeConfig
@@ -395,7 +435,7 @@ def test_materialization_skip_policy_reconciles_zero_survivors(monkeypatch: pyte
     provider = GitHubCredentialProvider("gh", {"source": {"mode": "secret"}})
     request = _request(provider, {"git-token-gh": "rejected"}, ("git-token-gh",))
     logger = MagicMock()
-    state = materialize_credential_state((request,), MagicMock(), "admin", _config(), logger)
+    state = materialize_credential_state((request,), RecordingVMAccess([], Admin()), "admin", _config(), logger)
     assert not state.has_credentials
     logger.warning.assert_called_once()
 
@@ -407,5 +447,5 @@ def test_disabled_runup_still_materializes_final_stored_credential(monkeypatch: 
     monkeypatch.setattr("agentworks.capabilities.git_credential.base._http_probe", explode)
     provider = GitHubCredentialProvider("gh", {"source": {"mode": "secret"}})
     request = _request(provider, {"git-token-gh": "value"}, ("git-token-gh",))
-    state = materialize_credential_state((request,), MagicMock(), "admin", _config(runup=False))
+    state = materialize_credential_state((request,), RecordingVMAccess([], Admin()), "admin", _config(runup=False))
     assert state.has_credentials

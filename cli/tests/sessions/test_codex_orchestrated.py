@@ -34,14 +34,23 @@ import pytest
 
 from agentworks.artifacts.declarations import ArtifactsConfig
 from agentworks.db import Database, InitStatus, ProvisioningStatus, SessionMode, SessionStatus
+from agentworks.execution.results import Completed, Result
+from agentworks.plugins.codex.harness_integration import discovery_probe, recorder_probe, rollout_probe
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.tmux import FingerprintProbe, ProbeStatus, TmuxServerFingerprint
 from tests.conftest import seed_vm_trust
+from tests.vm_access_support import check_result, install_access_recorder, is_command_check
 
 from ..conftest import stub_build_registry, stub_session_resolvers, stub_vm_gates
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from tests.vm_access_support import Call
+
+
+# Every access a command builds is the recording fake: these tests run no ssh.
+pytestmark = pytest.mark.usefixtures("vm_access_recorder")
 
 _SID = "939b1597-7c61-4ace-80f4-14617b7b4257"
 _OTHER_SID = "22222222-3333-4444-8555-666666666666"
@@ -67,13 +76,15 @@ class _Result:
 
 
 class _CodexTarget:
-    """Transport double for the codex op: answers the readiness
-    ``command -v codex`` probe and the three op-time probes (the recorder
-    read, the ``*-<sid>.jsonl`` rollout presence probe, and the
+    """Launch-target double for the codex op: its access answers the
+    readiness ``command -v codex`` check and the three op-time probes (the
+    recorder read, the ``*-<sid>.jsonl`` rollout presence probe, and the
     source-filtered discovery probe), recording each into a shared event
-    log. ``recorded`` seeds the recorder file with a codex-reported thread
-    id; ``rollout_present`` decides the bound-id fork; ``discovered``
-    (rollout paths, one per line) drives discovery."""
+    log. Each probe is matched by its builder, for session ``s1`` in
+    workspace ``/home/me/ws1``. ``recorded`` seeds the recorder file with a
+    codex-reported thread id; ``rollout_present`` decides the fork for the
+    ``bound`` id's rollout; ``discovered`` (rollout paths, one per line)
+    drives discovery."""
 
     def __init__(
         self,
@@ -82,28 +93,33 @@ class _CodexTarget:
         recorded: str | None = None,
         rollout_present: bool = False,
         discovered: str | None = None,
+        bound: str = _SID,
     ) -> None:
         self._events = events
         self._recorded = recorded
         self._present = rollout_present
         self._discovered = discovered
+        self._bound = bound
 
     def run(self, cmd: str, **kwargs: object) -> _Result:
-        if "command -v codex" in cmd:
+        return _Result()
+
+    def answer(self, call: Call) -> Result | None:
+        if is_command_check(call.request):
             self._events.append("probe")
-            return _Result()
-        if ".thread" in cmd:
+            return check_result(call.request, 0)
+        if call.request == recorder_probe("s1"):
             self._events.append("read_recorder")
             if self._recorded is None:
-                return _Result(returncode=1)  # no recorder file: nothing bound
-            return _Result(returncode=0, stdout=f"{self._recorded}\n")
-        if "-exec awk" in cmd:
+                return Result(Completed(1))  # no recorder file: nothing bound
+            return Result(Completed(0), f"{self._recorded}\n".encode())
+        if call.request == discovery_probe("/home/me/ws1"):
             self._events.append("discover")
-            return _Result(returncode=0, stdout=self._discovered or "")
-        if ".jsonl" in cmd:
+            return Result(Completed(0), (self._discovered or "").encode())
+        if call.request == rollout_probe(self._bound):
             self._events.append("detect")
-            return _Result(returncode=0 if self._present else 1)
-        return _Result()
+            return Result(Completed(0 if self._present else 1))
+        return None
 
 
 def _seed_db(tmp_path: Path) -> Database:
@@ -138,6 +154,7 @@ def _patch_transport(monkeypatch: pytest.MonkeyPatch, target: _CodexTarget) -> N
     admin_factory = lambda vm, config, **kwargs: target  # noqa: E731
     monkeypatch.setattr("agentworks.transports.transport", admin_factory)
     monkeypatch.setattr("agentworks.sessions.manager.transport", admin_factory)
+    install_access_recorder(monkeypatch).answer = target.answer
 
 
 def _capture_pane_command(monkeypatch: pytest.MonkeyPatch, events: list[str], captured: dict[str, str]) -> None:

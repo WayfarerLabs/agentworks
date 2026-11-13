@@ -1,25 +1,34 @@
-"""Workspace copying (packing a source workspace and unpacking it to a new one)."""
+"""Workspace copying: the source tree as an opaque tar stream, through the workstation, into a new workspace."""
 
 from __future__ import annotations
 
-import shlex
-import subprocess
+import posixpath
 from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.agents.grants import MAX_WORKSPACE_NAME_LENGTH
-from agentworks.errors import AlreadyExistsError, ExternalError, NotFoundError, StateError
+from agentworks.errors import AgentworksError, AlreadyExistsError, ExternalError, NotFoundError, StateError
+from agentworks.execution.requests import Command, FromFile, ToFile
+from agentworks.linux_users import managed_home
 from agentworks.naming import validate_name
 from agentworks.path_rendering import format_host_path
-from agentworks.programs import resolve_program
+from agentworks.vms.initializer.steps import status
 from agentworks.vms.manager import gated_vm_boundary
 from agentworks.workspaces.backends.vm import default_workspace_path
+from agentworks.workspaces.guest import FIND_DEADLINE, ensure_group, path_occupied
 from agentworks.workspaces.manager._common import _guard_vm_status, _resolve_vm, _workspace_scope
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from agentworks.config import Config
-    from agentworks.db import Database
+    from agentworks.db import Database, VMRow
     from agentworks.secrets.policy import TtyInteractionPolicy
+    from agentworks.vms.initializer.phase_a import OperationLog
+    from agentworks.vms.initializer.steps import InitLog
+
+OWNERSHIP_DEADLINE = 60
+"""Seconds the recursive ``chown`` of the extracted tree may take."""
 
 
 def copy_workspace(
@@ -47,16 +56,22 @@ def copy_workspace(
     the same stack so both VMs stay held; the same-VM case reuses the
     source composition with no second boundary. The multi-root walk
     stays available for the batch commands that already coalesce.
+
+    The tree goes VM, workstation, VM as a gzipped tar stream that is
+    never extracted on the workstation, so modes and links survive any
+    workstation; owners do not, since the destination extracts without them
+    and then gives the tree to the admin and the workspace group. Nothing is
+    staged on the destination VM: it extracts from the request's input. The
+    source read is logged to the source VM's own operation log
+    (``workspace-copy-source``), since the destination is chosen only after it.
     """
     import contextlib
     import tempfile
     from pathlib import Path
 
-    from agentworks.agents.grants import materialize_grant_all_agents, workspace_group
     from agentworks.bootstrap import load_request_registry
-    from agentworks.ssh import SSHLogger
-    from agentworks.transports import SSHTransport, transport
-    from agentworks.workspaces.acls import apply_workspace_acls
+    from agentworks.vms.manager import operation_log
+    from agentworks.workspaces.backends.vm import admin_access
 
     validate_name(dest_name, max_length=MAX_WORKSPACE_NAME_LENGTH)
 
@@ -75,10 +90,9 @@ def copy_workspace(
             entity_name=dest_name,
         )
 
-    with tempfile.NamedTemporaryFile(suffix=".tgz", delete=False) as tmp:
-        tmp_path = Path(tmp.name)
-
-    try:
+    with tempfile.TemporaryDirectory(prefix="agentworks-workspace-copy-") as scratch:
+        # ToFile creates its file, so the archive's path is new in a private directory.
+        archive = Path(scratch) / "workspace.tgz"
         with contextlib.ExitStack() as _keepalive_stack:
             # --- Pack from source ---
             src_vm = db.get_vm(src_ws.vm_name)
@@ -107,28 +121,21 @@ def copy_workspace(
                     entity_name=src_vm.name,
                 )
 
-            src_exec = transport(src_vm, config)
-            # transport() returns SSHTransport for Tailscale-backed VMs; this
-            # path streams scp/tar over the SSH channel and needs the raw argv.
-            assert isinstance(src_exec, SSHTransport)
             output.info(f"Packing workspace '{source_name}' from VM '{src_vm.name}'...")
-
-            # Stream tar from VM to local temp file
-            ssh_args = [resolve_program("ssh"), *src_exec.host_key_options(), "-o", "BatchMode=yes"]
-            if src_exec.identity_file is not None:
-                ssh_args.extend(["-i", str(src_exec.identity_file)])
-            ssh_args.append(f"{src_exec.user}@{src_exec.host}")
-            ssh_args.append(f"tar czf - -C {src_ws.workspace_path} .")
-
-            with open(tmp_path, "wb") as f:
-                proc = subprocess.run(ssh_args, stdout=f, stderr=subprocess.PIPE)
-            if proc.returncode != 0:
-                stderr = proc.stderr.decode() if proc.stderr else ""
-                raise ExternalError(
-                    f"pack failed: {stderr.strip()}",
-                    entity_kind="workspace",
-                    entity_name=source_name,
-                )
+            with operation_log(src_vm.name, "workspace-copy-source") as source_log:
+                # Unelevated, as the admin, who can read every workspace. The
+                # sink removes a partial archive on any other completion.
+                try:
+                    admin_access(src_vm, config, source_log).run(
+                        Command(("tar", "czf", "-", "-C", src_ws.workspace_path, ".")),
+                        stdout=ToFile(archive),
+                        check=True,
+                    )
+                except AgentworksError as error:
+                    error.add_hint(f"SSH log: {source_log.display_path}")
+                    raise
+                except Exception as error:
+                    raise _copy_failure(error, source_name, source_log) from error
 
             # --- Unpack to destination VM ---
             dest_vm = _resolve_vm(db, vm_name)
@@ -154,99 +161,127 @@ def copy_workspace(
                     entity_name=dest_vm.name,
                 )
 
-            lg = SSHLogger(dest_vm.name, "workspace-copy")
-            remote_tmp: str | None = None
-            try:
-                dest_target = transport(dest_vm, config, logger=lg)
-
-                workspace_path = default_workspace_path(config, dest_name)
-                ws_group = workspace_group(dest_name)
-
-                output.info(f"Unpacking to workspace '{dest_name}' on VM '{dest_vm.name}'...")
-
-                # Set up group, directory, and permissions (same as create_vm_workspace)
-                dest_target.run(
-                    f"sh -c 'getent group {ws_group} >/dev/null 2>&1 || /usr/sbin/groupadd {ws_group}'",
-                    sudo=True,
-                )
-                dest_target.run(f"usermod -aG {ws_group} {dest_vm.admin_username}", sudo=True)
-                dest_target.run(f"mkdir -p {workspace_path}", sudo=True, timeout=10)
-                dest_target.run(f"chown {dest_vm.admin_username}:{ws_group} {workspace_path}", sudo=True)
-                dest_target.run(f"chmod 2770 {workspace_path}", sudo=True)
-
-                # Unpack archive and fix ownership
-                remote_tmp = dest_target.run("mktemp /var/tmp/agentworks-workspace-copy-XXXXXX.tgz").stdout.strip()
-                dest_target.copy_to(tmp_path, remote_tmp, timeout=300)
-                dest_target.run(
-                    f"tar xzf {shlex.quote(remote_tmp)} -C {shlex.quote(workspace_path)}",
-                    sudo=True,
-                    timeout=120,
-                )
-                dest_target.run(
-                    f"chown -R {dest_vm.admin_username}:{ws_group} {workspace_path}",
-                    sudo=True,
-                    timeout=60,
-                )
-                dest_target.run(
-                    f"find {shlex.quote(workspace_path)} -type d -exec chmod g+s {{}} +",
-                    sudo=True,
-                    timeout=120,
-                )
-
-                # Canonical workspace ACL, applied AFTER the unpack and the recursive
-                # chown/SGID so the recursive access ACL covers every unpacked entry
-                # and the per-directory default ACL is seeded for future entries.
-                # The same shared spec workspace create and repair apply, so a copied
-                # workspace lands in the canonical state (its first repair is an ACL
-                # no-op) and, per #254, denies `other` on both the access and default
-                # ACLs, which the old inline top-dir-only default did not.
-                apply_workspace_acls(dest_target, workspace_path)
-
-                db.insert_workspace(
-                    dest_name,
-                    vm_name=dest_vm.name,
-                    workspace_path=workspace_path,
-                    template="copied",
-                    linux_group=ws_group,
-                )
-
-                # Materialize grant_all agents on the destination VM onto the new
-                # workspace, exactly as workspace create's realization body does
-                # after ITS row insert (issue #321): every workspace-inserting
-                # path runs this pass, or grant_all agents silently lack access
-                # to the copied workspace and reinit's row-driven reconcile
-                # (#280) can never restore it.
-                materialize_grant_all_agents(db, config, dest_vm, dest_name, logger=lg)
-
-                # Generate tmuxinator config and VS Code workspace
-                from agentworks.workspaces.backends.vm import generate_vscode_workspace
-                from agentworks.workspaces.tmuxinator import console_session_name, generate_config
-
-                tmux_config = generate_config(dest_name, workspace_path)
-                dest_target.write_file(f"{workspace_path}/.tmuxinator.yml", tmux_config)
-                session = console_session_name(dest_name)
-                dest_target.run("mkdir -p ~/.config/tmuxinator", timeout=10)
-                dest_target.run(
-                    f"ln -sf {workspace_path}/.tmuxinator.yml ~/.config/tmuxinator/{session}.yml",
-                    timeout=10,
-                )
-                vscode_path = generate_vscode_workspace(dest_vm, config, dest_name, workspace_path)
-                output.detail(f"VS Code workspace: {format_host_path(vscode_path)}")
-            finally:
-                if remote_tmp is not None:
-                    try:
-                        dest_target.run(f"rm -f {shlex.quote(remote_tmp)}", check=False, timeout=10)
-                    except Exception as error:
-                        output.warn(f"Could not remove remote workspace-copy archive: {error}")
-                # Exactly-once close, in a finally so a cancellation (the
-                # sanctioned KeyboardInterrupt re-raise out of
-                # materialize_grant_all_agents) or an error from any
-                # dest_target.run in the span still lands the footer, and the
-                # in-flight traceback, in the per-VM log. Mirrors realize.py's
-                # own finally; close() is not idempotent (each call appends a
-                # footer), hence the single call site.
-                lg.close()
-    finally:
-        tmp_path.unlink(missing_ok=True)
+            # Exactly-once close, however the span ends (a cancellation, the
+            # sanctioned KeyboardInterrupt re-raise out of
+            # materialize_grant_all_agents, or an error from any request), so
+            # the footer and the in-flight traceback land in the per-VM log.
+            with operation_log(dest_vm.name, "workspace-copy") as lg:
+                try:
+                    _unpack(db, config, dest_vm, dest_name, archive, lg)
+                except AgentworksError as error:
+                    error.add_hint(f"SSH log: {lg.display_path}")
+                    raise
+                except Exception as error:
+                    raise _copy_failure(error, dest_name, lg) from error
 
     output.result(f"Workspace '{source_name}' copied to '{dest_name}'")
+
+
+def _copy_failure(error: Exception, ws_name: str, log: OperationLog) -> ExternalError:
+    """An untyped failure (a local read or write error) as the copy's error, naming the log."""
+    return ExternalError(
+        f"copying workspace: {error}", entity_kind="workspace", entity_name=ws_name, hint=f"SSH log: {log.display_path}"
+    )
+
+
+def _unpack(db: Database, config: Config, dest_vm: VMRow, dest_name: str, archive: Path, lg: InitLog) -> None:
+    """Extract ``archive`` into the new workspace ``dest_name`` on ``dest_vm`` and record it."""
+    from agentworks.agents.grants import materialize_grant_all_agents, workspace_group
+    from agentworks.workspaces.acls import apply_workspace_acls
+    from agentworks.workspaces.backends.vm import admin_access, generate_vscode_workspace
+    from agentworks.workspaces.tmuxinator import generate_config, publish_tmuxinator_config
+
+    dest = admin_access(dest_vm, config, lg)
+    workspace_path = default_workspace_path(config, dest_name)
+    ws_group = workspace_group(dest_name)
+    owner = f"{dest_vm.admin_username}:{ws_group}"
+
+    output.info(f"Unpacking to workspace '{dest_name}' on VM '{dest_vm.name}'...")
+
+    # Refuse an occupied destination and reserve it exclusively, as create does,
+    # so nothing is extracted into another directory's content.
+    if status(dest, path_occupied(workspace_path)) == 0:
+        raise AlreadyExistsError(
+            f"workspace path {workspace_path!r} already exists on VM '{dest_vm.name}'.",
+            entity_kind="workspace",
+            entity_name=dest_name,
+            hint="Inspect and preserve its contents before removing it, or choose a different workspace name.",
+        )
+    dest.run(Command(("mkdir", "-p", "--", posixpath.dirname(workspace_path)), elevated=True), check=True)
+    dest.run(Command(("mkdir", "--", workspace_path), elevated=True), check=True)
+
+    # Set up group, directory, and permissions (same as create_vm_workspace)
+    dest.run(ensure_group(ws_group), check=True)
+    dest.run(Command(("usermod", "-aG", ws_group, dest_vm.admin_username), elevated=True), check=True)
+    dest.run(Command(("chown", owner, workspace_path), elevated=True), check=True)
+    dest.run(Command(("chmod", "2770", workspace_path), elevated=True), check=True)
+
+    # The archive comes from another VM, so extraction keeps GNU tar's
+    # defaults and never passes -P: leading '/' is stripped, '..' members
+    # are refused, and a link that is absolute or climbs is a placeholder
+    # until the end, so no member is written through it. Every extracted
+    # file is root's until the chown below. The directory is 2770 for the
+    # admin and the group, and agents get their grants only afterwards, so
+    # no agent reaches the partial tree. Neither half of the copy has a
+    # deadline: a tree takes as long as the link needs, and the connection's
+    # keepalives end a stalled one.
+    # A local read error fails this request, but tar still sees its input end
+    # there and may already have written the members before the cut; gzip
+    # only makes it fail rather than finish. The copy then fails before it
+    # records a row or grants access, and the partial tree stays in the
+    # reserved 2770 directory.
+    dest.run(
+        Command(("tar", "xzf", "-", "--no-same-owner", "-C", workspace_path), elevated=True, stdin=FromFile(archive)),
+        check=True,
+    )
+    # Neither follows a link: -P states the physical walk both default to.
+    dest.run(
+        Command(("chown", "-R", "-P", owner, workspace_path), elevated=True, deadline=OWNERSHIP_DEADLINE), check=True
+    )
+    dest.run(
+        Command(
+            ("find", "-P", workspace_path, "-type", "d", "-exec", "chmod", "g+s", "{}", "+"),
+            elevated=True,
+            deadline=FIND_DEADLINE,
+        ),
+        check=True,
+    )
+    # The archive's own '.' member set the directory's mode to the source's.
+    dest.run(Command(("chmod", "2770", workspace_path), elevated=True), check=True)
+
+    # Canonical workspace ACL, applied AFTER the unpack and the recursive
+    # chown/SGID so the recursive access ACL covers every unpacked entry
+    # and the per-directory default ACL is seeded for future entries.
+    # The same shared spec workspace create and repair apply, so a copied
+    # workspace lands in the canonical state (its first repair is an ACL
+    # no-op) and, per #254, denies `other` on both the access and default
+    # ACLs, which the old inline top-dir-only default did not.
+    apply_workspace_acls(dest.files(), workspace_path)
+
+    # Before the row, so a refused config (a link in its path) leaves no row.
+    publish_tmuxinator_config(
+        dest,
+        home=managed_home(dest_vm.admin_username),
+        ws_name=dest_name,
+        workspace_path=workspace_path,
+        text=generate_config(dest_name, workspace_path),
+        replace_link=True,
+    )
+
+    db.insert_workspace(
+        dest_name,
+        vm_name=dest_vm.name,
+        workspace_path=workspace_path,
+        template="copied",
+        linux_group=ws_group,
+    )
+
+    # Materialize grant_all agents on the destination VM onto the new
+    # workspace, exactly as workspace create's realization body does after
+    # ITS row insert (issue #321): every workspace-inserting path runs this
+    # pass, or grant_all agents silently lack access to the copied workspace
+    # and reinit's row-driven reconcile (#280) can never restore it.
+    materialize_grant_all_agents(db, config, dest_vm, dest_name, logger=lg)
+
+    vscode_path = generate_vscode_workspace(dest_vm, config, dest_name, workspace_path)
+    output.detail(f"VS Code workspace: {format_host_path(vscode_path)}")

@@ -117,7 +117,8 @@ def test_receiver_acknowledges_known_inputs_without_certifying_incoming_routes(
     runner = LocalFixtureTransport(tmp_path / "guest")
     invocation = UserSetupInvocation(
         vm=fixture.vm,
-        runner=runner,
+        access=(recorded := runner.access()),
+        files=recorded.files(),
         prior=None,
         checkpoint=lambda claims: None,
         username="worker",
@@ -132,7 +133,9 @@ def test_receiver_acknowledges_known_inputs_without_certifying_incoming_routes(
         "agentworks.harness_setup.readiness.destination_id", lambda *args, **kwargs: record.destination_id
     )
     assert (
-        evaluate_setup(db, fixture.owners["agent"], "shell", vm=fixture.vm, runner=runner, remediation="fixture").status
+        evaluate_setup(
+            db, fixture.owners["agent"], "shell", vm=fixture.vm, access=recorded, remediation="fixture"
+        ).status
         == "current"
     )
     routed = fixture.route()

@@ -15,7 +15,11 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Callable, Mapping, Sequence
+    from pathlib import Path
+
+CAPTURE_LIMIT_BYTES = 1_048_576
+"""What :class:`CaptureOutput` keeps by default: 1 MiB of one stream."""
 
 AccountShell = Literal["sh", "dash", "bash", "zsh"]
 """The login shells a managed account may use: the four the constant first-stage
@@ -57,6 +61,37 @@ class RequestOptions:
     cwd: str | None = None
 
 
+@dataclass(frozen=True)
+class NoInput:
+    """No input: the payload's stdin is at end of file once the request is sent."""
+
+
+@dataclass(frozen=True)
+class Bytes:
+    """Input the client writes after the request and then closes: the payload's stdin, at its first byte.
+
+    ``data`` is not in the ``repr``, and no operation log record or error
+    holds it. Its size is bounded only by memory; the pump writes it as fast
+    as ssh takes it, within the request's deadline.
+    """
+
+    data: bytes = field(repr=False)
+
+
+@dataclass(frozen=True)
+class FromFile:
+    """Input read from a workstation file: the payload's stdin, from its first byte to the file's end.
+
+    ``run`` opens ``path`` in binary mode when it dispatches, so a file that
+    cannot be opened is an ``OSError`` with nothing sent, and the client
+    copies it to ssh as it reads it: its size is bounded only by the file,
+    and the request's deadline bounds the copy with the rest of the request.
+    Like ``Bytes``, the content never reaches a log record or an error.
+    """
+
+    path: Path
+
+
 @dataclass(frozen=True, kw_only=True)
 class BoundedRequestOptions(RequestOptions):
     """The options of a request that runs to a result, which a deadline can bound.
@@ -66,10 +101,18 @@ class BoundedRequestOptions(RequestOptions):
     ``sudo -n``: it is the prefix of the connection's first-stage command, not
     part of the request message, and an agent-bound access refuses it. A
     :class:`LoginShell` has neither, so an elevated attach cannot be written.
+
+    ``stdin`` is the payload's input under ``run``; ``stream`` takes the
+    operator's stdin as its own argument and refuses a request that carries
+    input. ``log_streams=False`` keeps both of the payload's streams out of
+    the operation log, for a payload whose output is file content or a
+    command line that must not be retained.
     """
 
     deadline: float | None = None
     elevated: bool = False
+    stdin: NoInput | Bytes | FromFile = NoInput()
+    log_streams: bool = True
 
 
 @dataclass(frozen=True)
@@ -85,12 +128,32 @@ class Script(BoundedRequestOptions):
 
     The text is in no argument vector, and the interpreter's stdin stays the
     caller's. ``login`` adds ``-l`` so the interpreter runs the account's
-    login startup first.
+    login startup first. ``interactive`` adds ``-i`` and has the interactive
+    shell source the script, so its interactive startup runs first too.
     """
 
     source: str = field(repr=False)
     shell: Shell
     login: bool = False
+    interactive: bool = False
+
+
+@dataclass(frozen=True)
+class PythonProgram(BoundedRequestOptions):
+    """Core's own Python source, run by the guest's ``/usr/bin/python3 -I -S`` from a file descriptor.
+
+    The source is in no argument vector, and ``args`` are the program's
+    arguments, ``sys.argv[1:]``. The operation log records ``args``, so they
+    must never carry a secret; pass one on ``stdin``. ``login`` and
+    ``interactive`` run the identity's default shell with that startup first,
+    which then execs the interpreter, so the program sees the environment a
+    login or interactive shell builds.
+    """
+
+    source: str = field(repr=False)
+    args: tuple[str, ...] = field(default=(), repr=False)
+    login: bool = False
+    interactive: bool = False
 
 
 @dataclass(frozen=True)
@@ -117,8 +180,42 @@ def shell_command_line(args: Sequence[str]) -> str:
     )
 
 
-RunRequest = Command | Script
+RunRequest = Command | Script | PythonProgram
 """The requests ``run`` and ``stream`` take."""
+
+
+@dataclass(frozen=True)
+class CaptureOutput:
+    """A ``run`` sink that keeps up to ``limit`` bytes of its stream; more is ``Unknown(OUTPUT_LIMIT)``."""
+
+    limit: int = CAPTURE_LIMIT_BYTES
+
+
+@dataclass(frozen=True)
+class DiscardOutput:
+    """A ``run`` sink that keeps nothing. The stream is still read to its closing marker, so the outcome stands."""
+
+
+@dataclass(frozen=True)
+class ToFile:
+    """A ``run`` sink that writes its stream to a new workstation file, kept only for ``Completed(0)``.
+
+    ``run`` creates ``path`` before dispatch, mode 0600 and in binary mode, so
+    an existing path is refused with nothing sent and no newline is ever
+    translated. ``on_progress`` receives the running byte count after each
+    write; a caller that reports progress throttles its own reporting. For
+    any other completion, and for any exception while the request runs (an
+    operator's Ctrl-C included), ``run`` removes the file before it returns
+    or raises, so a partial file is never left behind. The result's field
+    for the stream is empty, and no log sees the bytes.
+    """
+
+    path: Path
+    on_progress: Callable[[int], None] | None = None
+
+
+OutputSink = CaptureOutput | DiscardOutput | ToFile
+"""Where ``run`` puts one of the payload's streams."""
 
 Request = RunRequest | LoginShell
 """Every request kind; ``LoginShell`` is the one ``attach`` takes."""

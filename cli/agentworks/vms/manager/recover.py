@@ -24,7 +24,7 @@ from agentworks.execution import reachability, trust
 from agentworks.execution.access import Admin
 from agentworks.vms import recovery
 
-from ._helpers import _guard_incomplete_vm, _operation_log, _require_known_power_state, _require_vm
+from ._helpers import _guard_incomplete_vm, _require_known_power_state, _require_vm, operation_log
 from .boundary import _auth_key_boundary
 
 if TYPE_CHECKING:
@@ -97,7 +97,7 @@ def recover_vm(db: Database, config: Config, name: str, *, interaction: TtyInter
         status = platform.status(vm, ops_ctx)
         _require_known_power_state(status, name)
 
-        with _operation_log(name, "recover", redactions=(auth_key,)) as log:
+        with operation_log(name, "recover", redactions=(auth_key,)) as log:
             # Started before the hold, as start_vm does: WSL2's keepalive boots a
             # stopped distro as a side effect of holding it.
             if status is not VMStatus.RUNNING:

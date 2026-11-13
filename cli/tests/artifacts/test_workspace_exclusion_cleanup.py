@@ -10,13 +10,15 @@ import pytest
 
 from agentworks.db import Database
 from agentworks.errors import StateError
+from agentworks.execution.errors import ExecutionIncomplete
+from agentworks.execution.results import Result, Unknown, UnknownReason
 from agentworks.harness_setup.model import NativeClaim, NativeSetupState, SetupRecord
+from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
 from agentworks.harness_setup.state import read_native_setup, write_native_setup
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.workspaces.manager import delete_workspace
-from tests.artifacts.test_git_excludes import apply, file, git
+from tests.artifacts.test_git_excludes import Guest, apply, file, git
 from tests.capabilities.test_native_setup_deletion import deletion as deletion
-from tests.native_setup_fixtures import LocalFixtureTransport
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux guest filesystem operations")
 
@@ -46,7 +48,7 @@ def store(db: Database, name: str, claims: tuple[NativeClaim, ...]) -> None:
 def shared_workspace(db, deletion, tmp_path, monkeypatch):
     import grp
 
-    target = LocalFixtureTransport(tmp_path / "guest")
+    target = Guest(tmp_path / "guest")
     repository = target.home / "repository"
     git("init", "-q", repository)
     first = repository / "project"
@@ -69,6 +71,7 @@ def shared_workspace(db, deletion, tmp_path, monkeypatch):
     store(db, "project", (*first_claims, foreign))
     store(db, "survivor", second_claims)
     monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: target)
+    monkeypatch.setattr("agentworks.execution.vm_access", lambda *a, **k: target.access())
     removed = []
 
     def remove(vm, config, name, path, linux_group, **kwargs):
@@ -108,8 +111,25 @@ def test_workspace_delete_retires_only_its_shared_exclusions(db, deletion, share
     )
 
 
+@pytest.mark.parametrize("spelling", ["{}/", "/{}"], ids=["trailing-slash", "leading-double-slash"])
+def test_workspace_delete_retires_the_exclusions_of_a_path_an_earlier_release_stored_unnormalized(
+    db, deletion, shared_workspace, spelling, captured_output
+):
+    target, first, second, exclude, prefix, first_claims, second_claims, removed = shared_workspace
+    db.update_workspace_path("project", spelling.format(first))
+
+    delete_workspace(db, deletion.config, "project", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert removed == ["project"]
+    assert first_claims[0].identifier.encode() not in exclude.read_bytes()
+    assert second_claims[0].identifier.encode() in exclude.read_bytes()
+    assert captured_output.warnings == []
+
+
 @pytest.mark.parametrize("force", [False, True])
-@pytest.mark.parametrize("problem", ["modified", "duplicate", "unavailable", "missing-workspace", "transport", "trust"])
+@pytest.mark.parametrize(
+    "problem", ["modified", "duplicate", "unavailable", "missing-workspace", "unreachable", "trust"]
+)
 def test_incomplete_shared_cleanup_warns_and_keeps_parent_deletion_best_effort(
     db, deletion, shared_workspace, problem, force, monkeypatch, captured_output
 ):
@@ -127,10 +147,11 @@ def test_incomplete_shared_cleanup_warns_and_keeps_parent_deletion_best_effort(
         git_dir.rename(displaced)
     elif problem == "missing-workspace":
         shutil.rmtree(first)
-    elif problem == "transport":
-        from agentworks.ssh import SSHError
-
-        monkeypatch.setattr(target, "run", lambda *args, **kwargs: (_ for _ in ()).throw(SSHError("fixture transport")))
+    elif problem == "unreachable":
+        # What VMAccess.run returns when ssh cannot reach the VM: an outcome, not an exception.
+        unreachable = Result(Unknown(UnknownReason.CONNECTION))
+        monkeypatch.setattr(target.access(), "answer", lambda call: unreachable)
+        expected = sanitize_setup_diagnostic(str(ExecutionIncomplete(target.access().vm_name, unreachable)))
     elif problem == "trust":
         target.environment["GIT_TEST_ASSUME_DIFFERENT_OWNER"] = "1"
     before = exclude.read_bytes() if exclude.exists() else None
@@ -150,6 +171,8 @@ def test_incomplete_shared_cleanup_warns_and_keeps_parent_deletion_best_effort(
         assert db.get_workspace("project") is None and not first.exists()
         assert db.instance_state.get_applied_slices("workspace", "project") == ()
         assert first_claims[0] in observed[0].claims
+        if problem == "unreachable":
+            assert expected in observed[0].incomplete_reasons
         assert any(
             first_claims[0].identifier in warning and first_claims[0].destination in warning
             for warning in captured_output.warnings
@@ -173,7 +196,7 @@ def test_cleanup_does_not_swallow_shared_failures_or_cancellation(db, deletion, 
     if isinstance(failure, StateError):
         monkeypatch.setattr("agentworks.harness_setup.cleanup.write_native_setup", fail)
     else:
-        monkeypatch.setattr(target, "run", fail)
+        monkeypatch.setattr(target.access(), "answer", lambda call: failure)
     with pytest.raises(type(failure)) as caught:
         delete_workspace(db, deletion.config, "project", yes=True, interaction=TtyInteractionPolicy.REFUSE)
     assert caught.value is failure and not removed and db.get_workspace("project") is not None

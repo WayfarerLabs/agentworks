@@ -18,7 +18,8 @@ from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.harness_integration import HarnessLaunchIntent
 from agentworks.errors import ConfigError
 from tests.artifacts.test_native_delivery import artifact, context
-from tests.conftest import _FakeResult, _FakeTarget, requires_posix_shell
+from tests.conftest import requires_posix_shell
+from tests.vm_access_support import Admin, RecordingVMAccess
 
 TOOLS = [
     ("claude", "ClaudeCodeIntegration", "session-skill-plugin"),
@@ -74,10 +75,10 @@ def test_start_refuses_effective_carrier_overrides_before_identity_probes(
         pytest.fail("effective forbidden arguments reached native probing")
 
     monkeypatch.setattr("agentworks.artifacts.native.probe.probe_native", forbid_probe)
-    runner = _FakeTarget()
+    access = RecordingVMAccess([], Admin())
     with pytest.raises(ConfigError):
-        selected.start(RunContext(admin_target=runner), intent=HarnessLaunchIntent.CREATE)
-    assert runner.commands == [] and selected._state == {}
+        selected.start(RunContext(admin_access=access), intent=HarnessLaunchIntent.CREATE)
+    assert access.requests() == [] and selected._state == {}
 
 
 @pytest.mark.windows
@@ -94,13 +95,13 @@ def test_start_emits_guarded_tokens_once_and_rebinds_next_launch(monkeypatch, to
     monkeypatch.setattr(module, "session_artifacts", inspect)
     authored = ["--fixture", "${agw:workspace_name}", "$${agw:workspace_name}"]
     selected = integration(tool, class_name, {"extra_args": authored})
-    runner = _FakeTarget({".thread": _FakeResult(1)})
+    access = RecordingVMAccess([], Admin())
     for value in ("one ; $(echo unsafe) ${agw:session_name}", "two ' quoted ${agw:session_name}"):
         selected.prepare_context(
             {"workspace_name": value, "session_name": "must-remain-unexpanded"},
             intent=HarnessLaunchIntent.CREATE,
         )
-        result = selected.start(RunContext(admin_target=runner), intent=HarnessLaunchIntent.CREATE)
+        result = selected.start(RunContext(admin_access=access), intent=HarnessLaunchIntent.CREATE)
         tokens = shlex.split(shlex.split(result.command)[2])
         emitted = tokens[tokens.index(tool) + 1 :]
         expected = ("--fixture", value, "${agw:workspace_name}")
@@ -120,9 +121,7 @@ def test_disabled_session_delivery_keeps_effective_native_override_available(too
         artifacts=context(artifact(ArtifactType.RULE)),
     )
     selected.prepare_context({"workspace_name": flags[tool]}, intent=HarnessLaunchIntent.CREATE)
-    result = selected.start(
-        RunContext(admin_target=_FakeTarget({".thread": _FakeResult(1)})), intent=HarnessLaunchIntent.CREATE
-    )
+    result = selected.start(RunContext(admin_access=RecordingVMAccess([], Admin())), intent=HarnessLaunchIntent.CREATE)
     assert not result.artifacts.files and len(result.artifacts.deferred) == 1
     tokens = shlex.split(shlex.split(result.command)[2])
     assert tokens[-2:] == ["--" + flags[tool], "custom"]
@@ -144,9 +143,7 @@ def test_ancestor_only_override_is_advisory_after_rendering(monkeypatch, capture
     )
     selected.prepare_context({"workspace_name": flags[tool]}, intent=HarnessLaunchIntent.CREATE)
     monkeypatch.setattr("agentworks.artifacts.native.probe.probe_native", lambda *args, **kwargs: native[tool])
-    result = selected.start(
-        RunContext(admin_target=_FakeTarget({".thread": _FakeResult(1)})), intent=HarnessLaunchIntent.CREATE
-    )
+    result = selected.start(RunContext(admin_access=RecordingVMAccess([], Admin())), intent=HarnessLaunchIntent.CREATE)
     assert captured_output.warnings
     assert not result.artifacts.files and not result.artifacts.deferred
     assert shlex.split(shlex.split(result.command)[2])[-1] == "--" + flags[tool]
@@ -173,9 +170,7 @@ def test_rendered_values_reach_the_process_as_literal_single_tokens(tmp_path, to
     selected.prepare_context(
         {"workspace_name": payload, "session_name": "must-remain-unexpanded"}, intent=HarnessLaunchIntent.CREATE
     )
-    result = selected.start(
-        RunContext(admin_target=_FakeTarget({".thread": _FakeResult(1)})), intent=HarnessLaunchIntent.CREATE
-    )
+    result = selected.start(RunContext(admin_access=RecordingVMAccess([], Admin())), intent=HarnessLaunchIntent.CREATE)
     completed = subprocess.run(
         ["/bin/sh", "-c", result.command],
         env={"HOME": str(home), "PATH": str(binaries) + ":/usr/bin:/bin", "ARGV_CAPTURE": str(capture)},

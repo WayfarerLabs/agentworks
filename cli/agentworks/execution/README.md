@@ -6,10 +6,11 @@ stdin, never on a command line or in the environment. The commands that use it t
 `vm shell`, `agent exec`, `agent shell`, `vm verify-connection` and `vm port-forward`, plus create's
 first contact (Phase A), the VM contract (`agentworks.vms.contract`) that create and reinit run,
 `vm confirm-release`, and the wait for a VM to answer (`reachability.wait`) after `vm start`, the
-activation gate's automatic start, `vm rekey` and `vm recover`. Everything else still reaches VMs
-through the legacy transport stack (`agentworks.transports`), which this package must never import.
-A platform's own channel is not part of either: core reaches it through `VMPlatform.run_as_root` and
-`native_shell`.
+activation gate's automatic start, `vm rekey` and `vm recover`, VM and agent initialization,
+`vm backup`, `vm describe`'s live resources, and the workspace commands. Everything else still
+reaches VMs through the legacy transport stack (`agentworks.transports`), which this package must
+never import. A platform's own channel is not part of either: core reaches it through
+`VMPlatform.run_as_root` and `native_shell`.
 
 ## Use
 
@@ -26,26 +27,66 @@ result = access.run(Command(("systemctl", "is-active", "ssh"), deadline=10), che
 Always call `vm_access` and `resolve_ssh` through the package attribute, as above. Tests replace
 those two attributes once (the `vm_access_recorder` fixture) and every manager follows.
 
-`VMAccess` has four operations:
+`VMAccess` has four operations, and `files()` (below) for file operations built on `run`:
 
-| Operation                                   | Returns                  | Use                                                       |
-| ------------------------------------------- | ------------------------ | --------------------------------------------------------- |
-| `run(request, check=False)`                 | `Result`                 | Buffered: up to 1 MiB per stream, then `OUTPUT_LIMIT`     |
-| `stream(request, stdin=, stdout=, stderr=)` | the guest's status       | Live output; `stream_to_operator` wires the process stdio |
-| `attach(login_shell)`                       | the shell's exit status  | The operator's terminal, under `guarded_terminal`         |
-| `forward(forwards, verbose=False)`          | the client's exit status | Blocking `ssh -N -L`; the caller owns the interrupt       |
+| Operation                                     | Returns                  | Use                                                       |
+| --------------------------------------------- | ------------------------ | --------------------------------------------------------- |
+| `run(request, stdout=, stderr=, check=False)` | `Result`                 | Buffered, into each stream's sink                         |
+| `stream(request, stdin=, stdout=, stderr=)`   | the guest's status       | Live output; `stream_to_operator` wires the process stdio |
+| `attach(login_shell)`                         | the shell's exit status  | The operator's terminal, under `guarded_terminal`         |
+| `forward(forwards, verbose=False)`            | the client's exit status | Blocking `ssh -N -L`; the caller owns the interrupt       |
 
 A request is a `Command` (a literal argv, run with no shell), a `Script` (source text run by `sh`,
-`bash` or the identity's default shell, optionally as a login shell) or a `LoginShell` (valid only
-for `attach`). Each takes `env` and `cwd` (absolute; `None` is the home directory); `Command` and
-`Script` also take `deadline` (seconds of local waiting; it never claims the guest command stopped).
-`vm exec` sends a `Script` under the identity's default shell, with several arguments shell-joined.
+`bash` or the identity's default shell), a `PythonProgram` (core's own Python source and its
+arguments) or a `LoginShell` (valid only for `attach`). Each takes `env` and `cwd` (absolute; `None`
+is the home directory); the first three also take `deadline` (seconds of local waiting; it never
+claims the guest command stopped). `vm exec` sends a `Script` under the identity's default shell,
+with several arguments shell-joined.
 
-`Command` and `Script` also take `elevated`, which runs the whole operation as root under `sudo -n`:
-it is the prefix of the constant first-stage command (below), not part of the request message, and
-the launcher rebuilds the payload's environment from root's passwd entry. An agent-bound access
-refuses an elevated request with `PermissionDenied` before anything resolves, and the guest's
-`sudo -n` is the second layer. `LoginShell` has no such option, so an attach never elevates.
+`Script` and `PythonProgram` take `login` and `interactive`, for a payload that must see the
+environment the account's login or interactive startup builds, as a harness's own shell would. A
+script's source and a program's source travel in the request and reach the guest as an in-memory
+file, never as an argument. An interactive `Script` is sourced by an interactive shell
+(`<shell> [-l] -i -c '. "$0"' <file>`). A `PythonProgram` runs as
+`/usr/bin/python3 -I -S <file> <args>`, the system interpreter with no Python startup; with either
+flag the identity's default shell runs that startup first and then execs it. The source is staged at
+descriptor 100 or above, clear of the low descriptors a startup file may close or reuse. Staging
+needs a soft open-file limit (`RLIMIT_NOFILE`) above 100; below it the request is
+`NotDelivered(LAUNCHER_FAILED)` with an error naming the limit.
+
+`run`'s sinks are `CaptureOutput(limit=1 MiB)`, the default, which keeps up to `limit` bytes and
+makes more `Unknown(OUTPUT_LIMIT)`; `DiscardOutput()`, which keeps nothing while the stream is still
+read to its closing marker; and `ToFile(path, on_progress=None)`, which writes the stream to a new
+workstation file. A caller whose output can exceed 1 MiB sets the limit per call, or writes it to a
+file. `run` creates a `ToFile` path before dispatch, exclusively, mode 0600 and in binary mode, so
+an existing path is a `ValidationError` with nothing sent and no newline is translated; it calls
+`on_progress` with the running byte count after each write. The file exists afterwards only for
+`Completed(0)`: any other completion, and any exception while the request runs (Ctrl-C included),
+removes it before `run` returns or raises. Plugins hold an access, so `run` checks what their types
+promise: input that is not `NoInput()`, `Bytes` of `bytes` or a `FromFile` of a `Path`, any other
+sink, a limit that is not a positive `int`, or a `ToFile` path that is not a `Path` is a
+`ValidationError` before anything resolves.
+
+`Command`, `Script` and `PythonProgram` take the payload's input as `stdin`: `NoInput()`, the
+default; `Bytes(data)`, which the client writes after the request and then closes, so the payload
+reads it from its first byte; or `FromFile(path)`, a workstation file `run` opens in binary mode
+before dispatch (one that cannot be opened is an `OSError` with nothing sent) and the pump copies to
+ssh as it reads it, until end of file. A read that fails part way fails the request with that
+`OSError` instead of reporting the guest's outcome, but the payload still sees its input end where
+the read stopped and may already have acted on what came before it. A format with a trailer, such as
+gzip, makes the payload fail at the cut rather than finish cleanly; it does not undo what was done
+before the cut, so a caller keeps the payload's effects somewhere it can discard. `Bytes` is bounded
+only by memory and `FromFile` only by the file; the pump writes either to ssh in 64 KiB pieces, as
+fast as ssh takes them, and the request's `deadline` bounds how long that takes. `stream` takes the
+operator's stdin as its own argument instead, and refuses a request that carries input with a
+`ValidationError`. Input is never formatted into a log record or an error, and `Bytes` keeps `data`
+out of its `repr`.
+
+They also take `elevated`, which runs the whole operation as root under `sudo -n`: it is the prefix
+of the constant first-stage command (below), not part of the request message, and the launcher
+rebuilds the payload's environment from root's passwd entry. An agent-bound access refuses an
+elevated request with `PermissionDenied` before anything resolves, and the guest's `sudo -n` is the
+second layer. `LoginShell` has no such option, so an attach never elevates.
 
 `reachability.wait(access, wording=)` is the one retry loop: it polls a fixed `true` probe (16
 attempts, 10 seconds each, 5 seconds apart, a second probe confirming an answer that followed a
@@ -61,8 +102,10 @@ against the store.
 `run` calls once per request before raising for its outcome, so failures are logged. The block is
 `oplog.format_record`'s: the step label, the request's shape (the argv, or a script's shell and
 login flag, with the working directory, the environment's names and the deadline), the completion,
-both streams and ssh's diagnostics. No environment value or script source reaches the formatter; the
-logger redacts the secrets registered when it was constructed, at its one sink.
+both streams and ssh's diagnostics. A request with `log_streams=False` has neither stream in its
+record, for a payload whose output is file content or a command line that must not be retained. No
+environment value, script source or input reaches the formatter; the logger redacts the secrets
+registered when it was constructed, at its one sink.
 
 ## What a request becomes
 
@@ -79,8 +122,9 @@ The guest's account shell may print or export before stage 0 runs. The launcher 
 payload's output with marker lines (`0x1E`, a per-request nonce, a word, a newline), and the client
 drops everything before the start marker and after the closing lines. The payload gets a rebuilt
 environment (a fixed `PATH`, `LANG=C.UTF-8`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `SHLVL=1`, then the
-request's `env`), a fixed umask, default signal dispositions and no descriptors above 2. A payload
-running as the same user could learn the nonce, which only lets it misreport its own result.
+request's `env`), a fixed umask, default signal dispositions and no descriptor above 2 but its
+source file's. A payload running as the same user could learn the nonce, which only lets it
+misreport its own result.
 
 ## Outcomes
 
@@ -108,6 +152,100 @@ still runs to its end and `stream` reports its own status. A departed stderr end
 held stdout is delivered, since ssh does not end the channel for it, unless its trailer had already
 arrived; then stdout is read to its end and the guest's status stands. With no status to report,
 `stream` returns 141.
+
+## Files
+
+`access.files(deadline=None)` returns that identity's `Files` (`files.py`). Each method is one `run`
+of the guest file program (`file_program.py`, sent as a `PythonProgram` like agw-launch's source,
+with no import-time effect): the operation and one JSON object of parameters are its arguments, and
+content travels as `Bytes` on stdin, never as an argument. So do the digests `write`, `write_if` and
+`remove_if` compare and verify, so the operation log, which records arguments, holds no content and
+no digest of it. The deadline bounds every request.
+
+| Method                                          | Does                                                                                                     |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `read(path, limit=1 MiB)`                       | The file's bytes, or `None` when the file or a parent is absent                                          |
+| `stat(path)`                                    | `Absent()`, `Directory()` or `RegularFile(digest, mode)`, hashed on the guest                            |
+| `write(path, data, mode=, owner=, group=, ...)` | Replaces the file whatever it holds, with that mode and ownership; creates missing parents               |
+| `write_if(path, data, expected=, mode=, ...)`   | Replaces the file only while its digest is `expected` (`None`: still absent)                             |
+| `update(path, data, observed=, mode=, ...)`     | `write_if` against what the caller read; data equal to `observed` sends nothing, returns false           |
+| `remove_if(path, expected=)`                    | Removes the file only while its digest is `expected`                                                     |
+| `ensure_directory(path, mode=, owner=, group=)` | Creates the directory and missing parents with `mode`; with an owner or group, converges an existing one |
+| `prune_empty_parents(path, root=)`              | Removes empty parents up to and including `root`; returns a `Pruned`                                     |
+
+Each takes `elevated`, which an agent's access refuses before dispatch. Paths must be absolute and
+normalized (`guest_path`). Nothing is read or written through a symbolic link: every component is
+opened relative to its parent without following links, and a link or the wrong type anywhere on the
+path is `PathRefused(UNSUITABLE)`, a permission denial `PathRefused(DENIED)`. `write` and `write_if`
+read their whole content and check its size and SHA-256 before creating anything, so a dropped
+connection publishes nothing (`FileContentMismatch`); each writes a sibling temporary file with the
+requested owner, group and mode, set before the rename, so the destination never holds the content
+without them. That temporary file's name is fixed per destination, so the next write replaces one a
+killed write left; a directory at it is `PathRefused(UNSUITABLE)` and is left alone. `write` keeps
+nothing of the file it replaces, and a link or anything but a regular file there is refused. With
+`write_if`, `preserve_metadata=True` gives the temporary file the existing file's owner, group, mode
+and extended attributes instead, and a changed destination is `FileConflict`, with nothing written.
+`update` is how a caller that reads, decides and writes publishes: an unchanged file keeps its
+inode, mode and ACLs, and a file another writer changed since the read is `FileConflict`, never
+retried. `ensure_directory` leaves an existing directory as it is, unless given an `owner` or
+`group`: then it opens the directory, new or existing, without following a link and sets them and
+`mode` on that descriptor, which is how an elevated caller places a directory inside another
+account's home. `read` and `stat` keep their streams out of the operation log.
+
+Every mutating operation holds one VM-wide lock, `/run/lock/agentworks-files.lock`, from its walk to
+its last system call, whichever identity runs it: opened read-only, created world-readable only when
+absent (an `O_CREAT` open of another identity's file in the sticky `/run/lock` is refused under
+`fs.protected_regular`), and locked with `flock`. A lock not taken within 30 seconds is
+`FileLockTimeout`. Reads take no lock, since a rename replaces a file whole. The lock orders
+Agentworks operations among themselves; a writer that ignores it is out of scope. Modes and
+placement policy (which directories root may write) belong to the caller.
+
+## Detached work
+
+`access.detached()` returns the admin's `Detached` (`detached.py`): a root payload that outlives the
+connection that started it. Every request is elevated, so an agent's access refuses each one with
+`PermissionDenied`. The guest side is `detached_program.py`, sent as a `PythonProgram` as the file
+program is.
+
+| Method                         | Does                                                                               | Deadline |
+| ------------------------------ | ---------------------------------------------------------------------------------- | -------- |
+| `new_launch()`                 | A fresh `Launch(vm_name, id)`, 32 hex digits chosen on the workstation; no request | none     |
+| `launch(launch, command)`      | Starts an elevated `Command` with no input, working directory or deadline          | 60       |
+| `observe(launch)`              | An `Observation`: state, status, `work/` file sizes, output tail                   | 30       |
+| `interrupt(launch)`            | `SIGTERM` to the payload's group, `SIGKILL` if it outlives 10 seconds; the state   | 30       |
+| `download(launch, name, sink)` | `cat` of `work/<name>` into a `ToFile`                                             | none     |
+| `discard(launch)`              | Removes the launch's directory; refuses a running one                              | 60       |
+
+Each launch lives in `/var/lib/agentworks/detached/<id>/`: the base is created root-owned, mode
+0700, under a 0755 `/var/lib/agentworks`, and the launch directory and its `work/` (the payload's
+working directory) are 0700. `launch` sends the argv and environment on stdin, so the environment
+reaches the payload and no file or log. The program forks once into a supervisor in its own session
+with every descriptor of the connection closed, which starts the payload in a session of its own
+with both streams in the launch's `output`, records its status (128 plus the signal for a signalled
+one) and exits. `launch` returns once the payload has started.
+
+The launch's `process` file is locked with `flock` before it appears and stays locked while the
+launching process, the supervisor or any process of the payload's tree lives, and that lock is the
+process identity: no pid is compared. A descendant that calls `setsid` leaves the group `interrupt`
+signals but keeps the lock, so it outlives the interrupt and keeps the launch `RUNNING`. `observe`
+tests the lock before it reads the status, since the supervisor writes the status before it releases
+its hold:
+
+| State     | Evidence                          |
+| --------- | --------------------------------- |
+| `ABSENT`  | no launch directory               |
+| `RUNNING` | `process` locked                  |
+| `EXITED`  | `process` unlocked, a `status`    |
+| `LOST`    | no `process` lock and no `status` |
+
+The guest refuses an id whose directory exists (`DetachedRefused`), so a launch never adopts an
+earlier one's files or status, and each new launch removes sibling launches that are not running and
+are older than seven days. A command the guest cannot execute is `RequestRefused` with its `exec`
+code, as under `run`, and the launch reads `EXITED` with 127 or 126. `launch` is never dispatched
+again: after a connection outcome it makes one `observe`, and returns if the launch is there;
+otherwise it raises `ExecutionIncomplete` naming the id. Resuming after a dropped connection is the
+caller's polling loop, since `observe` changes nothing. A caller holds the id from `new_launch`
+before anything is sent, so its `finally` can discard by id whatever `launch` did.
 
 ## Client and policy
 
@@ -196,12 +334,12 @@ reference and the 0.20 upgrade guide.
 
 ## Independence
 
-Nothing in this package imports `agentworks.transports`, `agentworks.ssh`, `agentworks.remote_exec`,
-`agentworks.harness_setup.runner` or `agentworks.native_files`. Three guards hold that. A
-fresh-interpreter test (`tests/execution/test_independence.py`) imports every submodule with them
+Nothing in this package imports `agentworks.transports` or `agentworks.ssh`. Three guards hold that.
+A fresh-interpreter test (`tests/execution/test_independence.py`) imports every submodule with them
 blocked, and with them the modules outside the package that are built on it alone: `vms.contract`,
-`vms.recovery`, and `public_ssh`, which loads the `vm_platform` package. A conftest blocks them for
-every test in `tests/execution/`. A static check rejects any import of them, in a function body or
-under `TYPE_CHECKING` too, in the files already migrated onto this package
+`vms.recovery`, `public_ssh`, which loads the `vm_platform` package, and every module of
+`agentworks.plugins`, which loads the plugin index. A conftest blocks them for every test in
+`tests/execution/`. A static check rejects any import of them, in a function body or under
+`TYPE_CHECKING` too, in the files already migrated onto this package
 (`tests/test_execution_import_boundary.py`); a slice that migrates a file adds it to that list. The
 tests are described in [`tests/execution/README.md`](../../tests/execution/README.md).

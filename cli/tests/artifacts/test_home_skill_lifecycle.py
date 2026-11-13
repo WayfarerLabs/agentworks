@@ -54,7 +54,7 @@ def test_restart_stages_disjoint_home_packages_before_teardown(home_lifecycle, m
 
 
 def test_partial_home_publication_retains_old_runtime_and_retry_cleans_owned_prefix(home_lifecycle, monkeypatch):
-    from agentworks.native_files import NativeFiles
+    from agentworks.execution.files import Files
 
     current = home_lifecycle
     current.config.artifact_bundles["team"] = current.config.artifact_bundles["team"].model_copy(
@@ -63,7 +63,7 @@ def test_partial_home_publication_retains_old_runtime_and_retry_cleans_owned_pre
     current.restart()
     old = current.files()
     before = current.db.get_session("s1")
-    publish = NativeFiles.publish
+    write_if = Files.write_if
     count = 0
 
     def fail(self, *args, **kwargs):
@@ -71,17 +71,17 @@ def test_partial_home_publication_retains_old_runtime_and_retry_cleans_owned_pre
         count += 1
         if count == 2:
             raise StateError("fixture failed write")
-        return publish(self, *args, **kwargs)
+        return write_if(self, *args, **kwargs)
 
     current.events.clear()
-    monkeypatch.setattr(NativeFiles, "publish", fail)
+    monkeypatch.setattr(Files, "write_if", fail)
     with pytest.raises(StateError):
         current.restart()
     partial = current.files()
     assert set(old) < set(partial) and all(path.exists() for path in partial)
     assert current.db.get_session("s1").run_id == before.run_id
     assert "kill" not in current.events
-    monkeypatch.setattr(NativeFiles, "publish", publish)
+    monkeypatch.setattr(Files, "write_if", write_if)
     current.restart()
     assert all(not path.exists() for path in partial)
     assert len(current.files()) == len(old)
@@ -117,7 +117,7 @@ def test_modified_home_package_preserves_owned_entrypoint_and_cleanup_evidence(h
     paths = current.files()
     paths[0].write_bytes(b"operator modification")
     with pytest.raises(StateError):
-        cleanup_session_artifacts(current.db, current.db.get_session("s1"), current.target)
+        cleanup_session_artifacts(current.db, current.db.get_session("s1"), current.target.access())
     assert paths[0].read_bytes() == b"operator modification"
     record = read_native_setup(current.db, "session", "s1").records[0]
     assert str(paths[0]) in {file.path for file in record.artifact_files}

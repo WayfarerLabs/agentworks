@@ -85,6 +85,9 @@ from ._pids import (
     _ensure_pid as _ensure_pid,
 )
 from ._pids import (
+    _identity_access as _identity_access,
+)
+from ._pids import (
     _needs_repair as _needs_repair,
 )
 from ._pids import (
@@ -95,6 +98,9 @@ from ._pids import (
 )
 from ._pids import (
     _resolve_session_linux_user as _resolve_session_linux_user,
+)
+from ._pids import (
+    _session_access as _session_access,
 )
 from ._pids import (
     _validated_observed_boot_id as _validated_observed_boot_id,

@@ -89,6 +89,41 @@ def _isolate_ssh_logs(tmp_path_factory: pytest.TempPathFactory) -> Generator[Non
         ssh.LOG_DIR = prior
 
 
+@pytest.fixture(scope="session")
+def file_lock_path(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """The guest file program's VM-wide lock for programs this worker runs on this machine."""
+    directory = tmp_path_factory.getbasetemp() / "file-lock"
+    directory.mkdir(exist_ok=True)
+    return directory / "agentworks-files.lock"
+
+
+@pytest.fixture(scope="session")
+def _file_program_with_private_lock(file_lock_path: Path) -> str:
+    from agentworks.execution import file_program, files
+
+    source = files.program_source()
+    declaration = f'LOCK_PATH = "{file_program.LOCK_PATH}"'
+    if source.count(declaration) != 1:
+        raise RuntimeError(f"the file program no longer declares {declaration}; update this fixture")
+    return source.replace(declaration, f'LOCK_PATH = "{file_lock_path}"')
+
+
+@pytest.fixture(autouse=True)
+def _private_file_lock(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Send the file program with its lock at :func:`file_lock_path` in every non-integration test.
+
+    The L and S lanes and ``run_file_program_locally`` run the program on this
+    machine, where the VM's lock path is the host's own ``/run/lock``.
+    Integration tests reach a VM and keep its real lock.
+    """
+    if request.node.get_closest_marker("integration") is not None:
+        return
+    from agentworks.execution import files
+
+    source = request.getfixturevalue("_file_program_with_private_lock")
+    monkeypatch.setattr(files, "program_source", lambda: source)
+
+
 # ---------------------------------------------------------------------------
 # Resource manifest authoring
 #
@@ -649,13 +684,11 @@ def install_fake_target(monkeypatch: pytest.MonkeyPatch, target: _FakeTarget) ->
     # eager top-level import (used by observe_session_statuses and friends).
     fake_factory = lambda vm, config, **kwargs: target  # noqa: E731
     monkeypatch.setattr("agentworks.transports.transport", fake_factory)
-    # ``sessions.manager`` and the agents modules import ``transport`` at
+    # ``sessions.manager`` and ``agents.manager`` import ``transport`` at
     # module load (eager), so the agentworks.transports-side patch alone
     # wouldn't take effect for callers that already captured the binding.
     monkeypatch.setattr("agentworks.sessions.manager.transport", fake_factory)
     monkeypatch.setattr("agentworks.agents.manager.transport", fake_factory)
-    monkeypatch.setattr("agentworks.agents.grants.transport", fake_factory)
-    monkeypatch.setattr("agentworks.agents.initializer.transport", fake_factory)
     stub_vm_gates(monkeypatch)
     # The interactive code path now lives on the transport itself; the
     # fake target exposes it as a no-op so attach flows return cleanly.
@@ -1060,13 +1093,9 @@ def ssh_enrolls_on_first_use(trust_binding: object) -> None:
 @pytest.fixture
 def vm_access_recorder(monkeypatch: pytest.MonkeyPatch) -> AccessRecorder:
     """Route ``execution.vm_access`` and ``enrollment_access`` to a recording fake, and resolve ssh without a client."""
-    from tests.vm_access_support import AccessRecorder
+    from tests.vm_access_support import install_access_recorder
 
-    recorder = AccessRecorder()
-    monkeypatch.setattr("agentworks.execution.vm_access", recorder.vm_access)
-    monkeypatch.setattr("agentworks.execution.enrollment_access", recorder.enrollment_access)
-    monkeypatch.setattr("agentworks.execution.resolve_ssh", lambda: recorder.client)
-    return recorder
+    return install_access_recorder(monkeypatch)
 
 
 def seed_vm_trust(vm_name: str) -> None:

@@ -51,8 +51,8 @@ from agentworks.schema import AgwModel, AgwRootModel
 if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
     from agentworks.db import VMRow, VMStatus
+    from agentworks.execution.access import VMAccess
     from agentworks.execution.root_script import RawRun
-    from agentworks.transports import Transport
 
 
 def config_model_for(kind: str, name: str) -> type[BaseModel]:
@@ -129,7 +129,7 @@ class ConformingHarnessIntegration(HarnessIntegration):
     """A concrete ``HarnessIntegration``. Subclasses add ``name`` /
     ``description``."""
 
-    contract_version = 7
+    contract_version = 8
 
     def __init_subclass__(cls, **kwargs: object) -> None:
         super().__init_subclass__(**kwargs)
@@ -143,7 +143,7 @@ class ConformingHarnessIntegration(HarnessIntegration):
     ) -> HarnessStart:
         raise NotImplementedError
 
-    def _probe_target(self, transport: Transport) -> None:
+    def _probe_target(self, access: VMAccess) -> None:
         raise NotImplementedError
 
 
@@ -151,7 +151,7 @@ class ConformingGitCredentialProvider(GitCredentialProvider):
     """A concrete ``GitCredentialProvider``. Subclasses add ``name`` /
     ``description``."""
 
-    contract_version = 3
+    contract_version = 4
 
     def __init_subclass__(cls, **kwargs: object) -> None:
         super().__init_subclass__(**kwargs)
@@ -178,7 +178,7 @@ class ConformingSecretBackend(SecretBackend):
     config_model: ClassVar[type[AgwModel]] = AgwModel
     mapping_model: ClassVar[type[AgwRootModel[Any]]] = AgwRootModel[str]
 
-    contract_version = 1
+    contract_version = 3
     supports_tty_interaction = False
 
     def __init_subclass__(cls, **kwargs: object) -> None:

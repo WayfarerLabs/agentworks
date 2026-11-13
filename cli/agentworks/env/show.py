@@ -302,7 +302,7 @@ def _resolve_scope_envs(
         # base disappears. A workspace without either still contributes an
         # empty scope, preserving copied-workspace compatibility.
         from agentworks.errors import ConfigError, NotFoundError
-        from agentworks.instance_specs import UnsupportedStoredOverlayError
+        from agentworks.instance_specs import ExplicitReplacementRequired, UnsupportedStoredOverlayError
         from agentworks.workspaces.templates import resolve_ws_template_env_or_empty
 
         try:
@@ -312,6 +312,12 @@ def _resolve_scope_envs(
                 ctx.workspace.name,
                 ctx.workspace.template,
             ).env
+        except ExplicitReplacementRequired as error:
+            output.warn(
+                f"{error}; using its base template for this environment inspection."
+                + (f"\n{error.hint}" if error.hint else "")
+            )
+            workspace_env = resolve_ws_template_env_or_empty(registry, ctx.workspace.template)
         except UnsupportedStoredOverlayError:
             output.warn(
                 f"Stored workspace instance spec for {ctx.workspace.name!r} requires a compatible or newer "

@@ -51,8 +51,8 @@ if TYPE_CHECKING:
 
     from agentworks.config import Config
     from agentworks.db import Database
+    from agentworks.execution.access import VMAccess
     from agentworks.secrets.policy import TtyInteractionPolicy
-    from agentworks.transports import Transport
 
 # NOTE on the initializer imports (``verify_tailscale_available``,
 # ``bootstrap_vm``, ``run_initialization``):
@@ -332,14 +332,14 @@ def create_vm(
     def scoped_ctx(
         secret_names: tuple[str, ...],
         *,
-        admin_target: Transport | None = None,
-        agent_target: Transport | None = None,
+        admin_access: VMAccess | None = None,
+        agent_access: VMAccess | None = None,
     ) -> RunContext:
         return RunContext(
             config=config,
             operation_scope=scope,
-            admin_target=admin_target,
-            agent_target=agent_target,
+            admin_access=admin_access,
+            agent_access=agent_access,
             secrets=ScopedSecrets(resolver.values, secret_names),
         )
 
@@ -622,7 +622,7 @@ def create_vm(
                 # so a failure to open it maps like any other init failure, as
                 # it did when the hold was entered inside the old initialize_vm.
                 init_stack.enter_context(platform_obj.vm_active(init_row, config=config))
-                ts_target, home, observed_release = _mgr.bootstrap_vm(
+                access, home, observed_release = _mgr.bootstrap_vm(
                     db,
                     config,
                     vm_name,
@@ -660,8 +660,8 @@ def create_vm(
                 _raise_init_failure(db, vm_name, e)
 
         # -- Initialization (Phase B) --
-        # Sibling of Provisioning: runs after the section closes, over
-        # Tailscale SSH, with the same failure mapping as Phase A.
+        # Sibling of Provisioning: runs after the section closes, on the
+        # admin's access Phase A returned, with the same failure mapping.
         try:
             _mgr.run_initialization(
                 db,
@@ -670,7 +670,7 @@ def create_vm(
                 vm_tmpl,
                 admin,
                 vm_name,
-                ts_target,
+                access,
                 credential_ops,
                 home,
                 resolved_admin_username,

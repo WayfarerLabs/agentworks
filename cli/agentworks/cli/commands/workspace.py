@@ -133,7 +133,7 @@ def workspace_describe(
 def workspace_rehome(
     name: Annotated[str, typer.Argument(help="Workspace name")],
     target: Annotated[
-        str | None, typer.Option("--target", help="Target path (default: configured workspace dir)")
+        str | None, typer.Option("--target", help="Absolute target path on the VM (default: configured workspace dir)")
     ] = None,
     remove_old: Annotated[
         bool, typer.Option("--remove-old", help="Remove the old directory after verified copy")

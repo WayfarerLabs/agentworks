@@ -15,13 +15,15 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
 from agentworks.db import Database, ProvisioningStatus
+from agentworks.execution.access import Admin, Agent
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.tmux import FingerprintProbe, ProbeStatus, TmuxServerFingerprint
+from tests.vm_access_support import check_result, is_command_check, presence_check
 
 from .conftest import (
     seed_vm_trust,
@@ -41,7 +43,12 @@ def _stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 if TYPE_CHECKING:
-    pass
+    from agentworks.execution.results import Result
+    from tests.vm_access_support import AccessRecorder, Call
+
+
+# Every access a command builds is the recording fake: these tests run no ssh.
+pytestmark = pytest.mark.usefixtures("vm_access_recorder")
 
 
 class _Result:
@@ -440,7 +447,7 @@ def test_create_session_uses_agent_target_for_tmux(tmp_path: Path, monkeypatch: 
     # scps a YAML file which doesn't help this test's transport assertion.
     monkeypatch.setattr(session_manager, "_regenerate_tmuxinator", lambda *a, **k: None)
 
-    captured: dict[str, object] = {}
+    captured: dict[str, Any] = {}
 
     def _capture_create(
         name,
@@ -449,7 +456,7 @@ def test_create_session_uses_agent_target_for_tmux(tmp_path: Path, monkeypatch: 
         linux_user,
         *,
         run_command,
-        target,
+        admin_files,
         admin_username,
         is_admin,
         env=None,
@@ -460,7 +467,7 @@ def test_create_session_uses_agent_target_for_tmux(tmp_path: Path, monkeypatch: 
         if before_spawn is not None:
             before_spawn()
         captured["run_command"] = run_command
-        captured["target"] = target
+        captured["admin_files"] = admin_files
         captured["env"] = env
         return ("/tmp/sock", 12345)
 
@@ -482,12 +489,14 @@ def test_create_session_uses_agent_target_for_tmux(tmp_path: Path, monkeypatch: 
 
     # run_command must be agent_target.run, not admin_target.run.
     assert captured["run_command"] == targets["agent"].run
-    # `target` (used for socket-root setup) is still admin's.
-    assert captured["target"] is targets["admin"]
+    # The socket roots are still set up on the admin's access.
+    assert isinstance(captured["admin_files"].access.identity, Admin)
     db.close()
 
 
-def test_create_session_aborts_on_missing_required_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_create_session_aborts_on_missing_required_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, vm_access_recorder: AccessRecorder
+) -> None:
     """A template whose ``required_commands`` aren't installed on the agent must
     abort with a clear ``StateError`` BEFORE any state mutation, rather than
     leaving the operator with the cryptic downstream tmux server-access failure.
@@ -498,26 +507,19 @@ def test_create_session_aborts_on_missing_required_command(tmp_path: Path, monke
 
     db = _seed_db(tmp_path)
 
-    # Agent target whose `command -v` probe reports the binary as missing.
-    class _MissingCmdResult:
-        def __init__(self, ok: bool) -> None:
-            self.ok = ok
-            self.returncode = 0 if ok else 20
-            self.stdout = ""
-            self.stderr = ""
+    # The agent's command check reports the binary as missing.
+    seen_probes: list[Call] = []
 
-    seen_probes: list[str] = []
+    def answer(call: Call) -> Result | None:
+        if not is_command_check(call.request):
+            return None
+        seen_probes.append(call)
+        return check_result(call.request, 20)
 
-    class _MissingCmdTarget:
-        def run(self, cmd: str, *_a: object, **_k: object) -> _MissingCmdResult:
-            if "command -v" in cmd:
-                seen_probes.append(cmd)
-                return _MissingCmdResult(ok=False)
-            return _MissingCmdResult(ok=True)
-
-    monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: _MissingCmdTarget())
-    monkeypatch.setattr("agentworks.sessions.manager.transport", lambda *a, **k: _MissingCmdTarget())
-    monkeypatch.setattr("agentworks.transports.agent_transport", lambda *a, **k: _MissingCmdTarget())
+    vm_access_recorder.answer = answer
+    monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: _Target("admin", []))
+    monkeypatch.setattr("agentworks.sessions.manager.transport", lambda *a, **k: _Target("admin", []))
+    monkeypatch.setattr("agentworks.transports.agent_transport", lambda *a, **k: _Target("agent", []))
     monkeypatch.setattr(agent_mgr, "_assert_agent_ssh_works", lambda *a, **k: None)
     stub_vm_gates(monkeypatch)
 
@@ -561,11 +563,10 @@ def test_create_session_aborts_on_missing_required_command(tmp_path: Path, monke
     assert not db.has_any_grant("a1", "ws1")
     assert add_calls == [], "agent added to workspace group before command preflight"
 
-    # Pin the probe's shell flags to `-lic`: same flags `tmux._pane_command`
-    # uses for the actual pane. A regression to `-lc` would silently skip
-    # PATH additions hidden behind interactive-only shell config.
-    assert len(seen_probes) == 1
-    assert " -lic " in seen_probes[0]
+    # The agent's own check, with the startup `tmux._pane_command` gives the
+    # pane: login and interactive (presence_probe), so PATH additions behind
+    # interactive-only shell config count.
+    assert [(call.identity, presence_check(call.request)) for call in seen_probes] == [(Agent("a1", "aw-a1"), "claude")]
     db.close()
 
 
@@ -726,7 +727,7 @@ def test_legacy_runtime_is_preserved_until_confirmed_restart(
         linux_user,
         *,
         run_command,
-        target,
+        admin_files,
         admin_username,
         is_admin,
         env=None,

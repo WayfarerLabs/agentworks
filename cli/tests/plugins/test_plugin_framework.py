@@ -241,7 +241,7 @@ class _PlatformWithoutADescription(ConformingVMPlatform):
 class _BackendMissingItsOperations:
     """A structural lookalike that does not derive from ``SecretBackend``."""
 
-    contract_version = 1
+    contract_version = 3
     name = "barely-a-backend"
     description = "none of the backend operations"
     supports_tty_interaction = False
@@ -251,7 +251,7 @@ class _BackendMissingItsOperations:
 class _BackendWithoutTtySupport:
     """Another lookalike, proving plausible members do not replace nominality."""
 
-    contract_version = 1
+    contract_version = 3
     name = "no-tty-support-backend"
     description = "omits the tty support member"
     config_model: type[AgwRootModel[Any]] = AgwRootModel[str]
@@ -528,7 +528,7 @@ def test_registration_rejects_mismatched_vm_platform_contract_without_writing() 
     assert _snapshot_registries() == before
 
 
-@pytest.mark.parametrize("contract_version", [1, 2])
+@pytest.mark.parametrize("contract_version", [1, 7])
 def test_registration_rejects_unsupported_harness_integration_contract_without_writing(
     monkeypatch: pytest.MonkeyPatch,
     contract_version: int,

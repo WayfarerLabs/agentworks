@@ -39,15 +39,13 @@ def live_lane(monkeypatch: pytest.MonkeyPatch) -> Iterator[LiveLane]:
     monkeypatch.setattr(db_module, "DB_PATH", REAL_DB_PATH)
     monkeypatch.setattr(trust, "STORE_DIR", REAL_STORE_DIR)
     from agentworks.config import load_config
-    from agentworks.execution import vm_access
-    from agentworks.execution.access import Admin
 
     database = db_module.Database()
     try:
         vm = database.get_vm(name)
         if vm is None:
             pytest.fail(f"AGW_CONFORMANCE_VM names '{name}', which is not a VM in the operator's state")
-        lane = LiveLane(monkeypatch, vm, vm_access(vm, load_config(), Admin()))
+        lane = LiveLane(monkeypatch, vm, load_config())
         yield lane
         lane.cleanup()
     finally:

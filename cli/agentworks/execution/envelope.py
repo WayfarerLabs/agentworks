@@ -6,7 +6,9 @@ ASCII decimal digits, zero padded, then that many bytes.
 
 The envelope is one JSON object, ASCII-only whatever the workstation's locale.
 ``encode`` is the one function that turns a request into bytes, so it is where
-operator-authored input is validated. Everything the guest prints for the
+operator-authored input is validated; ``Detached.launch`` applies the same
+``checked_argv`` and ``checked_env`` to the spec it sends on stdin, which no
+envelope carries. Everything the guest prints for the
 client is a marker line: ``0x1E``, the request's nonce, a space, a word and a
 newline. A :class:`StreamFilter` per stream finds the start marker, passes
 payload bytes through and stops at the closing line; :func:`classify` combines
@@ -25,7 +27,7 @@ from typing import TYPE_CHECKING
 
 from agentworks.errors import ValidationError
 from agentworks.execution.agw_launch import STDLIB_MISSING_STATUS
-from agentworks.execution.requests import Command, LoginShell, Script
+from agentworks.execution.requests import Command, LoginShell, PythonProgram, Script
 from agentworks.execution.results import (
     REFUSAL_CODE,
     Completed,
@@ -102,7 +104,10 @@ def encode(request: Request, *, nonce: str, term: str | None = None, handover: s
             raise ValueError("a login shell travels as a handover and needs its token and TERM")
         mode, kind = "park", "shell"
     else:
-        mode, kind = "run", "argv" if isinstance(request, Command) else "script"
+        mode, kind = (
+            "run",
+            "argv" if isinstance(request, Command) else "python" if isinstance(request, PythonProgram) else "script",
+        )
         if handover is not None or term is not None:
             raise ValueError("only a login shell takes a handover or TERM")
     body: dict[str, object] = {
@@ -110,15 +115,25 @@ def encode(request: Request, *, nonce: str, term: str | None = None, handover: s
         "mode": mode,
         "kind": kind,
         "cwd": _checked_cwd(request.cwd),
-        "env": _checked_env(request.env),
+        "env": checked_env(request.env),
         "term": None if term is None else _checked_term(term),
         "handover": handover,
     }
     if isinstance(request, Command):
-        body["argv"] = _checked_argv(request.argv)
+        body["argv"] = checked_argv(request.argv)
     elif isinstance(request, Script):
         _text(request.source, "script source")
-        body.update(shell=request.shell.value, source=request.source, login=request.login)
+        body.update(
+            shell=request.shell.value, source=request.source, login=request.login, interactive=request.interactive
+        )
+    elif isinstance(request, PythonProgram):
+        _text(request.source, "program source")
+        body.update(
+            source=request.source,
+            args=_checked_arguments(request.args),
+            login=request.login,
+            interactive=request.interactive,
+        )
     return json.dumps(body, ensure_ascii=True, separators=(",", ":")).encode("ascii")
 
 
@@ -141,16 +156,26 @@ def _checked_term(term: str) -> str:
     return term
 
 
-def _checked_argv(argv: tuple[str, ...]) -> list[str]:
+def checked_argv(argv: tuple[str, ...]) -> list[str]:
+    """``argv`` as a list, once it has a program name and every argument is one an ``exec`` can take.
+
+    The envelope's rule for a ``Command``; detached work applies it to the
+    argv it sends on stdin, which no envelope encodes.
+    """
     if not argv or not argv[0]:
         raise ValidationError("a command needs a non-empty program name")
-    for position, argument in enumerate(argv):
+    return _checked_arguments(argv)
+
+
+def _checked_arguments(arguments: tuple[str, ...]) -> list[str]:
+    for position, argument in enumerate(arguments):
         if len(_text(argument, f"argument {position}")) > MAX_STRING_BYTES:
             raise ValidationError(f"argument {position} is longer than {MAX_STRING_BYTES} bytes")
-    return list(argv)
+    return list(arguments)
 
 
-def _checked_env(env: Mapping[str, str]) -> dict[str, str]:
+def checked_env(env: Mapping[str, str]) -> dict[str, str]:
+    """``env`` as a dict, once every name is a shell name and every entry one an ``exec`` can take."""
     checked: dict[str, str] = {}
     for name, value in env.items():
         if not _ENV_NAME.fullmatch(name):

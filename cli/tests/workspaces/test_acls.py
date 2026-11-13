@@ -35,7 +35,7 @@ def test_cloned_artifacts_adopt_and_first_repair_keeps_published_file_acls(tmp_p
     parent = target.home / "workspaces"
     parent.mkdir()
     parent.chmod(0o2770)
-    apply_workspace_acls(target, str(parent))
+    apply_workspace_acls(target.files(), str(parent))
     source = target.root / "source"
     source.mkdir()
     content = {
@@ -60,7 +60,7 @@ def test_cloned_artifacts_adopt_and_first_repair_keeps_published_file_acls(tmp_p
     assert target.run(f"git clone -- {shlex.quote(str(source))} {shlex.quote(str(workspace))}").ok
     for directory in (workspace, *(entry for entry in workspace.rglob("*") if entry.is_dir())):
         directory.chmod(directory.stat().st_mode | 0o2000)
-    apply_workspace_acls(target, str(workspace))
+    apply_workspace_acls(target.files(), str(workspace))
     desired = tuple(
         ArtifactFile(
             str(workspace / name),
@@ -74,7 +74,7 @@ def test_cloned_artifacts_adopt_and_first_repair_keeps_published_file_acls(tmp_p
     before = {item.path: Path(item.path).stat() for item in desired}
     checkpoints: list[tuple[OwnedArtifactFile, ...]] = []
     group = fixture_group()
-    adopted = publish_artifacts(target, desired, (), checkpoints.append, roots=(str(workspace),), group=group)
+    adopted = publish_artifacts(target.files(), desired, (), checkpoints.append, roots=(str(workspace),), group=group)
     assert not adopted.skipped and len(adopted.files) == len(content)
     for item in desired:
         observed = Path(item.path).stat()
@@ -85,7 +85,7 @@ def test_cloned_artifacts_adopt_and_first_repair_keeps_published_file_acls(tmp_p
     assert target.run(shlex.quote(str(workspace / ".codex/skills/review/run.sh"))).ok
     new_file = workspace / ".codex/rules/new.md"
     updated = publish_artifacts(
-        target,
+        target.files(),
         (*desired, ArtifactFile(str(new_file), b"new fixture rule", ("d" * 64,))),
         adopted.files,
         checkpoints.append,
@@ -94,7 +94,7 @@ def test_cloned_artifacts_adopt_and_first_repair_keeps_published_file_acls(tmp_p
     )
     assert not updated.skipped and new_file.stat().st_mode & 0o777 == 0o660
     acl_before = snapshot(workspace)
-    apply_workspace_acls(target, str(workspace))
+    apply_workspace_acls(target.files(), str(workspace))
     assert snapshot(workspace) == acl_before
     for entry in (workspace, *workspace.rglob("*")):
         assert entry.stat().st_gid == os.getgid()
@@ -110,16 +110,16 @@ def test_access_mask_preserves_effective_executable_intent_and_is_idempotent(tmp
     workspace = target.home / "workspace"
     workspace.mkdir()
     workspace.chmod(0o2770)
-    apply_workspace_acls(target, str(workspace))
+    apply_workspace_acls(target.files(), str(workspace))
     path = workspace / "file"
     path.write_bytes(b"fixture")
     path.chmod(original_mode)
-    apply_workspace_acls(target, str(workspace))
+    apply_workspace_acls(target.files(), str(workspace))
     assert bool(path.stat().st_mode & 0o111) == bool(original_mode & 0o111)
     assert path.stat().st_mode & 0o070 == (0o070 if original_mode & 0o111 else 0o060)
     assert path.stat().st_mode & 0o007 == 0
     before = snapshot(workspace)
-    apply_workspace_acls(target, str(workspace))
+    apply_workspace_acls(target.files(), str(workspace))
     assert snapshot(workspace) == before
 
 
@@ -129,10 +129,10 @@ def test_differing_executable_intent_is_retained_after_workspace_acl_application
     path = target.home / "rule.md"
     path.write_bytes(b"fixture")
     path.chmod(0o644 if executable else 0o755)
-    apply_workspace_acls(target, str(target.home))
+    apply_workspace_acls(target.files(), str(target.home))
     before = path.stat()
     result = publish_artifacts(
-        target,
+        target.files(),
         (ArtifactFile(str(path), b"fixture", ("a" * 64,), executable=executable),),
         (),
         lambda files: None,
@@ -153,7 +153,7 @@ def test_workspace_acl_does_not_follow_a_link_outside_the_tree(tmp_path):
     outside.write_bytes(b"fixture")
     outside.chmod(0o644)
     (workspace / "link").symlink_to(outside)
-    apply_workspace_acls(target, str(workspace))
+    apply_workspace_acls(target.files(), str(workspace))
     assert outside.stat().st_mode & 0o777 == 0o644
 
 
@@ -161,7 +161,7 @@ def test_parent_acl_repair_prunes_private_clone_attempt_trees(tmp_path):
     target = LocalFixtureTransport(tmp_path / "target")
     parent = target.home / "workspaces"
     parent.mkdir()
-    apply_workspace_acls(target, str(parent))
+    apply_workspace_acls(target.files(), str(parent))
     workspace = parent / "project"
     workspace.mkdir()
     ordinary = workspace / "tracked"
@@ -179,7 +179,7 @@ def test_parent_acl_repair_prunes_private_clone_attempt_trees(tmp_path):
     executable.chmod(0o700)
     before = snapshot(attempt)
 
-    apply_workspace_acls(target, str(parent))
+    apply_workspace_acls(target.files(), str(parent))
 
     assert snapshot(attempt) == before
     assert attempt.stat().st_mode & 0o077 == 0

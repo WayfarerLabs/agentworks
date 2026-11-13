@@ -21,6 +21,9 @@ from agentworks.ssh import SSHError
 from ._runtime_probes import framed_runtime_result
 from .conftest import stub_build_registry, stub_session_resolvers, stub_vm_gates
 
+# Every access a command builds is the recording fake: these tests run no ssh.
+pytestmark = pytest.mark.usefixtures("vm_access_recorder")
+
 
 @pytest.fixture(autouse=True)
 def _stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:

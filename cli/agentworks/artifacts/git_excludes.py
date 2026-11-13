@@ -5,22 +5,31 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-import shlex
 from typing import TYPE_CHECKING
 
 from agentworks import output
+from agentworks.artifacts.config_files import publish_config
 from agentworks.errors import ExternalError, StateError
+from agentworks.execution.files import guest_path
+from agentworks.execution.requests import Bytes, PythonProgram
 from agentworks.harness_setup.model import NativeClaim
 from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
-from agentworks.native_files import NativeFiles, native_path
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Iterable, Sequence
 
     from agentworks.artifacts.application import OwnedArtifactFile
-    from agentworks.transports import Transport
+    from agentworks.execution.access import VMAccess
 
 GIT_EXCLUDE_ROLE = "artifact-git-exclude"
+METADATA_DEADLINE_SECONDS = 30
+"""How long the Git metadata read may take.
+
+The read is bounded so an unresponsive guest cannot stall the operation
+around it. A timeout is ``ExecutionIncomplete``: setup records the
+integration's setup as failed, and workspace deletion and rehome record the
+exclusion as incomplete and carry on.
+"""
 _METADATA = """
 import json, pathlib, subprocess, sys
 r = json.load(sys.stdin)
@@ -61,7 +70,7 @@ def _relative(claim: NativeClaim, workspace: str, prefix: str) -> str | None:
             claim.source == workspace
             and decoded.startswith(prefix)
             and claim.identifier == _pattern(relative, prefix)
-            and native_path(workspace + "/" + relative).startswith(workspace + "/")
+            and guest_path(workspace + "/" + relative).startswith(workspace + "/")
         ):
             return relative
     except StateError:
@@ -70,18 +79,20 @@ def _relative(claim: NativeClaim, workspace: str, prefix: str) -> str | None:
 
 
 def _metadata(
-    runner: Transport,
+    access: VMAccess,
     workspace: str,
     paths: Sequence[str],
     unavailable: Callable[[str], None],
+    redactions: Iterable[str],
 ) -> tuple[str, str, list[str]] | None:
-    request = json.dumps({"workspace": workspace, "paths": paths})
-    result = runner.run(shlex.join(["python3", "-c", _METADATA]), input_data=request, check=False, tty=False)
+    request = json.dumps({"workspace": workspace, "paths": paths}).encode()
+    result = access.run(PythonProgram(_METADATA, stdin=Bytes(request), deadline=METADATA_DEADLINE_SECONDS))
+    status = result.require_completed(access.vm_name)
     unavailable_reason = ""
     try:
         observed = json.loads(result.stdout)
         prefix, destination, tracked = observed["prefix"], observed["exclude"], observed["tracked"]
-        if result.returncode or not isinstance(tracked, list) or any(not isinstance(path, str) for path in tracked):
+        if status or not isinstance(tracked, list) or any(not isinstance(path, str) for path in tracked):
             raise ValueError()
         if prefix is None and destination is None:
             reason = observed.get("error")
@@ -92,23 +103,23 @@ def _metadata(
             if not isinstance(destination, str) or not isinstance(prefix, str) or (prefix and not prefix.endswith("/")):
                 raise ValueError()
             if prefix:
-                native_path("/" + prefix.removesuffix("/"))
+                guest_path("/" + prefix.removesuffix("/"))
             for path in tracked:
-                native_path("/" + path)
-            return prefix, native_path(destination), tracked
+                guest_path("/" + path)
+            return prefix, guest_path(destination), tracked
     except (ValueError, KeyError, TypeError, StateError):
         raise ExternalError(f"Git metadata for workspace artifact exclusions is unavailable at '{workspace}'") from None
     unavailable(
         sanitize_setup_diagnostic(
             f"Git could not resolve artifact exclusion metadata for '{workspace}': {unavailable_reason}",
-            logger=runner.logger,
+            redactions=redactions,
         )
     )
     return None
 
 
 def reconcile_workspace_excludes(
-    runner: Transport,
+    access: VMAccess,
     workspace: str,
     integration: str,
     files: Sequence[OwnedArtifactFile],
@@ -117,6 +128,7 @@ def reconcile_workspace_excludes(
     *,
     group: str,
     report_incomplete: Callable[[str], None],
+    redactions: Iterable[str],
     prior_workspace: str | None = None,
     shared_paths: Sequence[str] = (),
 ) -> None:
@@ -125,22 +137,25 @@ def reconcile_workspace_excludes(
     Claims cross persisted state, Git metadata crosses the guest boundary, and
     native file writes use a compare-and-publish guard against concurrent edits.
     Only Git's current destination authorizes I/O, never a stored destination.
+    ``redactions`` are resolved values to keep out of Git's diagnostics.
     Rehome alone supplies its verified old row path as prior_workspace; saved
     claims never select another source or authorize a migration by themselves.
+    With no files, shared paths or prior claims it returns before checking
+    ``workspace``: nothing addresses a file under it.
     """
     prior = tuple(claim for claim in claims if claim.role == GIT_EXCLUDE_ROLE)
-    workspace = native_path(workspace)
     paths = tuple(file.path for file in files if not file.generated_section) + tuple(shared_paths)
     if not paths and not prior:
         return
+    workspace = guest_path(workspace)
     if any(not path.startswith(workspace + "/") for path in paths):
         raise StateError("workspace artifact exclusion is outside its workspace")
     relative_paths = tuple(path.removeprefix(workspace + "/") for path in paths)
     source_workspace = workspace
     source_prefix = None
     if prior_workspace is not None and prior:
-        source_workspace = native_path(prior_workspace)
-        source_metadata = _metadata(runner, source_workspace, (), report_incomplete)
+        source_workspace = guest_path(prior_workspace)
+        source_metadata = _metadata(access, source_workspace, (), report_incomplete, redactions)
         if source_metadata is None:
             return
         source_prefix = source_metadata[0]
@@ -157,7 +172,7 @@ def reconcile_workspace_excludes(
                 )
             )
         )
-    metadata = _metadata(runner, workspace, relative_paths, report_incomplete if prior else output.warn)
+    metadata = _metadata(access, workspace, relative_paths, report_incomplete if prior else output.warn, redactions)
     if metadata is None:
         return
     prefix, destination, tracked = metadata
@@ -174,7 +189,7 @@ def reconcile_workspace_excludes(
                 sanitize_setup_diagnostic(
                     f"Stored artifact exclusion '{claim.identifier}' at recorded path '{claim.destination}' "
                     "no longer matches this workspace; its association was released.",
-                    logger=runner.logger,
+                    redactions=redactions,
                 )
             )
             continue
@@ -200,59 +215,63 @@ def reconcile_workspace_excludes(
     )
     if not prior and not desired:
         return
-    with NativeFiles(runner) as native:
-        current = native.read(destination)
-        for claim in (*prior, *(claim for claim in desired if claim not in prior)):
-            if claim in desired and any(
-                previous != claim
-                and (previous.role, previous.identifier, previous.destination)
-                == (claim.role, claim.identifier, claim.destination)
-                for previous in remaining
-            ):
-                report_incomplete(
-                    f"Artifact exclusion '{claim.identifier}' in '{destination}' retains unresolved prior ownership; "
-                    "the replacement was skipped."
-                )
-                continue
-            pair = _pair(claim, integration)
-            existing = current or b""
-            marker = pair.split(b"\n", 1)[0]
-            positions = tuple(match.start() for match in re.finditer(re.escape(marker), existing))
-            if any(
-                (start != 0 and existing[start - 1 : start] != b"\n") or not existing.startswith(pair, start)
-                for start in positions
-            ):
-                report_incomplete(
-                    f"An owned artifact exclusion in '{destination}' was modified; "
-                    "its bytes and ownership were retained."
-                )
-                continue
-            if len(positions) > 1:
-                raise StateError(f"workspace artifact exclusion ownership markers are duplicated in '{destination}'")
-            if claim in desired:
-                replacement = (
-                    existing
-                    if positions
-                    else existing + (b"" if not existing or existing.endswith(b"\n") else b"\n") + pair
-                )
-            elif positions:
-                start = positions[0]
-                replacement = existing[:start] + existing[start + len(pair) :]
-            else:
-                replacement = existing
-            if replacement != existing:
-                native.publish(
-                    destination,
-                    replacement,
-                    expected=None if current is None else hashlib.sha256(current).hexdigest(),
-                    group=group,
-                    preserve_metadata=current is not None,
-                )
-                current = replacement
-            if claim in desired:
-                updated = remaining if claim in remaining else [*remaining, claim]
-            else:
-                updated = [item for item in remaining if item != claim]
-            if updated != remaining:
-                checkpoint(tuple(updated))
-                remaining = updated
+    guest = access.files()
+    # The read keeps Files' default capture limit (1 MiB). A larger exclude file
+    # is ExecutionIncomplete naming that limit, handled as a timeout is (see
+    # METADATA_DEADLINE_SECONDS), and nothing rewrites a file not read whole.
+    current = guest.read(destination)
+    for claim in (*prior, *(claim for claim in desired if claim not in prior)):
+        if claim in desired and any(
+            previous != claim
+            and (previous.role, previous.identifier, previous.destination)
+            == (claim.role, claim.identifier, claim.destination)
+            for previous in remaining
+        ):
+            report_incomplete(
+                f"Artifact exclusion '{claim.identifier}' in '{destination}' retains unresolved prior ownership; "
+                "the replacement was skipped."
+            )
+            continue
+        pair = _pair(claim, integration)
+        existing = current or b""
+        marker = pair.split(b"\n", 1)[0]
+        positions = tuple(match.start() for match in re.finditer(re.escape(marker), existing))
+        if any(
+            (start != 0 and existing[start - 1 : start] != b"\n") or not existing.startswith(pair, start)
+            for start in positions
+        ):
+            report_incomplete(
+                f"An owned artifact exclusion in '{destination}' was modified; its bytes and ownership were retained."
+            )
+            continue
+        if len(positions) > 1:
+            raise StateError(f"workspace artifact exclusion ownership markers are duplicated in '{destination}'")
+        if claim in desired:
+            replacement = (
+                existing
+                if positions
+                else existing + (b"" if not existing or existing.endswith(b"\n") else b"\n") + pair
+            )
+        elif positions:
+            start = positions[0]
+            replacement = existing[:start] + existing[start + len(pair) :]
+        else:
+            replacement = existing
+        if replacement != existing:
+            publish_config(
+                guest,
+                destination,
+                replacement,
+                observed=current,
+                group=group,
+                operation="artifact exclusion",
+                preserve_metadata=current is not None,
+            )
+            current = replacement
+        if claim in desired:
+            updated = remaining if claim in remaining else [*remaining, claim]
+        else:
+            updated = [item for item in remaining if item != claim]
+        if updated != remaining:
+            checkpoint(tuple(updated))
+            remaining = updated

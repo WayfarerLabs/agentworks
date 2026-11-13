@@ -8,10 +8,13 @@ Integration activation must be explicit, including when all configuration fields
 
 Agentworks installs `python3` as a required system package on every VM during create and reinit.
 Native setup uses its standard library for guarded file access, atomic publication and artifact
-discovery; `python3-venv` and `python3-pip` are not required. Run `agw vm recover <vm-name>` to
-install it on an older VM missing the interpreter, then `agw vm reinit <vm-name>`. A missing
-interpreter is reported before staging or native mutation. The harness CLI itself must also be
-installed through the existing package or install-command configuration.
+discovery; `python3-venv` and `python3-pip` are not required. Artifact discovery runs after the
+account's login and interactive startup files, so it sees the environment the harness gets, but
+always with `/usr/bin/python3`, not whichever `python3` the login `PATH` finds first. Every request
+Agentworks sends needs that interpreter, so on an older VM missing it the first one fails, before
+any native mutation, naming `agw vm recover <vm-name>` to install it; then run
+`agw vm reinit <vm-name>`. The harness CLI itself must also be installed through the existing
+package or install-command configuration.
 
 ## Settings mappings
 
@@ -50,11 +53,14 @@ and refuses malformed existing settings. Repair those settings separately first.
 Serialization preserves values, not comments or formatting. JSON duplicate keys and non-finite
 numbers are rejected. Destinations must be regular files reached without traversing symbolic links.
 Publication uses a private sibling temporary file, checks the observed destination hash, and renames
-atomically. Traversal respects search-only ancestors. After plugin commands finish, merge policies
-use the current settings and preserve the native associations. Publication refuses if the file
-changes again between that read and the atomic write. Publication sets user files to mode `0600` and
-workspace files to mode `0660` with the workspace group. Unchanged or skipped files retain their
-existing permissions. Permission failures do not trigger elevation.
+atomically, holding the VM-wide file lock that every Agentworks file write takes. Traversal respects
+search-only ancestors. After plugin commands finish, merge policies use the current settings and
+preserve the native associations. If the file changes between that read and the atomic write,
+publication refuses and leaves the file as the other writer left it; rerunning setup reads the
+changed file and applies the settings to it. Publication sets user files to mode `0600`, creating
+missing directories `0700`, and workspace files to mode `0660` with the workspace group, creating
+missing directories `2770`. Unchanged or skipped files retain their existing permissions. Permission
+failures do not trigger elevation.
 
 Use non-secret settings sources. Authentication files are not supported settings roles. Captured
 contents and native command output are transferred privately and are not stored in applied-state
@@ -180,8 +186,9 @@ nor temporary reprovisioning.
 ## Marketplaces and plugins
 
 User configuration has `marketplaces` and `plugins` lists, both empty by default. Marketplace
-strings use the installed harness's native source grammar. Local marketplace paths refer to the
-guest filesystem; relative paths resolve against the actual user's home. Plugin names resolve
+strings use the installed harness's native source grammar, except that one beginning with `-`, which
+the native CLI would read as an option, is a configuration error. Local marketplace paths refer to
+the guest filesystem; relative paths resolve against the actual user's home. Plugin names resolve
 against the native catalog; qualify ambiguous names as `plugin@marketplace`. An ambiguous
 unqualified selection is retained and reported without retiring its prior associations. A name
 absent from the catalog is a configuration error.

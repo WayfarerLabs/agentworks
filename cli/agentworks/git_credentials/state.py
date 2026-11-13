@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
 from agentworks.errors import ConfigError
+from agentworks.vms.home_layout import GIT_CREDENTIAL_STATE_DIR
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -193,7 +194,7 @@ def _render_include(hosts: list[str]) -> str:
         blocks.append(
             f'[credential "https://{host}"]\n'
             "\thelper =\n"
-            "\thelper = !~/.agentworks/git-credentials/launch\n"
+            f"\thelper = !~/{GIT_CREDENTIAL_STATE_DIR}/git-credentials/launch\n"
             "\tuseHttpPath = true\n"
         )
     return "\n".join(blocks)
@@ -224,7 +225,7 @@ def _render_dispatcher(routes: list[_Route]) -> str:
 # Managed by Agentworks. Routes one bounded Git credential request.
 set -o pipefail
 shopt -s lastpipe
-root="$HOME/.agentworks/git-credentials"
+root="$HOME/{GIT_CREDENTIAL_STATE_DIR}/git-credentials"
 op=${{1:-}}
 fail_request() {{
     exec 9>&-

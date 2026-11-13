@@ -23,6 +23,9 @@ from pathlib import Path
 import pytest
 
 from agentworks.errors import ExternalError, StateError
+from agentworks.execution.files import Files
+from agentworks.execution.requests import Script
+from agentworks.execution.results import Completed, Result
 from agentworks.sessions.tmux import (
     _pane_command,
     _tmux_env_flags,
@@ -35,6 +38,7 @@ from agentworks.sessions.tmux import (
     parse_process_start_ticks,
 )
 from tests._runtime_probes import framed_runtime_result
+from tests.vm_access_support import Admin, Call, RecordingVMAccess, files_over_target
 
 # ---------------------------------------------------------------------------
 # Pure helpers
@@ -321,11 +325,11 @@ def test_stale_socket_cleanup_removes_only_a_canonically_absent_server() -> None
             return _SpyResult()
 
     unknown = _CleanupTarget("error connecting to /run/agentworks/s.sock (Permission denied)")
-    assert _cleanup_stale_sockets_under(unknown, "/run/agentworks") == 0  # type: ignore[arg-type]
+    assert _cleanup_stale_sockets_under(files_over_target(unknown), "/run/agentworks", owner="agt-a") == 0
     assert not any("rm -f -- " in command for command in unknown.commands)
 
     absent = _CleanupTarget("no server running on /run/agentworks/s.sock")
-    assert _cleanup_stale_sockets_under(absent, "/run/agentworks") == 1  # type: ignore[arg-type]
+    assert _cleanup_stale_sockets_under(files_over_target(absent), "/run/agentworks", owner="agt-a") == 1
     assert sum("rm -f -- " in command for command in absent.commands) == 1
 
 
@@ -385,25 +389,20 @@ class _SpyRunCommand:
         return _SpyResult(ok=True)
 
 
-class _SpyTarget:
-    """``Transport`` stub that captures runs for the socket-root setup helpers."""
-
-    def __init__(self) -> None:
-        self.calls: list[str] = []
-
-    def run(self, command: str, *, sudo: bool = False, check: bool = False) -> _SpyResult:  # noqa: ARG002
-        self.calls.append(command)
-        # ensure_admin_socket_root probes for an existing directory; reply
-        # PROBE_FAILED so the helper takes the create path (records the mkdir
-        # commands, but those aren't what this test pins).
-        if "stat -c" in command:
-            return _SpyResult(ok=True, stdout="PROBE_FAILED\n")
-        return _SpyResult(ok=True)
+def _socket_roots_need_setup(call: Call) -> Result | None:
+    """The admin's socket-root probe reports PROBE_FAILED, so the setup helper takes its create path."""
+    request = call.request
+    if isinstance(request, Script) and "stat -c" in request.source:
+        return Result(Completed(0), b"PROBE_FAILED\n")
+    return None
 
 
 @pytest.fixture
-def spy_target(monkeypatch: pytest.MonkeyPatch) -> _SpyTarget:  # noqa: ARG001
-    return _SpyTarget()
+def spy_target() -> Files:
+    """The admin's ``Files`` for the socket-root setup, over a recording access."""
+    access = RecordingVMAccess([], Admin())
+    access.answer = _socket_roots_need_setup
+    return access.files()
 
 
 @pytest.fixture
@@ -416,7 +415,7 @@ def stub_agent_socket_setup(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_existing_socket_is_untouched_when_server_probe_is_indeterminate(
-    spy_target: _SpyTarget,
+    spy_target: Files,
 ) -> None:
     calls: list[str] = []
 
@@ -435,7 +434,7 @@ def test_existing_socket_is_untouched_when_server_probe_is_indeterminate(
             command="claude",
             linux_user="agentworks",
             run_command=run,
-            target=spy_target,
+            admin_files=spy_target,
             admin_username="agentworks",
             is_admin=True,
         )
@@ -445,7 +444,7 @@ def test_existing_socket_is_untouched_when_server_probe_is_indeterminate(
 
 @pytest.mark.parametrize("managed_identity", [False, True])
 def test_admin_create_session_passes_env_to_run_command(
-    spy_target: _SpyTarget,
+    spy_target: Files,
     managed_identity: bool,
 ) -> None:
     """Admin-mode create_session: env reaches the SSH layer via run_command's
@@ -467,7 +466,7 @@ def test_admin_create_session_passes_env_to_run_command(
         command="claude",
         linux_user="agentworks",
         run_command=spy_run,
-        target=spy_target,
+        admin_files=spy_target,
         admin_username="agentworks",
         is_admin=True,
         env=env,
@@ -491,7 +490,7 @@ def test_admin_create_session_passes_env_to_run_command(
 
 
 def test_agent_create_session_uses_dedicated_socket_and_env(
-    spy_target: _SpyTarget,
+    spy_target: Files,
     stub_agent_socket_setup: None,
 ) -> None:
     """Agent-mode create_session keeps the agent socket path AND threads env
@@ -505,7 +504,7 @@ def test_agent_create_session_uses_dedicated_socket_and_env(
         command="claude",
         linux_user="aw-claude",
         run_command=spy_run,
-        target=spy_target,
+        admin_files=spy_target,
         admin_username="agentworks",
         is_admin=False,
         env=env,
@@ -521,7 +520,7 @@ def test_agent_create_session_uses_dedicated_socket_and_env(
 
 
 def test_admin_create_session_uses_admin_socket(
-    spy_target: _SpyTarget,
+    spy_target: Files,
 ) -> None:
     """The Phase 3 SetEnv pivot moves admin sessions to per-session sockets
     so each session creates a fresh tmux server (no env leak between admin
@@ -534,7 +533,7 @@ def test_admin_create_session_uses_admin_socket(
         command="claude",
         linux_user="agentworks",
         run_command=spy_run,
-        target=spy_target,
+        admin_files=spy_target,
         admin_username="agentworks",
         is_admin=True,
     )
@@ -547,7 +546,7 @@ def test_admin_create_session_uses_admin_socket(
 
 
 def test_create_session_with_no_env_omits_e_flags(
-    spy_target: _SpyTarget,
+    spy_target: Files,
 ) -> None:
     """No env / empty env: behavior is unchanged from pre-pivot (no -e flags,
     no SetEnv, plain pane command)."""
@@ -559,7 +558,7 @@ def test_create_session_with_no_env_omits_e_flags(
         command="",
         linux_user="agentworks",
         run_command=spy_run,
-        target=spy_target,
+        admin_files=spy_target,
         admin_username="agentworks",
         is_admin=True,
         env=None,
@@ -634,7 +633,7 @@ class _ScriptedRunCommand:
         return _SpyResult(ok=True)
 
 
-def _agent_create(spy_run: _ScriptedRunCommand, spy_target: _SpyTarget) -> tuple[str, int | None]:
+def _agent_create(spy_run: _ScriptedRunCommand, spy_target: Files) -> tuple[str, int | None]:
     """Drive an agent-mode create_session against the scripted spy."""
     created = create_session(
         session_name="s1",
@@ -642,7 +641,7 @@ def _agent_create(spy_run: _ScriptedRunCommand, spy_target: _SpyTarget) -> tuple
         command="codex -a on-failure",
         linux_user="aw-claude",
         run_command=spy_run,
-        target=spy_target,
+        admin_files=spy_target,
         admin_username="agentworks",
         is_admin=False,
     )
@@ -651,7 +650,7 @@ def _agent_create(spy_run: _ScriptedRunCommand, spy_target: _SpyTarget) -> tuple
 
 
 def test_dead_pane_at_first_check_captures_and_skips_grant(
-    spy_target: _SpyTarget,
+    spy_target: Files,
     stub_agent_socket_setup: None,
 ) -> None:
     """Make the socket observable before diagnosing death; skip server grants."""
@@ -674,7 +673,7 @@ def test_dead_pane_at_first_check_captures_and_skips_grant(
 
 
 def test_alive_pane_remain_on_exit_lifecycle(
-    spy_target: _SpyTarget,
+    spy_target: Files,
     stub_agent_socket_setup: None,
 ) -> None:
     """Healthy path: remain-on-exit is chained into the SAME tmux invocation
@@ -703,7 +702,7 @@ def test_alive_pane_remain_on_exit_lifecycle(
 
 
 def test_dead_pane_at_post_unset_recheck_captures_and_raises(
-    spy_target: _SpyTarget,
+    spy_target: Files,
     stub_agent_socket_setup: None,
 ) -> None:
     """A workload that dies between the first check and the unset leaves a
@@ -725,7 +724,7 @@ def test_dead_pane_at_post_unset_recheck_captures_and_raises(
 
 
 def test_probe_transport_failure_raises_could_not_verify_without_kill(
-    spy_target: _SpyTarget,
+    spy_target: Files,
     stub_agent_socket_setup: None,
 ) -> None:
     """A probe that fails twice is a transport failure, NOT proof of death:
@@ -746,7 +745,7 @@ def test_probe_transport_failure_raises_could_not_verify_without_kill(
 
 
 def test_probe_transient_blip_retries_and_succeeds(
-    spy_target: _SpyTarget,
+    spy_target: Files,
     stub_agent_socket_setup: None,
 ) -> None:
     """One failed probe attempt followed by a clean 'alive' answer must not
@@ -762,7 +761,7 @@ def test_probe_transient_blip_retries_and_succeeds(
 
 @pytest.mark.parametrize("observation", ["", "unknown", "0 junk", "1 23\n0"])
 def test_invalid_pane_observation_never_authorizes_capture_or_cleanup(
-    spy_target: _SpyTarget,
+    spy_target: Files,
     stub_agent_socket_setup: None,
     observation: str,
 ) -> None:
@@ -778,7 +777,7 @@ def test_invalid_pane_observation_never_authorizes_capture_or_cleanup(
 
 
 def test_dead_pane_saved_screen_is_captured(
-    spy_target: _SpyTarget,
+    spy_target: Files,
     stub_agent_socket_setup: None,
 ) -> None:
     """The saved screen can contain diagnostics absent from the active screen."""
@@ -796,7 +795,7 @@ def test_dead_pane_saved_screen_is_captured(
 
 
 def test_dead_pane_with_no_output_at_all_says_so(
-    spy_target: _SpyTarget,
+    spy_target: Files,
     stub_agent_socket_setup: None,
 ) -> None:
     """Capture still attempts both buffers when no output is available."""
@@ -843,7 +842,7 @@ def test_trim_captured_output_empty_input() -> None:
 @pytest.mark.parametrize("observation", ["0 ", ""])
 @pytest.mark.parametrize("stage", ["chmod", "server-access"])
 def test_socket_sharing_failure_preserves_its_original_exception_when_death_is_not_observed(
-    spy_target: _SpyTarget, stub_agent_socket_setup: None, observation: str, stage: str
+    spy_target: Files, stub_agent_socket_setup: None, observation: str, stage: str
 ) -> None:
     failure = ExternalError("controlled sharing failure")
     answers = [observation, observation]

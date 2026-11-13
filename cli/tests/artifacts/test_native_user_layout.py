@@ -18,12 +18,11 @@ from agentworks.artifacts.native.layout import NATIVE_USER_DIRECTORIES
 from agentworks.capabilities.harness_integration.settings import parse_settings, serialize_settings
 from agentworks.errors import ExternalError, StateConflictError, StateError, UserAbort
 from agentworks.harness_setup.model import NativeClaim
-from agentworks.native_files import NativeFiles
 from agentworks.plugins._harness_native.native_cli import NativeMarket, NativePlugin, identity
 from tests.artifacts._fixtures import received
 from tests.artifacts.test_native_delivery import artifact, owned
 from tests.artifacts.test_native_mcp import server
-from tests.native_setup_fixtures import LocalFixtureTransport, invocation, record
+from tests.native_setup_fixtures import LocalFixtureTransport, forbid_files, invocation, native_cli_double, record
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="isolated Linux guest login and file helpers")
 TOOLS = [("claude", "ClaudeCodeIntegration"), ("codex", "CodexIntegration"), ("grok", "GrokBuildIntegration")]
@@ -170,7 +169,7 @@ def test_plugin_progress_settings_and_mcp_use_the_same_verified_root(target, mon
     source.write_bytes(serialize_settings({"theme": "mapped"}, format=format))
     market = NativeMarket("fixture", identity({"source_type": "local", "source": "/fixture-market"}))
     installed: list[NativePlugin] = []
-    cli = Mock()
+    cli = native_cli_double()
     cli.markets.return_value = (market,)
     cli.plugins.side_effect = lambda _markets: tuple(installed)
     cli.available.return_value = ("one@fixture",)
@@ -220,7 +219,7 @@ def test_unknown_layout_retains_mcp_claims_and_never_guesses_a_settings_destinat
     prior = record(checkpoints[-1], "codex")
     reports: list[str] = []
     (target.home / ".profile").write_text("exit 7\n")
-    monkeypatch.setattr(NativeFiles, "__enter__", forbid)
+    forbid_files(monkeypatch)
     monkeypatch.setattr(module, "probe_native", forbid)
     config = {}
     if tool != "grok":
@@ -249,7 +248,7 @@ def test_unknown_layout_does_not_turn_prior_file_effects_into_an_empty_retiremen
     ).files
     previous = record((), "codex").model_copy(update={"artifact_files": tuple(owned(file) for file in files)})
     (target.home / ".profile").write_text("exit 7\n")
-    monkeypatch.setattr(NativeFiles, "__enter__", forbid)
+    forbid_files(monkeypatch)
     integration = CodexIntegration.for_setup(owner_kind="agent", owner_name="fixture", facet="user", config={})
     with pytest.raises(ExternalError):
         integration.user_init(replace(invocation(target, [], prior=previous), report_incomplete=Mock()))
@@ -268,7 +267,7 @@ def test_unknown_layout_does_not_turn_prior_file_effects_into_an_empty_retiremen
 def test_layout_failure_does_not_hide_internal_persistence_or_cancellation_errors(target, monkeypatch, error):
     from agentworks.plugins.codex.harness_integration import CodexIntegration
 
-    monkeypatch.setattr(target, "run", Mock(side_effect=error))
+    monkeypatch.setattr(target, "answer", Mock(side_effect=error))
     integration = CodexIntegration.for_setup(owner_kind="agent", owner_name="fixture", facet="user", config={})
     with pytest.raises(type(error)):
         integration.user_init(replace(invocation(target, []), artifacts=received(server())))
@@ -291,7 +290,7 @@ def test_current_root_change_retains_old_claims_without_opening_the_recorded_rol
     before = path.read_bytes()
     profile(target, tool, target.home / "next-root")
     retired = getattr(module, class_name).for_setup(owner_kind="agent", owner_name="fixture", facet="user", config=None)
-    monkeypatch.setattr(NativeFiles, "__enter__", forbid)
+    forbid_files(monkeypatch)
     reports: list[str] = []
     result = retired.user_init(
         replace(call, artifacts=received(), prior=record(old, "codex"), report_incomplete=reports.append)
@@ -324,7 +323,7 @@ def test_plugin_retirement_keeps_recorded_root_policy_and_separate_current_mcp_a
         (target.home / ".profile").write_text("exit 7\n")
     else:
         profile(target, tool, target.home / "next-root")
-    cli = Mock()
+    cli = native_cli_double()
     cli.markets.return_value = ()
     cli.plugins.return_value = ()
     constructor = Mock(return_value=cli)

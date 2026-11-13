@@ -8,38 +8,54 @@ from agentworks import output
 from agentworks.artifacts.git_excludes import GIT_EXCLUDE_ROLE, reconcile_workspace_excludes
 from agentworks.artifacts.native.mcp import MCP_CLAIM_ROLE
 from agentworks.errors import AgentworksError, StateError, UserAbort
+from agentworks.execution.files import guest_path
 from agentworks.harness_setup.dispatch import destination_id
 from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
 from agentworks.harness_setup.state import read_native_setup, replace_setup_record, write_native_setup
-from agentworks.native_files import native_path
+from agentworks.workspaces.guest import stored_workspace_path
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable
 
     from agentworks.db import Database, WorkspaceRow
+    from agentworks.execution.access import VMAccess
     from agentworks.harness_setup.model import NativeClaim, SetupRecord
-    from agentworks.transports import Transport
 
 
-def cleanup_workspace_excludes(db: Database, workspace: WorkspaceRow, runner: Callable[[], Transport]) -> None:
-    """Try known Git retirement without adding a parent-deletion prerequisite."""
-    _workspace_excludes(db, workspace, runner)
+def cleanup_workspace_excludes(
+    db: Database, workspace: WorkspaceRow, access: Callable[[], VMAccess], *, redactions: Iterable[str]
+) -> None:
+    """Try known Git retirement without adding a parent-deletion prerequisite.
+
+    ``redactions`` are the values the operation's log redacts, kept out of its diagnostics too.
+    """
+    _workspace_excludes(db, workspace, access, redactions=tuple(redactions))
 
 
-def rehome_workspace_artifacts(db: Database, workspace: WorkspaceRow, new_path: str, runner: Transport) -> None:
-    """Transfer associations after copying, while the actual old owner still exists."""
-    _workspace_excludes(db, workspace, lambda: runner, new_path=new_path)
+def rehome_workspace_artifacts(
+    db: Database, workspace: WorkspaceRow, new_path: str, access: VMAccess, *, redactions: Iterable[str]
+) -> None:
+    """Transfer associations after copying, while the actual old owner still exists.
+
+    ``redactions`` are the values the operation's log redacts, kept out of its diagnostics too.
+    """
+    _workspace_excludes(db, workspace, lambda: access, new_path=new_path, redactions=tuple(redactions))
 
 
 def _relocated_record(record: SetupRecord, old_path: str, new_path: str, identity: str) -> SetupRecord:
-    """Rebase metadata under verified workspace roots without using it for file I/O."""
-    old_path, new_path = native_path(old_path), native_path(new_path)
+    """Rebase metadata under verified workspace roots without using it for file I/O.
+
+    The old root is checked only when a path is rebased under it, so a record
+    holding none relocates whatever the old row's spelling, an earlier
+    release's ``..`` included.
+    """
+    new_path = guest_path(new_path)
 
     def relocate(path: str) -> str:
-        path = native_path(path)
-        if not path.startswith(old_path + "/"):
+        root, path = guest_path(old_path), guest_path(path)
+        if not path.startswith(root + "/"):
             raise StateError("workspace artifact evidence is outside its owning workspace")
-        return new_path + path.removeprefix(old_path)
+        return new_path + path.removeprefix(root)
 
     return record.model_copy(
         update={
@@ -67,12 +83,22 @@ def _relocated_record(record: SetupRecord, old_path: str, new_path: str, identit
 def _workspace_excludes(
     db: Database,
     workspace: WorkspaceRow,
-    runner: Callable[[], Transport],
+    access: Callable[[], VMAccess],
     *,
     new_path: str | None = None,
+    redactions: tuple[str, ...],
 ) -> None:
+    """Retire, and on rehome re-establish, the workspace's Git exclusions.
+
+    The row's stored path is read normalized (``stored_workspace_path``), as
+    an earlier release may have stored it with a trailing ``/`` or a leading
+    ``//``; both callers have already refused one that is not absolute. One
+    with a ``..`` component is checked only where a file is addressed under
+    it, so a record with nothing there to retire or rebase still relocates.
+    """
     operation = "workspace-rehome" if new_path is not None else "workspace-delete"
     action = "workspace rehome" if new_path is not None else "workspace deletion"
+    old_path = stored_workspace_path(workspace.workspace_path)
     try:
         state = read_native_setup(db, "workspace", workspace.name)
     except StateError:
@@ -82,7 +108,7 @@ def _workspace_excludes(
         )
         return
     failed = []
-    target = None
+    admin = None
     identity = None
     identity_failure: AgentworksError | None = None
     for record in tuple(state.records):
@@ -107,7 +133,7 @@ def _workspace_excludes(
         def incomplete(reason: str, *, integration: str = record.integration) -> None:
             nonlocal current, incomplete_seen
             incomplete_seen = True
-            reason = sanitize_setup_diagnostic(reason)
+            reason = sanitize_setup_diagnostic(reason, redactions=redactions)
             current = current.model_copy(
                 update={
                     "complete": False,
@@ -120,37 +146,38 @@ def _workspace_excludes(
 
         checkpoint(current.claims)
         try:
-            if target is None:
-                target = runner()
+            if admin is None:
+                admin = access()
             reconcile_workspace_excludes(
-                target,
-                workspace.workspace_path,
+                admin,
+                old_path,
                 record.integration,
                 (),
                 current.claims,
                 checkpoint,
                 group=workspace.linux_group,
                 report_incomplete=incomplete,
+                redactions=redactions,
             )
         except UserAbort:
             raise
         except AgentworksError as error:
             if error is persistence_failure:
                 raise
-            incomplete(sanitize_setup_diagnostic(str(error), logger=target.logger if target is not None else None))
+            incomplete(str(error))
         if new_path is not None:
             relocated = None
             try:
-                relocated = _relocated_record(record, workspace.workspace_path, new_path, record.destination_id)
+                relocated = _relocated_record(record, old_path, new_path, record.destination_id)
             except StateError as error:
                 incomplete(str(error))
             # The snapshot predates old-location retirement: a complete .git
             # copy still contains those pairs even when the old ones are gone.
             try:
-                if target is None:
-                    target = runner()
+                if admin is None:
+                    admin = access()
                 reconcile_workspace_excludes(
-                    target,
+                    admin,
                     new_path,
                     record.integration,
                     () if relocated is None else relocated.artifact_files,
@@ -158,7 +185,8 @@ def _workspace_excludes(
                     checkpoint,
                     group=workspace.linux_group,
                     report_incomplete=incomplete,
-                    prior_workspace=workspace.workspace_path,
+                    redactions=redactions,
+                    prior_workspace=old_path,
                     shared_paths=tuple(
                         claim.destination
                         for claim in (() if relocated is None else relocated.claims)
@@ -170,29 +198,27 @@ def _workspace_excludes(
             except AgentworksError as error:
                 if error is persistence_failure:
                     raise
-                incomplete(sanitize_setup_diagnostic(str(error), logger=target.logger if target is not None else None))
+                incomplete(str(error))
             # Safe placement evidence follows the copy independently of Git
             # cleanup. Keep its current claims and any unresolved cleanup status.
             if relocated is not None:
                 try:
-                    if target is None:
-                        target = runner()
+                    if admin is None:
+                        admin = access()
                     if identity_failure is not None:
                         raise identity_failure
                     if identity is None:
                         vm = db.get_vm(workspace.vm_name)
                         if vm is None:
                             raise StateError("workspace VM is missing while relocating artifact evidence")
-                        identity = destination_id(vm, target, location=new_path)
-                    current = _relocated_record(current, workspace.workspace_path, new_path, identity)
+                        identity = destination_id(vm, admin, location=new_path)
+                    current = _relocated_record(current, old_path, new_path, identity)
                 except UserAbort:
                     raise
                 except AgentworksError as error:
                     if identity is None:
                         identity_failure = error
-                    incomplete(
-                        sanitize_setup_diagnostic(str(error), logger=target.logger if target is not None else None)
-                    )
+                    incomplete(str(error))
                 else:
                     checkpoint(current.claims)
         retained = tuple(
@@ -207,7 +233,7 @@ def _workspace_excludes(
                     sanitize_setup_diagnostic(
                         f"Workspace '{workspace.name}' via {record.integration}: retained artifact exclusion "
                         f"'{claim.identifier}' at recorded path '{claim.destination}'.",
-                        logger=target.logger if target is not None else None,
+                        redactions=redactions,
                     )
                 )
     if failed:

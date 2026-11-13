@@ -1,221 +1,243 @@
 """Tests for VM hardening applied by the initializer.
 
-Split out of ``test_initializer.py`` (see ``_initializer_support.py`` for
-the shared ``Transport`` builder). Covers the sysctl baseline, the fstab
-``hidepid`` reconcile (both the ``Transport``-driven wrapper and the pure
-line-editor function), and the section role/level shape those two steps
-render with.
+The sysctl baseline and the fstab ``hidepid`` reconcile run over a recording
+admin access whose file operations publish to the test's own paths (see
+``tests/phase_b_support.py``), so each test reads what the step left on disk
+and which commands it ran. The pure line editor is tested on its own.
 """
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+import stat
+from pathlib import Path
 
-from ._initializer_support import _make_hardening_target
+import pytest
 
-
-def test_sysctl_baseline_writes_when_missing() -> None:
-    from agentworks.vms.hardening import (
-        HARDENING_SYSCTL_CONTENT,
-        HARDENING_SYSCTL_PATH,
-        _apply_hardening_sysctl,
-    )
-
-    target = _make_hardening_target(sysctl_content=None)
-    logger = MagicMock()
-
-    _apply_hardening_sysctl(target, logger)
-
-    # write_file was called with the canonical content
-    assert any(content == HARDENING_SYSCTL_CONTENT for _, content in target.write_log)
-    # install -m 0644 and sysctl --system were run
-    assert any("install -m 0644" in cmd and HARDENING_SYSCTL_PATH in cmd for cmd in target.run_log)
-    assert any(cmd == "sysctl --system" for cmd in target.run_log)
+from agentworks.execution.errors import CommandFailed
+from agentworks.execution.requests import Command
+from agentworks.execution.results import Completed, Result
+from agentworks.vms import hardening
+from tests.phase_b_support import StepGuest, requires_file_program
 
 
-def test_sysctl_baseline_noop_when_content_matches() -> None:
-    from agentworks.vms.hardening import (
-        HARDENING_SYSCTL_CONTENT,
-        HARDENING_SYSCTL_PATH,
-        _apply_hardening_sysctl,
-    )
-
-    target = _make_hardening_target(sysctl_content=HARDENING_SYSCTL_CONTENT)
-    logger = MagicMock()
-
-    _apply_hardening_sysctl(target, logger)
-
-    # No write, no install, no sysctl reload
-    assert target.write_log == []
-    assert not any("install -m 0644" in cmd and HARDENING_SYSCTL_PATH in cmd for cmd in target.run_log)
-    assert not any(cmd == "sysctl --system" for cmd in target.run_log)
+def _load() -> Command:
+    """Loading the baseline file alone, at the path the fixture gives it."""
+    return Command(("sysctl", "-p", hardening.HARDENING_SYSCTL_PATH), elevated=True, deadline=60)
 
 
-def test_sysctl_baseline_rewrites_when_content_differs() -> None:
-    from agentworks.vms.hardening import (
-        HARDENING_SYSCTL_CONTENT,
-        HARDENING_SYSCTL_PATH,
-        _apply_hardening_sysctl,
-    )
-
-    target = _make_hardening_target(sysctl_content="# old content\n")
-    logger = MagicMock()
-
-    _apply_hardening_sysctl(target, logger)
-
-    # Writes the canonical content and reloads
-    assert any(content == HARDENING_SYSCTL_CONTENT for _, content in target.write_log)
-    assert any("install -m 0644" in cmd and HARDENING_SYSCTL_PATH in cmd for cmd in target.run_log)
-    assert any(cmd == "sysctl --system" for cmd in target.run_log)
+def _remount(value: int | str) -> Command:
+    return Command(("mount", "-o", f"remount,hidepid={value}", "/proc"), elevated=True, deadline=60)
 
 
-def test_fstab_hidepid_appends_when_no_proc_line() -> None:
-    """No /proc line in fstab: append one with defaults,hidepid=1."""
-    from agentworks.vms.hardening import (
-        HARDENING_FSTAB_PATH,
-        _apply_hardening_fstab,
-    )
-
-    fstab_in = "# fstab\nUUID=root  /  ext4  defaults  0  1\n"
-    target = _make_hardening_target(fstab_content=fstab_in)
-    logger = MagicMock()
-
-    _apply_hardening_fstab(target, logger)
-
-    assert len(target.write_log) == 1
-    _, new_content = target.write_log[0]
-    # New /proc line ends up in the file with hidepid=1.
-    assert "proc" in new_content and "hidepid=1" in new_content
-    # Original lines preserved.
-    assert "UUID=root  /  ext4  defaults  0  1" in new_content
-    assert any("install -m 0644" in cmd and HARDENING_FSTAB_PATH in cmd for cmd in target.run_log)
-    assert any(cmd == "mount -o remount,hidepid=1 /proc" for cmd in target.run_log)
+@pytest.fixture
+def guest(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> StepGuest:
+    monkeypatch.setattr(hardening, "HARDENING_SYSCTL_PATH", str(tmp_path / "sysctl.d" / "99-agentworks.conf"))
+    monkeypatch.setattr(hardening, "HARDENING_FSTAB_PATH", str(tmp_path / "fstab"))
+    return StepGuest()
 
 
-def test_fstab_hidepid_adds_option_when_proc_line_has_no_hidepid() -> None:
-    """Existing /proc line with no hidepid= : append hidepid=1 to options."""
-    from agentworks.vms.hardening import (
-        HARDENING_FSTAB_PATH,
-        _apply_hardening_fstab,
-    )
-
-    fstab_in = "# fstab\nproc  /proc  proc  defaults  0  0\n"
-    target = _make_hardening_target(fstab_content=fstab_in)
-    logger = MagicMock()
-
-    _apply_hardening_fstab(target, logger)
-
-    assert len(target.write_log) == 1
-    _, new_content = target.write_log[0]
-    # The single proc line now has both defaults AND hidepid=1; not parallel lines.
-    proc_lines = [ln for ln in new_content.splitlines() if ln.split()[:1] == ["proc"]]
-    assert len(proc_lines) == 1
-    assert "defaults" in proc_lines[0]
-    assert "hidepid=1" in proc_lines[0]
-    assert any("install -m 0644" in cmd and HARDENING_FSTAB_PATH in cmd for cmd in target.run_log)
-    assert any(cmd == "mount -o remount,hidepid=1 /proc" for cmd in target.run_log)
+def _sysctl() -> Path:
+    return Path(hardening.HARDENING_SYSCTL_PATH)
 
 
-def test_fstab_hidepid_upgrades_0_to_1() -> None:
-    """Existing /proc line with hidepid=0: upgrade to hidepid=1."""
-    from agentworks.vms.hardening import (
-        HARDENING_FSTAB_PATH,
-        _apply_hardening_fstab,
-    )
-
-    fstab_in = "proc  /proc  proc  defaults,hidepid=0  0  0\n"
-    target = _make_hardening_target(fstab_content=fstab_in)
-    logger = MagicMock()
-
-    _apply_hardening_fstab(target, logger)
-
-    assert len(target.write_log) == 1
-    _, new_content = target.write_log[0]
-    assert "hidepid=1" in new_content
-    assert "hidepid=0" not in new_content
-    assert any("install -m 0644" in cmd and HARDENING_FSTAB_PATH in cmd for cmd in target.run_log)
+def _fstab() -> Path:
+    return Path(hardening.HARDENING_FSTAB_PATH)
 
 
-def test_fstab_hidepid_noop_when_already_1() -> None:
-    """Existing /proc line with hidepid=1: no fstab rewrite, but still remount."""
-    from agentworks.vms.hardening import (
-        HARDENING_FSTAB_PATH,
-        _apply_hardening_fstab,
-    )
-
-    fstab_in = "proc  /proc  proc  defaults,hidepid=1  0  0\n"
-    target = _make_hardening_target(fstab_content=fstab_in)
-    logger = MagicMock()
-
-    _apply_hardening_fstab(target, logger)
-
-    assert target.write_log == []
-    assert not any("install -m 0644" in cmd and HARDENING_FSTAB_PATH in cmd for cmd in target.run_log)
-    assert any(cmd == "mount -o remount,hidepid=1 /proc" for cmd in target.run_log)
+# -- The sysctl baseline ---------------------------------------------------------
 
 
-def test_fstab_hidepid_preserves_admin_set_hidepid_2() -> None:
-    """Existing /proc line with hidepid=2 (stricter): no fstab edit, remount uses 2."""
-    from agentworks.vms.hardening import (
-        HARDENING_FSTAB_PATH,
-        _apply_hardening_fstab,
-    )
+@requires_file_program
+def test_sysctl_baseline_is_written_and_reloaded_when_missing(guest: StepGuest) -> None:
+    hardening._apply_hardening_sysctl(guest.files, guest.log)
 
-    fstab_in = "proc  /proc  proc  defaults,hidepid=2  0  0\n"
-    target = _make_hardening_target(fstab_content=fstab_in)
-    logger = MagicMock()
+    assert _sysctl().read_text() == hardening.HARDENING_SYSCTL_CONTENT
+    assert stat.S_IMODE(_sysctl().stat().st_mode) == 0o644
+    assert stat.S_IMODE(_sysctl().parent.stat().st_mode) == 0o755
+    assert guest.commands() == [_load()]
 
-    _apply_hardening_fstab(target, logger)
 
-    assert target.write_log == []
-    assert not any("install -m 0644" in cmd and HARDENING_FSTAB_PATH in cmd for cmd in target.run_log)
-    # Critical: live remount uses hidepid=2 (admin's stricter choice), not 1.
-    assert any(cmd == "mount -o remount,hidepid=2 /proc" for cmd in target.run_log)
+@requires_file_program
+def test_sysctl_baseline_that_matches_is_neither_written_nor_reloaded(guest: StepGuest) -> None:
+    _sysctl().parent.mkdir()
+    _sysctl().write_text(hardening.HARDENING_SYSCTL_CONTENT)
+    before = _sysctl().stat().st_ino
+
+    hardening._apply_hardening_sysctl(guest.files, guest.log)
+
+    assert guest.writes() == []
+    assert guest.commands() == []
+    assert _sysctl().stat().st_ino == before
+
+
+@requires_file_program
+def test_sysctl_baseline_that_differs_is_rewritten_and_reloaded(guest: StepGuest) -> None:
+    _sysctl().parent.mkdir()
+    _sysctl().write_text("kernel.dmesg_restrict = 0\n")
+
+    hardening._apply_hardening_sysctl(guest.files, guest.log)
+
+    assert _sysctl().read_text() == hardening.HARDENING_SYSCTL_CONTENT
+    assert guest.commands() == [_load()]
+
+
+@requires_file_program
+def test_a_failed_reload_warns_and_the_fstab_step_still_runs(guest: StepGuest) -> None:
+    failed = Result(Completed(1), b"", b"sysctl: cannot stat /proc/sys/x\n")
+    guest.respond(_load(), CommandFailed("box", 1, failed, streams_logged=True))
+    _fstab().write_text("proc  /proc  proc  defaults,hidepid=1  0  0\n")
+
+    hardening.apply_vm_hardening(guest.files, guest.log)
+
+    assert len(guest.log.warned) == 1
+    assert "cannot stat /proc/sys/x" in guest.log.warned[0]
+    assert guest.commands() == [_load(), _remount(1)]
+
+
+@requires_file_program
+def test_a_failed_load_restores_the_prior_baseline_and_the_next_run_retries(guest: StepGuest) -> None:
+    _sysctl().parent.mkdir()
+    _sysctl().write_text("kernel.dmesg_restrict = 0\n")
+    guest.respond(_load(), CommandFailed("box", 1, Result(Completed(1)), streams_logged=True))
+
+    hardening.apply_vm_hardening(guest.files, guest.log)
+
+    assert _sysctl().read_text() == "kernel.dmesg_restrict = 0\n"
+    guest.access.responses.clear()
+    guest.access.calls.clear()
+
+    hardening._apply_hardening_sysctl(guest.files, guest.log)
+
+    assert _sysctl().read_text() == hardening.HARDENING_SYSCTL_CONTENT
+    assert guest.commands() == [_load()]
+
+
+@requires_file_program
+def test_a_failed_load_of_a_new_baseline_removes_it(guest: StepGuest) -> None:
+    guest.respond(_load(), CommandFailed("box", 1, Result(Completed(1)), streams_logged=True))
+
+    hardening.apply_vm_hardening(guest.files, guest.log)
+
+    assert not _sysctl().exists()
+
+
+@requires_file_program
+def test_a_linked_sysctl_file_is_refused_with_a_warning_and_its_target_left_alone(
+    guest: StepGuest, tmp_path: Path
+) -> None:
+    target = tmp_path / "elsewhere"
+    target.write_text("kept\n")
+    _sysctl().parent.mkdir()
+    _sysctl().symlink_to(target)
+
+    hardening.apply_vm_hardening(guest.files, guest.log)
+
+    assert target.read_text() == "kept\n"
+    assert len(guest.log.warned) >= 1
+    assert _load() not in guest.commands()
+
+
+# -- The fstab hidepid edit -----------------------------------------------------------
+
+
+@requires_file_program
+@pytest.mark.parametrize(
+    ("before", "after"),
+    [
+        (
+            "UUID=root  /  ext4  defaults  0  1\n",
+            f"UUID=root  /  ext4  defaults  0  1\n{hardening.HARDENING_FSTAB_NEW_LINE}\n",
+        ),
+        (
+            "proc  /proc  proc  defaults  0  0\n",
+            f"proc  /proc  proc  defaults,hidepid=1  0  0  {hardening.HARDENING_FSTAB_COMMENT}\n",
+        ),
+        (
+            "proc  /proc  proc  defaults,hidepid=0  0  0\n",
+            f"proc  /proc  proc  defaults,hidepid=1  0  0  {hardening.HARDENING_FSTAB_COMMENT}\n",
+        ),
+    ],
+    ids=["appended", "added-option", "upgraded"],
+)
+def test_an_fstab_edit_is_published_keeping_the_files_metadata_and_proc_is_remounted(
+    guest: StepGuest, before: str, after: str
+) -> None:
+    _fstab().write_text(before)
+    _fstab().chmod(0o640)
+
+    hardening._apply_hardening_fstab(guest.files, guest.log)
+
+    assert _fstab().read_text() == after
+    assert stat.S_IMODE(_fstab().stat().st_mode) == 0o640
+    assert guest.commands() == [_remount(1)]
+
+
+@requires_file_program
+@pytest.mark.parametrize(
+    ("content", "effective"),
+    [
+        ("proc  /proc  proc  defaults,hidepid=1  0  0\n", 1),
+        ("proc  /proc  proc  defaults,hidepid=noaccess  0  0\n", "noaccess"),
+        ("proc  /proc  proc  defaults,hidepid=2  0  0\n", 2),
+        ("proc  /proc  proc  defaults,hidepid=invisible  0  0\n", "invisible"),
+        ("proc  /proc  proc  defaults,hidepid=bogus  0  0\n", "bogus"),
+    ],
+    ids=["already-1", "already-noaccess", "stricter-2", "stricter-invisible", "unrecognized"],
+)
+def test_an_fstab_that_needs_no_edit_is_not_written_and_proc_keeps_its_value(
+    guest: StepGuest, content: str, effective: int | str
+) -> None:
+    _fstab().write_text(content)
+
+    hardening._apply_hardening_fstab(guest.files, guest.log)
+
+    assert guest.writes() == []
+    assert _fstab().read_text() == content
+    assert guest.commands() == [_remount(effective)]
+
+
+@requires_file_program
+def test_a_malformed_proc_line_warns_leaves_fstab_alone_and_still_remounts(guest: StepGuest) -> None:
+    _fstab().write_text("proc  /proc  proc\n")
+
+    hardening._apply_hardening_fstab(guest.files, guest.log)
+
+    assert len(guest.log.warned) == 1
+    assert guest.writes() == []
+    assert guest.commands() == [_remount(1)]
+
+
+@requires_file_program
+def test_a_missing_fstab_warns_and_skips_the_remount(guest: StepGuest) -> None:
+    hardening._apply_hardening_fstab(guest.files, guest.log)
+
+    assert len(guest.log.warned) == 1
+    assert not _fstab().exists()
+    assert guest.commands() == []
 
 
 # -- Section role/level shape (regression guard) -------------------------------
 
 
-def test_vm_initialization_step_and_subresult_roles(captured_output) -> None:  # noqa: ANN001
-    """Pin the fixed indentation shape for a VM Initialization section.
-
-    Regression guard for the over-indent bug: inside a ``section("VM
-    Initialization")`` (body at level 1), a primary step must carry the
-    BODY role so the handler renders it at the section level (2 spaces),
-    while a genuine sub-result subordinate to that step stays DETAIL so it
-    nests one notch deeper (4 spaces). ``apply_vm_hardening`` exercises
-    both in one section: "Applying sysctl baseline..." and "Ensuring
-    hidepid=1 on /proc..." are steps, and "Added /proc entry to
-    /etc/fstab" is the fstab step's sub-result.
+@requires_file_program
+def test_vm_initialization_step_and_subresult_roles(guest: StepGuest, captured_output) -> None:  # noqa: ANN001
+    """Phase-B step lines render as BODY; only genuine sub-results render as DETAIL.
 
     The captured level is the ambient section level (1) for both roles;
     the step-vs-subresult distinction rides the ROLE (the handler maps
-    DETAIL to level + 1 at render time), which is exactly what the fix
-    restored.
+    DETAIL to level + 1 at render time).
     """
     from agentworks import output
     from agentworks.output import Role
-    from agentworks.vms.hardening import apply_vm_hardening
 
-    # sysctl file missing -> "Applying sysctl baseline..."; fstab has no
-    # /proc line -> "Ensuring hidepid=1 on /proc..." + "Added /proc entry
-    # to /etc/fstab" sub-result.
-    target = _make_hardening_target(
-        sysctl_content=None,
-        fstab_content="# fstab\nUUID=root  /  ext4  defaults  0  1\n",
-    )
-    logger = MagicMock()
+    _fstab().write_text("# fstab\nUUID=root  /  ext4  defaults  0  1\n")
 
     with output.section("VM Initialization"):
-        apply_vm_hardening(target, logger)
+        hardening.apply_vm_hardening(guest.files, guest.log)
 
-    # Primary steps: BODY at the section level (renders at 2 spaces).
     assert (Role.BODY, 1, "Applying sysctl baseline...") in captured_output.lines
     assert (Role.BODY, 1, "Ensuring hidepid=1 on /proc...") in captured_output.lines
-    # Genuine sub-result: DETAIL, so the handler nests it one notch deeper
-    # (4 spaces) under the step above.
     assert (Role.DETAIL, 1, "Added /proc entry to /etc/fstab") in captured_output.lines
-    # The step lines are NOT dimmed to DETAIL (the bug this guards against).
     assert not any(
         role is Role.DETAIL and msg == "Ensuring hidepid=1 on /proc..." for role, _level, msg in captured_output.lines
     )
@@ -230,7 +252,7 @@ def test_ensure_proc_hidepid_appends_when_no_proc_line() -> None:
     content = "UUID=root  /  ext4  defaults  0  1\n"
     new, action, eff = _ensure_proc_hidepid_in_fstab(content)
     assert action == "appended"
-    assert eff == 1
+    assert eff == "1"
     assert "proc" in new and "hidepid=1" in new
 
 
@@ -240,7 +262,7 @@ def test_ensure_proc_hidepid_added_option() -> None:
     content = "proc  /proc  proc  defaults  0  0\n"
     new, action, eff = _ensure_proc_hidepid_in_fstab(content)
     assert action == "added-option"
-    assert eff == 1
+    assert eff == "1"
     assert "hidepid=1" in new
 
 
@@ -250,7 +272,7 @@ def test_ensure_proc_hidepid_upgraded() -> None:
     content = "proc  /proc  proc  defaults,hidepid=0  0  0\n"
     new, action, eff = _ensure_proc_hidepid_in_fstab(content)
     assert action == "upgraded"
-    assert eff == 1
+    assert eff == "1"
     assert "hidepid=1" in new
     assert "hidepid=0" not in new
 
@@ -261,7 +283,7 @@ def test_ensure_proc_hidepid_no_op() -> None:
     content = "proc  /proc  proc  defaults,hidepid=1  0  0\n"
     new, action, eff = _ensure_proc_hidepid_in_fstab(content)
     assert action == "no-op"
-    assert eff == 1
+    assert eff == "1"
     assert new == content
 
 
@@ -271,7 +293,7 @@ def test_ensure_proc_hidepid_preserves_stricter() -> None:
     content = "proc  /proc  proc  defaults,hidepid=2  0  0\n"
     new, action, eff = _ensure_proc_hidepid_in_fstab(content)
     assert action == "preserved-stricter"
-    assert eff == 2
+    assert eff == "2"
     assert new == content
 
 
@@ -293,4 +315,41 @@ def test_ensure_proc_hidepid_malformed() -> None:
     new, action, eff = _ensure_proc_hidepid_in_fstab(content)
     assert action == "malformed"
     assert new == content
-    assert eff == 1
+    assert eff == "1"
+
+
+def test_ensure_proc_hidepid_upgrades_off_by_name() -> None:
+    from agentworks.vms.hardening import _ensure_proc_hidepid_in_fstab
+
+    new, action, eff = _ensure_proc_hidepid_in_fstab("proc  /proc  proc  defaults,hidepid=off  0  0\n")
+    assert action == "upgraded"
+    assert eff == "1"
+    assert "hidepid=off" not in new
+    assert new.count("hidepid=") == 1
+
+
+@pytest.mark.parametrize("value", ["²", "3", "01", "Invisible"])
+def test_ensure_proc_hidepid_leaves_a_value_outside_the_canonical_spellings_alone(value: str) -> None:
+    from agentworks.vms.hardening import _ensure_proc_hidepid_in_fstab
+
+    content = f"proc  /proc  proc  defaults,hidepid={value}  0  0\n"
+    new, action, eff = _ensure_proc_hidepid_in_fstab(content)
+    assert action == "preserved-unrecognized"
+    assert eff == value
+    assert new == content
+
+
+@pytest.mark.parametrize(
+    ("options", "action", "effective"),
+    [
+        ("defaults,hidepid=invisible,nosuid,hidepid=1", "no-op", "1"),
+        ("defaults,hidepid=1,nosuid,hidepid=invisible", "preserved-stricter", "invisible"),
+    ],
+)
+def test_ensure_proc_hidepid_reads_the_last_occurrence_as_mount_does(options: str, action: str, effective: str) -> None:
+    from agentworks.vms.hardening import _ensure_proc_hidepid_in_fstab
+
+    content = f"proc  /proc  proc  {options}  0  0\n"
+    new, got_action, eff = _ensure_proc_hidepid_in_fstab(content)
+    assert (got_action, eff) == (action, effective)
+    assert new == content

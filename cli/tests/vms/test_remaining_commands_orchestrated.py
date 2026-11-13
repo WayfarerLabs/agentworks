@@ -28,7 +28,6 @@ from agentworks.capabilities.vm_platform.tailscale_join import JOIN_FRAGMENT
 from agentworks.db import DesiredRuntimeState as Target
 from agentworks.db import ProvisioningStatus, VMStatus
 from agentworks.execution.requests import Forward
-from agentworks.execution.trust import HOST_TRUST
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
@@ -779,17 +778,10 @@ def backup_env(
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
 ):  # noqa: ANN201
-    """A config whose backups land under tmp, the SSH log dir isolated,
-    and the admin transport faked (an SSHTransport whose run is a
-    stub: the body asserts the SSH-specific type)."""
-    from types import SimpleNamespace
+    """A config whose backups (and so their logs) land under tmp, and the admin's access a recording fake."""
+    from tests.vm_access_support import install_access_recorder
 
-    from agentworks.transports import SSHTransport
-
-    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path / "logs")
-    target = SSHTransport(trust=HOST_TRUST, host="100.64.0.9")
-    target.run = lambda *a, **k: SimpleNamespace(stdout="", ok=True)  # type: ignore[method-assign, assignment]
-    monkeypatch.setattr("agentworks.transports.transport", lambda vm, config, **kwargs: target)
+    install_access_recorder(monkeypatch)
     return make_config(f'[paths]\nbackups = "{tmp_path.as_posix()}/backups"\n')
 
 

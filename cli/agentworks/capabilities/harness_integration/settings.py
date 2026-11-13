@@ -19,7 +19,7 @@ from pydantic import field_validator
 
 from agentworks.errors import ConfigError
 from agentworks.schema import AgwModel
-from agentworks.sources import SourceRefError, parse_source_ref, snapshot_workstation_file
+from agentworks.sources import check_source_ref, parse_source_ref, snapshot_workstation_file
 
 type SettingsFormat = Literal["json", "toml"]
 SettingsStrategy = Literal["replace", "merge-overwrite", "merge-preserve", "skip-existing"]
@@ -42,10 +42,7 @@ class SettingsMapping(AgwModel):
     @classmethod
     def _local_source(cls, value: str) -> str:
         """Validate operator-authored source syntax without acquiring its content."""
-        try:
-            reference = parse_source_ref(value)
-        except SourceRefError:
-            raise ValueError("invalid local settings source reference") from None
+        reference = parse_source_ref(check_source_ref(value, field="source"))
         if reference.kind != "file":
             raise ValueError("settings sources must be workstation files")
         return value

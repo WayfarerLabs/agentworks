@@ -14,6 +14,9 @@ from agentworks.capabilities.harness_integration.kinds import HarnessIntegration
 from agentworks.capabilities.harness_integration.shell import ShellIntegration
 from agentworks.env.entry import EnvEntry
 from agentworks.errors import ExternalError, StateError
+from agentworks.execution.errors import CommandFailed
+from agentworks.execution.requests import Command, Script
+from agentworks.execution.results import Completed, Result
 from agentworks.harness_setup.inputs import SetupInputs
 from agentworks.harness_setup.lifecycle import prepare_agent_setup, prepare_vm_setup, prepare_workspace_setup
 from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
@@ -30,6 +33,10 @@ from agentworks.vms.admin import AdminConfig
 from agentworks.vms.templates import resolve_from_dict as resolve_vm
 from agentworks.workspaces.realize import realize_workspace
 from agentworks.workspaces.templates import ResolvedTemplate
+from tests.vm_access_support import answer_destination_identity
+
+# Every access a command builds is the recording fake: these tests run no ssh.
+pytestmark = pytest.mark.usefixtures("vm_access_recorder")
 
 
 def _env(**values: str) -> dict[str, EnvEntry]:
@@ -101,12 +108,11 @@ def test_component_inputs_keep_only_ancestors_and_retirement(db, registry, vm, m
 
 
 @pytest.fixture
-def native(monkeypatch, tmp_path):
+def native(monkeypatch, tmp_path, vm_access_recorder):
+    vm_access_recorder.answer = answer_destination_identity
     target = Mock(spec=Transport)
     target.logger = None
-    target.run.return_value = SimpleNamespace(stdout="\nAGW_NATIVE_ID=native-identity\n", ok=True)
     monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: target)
-    monkeypatch.setattr("agentworks.transports.transport_for_user", lambda *a, **k: target)
     monkeypatch.setattr("agentworks.harness_setup.lifecycle.site_platform_name", lambda *a: "fixture")
     monkeypatch.setattr("agentworks.agents.initializer.create_new_agent_user", lambda *a, **k: None)
     monkeypatch.setattr("agentworks.agents.initializer.create_agent_on_vm", lambda *a, **k: None)
@@ -127,7 +133,7 @@ def native(monkeypatch, tmp_path):
         display_path = "fixture.log"
         closed = False
 
-        def __init__(self, *args, redactions=()):
+        def __init__(self, *args, redactions=(), path=None):
             self.redactions = redactions
             loggers.append(self)
 
@@ -141,6 +147,9 @@ def native(monkeypatch, tmp_path):
 
         def close(self):
             self.closed = True
+
+        def record(self, request, result):
+            pass
 
     monkeypatch.setattr("agentworks.ssh.SSHLogger", Logger)
     return SimpleNamespace(target=target, loggers=loggers, removed_agent=removed_agent, removed_project=removed_project)
@@ -249,33 +258,34 @@ def test_fresh_owner_buffers_setup_until_atomic_row_commit(
 
 
 @pytest.mark.parametrize("existing", ["user", "home", "race", "absent"])
-def test_exclusive_agent_user_refuses_native_residue_and_races(vm, monkeypatch, existing):
-    target = Mock(spec=Transport)
-    commands = []
+def test_exclusive_agent_user_refuses_native_residue_and_races(vm, existing, vm_access_recorder):
+    useradd = Command(("useradd", "-m", "-U", "-s", "/bin/bash", "agt-a"), elevated=True)
 
-    def run(command, **kwargs):
-        commands.append(command)
-        if command.startswith("getent"):
-            return SimpleNamespace(ok=existing == "user")
-        if command.startswith("test"):
-            return SimpleNamespace(ok=existing == "home")
-        if existing == "race":
-            raise RuntimeError("useradd: name taken")
-        return SimpleNamespace(ok=True)
+    def answer(call):
+        request = call.request
+        if isinstance(request, Command) and request.argv[:2] == ("getent", "passwd"):
+            return Result(Completed(0 if existing == "user" else 2))
+        if isinstance(request, Script):
+            return Result(Completed(0 if existing == "home" else 1))
+        if request == useradd and existing == "race":
+            return CommandFailed(vm.name, 9, Result(Completed(9)), streams_logged=True)
+        return None
 
-    target.run.side_effect = run
-    monkeypatch.setattr("agentworks.agents.initializer.transport", lambda *a, **k: target)
+    vm_access_recorder.answer = answer
     if existing in {"user", "home"}:
         with pytest.raises(StateError):
             create_new_agent_user(vm, MagicMock(), "agt-a", shell="bash", logger=Mock())
-        assert not any(command.startswith("useradd") for command in commands)
+        assert useradd not in vm_access_recorder.requests("run")
     elif existing == "race":
-        with pytest.raises(RuntimeError):
+        with pytest.raises(CommandFailed):
             create_new_agent_user(vm, MagicMock(), "agt-a", shell="bash", logger=Mock())
     else:
         create_new_agent_user(vm, MagicMock(), "agt-a", shell="bash", logger=Mock())
-        assert commands[-1] == "useradd -m -U -s /bin/bash agt-a"
-    assert not any(command.startswith("userdel") for command in commands)
+        assert vm_access_recorder.requests("run")[-1] == useradd
+    assert all(request.elevated for request in vm_access_recorder.requests("run"))
+    assert not any(
+        isinstance(request, Command) and request.argv[0] == "userdel" for request in vm_access_recorder.requests("run")
+    )
 
 
 def test_failed_exclusive_creation_never_arms_realizer_rollback(db, registry, vm, native, monkeypatch):
@@ -368,7 +378,7 @@ def test_config_secret_registration_and_delivery_share_actual_owner(db, vm, nati
                     "env-secret": "env-private",
                     "other-secret": "other-private",
                 },
-                logger=Mock(),
+                logger=Mock(redactions=()),
                 held=guard,
                 operation="agent-create",
                 failures=[],
@@ -407,7 +417,7 @@ def test_applied_state_appearing_after_empty_preparation_refuses_before_core(db,
 
 @pytest.mark.parametrize("failed_components", [(), ("vm",), ("admin",), ("vm", "admin")])
 def test_vm_and_admin_setup_follow_core_before_terminal_checkpoint(
-    db, registry, vm, native, monkeypatch, failed_components
+    db, registry, vm, native, monkeypatch, failed_components, vm_access_recorder
 ):
     from agentworks.db import InitStatus
     from agentworks.debian import DebianRelease
@@ -431,6 +441,9 @@ def test_vm_and_admin_setup_follow_core_before_terminal_checkpoint(
 
     def vm_setup(self, invocation):
         assert events == ["core"]
+        # Setup runs on Phase B's own access and bound.
+        assert invocation.access is vm_access_recorder.access(vm_name=vm.name)
+        assert invocation.files.deadline == 60
         assert invocation.environment["TOKEN"] == "vm-private"
         assert "ADMIN_ONLY" not in invocation.environment
         assert "AGENTWORKS_AGENT" not in invocation.environment
@@ -472,7 +485,7 @@ def test_vm_and_admin_setup_follow_core_before_terminal_checkpoint(
             template,
             admin,
             vm.name,
-            native.target,
+            vm_access_recorder.access(vm_name=vm.name),
             (),
             "/home/admin",
             "admin",

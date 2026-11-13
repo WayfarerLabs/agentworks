@@ -24,7 +24,7 @@ from agentworks.plugins.codex.harness_integration import CodexIntegration
 from agentworks.plugins.grok.harness_integration import GrokBuildIntegration
 from tests.artifacts._fixtures import received
 from tests.artifacts.test_native_delivery import artifact, context, enabled
-from tests.conftest import _FakeTarget
+from tests.vm_access_support import Admin, RecordingVMAccess
 
 
 @pytest.mark.parametrize("implementation", [ClaudeCodeIntegration, CodexIntegration, GrokBuildIntegration])
@@ -51,7 +51,8 @@ def test_setup_defers_all_colliding_origins_and_applies_independent_rule(
     incomplete = Mock()
     common = {
         "vm": db.insert_vm("vm", "site", "host"),
-        "runner": _FakeTarget(),
+        "access": (recorded := RecordingVMAccess([], Admin())),
+        "files": recorded.files(),
         "prior": None,
         "checkpoint": lambda claims: None,
         "report_incomplete": incomplete,
@@ -141,7 +142,8 @@ def test_deferring_a_renamed_existing_entry_exposes_its_other_native_collision(d
     incomplete = Mock()
     invocation = UserSetupInvocation(
         vm=db.insert_vm("vm", "site", "host"),
-        runner=_FakeTarget(),
+        access=(recorded := RecordingVMAccess([], Admin())),
+        files=recorded.files(),
         prior=None,
         checkpoint=lambda claims: None,
         report_incomplete=incomplete,
@@ -174,10 +176,6 @@ def test_real_workspace_setup_defers_generated_helper_and_authored_skill_identit
     from tests.native_setup_fixtures import LocalFixtureTransport
 
     target = LocalFixtureTransport(tmp_path / "guest")
-    login = target.root / "login-shell"
-    login.write_text(
-        login.read_text().replace('[ "$1" = "-lc" ] || exit 9', 'case "$1" in -lc|-lic) ;; *) exit 9 ;; esac')
-    )
     workspace = target.home / "project"
     workspace.mkdir()
     owner = ArtifactOrigin("workspace", "workspace", "ws", entry="review")
@@ -194,9 +192,11 @@ def test_real_workspace_setup_defers_generated_helper_and_authored_skill_identit
     hint = replace(artifact(ArtifactType.HINT, name="independent"), origin=replace(owner, entry="independent"))
     inputs = received(rule, skill, hint)
     incomplete: list[str] = []
+    access = target.access()
     invocation = WorkspaceSetupInvocation(
         vm=db.insert_vm("vm", "site", "host"),
-        runner=target,
+        access=access,
+        files=access.files(),
         prior=None,
         checkpoint=lambda claims: None,
         report_incomplete=incomplete.append,
@@ -210,5 +210,5 @@ def test_real_workspace_setup_defers_generated_helper_and_authored_skill_identit
     assert {item.input_id for item in result.deferred} == {rule.identity, skill.identity}
     assert all(item.destination == "session" for item in result.deferred)
     assert {origin for file in result.files for origin in file.origins} == {hint.origin_identity}
-    assert incomplete and target.commands
+    assert incomplete and access.requests()
     validate_application(result, inputs, "workspace", integration="codex")

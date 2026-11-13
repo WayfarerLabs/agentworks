@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from agentworks.execution.oplog import format_record
-from agentworks.execution.requests import Command, Script, Shell
+from agentworks.execution.requests import Bytes, Command, PythonProgram, Script, Shell
 from agentworks.execution.results import Completed, NotDelivered, NotDeliveredReason, Result, Unknown, UnknownReason
 
 ENV_VALUE = "env-value-7f3a"
@@ -46,3 +46,35 @@ def test_every_completion_and_both_streams_and_the_diagnostics_reach_the_record(
     assert "out-bytes" in record
     assert "err-bytes" in record
     assert "ssh: diagnostics line" in record
+
+
+def test_a_request_that_withholds_its_streams_has_neither_stream_nor_its_input_in_the_record() -> None:
+    marker = "marker-4b1e"
+    request = Command(("cat",), stdin=Bytes(marker.encode()), log_streams=False)
+    result = Result(Completed(3), marker.encode(), marker.encode(), "ssh: diagnostics line")
+
+    record = format_record(request, result, label="Reading")
+
+    assert marker not in record
+    assert "ssh: diagnostics line" in record
+
+
+def test_input_never_reaches_a_record_even_when_the_streams_are_logged() -> None:
+    marker = "marker-77d0"
+
+    record = format_record(
+        Command(("cat",), stdin=Bytes(marker.encode())), Result(Completed(0), b"out", b""), label="Reading"
+    )
+
+    assert marker not in record
+    assert "out" in record
+
+
+def test_a_python_program_record_shows_its_arguments_and_holds_no_source() -> None:
+    request = PythonProgram(SOURCE, args=("stat", '{"path":"/etc/hosts"}'), login=True, env={"API_TOKEN": ENV_VALUE})
+
+    record = format_record(request, Result(Completed(0)), label="Checking")
+
+    assert "script-source" not in record
+    assert ENV_VALUE not in record
+    assert "/etc/hosts" in record

@@ -19,10 +19,6 @@ pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="local Linux gue
 
 
 def select_claude_mcp(lifecycle, monkeypatch) -> None:
-    login = lifecycle.target.root / "login-shell"
-    login.write_text(
-        login.read_text().replace('[ "$1" = "-lc" ] || exit 9', 'case "$1" in -lc|-lic) ;; *) exit 9 ;; esac')
-    )
     lifecycle.template.harness_integration = "claude-code"
     lifecycle.template.harness_integration_config = {"enabled_workarounds": ["session-mcp-config"]}
     lifecycle.config.artifact_bundles["team"] = ArtifactBundle(
@@ -41,20 +37,20 @@ def select_claude_mcp(lifecycle, monkeypatch) -> None:
 
 
 def test_failed_private_mcp_stage_preserves_previous_runtime_and_run(lifecycle, monkeypatch):
-    from agentworks.native_files import NativeFiles
+    from agentworks.execution.files import Files
 
     lifecycle.restart()
     previous = lifecycle.db.get_session("s1")
     old_files = lifecycle.files()
     select_claude_mcp(lifecycle, monkeypatch)
-    original = NativeFiles.publish
+    original = Files.write_if
 
     def reject_mcp(self, path, *args, **kwargs):
         if path.endswith("/mcp.json"):
             raise StateError("fixture private MCP publication interrupted")
         return original(self, path, *args, **kwargs)
 
-    monkeypatch.setattr(NativeFiles, "publish", reject_mcp)
+    monkeypatch.setattr(Files, "write_if", reject_mcp)
     lifecycle.events.clear()
     with pytest.raises(StateError):
         lifecycle.restart()

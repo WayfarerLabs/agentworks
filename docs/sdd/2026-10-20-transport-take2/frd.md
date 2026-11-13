@@ -367,6 +367,27 @@ warning only), the operator chose the first:]
 > to lean towards ripping the bandaid now if it's at all related, though. It all has to work
 > together at the end of the day, right?
 
+### 2026-11-09
+
+[Asked what initialization should do when a shell rc file (or mise config) is a symbolic link, as in
+stow-style dotfiles, and its target does not already hold Agentworks' source line, with three
+options (write through a link only for an unelevated write by the file's own user to a regular file
+inside that user's home; refuse to write through any link and warn with the exact line to add,
+staying silent when the target already holds it, at the cost of the fragments' identity and `PATH`
+entries missing from login shells and a partial reinit until the operator adds the line; or keep
+following links wherever they point), the operator chose:]
+
+> Refuse and warn
+
+### 2026-11-10
+
+[Asked how an operator repairs a VM whose stored admin spec holds a dotfiles source this release
+refuses (a credential in a git URL, or a `user@host:path` remote without `git::`), since no command
+replaces a VM's stored admin spec after `vm create`, with two options (add `vm reinit --admin-spec`,
+mirroring `agent reinit --spec`, or document delete and recreate), the operator answered:]
+
+> Yeah, let's allow for both --admin-template and --admin-spec on vm reinit.
+
 ### 2026-11-11
 
 [Asked whether #866 may take an eighth feedback round for the round 7 integration report, and how to
@@ -376,6 +397,26 @@ the platform contract and LLD, or to enforce a whole-response bound by replacing
 reaching into private socket attributes, the operator chose:]
 
 > Round 8, document (Recommended)
+
+### 2026-11-12
+
+[Asked how console restore, start, create, add-sessions and add-shell should resolve their panes'
+secrets, which they resolved after the VM gate once live tmux showed which panes were missing,
+against ADR 0019's one boundary resolve per command, with the options to resolve every configured
+pane's secrets in the boundary pass (an operator may be prompted for panes that already exist, and a
+non-interactive run can fail on a secret it ends up not using), to probe tmux before the boundary
+and declare only the missing panes' secrets, or to keep the late resolves as a recorded exception,
+the operator chose:]
+
+> Resolve all up front (Recommended)
+
+[Asked whether the command reference's rule that JSON issue codes are fixed for schema version 1,
+and that changing a value's meaning needs a new schema version, should give way to practice (v0.19.0
+added `migration-pending` under v1, and this effort moves the activation-list case to the new
+`replacement-required` reason and issue code under v1 behind a BREAKING footer), or be followed by
+keeping the old values or bumping the schema version, the operator chose:]
+
+> Amend the contract text (Recommended)
 
 ### Rulings carried forward
 

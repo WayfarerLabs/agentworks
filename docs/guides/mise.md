@@ -17,7 +17,7 @@ itself. Agentworks does not reinvent mise's integrity mechanisms.
 
 ## Quick start
 
-Add packages to your admin template -- as a YAML manifest in `~/.config/agentworks/resources/`:
+Add packages to your admin template, as a YAML manifest in `~/.config/agentworks/resources/`:
 
 ```yaml
 apiVersion: agentworks/v1
@@ -126,13 +126,23 @@ When no lockfile is present, `mise install` runs without `--locked` (no verifica
 
 ## Sequencing
 
-Understanding the init ordering matters if your dotfiles also configure mise:
+Understanding the init ordering matters if your dotfiles also configure mise. The order is the same
+for the admin and for every agent:
 
-1. **Mise config write** -- agentworks writes `~/.config/mise/config.toml` from `mise_packages`
-2. **Dotfiles sync** -- your dotfiles can override the mise config (or provide their own lockfile)
-3. **Mise lockfile fetch** -- if `mise_lockfile` is set, it is copied last, overriding anything
-   dotfiles put there
-4. **Mise install** -- runs with the final config + lockfile state
+1. **Mise config write.** When `mise_packages` is set, agentworks writes
+   `~/.config/mise/config.toml` from it.
+2. **Dotfiles sync.** Your dotfiles can override the mise config, or provide their own lockfile.
+3. **Mise lockfile fetch.** If `mise_lockfile` is set, it is copied last, overriding anything the
+   dotfiles put there.
+4. **Mise install.** It runs with the final config and lockfile, whenever `mise_packages` or
+   `mise_lockfile` is set or the home has a config (one your dotfiles supplied counts), and prunes
+   on reinit as `mise_prune_on_reinit` says.
+5. **User install commands.** They run after the mise install, with mise's shims on their `PATH`
+   (behind the install commands' own `path` entries), on a first create as on every reinit.
+
+The profile that carries the shims is written before the first step, so the dotfiles installer and
+the mise install see it too. If your dotfiles installer replaces `~/.profile`, Agentworks adds its
+source line back before the user install commands.
 
 This means:
 
@@ -142,6 +152,14 @@ This means:
 - If you set `mise_lockfile` explicitly, it always wins over a dotfiles-provided lockfile. This is
   intentional: an explicit lockfile in the agentworks config is a deliberate policy decision that
   should not be silently overridden by dotfiles.
+- Agentworks never writes the config or the lockfile through a symbolic link. If your dotfiles
+  install links `~/.config/mise/config.toml` (or the directory) into the checkout, the next reinit
+  leaves it alone and warns while `mise_packages` is set: let the dotfiles own the config and drop
+  `mise_packages`, or stop linking it. The same holds for an explicit `mise_lockfile` over a linked
+  `mise.lock`.
+- A git dotfiles checkout at `~/.config/mise` itself cannot be combined with `mise_packages`: the
+  config write creates that directory first, so the clone then finds it in place and the sync fails.
+  Let the dotfiles own the config and drop `mise_packages`, or check the dotfiles out elsewhere.
 
 ## Release age filtering
 

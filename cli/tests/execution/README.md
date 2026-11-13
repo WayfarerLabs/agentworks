@@ -29,6 +29,17 @@ returns canned outcomes without ssh.
 - `test_access.py`, `test_launcher_source.py`, `test_stream_process.py`: passivity and ordering, the
   launcher's structure, and `stream` in a real process whose stdin stays open.
 - `test_trust.py`: the host-key store.
+- `test_detached_program.py`: the guest detached program against real processes and a temporary
+  base, under each interpreter: launch identity, every state and the read order, the prune,
+  interrupt, discard, and (under the sudo lane) the base's modes. Linux only.
+- `test_detached.py`: the detached client over the recording fake: each request, the follow-up after
+  a connection outcome, and the boundary checks.
+- `test_from_file.py`: the `FromFile` input: a file that cannot be opened and a path that is not a
+  `Path` refused before dispatch, `stream` refusing it, every byte reaching the payload on the L
+  lane, and a file that fails part way failing the request.
+- `test_to_file.py`: the `ToFile` sink: an existing path refused before dispatch, bytes unchanged,
+  and the file kept only for `Completed(0)`. Marked `windows`, where binary mode is what keeps CR
+  LF.
 - `test_reachability.py`: what `reachability.wait` polls, what it raises on the first attempt, and
   the confirming probe, over the recording fake.
 - `test_oplog.py`: the operation log record holds a request's shape and never its secrets.
@@ -74,6 +85,51 @@ included; the root channel's W3 skips on a local lane without `/proc`.
 The elevation vectors (E1, E2 and E6) run on L and V. On L they need the runner's passwordless
 `sudo -n`, skipping without it locally and failing without it when `CI` is set; E4, the
 distribution's default sudoers on a fresh VM, is V only.
+
+`conformance/program_vectors.py` holds the vectors for the request vocabulary the files LLD adds,
+which join the list in `vectors.py`:
+
+- F1 (L, S and V): a request's `Bytes` input reaches no record of a real `SSHLogger` and no error,
+  and `log_streams=False` keeps its streams out of the record.
+- F2 and F3 (L, S and V): every input byte reaches a `PythonProgram` from its first byte, its
+  arguments arrive exactly, and its source is in no argument.
+- F4 (L and V): a `PythonProgram` with `login`, `interactive` and both, under startup files that
+  print, export and end with a failing command substitution. On L the account's default shell is the
+  lane's own (`LocalLane.use_lane_shell_as_account_shell`), so the four shells are each covered; on
+  V it is the admin's.
+- F5 (L and V): an interactive `Script` under `sh`, `bash` and the default shell sees its
+  interactive startup, returns its own `exit` status and prints none of the prompts its startup
+  sets, which a shell reading the script as its input would.
+- F9 (L and V): a startup file that closes descriptors 3 to 9 still leaves a login and interactive
+  `PythonProgram` and an interactive `Script` their source.
+- F8 (L and V): an elevated request keeps its environment; on L it needs `sudo -n`, as the elevation
+  vectors do.
+- The `run` sinks capture to their limit or discard (L and S).
+
+On L, a 3.11 interpreter that is not the system one becomes the program interpreter as well as the
+launcher's, so a `PythonProgram` runs under it too.
+
+`conformance/file_vectors.py` holds the file operations' vectors, which join the same list:
+
+- F6 (V): the VM-wide file lock under the image's `fs.protected_regular`. The admin and root each
+  create it in turn, and the other then takes it unelevated or elevated and completes a `write_if`.
+  The lane reaches the VM as its admin only, so root stands in for a second account. It removes the
+  lock file between rounds.
+- F7 (S and V): an elevated `write_if` creates a root-owned file that an elevated `read` returns
+  (with `sudo -n` on S), and an agent's elevated `write_if` is refused before anything is sent.
+
+Every test but an integration test sends the file program with its lock in the worker's temporary
+directory (the suite conftest's `file_lock_path`), so the L and S lanes and
+`run_file_program_locally` never take the host's own `/run/lock`.
+
+`test_file_program.py` runs the guest file program's `main` in its own interpreter, under each
+interpreter the L lane uses, on a temporary tree with its lock in a sticky directory of its own:
+conflicts, truncated input, links at the destination, a parent and the lock path, the lock's mode,
+wait and sharing, metadata preservation, cleanup after a failure or `SIGTERM`, and pruning. Its sudo
+lane (a lock root created first, owner preservation, a root-owned write) needs the runner's
+passwordless `sudo -n` and follows the elevation vectors' rule. `test_files.py` covers `Files`: the
+status-to-error mapping and refusals before dispatch over the recording access, and a round trip, a
+link refusal and the private lock over the L lane.
 
 `conformance/test_attach_terminal.py` and `conformance/test_forward.py` cover what happens around
 the terminal half and a forward, on the same lanes.

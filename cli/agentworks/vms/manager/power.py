@@ -13,7 +13,7 @@ from agentworks.execution import trust
 from agentworks.naming import MAX_SECRET_NAME_LENGTH, NAME_RE, validate_name
 from agentworks.secrets.policy import require_exact_tty_interaction_policy
 
-from ._helpers import _guard_incomplete_vm, _operation_log, _require_known_power_state, _require_vm
+from ._helpers import _guard_incomplete_vm, _require_known_power_state, _require_vm, operation_log
 from .boundary import _auth_key_boundary, _live_vm_boundary, _warn_legacy_release
 from .tailscale import VMNotAnswering
 
@@ -452,7 +452,7 @@ def rekey_vm(
         # values, never resolves or seeds: the union covers the gate secrets, and
         # ``Resolver.get`` refuses anything outside it.
         with (
-            _operation_log(name, "rekey", redactions=(auth_key,)) as logger,
+            operation_log(name, "rekey", redactions=(auth_key,)) as logger,
             output.section(f"Rekeying '{name}'"),
             activation_gate(vm_node, resolver.get),
         ):

@@ -31,13 +31,21 @@ from agentworks.execution.results import (
     Unknown,
     UnknownReason,
 )
-from tests.execution.conformance.lanes import Lane, LocalFilesystem, LocalLane, SSHDLane, sudo_granted, unavailable
+from tests.execution.conformance import file_vectors, program_vectors
+from tests.execution.conformance.lanes import Lane, LocalFilesystem, LocalLane, SSHDLane, needs_sudo
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
 KERNEL_STRING_LIMIT = 131_071
 REQUEST_DEADLINE = 60
+UNAWAITED_SECONDS = 30
+"""How long a guest process lasts when the run must return without waiting for it.
+
+The process starts after the vector's clock does, so a run that waited took at
+least this long: ``elapsed < UNAWAITED_SECONDS`` proves it did not wait, and a
+loaded machine's scheduling delay stays far inside the bound.
+"""
 
 
 def cmd(*argv: str, **options: object) -> Command:
@@ -295,9 +303,9 @@ def bash_child_reads_no_startup_file(lane: Lane) -> None:
 def background_child_holds_both_streams(lane: Lane) -> None:
     started = time.monotonic()
 
-    result = lane.run(script("sleep 5 &\necho done"))
+    result = lane.run(script(f"sleep {UNAWAITED_SECONDS} &\necho done"))
 
-    assert time.monotonic() - started < 4
+    assert time.monotonic() - started < UNAWAITED_SECONDS  # the run ended with the script, not the child
     assert result.completion == Completed(0)
     assert result.stdout == b"done\n"
 
@@ -321,9 +329,9 @@ def deadline(lane: Lane) -> None:
     lane.monkeypatch.setattr(subprocess, "Popen", Recording)
     started = time.monotonic()
 
-    result = lane.run(cmd("sleep", "3", deadline=0.5))
+    result = lane.run(cmd("sleep", str(UNAWAITED_SECONDS), deadline=0.5))
 
-    assert time.monotonic() - started < 3
+    assert time.monotonic() - started < UNAWAITED_SECONDS  # the run returned at its deadline, not the payload's end
     assert result.completion == Unknown(UnknownReason.DEADLINE)
     assert spawned
     assert all(process.poll() is not None for process in spawned)
@@ -410,18 +418,20 @@ def handover_whose_second_connection_never_arrives_leaves_nothing(lane: Lane) ->
 
 def handover_gives_up_after_its_wait(lane: Lane) -> None:
     lane.shorten_handover_wait(1)
-    token = lane.handover_token()
+    directory = f"/tmp/agw-handover-{lane.handover_token()}"
+    gone_while_parked: list[bool] = []
 
     def never_connects(argv: list[str], half: object) -> int:
-        time.sleep(2.5)  # past the launcher's wait, with the parking connection still open
+        # The client holds the parking connection's stdin open until this returns, so the launcher's
+        # end-of-input cleanup cannot fire yet and only its own wait can remove the directory. Polling
+        # for less than the unshortened 30 second wait proves the shortened one ended it.
+        gone_while_parked.append(lane.wait_gone(directory, seconds=20))
         return 0
 
     with lane.terminal(behavior=never_connects):
-        started = time.monotonic()
         assert lane.access.attach(LoginShell()) == 0
 
-    assert time.monotonic() - started < 15
-    assert lane.wait_gone(f"/tmp/agw-handover-{token}")
+    assert gone_while_parked == [True]
 
 
 def parking_that_never_reports_is_bounded_and_leaves_the_terminal_alone(lane: Lane) -> None:
@@ -663,12 +673,6 @@ def handover_shell_starts_with_clean_dispositions(lane: Lane) -> None:
 # -- Elevation (E1, E2, E4, E6) ----------------------------------------------------------
 
 
-def needs_sudo(lane: Lane) -> None:
-    """A local guest elevates only where the runner grants passwordless sudo: CI does, so it fails there without it."""
-    if isinstance(lane, LocalFilesystem) and not sudo_granted():
-        unavailable("the elevation vectors need passwordless sudo")
-
-
 def elevated_runs_as_root_in_the_rebuilt_environment(lane: Lane) -> None:
     needs_sudo(lane)
     if isinstance(lane, LocalLane) and lane.shell_name in ("bash", "zsh"):
@@ -714,9 +718,9 @@ def elevated_background_child_holds_both_streams(lane: Lane) -> None:
     needs_sudo(lane)
     started = time.monotonic()
 
-    result = lane.run(script("sleep 5 &\necho done", elevated=True))
+    result = lane.run(script(f"sleep {UNAWAITED_SECONDS} &\necho done", elevated=True))
 
-    assert time.monotonic() - started < 4
+    assert time.monotonic() - started < UNAWAITED_SECONDS
     assert result.completion == Completed(0)
     assert result.stdout == b"done\n"
 
@@ -804,7 +808,8 @@ def build() -> list[Vector]:
         Vector("memfd-noexec-seal-refused", "L", memfd_refusing_the_noexec_seal_still_runs_the_script),
         Vector("memfd-cannot-be-created", "L", memfd_that_cannot_be_created_is_not_delivered),
     ]
-    return [*shared, *startup_exits, *startup_redirects, *local_only]
+    program = [Vector(*entry) for entry in (*program_vectors.ENTRIES, *file_vectors.ENTRIES)]
+    return [*shared, *startup_exits, *startup_redirects, *local_only, *program]
 
 
 VECTORS = build()

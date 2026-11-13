@@ -128,7 +128,7 @@ def test_a_capability_with_no_config_rejects_every_key() -> None:
     class _Bare(GitCredentialProvider):
         name = "bare"
         description = "declares no configuration"
-        contract_version = 3
+        contract_version = 4
         config_model = _BareConfig
 
         def credential_scopes(self) -> tuple[HttpsCredentialScope, ...]:
@@ -295,7 +295,7 @@ class _SigningCredentialProvider(GitCredentialProvider):
 
     name = "test-signing"
     description = "signs with a declared secret"
-    contract_version = 3
+    contract_version = 4
     config_model = _SigningConfig
 
     def credential_scopes(self) -> tuple[HttpsCredentialScope, ...]:

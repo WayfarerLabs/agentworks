@@ -13,6 +13,7 @@ from agentworks.artifacts.application import ArtifactFile, OwnedArtifactFile
 from agentworks.artifacts.publication import publish_artifacts
 from agentworks.artifacts.sections import BEGIN, END
 from tests.native_setup_fixtures import LocalFixtureTransport
+from tests.vm_access_support import Admin, RecordingVMAccess
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux guest filesystem operations")
 
@@ -27,13 +28,19 @@ def test_unresolved_routes_hold_previous_files_and_sections_without_inspecting_t
     if generated_section:
         path.write_bytes(b"operator prefix\n")
     item = ArtifactFile(str(path), b"managed fixture", ("a" * 64,), generated_section=generated_section)
-    previous = publish_artifacts(target, (item,), (), lambda files: None, roots=(str(target.home),)).files
+    previous = publish_artifacts(target.files(), (item,), (), lambda files: None, roots=(str(target.home),)).files
     before, metadata = path.read_bytes(), path.stat()
     desired = () if plan == "absent" else (replace(item, data=b"changed" if plan == "changed" else item.data),)
     checkpoint = Mock()
-    monkeypatch.setattr("agentworks.artifacts.publication.NativeFiles", Mock(side_effect=AssertionError("no I/O")))
+    no_io = RecordingVMAccess([], Admin())
+    no_io.default_outcome = AssertionError("no I/O")
     result = publish_artifacts(
-        target, desired, previous, checkpoint, roots=(str(target.home),), retain_origins=frozenset({"a" * 64, "b" * 64})
+        no_io.files(),
+        desired,
+        previous,
+        checkpoint,
+        roots=(str(target.home),),
+        retain_origins=frozenset({"a" * 64, "b" * 64}),
     )
     assert result.files == previous and len(result.skipped) == 1
     assert result.skipped[0].path == str(path) and result.skipped[0].origins == item.origins
@@ -55,14 +62,14 @@ def test_unresolved_routes_hold_package_updates_and_new_members_but_allow_indepe
     )
     supporting = replace(entrypoint, path=str(package / "run.sh"), data=b"old script", executable=True)
     previous = publish_artifacts(
-        target, (entrypoint, supporting), (), lambda files: None, roots=(str(target.home),)
+        target.files(), (entrypoint, supporting), (), lambda files: None, roots=(str(target.home),)
     ).files
     snapshots = {file.path: (Path(file.path).read_bytes(), Path(file.path).stat()) for file in previous}
     new_member = replace(supporting, path=str(package / "new.sh"), origins=("b" * 64,), data=b"new script")
     independent = ArtifactFile(str(target.home / "independent.md"), b"independent", ("c" * 64,))
     checkpoints: list[tuple[OwnedArtifactFile, ...]] = []
     result = publish_artifacts(
-        target,
+        target.files(),
         (replace(entrypoint, data=b"changed skill"), new_member, independent),
         previous,
         checkpoints.append,
@@ -80,7 +87,7 @@ def test_unresolved_routes_hold_package_updates_and_new_members_but_allow_indepe
         assert Path(path).stat().st_mtime_ns == metadata.st_mtime_ns
     # Once inputs resolve, ordinary convergence can update the package and retire old members.
     healed = publish_artifacts(
-        target,
+        target.files(),
         (replace(entrypoint, data=b"changed skill"), new_member, independent),
         result.files,
         checkpoints.append,
@@ -96,12 +103,12 @@ def test_retained_aggregate_section_does_not_drop_unresolved_members_when_new_in
     path = target.home / "AGENTS.md"
     path.write_bytes(b"prefix\n")
     item = ArtifactFile(str(path), b"old rule and inherited hint", ("a" * 64, "b" * 64), generated_section=True)
-    previous = publish_artifacts(target, (item,), (), lambda files: None, roots=(str(target.home),)).files
+    previous = publish_artifacts(target.files(), (item,), (), lambda files: None, roots=(str(target.home),)).files
     path.write_bytes(path.read_bytes() + b"suffix\n")
     before = path.read_bytes()
     independent = ArtifactFile(str(target.home / "new-rule.md"), b"new fixture rule", ("d" * 64,))
     result = publish_artifacts(
-        target,
+        target.files(),
         (replace(item, data=b"only local rule", origins=("a" * 64,)), independent),
         previous,
         lambda files: None,

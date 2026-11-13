@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Literal, cast
 
 from agentworks import output
 from agentworks.artifacts.application import ArtifactApplication, ArtifactDeferral
+from agentworks.artifacts.config_files import publish_config
 from agentworks.artifacts.model import ArtifactInput, ArtifactInputs, ArtifactType
 from agentworks.artifacts.native.layout import NativeUserLayout, resolve_user_layout
 from agentworks.capabilities.harness_integration.settings import (
@@ -20,14 +21,16 @@ from agentworks.capabilities.harness_integration.settings import (
     serialize_settings,
 )
 from agentworks.capabilities.harness_integration.setup import UserSetupInvocation, WorkspaceSetupInvocation
-from agentworks.errors import ConfigError, ConnectivityError, ExternalError
+from agentworks.errors import ConfigError, ConnectivityError, ExternalError, ValidationError
+from agentworks.execution.errors import PathRefused
+from agentworks.execution.files import guest_path
 from agentworks.harness_setup.model import NativeClaim
-from agentworks.native_files import NativeFilePathError, NativeFiles, native_path
+from agentworks.workspaces.guest import addressable_workspace_path
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from agentworks.transports import Transport
+    from agentworks.execution.access import VMAccess
 
 MCP_CLAIM_ROLE = "artifact-mcp-server"
 type MCPTool = Literal["claude", "codex", "grok"]
@@ -109,14 +112,14 @@ def mcp_input_conflicts(inputs: ArtifactInputs, tool: MCPTool) -> dict[str, str]
 
 
 def _user_mcp_path(layout: NativeUserLayout, home: str) -> str:
-    if not layout.mcp_path.startswith(native_path(home).rstrip("/") + "/"):
+    if not layout.mcp_path.startswith(guest_path(home).rstrip("/") + "/"):
         raise ConfigError("User MCP config placement outside HOME is unsupported")
     return layout.mcp_path
 
 
-def resolve_mcp_user_path(tool: MCPTool, runner: Transport, *, home: str, environment: Mapping[str, str]) -> str:
+def resolve_mcp_user_path(tool: MCPTool, access: VMAccess, *, home: str, environment: Mapping[str, str]) -> str:
     """Observe the native layout and restrict MCP placement to the actual user's HOME."""
-    return _user_mcp_path(resolve_user_layout(tool, runner, home=home, environment=environment), home)
+    return _user_mcp_path(resolve_user_layout(tool, access, home=home, environment=environment), home)
 
 
 def user_mcp_location(
@@ -148,46 +151,60 @@ def user_mcp_location(
 
 def session_mcp_conflicts(
     tool: Literal["claude", "codex"],
-    runner: Transport | None,
+    access: VMAccess | None,
     inputs: ArtifactInputs,
     *,
     home: str,
     environment: Mapping[str, str],
     workspace: str,
 ) -> dict[str, str]:
-    """Read fixed native roles before optional invocation overrides; never return config values."""
+    """Read fixed native roles before optional invocation overrides; never return config values.
+
+    ``workspace`` is the session's stored workspace path, read as the file
+    operations address it (``workspaces.guest.addressable_workspace_path``);
+    one they cannot address defers every MCP input with the refusal as the
+    reason. A ``ValidationError`` from the requests themselves still raises.
+    """
     items = tuple(item for item in inputs.items() if item.content.type is ArtifactType.MCP_SERVER)
     if not items:
         return {}
     conflicts: dict[str, str] = {}
-    if runner is None:
+    if access is None:
         return {
             item.identity: "The native launch target is unavailable for MCP configuration checks." for item in items
         }
     try:
-        user = resolve_mcp_user_path(tool, runner, home=home, environment=environment)
-        project = native_path(workspace) + ("/.mcp.json" if tool == "claude" else "/.codex/config.toml")
+        root = addressable_workspace_path(workspace)
+    except ValidationError as error:
+        reason = " ".join(part for part in (str(error), error.hint, "Invocation delivery is deferred.") if part)
+        return {item.identity: reason for item in items}
+    try:
+        user = resolve_mcp_user_path(tool, access, home=home, environment=environment)
+        project = root + ("/.mcp.json" if tool == "claude" else "/.codex/config.toml")
         key = "mcpServers" if tool == "claude" else "mcp_servers"
         format: SettingsFormat = "json" if tool == "claude" else "toml"
-        with NativeFiles(runner) as files:
-            for path in dict.fromkeys((user, project)):
-                content = files.read(path)
-                document = {} if content is None else parse_settings(content, format=format)
-                tables = [_table(document, key)]
-                if tool == "claude" and path == user:
-                    projects = _table(document, "projects")
-                    local = projects.get(workspace, {})
-                    if not isinstance(local, dict):
-                        raise ConfigError("native MCP project config must use an object")
-                    tables.append(_table(local, key))
-                for item in items:
-                    name = item.content.name
-                    expected = render_mcp(item, tool)
-                    if any(name in table and table[name] != expected for table in tables):
-                        conflicts[item.identity] = (
-                            "An existing native MCP entry differs; invocation delivery leaves it unchanged."
-                        )
-    except (ConfigError, ConnectivityError, ExternalError, NativeFilePathError):
+        files = access.files()
+        for path in dict.fromkeys((user, project)):
+            content = files.read(path)
+            document = {} if content is None else parse_settings(content, format=format)
+            tables = [_table(document, key)]
+            if tool == "claude" and path == user:
+                projects = _table(document, "projects")
+                # Assumed from Claude Code's behavior, not its documentation:
+                # it keys a project by the directory it runs in, whose spelling
+                # never has an empty or "." component.
+                local = projects.get(root, {})
+                if not isinstance(local, dict):
+                    raise ConfigError("native MCP project config must use an object")
+                tables.append(_table(local, key))
+            for item in items:
+                name = item.content.name
+                expected = render_mcp(item, tool)
+                if any(name in table and table[name] != expected for table in tables):
+                    conflicts[item.identity] = (
+                        "An existing native MCP entry differs; invocation delivery leaves it unchanged."
+                    )
+    except (ConfigError, ConnectivityError, ExternalError, PathRefused):
         return {
             item.identity: "Native MCP configuration could not be checked safely; invocation delivery is deferred."
             for item in items
@@ -242,7 +259,7 @@ def apply_mcp(
     entries before applying its merge policy. The callback must preserve its
     original file-existence decision for skip-existing.
     """
-    destination = native_path(destination)
+    destination = guest_path(destination)
     previous = claims if claims is not None else invocation.prior.claims if invocation.prior else ()
     old = tuple(claim for claim in previous if claim.role == MCP_CLAIM_ROLE)
     grouped: dict[str, list[ArtifactInput]] = {}
@@ -284,7 +301,20 @@ def apply_mcp(
         return ArtifactApplication(deferred=preflight_deferrals)
     format: SettingsFormat = "json" if tool == "claude" else "toml"
     key = "mcpServers" if tool == "claude" else "mcp_servers"
-    group = invocation.linux_group if isinstance(invocation, WorkspaceSetupInvocation) else ""
+    group = invocation.linux_group if isinstance(invocation, WorkspaceSetupInvocation) else None
+    files = invocation.files
+
+    def publish(content: bytes, initial: bytes | None) -> None:
+        """Write ``content`` over ``initial``, keeping an existing file's owner, mode and attributes."""
+        publish_config(
+            files,
+            destination,
+            content,
+            observed=initial,
+            group=group,
+            operation="MCP publication",
+            preserve_metadata=initial is not None,
+        )
 
     def unavailable() -> ArtifactApplication:
         reason = "Native MCP configuration could not be read or safely updated; review it before reinitializing."
@@ -302,158 +332,143 @@ def apply_mcp(
             shared_paths=_shared_paths(invocation, old, destination=destination),
         )
 
-    with NativeFiles(invocation.runner) as files:
-        if not desired and not old:
-            initial = files.read(destination)
-            content, _ = map_document(initial) if map_document is not None else (initial, {})
-            if content is not None and content != initial:
-                files.publish(
-                    destination,
-                    content,
-                    expected=None if initial is None else hashlib.sha256(initial).hexdigest(),
-                    group=group,
-                    preserve_metadata=initial is not None,
-                )
-            return ArtifactApplication(deferred=preflight_deferrals)
-        try:
-            initial = files.read(destination)
-        except (ConnectivityError, ExternalError, NativeFilePathError):
+    if not desired and not old:
+        initial = files.read(destination)
+        content, _ = map_document(initial) if map_document is not None else (initial, {})
+        if content is not None:
+            publish(content, initial)
+        return ArtifactApplication(deferred=preflight_deferrals)
+    try:
+        initial = files.read(destination)
+    except (ConnectivityError, ExternalError, PathRefused):
+        return unavailable()
+    mapped = False
+    contributions: SettingsObject = {}
+    try:
+        document = {} if initial is None else parse_settings(initial, format=format)
+        current = dict(_table(document, key))
+        original_document = {} if initial is None else parse_settings(initial, format=format)
+    except ConfigError:
+        if map_document is None:
             return unavailable()
-        mapped = False
-        contributions: SettingsObject = {}
+        # An explicit replacement retains its repair behavior. Ownership of
+        # unreadable old entries cannot authorize changes to source entries.
+        replacement, contributions = map_document(initial)
         try:
-            document = {} if initial is None else parse_settings(initial, format=format)
-            current = dict(_table(document, key))
-            original_document = {} if initial is None else parse_settings(initial, format=format)
+            document = {} if replacement is None else parse_settings(replacement, format=format)
+            _table(document, key)
         except ConfigError:
-            if map_document is None:
-                return unavailable()
-            # An explicit replacement retains its repair behavior. Ownership of
-            # unreadable old entries cannot authorize changes to source entries.
-            replacement, contributions = map_document(initial)
-            try:
-                document = {} if replacement is None else parse_settings(replacement, format=format)
-                _table(document, key)
-            except ConfigError:
-                return unavailable()
-            current = {}
-            original_document = None
-            mapped = True
-
-        retained: list[NativeClaim] = []
-        retired: list[str] = []
-        absent: set[str] = set()
-        modified: list[NativeClaim] = []
-        for claim in old:
-            if (
-                claim.identifier in desired
-                or claim.identifier in protected_names
-                or claim.source in protected_origins
-                or claim.source in invocation.retain_artifact_origins
-            ):
-                retained.append(claim)
-            elif claim.identifier not in current:
-                retired.append(claim.identifier)
-                absent.add(claim.identifier)
-                continue
-            elif _matches(claim, current[claim.identifier]):
-                _table(document, key).pop(claim.identifier)
-                retired.append(claim.identifier)
-            else:
-                modified.append(claim)
-
-        working = None if initial is None else serialize_settings(document, format=format)
-        if map_document is not None and not mapped:
-            working, contributions = map_document(working)
-            document = {} if working is None else parse_settings(working, format=format)
-        table = _table(document, key)
-        contributed = _table(contributions, key)
-        for claim in modified:
-            # The explicit settings policy authorizes takeover or removal here;
-            # MCP retirement alone cannot change an externally modified entry.
-            if map_document is not None and (claim.identifier in contributed or claim.identifier not in table):
-                retired.append(claim.identifier)
-            else:
-                retained.append(claim)
-                invocation.report_incomplete(
-                    f"Retained modified MCP server '{claim.identifier}'; "
-                    "its current native entry differs from applied state."
-                )
-        deferred: list[ArtifactDeferral] = list(preflight_deferrals)
-        adopted: list[str] = []
-        confirmed = {claim.identifier: claim for claim in retained}
-        for name, items in desired.items():
-            item = items[0]
-            entry = render_mcp(item, tool)
-            owned_claim = confirmed.get(name)
-            observed = table.get(name)
-            unresolved = owned_claim is not None and owned_claim.source in invocation.retain_artifact_origins
-            if unresolved and observed == entry:
-                # Equal descendants cannot replace an unresolved representative:
-                # their later withdrawal must still retain the ancestor's entry.
-                continue
-            conflict = name in contributed and observed != entry
-            owned = owned_claim is not None and name in current and _matches(owned_claim, current[name])
-            if unresolved or conflict or (name in table and observed != entry and not owned):
-                reason = (
-                    f"MCP server '{name}' delivery is deferred until ancestor setup is repaired; "
-                    "recorded ownership is retained."
-                    if unresolved
-                    else f"MCP server '{name}' conflicts with a mapped or externally managed native entry; "
-                    "that entry was retained."
-                )
-                deferred.extend(
-                    ArtifactDeferral(input_id=item.identity, destination="session", reason=reason) for item in items
-                )
-                continue
-            if owned_claim is None and name in current and current[name] == entry:
-                adopted.append(name)
-            if key not in document:
-                document[key] = table
-            table[name] = entry
-            confirmed[name] = NativeClaim(
-                role=MCP_CLAIM_ROLE,
-                identifier=name,
-                destination=destination,
-                source=item.origin_identity,
-                sha256=_fingerprint(entry),
-            )
-
-        updated = (
-            tuple(claim for claim in previous if claim.role != MCP_CLAIM_ROLE) + elsewhere + tuple(confirmed.values())
-        )
-        content = serialize_settings(document, format=format)
-        if initial is not None and document == original_document:
-            content = initial
-        try:
-            if content != initial and (initial is not None or document):
-                files.publish(
-                    destination,
-                    content,
-                    expected=None if initial is None else hashlib.sha256(initial).hexdigest(),
-                    group=group,
-                    preserve_metadata=initial is not None,
-                )
-        except (ConnectivityError, ExternalError, NativeFilePathError):
             return unavailable()
-        # Persistence failures must escape: a confirmed write cannot be treated as
-        # an optional artifact skip or followed by more native mutations.
-        if updated != previous:
-            invocation.checkpoint(updated)
-        for name in adopted:
-            output.info(f"Adopted existing MCP server '{name}' into managed ownership.")
-        for name in retired:
-            action = (
-                "Released MCP ownership of native server"
-                if name in table
-                else "Cleared ownership of already absent MCP server"
-                if name in absent
-                else "Removed MCP server"
+        current = {}
+        original_document = None
+        mapped = True
+
+    retained: list[NativeClaim] = []
+    retired: list[str] = []
+    absent: set[str] = set()
+    modified: list[NativeClaim] = []
+    for claim in old:
+        if (
+            claim.identifier in desired
+            or claim.identifier in protected_names
+            or claim.source in protected_origins
+            or claim.source in invocation.retain_artifact_origins
+        ):
+            retained.append(claim)
+        elif claim.identifier not in current:
+            retired.append(claim.identifier)
+            absent.add(claim.identifier)
+            continue
+        elif _matches(claim, current[claim.identifier]):
+            _table(document, key).pop(claim.identifier)
+            retired.append(claim.identifier)
+        else:
+            modified.append(claim)
+
+    working = None if initial is None else serialize_settings(document, format=format)
+    if map_document is not None and not mapped:
+        working, contributions = map_document(working)
+        document = {} if working is None else parse_settings(working, format=format)
+    table = _table(document, key)
+    contributed = _table(contributions, key)
+    for claim in modified:
+        # The explicit settings policy authorizes takeover or removal here;
+        # MCP retirement alone cannot change an externally modified entry.
+        if map_document is not None and (claim.identifier in contributed or claim.identifier not in table):
+            retired.append(claim.identifier)
+        else:
+            retained.append(claim)
+            invocation.report_incomplete(
+                f"Retained modified MCP server '{claim.identifier}'; "
+                "its current native entry differs from applied state."
             )
-            output.info(
-                f"{action} '{name}'. Any native OAuth credentials are retained. "
-                "Use the harness's native logout before withdrawing a server when logout requires its definition."
+    deferred: list[ArtifactDeferral] = list(preflight_deferrals)
+    adopted: list[str] = []
+    confirmed = {claim.identifier: claim for claim in retained}
+    for name, items in desired.items():
+        item = items[0]
+        entry = render_mcp(item, tool)
+        owned_claim = confirmed.get(name)
+        observed = table.get(name)
+        unresolved = owned_claim is not None and owned_claim.source in invocation.retain_artifact_origins
+        if unresolved and observed == entry:
+            # Equal descendants cannot replace an unresolved representative:
+            # their later withdrawal must still retain the ancestor's entry.
+            continue
+        conflict = name in contributed and observed != entry
+        owned = owned_claim is not None and name in current and _matches(owned_claim, current[name])
+        if unresolved or conflict or (name in table and observed != entry and not owned):
+            reason = (
+                f"MCP server '{name}' delivery is deferred until ancestor setup is repaired; "
+                "recorded ownership is retained."
+                if unresolved
+                else f"MCP server '{name}' conflicts with a mapped or externally managed native entry; "
+                "that entry was retained."
             )
-        return ArtifactApplication(
-            deferred=tuple(deferred), shared_paths=_shared_paths(invocation, updated, destination=destination)
+            deferred.extend(
+                ArtifactDeferral(input_id=item.identity, destination="session", reason=reason) for item in items
+            )
+            continue
+        if owned_claim is None and name in current and current[name] == entry:
+            adopted.append(name)
+        if key not in document:
+            document[key] = table
+        table[name] = entry
+        confirmed[name] = NativeClaim(
+            role=MCP_CLAIM_ROLE,
+            identifier=name,
+            destination=destination,
+            source=item.origin_identity,
+            sha256=_fingerprint(entry),
         )
+
+    updated = tuple(claim for claim in previous if claim.role != MCP_CLAIM_ROLE) + elsewhere + tuple(confirmed.values())
+    content = serialize_settings(document, format=format)
+    if initial is not None and document == original_document:
+        content = initial
+    try:
+        if initial is not None or document:
+            publish(content, initial)
+    except (ConnectivityError, ExternalError, PathRefused):
+        return unavailable()
+    # Persistence failures must escape: a confirmed write cannot be treated as
+    # an optional artifact skip or followed by more native mutations.
+    if updated != previous:
+        invocation.checkpoint(updated)
+    for name in adopted:
+        output.info(f"Adopted existing MCP server '{name}' into managed ownership.")
+    for name in retired:
+        action = (
+            "Released MCP ownership of native server"
+            if name in table
+            else "Cleared ownership of already absent MCP server"
+            if name in absent
+            else "Removed MCP server"
+        )
+        output.info(
+            f"{action} '{name}'. Any native OAuth credentials are retained. "
+            "Use the harness's native logout before withdrawing a server when logout requires its definition."
+        )
+    return ArtifactApplication(
+        deferred=tuple(deferred), shared_paths=_shared_paths(invocation, updated, destination=destination)
+    )

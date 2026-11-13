@@ -615,9 +615,10 @@ VM creation follows a two-phase lifecycle tracked by separate status columns:
 Initialization is fully declarative. `vm create` accepts a name, `--template`, `--spec`,
 `--admin-template`, `--admin-spec`, and `--site`. Immutable hardware starts with the VM template and
 may be refined by `--spec`; the admin user starts with the selected admin template and may be
-refined by `--admin-spec`. `vm reinit` takes only the VM name and re-runs initialization using the
-current config and both stored final layers. See
-[Instance specs](command-reference.md#instance-specs) for the exact create and agent-reinit surface.
+refined by `--admin-spec`. `vm reinit` re-runs initialization using the current config and both
+stored final layers; `--admin-template` and `--admin-spec` re-point the admin template and replace
+or clear the admin layer. See [Instance specs](command-reference.md#instance-specs) for the exact
+create and reinit surface.
 
 Agentworks records the configured SSH identity only after a VM create, reinit or recover proves the
 VM accepts it. It does not synthesize evidence for VMs created before this tracking was introduced.

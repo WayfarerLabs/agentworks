@@ -25,6 +25,7 @@ from agentworks.interpolation_compat import (
 )
 from agentworks.schema import AgwModel
 from agentworks.topics import TopicProse
+from agentworks.vms.home_layout import AGENTWORKS_ARTIFACTS
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
@@ -36,7 +37,7 @@ if TYPE_CHECKING:
         VMSetupInvocation,
         WorkspaceSetupInvocation,
     )
-    from agentworks.transports import Transport
+    from agentworks.execution.access import VMAccess
 
 
 class ShellConfig(AgwModel):
@@ -82,7 +83,7 @@ class ShellSetupConfig(AgwModel):
 class ShellIntegration(HarnessIntegration):
     """Runs an operator command (or a login shell) as the session."""
 
-    contract_version: ClassVar[int] = 7
+    contract_version: ClassVar[int] = 8
     name: ClassVar[str] = "shell"
     description: ClassVar[str] = "Run an operator command or a login shell"
     prose: ClassVar[TopicProse | None] = TopicProse(
@@ -126,7 +127,7 @@ class ShellIntegration(HarnessIntegration):
         return (
             ArtifactApplication()
             if self.retiring
-            else filesystem_artifacts(invocation.artifacts, f"{invocation.home}/.agentworks-artifacts/user")
+            else filesystem_artifacts(invocation.artifacts, f"{invocation.home}/{AGENTWORKS_ARTIFACTS}/user")
         )
 
     def workspace_init(self, invocation: WorkspaceSetupInvocation) -> ArtifactApplication:
@@ -186,10 +187,10 @@ class ShellIntegration(HarnessIntegration):
             application = filesystem_artifacts(context.inputs, context.directory, session=True)
         return HarnessStart(command, artifacts=application)
 
-    def _probe_target(self, transport: Transport) -> None:
+    def _probe_target(self, access: VMAccess) -> None:
         require_commands(
             tuple(self.config.required_commands),
-            transport,
+            access,
             harness_integration_name=self.name,
             template_name=self.owner_name,
             session_name=self._session_name,

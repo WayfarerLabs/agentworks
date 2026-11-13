@@ -6,6 +6,12 @@ Date: 2026-06-10
 
 Accepted
 
+Amended: the agent's `.ssh` and `authorized_keys` are placed by Agentworks' file program as root
+rather than staged with `scp` and `sudo install`. `ensure_directory` places `.ssh` and an elevated
+`write` places the file, each with the agent as owner and group and its mode set through descriptors
+opened without following a symbolic link, before the file is published. The admin's role is
+unchanged, so the decision stands; the description below names the current mechanism.
+
 ## Context
 
 Operations on a VM run as different Linux users: admin for provisioning and admin-side maintenance,
@@ -19,13 +25,15 @@ the operation itself didn't need root.
 
 Operations whose target user is the agent open SSH directly as the agent's Linux user. Admin SSH
 stays in scope only for operations that fundamentally need root or that the agent cannot do for
-itself: `useradd`, the agent's tmux socket directory under `/var/lib/`, the initial
+itself: `useradd`, the agent's tmux socket directory under `/run/agentworks/`, the initial
 `authorized_keys` install, and bulk maintenance ops (`stop_all_sessions`, `delete_agent` killing the
 agent's sessions) where iterating per-agent SSH probes would penalize performance for no benefit.
 
-The agent's `~/.ssh/authorized_keys` is reconciled at agent create / reinit via a stage-and-install
-pattern (admin `scp`s content to a private `mktemp` path, then `sudo install` atomically places it
-owned by the agent). After that point, direct agent SSH is possible.
+The agent's `~/.ssh/authorized_keys` is reconciled at agent create / reinit by the admin as root:
+the file program places `~/.ssh` and then the file, each owned by the agent with its mode applied
+through descriptors opened without following a link, and publishes the file by renaming it into
+place. After that point, direct agent SSH is possible, and the rest of agent initialization runs as
+the agent.
 
 The operator's local SSH config gets a parallel alias surface: each agent gets a
 `Host awagent--<agent>` block alongside the existing `Host awvm--<vm>` blocks, keyed on the

@@ -128,13 +128,15 @@ fresh access token as password. The helper neither selects nor mutates Azure ten
 state.
 
 If a CLI is not visible at this point in initialization, or its authentication check fails or is
-indeterminate, initialization warns but still installs the helper. Later user-install/profile steps
-may make a CLI visible, so verify again after initialization when applicable. If it is absent,
-unauthenticated, times out, or returns malformed output at Git runtime, the wrapper suppresses its
-stdout and stderr and prints only the provider's fixed recovery hint. Authenticate or repair the
-target user's CLI identity and retry Git; reinitialization is needed only when the manifest or
-generated helper changes. Setting `defaults.runup_git_credentials = false` skips both secret-source
-verification and these CLI readiness checks, not helper installation.
+indeterminate, initialization warns but still installs the helper; a VM without `python3` counts as
+indeterminate. A host-key or other state error is not indeterminate and fails initialization as it
+would for any other request. Later user-install/profile steps may make a CLI visible, so verify
+again after initialization when applicable. If it is absent, unauthenticated, times out, or returns
+malformed output at Git runtime, the wrapper suppresses its stdout and stderr and prints only the
+provider's fixed recovery hint. Authenticate or repair the target user's CLI identity and retry Git;
+reinitialization is needed only when the manifest or generated helper changes. Setting
+`defaults.runup_git_credentials = false` skips both secret-source verification and these CLI
+readiness checks, not helper installation.
 
 ## Scope and selection
 
@@ -154,9 +156,9 @@ The generated include resets earlier helpers only for hosts Agentworks manages, 
 Agentworks launcher, and enables `credential.useHttpPath`. Unrelated hosts and operator Git settings
 remain untouched.
 
-## Provider contract version 3
+## Provider contract version 4
 
-A provider subclasses `GitCredentialProvider`, declares `contract_version = 3`, and supplies a
+A provider subclasses `GitCredentialProvider`, declares `contract_version = 4`, and supplies a
 closed provider-local `AgwModel` with its literal `name` tag. It implements two required operations
 and may override one side-effect-free hook:
 
@@ -167,11 +169,11 @@ def credential_material(self, ctx: RunContext) -> CredentialPayload: ...
 ```
 
 Static scopes come only from provider configuration. Before VM or agent creation mutation, core
-validates all declarations together and calls `validate_inputs` with a fresh context without a
-target containing the provider's scoped resolved inputs. At user initialization it constructs
-another fresh context with the same scoped inputs and exactly the current admin or agent target for
-runup, then a third fresh context without a target for materialization. The later payload is either
-`StoredCredential(username, password)` or
+validates all declarations together and calls `validate_inputs` with a fresh context without an
+access containing the provider's scoped resolved inputs. At user initialization it constructs
+another fresh context with the same scoped inputs and exactly the current admin's or agent's access
+for runup, then a third fresh context without an access for materialization. The later payload is
+either `StoredCredential(username, password)` or
 `ManagedHelper(provider_authored_program, fixed_failure_hint)`.
 
 The result carries no echoed credential name. Provider inputs and outputs are orthogonal: secret
@@ -186,8 +188,10 @@ Delimiters such as `:`, `@`, `/`, `%`, `?`, `#`, `=`, and backslash therefore re
 ## Reconciliation and managed state
 
 Every admin and agent initialization prepares selected providers, later materializes them, and
-invokes the same reconciler, including when the desired set is empty. The reconciler uses one
-bounded shared/exclusive lock and a private generation under:
+invokes the same reconciler, including when the desired set is empty. The reconciler is one script
+run under bash on the user's own access, whatever the account's login shell, with the state as a
+gzip archive on its standard input and both of its output streams discarded; its exit status is the
+whole answer. It uses one bounded shared/exclusive lock and a private generation under:
 
 ```text
 ~/.agentworks/git-credentials/
@@ -220,7 +224,7 @@ CLI output do not appear in generated scripts, process arguments, logs, errors, 
 - `github.py` and `plugins/azure/azdo.py` own the shipped schemas, scope translations, runup, and
   final material.
 - `git_credentials/state.py` validates material and builds generic per-user state.
-- `git_credentials/reconcile.py` installs or removes that state over a transport.
+- `git_credentials/reconcile.py` installs or removes that state on the user's `VMAccess`.
 - `tests/test_git_credential_contexts.py` covers graph edges and scoped delivery.
 - `tests/test_git_token_verification.py` covers provider runup and input/output independence.
 - `tests/test_git_credential_scoping.py` covers schema shape, translation parity, Git protocol,

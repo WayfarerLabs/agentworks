@@ -605,6 +605,39 @@ def test_return_type_is_list_of_resolved_env_rows(
     assert all(isinstance(r, ResolvedEnvRow) for r in rows)
 
 
+def test_a_workspace_layer_needing_replacement_warns_with_its_own_repair_and_uses_the_base(
+    db: Database,
+    tmp_path: Path,
+    captured_output,  # noqa: ANN001
+) -> None:
+    from agentworks.instance_specs import ExplicitReplacementRequired, decode_stored_overlay
+    from agentworks.vms.manager._helpers import _resolve_vm_admin_env_scopes
+
+    cfg = _write_config(
+        tmp_path, manifests=[ManifestDoc("workspace-template", "default", {"env": {"WS_VAR": "ws-val"}})]
+    )
+    config = load_config(cfg, warn_issues=False)
+    _seed_db(db)
+    db.instance_state.put_desired_overlay("workspace", "ws-a", VersionedPayload(1, {"harness_integrations": ["codex"]}))
+    record = db.instance_state.get_desired_overlay("workspace", "ws-a")
+    assert record is not None
+    with pytest.raises(ExplicitReplacementRequired) as refused:
+        decode_stored_overlay(record)
+
+    rows = show_env(db, config, workspace_name="ws-a", interaction=TtyInteractionPolicy.REFUSE)
+    from agentworks.bootstrap import load_request_registry
+
+    vm, ws = db.get_vm("vm-1"), db.get_workspace("ws-a")
+    assert vm is not None and ws is not None
+    scopes = _resolve_vm_admin_env_scopes(db, load_request_registry(config, live_database=db), vm, ws=ws)
+
+    assert {row.key: row.rendered_value for row in rows}["WS_VAR"] == "ws-val"
+    assert scopes.workspace is not None and "WS_VAR" in scopes.workspace
+    warnings = [warning for warning in captured_output.warnings if str(refused.value) in warning]
+    assert len(warnings) == 2
+    assert all(refused.value.hint is not None and refused.value.hint in warning for warning in warnings)
+
+
 def test_show_plaintext_matches_execution_with_live_instance_context(db: Database, tmp_path: Path) -> None:
     from agentworks.env import ResourceContext, compose_env
     from agentworks.env.entry import EnvEntry

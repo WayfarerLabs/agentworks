@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import sys
+import json
+from dataclasses import replace
 from pathlib import Path
-from typing import Any
 from unittest.mock import Mock
 from uuid import uuid4
 
@@ -12,26 +12,19 @@ import pytest
 
 from agentworks.artifacts.native.probe import probe_native
 from agentworks.errors import ExternalError
-from agentworks.harness_setup.runner import SetupRunner
-from agentworks.native_files import NativeFiles
-from agentworks.ssh import SSHError, SSHLogger, SSHResult
-from agentworks.transports import Transport
-from tests.native_setup_fixtures import LocalFixtureTransport
-from tests.test_native_harness_setup import transport as transport
+from agentworks.execution.results import Completed, Result
+from agentworks.ssh import SSHLogger
+from tests.vm_access_support import Admin, RecordingVMAccess
 
 
 @pytest.mark.parametrize("raised", [False, True])
 def test_plain_environment_values_do_not_redact_the_offending_native_path(raised: bool) -> None:
     path = "/home/agt-tester/.grok/agents/operator.md"
-    runner = Mock(spec=Transport)
-    runner.logger = None
-    failure = SSHError(path)
-    runner.run.side_effect = [
-        SSHResult(0, "\nAGW_PYTHON3=available\n", ""),
-        failure if raised else SSHResult(7, "", path),
-    ]
-    with pytest.raises((SSHError, ExternalError)) as caught:
-        probe_native(runner, tool="grok", environment={"USER": "tester", "LETTER": "e", "TYPE": "agent"})
+    access = RecordingVMAccess([], Admin())
+    failure = ExternalError(path)
+    access.run_outcomes = [failure if raised else Result(Completed(7), b"", path.encode())]
+    with pytest.raises(ExternalError) as caught:
+        probe_native(access, tool="grok", environment={"USER": "tester", "LETTER": "e", "TYPE": "agent"})
     assert path in str(caught.value)
     if raised:
         assert caught.value is failure
@@ -62,12 +55,8 @@ def test_actual_session_delivery_caller_redacts_probe_failures(delivery, monkeyp
         ),
     )
     monkeypatch.setattr("agentworks.artifacts.session.read_native_setup", lambda *a: Mock(records=()))
-    runner = Mock(spec=Transport)
-    runner.logger = None
-    runner.run.side_effect = [
-        SSHResult(0, "\nAGW_PYTHON3=available\n", ""),
-        SSHResult(9, "", "login failed TOKEN=" + secret + " " + path),
-    ]
+    access = RecordingVMAccess([], Admin())
+    access.run_outcomes = [Result(Completed(9), b"", ("login failed TOKEN=" + secret + " " + path).encode())]
     warnings: list[str] = []
     monkeypatch.setattr("agentworks.output.warn", warnings.append)
     prepared = prepare_session_artifacts(
@@ -78,7 +67,7 @@ def test_actual_session_delivery_caller_redacts_probe_failures(delivery, monkeyp
         vm=Mock(),
         workspace=Mock(),
         agent_name="worker",
-        runner=runner,
+        access=access,
         environment={"TOKEN": secret},
         secret_target=SecretTarget(vm={}),
         linux_user="worker",
@@ -93,7 +82,7 @@ def test_actual_session_delivery_caller_redacts_probe_failures(delivery, monkeyp
     )
     if delivery == "ancestor":
         actual, _ = prepare_session_delivery(
-            runner,
+            access,
             tool="codex",
             integration="codex",
             context=prepared.context,
@@ -105,7 +94,7 @@ def test_actual_session_delivery_caller_redacts_probe_failures(delivery, monkeyp
     else:
         with pytest.raises(ExternalError) as caught:
             prepare_session_delivery(
-                runner,
+                access,
                 tool="codex",
                 integration="codex",
                 context=prepared.context,
@@ -116,50 +105,56 @@ def test_actual_session_delivery_caller_redacts_probe_failures(delivery, monkeyp
     assert secret not in diagnostic and path in diagnostic
 
 
-@pytest.mark.parametrize("through_setup_runner", [False, True])
-def test_logger_only_secret_is_removed_before_terminal_normalization(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, through_setup_runner: bool
+def test_logger_only_secret_is_removed_from_setup_probe_diagnostics(
+    db, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """A secret only the operation log registered reaches the setup probe, which removes it from its error."""
+    from agentworks.artifacts.model import ArtifactType
+    from agentworks.harness_setup.inputs import SetupInputs
+    from agentworks.harness_setup.lifecycle import apply_agent_setup
+    from agentworks.harness_setup.model import NativeSetupState
+    from agentworks.plugins.claude.harness_integration import ClaudeCodeIntegration
+    from agentworks.secrets.orchestration import SecretTarget
+    from tests.artifacts._fixtures import received
+    from tests.artifacts.test_native_delivery import artifact
+    from tests.vm_access_support import install_access_recorder
+
     marker = uuid4().hex.upper()
     secret = "x" + marker + "\nsecond-part"
-    path = "/home/agt-tester/.grok/agents/operator.md"
-    failure = SSHError("\x1b[" + secret + " " + path, hint=secret)
+    path = "/home/worker/.claude/skills/review/SKILL.md"
     monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path / "logs")
-    runner = Mock(spec=Transport)
-    runner.logger = SSHLogger("resolved-values", "probe", redactions=(secret,))
-    runner.default_timeout = 30
-    runner.run.side_effect = failure
-    with pytest.raises(SSHError) as caught:
-        if through_setup_runner:
-            SetupRunner(runner, {"USER": "tester", "LETTER": "e"}).run("fixture")
-        else:
-            probe_native(runner, tool="grok", environment={"USER": "tester", "LETTER": "e"})
-    assert caught.value is failure
-    assert marker not in str(failure) and marker not in (failure.hint or "")
-    assert path in str(failure)
+    install_access_recorder(monkeypatch)
+    monkeypatch.setattr("agentworks.harness_setup.lifecycle.site_platform_name", lambda *args: "fixture")
+    invocations = []
 
+    def capture(db, registry, inputs, invocation, **kwargs):
+        invocations.append(invocation)
+        return NativeSetupState()
 
-@pytest.mark.skipif(sys.platform != "linux", reason="executes Linux guest native-file helpers")
-def test_native_staging_ignores_a_startup_banner_and_cleans_its_directory(
-    transport: LocalFixtureTransport, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    original = transport.run
-
-    def with_banner(command: str, **kwargs: Any) -> SSHResult:
-        result = original(command, **kwargs)
-        return SSHResult(result.returncode, "fixture welcome" + result.stdout, result.stderr)
-
-    monkeypatch.setattr(transport, "run", with_banner)
-    with NativeFiles(transport) as files:
-        destination = str(transport.home / "settings.json")
-        assert not files.directory(str(transport.home / "config"))
-        assert files.directory(str(transport.home / "config"), create=True)
-        assert files.read(destination) is None
-        assert files.fingerprint(destination) is None
-        files.publish(destination, b"{}", expected=None)
-        assert files.read(destination) == b"{}"
-        observed = files.fingerprint(destination)
-        assert observed is not None
-        files.remove(destination, expected=observed[0])
-        assert files.read(destination) is None
-    assert not list((transport.root / "tmp").iterdir())
+    monkeypatch.setattr("agentworks.harness_setup.lifecycle.run_setup", capture)
+    apply_agent_setup(
+        db,
+        Mock(),
+        Mock(),
+        inputs=SetupInputs("agent", "agent", "agent", {}, SecretTarget(vm={})),
+        vm=db.insert_vm("vm", "site", "host"),
+        username="worker",
+        values={"TOKEN": "resolved-value"},
+        logger=SSHLogger("resolved-values", "probe", redactions=(secret,)),
+        held=Mock(),
+        operation="agent-init",
+        failures=[],
+    )
+    (invocation,) = invocations
+    access = RecordingVMAccess([], Admin())
+    # The native layout observation answers first; the discovery probe then fails, quoting the secret.
+    layout = {"root": "/home/worker/.claude", "mcp_path": "/home/worker/.claude.json"}
+    access.run_outcomes = [
+        Result(Completed(0), b"\nAGW_NATIVE_USER_LAYOUT=" + json.dumps(layout).encode()),
+        Result(Completed(1), b"", ("\x1b[" + secret + " " + path).encode()),
+    ]
+    setup = ClaudeCodeIntegration.for_setup(owner_kind="agent", owner_name="agent", facet="user", config={})
+    with pytest.raises(ExternalError) as caught:
+        setup.user_init(replace(invocation, access=access, artifacts=received(artifact(ArtifactType.SKILL))))
+    assert marker not in str(caught.value) and marker not in (caught.value.hint or "")
+    assert path in str(caught.value)

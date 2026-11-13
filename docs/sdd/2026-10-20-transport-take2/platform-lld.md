@@ -490,13 +490,14 @@ controlling pseudo-terminal (`tests/capabilities/test_wsl2_root_channel.py`).
 
 ### Proxmox
 
-`guest_agent.run_as_root(api, node, vmid, script, deadline) -> RawRun` is written fresh from the
-dispatch-and-poll half of `plugins/proxmox/transport.py:51-137`. First it pings the guest agent
-(`guest_agent_ping`, `POST .../agent/ping`) every two seconds until it answers, since a VM that has
-just started (recover starts a stopped one with no wait) has no agent running yet. A ping carries no
-script, so asking again is safe; a token rejection raises `TokenRejectedError` at once, any other
-`ProxmoxAPIError` means not yet (anything else the client raises is a bug and propagates), and no
-answer within `AGENT_WAIT_SECONDS` (120 s) or the deadline, whichever comes first, raises
+`guest_agent.run_as_root(api, node, vmid, script, deadline) -> RawRun`, a duration wrapper over
+`run_as_root_until(..., expires)`, which the platform calls with its own expiry, is written fresh
+from the dispatch-and-poll half of `plugins/proxmox/transport.py:51-137`. First it pings the guest
+agent (`guest_agent_ping`, `POST .../agent/ping`) every two seconds until it answers, since a VM
+that has just started (recover starts a stopped one with no wait) has no agent running yet. A ping
+carries no script, so asking again is safe; a token rejection raises `TokenRejectedError` at once,
+any other `ProxmoxAPIError` means not yet (anything else the client raises is a bug and propagates),
+and no answer within `AGENT_WAIT_SECONDS` (120 s) or the deadline, whichever comes first, raises
 `ChannelUnreachable` saying no script was dispatched, so a VM with no agent fails in about two
 minutes rather than after the repair's 600. Then, unless the pinging left none of the deadline
 (which raises `ChannelUnreachable` the same way), one `guest_agent_exec` of `["/bin/bash", "-s"]`
@@ -942,8 +943,8 @@ refuses a provisioning-failed VM (step 1).
   baseline: the other modules those import (`capabilities.base`, `db`, `debian`, `schema`, `topics`,
   `subprocess_io`, `secrets.line_safety`, `execution`) load no legacy module.
 - **Static check.** The plugins cannot pass the import guard: importing any of them loads the plugin
-  index (`plugins/__init__.py:26-35`), which loads the harness plugins and `native_files`
-  (measured), until slice 5. They join `MIGRATED_FILES` instead
+  index (`plugins/__init__.py:26-35`), which loaded the harness plugins and `native_files`
+  (measured) until slice 5 deleted `native_files`. They join `MIGRATED_FILES` instead
   (`tests/test_execution_import_boundary.py:24`): the four plugin `platform.py` files,
   `plugins/proxmox/guest_agent.py`, `vms/manager/recover.py`, `vms/manager/tailscale.py`,
   `vms/nodes.py`, `orchestration/activation.py` and `vms/initializer/tailscale_preflight.py`.

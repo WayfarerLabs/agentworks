@@ -3,7 +3,7 @@ gates its recipe first. The gate must remain beside each consumption site so a
 new caller cannot silently bypass disabled-resource enforcement.
 
 The recipe gate (``ensure_recipe_enabled``) sits at each COMMAND ENTRY, not at
-the runners (``_run_install_commands`` / ``_run_agent_install_commands``) nor at
+the runner (``_run_install_commands``) nor at
 the choreography (``create_agent_on_vm`` / ``realize_agent``), which are never
 themselves gated. The runner call graph is multi-hop and fans out, so a shallow
 "the immediate caller of the runner gates" check would pass while a hole stays
@@ -45,13 +45,12 @@ _ROOT = Path(agentworks.__file__).parent
 # (whose build phase `_build_session_graph` gates).
 _EXPECTED_CALLERS: dict[str, set[str]] = {
     # agent-install runner chain -> create_agent / reinit_agent (+ session --new-agent)
-    "_run_agent_install_commands": {"create_agent_on_vm"},
     "create_agent_on_vm": {"realize_agent", "reinit_agent"},
     "realize_agent": {"create_agent", "_realize_ephemerals"},
     "_realize_ephemerals": {"_roll_forward"},
     "_roll_forward": {"create_session"},
     # vm-install runner chain -> create_vm / reinit_vm
-    "_run_install_commands": {"_phase_b_setup"},
+    "_run_install_commands": {"_phase_b_setup", "create_agent_on_vm"},
     "_phase_b_setup": {"run_initialization"},
     "run_initialization": {"create_vm", "reinit_vm"},
 }

@@ -46,13 +46,20 @@ def fallback_placements(db, tmp_path, monkeypatch):
     target = LocalFixtureTransport(tmp_path / "guest")
     user = UserSetupInvocation(
         vm=fixture.vm,
-        runner=target,
+        access=(recorded := target.access()),
+        files=recorded.files(),
         prior=None,
         checkpoint=lambda claims: None,
         username="worker",
         home=str(target.home),
     )
-    machine = VMSetupInvocation(vm=fixture.vm, runner=target, prior=None, checkpoint=lambda claims: None)
+    machine = VMSetupInvocation(
+        vm=fixture.vm,
+        access=(recorded := target.access()),
+        files=recorded.files(),
+        prior=None,
+        checkpoint=lambda claims: None,
+    )
     control = {"template": ResolvedVMTemplate("vm", artifacts=fixture.owners["vm"].artifacts), "fail": True}
     monkeypatch.setattr("agentworks.vms.templates.resolve_live_template", lambda *a, **k: control["template"])
 
@@ -81,11 +88,11 @@ def fallback_placements(db, tmp_path, monkeypatch):
     monkeypatch.setattr(ShellIntegration, "vm_init", vm_setup)
     real_publish = publish_artifacts
 
-    def publish(runner, desired, previous, checkpoint, *, root=False, **kwargs):
+    def publish(files, desired, previous, checkpoint, *, root=False, **kwargs):
         if not root:
-            return real_publish(runner, desired, previous, checkpoint, root=False, **kwargs)
+            return real_publish(files, desired, previous, checkpoint, root=False, **kwargs)
         # Only the root producer is simulated. Both descendant files are created,
-        # fingerprinted and retired through the actual NativeFiles program.
+        # fingerprinted and retired through the actual guest file program.
         owned = tuple(
             OwnedArtifactFile(path=file.path, sha256=hashlib.sha256(file.data).hexdigest(), origins=file.origins)
             for file in desired

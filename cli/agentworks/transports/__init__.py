@@ -5,9 +5,7 @@ Two named factories plus one low-level helper:
 - :func:`transport`: the admin's transport to a VM (SSH to its tailnet
   address).
 - :func:`agent_transport`: the same as a named agent's Linux user.
-- :func:`transport_for_user`: the helper both call. Direct use is
-  reserved for the mid-create case where the agent row doesn't exist yet
-  (today's only direct caller is ``agents/initializer.py``).
+- :func:`transport_for_user`: the helper both call.
 
 A platform's own channel is not a transport: core reaches it through
 ``VMPlatform.run_as_root`` and ``native_shell``. Commands migrated onto
@@ -52,9 +50,7 @@ def transport_for_user(
     """Build an ``SSHTransport`` for ``user`` on this VM via Tailscale.
 
     The two named factories (:func:`transport`, :func:`agent_transport`)
-    call this. Direct use is reserved for the mid-create case where an
-    agent row doesn't exist yet but the on-VM identity already accepts
-    the operator's key (see ``agents/initializer.py``).
+    call this.
 
     Always uses ``config.operator.ssh_private_key`` as the SSH identity:
     that's the key the on-VM authorized_keys reconciler installs for

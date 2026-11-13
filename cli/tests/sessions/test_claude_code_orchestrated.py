@@ -26,6 +26,7 @@ presence.
 from __future__ import annotations
 
 import shlex
+import uuid
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
@@ -33,14 +34,24 @@ import pytest
 
 from agentworks.artifacts.declarations import ArtifactsConfig
 from agentworks.db import Database, InitStatus, ProvisioningStatus, SessionMode, SessionStatus
+from agentworks.execution.results import Completed, Result
+from agentworks.plugins.claude import harness_integration as claude_module
+from agentworks.plugins.claude.harness_integration import transcript_probe
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.tmux import FingerprintProbe, ProbeStatus, TmuxServerFingerprint
 from tests.conftest import seed_vm_trust
+from tests.vm_access_support import check_result, install_access_recorder, is_command_check
 
 from ..conftest import stub_build_registry, stub_session_resolvers, stub_vm_gates
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from tests.vm_access_support import Call
+
+
+# Every access a command builds is the recording fake: these tests run no ssh.
+pytestmark = pytest.mark.usefixtures("vm_access_recorder")
 
 
 @pytest.fixture(autouse=True)
@@ -56,24 +67,33 @@ class _Result:
         self.stderr = ""
 
 
-class _ClaudeTarget:
-    """Transport double for the claude-code op: answers the readiness
-    ``command -v claude`` probe and the ``<sid>.jsonl`` find probe,
-    recording each into a shared event log. ``transcript_present`` decides
-    resume-vs-launch."""
+# The id the op mints when the row holds none (``_common_stubs`` pins it), so a double can name its probe.
+_MINTED_SID = "6a1b2c3d-4e5f-4a6b-8c7d-8e9f0a1b2c3d"
 
-    def __init__(self, events: list[str], *, transcript_present: bool) -> None:
+
+class _ClaudeTarget:
+    """Launch-target double for the claude-code op: its access answers the
+    readiness ``command -v claude`` check and ``transcript_probe(sid)``,
+    recording each into a shared event log. ``transcript_present`` decides
+    resume-vs-launch; ``sid`` is the id the op is expected to probe (``None``
+    when it should probe none). Its transport answers everything else."""
+
+    def __init__(self, events: list[str], *, sid: str | None, transcript_present: bool) -> None:
         self._events = events
+        self._sid = sid
         self._present = transcript_present
 
     def run(self, cmd: str, **kwargs: object) -> _Result:
-        if "command -v claude" in cmd:
-            self._events.append("probe")
-            return _Result(ok=True)
-        if ".jsonl" in cmd:
-            self._events.append("detect")
-            return _Result(ok=self._present)
         return _Result()
+
+    def answer(self, call: Call) -> Result | None:
+        if is_command_check(call.request):
+            self._events.append("probe")
+            return check_result(call.request, 0)
+        if self._sid is not None and call.request == transcript_probe(self._sid):
+            self._events.append("detect")
+            return Result(Completed(0 if self._present else 1))
+        return None
 
 
 def _seed_db(tmp_path: Path) -> Database:
@@ -113,6 +133,7 @@ def _patch_transport(monkeypatch: pytest.MonkeyPatch, target: _ClaudeTarget) -> 
     admin_factory = lambda vm, config, **kwargs: target  # noqa: E731
     monkeypatch.setattr("agentworks.transports.transport", admin_factory)
     monkeypatch.setattr("agentworks.sessions.manager.transport", admin_factory)
+    install_access_recorder(monkeypatch).answer = target.answer
 
 
 def _capture_pane_command(monkeypatch: pytest.MonkeyPatch, events: list[str], captured: dict[str, str]) -> None:
@@ -154,6 +175,7 @@ def _common_stubs(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(tmux_mod, "finalize_session_start", lambda *a, **k: None)
     monkeypatch.setattr(session_manager, "_get_boot_id", lambda *a, **k: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
     monkeypatch.setattr(session_manager, "_regenerate_tmuxinator", lambda *a, **k: None)
+    monkeypatch.setattr(claude_module, "uuid", SimpleNamespace(uuid4=lambda: uuid.UUID(_MINTED_SID)))
 
 
 # -- create: launch string + minted id persists ------------------------------
@@ -167,7 +189,7 @@ def test_create_produces_launch_string_and_persists_the_minted_id(
     db = _seed_db(tmp_path)
     events: list[str] = []
     captured: dict[str, str] = {}
-    _patch_transport(monkeypatch, _ClaudeTarget(events, transcript_present=False))
+    _patch_transport(monkeypatch, _ClaudeTarget(events, sid=None, transcript_present=False))
     _common_stubs(monkeypatch)
     _harness_integration_template(monkeypatch)
     _capture_pane_command(monkeypatch, events, captured)
@@ -204,7 +226,7 @@ def test_create_forces_a_fresh_conversation_when_a_transcript_exists(
     db = _seed_db(tmp_path)
     events: list[str] = []
     captured: dict[str, str] = {}
-    _patch_transport(monkeypatch, _ClaudeTarget(events, transcript_present=True))
+    _patch_transport(monkeypatch, _ClaudeTarget(events, sid=_MINTED_SID, transcript_present=True))
     _common_stubs(monkeypatch)
     _harness_integration_template(monkeypatch)
     _capture_pane_command(monkeypatch, events, captured)
@@ -233,8 +255,10 @@ def _restart_stubs(
     *,
     transcript_present: bool,
     stored_state: dict[str, object] | None,
+    sid: str = _MINTED_SID,
     harness_integration: str = "claude-code",
 ) -> tuple[Database, list[str], dict[str, str]]:
+    """A running session with ``stored_state``, whose restart is expected to probe ``sid``'s transcript."""
     from agentworks.sessions import manager as session_manager
 
     db = _seed_db(tmp_path)
@@ -249,7 +273,7 @@ def _restart_stubs(
 
     events: list[str] = []
     captured: dict[str, str] = {}
-    _patch_transport(monkeypatch, _ClaudeTarget(events, transcript_present=transcript_present))
+    _patch_transport(monkeypatch, _ClaudeTarget(events, sid=sid, transcript_present=transcript_present))
     _common_stubs(monkeypatch)
     _harness_integration_template(monkeypatch, harness_integration=harness_integration)
     _capture_pane_command(monkeypatch, events, captured)
@@ -277,6 +301,7 @@ def test_restart_reads_stored_id_before_the_kill_and_resumes(tmp_path: Path, mon
         monkeypatch,
         transcript_present=True,
         stored_state={"claude-code": {"session_id": "939b1597-7c61-5ace-80f4-14617b7b4257"}},
+        sid="939b1597-7c61-5ace-80f4-14617b7b4257",
     )
 
     restart_session(
@@ -344,6 +369,7 @@ def test_restart_hoists_a_pre_namespacing_row_and_resumes_its_id(
         monkeypatch,
         transcript_present=True,
         stored_state={"session_id": sid},
+        sid=sid,
     )
 
     restart_session(
@@ -412,6 +438,7 @@ def test_restart_under_another_harness_integration_leaves_the_flat_legacy_key_in
         monkeypatch,
         transcript_present=False,
         stored_state={"session_id": sid},
+        sid=sid,
         harness_integration="shell",
     )
 
@@ -445,7 +472,7 @@ def test_substitution_preserves_workload_values_and_substitutes_extra_args(
     db.update_workspace_path("ws1", workspace_path)
     events: list[str] = []
     captured: dict[str, str] = {}
-    _patch_transport(monkeypatch, _ClaudeTarget(events, transcript_present=False))
+    _patch_transport(monkeypatch, _ClaudeTarget(events, sid=None, transcript_present=False))
     _common_stubs(monkeypatch)
     _harness_integration_template(
         monkeypatch,

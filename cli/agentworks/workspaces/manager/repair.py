@@ -7,21 +7,40 @@ used by ``rehome._rehome_vm``, which imports it from this module.
 
 from __future__ import annotations
 
-import shlex
 from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.errors import NotFoundError
+from agentworks.execution.requests import CAPTURE_LIMIT_BYTES, CaptureOutput, Command
+from agentworks.execution.results import Completed
+from agentworks.vms.initializer.steps import describe_failure, status
 from agentworks.vms.manager import gated_vm_boundary
-from agentworks.workspaces.acls import apply_workspace_acls
+from agentworks.workspaces.acls import ACL_DEADLINE, apply_workspace_acls
+from agentworks.workspaces.guest import FIND_DEADLINE, REQUEST_FAILURES, ensure_group, open_parent_traversal
 from agentworks.workspaces.manager._common import _workspace_scope
 
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, WorkspaceRow
+    from agentworks.execution.access import VMAccess
+    from agentworks.execution.results import Result
     from agentworks.resources.registry import Registry
     from agentworks.secrets.policy import TtyInteractionPolicy
-    from agentworks.transports import Transport
+    from agentworks.vms.initializer.steps import InitLog
+
+INSTALL_DEADLINE = 60
+"""Seconds the ``acl`` package install may take."""
+
+TREE_OUTPUT = CaptureOutput(64 * CAPTURE_LIMIT_BYTES)
+"""What a step keeps of a recursive command's output: a line per entry, so a large tree's can pass 1 MiB.
+
+Output beyond it is an unknown outcome, which the step reports as it reports
+a failed request.
+"""
+
+
+def _text(result: Result) -> str:
+    return result.stdout.decode("utf-8", errors="replace")
 
 
 def repair_workspace(
@@ -70,7 +89,7 @@ def repair_workspace(
     Orchestrated (``vms.manager.gated_vm_boundary``, WORKSPACE scope):
     the graph is the live VM alone (the workspace has no capability
     instances and nothing realization-shaped; convergence mutates
-    through the VM transport), the activation gate replaces this
+    through the admin's access), the activation gate replaces this
     command's ``keep_active``, opening BEFORE the preflight sweep with
     its just-in-time values seeding the boundary resolver, and the
     whole SSH convergence body runs inside the held-active span. The
@@ -79,8 +98,8 @@ def repair_workspace(
     """
     from agentworks.agents.manager import AGENT_PREFIX
     from agentworks.bootstrap import load_request_registry
-    from agentworks.ssh import SSHError
-    from agentworks.transports import transport
+    from agentworks.vms.manager import operation_log
+    from agentworks.workspaces.backends.vm import admin_access
 
     # build_registry runs first so framework miss-policies fire before
     # any DB / VM business logic.
@@ -102,17 +121,20 @@ def repair_workspace(
             entity_name=ws.vm_name,
         )
 
-    with gated_vm_boundary(
-        db,
-        config,
-        registry,
-        vm,
-        scope=_workspace_scope(db, vm, name),
-        interaction=interaction,
+    with (
+        gated_vm_boundary(
+            db,
+            config,
+            registry,
+            vm,
+            scope=_workspace_scope(db, vm, name),
+            interaction=interaction,
+        ),
+        operation_log(vm.name, "workspace-repair") as log,
     ):
-        target = transport(vm, config)
+        admin = admin_access(vm, config, log)
         ws_group = ws.linux_group
-        quoted_ws = shlex.quote(ws.workspace_path)
+        ws_path = ws.workspace_path
         fixes = 0
         # Steps whose convergence ran but whose Fixed-vs-OK outcome could not
         # be verified (currently only the ACL step, when a getfacl snapshot
@@ -124,46 +146,45 @@ def repair_workspace(
 
         # 0. Ensure acl package is installed (needed for setfacl)
         try:
-            has_setfacl = target.run("which setfacl", sudo=True, check=False)
-            if not has_setfacl.ok:
-                target.run("apt-get install -y -qq acl", sudo=True, timeout=60)
+            if status(admin, Command(("which", "setfacl"), elevated=True)) != 0:
+                admin.run(
+                    Command(
+                        ("apt-get", "install", "-y", "-qq", "acl"),
+                        elevated=True,
+                        deadline=INSTALL_DEADLINE,
+                        env={"DEBIAN_FRONTEND": "noninteractive"},
+                    ),
+                    check=True,
+                )
                 output.detail("Fixed: installed acl package")
                 fixes += 1
             else:
                 output.detail("OK: acl package")
-        except SSHError as e:
-            output.warn(f"acl package check failed: {e}")
+        except REQUEST_FAILURES as e:
+            output.warn(f"acl package check failed: {describe_failure(e, log.sanitize)}")
 
         # 1. Ensure the workspace group recorded in the DB exists on the VM.
         try:
-            group_exists = target.run(f"getent group {ws_group}", sudo=True, check=False)
-            if not group_exists.ok:
-                target.run(
-                    f"sh -c 'getent group {ws_group} >/dev/null 2>&1 || /usr/sbin/groupadd {ws_group}'",
-                    sudo=True,
-                )
+            if status(admin, Command(("getent", "group", ws_group), elevated=True)) != 0:
+                admin.run(ensure_group(ws_group), check=True)
                 output.detail(f"Fixed: created group {ws_group}")
                 fixes += 1
             else:
                 output.detail(f"OK: group {ws_group} exists")
-        except SSHError as e:
-            output.warn(f"group check failed: {e}")
+        except REQUEST_FAILURES as e:
+            output.warn(f"group check failed: {describe_failure(e, log.sanitize)}")
 
         # 2. Ensure admin is in the group
         try:
-            in_group = target.run(
-                f"id -nG {vm.admin_username}",
-                sudo=True,
-                check=False,
-            )
-            if in_group.ok and ws_group not in in_group.stdout.split():
-                target.run(f"usermod -aG {ws_group} {vm.admin_username}", sudo=True)
+            in_group = admin.run(Command(("id", "-nG", vm.admin_username), elevated=True))
+            if in_group.require_completed(vm.name) == 0 and ws_group not in _text(in_group).split():
+                admin.run(Command(("usermod", "-aG", ws_group, vm.admin_username), elevated=True), check=True)
                 output.detail(f"Fixed: added admin '{vm.admin_username}' to {ws_group}")
                 fixes += 1
             else:
                 output.detail(f"OK: admin in {ws_group}")
-        except SSHError as e:
-            output.warn(f"admin group check failed: {e}")
+        except REQUEST_FAILURES as e:
+            output.warn(f"admin group check failed: {describe_failure(e, log.sanitize)}")
 
         # 3. Fix directory ownership, permissions, and SGID (recursive chgrp
         # so ACLs apply correctly). The -c (changes) flag makes chown/chmod
@@ -176,23 +197,35 @@ def repair_workspace(
         # per altered entry), but detection only needs its truthiness, so we
         # never parse it, just test whether anything was printed.
         try:
-            owner = target.run(f"chown -R -c {vm.admin_username}:{ws_group} {quoted_ws}", sudo=True, timeout=120)
-            mode = target.run(f"chmod -c 2770 {quoted_ws}", sudo=True)
+            owner = admin.run(
+                Command(
+                    ("chown", "-R", "-c", f"{vm.admin_username}:{ws_group}", ws_path),
+                    elevated=True,
+                    deadline=FIND_DEADLINE,
+                ),
+                stdout=TREE_OUTPUT,
+                check=True,
+            )
+            mode = admin.run(Command(("chmod", "-c", "2770", ws_path), elevated=True), check=True)
             # Set SGID on all subdirectories so new files inherit the workspace group.
             # This is critical for atomic-write tools (including Claude Code) that
             # create a temp file and rename it over the original.
-            sgid = target.run(
-                f"find {quoted_ws} -type d -exec chmod -c g+s {{}} +",
-                sudo=True,
-                timeout=120,
+            sgid = admin.run(
+                Command(
+                    ("find", ws_path, "-type", "d", "-exec", "chmod", "-c", "g+s", "{}", "+"),
+                    elevated=True,
+                    deadline=FIND_DEADLINE,
+                ),
+                stdout=TREE_OUTPUT,
+                check=True,
             )
-            if owner.stdout.strip() or mode.stdout.strip() or sgid.stdout.strip():
+            if any(_text(result).strip() for result in (owner, mode, sgid)):
                 output.detail("Fixed: directory ownership and permissions")
                 fixes += 1
             else:
                 output.detail("OK: directory ownership and permissions")
-        except SSHError as e:
-            output.warn(f"permission fix failed: {e}")
+        except REQUEST_FAILURES as e:
+            output.warn(f"permission fix failed: {describe_failure(e, log.sanitize)}")
 
         # 4. Fix ACLs
         # apply_workspace_acls applies the canonical workspace ACL, the SAME spec
@@ -208,52 +241,47 @@ def repair_workspace(
         # ignored as churn, while a real ACL change on a persisting path is
         # still detected. Comparing actual before/after state, rather than
         # reconstructing the desired ACL, keeps this correct as the applied
-        # spec evolves. getfacl uses check=False because a getfacl hiccup must
-        # not mask the real SSHError a failing setfacl would surface; but if a
-        # snapshot did fail we have no change data, so we report the check as
-        # indeterminate rather than claiming a confirmed OK.
+        # spec evolves. A snapshot's own failure must not mask a failing
+        # setfacl's error; but if a snapshot did not complete with status 0
+        # we have no change data, so we report the check as indeterminate
+        # rather than claiming a confirmed OK.
         try:
-            before = target.run(f"getfacl -R -n {quoted_ws}", sudo=True, check=False, timeout=120)
-            apply_workspace_acls(target, ws.workspace_path)
-            after = target.run(f"getfacl -R -n {quoted_ws}", sudo=True, check=False, timeout=120)
-            if not before.ok or not after.ok:
+            before = _acl_snapshot(admin, ws_path)
+            apply_workspace_acls(admin.files(), ws_path)
+            after = _acl_snapshot(admin, ws_path)
+            if before is None or after is None:
                 # Convergence still ran (apply_workspace_acls above), but the
                 # before/after probe did not, so we cannot tell OK from Fixed.
                 # Warn rather than report a no-op we did not verify, and mark
                 # the step indeterminate so the closing line stays honest.
                 output.warn("ACLs applied, but the before/after check could not run (state indeterminate)")
                 indeterminate += 1
-            elif _acls_changed(before.stdout, after.stdout):
+            elif _acls_changed(before, after):
                 output.detail("Fixed: ACLs")
                 fixes += 1
             else:
                 output.detail("OK: ACLs")
-        except SSHError as e:
-            output.warn(f"ACL fix failed: {e}")
+        except REQUEST_FAILURES as e:
+            output.warn(f"ACL fix failed: {describe_failure(e, log.sanitize)}")
 
         # 5. Fix parent directory traversal. The walk seeds from the PARENT of
-        # the workspace (`dirname "$1"`), never the workspace dir itself: the
-        # workspace's own mode is step 3's business (canonical 2770, which
-        # deliberately carries no world bits), and an `a+x` on it would flip
-        # 2770 to 2771 and fight step 3, so a pristine workspace would report
-        # Fixed on every run and never reach "No issues found". Only true
-        # ancestors get a+x. Each ancestor's chmod carries -c, so the loop's
-        # aggregated stdout is non-empty exactly when we opened traversal that
-        # was missing (Fixed) and empty when every ancestor was already a+x
-        # (OK). The path rides as a positional arg ($1) so shlex.quote handles
-        # spaces / metacharacters cleanly rather than interpolating a raw path
-        # into the sh -c script.
+        # the workspace, never the workspace dir itself: the workspace's own
+        # mode is step 3's business (canonical 2770, which deliberately
+        # carries no world bits), and an `a+x` on it would flip 2770 to 2771
+        # and fight step 3, so a pristine workspace would report Fixed on
+        # every run and never reach "No issues found". Each ancestor's chmod
+        # carries -c, so the loop's output is non-empty exactly when we opened
+        # traversal that was missing (Fixed) and empty when every ancestor was
+        # already a+x (OK).
         try:
-            walk = 'p=$(dirname "$1"); while [ "$p" != "/" ]; do chmod -c a+x "$p"; p=$(dirname "$p"); done'
-            traversal_cmd = f"sh -c {shlex.quote(walk)} _ {quoted_ws}"
-            traversal = target.run(traversal_cmd, sudo=True)
-            if traversal.stdout.strip():
+            traversal = admin.run(open_parent_traversal(ws_path), check=True)
+            if _text(traversal).strip():
                 output.detail("Fixed: parent traversal")
                 fixes += 1
             else:
                 output.detail("OK: parent traversal")
-        except SSHError as e:
-            output.warn(f"parent traversal fix failed: {e}")
+        except REQUEST_FAILURES as e:
+            output.warn(f"parent traversal fix failed: {describe_failure(e, log.sanitize)}")
 
         # 5b. Converge the checkout's git identity. Repo-local config is
         # actor-agnostic and idempotent, so identity joins the repair
@@ -261,7 +289,7 @@ def repair_workspace(
         # after create lands here (detection-based, so an unchanged value
         # reports OK). Only meaningful when the workspace is a git repo; a
         # declared identity on a repo-less workspace is a no-op.
-        fixes += _repair_git_identity(db, target, registry, ws)
+        fixes += _repair_git_identity(db, admin, registry, ws, log)
 
         # 6. Reconcile agent group membership
         # Get agents that SHOULD be in the group (have any grant)
@@ -274,31 +302,32 @@ def repair_workspace(
         # Get agents that ARE in the group. The agt- prefix check covers both
         # current agents and legacy ones (whose names start with agt--).
         try:
-            group_info = target.run(f"getent group {ws_group}", sudo=True, check=False)
+            group_info = admin.run(Command(("getent", "group", ws_group), elevated=True))
+            group_line = _text(group_info)
             current_members: set[str] = set()
-            if group_info.ok and ":" in group_info.stdout:
-                members_str = group_info.stdout.strip().split(":")[-1]
+            if group_info.require_completed(vm.name) == 0 and ":" in group_line:
+                members_str = group_line.strip().split(":")[-1]
                 if members_str:
                     current_members = {m for m in members_str.split(",") if m.startswith(AGENT_PREFIX)}
 
             # Add missing agents
             to_add = granted_agents - current_members
             for user in sorted(to_add):
-                target.run(f"usermod -aG {ws_group} {user}", sudo=True)
+                admin.run(Command(("usermod", "-aG", ws_group, user), elevated=True), check=True)
                 output.detail(f"Fixed: added {user} to {ws_group}")
                 fixes += 1
 
             # Remove agents that shouldn't be there
             to_remove = current_members - granted_agents
             for user in sorted(to_remove):
-                target.run(f"gpasswd -d {user} {ws_group}", sudo=True, check=False)
+                status(admin, Command(("gpasswd", "-d", user, ws_group), elevated=True))
                 output.detail(f"Fixed: removed {user} from {ws_group}")
                 fixes += 1
 
             if not to_add and not to_remove:
                 output.detail(f"OK: agent group membership ({len(current_members)} agent(s))")
-        except SSHError as e:
-            output.warn(f"agent membership check failed: {e}")
+        except REQUEST_FAILURES as e:
+            output.warn(f"agent membership check failed: {describe_failure(e, log.sanitize)}")
 
         # A step whose verification was indeterminate qualifies the closing
         # line either way: it must not read as a clean bill of health.
@@ -307,6 +336,14 @@ def repair_workspace(
             output.result(f"\nRepaired {fixes} issue(s){qualifier}")
         else:
             output.result(f"\nNo issues found{qualifier}")
+
+
+def _acl_snapshot(access: VMAccess, path: str) -> str | None:
+    """``getfacl -R -n`` of the tree at ``path``, as root, or ``None`` when it did not complete with status 0."""
+    result = access.run(
+        Command(("getfacl", "-R", "-n", path), elevated=True, deadline=ACL_DEADLINE), stdout=TREE_OUTPUT
+    )
+    return _text(result) if result.completion == Completed(0) else None
 
 
 def _parse_getfacl(text: str) -> dict[str, frozenset[str]]:
@@ -353,9 +390,10 @@ def _acls_changed(before: str, after: str) -> bool:
 
 def _repair_git_identity(
     db: Database,
-    target: Transport,
+    admin: VMAccess,
     registry: Registry,
     ws: WorkspaceRow,
+    log: InitLog,
 ) -> int:
     """Converge the checkout's repo-local git identity to its template.
 
@@ -375,7 +413,6 @@ def _repair_git_identity(
     Returns the number of identity fields it actually changed.
     """
     from agentworks.errors import ConfigError, NotFoundError
-    from agentworks.ssh import SSHError
     from agentworks.workspaces.templates import resolve_live_template
 
     try:
@@ -399,36 +436,38 @@ def _repair_git_identity(
     if not declared:
         return 0
 
-    quoted_path = shlex.quote(ws.workspace_path)
+    def git(*args: str) -> Command:
+        return Command(("git", "-C", ws.workspace_path, *args))
+
     try:
-        is_repo = target.run(f"git -C {quoted_path} rev-parse --git-dir", check=False)
-        if not is_repo.ok:
+        is_repo = admin.run(git("rev-parse", "--git-dir"))
+        if is_repo.require_completed(admin.vm_name) != 0:
             # "not a git repository" is the expected, quiet no-op (a
             # workspace created without a repo). Any other probe failure
             # (git missing, a broken checkout, permissions) is a real
             # problem the operator should see, not a silent OK.
-            stderr = (is_repo.stderr or "").strip()
+            stderr = is_repo.stderr.decode("utf-8", errors="replace").strip()
             if "not a git repository" in stderr.lower():
                 output.detail("OK: git identity (workspace has no repo)")
             else:
                 output.warn(
                     f"git identity skipped: could not probe {ws.workspace_path} "
-                    f"as a git repo ({stderr or 'unknown error'})"
+                    f"as a git repo ({log.sanitize(stderr) or 'unknown error'})"
                 )
             return 0
 
         fixed = 0
         for key, value in declared:
-            current = target.run(f"git -C {quoted_path} config --local --get {key}", check=False)
-            if current.ok and current.stdout.strip() == value:
+            current = admin.run(git("config", "--local", "--get", key))
+            if current.require_completed(admin.vm_name) == 0 and _text(current).strip() == value:
                 output.detail(f"OK: git {key}")
                 continue
-            target.run(f"git -C {quoted_path} config --local {key} {shlex.quote(value)}")
+            admin.run(git("config", "--local", key, value), check=True)
             output.detail(f"Fixed: git {key}")
             fixed += 1
         return fixed
-    except SSHError as e:
-        output.warn(f"git identity check failed: {e}")
+    except REQUEST_FAILURES as e:
+        output.warn(f"git identity check failed: {describe_failure(e, log.sanitize)}")
         return 0
 
 

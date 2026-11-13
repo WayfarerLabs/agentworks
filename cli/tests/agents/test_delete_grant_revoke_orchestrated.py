@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import contextlib
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -32,13 +32,16 @@ from agentworks.errors import (
     ValidationError,
 )
 from agentworks.execution import trust
-from agentworks.execution.errors import TrustMissing
+from agentworks.execution.errors import CommandFailed, TrustMissing
+from agentworks.execution.requests import Command
+from agentworks.execution.results import Completed, Result
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.tmux import FingerprintProbe, ProbeStatus, TmuxServerFingerprint
 from agentworks.vms import manager as vm_manager
 from agentworks.vms.manager.boundary import require_vm_ssh_boundary
 from tests.conftest import seed_vm_trust, stub_vm_ssh_identity
+from tests.vm_access_support import install_access_recorder, route_vm_access_to_target
 
 # Captured at import, before the autouse fixture stubs the SSH precondition.
 _REAL_SSH_BOUNDARY = require_vm_ssh_boundary
@@ -142,17 +145,15 @@ class _FakeAdminTarget:
 
 @pytest.fixture
 def target(monkeypatch: pytest.MonkeyPatch) -> _FakeAdminTarget:
-    """One recording admin target behind every module that captured the
-    eager ``transport`` import (manager's session kill, grants' group
-    ops, initializer's user delete)."""
+    """One recording admin target behind manager's eager ``transport``
+    import (its session kill) and the admin's access (grants' group ops,
+    initializer's user delete)."""
     fake = _FakeAdminTarget()
     factory = lambda vm, config, **kwargs: fake  # noqa: E731
-    for mod in (
-        "agentworks.agents.manager.transport",
-        "agentworks.agents.grants.transport",
-        "agentworks.agents.initializer.transport",
-    ):
-        monkeypatch.setattr(mod, factory)
+    monkeypatch.setattr("agentworks.agents.manager.transport", factory)
+    # Grants' group operations and the user delete run on the admin's access,
+    # whose commands reach the same double as their command lines.
+    route_vm_access_to_target(monkeypatch, fake)
     return fake
 
 
@@ -541,7 +542,7 @@ def test_delete_choreography_end_to_end_standalone(
     assert any("gpasswd -d agt-a1 ws-ws1" in c for c in target.commands)
     assert any("pkill -u agt-a1" in c for c in target.commands)
     assert any("userdel -r agt-a1" in c for c in target.commands)
-    assert any("rm -rf /run/agentworks/agent-tmux-sockets/agt-a1" in c for c in target.commands)
+    assert any("rm -rf -- /run/agentworks/agent-tmux-sockets/agt-a1" in c for c in target.commands)
     assert db.get_session("s1") is None
     assert db.get_agent("a1") is None
     assert len(synced) == 1
@@ -550,72 +551,48 @@ def test_delete_choreography_end_to_end_standalone(
     assert "Deleted 1 session(s)" in captured_output.detail
 
 
-class _KwargRecordingTarget:
-    """Admin transport double that records each command with its kwargs
-    (so a test can assert ``sudo`` / ``check``), and faithfully raises
-    ``SSHError`` on a failing command only when ``check`` is truthy,
-    mirroring the real transport's default-checked contract."""
-
-    def __init__(self, *, fail_substr: str | None = None) -> None:
-        self.calls: list[tuple[str, dict[str, object]]] = []
-        self._fail_substr = fail_substr
-
-    def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
-        self.calls.append((cmd, kwargs))
-        if self._fail_substr is not None and self._fail_substr in cmd:
-            if kwargs.get("check", True):
-                from agentworks.ssh import SSHError
-
-                raise SSHError(f"boom: {cmd}")
-            return SimpleNamespace(ok=False, returncode=1, stdout="", stderr="")
-        return SimpleNamespace(ok=True, returncode=0, stdout="", stderr="")
+SOCKET_DIR_REMOVAL = Command(("rm", "-rf", "--", "/run/agentworks/agent-tmux-sockets/agt-a1"), elevated=True)
+USERDEL = Command(("userdel", "-r", "agt-a1"), elevated=True)
 
 
-def test_delete_removes_per_agent_socket_dir_best_effort(
+def _delete_on_recorder(
     db: Database,
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """``delete_agent_on_vm`` removes the per-agent tmux socket directory
-    (the same path create derives via ``ensure_agent_socket_dir``), with
-    sudo, best-effort (``check=False``), before the ``userdel``. Even when
-    the removal fails it does not abort the delete."""
-    import shlex
-
+    failing: Command,
+    outcome: Result | BaseException,
+) -> list[Any]:
     from agentworks.agents import initializer as agent_initializer
-    from agentworks.sessions.tmux import agent_socket_dir
     from agentworks.ssh import SSHLogger
 
     config = make_config()
     _seed(db)
     vm = db.get_vm("box")
     assert vm is not None
+    recorder = install_access_recorder(monkeypatch)
+    recorder.access().respond(failing, outcome)
 
-    # The removal "fails" on the VM; check=False must keep it from aborting.
-    fake = _KwargRecordingTarget(fail_substr="rm -rf")
-    monkeypatch.setattr(agent_initializer, "transport", lambda *a, **k: fake)
+    agent_initializer.delete_agent_on_vm(vm, config, "agt-a1", logger=SSHLogger("box", "test-delete-socket-dir"))
 
-    agent_initializer.delete_agent_on_vm(
-        vm,
-        config,
-        "agt-a1",
-        logger=SSHLogger("box", "test-delete-socket-dir"),
-    )
+    requests = recorder.requests("run")
+    assert all(request.elevated for request in requests)
+    return requests
 
-    expected_path = shlex.quote(agent_socket_dir("agt-a1"))
-    assert expected_path == "/run/agentworks/agent-tmux-sockets/agt-a1"
 
-    userdel_idx = next(i for i, (cmd, _k) in enumerate(fake.calls) if cmd.startswith("userdel -r agt-a1"))
-    rm_matches = [(i, kwargs) for i, (cmd, kwargs) in enumerate(fake.calls) if cmd == f"rm -rf {expected_path}"]
-    assert len(rm_matches) == 1, fake.calls
-    rm_idx, rm_kwargs = rm_matches[0]
+def test_delete_removes_per_agent_socket_dir_best_effort(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """``delete_agent_on_vm`` removes the per-agent tmux socket directory
+    (the same path create derives via ``ensure_agent_socket_dir``), as root,
+    best-effort (its status is not read), before the ``userdel``. Even when
+    the removal fails it does not abort the delete."""
+    requests = _delete_on_recorder(db, make_config, monkeypatch, SOCKET_DIR_REMOVAL, Result(Completed(1)))
 
-    # Before the userdel: the pkill already freed the sockets, and running
-    # the rm first means a failing userdel cannot skip it (see the dedicated
-    # regression test below).
-    assert rm_idx < userdel_idx
-    assert rm_kwargs.get("sudo") is True
-    assert rm_kwargs.get("check") is False  # best-effort: a failing rm does not abort
+    assert requests == [Command(("pkill", "-u", "agt-a1"), elevated=True), SOCKET_DIR_REMOVAL, USERDEL]
+    assert captured_output.warnings == []
 
 
 def test_delete_socket_dir_runs_even_when_userdel_fails(
@@ -626,37 +603,13 @@ def test_delete_socket_dir_runs_even_when_userdel_fails(
 ) -> None:
     """Regression (#296): a failing ``userdel`` must not skip the socket-dir
     removal. ``userdel`` runs checked, so on failure it raises; because the
-    ``rm`` now runs BEFORE it, the socket dir is already cleaned and does not
+    ``rm`` runs BEFORE it, the socket dir is already cleaned and does not
     re-orphan under the freed uid. The delete still warns rather than aborts."""
-    import shlex
+    failed = CommandFailed("box", 12, Result(Completed(12)), streams_logged=True)
 
-    from agentworks.agents import initializer as agent_initializer
-    from agentworks.sessions.tmux import agent_socket_dir
-    from agentworks.ssh import SSHLogger
+    requests = _delete_on_recorder(db, make_config, monkeypatch, USERDEL, failed)
 
-    config = make_config()
-    _seed(db)
-    vm = db.get_vm("box")
-    assert vm is not None
-
-    # userdel "fails" on the VM (checked -> raises); the rm must have already run.
-    fake = _KwargRecordingTarget(fail_substr="userdel")
-    monkeypatch.setattr(agent_initializer, "transport", lambda *a, **k: fake)
-
-    agent_initializer.delete_agent_on_vm(
-        vm,
-        config,
-        "agt-a1",
-        logger=SSHLogger("box", "test-delete-socket-userdel-fail"),
-    )
-
-    expected_path = shlex.quote(agent_socket_dir("agt-a1"))
-    commands = [cmd for cmd, _k in fake.calls]
-    assert f"rm -rf {expected_path}" in commands  # socket dir cleaned despite the userdel failure
-    assert any(c.startswith("userdel -r agt-a1") for c in commands)
-    rm_idx = commands.index(f"rm -rf {expected_path}")
-    userdel_idx = next(i for i, c in enumerate(commands) if c.startswith("userdel -r agt-a1"))
-    assert rm_idx < userdel_idx
+    assert requests.index(SOCKET_DIR_REMOVAL) < requests.index(USERDEL)
     assert captured_output.warnings
 
 

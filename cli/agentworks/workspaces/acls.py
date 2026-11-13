@@ -10,14 +10,36 @@ no-op (``OK: ACLs`` / ``No issues found``) rather than reporting a spurious fix.
 
 from __future__ import annotations
 
-import shlex
 from typing import TYPE_CHECKING
 
+from agentworks.execution.requests import Command
+
 if TYPE_CHECKING:
-    from agentworks.transports import Transport
+    from agentworks.execution.files import Files
+
+ACL_DEADLINE = 120
+"""Seconds one recursive ACL pass over a workspace tree may take."""
 
 
-def apply_workspace_acls(target: Transport, path: str) -> None:
+def workspace_acl_commands(path: str) -> tuple[Command, ...]:
+    """The three recursive ``setfacl`` passes over ``path``, as root, each a literal argv with no shell.
+
+    VM initialization repairs the parent recursively while clones may still
+    be running, so every pass prunes private clone attempts and never shares
+    one or any of its descendants.
+    """
+    prune = ("find", path, "-type", "d", "-name", "*.agentworks-clone-*", "-prune", "-o")
+    directory_or_executable = ("(", "-type", "d", "-o", "(", "-type", "f", "-perm", "/111", ")", ")")
+    group_rwx, deny_other = ("-m", "g::rwx"), ("-m", "o::---", "{}", "+")
+    passes = (
+        ("-type", "d", "-exec", "setfacl", "-d", *group_rwx, "-m", "m::rwx", *deny_other),
+        (*directory_or_executable, "-exec", "setfacl", *group_rwx, "-m", "m::rwx", *deny_other),
+        ("-type", "f", "!", "-perm", "/111", "-exec", "setfacl", *group_rwx, "-m", "m::rw", *deny_other),
+    )
+    return tuple(Command((*prune, *rest), elevated=True, deadline=ACL_DEADLINE) for rest in passes)
+
+
+def apply_workspace_acls(files: Files, path: str) -> None:
     """Share the tree with its owning group without inventing executable files.
 
     Directory defaults grant group rwx, with no other access. Regular files
@@ -28,24 +50,8 @@ def apply_workspace_acls(target: Transport, path: str) -> None:
     unchanged. Inspect effective mode bits before modifying the ACL; setfacl's
     conditional X also sees masked inherited execute entries and would turn
     non-executable files into executable ones.
+
+    Runs as root on ``files.access``; any pass that does not exit 0 raises.
     """
-    # VM initialization repairs the parent recursively while clones may still
-    # be running. Never share a private attempt or any of its descendants.
-    quoted = shlex.quote(path)
-    find = f"find {quoted} -type d -name '*.agentworks-clone-*' -prune -o"
-    target.run(
-        f"{find} -type d -exec setfacl -d -m g::rwx -m m::rwx -m o::--- {{}} +",
-        sudo=True,
-        timeout=120,
-    )
-    target.run(
-        rf"{find} \( -type d -o \( -type f -perm /111 \) \) "
-        "-exec setfacl -m g::rwx -m m::rwx -m o::--- {} +",
-        sudo=True,
-        timeout=120,
-    )
-    target.run(
-        f"{find} -type f ! -perm /111 -exec setfacl -m g::rwx -m m::rw -m o::--- {{}} +",
-        sudo=True,
-        timeout=120,
-    )
+    for command in workspace_acl_commands(path):
+        files.access.run(command, check=True)

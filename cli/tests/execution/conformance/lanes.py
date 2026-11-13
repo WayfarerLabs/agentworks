@@ -35,14 +35,15 @@ import pytest
 from agentworks.execution import attach as attach_module
 from agentworks.execution import client, envelope, ssh_process, trust
 from agentworks.execution.access import Admin, VMAccess
-from agentworks.execution.client import SSHClient
 from agentworks.execution.requests import Command, RunRequest, Script, Shell
 from agentworks.execution.results import Completed, Result
+from tests.vm_access_support import local_remote_argv, rewrite_launcher, run_requests_locally
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Mapping, Sequence
     from typing import NoReturn
 
+    from agentworks.config import Config
     from agentworks.db import VMRow
 
 SHELLS = ("sh", "dash", "bash", "zsh")
@@ -156,13 +157,14 @@ class Lane:
 
     def rewrite_launcher(self, old: bytes, new: bytes) -> None:
         """Send a launcher whose source has ``old`` replaced by ``new``, to make the guest behave as a fault would."""
-        source = envelope.launcher_source()
-        rewritten = source.replace(old, new)
-        assert rewritten != source
-        self.monkeypatch.setattr(envelope, "launcher_source", lambda: rewritten)
+        rewrite_launcher(self.monkeypatch, old, new)
 
     def access_with_identity(self, identity_file: Path) -> VMAccess:
         """The lane's access to the same account with another key, for a vector about the key itself."""
+        raise NotImplementedError
+
+    def access_with_log(self, log: Callable[[RunRequest, Result], None] | None) -> VMAccess:
+        """The lane's access to the same account, with an operation log, for a vector about what a log holds."""
         raise NotImplementedError
 
     def shorten_handover_wait(self, seconds: int = 1) -> None:
@@ -232,6 +234,12 @@ def sudo_granted() -> bool:
     return subprocess.run([sudo, "-n", "true"], capture_output=True, check=False).returncode == 0
 
 
+def needs_sudo(lane: Lane) -> None:
+    """A local guest elevates only where the runner grants passwordless sudo: CI does, so it fails there without it."""
+    if isinstance(lane, LocalFilesystem) and not sudo_granted():
+        unavailable("the elevation vectors need passwordless sudo")
+
+
 def require_shell(name: str) -> str:
     """The shell's path; a missing one fails on CI and skips elsewhere."""
     found = find_shell(name)
@@ -274,47 +282,38 @@ class LocalLane(LocalFilesystem):
         self.home = tmp_path / "account-home"
         self.home.mkdir()
         self.workdir = str(tmp_path)
-        self.access = VMAccess(
+        self.access = self.access_with_log(None)
+        run_requests_locally(monkeypatch, self._remote_argv)
+        if python != ssh_process.DEFAULT_PYTHON:
+            # The guest's python3 is this interpreter for the payload's Python programs too.
+            self.rewrite_launcher(
+                b'program_interpreter = "/usr/bin/python3"', b"program_interpreter = " + repr(python).encode()
+            )
+
+    def use_lane_shell_as_account_shell(self) -> None:
+        """Send a launcher whose passwd entry names this lane's shell, as the account's default shell.
+
+        The runner's own account shell is whatever it is; a vector about the
+        default shell's startup needs the one the lane is parametrized by.
+        """
+        self.rewrite_launcher(b'shell = entry.pw_shell or "/bin/sh"', b"shell = " + repr(self.shell).encode())
+
+    def access_with_log(self, log: Callable[[RunRequest, Result], None] | None) -> VMAccess:
+        return VMAccess(
             vm_name="local",
             host="127.0.0.1",
             user=getpass.getuser(),
             identity=Admin(),
             identity_file=Path("/nonexistent/identity"),
+            log=log,
         )
-        monkeypatch.setattr(client, "resolve_ssh", lambda: SSHClient("/nonexistent/ssh", (9, 9)))
-        monkeypatch.setattr(ssh_process, "build_argv", self._argv)
 
     def startup(self, name: str, content: str) -> None:
         """Write an account startup file (``.zshenv``, ``.bashrc``) read by the account shell."""
         (self.home / name).write_text(content)
 
-    def _argv(
-        self,
-        client: SSHClient,
-        policy: object,
-        destination: object,
-        mode: object,
-        remote_command: str | None = None,
-        forwards: object = (),
-        *,
-        client_log: Path | None = None,
-        verbose: bool = False,
-    ) -> list[str]:
-        assert remote_command is not None
-        user = getpass.getuser()
-        environment = [
-            f"HOME={self.home}",
-            "PATH=/usr/bin:/bin",
-            f"USER={user}",
-            f"LOGNAME={user}",
-            f"SHELL={self.shell}",
-            "LANG=C.UTF-8",
-            # sshd exports these, and Debian's bash reads ~/.bashrc when it sees them.
-            "SSH_CLIENT=203.0.113.5 52000 22",
-            "SSH_CONNECTION=203.0.113.5 52000 10.0.0.2 22",
-        ]
-        command = remote_command.replace(ssh_process.DEFAULT_PYTHON, self.python, 1)
-        return ["/usr/bin/env", "-i", *environment, self.shell, "-c", command]
+    def _remote_argv(self, remote_command: str) -> list[str]:
+        return local_remote_argv(remote_command, home=self.home, shell=self.shell, python=self.python)
 
 
 # -- S ----------------------------------------------------------------------------------
@@ -421,16 +420,11 @@ class SSHDLane(LocalFilesystem):
         self.scratch = tmp_path
         self.workdir = str(tmp_path)
         trust.write_records(vm_name, [server.host_key])
-        self.access = VMAccess(
-            vm_name=vm_name,
-            host="127.0.0.1",
-            user=getpass.getuser(),
-            identity=Admin(),
-            identity_file=server.client_key,
-            port=server.port,
-        )
+        self.access = self.access_with_identity(server.client_key)
 
-    def access_with_identity(self, identity_file: Path) -> VMAccess:
+    def access_with_identity(
+        self, identity_file: Path, log: Callable[[RunRequest, Result], None] | None = None
+    ) -> VMAccess:
         return VMAccess(
             vm_name=self.vm_name,
             host="127.0.0.1",
@@ -438,7 +432,11 @@ class SSHDLane(LocalFilesystem):
             identity=Admin(),
             identity_file=identity_file,
             port=self.server.port,
+            log=log,
         )
+
+    def access_with_log(self, log: Callable[[RunRequest, Result], None] | None) -> VMAccess:
+        return self.access_with_identity(self.server.client_key, log)
 
 
 # -- V ----------------------------------------------------------------------------------
@@ -450,11 +448,17 @@ class LiveLane(Lane):
     name = "V"
     workdir = "/tmp"
 
-    def __init__(self, monkeypatch: pytest.MonkeyPatch, vm: VMRow, access: VMAccess) -> None:
+    def __init__(self, monkeypatch: pytest.MonkeyPatch, vm: VMRow, config: Config) -> None:
         super().__init__(monkeypatch)
         self.vm = vm
-        self.access = access
+        self.config = config
+        self.access = self.access_with_log(None)
         self._created: list[str] = []
+
+    def access_with_log(self, log: Callable[[RunRequest, Result], None] | None) -> VMAccess:
+        from agentworks.execution import vm_access
+
+        return vm_access(self.vm, self.config, Admin(), log=log)
 
     def access_with_identity(self, identity_file: Path) -> VMAccess:
         return VMAccess(

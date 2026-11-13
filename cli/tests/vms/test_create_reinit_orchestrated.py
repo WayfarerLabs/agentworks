@@ -947,7 +947,6 @@ def test_create_phase_a_sync_failure_is_non_fatal(
     reinit-able), Phase B still runs, and create completes with a warning
     rather than raising. Only the bootstrap/verify is fatal to provisioning."""
     import agentworks.ssh_config as ssh_config_mod
-    import agentworks.vms.initializer.driver as driver
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
     from agentworks.db import ProvisioningStatus
 
@@ -962,9 +961,7 @@ def test_create_phase_a_sync_failure_is_non_fatal(
     monkeypatch.setattr(LimaPlatform, "create", _fake_create)
     monkeypatch.setattr(LimaPlatform, "vm_active", _noop_hold)
 
-    # Phase A runs for real over the recording access (the module's contract fixture);
-    # Phase B's legacy target is only built, since the initializer is faked.
-    monkeypatch.setattr(driver, "SSHTransport", lambda **kwargs: SimpleNamespace(**kwargs))
+    # Phase A runs for real over the recording access (the module's contract fixture).
 
     # The SSH-config sync fails (e.g. read-only home) at the end of Phase A
     # (and again on the post-init re-sync); both sites handle it non-fatally.
@@ -995,7 +992,6 @@ def test_create_provisioning_section_has_explicit_closing_body_line(
     captured_output,
 ) -> None:
     """Provisioning closes explicitly after Phase A and before Phase B."""
-    import agentworks.vms.initializer.driver as driver
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
 
     # Contain the real SSH-config write inside the test's tmp dir.
@@ -1010,9 +1006,7 @@ def test_create_provisioning_section_has_explicit_closing_body_line(
     monkeypatch.setattr(LimaPlatform, "create", _fake_create)
     monkeypatch.setattr(LimaPlatform, "vm_active", _noop_hold)
 
-    # Phase A runs for real over the recording access (the module's contract fixture);
-    # Phase B's legacy target is only built, since the initializer is faked.
-    monkeypatch.setattr(driver, "SSHTransport", lambda **kwargs: SimpleNamespace(**kwargs))
+    # Phase A runs for real over the recording access (the module's contract fixture).
     monkeypatch.setattr(vm_manager, "run_initialization", lambda *a, **k: None)
 
     vm_manager.create_vm(db, config, name="pvm", interaction=TtyInteractionPolicy.REFUSE)

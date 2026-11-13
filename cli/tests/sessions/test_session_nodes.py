@@ -19,6 +19,7 @@ from agentworks.sessions.nodes import pending_session_node
 from agentworks.sessions.templates import ResolvedSessionTemplate
 from agentworks.vms.nodes import LiveVMNode, VMSiteNode
 from tests.conftest import ManifestDoc, write_manifests
+from tests.vm_access_support import RecordingVMAccess, command_check_access
 
 if TYPE_CHECKING:
     from agentworks.capabilities.vm_platform import VMPlatform
@@ -37,19 +38,6 @@ def _stub_config() -> Config:
     attribute the graph reads at construction time (the pending workspace
     node derives its eventual VM-side path from it)."""
     return cast("Config", SimpleNamespace(paths=SimpleNamespace(vm_workspaces="/srv")))
-
-
-class _Probe:
-    """Recording transport double for the required-commands probe."""
-
-    def __init__(self, missing: set[str] | None = None) -> None:
-        self._missing = missing or set()
-        self.commands: list[str] = []
-
-    def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
-        self.commands.append(cmd)
-        ok = not any(f"command -v {m} " in cmd for m in self._missing)
-        return SimpleNamespace(ok=ok, returncode=0 if ok else 20)
 
 
 def _vm_node(db: Database, name: str = "box") -> LiveVMNode:
@@ -98,8 +86,8 @@ def _session(
 def _ctx(
     level: ScopeLevel = ScopeLevel.SESSION,
     *,
-    agent_target: object | None = None,
-    admin_target: object | None = None,
+    agent_access: RecordingVMAccess | None = None,
+    admin_access: RecordingVMAccess | None = None,
     agent: str | None = "dev",
     admin: bool = False,
 ) -> RunContext:
@@ -116,8 +104,8 @@ def _ctx(
         scope = OperationScope(level=level)
     return RunContext(
         operation_scope=scope,
-        agent_target=agent_target,  # type: ignore[arg-type]
-        admin_target=admin_target,  # type: ignore[arg-type]
+        agent_access=agent_access,
+        admin_access=admin_access,
     )
 
 
@@ -150,14 +138,14 @@ def test_pending_target_defers_then_probes_after_the_flip(db: Database) -> None:
     vm = _vm_node(db)
     agent = _pending_agent(db, vm)
     session = _session(db, agent=agent, vm=vm)
-    probe = _Probe()
+    probe = command_check_access()
 
-    session.preflight(_ctx(agent_target=probe))
-    assert probe.commands == []  # pending target: deferred
+    session.preflight(_ctx(agent_access=probe))
+    assert probe.requests() == []  # pending target: deferred
 
     agent.mark_realized()  # the orchestrator's flip, same object
-    session.runup(_ctx(agent_target=probe))
-    assert len(probe.commands) == 1  # probed exactly once, post-flip
+    session.runup(_ctx(agent_access=probe))
+    assert len(probe.requests()) == 1  # probed exactly once, post-flip
 
 
 def test_realized_target_probes_at_preflight(db: Database) -> None:
@@ -167,12 +155,12 @@ def test_realized_target_probes_at_preflight(db: Database) -> None:
     agent = _pending_agent(db, vm)
     agent.mark_realized()
     session = _session(db, agent=agent, vm=vm)
-    probe = _Probe()
+    probe = command_check_access()
 
-    session.preflight(_ctx(agent_target=probe))
-    assert len(probe.commands) == 1
-    session.runup(_ctx(agent_target=probe))
-    assert len(probe.commands) == 1  # fired once
+    session.preflight(_ctx(agent_access=probe))
+    assert len(probe.requests()) == 1
+    session.runup(_ctx(agent_access=probe))
+    assert len(probe.requests()) == 1  # fired once
 
 
 def test_missing_command_is_a_typed_error(db: Database) -> None:
@@ -180,28 +168,28 @@ def test_missing_command_is_a_typed_error(db: Database) -> None:
     agent = _pending_agent(db, vm)
     agent.mark_realized()
     session = _session(db, required=("claude", "rg"), agent=agent, vm=vm)
-    probe = _Probe(missing={"rg"})
+    probe = command_check_access(missing={"rg"})
 
     with pytest.raises(StateError, match="requires 'rg'") as exc:
-        session.preflight(_ctx(agent_target=probe))
+        session.preflight(_ctx(agent_access=probe))
     assert "agent 'dev'" in str(exc.value)
     assert "--template" in (exc.value.hint or "")
 
 
-def test_admin_mode_probes_the_admin_target(db: Database) -> None:
+def test_admin_mode_probes_through_the_admin_access(db: Database) -> None:
     session = _session(db, agent=None, admin=True)
-    probe = _Probe()
-    session.preflight(_ctx(agent=None, admin=True, admin_target=probe))
-    assert len(probe.commands) == 1
+    probe = command_check_access()
+    session.preflight(_ctx(agent=None, admin=True, admin_access=probe))
+    assert len(probe.requests()) == 1
 
 
 def test_admin_mode_error_names_the_vm(db: Database) -> None:
     """Label parity with the imperative call sites: admin sessions
     name the VM, not the agent."""
     session = _session(db, agent=None, admin=True)
-    probe = _Probe(missing={"claude"})
+    probe = command_check_access(missing={"claude"})
     with pytest.raises(StateError, match="requires 'claude'") as exc:
-        session.preflight(_ctx(agent=None, admin=True, admin_target=probe))
+        session.preflight(_ctx(agent=None, admin=True, admin_access=probe))
     assert "for VM 'box'." in str(exc.value)
 
 
@@ -334,7 +322,7 @@ class _SecretHarnessIntegration(HarnessIntegration):
     ):
         return HarnessStart("")
 
-    def _probe_target(self, transport):  # type: ignore[no-untyped-def]
+    def _probe_target(self, access):  # type: ignore[no-untyped-def]
         return None
 
 
@@ -764,9 +752,9 @@ def test_live_session_probes_its_realized_agent_at_preflight(
         workspace=_live_workspace(db, vm),
         vm=vm,
     )
-    probe = _Probe()
-    session.preflight(_ctx(agent_target=probe))
-    assert len(probe.commands) == 1  # realized target: the early probe
+    probe = command_check_access()
+    session.preflight(_ctx(agent_access=probe))
+    assert len(probe.requests()) == 1  # realized target: the early probe
 
 
 def test_live_session_admin_mode_comes_from_the_row(db: Database) -> None:
@@ -780,9 +768,9 @@ def test_live_session_admin_mode_comes_from_the_row(db: Database) -> None:
         workspace=_live_workspace(db, vm),
         vm=vm,
     )
-    probe = _Probe(missing={"claude"})
+    probe = command_check_access(missing={"claude"})
     with pytest.raises(StateError, match="for VM 'box'"):
-        session.preflight(_ctx(agent=None, admin=True, admin_target=probe))
+        session.preflight(_ctx(agent=None, admin=True, admin_access=probe))
 
 
 def test_live_session_agent_row_with_no_agent_node_is_loud(
@@ -901,7 +889,7 @@ def _toy_harness_integration(harness_integration_name: str) -> type:
             self._state["session_id"] = f"{harness_integration_name}-id"
             return HarnessStart("")
 
-        def _probe_target(self, transport: object) -> None:
+        def _probe_target(self, access: object) -> None:
             return None
 
     return _ToyIntegration

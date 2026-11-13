@@ -21,8 +21,8 @@ from agentworks.artifacts.native.mcp import (
 )
 from agentworks.capabilities.harness_integration.settings import SettingsObject
 from agentworks.errors import ExternalError
+from agentworks.execution.files import Files
 from agentworks.harness_setup.model import NativeClaim
-from agentworks.native_files import NativeFiles
 from tests.artifacts._fixtures import received
 from tests.artifacts.test_native_mcp import read, server, table, write
 from tests.native_setup_fixtures import LocalFixtureTransport, invocation, record
@@ -58,7 +58,7 @@ def test_literal_native_entry_is_adopted_without_publication_and_retry_is_unchan
     write(path, {key: {item.content.name: render_mcp(item, tool)}, "foreign": True}, tool)
     before = path.read_bytes()
     publish = Mock(side_effect=AssertionError("identical adoption must not publish"))
-    monkeypatch.setattr(NativeFiles, "publish", publish)
+    monkeypatch.setattr(Files, "write_if", publish)
     checkpoints: list[tuple[NativeClaim, ...]] = []
     events: list[str] = []
 
@@ -141,13 +141,13 @@ def test_recorded_legacy_name_migrates_atomically_without_prefix_authority(
         report_incomplete=reports.append,
     )
     published: list[bytes] = []
-    native_publish = NativeFiles.publish
+    native_write = Files.write_if
 
     def publish(files, destination, content, **kwargs):
         published.append(content)
-        native_publish(files, destination, content, **kwargs)
+        native_write(files, destination, content, **kwargs)
 
-    monkeypatch.setattr(NativeFiles, "publish", publish)
+    monkeypatch.setattr(Files, "write_if", publish)
     result = apply_mcp(tool, call, destination=str(path))
     assert not result.deferred
     final_entries = table(read(path, tool), key)
@@ -175,9 +175,7 @@ def test_equal_inputs_share_one_claim_and_withdrawing_one_keeps_the_entry(transp
     assert len(checkpoints[-1]) == 1
     assert set(table(read(path, tool), key)) == {first.content.name}
     before = path.read_bytes()
-    monkeypatch.setattr(
-        NativeFiles, "publish", Mock(side_effect=AssertionError("remaining equal input must keep entry"))
-    )
+    monkeypatch.setattr(Files, "write_if", Mock(side_effect=AssertionError("remaining equal input must keep entry")))
     assert not apply_mcp(
         tool,
         replace(call, prior=record(checkpoints[-1], "codex"), artifacts=received(second)),
@@ -365,7 +363,8 @@ def test_equal_input_deferrals_keep_every_original_identity(transport, monkeypat
             def mapping(content):
                 return content, foreign
     elif failure in ("read", "publish"):
-        monkeypatch.setattr(NativeFiles, failure, Mock(side_effect=ExternalError("private-native-value")))
+        operation = "read" if failure == "read" else "update"
+        monkeypatch.setattr(Files, operation, Mock(side_effect=ExternalError("private-native-value")))
     elif failure == "malformed":
         path.parent.mkdir()
         path.write_text("malformed = [\n")
@@ -397,7 +396,7 @@ def test_session_native_table_checks_use_the_declared_key_for_every_input(transp
     write(path, {key: {first.content.name: {"command": "operator"}}}, tool)
     conflicts = session_mcp_conflicts(
         tool,
-        transport,
+        transport.access(),
         received(first, second),
         home=str(transport.home),
         environment={},

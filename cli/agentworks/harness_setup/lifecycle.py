@@ -7,8 +7,9 @@ Install-command transports remain independent of this setup environment.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
+import agentworks.execution as execution
 from agentworks.artifacts.state import capture_owner, read_captures
 from agentworks.capabilities.harness_integration.setup import (
     SetupInvocation,
@@ -18,9 +19,9 @@ from agentworks.capabilities.harness_integration.setup import (
 )
 from agentworks.env import ResourceContext
 from agentworks.errors import StateError
+from agentworks.execution.access import Admin, Agent
 from agentworks.harness_setup.dispatch import run_setup
 from agentworks.harness_setup.inputs import SetupInputs
-from agentworks.harness_setup.runner import SetupRunner
 from agentworks.harness_setup.state import read_native_setup
 from agentworks.linux_users import managed_home
 from agentworks.package_sources import PackageCapture
@@ -35,16 +36,28 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
     from agentworks.db.instance_state import InstanceKind
+    from agentworks.execution.files import Files
+    from agentworks.execution.requests import RunRequest
+    from agentworks.execution.results import Result
     from agentworks.harness_setup.locking import NativeMutationGuard
     from agentworks.harness_setup.model import NativeSetupState, SetupComponent
     from agentworks.harness_setup.outcomes import SetupFailure
     from agentworks.resources.registry import Registry
     from agentworks.schema import CapabilityConfig
-    from agentworks.ssh import SSHLogger
-    from agentworks.transports import Transport
     from agentworks.vms.admin import AdminConfig
     from agentworks.vms.templates import ResolvedVMTemplate
     from agentworks.workspaces.templates import ResolvedTemplate
+
+
+class SetupLog(Protocol):
+    """What native setup reads of the owning operation's log (``SSHLogger`` satisfies it)."""
+
+    @property
+    def redactions(self) -> tuple[str, ...]: ...
+
+    def warning(self, msg: str) -> None: ...
+
+    def record(self, request: RunRequest, result: Result) -> None: ...
 
 
 def _needed(
@@ -192,44 +205,62 @@ def prepare_workspace_setup(
 
 def apply_vm_setup(
     db: Database,
+    files: Files,
     registry: Registry,
     *,
     inputs: tuple[SetupInputs, ...],
     vm: VMRow,
-    target: Transport,
     values: Mapping[str, str],
+    logger: SetupLog,
     held: NativeMutationGuard,
     operation: str,
     failures: list[SetupFailure],
 ) -> None:
-    """Apply VM then admin setup on the already-established admin transport."""
+    """Apply VM then admin setup as the admin, on Phase B's ``files`` and its access.
+
+    ``files`` carries Phase B's bound, so every setup request has the one
+    create and reinit give each of their own.
+    """
+    access = files.access
     for item in inputs:
         context = ResourceContext(
             vm_name=vm.name, platform=site_platform_name(vm.site, registry), site=vm.site, user=vm.admin_username
         )
         environment = item.environment(values, context)
-        runner = SetupRunner(target, environment, redactions=values.values())
         if item.component == "vm":
             invocation: SetupInvocation = VMSetupInvocation(
                 vm=vm,
-                runner=runner,
+                access=access,
+                files=files,
                 environment=environment,
                 secrets=values,
+                redactions=logger.redactions,
                 prior=None,
                 checkpoint=lambda claims: None,
             )
         else:
             invocation = UserSetupInvocation(
                 vm=vm,
-                runner=runner,
+                access=access,
+                files=files,
                 environment=environment,
                 secrets=values,
+                redactions=logger.redactions,
                 prior=None,
                 checkpoint=lambda claims: None,
                 username=vm.admin_username,
                 home=managed_home(vm.admin_username),
             )
-        run_setup(db, registry, item, invocation, operation=operation, failures=failures, held=held)
+        run_setup(
+            db,
+            registry,
+            item,
+            invocation,
+            operation=operation,
+            failures=failures,
+            held=held,
+            log_warning=logger.warning,
+        )
 
 
 def apply_agent_setup(
@@ -241,15 +272,13 @@ def apply_agent_setup(
     vm: VMRow,
     username: str,
     values: Mapping[str, str],
-    logger: SSHLogger,
+    logger: SetupLog,
     held: NativeMutationGuard,
     operation: str,
     failures: list[SetupFailure],
     buffered: bool = False,
 ) -> NativeSetupState:
     """Execute as the actual agent, after core establishes its SSH access."""
-    from agentworks.transports import transport_for_user
-
     context = ResourceContext(
         vm_name=vm.name,
         platform=site_platform_name(vm.site, registry),
@@ -258,21 +287,29 @@ def apply_agent_setup(
         agent_name=inputs.name,
     )
     environment = inputs.environment(values, context)
-    runner = SetupRunner(
-        transport_for_user(vm, config, user=username, logger=logger), environment, redactions=values.values()
-    )
+    access = execution.vm_access(vm, config, Agent(inputs.name, username), log=logger.record)
     invocation = UserSetupInvocation(
         vm=vm,
-        runner=runner,
+        access=access,
+        files=access.files(),
         environment=environment,
         secrets=values,
+        redactions=logger.redactions,
         prior=None,
         checkpoint=lambda claims: None,
         username=username,
         home=managed_home(username),
     )
     return run_setup(
-        db, registry, inputs, invocation, operation=operation, failures=failures, buffered=buffered, held=held
+        db,
+        registry,
+        inputs,
+        invocation,
+        operation=operation,
+        failures=failures,
+        buffered=buffered,
+        held=held,
+        log_warning=logger.warning,
     )
 
 
@@ -286,15 +323,13 @@ def apply_workspace_setup(
     root: str,
     linux_group: str,
     values: Mapping[str, str],
-    logger: SSHLogger,
+    logger: SetupLog,
     held: NativeMutationGuard,
     operation: str,
     failures: list[SetupFailure],
     buffered: bool = True,
 ) -> NativeSetupState:
     """Execute project setup as admin before publishing the new workspace row."""
-    from agentworks.transports import transport
-
     context = ResourceContext(
         vm_name=vm.name,
         platform=site_platform_name(vm.site, registry),
@@ -304,12 +339,14 @@ def apply_workspace_setup(
         workspace_dir=root,
     )
     environment = inputs.environment(values, context)
-    runner = SetupRunner(transport(vm, config, logger=logger), environment, redactions=values.values())
+    access = execution.vm_access(vm, config, Admin(), log=logger.record)
     invocation = WorkspaceSetupInvocation(
         vm=vm,
-        runner=runner,
+        access=access,
+        files=access.files(),
         environment=environment,
         secrets=values,
+        redactions=logger.redactions,
         prior=None,
         checkpoint=lambda claims: None,
         workspace_name=inputs.name,
@@ -317,5 +354,13 @@ def apply_workspace_setup(
         linux_group=linux_group,
     )
     return run_setup(
-        db, registry, inputs, invocation, operation=operation, failures=failures, buffered=buffered, held=held
+        db,
+        registry,
+        inputs,
+        invocation,
+        operation=operation,
+        failures=failures,
+        buffered=buffered,
+        held=held,
+        log_warning=logger.warning,
     )

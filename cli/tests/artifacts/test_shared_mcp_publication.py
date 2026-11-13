@@ -127,7 +127,8 @@ def test_dispatch_excludes_shared_mcp_document_without_owning_or_changing_it(
     )
     invocation = WorkspaceSetupInvocation(
         vm=vm,
-        runner=target,
+        access=(access := target.access()),
+        files=access.files(),
         prior=None,
         checkpoint=Mock(),
         workspace_name="fixture",
@@ -182,7 +183,6 @@ def test_dispatch_excludes_shared_mcp_document_without_owning_or_changing_it(
     assert git("-C", workspace, "check-ignore", "--", ".mcp.json", check=False).returncode == 1
     if tracked:
         assert git("-C", workspace, "ls-files", "--error-unmatch", "--", ".mcp.json").stdout
-    assert not list((target.root / "tmp").iterdir())
 
 
 def test_exclusion_metadata_cannot_escape_owning_workspace():
@@ -197,6 +197,7 @@ def test_exclusion_metadata_cannot_escape_owning_workspace():
             Mock(),
             group="",
             report_incomplete=Mock(),
+            redactions=(),
             shared_paths=("/workspace-neighbor/.mcp.json",),
         )
     assert target.method_calls == []

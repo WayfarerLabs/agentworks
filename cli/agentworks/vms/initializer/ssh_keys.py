@@ -3,20 +3,24 @@ Apple-vz SVE trap mask."""
 
 from __future__ import annotations
 
-import shlex
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from agentworks import output
-from agentworks.ssh import SSHError, SSHLogger
+from agentworks.execution.requests import Command, Script, Shell
+from agentworks.vms.home_layout import SSH_DIR
+
+from .steps import STEP_FAILURES, status, warn, warn_step
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
 
     from agentworks.config import Config
+    from agentworks.execution.files import Files
     from agentworks.ssh_identity import SSHIdentity
-    from agentworks.transports import Transport
+
+    from .steps import InitLog
 
 AUTHORIZED_KEYS_HEADER = """\
 # Managed by agentworks -- manual edits will be overwritten on reinit.
@@ -51,32 +55,31 @@ def authorized_keys_content(public_text: str, extra_keys: Sequence[Path]) -> str
 
 
 def _reconcile_authorized_keys(
-    target: Transport,
+    files: Files,
     config: Config,
     home: str,
-    logger: SSHLogger,
+    log: InitLog,
     *,
     owner: str | None = None,
 ) -> AuthorizedKeysOutcome:
-    """Reconcile <home>/.ssh/authorized_keys with the configured key set.
+    """Reconcile ``<home>/.ssh/authorized_keys`` with the configured key set, through the file program.
 
     Writes the primary ssh_public_key plus any extra_ssh_public_keys from
     config. Full overwrite so that removed keys are cleaned up on reinit.
 
-    When ``owner`` is None (default), writes directly via the connected SSH
-    user (admin writing to admin's home). Failure is downgraded to a warning
-    because the operator can recover on the next ``vm reinit``.
+    When ``owner`` is None (default), ``files`` is the account's own and the
+    file is written as it, 0600 under a 0700 ``.ssh``. Any step failure is
+    downgraded to a warning and an unproven outcome, because the operator
+    can recover on the next ``vm reinit``.
 
-    When ``owner`` is set to a Linux username different from the SSH user
-    (e.g. an agent's username), uses a stage-and-install path: ensures
-    ``<home>/.ssh`` exists with correct ownership, scp's the file content
-    to a private mktemp path with 0600 perms, then ``sudo install``s the
-    staged file atomically into place with the requested owner / group /
-    mode. The staging file is removed in a ``finally`` block so a partial
-    failure doesn't leak it. Failure on this path RAISES (``SSHError``):
-    the call is load-bearing for whether the operator can SSH to the agent
-    at all, so a silent failure here would leave the caller running
-    downstream commands that all fail with a cryptic ``exit 255``.
+    When ``owner`` is set, ``files`` is the admin's and the work is root's:
+    ``.ssh`` is placed with ``ensure_directory`` and the file with ``write``,
+    each with the owner, its group and its mode set through descriptors
+    opened without following a link, before the file is published. A link
+    at either is refused. Failure on this path RAISES: the call is
+    load-bearing for whether the operator can SSH to the agent at all, so a
+    silent failure here would leave the caller running downstream requests
+    that all fail the same way.
     """
     from agentworks.vms.applied_state import prepare_configured_ssh_identity
 
@@ -85,9 +88,9 @@ def _reconcile_authorized_keys(
         config.operator.ssh_private_key,
     )
 
-    logger.step("SSH authorized keys")
+    log.step("SSH authorized keys")
 
-    content = authorized_keys_content(prepared.public_text, config.operator.extra_ssh_public_keys)
+    content = authorized_keys_content(prepared.public_text, config.operator.extra_ssh_public_keys).encode()
 
     extra_count = len(config.operator.extra_ssh_public_keys)
     label = f"1 primary + {extra_count} extra" if extra_count else "1 primary"
@@ -95,56 +98,28 @@ def _reconcile_authorized_keys(
         label = f"{label} for {owner}"
     output.info(f"Reconciling authorized_keys ({label})...")
 
+    path = f"{home}/{SSH_DIR}/authorized_keys"
     if owner is None:
-        # Direct-write: the SSH user writes to its own home.
         try:
-            target.write_file(f"{home}/.ssh/authorized_keys", content, mode="600")
-        except SSHError:
-            # The transport exception may contain captured command output or
-            # transferred content. Keep both the warning and proof carrier to
-            # a bounded authored diagnostic.
-            msg = "authorized_keys reconciliation failed"
-            logger.warning(msg)
-            output.warn(msg)
+            files.write(path, content, mode=0o600, parent_mode=0o700)
+        except STEP_FAILURES as error:
+            # The error's own message only: ``write`` logs its streams, and this warning shows none of them.
+            warn(log, f"authorized_keys reconciliation failed: {log.sanitize(str(error))}")
             return AuthorizedKeysUnproven()
         return AuthorizedKeysApplied(prepared.identity, prepared.private_key_ref)
 
-    # Stage-and-install: admin writes for a non-self uid (agent).
-    quoted_owner = shlex.quote(owner)
-    # Ensure <home>/.ssh exists with correct ownership/mode.
-    # `useradd -m` doesn't create .ssh (not in /etc/skel), and install -d
-    # is idempotent (creates if missing; sets owner/mode either way).
-    target.run(
-        f"install -d -o {quoted_owner} -g {quoted_owner} -m 0700 {home}/.ssh",
-        sudo=True,
-    )
-    mktemp_result = target.run("mktemp --tmpdir agw-ak.XXXXXX")
-    staging = (getattr(mktemp_result, "stdout", "") or "").strip()
-    if not staging:
-        raise SSHError("mktemp produced empty path")
-    try:
-        # Restrict the staging file before content lands; mktemp's
-        # randomized suffix plus 0600 perms keep the contents private
-        # between admin's write and the atomic install.
-        target.write_file(staging, content, mode="0600")
-        target.run(
-            f"install -o {quoted_owner} -g {quoted_owner} -m 0600 {shlex.quote(staging)} {home}/.ssh/authorized_keys",
-            sudo=True,
-        )
-    finally:
-        target.run(f"rm -f {shlex.quote(staging)}", check=False)
+    # `useradd -m` creates no .ssh (it is not in /etc/skel).
+    files.ensure_directory(f"{home}/{SSH_DIR}", mode=0o700, owner=owner, group=owner, elevated=True)
+    files.write(path, content, mode=0o600, parent_mode=0o700, owner=owner, group=owner, elevated=True)
     return AuthorizedKeysApplied(prepared.identity, prepared.private_key_ref)
 
 
-def _preserve_ssh_host_keys(
-    target: Transport,
-    logger: SSHLogger,
-) -> None:
+def _preserve_ssh_host_keys(files: Files, log: InitLog) -> None:
     """Stop cloud-init from regenerating SSH host keys on stop/start.
 
     Writes the cloud-init drop-in that pins existing host keys. This also runs
     during create-time bootstrap, but reconciling it here means VMs provisioned
-    before the drop-in existed get repaired on ``vm reinit`` -- otherwise their
+    before the drop-in existed get repaired on ``vm reinit``: otherwise their
     host key changes on the next reboot and no longer matches the key recorded
     in the VM's host-key store, so every connection is refused.
 
@@ -152,30 +127,22 @@ def _preserve_ssh_host_keys(
     read. Written unconditionally to keep the step platform-agnostic, matching
     the create-time bootstrap step.
     """
-    from pathlib import PurePosixPath
-
     from agentworks.capabilities.vm_platform.bootstrap_script import (
-        SSH_PRESERVE_KEYS_LINES,
+        SSH_PRESERVE_KEYS_CONTENT,
         SSH_PRESERVE_KEYS_PATH,
     )
 
-    logger.step("Preserve SSH host keys")
+    log.step("Preserve SSH host keys")
     output.info("Ensuring SSH host key preservation...")
-
-    parent = str(PurePosixPath(SSH_PRESERVE_KEYS_PATH).parent)
-    printf_args = " ".join(shlex.quote(line) for line in SSH_PRESERVE_KEYS_LINES)
     try:
-        target.run(
-            f"mkdir -p {shlex.quote(parent)} && printf '%s\\n' {printf_args} > {shlex.quote(SSH_PRESERVE_KEYS_PATH)}",
-            sudo=True,
+        files.write(
+            SSH_PRESERVE_KEYS_PATH, SSH_PRESERVE_KEYS_CONTENT.encode(), mode=0o644, parent_mode=0o755, elevated=True
         )
-    except SSHError as e:
-        msg = f"SSH host key preservation failed: {e}"
-        logger.warning(msg)
-        output.warn(msg)
+    except STEP_FAILURES as error:
+        warn_step(log, "SSH host key preservation failed", error)
 
 
-def _apply_sve_mask(target: Transport, logger: SSHLogger) -> None:
+def _apply_sve_mask(files: Files, log: InitLog) -> None:
     """Repair the Apple-vz SVE trap on VMs provisioned before the mask existed.
 
     Apple's Virtualization.framework advertises SVE the guest cannot execute,
@@ -199,50 +166,37 @@ def _apply_sve_mask(target: Transport, logger: SSHLogger) -> None:
     again (matching ``apply_tailscaled_dns_fix``, which likewise defers to the
     next boot).
     """
-    from pathlib import PurePosixPath
-
     from agentworks.capabilities.vm_platform.bootstrap_script import (
         SVE_APPLE_VZ_GREP,
         SVE_CPUINFO_GREP,
-        SVE_NOSVE_GRUB_LINES,
+        SVE_NOSVE_GRUB_CONTENT,
         SVE_NOSVE_GRUB_PATH,
     )
 
-    logger.step("Mask SVE")
-
-    # Gate: an Apple Virtualization guest still advertising SVE. Both greps
-    # read /sys and /proc (no sudo); either one failing (non-Apple host, or a
-    # VM already masked and rebooted) makes this a silent no-op.
-    gate = target.run(f"{SVE_APPLE_VZ_GREP} && {SVE_CPUINFO_GREP}", check=False)
-    if not gate.ok:
-        return
-
-    output.info("Masking unusable SVE (arm64.nosve)...")
-    parent = str(PurePosixPath(SVE_NOSVE_GRUB_PATH).parent)
-    printf_args = " ".join(shlex.quote(line) for line in SVE_NOSVE_GRUB_LINES)
+    log.step("Mask SVE")
     try:
-        target.run(
-            f"mkdir -p {shlex.quote(parent)} && printf '%s\\n' {printf_args} > {shlex.quote(SVE_NOSVE_GRUB_PATH)}",
-            sudo=True,
-        )
-        update = target.run("update-grub", sudo=True, check=False)
-        if not update.ok:
-            msg = "SVE mask: update-grub failed; VM may crash on SVE (SIGILL)."
-            logger.warning(msg)
-            output.warn(msg)
+        # Gate: an Apple Virtualization guest still advertising SVE. Both greps
+        # read /sys and /proc unelevated; either one failing (non-Apple host, or
+        # a VM already masked and rebooted) makes this a silent no-op.
+        if status(
+            files.access, Script(f"{SVE_APPLE_VZ_GREP} && {SVE_CPUINFO_GREP}", Shell.SH, deadline=files.deadline)
+        ):
             return
-    except SSHError as e:
-        msg = f"SVE mask failed: {e}"
-        logger.warning(msg)
-        output.warn(msg)
+        output.info("Masking unusable SVE (arm64.nosve)...")
+        files.write(SVE_NOSVE_GRUB_PATH, SVE_NOSVE_GRUB_CONTENT.encode(), mode=0o644, parent_mode=0o755, elevated=True)
+        if status(files.access, Command(("update-grub",), elevated=True, deadline=files.deadline)):
+            msg = "SVE mask: update-grub failed; VM may crash on SVE (SIGILL)."
+            warn(log, msg)
+            return
+        # The drop-in is installed but the running kernel picked it up only if
+        # arm64.nosve is already on the cmdline (i.e. the VM was rebooted since).
+        # We cannot reboot from here without dropping the tailnet mid-init, so tell
+        # the operator; a restart plus one more reinit converges the VM.
+        active = status(files.access, Command(("grep", "-qw", "arm64.nosve", "/proc/cmdline"), deadline=files.deadline))
+    except STEP_FAILURES as error:
+        warn_step(log, "SVE mask failed", error)
         return
-
-    # The drop-in is installed but the running kernel picked it up only if
-    # arm64.nosve is already on the cmdline (i.e. the VM was rebooted since).
-    # We cannot reboot from here without dropping the tailnet mid-init, so tell
-    # the operator; a restart plus one more reinit converges the VM.
-    active = target.run("grep -qw arm64.nosve /proc/cmdline", check=False)
-    if not active.ok:
+    if active:
         output.warn(
             "Masked unusable SVE (arm64.nosve). Restart the VM and reinit "
             "again to apply it; until then, OpenSSL/git/apt may crash (SIGILL)."

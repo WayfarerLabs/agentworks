@@ -4,13 +4,11 @@ from __future__ import annotations
 
 import json
 import os
-import shlex
-import subprocess
 from dataclasses import replace
 from importlib import import_module
 from pathlib import Path
-from types import ModuleType, SimpleNamespace
-from typing import Any
+from types import ModuleType
+from typing import TYPE_CHECKING, Any
 from unittest.mock import Mock
 
 import pytest
@@ -18,23 +16,33 @@ import pytest
 from agentworks.artifacts.application import OwnedArtifactFile, SessionArtifactContext
 from agentworks.artifacts.model import ArtifactInputs, ArtifactOrigin, ArtifactType
 from agentworks.artifacts.native.common import NativeSessionArtifacts
+from agentworks.artifacts.native.probe import _PROBE
 from agentworks.artifacts.session import validate_session_application
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.harness_integration import HarnessLaunchIntent, HarnessStart
 from agentworks.capabilities.harness_integration.setup import UserSetupInvocation
 from agentworks.errors import StateError
-from agentworks.ssh import SSHResult
 from tests.artifacts._fixtures import received
 from tests.artifacts.test_native_delivery import artifact, enabled, owned
 from tests.artifacts.test_native_probe import probe
 from tests.conftest import requires_posix_shell
+from tests.vm_access_support import account_shell, local_vm_access
+
+if TYPE_CHECKING:
+    from agentworks.execution.access import VMAccess
 
 pytestmark = requires_posix_shell
 
 TOOLS = [("claude", "ClaudeCodeIntegration"), ("codex", "CodexIntegration"), ("grok", "GrokBuildIntegration")]
 
 
-def guest(tmp_path: Path, tool: str) -> tuple[SimpleNamespace, Path, Path, Path, dict[str, str]]:
+def guest(
+    tmp_path: Path, tool: str, monkeypatch: pytest.MonkeyPatch
+) -> tuple[VMAccess, Path, Path, Path, dict[str, str]]:
+    """A real access to this machine whose account home is ``home``, and the native layout around it.
+
+    The probe's machine-wide roots move under ``tmp_path``.
+    """
     probe(tmp_path, tool=tool, identities=())
     home, workspace = tmp_path / "home", tmp_path / "workspace"
     native = home / {"claude": ".claude", "codex": ".codex", "grok": ".grok"}[tool]
@@ -45,33 +53,20 @@ def guest(tmp_path: Path, tool: str) -> tuple[SimpleNamespace, Path, Path, Path,
         "CODEX_HOME": str(native),
         "GROK_HOME": str(native),
     }
-
-    def run(command, *, env=None, **kwargs):
-        argv = ["bash", "-c", command]
-        if "input_data" in kwargs:
-            argv = shlex.split(shlex.split(command)[-1])
-            argv[2] = (
-                argv[2]
-                .replace("/etc/claude-code", str(tmp_path / "etc/claude-code"))
-                .replace("/etc/codex", str(tmp_path / "etc/codex"))
-            )
-        result = subprocess.run(
-            argv,
-            input=kwargs.get("input_data"),
-            env={**os.environ, **environment, **(env or {})},
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        return SSHResult(result.returncode, result.stdout, result.stderr)
-
-    return SimpleNamespace(run=run, logger=None), home, workspace, native, environment
+    monkeypatch.setattr(
+        "agentworks.artifacts.native.probe._PROBE",
+        _PROBE.replace("/etc/claude-code", str(tmp_path / "etc/claude-code")).replace(
+            "/etc/codex", str(tmp_path / "etc/codex")
+        ),
+    )
+    access = local_vm_access(monkeypatch, home=home, shell=account_shell(tmp_path))
+    return access, home, workspace, native, environment
 
 
 def launch(
     implementation: Any,
     adapter: ModuleType,
-    runner: SimpleNamespace | None,
+    access: VMAccess | None,
     home: Path,
     workspace: Path,
     environment: dict[str, str],
@@ -105,7 +100,7 @@ def launch(
         artifact_context=context,
     )
     monkeypatch.setattr(integration, "_resume_or_launch", lambda *args, **kwargs: "fixture-launch")
-    result = integration.start(RunContext(admin_target=runner), intent=HarnessLaunchIntent.RESUME_OR_NEW)
+    result = integration.start(RunContext(admin_access=access), intent=HarnessLaunchIntent.RESUME_OR_NEW)
     validate_session_application(result.artifacts, context, integration=implementation.name)
     return result, integration._artifact_plan
 
@@ -135,7 +130,7 @@ def test_setup_operator_collision_is_reconsidered_at_session_without_blocking_ot
     module = import_module(f"agentworks.plugins.{tool}.harness_integration")
     adapter = import_module(f"agentworks.plugins.{tool}.artifacts")
     implementation = getattr(module, class_name)
-    runner, home, workspace, native, environment = guest(tmp_path, tool)
+    access, home, workspace, native, environment = guest(tmp_path, tool, monkeypatch)
     bad = replace(artifact(artifact_type), origin=ArtifactOrigin("agent", "agent", "worker", entry="review"))
     if artifact_type is ArtifactType.SKILL:
         root = home / ".agents" if tool == "codex" else native
@@ -155,7 +150,8 @@ def test_setup_operator_collision_is_reconsidered_at_session_without_blocking_ot
     application = setup.user_init(
         UserSetupInvocation(
             vm=db.insert_vm("vm", "site", "host"),
-            runner=runner,
+            access=access,
+            files=access.files(),
             prior=None,
             checkpoint=lambda claims: None,
             report_incomplete=incomplete,
@@ -172,7 +168,7 @@ def test_setup_operator_collision_is_reconsidered_at_session_without_blocking_ot
     warnings = Mock()
     monkeypatch.setattr("agentworks.output.warn", warnings)
     result, plan = launch(
-        implementation, adapter, runner, home, workspace, environment, received(bad, good, guidance), monkeypatch
+        implementation, adapter, access, home, workspace, environment, received(bad, good, guidance), monkeypatch
     )
     assert result.command == "fixture-launch"
     assert existing.read_text() == body
@@ -206,7 +202,7 @@ def test_session_persona_delivery_keeps_unhandled_origins_and_independent_guidan
     module = import_module(f"agentworks.plugins.{tool}.harness_integration")
     adapter = import_module(f"agentworks.plugins.{tool}.artifacts")
     implementation = getattr(module, class_name)
-    runner, home, workspace, native, environment = guest(tmp_path, tool)
+    access, home, workspace, native, environment = guest(tmp_path, tool, monkeypatch)
     bad = artifact(ArtifactType.AGENT)
     outer = replace(bad, origin=ArtifactOrigin("agent", "agent", "worker", entry="review"))
     good = artifact(ArtifactType.AGENT, name="other")
@@ -233,7 +229,7 @@ def test_session_persona_delivery_keeps_unhandled_origins_and_independent_guidan
         inputs = received(outer, bad, good, guidance)
         rejected = {outer.identity, bad.identity}
     result, plan = launch(
-        implementation, adapter, runner, home, workspace, environment, inputs, monkeypatch, ancestors=ancestors
+        implementation, adapter, access, home, workspace, environment, inputs, monkeypatch, ancestors=ancestors
     )
     assert result.command == "fixture-launch"
     if tool == "grok":
@@ -257,7 +253,7 @@ def test_session_persona_delivery_keeps_unhandled_origins_and_independent_guidan
 def test_new_session_unsafe_inventory_remains_a_hard_failure(tmp_path, monkeypatch, tool, class_name):
     module = import_module(f"agentworks.plugins.{tool}.harness_integration")
     adapter = import_module(f"agentworks.plugins.{tool}.artifacts")
-    runner, home, workspace, native, environment = guest(tmp_path, tool)
+    access, home, workspace, native, environment = guest(tmp_path, tool, monkeypatch)
     outside = tmp_path / "outside"
     outside.mkdir()
     # Grok session rules inspect discovery roots, but do not inventory personas.
@@ -267,7 +263,7 @@ def test_new_session_unsafe_inventory_remains_a_hard_failure(tmp_path, monkeypat
         launch(
             getattr(module, class_name),
             adapter,
-            runner,
+            access,
             home,
             workspace,
             environment,
@@ -286,7 +282,7 @@ def test_empty_or_unmatched_name_conflict_cannot_claim_terminal_handling(
 
     module = import_module(f"agentworks.plugins.{tool}.harness_integration")
     adapter = import_module(f"agentworks.plugins.{tool}.artifacts")
-    runner, home, workspace, native, environment = guest(tmp_path, tool)
+    access, home, workspace, native, environment = guest(tmp_path, tool, monkeypatch)
 
     def malformed(*args, **kwargs):
         raise NativeArtifactConflictError("fixture invalid native identity", identities, hint="fixture repair")
@@ -296,7 +292,7 @@ def test_empty_or_unmatched_name_conflict_cannot_claim_terminal_handling(
         launch(
             getattr(module, class_name),
             adapter,
-            runner,
+            access,
             home,
             workspace,
             environment,
@@ -313,7 +309,7 @@ def test_ancestor_only_missing_target_or_changed_native_root_warns_and_launches(
 ):
     adapter = import_module(f"agentworks.plugins.{tool}.artifacts")
     implementation = getattr(import_module(f"agentworks.plugins.{tool}.harness_integration"), class_name)
-    runner, home, workspace, native, environment = guest(tmp_path, tool)
+    access, home, workspace, native, environment = guest(tmp_path, tool, monkeypatch)
     item = artifact(ArtifactType.AGENT)
     from agentworks.plugins.claude.artifacts import outer_artifacts
 
@@ -330,7 +326,7 @@ def test_ancestor_only_missing_target_or_changed_native_root_warns_and_launches(
     result, plan = launch(
         implementation,
         adapter,
-        None if missing_target else runner,
+        None if missing_target else access,
         home,
         workspace,
         environment,

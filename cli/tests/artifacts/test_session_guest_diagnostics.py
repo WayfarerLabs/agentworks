@@ -4,7 +4,7 @@ import shlex
 import subprocess
 import sys
 import traceback
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
@@ -12,14 +12,10 @@ import pytest
 from agentworks.artifacts.native.common import ancestor_diagnostics
 from agentworks.artifacts.native.probe import probe_native
 from agentworks.errors import ExternalError
-from agentworks.execution.trust import HOST_TRUST
-from agentworks.harness_setup.dispatch import destination_id
+from agentworks.execution.results import Completed, Result
 from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
-from agentworks.harness_setup.runner import SetupRunner
-from agentworks.ssh import SSHError, SSHResult
-from agentworks.transports import Transport
 from tests.artifacts.test_native_probe import probe
-from tests.native_setup_fixtures import LocalFixtureTransport
+from tests.vm_access_support import Admin, RecordingVMAccess, account_shell, local_vm_access
 
 
 def hostile_text(representation: str = "raw") -> tuple[str, str]:
@@ -46,21 +42,17 @@ def test_raw_redaction_precedes_context_sensitive_terminal_normalization():
 
 @pytest.mark.windows
 @pytest.mark.parametrize("representation", ["raw", "shell", "repr"])
-@pytest.mark.parametrize("stage", ["python-exception", "probe-exception", "probe-status", "probe-protocol"])
+@pytest.mark.parametrize("stage", ["probe-exception", "probe-status", "probe-protocol"])
 def test_session_probe_sanitizes_raised_and_returned_guest_failures(stage, representation):
     secret, payload = hostile_text(representation)
-    runner = Mock(spec=Transport)
-    runner.logger = None
-    failure = SSHError(payload, hint=payload)
-    python = SSHResult(0, "AGW_PYTHON3=available\n", "")
-    if stage == "python-exception":
-        runner.run.side_effect = [failure]
-    elif stage == "probe-exception":
-        runner.run.side_effect = [python, failure]
+    access = RecordingVMAccess([], Admin())
+    failure = ExternalError(payload, hint=payload)
+    if stage == "probe-exception":
+        access.run_outcomes = [failure]
     else:
-        runner.run.side_effect = [python, SSHResult(19 if stage == "probe-status" else 0, "invalid", payload)]
-    with pytest.raises((SSHError, ExternalError)) as caught:
-        probe_native(runner, tool="grok", environment={"TOKEN": secret}, redactions=(secret,))
+        access.run_outcomes = [Result(Completed(19 if stage == "probe-status" else 0), b"invalid", payload.encode())]
+    with pytest.raises(ExternalError) as caught:
+        probe_native(access, tool="grok", environment={"TOKEN": secret}, redactions=(secret,))
     assert_safe(str(caught.value), secret)
     if caught.value.hint:
         assert_safe(caught.value.hint, secret)
@@ -79,55 +71,18 @@ def test_advisory_ancestor_warning_redacts_normalized_runtime_values(representat
     assert len(message.encode()) < 2300
 
 
-@pytest.mark.windows
-@pytest.mark.parametrize("representation", ["raw", "shell", "repr"])
-def test_setup_runner_preserves_error_identity_and_sanitizes_environment(representation):
-    secret, payload = hostile_text(representation)
-    target = Mock(spec=Transport)
-    target.logger = None
-    target.default_timeout = 30
-    failure = SSHError(payload, hint=payload)
-    target.run.side_effect = failure
-    with pytest.raises(SSHError) as caught:
-        SetupRunner(target, {"TOKEN": secret}, redactions=(secret,)).run("fixture")
-    assert caught.value is failure
-    assert_safe(str(failure), secret)
-    assert failure.hint is not None
-    assert_safe(failure.hint, secret)
-
-
-@pytest.mark.skipif(sys.platform != "linux", reason="executes Linux guest login-shell and filesystem helpers locally")
-def test_native_discovery_accepts_a_login_banner_without_a_newline(tmp_path):
-    root = tmp_path / "target"
-    root.mkdir()
-    target = LocalFixtureTransport(root)
-    binary = root / "bin/grok"
+@pytest.mark.skipif(sys.platform != "linux", reason="runs agw-launch and the native probe locally")
+def test_native_discovery_accepts_a_login_banner_without_a_newline(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    binary = tmp_path / "bin/grok"
     binary.parent.mkdir()
     binary.write_text("#!/bin/sh\nexit 0\n")
     binary.chmod(0o700)
-    (root / "login-shell").write_text(
-        '#!/bin/bash\ncase "$1" in -lc|-lic) ;; *) exit 9 ;; esac\n'
-        '. "$HOME/.profile"\nexec /bin/bash --noprofile --norc -c "$2"\n'
-    )
-    (target.home / ".profile").write_text('printf "fixture-banner"\n')
-    assert probe_native(target, tool="grok", environment={}, home=str(target.home)) == str(target.home / ".grok")
-
-
-@pytest.mark.parametrize("banner", ["", "Welcome\n", "Welcome"])
-def test_destination_identity_ignores_noninteractive_startup_output(db, banner):
-    vm = db.insert_vm("identity", "site", "vm")
-    runner = Mock(spec=Transport)
-    runner.logger = None
-    runner.run.side_effect = [
-        SSHResult(0, banner + "\nAGW_NATIVE_ID=machine-token\n", ""),
-        SSHResult(0, banner + "\nAGW_NATIVE_ID=1:2:1000\n", ""),
-    ]
-    observed = destination_id(vm, runner, location="/home/identity", username="identity")
-    runner.run.side_effect = [
-        SSHResult(0, "\nAGW_NATIVE_ID=machine-token\n", ""),
-        SSHResult(0, "\nAGW_NATIVE_ID=1:2:1000\n", ""),
-    ]
-    assert observed == destination_id(vm, runner, location="/home/identity", username="identity")
+    home.mkdir()
+    (home / ".profile").write_text('printf "fixture-banner"\n')
+    access = local_vm_access(monkeypatch, home=home, shell=account_shell(tmp_path))
+    environment = {"PATH": f"{binary.parent}:/usr/bin:/bin"}
+    assert probe_native(access, tool="grok", environment=environment, home=str(home)) == str(home / ".grok")
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="executes the Linux guest inventory helper locally")
@@ -146,28 +101,6 @@ def test_malformed_native_persona_metadata_keeps_its_path():
     path = "/fixture/.grok/agents/operator.md"
     problems = _inventory_problems([{"kind": "agent", "path": path, "frontmatter": ""}], (), {})
     assert len(problems) == 1 and problems[0].path == path
-
-
-def test_firstparty_ssh_timeout_cannot_expose_setenv_through_its_traceback(monkeypatch):
-    from agentworks.transports.ssh import SSHTransport
-
-    secret = uuid4().hex
-    calls: list[list[str]] = []
-
-    def run(arguments, **kwargs):
-        calls.append(arguments)
-        if len(calls) == 1:
-            return subprocess.CompletedProcess(arguments, 0, "\nAGW_PYTHON3=available\n", "")
-        raise subprocess.TimeoutExpired(arguments, 30)
-
-    monkeypatch.setattr("agentworks.transports.ssh.subprocess.run", run)
-    with pytest.raises(SSHError) as caught:
-        probe_native(
-            SSHTransport("fixture.invalid", trust=HOST_TRUST, retries=1), tool="grok", environment={"TOKEN": secret}
-        )
-    assert len(calls) == 2 and any(secret in argument for argument in calls[1])
-    assert secret not in "".join(traceback.format_exception(caught.value))
-    assert caught.value.__cause__ is None and caught.value.__suppress_context__
 
 
 def test_safe_domain_causes_survive_without_unsafe_implicit_context():

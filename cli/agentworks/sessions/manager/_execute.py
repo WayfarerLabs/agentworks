@@ -114,6 +114,8 @@ def execute_session_start(
         if is_admin:
             session_target = admin_target
             session_run_command = admin_target.run
+        session_access = _mgr._session_access(session, vm=vm, config=config, db=db, logger=logger)
+        admin_access = session_access if is_admin else _mgr._identity_access(vm, config, None, logger=logger)
 
         if recovered_startup and status is SessionStatus.RUNNING and not replace_running:
             from agentworks.sessions.tmux import (
@@ -179,9 +181,10 @@ def execute_session_start(
             vm=vm,
             workspace=ws,
             agent_name=session.agent_name,
-            runner=session_target,
+            access=session_access,
             environment=session_env,
-            redactions=redactions,
+            # The start stages sanitize probe diagnostics with everything the operation log redacts.
+            redactions=logger.redactions,
             session_uuid=session.session_uuid,
             linux_user=linux_user,
             secret_target=_mgr._session_secret_target(
@@ -203,8 +206,8 @@ def execute_session_start(
         start_ctx = RunContext(
             config=config,
             operation_scope=scope,
-            admin_target=admin_target,
-            agent_target=None if is_admin else session_target,
+            admin_access=admin_access,
+            agent_access=None if is_admin else session_access,
             secrets=ScopedSecrets(graph_secret_values, session_node.secret_refs()),
         )
         template_values = _mgr._session_context_values(db, vm, ws, name, SessionMode(session.mode), session.agent_name)
@@ -222,7 +225,7 @@ def execute_session_start(
             session_env["AGENTWORKS_ARTIFACTS_DIR"] = artifact_application.artifacts_dir
         require_session_launch_identity(definition)
         stage_session_artifacts(
-            db, name, template.harness_integration, session_target, prepared_artifacts, artifact_application
+            db, name, template.harness_integration, session_access, prepared_artifacts, artifact_application
         )
         command = harness_start.command
 
@@ -250,7 +253,7 @@ def execute_session_start(
                 )
 
             commit_session_artifacts(
-                db, name, template.harness_integration, session_target, prepared_artifacts, artifact_application
+                db, name, template.harness_integration, session_access, prepared_artifacts, artifact_application
             )
             deploy_restricted_config(run_command, history_limit=config.session.history_limit)
 
@@ -290,7 +293,7 @@ def execute_session_start(
                     command,
                     linux_user,
                     run_command=session_run_command,
-                    target=admin_target,
+                    admin_files=admin_access.files(),
                     admin_username=vm.admin_username,
                     is_admin=is_admin,
                     env=session_env,

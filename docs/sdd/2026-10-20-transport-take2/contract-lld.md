@@ -553,9 +553,9 @@ the shell and the login flag, with no source; then `elevated`, the `cwd`, the en
 and the deadline. Environment values, script source and stdin are never passed to the formatter, so
 no code path can write them. D13 says the log records a label: it is the caller's step heading, the
 name of the `SSHLogger` step in effect (`logger.step(...)`) when the request ran. Streams are
-retained as `Result` holds them, bytes decoded with replacement. A sensitive stdin keeping the
-streams out of the log arrives with `Bytes(data, sensitive=)` in slice 5, its first consumer; this
-slice has no stdin to log.
+retained as `Result` holds them, bytes decoded with replacement. A request's `log_streams=False`
+keeping both streams out of the log arrives in slice 5 with its first consumers
+([files-lld.md](./files-lld.md)); this slice has no stdin to log.
 
 **Wiring.** `VMAccess` takes an optional `log: Callable[[RunRequest, Result], None]`. `run` calls it
 after `_execute` and before it raises for a bad completion, so failures are logged. `stream`,
@@ -835,7 +835,7 @@ probes (its first callers) are, not slice 5 as the first draft of this list said
     `SSHLogger`'s deletion); "the readers move to the new constant in slice 3" is withdrawn.
   - "The request's secret values" are the set registered at the log's construction, as `SSHLogger`
     does; per-request marking has no consumer yet.
-  - The sensitive-stdin rule is implemented with `Bytes(sensitive=)` in slice 5.
+  - Keeping streams out of the log is implemented with `log_streams=False` in slice 5.
 - **HLA Migration and Incident inventory.**
   - Slice 3 (`hla.md:719-726`): remove "the initialized checks land too"; replace "`oplog.py` lands
     with its `LOG_DIR` constant and the readers that move to it" with `format_record` and

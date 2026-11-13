@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import shlex
 from dataclasses import replace
 from typing import TYPE_CHECKING, Literal, cast
 
@@ -14,7 +13,7 @@ from agentworks import output
 from agentworks.artifacts.application import ArtifactDeferral
 from agentworks.artifacts.git_excludes import reconcile_workspace_excludes
 from agentworks.artifacts.model import ArtifactInputs
-from agentworks.artifacts.publication import publish_artifacts, validate_application
+from agentworks.artifacts.publication import ROOT_FILE_DIRECTORIES, publish_artifacts, validate_application
 from agentworks.artifacts.reporting import report_applied, report_deferrals
 from agentworks.artifacts.state import read_captures, write_capture
 from agentworks.capabilities.harness_integration import ensure_harness_integration_enabled, harness_integration_for
@@ -25,6 +24,7 @@ from agentworks.capabilities.harness_integration.setup import (
     WorkspaceSetupInvocation,
 )
 from agentworks.errors import AgentworksError, ConfigError, ConnectivityError, ExternalError, StateError
+from agentworks.execution.requests import Command
 from agentworks.harness_setup.locking import native_mutation_guard
 from agentworks.harness_setup.model import NativeClaim, NativeSetupState, SetupRecord
 from agentworks.harness_setup.outcomes import (
@@ -33,15 +33,16 @@ from agentworks.harness_setup.outcomes import (
     sanitize_setup_error,
 )
 from agentworks.harness_setup.state import read_native_setup, replace_setup_record, write_native_setup
-from agentworks.native_files import ROOT_FILE_DIRECTORIES
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from agentworks.artifacts.application import OwnedArtifactFile
     from agentworks.db import Database, VMRow
+    from agentworks.execution.access import VMAccess
     from agentworks.harness_setup.inputs import SetupInputs
     from agentworks.harness_setup.locking import NativeMutationGuard
     from agentworks.resources.registry import Registry
-    from agentworks.transports import Transport
 
 
 class _SetupInfrastructureFailure(Exception):
@@ -54,38 +55,35 @@ class _SetupInfrastructureFailure(Exception):
 
 def _sanitize(invocation: SetupInvocation, text: str) -> str:
     """Redact diagnostics before they enter persisted state or the failure list."""
-    return sanitize_setup_diagnostic(text, redactions=invocation.secrets.values(), logger=invocation.runner.logger)
+    return sanitize_setup_diagnostic(text, redactions=invocation.redactions)
 
 
-def destination_id(vm: VMRow, runner: Transport, *, location: str | None = None, username: str | None = None) -> str:
+def destination_id(vm: VMRow, access: VMAccess, *, location: str | None = None, username: str | None = None) -> str:
     """Fingerprint actual native placement and its owning VM generation.
 
     Native filesystem identity distinguishes a recreated user home or workspace.
     This contains no env or resolved secret values and performs only probes.
     """
 
-    def observe(command: str) -> str:
+    def observe(argv: tuple[str, ...]) -> str:
         try:
-            result = runner.run(f"printf '\\nAGW_NATIVE_ID='; {command}", timeout=15)
+            result = access.run(Command(argv, deadline=15))
+            status = result.require_completed(access.vm_name)
         except AgentworksError as error:
-            sanitize_setup_error(error, logger=runner.logger)
+            sanitize_setup_error(error)
             raise
-        values = [
-            line.removeprefix("AGW_NATIVE_ID=")
-            for line in result.stdout.splitlines()
-            if line.startswith("AGW_NATIVE_ID=")
-        ]
-        if len(values) != 1 or not values[0]:
+        value = result.stdout.decode("utf-8", "replace").strip() if status == 0 else ""
+        if not value or "\n" in value:
             raise StateError(
                 "native setup could not establish the destination identity",
-                hint="Check the target user's shell startup and the VM identity files, then retry this operation.",
+                hint="Check the VM identity file and the destination directory, then retry this operation.",
             )
-        return values[0]
+        return value
 
-    machine = observe("cat /etc/machine-id")
+    machine = observe(("cat", "/etc/machine-id"))
     directory = None
     if location is not None:
-        directory = observe(f"stat -Lc '%d:%i:%u' -- {shlex.quote(location)}")
+        directory = observe(("stat", "-Lc", "%d:%i:%u", "--", location))
     payload = (vm.name, vm.site, vm.created_at, vm.platform_metadata, machine, username, location, directory)
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
@@ -100,8 +98,12 @@ def run_setup(
     failures: list[SetupFailure],
     buffered: bool = False,
     held: NativeMutationGuard | None = None,
+    log_warning: Callable[[str], None] | None = None,
 ) -> NativeSetupState:
     """Run desired integration activations, then retire removed activations in prior order.
+
+    ``log_warning`` writes to the operation log, which records each failed
+    integration's reason.
 
     A fresh owner's caller buffers and commits this result with its owner row.
     It must already have refused native residue and own failed-create rollback.
@@ -167,7 +169,7 @@ def run_setup(
         )
         destination = destination_id(
             invocation.vm,
-            invocation.runner,
+            invocation.access,
             location=location,
             username=invocation.username if isinstance(invocation, UserSetupInvocation) else None,
         )
@@ -322,7 +324,7 @@ def run_setup(
                 application = validate_application(application, artifacts, inputs.facet, integration=name)
                 roots = ROOT_FILE_DIRECTORIES if location is None else (location,)
                 publication = publish_artifacts(
-                    call.runner,
+                    call.files,
                     application.files,
                     current.artifact_files,
                     checkpoint_files,
@@ -333,7 +335,7 @@ def run_setup(
                 )
                 if isinstance(call, WorkspaceSetupInvocation):
                     reconcile_workspace_excludes(
-                        call.runner,
+                        call.access,
                         call.root,
                         name,
                         publication.files,
@@ -341,6 +343,7 @@ def run_setup(
                         checkpoint,
                         group=call.linux_group,
                         report_incomplete=report_incomplete,
+                        redactions=call.redactions,
                         shared_paths=application.shared_paths,
                     )
             except _SetupInfrastructureFailure as error:
@@ -358,8 +361,8 @@ def run_setup(
                 state = replace_setup_record(state, current)
                 persist(state)
                 failures.append(SetupFailure(inputs.kind, inputs.name, facet, name, reason, hint))
-                if invocation.runner.logger is not None:
-                    invocation.runner.logger.warning(
+                if log_warning is not None:
+                    log_warning(
                         f"Setup failed for {inputs.kind}/{inputs.name} facet={facet} integration={name}: {reason}"
                     )
                 continue

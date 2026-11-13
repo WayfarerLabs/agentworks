@@ -44,6 +44,7 @@ def main(f: int, g: bytes) -> None:
     try:
         import contextlib
         import errno
+        import fcntl
         import json
         import pwd
         import select
@@ -57,6 +58,12 @@ def main(f: int, g: bytes) -> None:
 
     fixed_path = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/games:/usr/games"
     handover_wait_seconds = 30
+    program_interpreter = "/usr/bin/python3"
+    # The lowest descriptor a staged source may take. Startup files close or
+    # reuse low descriptors (3 to 9 are the shell's own redirection range), so
+    # the source sits above them for as long as the payload runs. A
+    # precondition: the soft RLIMIT_NOFILE exceeds it.
+    staged_source_floor = 100
 
     # -- 1. Read: the envelope and the passwd entry. Every failure before the
     # start marker is an uncaught exception (exit 1) or the status above.
@@ -133,8 +140,10 @@ def main(f: int, g: bytes) -> None:
     # Encoded before the start marker, so a string that cannot be encoded
     # fails before it.
     environment = build_environment()
-    arguments = [enc(item) for item in request["argv"]] if request["kind"] == "argv" else []
-    source = enc(request["source"]) if request["kind"] == "script" else b""
+    kind = request["kind"]
+    arguments = [enc(item) for item in request["argv"]] if kind == "argv" else []
+    source = enc(request["source"]) if kind in ("script", "python") else b""
+    program_arguments = [enc(item) for item in request["args"]] if kind == "python" else []
 
     def reset_signals(include_python_ignores: bool) -> None:
         for number in signal.valid_signals():
@@ -185,11 +194,12 @@ def main(f: int, g: bytes) -> None:
     if (out_info.st_dev, out_info.st_ino) == (err_info.st_dev, err_info.st_ino):
         sys.exit("agw-launch: standard output and error are the same stream")
 
-    # The script is staged before the start marker, so a failure to create or
-    # fill it is a launcher failure, not an outcome that may have run.
+    # A script's or program's source is staged before the start marker, so a
+    # failure to create or fill it is a launcher failure, not an outcome that
+    # may have run.
     script_fd = -1
     pass_fds: tuple[int, ...] = ()
-    if request["kind"] == "script":
+    if kind in ("script", "python"):
         try:
             # MFD_NOEXEC_SEAL (kernel 6.3 and later), retried without it only on
             # EINVAL; any other failure (EMFILE, say) is a launcher failure.
@@ -198,14 +208,40 @@ def main(f: int, g: bytes) -> None:
             if error.errno != errno.EINVAL:
                 raise
             script_fd = os.memfd_create("agw-script", os.MFD_CLOEXEC)
+        try:
+            staged = fcntl.fcntl(script_fd, fcntl.F_DUPFD_CLOEXEC, staged_source_floor)
+        except OSError as error:
+            if error.errno != errno.EINVAL:
+                raise
+            sys.exit(
+                f"agw-launch: staging a source needs a soft open-file limit (RLIMIT_NOFILE) above {staged_source_floor}"
+            )
+        os.close(script_fd)
+        script_fd = staged
         remaining = source
         while remaining:
             remaining = remaining[os.write(script_fd, remaining) :]
-        interpreter = {"sh": "/bin/sh", "bash": "/bin/bash", "user_default": shell}[request["shell"]]
-        arguments = [enc(interpreter)]
-        if request["login"]:
-            arguments.append(b"-l")
-        arguments.append(b"/dev/fd/%d" % script_fd)
+        source_path = b"/dev/fd/%d" % script_fd
+        startup = [b"-l"] if request["login"] else []
+        if request["interactive"]:
+            startup.append(b"-i")
+        if kind == "script":
+            interpreter = {"sh": "/bin/sh", "bash": "/bin/bash", "user_default": shell}[request["shell"]]
+            # An interactive shell reads no commands from a file it is given
+            # (dash prompts for each line), so it sources the script instead.
+            run_source = [b"-c", b'. "$0"'] if request["interactive"] else []
+            arguments = [enc(interpreter), *startup, *run_source, source_path]
+        elif startup:
+            # The startup shell runs its startup files, reopens the source as
+            # descriptor 9 and becomes the interpreter. It reopens the source
+            # itself because the shell may mark an inherited descriptor
+            # close-on-exec (bash -l -i does for 3 to 19). A redirect-only exec
+            # can return a stale status in zsh, which is why the line uses ";"
+            # and not "&&".
+            line = b'exec 9<"$0"; exec ' + enc(program_interpreter) + b' -I -S /dev/fd/9 "$@"'
+            arguments = [enc(shell), *startup, b"-c", line, source_path, *program_arguments]
+        else:
+            arguments = [enc(program_interpreter), b"-I", b"-S", source_path, *program_arguments]
         pass_fds = (script_fd,)
     # -- 3. Start marker, to stdout and then stderr.
 

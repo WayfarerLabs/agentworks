@@ -8,6 +8,7 @@ diagnostics, which the client keeps apart from the payload's output.
 
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from agentworks.errors import AuthorizationError, ConfigError, ConnectivityError, ExternalError, StateError
@@ -141,9 +142,11 @@ class TrustMismatch(StateError):
 class RequestRefused(StateError):
     """The guest could not start the payload: a command, interpreter or directory it cannot use.
 
-    Raised for a ``refused`` trailer under ``run`` and for a refused terminal
-    handover. ``code`` is the guest's refusal, already checked against the
-    refusal grammar by the classifier.
+    Raised for a ``refused`` trailer under ``run``, for a refused terminal
+    handover, and for a detached launch whose command the guest could not
+    execute. ``code`` is the guest's refusal, already checked against the
+    refusal grammar (``results.REFUSAL_CODE``, or its ``exec`` part for a
+    detached launch).
     """
 
     def __init__(self, vm_name: str, code: str, result: Result) -> None:
@@ -240,14 +243,119 @@ class ExecutionIncomplete(ConnectivityError):
 
 
 class CommandFailed(ExternalError):
-    """``check=True`` and the command exited non-zero. Names the status, never stream text."""
+    """A command that had to succeed exited non-zero. Names the status, never stream text.
 
-    def __init__(self, vm_name: str, status: int, result: Result) -> None:
+    ``streams_logged`` is the failed request's ``log_streams``: a caller that
+    shows any of ``result``'s streams (an initialization warning's stderr
+    tail) shows them only when it is true, so a request that kept its streams
+    out of the log keeps them out of a warning too.
+    """
+
+    def __init__(self, vm_name: str, status: int, result: Result, *, streams_logged: bool) -> None:
         self.vm_name = vm_name
         self.status = status
         self.result = result
+        self.streams_logged = streams_logged
         super().__init__(
             f"command on VM '{vm_name}' failed with exit status {status}",
             entity_kind="vm",
             entity_name=vm_name,
         )
+
+
+class FileContentMismatch(ExternalError):
+    """``write_if``'s content reached the VM with a size or SHA-256 other than what was sent. Nothing changed."""
+
+    def __init__(self, vm_name: str, path: str) -> None:
+        self.vm_name = vm_name
+        self.path = path
+        super().__init__(
+            f"the content written to '{path}' on VM '{vm_name}' did not arrive as sent, so nothing was written",
+            entity_kind="vm",
+            entity_name=vm_name,
+            hint="Retry the operation; if it recurs, check the connection to the VM.",
+        )
+
+
+class FileConflict(StateError):
+    """A conditional file operation found the destination changed since its caller observed it.
+
+    Nothing was written or removed. Names the VM, the operation and the path,
+    never content. A caller that knows what rerunning does passes its own ``hint``.
+    """
+
+    def __init__(self, vm_name: str, operation: str, path: str, *, hint: str | None = None) -> None:
+        self.vm_name = vm_name
+        self.operation = operation
+        self.path = path
+        super().__init__(
+            f"'{path}' on VM '{vm_name}' changed since it was read, so {operation} left it as it is",
+            entity_kind="vm",
+            entity_name=vm_name,
+            hint=hint or "Inspect the file, then retry the operation against its current content.",
+        )
+
+
+class PathRefusal(StrEnum):
+    """Why the file program would not use a path."""
+
+    UNSUITABLE = "unsuitable"
+    """A symbolic link, or the wrong type of file, at the path or one of its parents."""
+    DENIED = "denied"
+    """The account may not use the path: ``EACCES``, ``EPERM`` or ``EROFS``."""
+
+
+class PathRefused(StateError):
+    """The file program refused a path: a link or wrong type at it or a parent, or a permission denial."""
+
+    def __init__(self, vm_name: str, operation: str, path: str, reason: PathRefusal) -> None:
+        self.vm_name = vm_name
+        self.operation = operation
+        self.path = path
+        self.reason = reason
+        if reason is PathRefusal.UNSUITABLE:
+            message = (
+                f"{operation} refused '{path}' on VM '{vm_name}': a link or another file type is at it or a parent"
+            )
+            hint = (
+                "Agentworks never reads or writes through a link. Inspect the path and whatever created it "
+                "(a dotfile installer is the usual cause), then put a regular file or directory there."
+            )
+        else:
+            message = f"{operation} was denied access to '{path}' on VM '{vm_name}'"
+            hint = "Check the ownership and mode of the path and each of its parent directories, then retry."
+        super().__init__(message, entity_kind="vm", entity_name=vm_name, hint=hint)
+
+
+class FileLockTimeout(StateError):
+    """A mutating file operation could not take the VM's file lock within its wait. Nothing changed."""
+
+    def __init__(self, vm_name: str, operation: str, path: str) -> None:
+        self.vm_name = vm_name
+        self.operation = operation
+        self.path = path
+        super().__init__(
+            f"{operation} of '{path}' on VM '{vm_name}' timed out waiting for the VM's file lock",
+            entity_kind="vm",
+            entity_name=vm_name,
+            hint="Another Agentworks operation is writing files on this VM; retry once it has finished.",
+        )
+
+
+class DetachedRefused(StateError):
+    """The detached program refused a launch: its id already exists at ``launch``, or it is running at ``discard``.
+
+    Nothing was changed on the VM.
+    """
+
+    def __init__(self, vm_name: str, launch_id: str, *, running: bool) -> None:
+        self.vm_name = vm_name
+        self.launch_id = launch_id
+        self.running = running
+        if running:
+            message = f"detached launch {launch_id} on VM '{vm_name}' is still running, so it was not discarded"
+            hint = "Wait for it to end, or stop it, then run the command again."
+        else:
+            message = f"detached launch {launch_id} already exists on VM '{vm_name}', so nothing was started"
+            hint = "Run the command again: it starts its work under a new id."
+        super().__init__(message, entity_kind="vm", entity_name=vm_name, hint=hint)

@@ -121,8 +121,6 @@ def _safe_mise_validation_message(error: object) -> str | None:
         return None
     if error.kind is MiseSettingsErrorKind.PACKAGE_SYNTAX:
         return "mise_packages entries must use non-empty name@version syntax"
-    if error.kind is MiseSettingsErrorKind.LOCKFILE:
-        return "mise_lockfile is invalid"
     if error.kind is MiseSettingsErrorKind.INSTALL_BEFORE:
         return "mise_install_before must be a positive duration such as '7d' or an ISO date"
     return None

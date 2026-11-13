@@ -32,9 +32,11 @@ from __future__ import annotations
 
 import shlex
 
+from agentworks.vms.home_layout import AGENTWORKS_STATE_DIR
+
 # Our own per-user directory on the launch target, holding the recorder
 # script and the per-session ``.thread`` files it writes.
-AGW_CODEX_TAIL = ".agentworks/codex"
+AGW_CODEX_TAIL = f"{AGENTWORKS_STATE_DIR}/codex"
 # The filename carries the recorder's CONTRACT VERSION, not the Agentworks
 # version: ``$1``-destination-plus-``$2``-payload is an interface codex holds
 # a path to for the life of a session. A future recorder that takes different

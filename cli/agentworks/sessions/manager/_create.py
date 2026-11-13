@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.sessions.template import SessionTemplate
     from agentworks.sessions.tmux import RunCommand
+    from agentworks.ssh import SSHLogger
     from agentworks.transports import Transport
     from agentworks.workspaces.template import WorkspaceTemplate
 
@@ -135,14 +136,14 @@ def _reload_vm(db: Database, target_vm_name: str) -> VMRow:
 
 def _build_live_transport(
     vm: VMRow, config: Config, *, redactions: tuple[str, ...] = ()
-) -> tuple[Transport, RunCommand]:
-    """Build the admin SSH transport for the live VM and its run command."""
+) -> tuple[Transport, RunCommand, SSHLogger]:
+    """Build the admin SSH transport for the live VM, its run command and the operation log they share."""
     from agentworks.ssh import SSHLogger
 
     logger = SSHLogger(vm.name, "session-create", redactions=redactions)
     target = _mgr.transport(vm, config, logger=logger)
     run_command: RunCommand = target.run
-    return target, run_command
+    return target, run_command, logger
 
 
 def _preflight_and_resolve(
@@ -203,13 +204,20 @@ def _preflight_and_resolve(
         # predicts each node's declared secrets (the git-credential
         # tokens here) before that node's own preflight.
         # Then the boundary resolve: the walk-away point.
+        # Preflight precedes secret resolution, so its accesses log nothing.
+        admin_access = _mgr._identity_access(vm, config, None, logger=None)
+        agent_access = (
+            None
+            if plan.existing_agent is None or agent_target is None
+            else _mgr._identity_access(vm, config, plan.existing_agent, logger=None)
+        )
         preflight_all(
             graph.nodes,
             RunContext(
                 config=config,
                 operation_scope=graph.scope,
-                admin_target=target,
-                agent_target=agent_target,
+                admin_access=admin_access,
+                agent_access=agent_access,
             ),
             registry=graph.registry,
             interaction=interaction,
@@ -229,7 +237,7 @@ def _preflight_and_resolve(
                 vm=vm,
                 workspace=plan.existing_ws,
                 agent_name=plan.agent_name,
-                runner=agent_target or target,
+                access=agent_access or admin_access,
             )
 
     with output.section("Resolving Secrets"):
@@ -441,7 +449,7 @@ def create_session(
                 target=target,
                 interaction=interaction,
             )
-            target, run_command = _build_live_transport(vm, config, redactions=tuple(secret_values.values()))
+            target, run_command, logger = _build_live_transport(vm, config, redactions=tuple(secret_values.values()))
 
             # ===== Dependency-ordered roll-forward (S11) ========================
             #
@@ -459,6 +467,7 @@ def create_session(
                 graph=graph,
                 vm=vm,
                 target=target,
+                logger=logger,
                 run_command=run_command,
                 agent_target=agent_target,
                 secret_values=secret_values,

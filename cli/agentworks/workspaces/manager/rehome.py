@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import shlex
 from typing import TYPE_CHECKING
 
 from agentworks import output
@@ -14,17 +13,38 @@ from agentworks.errors import (
     UserAbort,
     ValidationError,
 )
+from agentworks.execution.files import guest_path
+from agentworks.execution.requests import Command
+from agentworks.linux_users import managed_home
 from agentworks.path_rendering import format_host_path
 from agentworks.secrets.policy import require_exact_tty_interaction_policy
+from agentworks.vms.initializer.steps import describe_failure, status
 from agentworks.vms.manager import gated_vm_boundary
+from agentworks.workspaces.guest import (
+    FIND_DEADLINE,
+    PROBE_DEADLINE,
+    REQUEST_FAILURES,
+    open_parent_traversal,
+    script,
+    stored_workspace_path,
+)
 from agentworks.workspaces.manager._common import _guard_vm_status, _workspace_scope
 from agentworks.workspaces.manager.repair import _rehome_partial_state_hint
+from agentworks.workspaces.tmuxinator import generate_config, publish_tmuxinator_config, remove_config
 
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, WorkspaceRow
+    from agentworks.execution.access import VMAccess
     from agentworks.harness_setup.locking import NativeMutationGuard
     from agentworks.secrets.policy import TtyInteractionPolicy
+
+
+COPY_DEADLINE = 600
+"""Seconds the copy of the tree to its new path may take."""
+
+REMOVE_OLD_DEADLINE = 60
+"""Seconds the removal of the old directory may take."""
 
 
 def rehome_workspace(
@@ -56,23 +76,19 @@ def rehome_workspace(
     # Determine target path
     from agentworks.workspaces.backends.vm import default_workspace_path
 
-    new_path = target_path if target_path is not None else default_workspace_path(config, name)
-
-    old_path = ws.workspace_path
+    new_path = _target_directory(
+        target_path if target_path is not None else default_workspace_path(config, name), ws_name=name
+    )
+    # Compared normalized: a stored path can be spelled `/data//ws` or `/data/ws/`; one that
+    # is not absolute is refused here, before anything runs.
+    old_path = stored_workspace_path(ws.workspace_path)
 
     if old_path == new_path:
         output.info(f"Workspace '{name}' is already at {new_path}")
         return
 
-    # Safety: detect overlapping paths
-    old_norm = old_path.rstrip("/") + "/"
-    new_norm = new_path.rstrip("/") + "/"
-    if new_norm.startswith(old_norm) or old_norm.startswith(new_norm):
-        raise ValidationError(
-            "source and target paths overlap",
-            entity_kind="workspace",
-            entity_name=name,
-        )
+    # As spelled here, before anything runs; as the guest resolves them, inside the span.
+    _refuse_overlap(old_path, new_path, ws_name=name)
 
     from agentworks.harness_setup.locking import native_mutation_guard
 
@@ -143,10 +159,9 @@ def _rehome_vm(
     """
 
     from agentworks.bootstrap import load_request_registry
-    from agentworks.ssh import SSHError, SSHLogger
-    from agentworks.transports import transport
+    from agentworks.vms.manager import operation_log
     from agentworks.workspaces.acls import apply_workspace_acls
-    from agentworks.workspaces.backends.vm import generate_vscode_workspace
+    from agentworks.workspaces.backends.vm import admin_access, generate_vscode_workspace
 
     ws_name = ws.name
     old_path = ws.workspace_path
@@ -174,25 +189,23 @@ def _rehome_vm(
         interaction=interaction,
         held_native_guard=held_native_guard,
     ):
-        target = transport(vm, config)
+        probe = admin_access(vm, config, None)
 
-        # Verify source exists
-        src_check = target.run(f"test -d {shlex.quote(old_path)}", check=False, timeout=10)
-        if not src_check.ok:
+        if not _is_directory(probe, old_path):
             raise StateError(
                 f"source directory {old_path} does not exist on VM",
                 entity_kind="workspace",
                 entity_name=ws_name,
             )
-
-        # Verify target does not exist
-        dst_check = target.run(f"test -d {shlex.quote(new_path)}", check=False, timeout=10)
-        if dst_check.ok:
+        if _is_directory(probe, new_path):
             raise StateError(
                 f"target directory {new_path} already exists on VM",
                 entity_kind="workspace",
                 entity_name=ws_name,
             )
+        # A link can make different spellings one directory, and the copy would
+        # then write into its own source before --remove-old removes it.
+        _refuse_overlap(*_resolved_paths(probe, old_path, new_path), ws_name=ws_name)
 
         if not yes:
             output.info(f"Rehome workspace '{ws_name}':")
@@ -205,53 +218,52 @@ def _rehome_vm(
             if not output.confirm("Proceed?"):
                 raise UserAbort("rehome cancelled")
 
-        ssh_logger = SSHLogger(vm.name, "workspace-rehome")
-        target = transport(vm, config, logger=ssh_logger)
-        ws_group = ws.linux_group
-
-        # Shell-quote paths once up front; both are interpolated into many shell
-        # commands below. Without this, any space or shell-special character in
-        # a workspace path breaks the command (and exposes an injection surface
-        # if a path is ever supplied by an attacker-controlled source).
-        np = shlex.quote(new_path)
-        op = shlex.quote(old_path)
-
-        # Outer try/finally ensures the SSH logger is closed exactly once. Earlier
-        # versions called close() in every except branch AND on the success path,
-        # which double-wrote the "Finished" footer when an inner raise re-entered
-        # an outer except.
-        try:
+        # The log closes exactly once, however the move ends.
+        with operation_log(vm.name, "workspace-rehome") as ssh_logger:
+            admin = admin_access(vm, config, ssh_logger)
             try:
                 # Create target directory as root and chown to admin so rsync can write
-                target.run(f"mkdir -p {np}", sudo=True)
-                target.run(f"chown {vm.admin_username} {np}", sudo=True)
+                admin.run(Command(("mkdir", "-p", "--", new_path), elevated=True), check=True)
+                admin.run(Command(("chown", vm.admin_username, new_path), elevated=True), check=True)
 
-                # Copy with rsync (fall back to cp -a). Trailing slash matters for
-                # rsync semantics ("contents of source into target"); putting it
-                # AFTER the quoted path works because adjacent quoted/unquoted
-                # tokens concatenate in shell.
+                # Copy with rsync (fall back to cp -a). The trailing slash
+                # matters for rsync: the contents of the source into the target.
                 output.info("Copying workspace...")
-                has_rsync = target.run("which rsync", check=False, timeout=10)
-                if has_rsync.ok:
-                    target.run(f"rsync -a {op}/ {np}/", timeout=600)
+                has_rsync = admin.run(Command(("which", "rsync"), deadline=PROBE_DEADLINE))
+                if has_rsync.require_completed(vm.name) == 0:
+                    admin.run(
+                        Command(("rsync", "-a", "--", f"{old_path}/", f"{new_path}/"), deadline=COPY_DEADLINE),
+                        check=True,
+                    )
                 else:
-                    target.run(f"cp -a {op}/. {np}/", sudo=True, timeout=600)
+                    admin.run(
+                        Command(
+                            ("cp", "-a", "--", f"{old_path}/.", f"{new_path}/"), elevated=True, deadline=COPY_DEADLINE
+                        ),
+                        check=True,
+                    )
 
-                # Verify copy succeeded
-                verify = target.run(f"test -d {np}", check=False, timeout=10)
-                if not verify.ok:
+                if not _is_directory(admin, new_path):
                     raise ExternalError(
                         "copy verification failed, target directory not found",
                         entity_kind="workspace",
                         entity_name=ws_name,
-                        hint=f"SSH log: {ssh_logger.display_path}",
                     )
 
                 # Fix ownership, permissions, and ACLs on the new path
                 output.info("Setting permissions...")
-                target.run(f"chown {vm.admin_username}:{ws_group} {np}", sudo=True)
-                target.run(f"chmod 2770 {np}", sudo=True)
-                target.run(f"find {np} -type d -exec chmod g+s {{}} +", sudo=True, timeout=120)
+                admin.run(
+                    Command(("chown", f"{vm.admin_username}:{ws.linux_group}", new_path), elevated=True), check=True
+                )
+                admin.run(Command(("chmod", "2770", new_path), elevated=True), check=True)
+                admin.run(
+                    Command(
+                        ("find", new_path, "-type", "d", "-exec", "chmod", "g+s", "{}", "+"),
+                        elevated=True,
+                        deadline=FIND_DEADLINE,
+                    ),
+                    check=True,
+                )
                 # Canonical workspace ACL, the same shared spec workspace create
                 # and repair apply, so a rehomed workspace lands in the canonical
                 # state (its first repair is an ACL no-op). Per #254 this now also
@@ -260,51 +272,34 @@ def _rehome_vm(
                 # (warn and continue, exactly as before): the rsync copy already
                 # succeeded, so a later repair converges the tree.
                 try:
-                    apply_workspace_acls(target, new_path)
-                except SSHError as e:
-                    output.warn(f"ACL setup failed: {e}")
+                    apply_workspace_acls(admin.files(), new_path)
+                except REQUEST_FAILURES as e:
+                    output.warn(f"ACL setup failed: {describe_failure(e, ssh_logger.sanitize)}")
 
-                # Fix parent directory traversal. Seed the walk from the PARENT
-                # of the new path (`dirname {np}`), never the workspace dir
-                # itself: its own mode was just set to the canonical 2770 above
-                # (no world bits by design), and an a+x on it would flip 2770 to
-                # 2771. Only true ancestors need a+x. sudo=True already wraps the
-                # command in `sudo -n bash -c '<quoted>'`, so the script runs in
-                # a single bash context. No extra `sh -c '...'` indirection is
-                # needed (and the explicit wrapper made path quoting impossible
-                # to do safely).
-                target.run(
-                    f'p=$(dirname {np}); while [ "$p" != "/" ]; do chmod a+x "$p"; p=$(dirname "$p"); done',
-                    sudo=True,
-                )
+                # Only true ancestors of the new path get a+x; its own mode is
+                # the canonical 2770 set above.
+                admin.run(open_parent_traversal(new_path), check=True)
 
-                # Regenerate tmuxinator config at new path. write_file passes
-                # remote_path to scp as a subprocess arg (not interpolated into a
-                # local shell), so f-string concatenation is safe on the client
-                # side. The remote scp/sftp handler may still interpret the path
-                # per its own rules; if a future change funnels untrusted paths
-                # through here, revisit.
-                from agentworks.workspaces.tmuxinator import console_session_name, generate_config, remove_config
-
+                # Regenerate the tmuxinator config at the new path, replacing the
+                # link to the old one.
+                home = managed_home(vm.admin_username)
                 if tmuxinator_enabled:
-                    tmux_config = generate_config(ws_name, new_path)
-                    target.write_file(f"{new_path}/.tmuxinator.yml", tmux_config)
-                    session = console_session_name(ws_name)
-                    target.run("mkdir -p ~/.config/tmuxinator", timeout=10)
-                    # Keep ~/.config/tmuxinator/ literal so tilde expansion still
-                    # happens; quote just the filename for layered defense.
-                    target.run(
-                        f"ln -sf {np}/.tmuxinator.yml ~/.config/tmuxinator/{shlex.quote(session)}.yml",
-                        timeout=10,
+                    publish_tmuxinator_config(
+                        admin,
+                        home=home,
+                        ws_name=ws_name,
+                        workspace_path=new_path,
+                        text=generate_config(ws_name, new_path),
+                        replace_link=True,
                     )
                 else:
-                    remove_config(target, ws_name, new_path)
+                    remove_config(admin, home=home, ws_name=ws_name, workspace_path=new_path)
 
                 # Retire old-location and copied Git pairs while the old row
                 # still authorizes their source, then establish the new pairs.
                 from agentworks.harness_setup.cleanup import rehome_workspace_artifacts
 
-                rehome_workspace_artifacts(db, ws, new_path, target)
+                rehome_workspace_artifacts(db, ws, new_path, admin, redactions=ssh_logger.redactions)
 
                 # Update database
                 db.update_workspace_path(ws_name, new_path)
@@ -317,7 +312,9 @@ def _rehome_vm(
                 # Handle old directory
                 if remove_old:
                     output.info(f"Removing old directory {old_path}...")
-                    target.run(f"rm -rf {op}", sudo=True, timeout=60)
+                    admin.run(
+                        Command(("rm", "-rf", "--", old_path), elevated=True, deadline=REMOVE_OLD_DEADLINE), check=True
+                    )
                     output.detail("Old directory removed")
                 else:
                     output.info(f"Old directory left in place at {old_path}")
@@ -330,7 +327,10 @@ def _rehome_vm(
                     f"SSH log: {ssh_logger.display_path}"
                 )
                 raise
-            except AgentworksError:
+            except AgentworksError as e:
+                e.add_hint(
+                    f"SSH log: {ssh_logger.display_path}. {_rehome_partial_state_hint(db, ws_name, old_path, new_path)}"
+                )
                 raise
             except Exception as e:
                 raise ExternalError(
@@ -342,7 +342,68 @@ def _rehome_vm(
                         f"{_rehome_partial_state_hint(db, ws_name, old_path, new_path)}"
                     ),
                 ) from e
-        finally:
-            ssh_logger.close()
 
         output.result(f"Workspace '{ws_name}' rehomed to {new_path}")
+
+
+def _refuse_overlap(old_path: str, new_path: str, *, ws_name: str) -> None:
+    """Refuse a target that is the source, inside it, or contains it."""
+    if (new_path + "/").startswith(old_path + "/") or (old_path + "/").startswith(new_path + "/"):
+        raise ValidationError(
+            "source and target paths overlap",
+            entity_kind="workspace",
+            entity_name=ws_name,
+        )
+
+
+def _resolved_paths(access: VMAccess, old_path: str, new_path: str) -> tuple[str, str]:
+    """The source and the target as the guest resolves them, every link followed.
+
+    The source exists (``realpath -e``); the target need not yet (``realpath
+    -m``). It runs as root, as the target's creation does (``mkdir -p``):
+    ``realpath -m`` prints a component it cannot search unresolved, and still
+    succeeds. Boundary: the paths are a guest process's output, so anything
+    but two absolute paths is a ``StateError``.
+    """
+    result = access.run(
+        script(
+            'realpath -z -e -- "$1" && realpath -z -m -- "$2"',
+            old_path,
+            new_path,
+            elevated=True,
+            deadline=PROBE_DEADLINE,
+        ),
+        check=True,
+    )
+    resolved = result.stdout.decode("utf-8", errors="surrogateescape").split("\0")
+    if len(resolved) != 3 or resolved[2] or not all(path.startswith("/") for path in resolved[:2]):
+        raise StateError(
+            f"cannot resolve {old_path} and {new_path} on VM '{access.vm_name}'",
+            entity_kind="vm",
+            entity_name=access.vm_name,
+        )
+    return resolved[0], resolved[1]
+
+
+def _is_directory(access: VMAccess, path: str) -> bool:
+    """Whether a directory is at ``path``, as the admin sees it; an outcome that is not a completion raises."""
+    return status(access, Command(("test", "-d", path), deadline=PROBE_DEADLINE)) == 0
+
+
+def _target_directory(path: str, *, ws_name: str) -> str:
+    """``path`` as a rehome target: the boundary of the operator's ``--target``.
+
+    A trailing ``/`` names the same directory, so it is dropped. Anything
+    else that is not an absolute, normalized path (a relative path, an empty,
+    ``.`` or ``..`` component, the root) is refused before anything runs:
+    the copy would read ``host:path`` as a remote, and the guest steps need
+    the directory's own absolute spelling.
+    """
+    try:
+        return guest_path(path.rstrip("/"))
+    except StateError:
+        raise ValidationError(
+            f"rehome target must be an absolute directory path with no empty, '.' or '..' component, not {path!r}",
+            entity_kind="workspace",
+            entity_name=ws_name,
+        ) from None

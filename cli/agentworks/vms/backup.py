@@ -4,27 +4,33 @@ from __future__ import annotations
 
 import json
 import os
-import shlex
-import subprocess
 import time
 from dataclasses import asdict
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, NoReturn
 
+import agentworks.execution as execution
 from agentworks import output
-from agentworks.errors import BackupError, NotFoundError, StateError
+from agentworks.errors import AgentworksError, BackupError, NotFoundError, StateError, UserAbort
+from agentworks.execution import detached_program, reachability
+from agentworks.execution.access import Admin
+from agentworks.execution.detached import State
+from agentworks.execution.errors import ExecutionIncomplete
+from agentworks.execution.requests import Command, Script, Shell, ToFile
+from agentworks.execution.results import Completed
 from agentworks.path_rendering import format_host_path
-from agentworks.programs import resolve_program
+from agentworks.terminal import sanitize_terminal_output
 from agentworks.vms.applied_state import canonicalize_vm_applied_slice
-from agentworks.vms.manager import _guard_incomplete_vm, gated_vm_boundary
+from agentworks.vms.manager import _guard_incomplete_vm, gated_vm_boundary, operation_log
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from agentworks.config import Config
     from agentworks.db import Database, WorkspaceRow
+    from agentworks.execution.access import VMAccess
+    from agentworks.execution.detached import Detached, Launch, Observation
     from agentworks.secrets.policy import TtyInteractionPolicy
-    from agentworks.transports import SSHTransport, Transport
 
 
 def backup_vm(
@@ -45,8 +51,6 @@ def backup_vm(
     held-active span covers the whole snapshot-archive-transfer body.
     """
     from agentworks.bootstrap import load_request_registry
-    from agentworks.ssh import SSHError, SSHLogger
-    from agentworks.transports import SSHTransport, transport
 
     vm = db.get_vm(vm_name)
     if vm is None:
@@ -70,6 +74,7 @@ def backup_vm(
         )
     if not _host_supports_private_backup_permissions() and db.instance_state.has_vm_owner_tree_desired_overlay(vm_name):
         _raise_windows_overlay_backup_error(vm_name)
+    execution.resolve_ssh()
     registry = load_request_registry(config, live_database=db)
 
     with gated_vm_boundary(db, config, registry, vm, interaction=interaction):
@@ -79,225 +84,198 @@ def backup_vm(
         backup_dir = config.paths.backups / backup_name
         _create_backup_directory(backup_dir, vm_name)
 
-        ssh_logger = SSHLogger(vm_name, "vm-backup")
-        ssh_logger.path = backup_dir / "backup.log"
-        target = transport(vm, config, logger=ssh_logger)
-        # backup_vm runs over the admin Tailscale SSH transport, so this is
-        # always an SSHTransport. _archive_workspaces and _transfer_with_progress
-        # rely on SSH-specific scp argv building for progress reporting.
-        assert isinstance(target, SSHTransport)
+        # The log closes, with its footer, however the body ends, and any failure records backup_failed.
+        with operation_log(vm_name, "vm-backup", path=backup_dir / "backup.log") as log:
+            access = execution.vm_access(vm, config, Admin(), log=log.record)
+            db.insert_vm_event(vm_name, "backup_started")
+            try:
+                return _back_up(db, access, vm_name, timestamp, backup_dir)
+            except KeyboardInterrupt:
+                db.insert_vm_event(vm_name, "backup_failed")
+                raise UserAbort("backup interrupted") from None
+            except Exception:
+                db.insert_vm_event(vm_name, "backup_failed")
+                raise
 
-        # Log the backup event
-        db.insert_vm_event(vm_name, "backup_started")
 
-        # Single try/except/finally around the whole backup body so any failure
-        # (SSH timeout in the agents/workspaces loops, an archive failure, a
-        # disk-full _write_json, etc.) consistently emits backup_failed AND
-        # closes the SSH logger so the log keeps its footer. Previously only
-        # _archive_workspaces had a try/except, so other failure paths left
-        # the DB without an event and the log without its trailing summary.
-        try:
-            with output.section(f"Backing up VM '{vm_name}' to {format_host_path(backup_dir)}"):
-                # Snapshot all DB data in a single transaction for consistency
-                output.info("Reading database (consistent snapshot)...")
-                (
-                    snapshot_vm,
-                    agents,
-                    workspaces,
-                    sessions,
-                    events,
-                    grants_by_agent,
-                    desired_overlays,
-                    applied_slices,
-                ) = db.snapshot_vm_backup_data(vm_name)
-                if snapshot_vm is None:
-                    raise StateError(
-                        f"VM '{vm_name}' no longer exists",
-                        entity_kind="vm",
-                        entity_name=vm_name,
-                    )
-                if not _host_supports_private_backup_permissions() and desired_overlays:
-                    _raise_windows_overlay_backup_error(vm_name)
+def _back_up(db: Database, access: VMAccess, vm_name: str, timestamp: str, backup_dir: Path) -> Path:
+    """Export the VM's metadata and archive its workspaces into ``backup_dir``; return it."""
+    with output.section(f"Backing up VM '{vm_name}' to {format_host_path(backup_dir)}"):
+        # Snapshot all DB data in a single transaction for consistency
+        output.info("Reading database (consistent snapshot)...")
+        (
+            snapshot_vm,
+            agents,
+            workspaces,
+            sessions,
+            events,
+            grants_by_agent,
+            desired_overlays,
+            applied_slices,
+        ) = db.snapshot_vm_backup_data(vm_name)
+        if snapshot_vm is None:
+            raise StateError(
+                f"VM '{vm_name}' no longer exists",
+                entity_kind="vm",
+                entity_name=vm_name,
+            )
+        if not _host_supports_private_backup_permissions() and desired_overlays:
+            _raise_windows_overlay_backup_error(vm_name)
 
-                # 1. VM metadata
-                output.info("Exporting VM metadata...")
-                _write_json(backup_dir / "vm.json", asdict(snapshot_vm))
+        # 1. VM metadata
+        output.info("Exporting VM metadata...")
+        _write_json(backup_dir / "vm.json", asdict(snapshot_vm))
 
-                # 2. Events
-                output.info(f"Exporting {len(events)} VM events...")
-                _write_json(backup_dir / "events.json", [asdict(e) for e in events])
+        # 2. Events
+        output.info(f"Exporting {len(events)} VM events...")
+        _write_json(backup_dir / "events.json", [asdict(e) for e in events])
 
-                # 3. Agents with grants and live UID verification
-                output.info(f"Exporting {len(agents)} agents...")
-                agents_data = []
-                for agent in agents:
-                    agent_data = asdict(agent)
+        # 3. Agents with grants and live UID verification
+        output.info(f"Exporting {len(agents)} agents...")
+        agents_data = []
+        for agent in agents:
+            agent_data = asdict(agent)
 
-                    try:
-                        result = target.run(f"id -u {shlex.quote(agent.linux_user)}", check=False)
-                        if result.ok:
-                            agent_data["live_uid"] = result.stdout.strip()
-                        else:
-                            agent_data["live_uid"] = None
-                            output.warn(f"user '{agent.linux_user}' not found on VM")
-                    except SSHError:
-                        agent_data["live_uid"] = None
+            found, uid = _lookup(access, ("id", "-u", agent.linux_user))
+            agent_data["live_uid"] = uid if found else None
+            if found is False:
+                output.warn(f"user '{agent.linux_user}' not found on VM")
 
-                    agent_data["grants"] = [asdict(g) for g in grants_by_agent.get(agent.name, [])]
-                    agents_data.append(agent_data)
-                _write_json(backup_dir / "agents.json", agents_data)
+            agent_data["grants"] = [asdict(g) for g in grants_by_agent.get(agent.name, [])]
+            agents_data.append(agent_data)
+        _write_json(backup_dir / "agents.json", agents_data)
 
-                # 4. Workspaces with live GID verification
-                output.info(f"Exporting {len(workspaces)} workspaces...")
-                ws_data = []
-                for ws in workspaces:
-                    ws_entry = asdict(ws)
-                    ws_group = ws.linux_group
-                    try:
-                        result = target.run(f"getent group {shlex.quote(ws_group)}", check=False)
-                        if result.ok:
-                            parts = result.stdout.strip().split(":")
-                            ws_entry["live_gid"] = parts[2] if len(parts) > 2 else None
-                        else:
-                            ws_entry["live_gid"] = None
-                            output.warn(f"group '{ws_group}' not found on VM")
-                    except SSHError:
-                        ws_entry["live_gid"] = None
+        # 4. Workspaces with live GID verification
+        output.info(f"Exporting {len(workspaces)} workspaces...")
+        ws_data = []
+        for ws in workspaces:
+            ws_entry = asdict(ws)
+            ws_group = ws.linux_group
+            found, group = _lookup(access, ("getent", "group", ws_group))
+            parts = group.split(":")
+            ws_entry["live_gid"] = parts[2] if found and len(parts) > 2 else None
+            if found is False:
+                output.warn(f"group '{ws_group}' not found on VM")
 
-                    ws_data.append(ws_entry)
-                _write_json(backup_dir / "workspaces.json", ws_data)
+            ws_data.append(ws_entry)
+        _write_json(backup_dir / "workspaces.json", ws_data)
 
-                # 5. Sessions
-                output.info(f"Exporting {len(sessions)} sessions...")
-                _write_json(backup_dir / "sessions.json", [asdict(s) for s in sessions])
+        # 5. Sessions
+        output.info(f"Exporting {len(sessions)} sessions...")
+        _write_json(backup_dir / "sessions.json", [asdict(s) for s in sessions])
 
-                # 6. Desired overlays. This exact owner-tree projection may
-                # contain plaintext environment values, so every local file
-                # is created owner-only and the containing directory is 0700.
-                overlay_data = [
-                    {
-                        "instance_kind": record.instance_kind,
-                        "instance_name": record.instance_name,
-                        "payload_version": record.payload.payload_version,
-                        "value": record.payload.value,
-                        "recorded_at": record.recorded_at,
-                    }
-                    for record in desired_overlays
-                ]
-                _write_json(backup_dir / "instance-specs.json", overlay_data)
+        # 6. Desired overlays. This exact owner-tree projection may
+        # contain plaintext environment values, so every local file
+        # is created owner-only and the containing directory is 0700.
+        overlay_data = [
+            {
+                "instance_kind": record.instance_kind,
+                "instance_name": record.instance_name,
+                "payload_version": record.payload.payload_version,
+                "value": record.payload.value,
+                "recorded_at": record.recorded_at,
+            }
+            for record in desired_overlays
+        ]
+        _write_json(backup_dir / "instance-specs.json", overlay_data)
 
-                # 7. Applied-state evidence is non-secret, but still passes
-                # through its domain codec so corrupt persisted JSON cannot
-                # be laundered into an apparently valid archive.
-                applied_state_data = []
-                for record in applied_slices:
-                    from agentworks.artifacts.state import canonicalize_captures
-                    from agentworks.db import AppliedStateKey
-                    from agentworks.harness_setup.state import canonicalize_native_setup
+        # 7. Applied-state evidence is non-secret, but still passes
+        # through its domain codec so corrupt persisted JSON cannot
+        # be laundered into an apparently valid archive.
+        applied_state_data = []
+        for record in applied_slices:
+            from agentworks.artifacts.state import canonicalize_captures
+            from agentworks.db import AppliedStateKey
+            from agentworks.harness_setup.state import canonicalize_native_setup
 
-                    payload = (
-                        canonicalize_native_setup(record)
-                        if record.key is AppliedStateKey.HARNESS_NATIVE_SETUP
-                        else canonicalize_captures(record)
-                        if record.key is AppliedStateKey.ARTIFACT_INPUTS
-                        else canonicalize_vm_applied_slice(record)
-                    )
-                    applied_state_data.append(
-                        {
-                            "instance_kind": record.instance_kind,
-                            "instance_name": record.instance_name,
-                            "key": record.key.value,
-                            "payload_version": payload.payload_version,
-                            "value": payload.value,
-                            "operation": record.operation,
-                            "recorded_at": record.recorded_at,
-                        }
-                    )
-                _write_json(backup_dir / "instance-applied-state.json", applied_state_data)
-
-                # 8. Workspace files -- single archive of all workspace paths.
-                # _archive_workspaces catches its own KeyboardInterrupt during the
-                # long tar phase and converts it to UserAbort (an AgentworksError),
-                # which the outer except below treats as a backup_failed event.
-                archived_paths: list[str] = []
-                skipped_paths: list[str] = []
-                if workspaces:
-                    output.info("Archiving workspace files...")
-                    local_archive = backup_dir / "workspaces.tar.zst"
-                    archived_paths, skipped_paths = _archive_workspaces(
-                        target,
-                        workspaces,
-                        local_archive,
-                        vm.admin_username,
-                    )
-                else:
-                    output.info("No VM workspaces to archive.")
-
-                # 9. Manifest
-                manifest = {
-                    "version": 5,
-                    "vm_name": vm_name,
-                    "timestamp": timestamp,
-                    "agent_count": len(agents_data),
-                    "workspace_count": len(ws_data),
-                    "session_count": len(sessions),
-                    "event_count": len(events),
-                    "instance_spec_count": len(overlay_data),
-                    "applied_state_count": len(applied_state_data),
-                    "archived_paths": archived_paths,
-                    "skipped_paths": skipped_paths,
+            payload = (
+                canonicalize_native_setup(record)
+                if record.key is AppliedStateKey.HARNESS_NATIVE_SETUP
+                else canonicalize_captures(record)
+                if record.key is AppliedStateKey.ARTIFACT_INPUTS
+                else canonicalize_vm_applied_slice(record)
+            )
+            applied_state_data.append(
+                {
+                    "instance_kind": record.instance_kind,
+                    "instance_name": record.instance_name,
+                    "key": record.key.value,
+                    "payload_version": payload.payload_version,
+                    "value": payload.value,
+                    "operation": record.operation,
+                    "recorded_at": record.recorded_at,
                 }
-                _write_json(backup_dir / "manifest.json", manifest)
+            )
+        _write_json(backup_dir / "instance-applied-state.json", applied_state_data)
 
-            db.insert_vm_event(vm_name, "backup_completed", detail=str(backup_dir))
-            output.result(f"Backup complete: {format_host_path(backup_dir)}")
-            return backup_dir
-        except Exception:
-            db.insert_vm_event(vm_name, "backup_failed")
-            raise
-        finally:
-            ssh_logger.close()
+        # 8. Workspace files: a single archive of all workspace paths. Ctrl-C
+        # anywhere in this body ends the backup as UserAbort with a
+        # backup_failed event (backup_vm); _archive_workspaces stops and
+        # discards the remote archive on its way out.
+        archived_paths: list[str] = []
+        skipped_paths: list[str] = []
+        if workspaces:
+            output.info("Archiving workspace files...")
+            local_archive = backup_dir / "workspaces.tar.zst"
+            archived_paths, skipped_paths = _archive_workspaces(access, workspaces, local_archive)
+        else:
+            output.info("No VM workspaces to archive.")
+
+        # 9. Manifest
+        manifest = {
+            "version": 5,
+            "vm_name": vm_name,
+            "timestamp": timestamp,
+            "agent_count": len(agents_data),
+            "workspace_count": len(ws_data),
+            "session_count": len(sessions),
+            "event_count": len(events),
+            "instance_spec_count": len(overlay_data),
+            "applied_state_count": len(applied_state_data),
+            "archived_paths": archived_paths,
+            "skipped_paths": skipped_paths,
+        }
+        _write_json(backup_dir / "manifest.json", manifest)
+
+    db.insert_vm_event(vm_name, "backup_completed", detail=str(backup_dir))
+    output.result(f"Backup complete: {format_host_path(backup_dir)}")
+    return backup_dir
+
+
+ARCHIVE_NAME = "workspaces.tar.zst"
+"""The archive's name in the launch's work directory and in the backup directory."""
+
+POLL_SECONDS = 5
+"""How often the archive is observed while it runs."""
+
+REPORT_SECONDS = 30
+"""How often the archive's size, a transfer's progress or a lost connection is reported."""
 
 
 def _archive_workspaces(
-    target: SSHTransport,
-    vm_workspaces: list[WorkspaceRow],
-    local_archive: Path,
-    admin_username: str,
+    access: VMAccess, vm_workspaces: list[WorkspaceRow], local_archive: Path
 ) -> tuple[list[str], list[str]]:
-    """Create a single zstd-compressed tar of all workspace paths and transfer locally.
+    """Archive every workspace path that exists into one zstd tar, detached on the VM, and download it.
 
-    Runs tar via nohup so it survives SSH disconnects. Polls for completion
-    and reports archive size periodically.
+    The archive runs as detached work (``agentworks.execution.detached``) in
+    its launch's root-only directory, so it survives a dropped connection;
+    this polls it until it ends, reporting a lost connection once, a reminder
+    every 30 seconds and the recovery. Leaving before the archive is known to
+    have ended, by Ctrl-C or any error, interrupts its whole process group
+    first. Whatever happens once the launch was attempted, its directory is
+    then discarded by the id ``new_launch`` chose before anything was sent.
 
-    The archive is created in a root-owned temp directory to avoid symlink
-    attacks and collisions in the disk-backed staging area.
-
-    ``admin_username`` is the account the archive is chowned to so scp can
-    read it. It comes from the VM row, which is where the value is
-    declared, rather than from ``target.user``: the transport's user is
-    optional (the VM-host transports defer to SSH config), and folding
-    that ``None`` to a literal "agentworks" would silently chown to the
-    wrong account on a VM whose admin-template renamed the admin user.
-
-    Returns (archived_paths, skipped_paths) -- paths that were actually included
-    and paths that were skipped because they didn't exist on the VM.
+    Returns (archived_paths, skipped_paths): the paths that were archived and
+    those skipped because they do not exist on the VM.
     """
-
-    # Create a secure temp directory (root-owned, mode 0700)
-    tmp_dir = target.run("mktemp -d /var/tmp/agentworks-backup-XXXXXX", sudo=True).stdout.strip()
-    q_tmp = shlex.quote(tmp_dir)
-    archive = f"{tmp_dir}/workspaces.tar.zst"
-    q_archive = shlex.quote(archive)
-    detached_dir: str | None = None
-    staging_paths: str | None = None
-
+    detached = access.detached()
+    launch = detached.new_launch()
+    launched = ended = False
     try:
-        # Verify workspace paths exist on the VM
         valid: list[WorkspaceRow] = []
         skipped: list[str] = []
         for ws in vm_workspaces:
-            if target.run(f"test -d {shlex.quote(ws.workspace_path)}", sudo=True, check=False).ok:
+            if _directory_exists(access, ws.workspace_path):
                 valid.append(ws)
             else:
                 output.warn(f"path not found, skipping: {ws.workspace_path}")
@@ -306,216 +284,176 @@ def _archive_workspaces(
         if not valid:
             raise BackupError("no workspace paths exist on the VM")
 
-        # Verify zstd is available
-        if not target.run("command -v zstd >/dev/null 2>&1", check=False).ok:
+        if access.run(Script("command -v zstd >/dev/null 2>&1", Shell.SH)).require_completed(access.vm_name) != 0:
             raise BackupError(
                 "zstd is not installed on the VM.",
                 hint="Run 'agw vm reinit' to install it.",
             )
 
-        # Calculate total uncompressed size
-        du_paths = " ".join(shlex.quote(ws.workspace_path) for ws in valid)
-        du_result = target.run(f"du -sb {du_paths} | awk '{{s+=$1}} END {{print s}}'", sudo=True, check=False)
-        if du_result.ok and du_result.stdout.strip().isdigit():
-            total_size = int(du_result.stdout.strip())
+        paths = [ws.workspace_path for ws in valid]
+        total_size = _total_size(access, paths)
+        if total_size is not None:
             output.detail(f"Total workspace size: {_fmt_size(total_size)} (uncompressed)")
 
-        # Use zstd at level 15 for high compression (trades CPU for smaller archive,
-        # which is worthwhile since cross-workspace deduplication benefits from it).
+        # zstd level 15 trades CPU for a smaller archive, which cross-workspace deduplication benefits from.
         output.detail(f"Archiving {len(valid)} workspace(s) with zstd (this may take a while)...")
-        # The archive paths sit one level under the "Archiving ..." line
-        # (was detail(indent=2)).
         with output.section():
-            output.detail(f"Remote archive: {archive}")
+            output.detail(f"Remote archive: {detached_program.BASE}/{launch.id}/work/{ARCHIVE_NAME}")
             output.detail(f"Local archive:  {format_host_path(local_archive)}")
 
-        # Write paths file via scp to avoid shell escaping issues.
-        paths_file = f"{tmp_dir}/paths.txt"
-        q_paths_file = shlex.quote(paths_file)
-        path_content = "\n".join(ws.workspace_path.lstrip("/") for ws in valid) + "\n"
+        # Every option precedes ``--``, so tar reads each path after it as a member name, never an option.
+        members = [path.lstrip("/") for path in paths]
+        archive = Command(
+            ("tar", "--zstd", "-cf", ARCHIVE_NAME, "-C", "/", "--", *members),
+            env={"ZSTD_CLEVEL": "15"},
+            elevated=True,
+        )
+        launched = True
+        detached.launch(launch, archive)
+        observation = _wait_for_archive(detached, launch, access.vm_name)
+        ended = True
 
-        # Admin can't write to root-owned temp dir, so stage via a securely
-        # created temp file (mktemp creates with mode 0600), then move as root.
-        staging_paths = target.run("mktemp /var/tmp/_aw_paths_XXXXXX.txt").stdout.strip()
-        q_staging = shlex.quote(staging_paths)
-        target.write_file(staging_paths, path_content)
-        target.run(f"mv {q_staging} {q_paths_file}", sudo=True)
+        if observation.state is State.LOST:
+            raise BackupError(
+                f"the archive's process on VM '{access.vm_name}' ended without recording a status,"
+                " as the VM restarting leaves it",
+                hint="Run the backup again.",
+            )
+        if observation.state is State.ABSENT:
+            raise BackupError(f"the archive's directory on VM '{access.vm_name}' disappeared (launch {launch.id})")
+        tail = _decoded(observation.output_tail)
+        if observation.status != 0:
+            detail = f"\nOutput:\n{tail}" if tail else ""
+            raise BackupError(f"tar failed (exit {observation.status}){detail}")
 
-        # Use run_detached in a background thread so we can poll archive size.
-        # run_detached handles nohup reliably via scp'd wrapper script.
-        tar_cmd = f"ZSTD_CLEVEL=15 tar --zstd -cf {q_archive} -C / -T {q_paths_file}"
-
-        # Create a secure admin-owned directory (mktemp -d creates mode 0700)
-        # for run_detached's files. Can't use the root-owned tmp_dir because
-        # run_detached writes its wrapper script via scp (as admin). Using
-        # mktemp -d (not -u) avoids the race/symlink risks of mktemp -u.
-        detached_dir = target.run("mktemp -d /var/tmp/_aw_detached_XXXXXX").stdout.strip()
-        detached_base = f"{detached_dir}/run"
-
-        import threading
-
-        from agentworks.remote_exec import DetachedResult, run_detached
-
-        result_holder: list[DetachedResult] = []
-        error_holder: list[Exception] = []
-
-        def _run_tar() -> None:
-            try:
-                r = run_detached(
-                    target,
-                    tar_cmd,
-                    label="Archive",
-                    base_path=detached_base,
-                    poll_interval=5,
-                    quiet_timeout=300,
-                    as_root=True,
-                    quiet=True,
-                )
-                result_holder.append(r)
-            except Exception as e:
-                error_holder.append(e)
-
-        thread = threading.Thread(target=_run_tar, daemon=True)
-        thread.start()
-
-        # Poll archive size while tar runs
-        try:
-            last_report = time.monotonic()
-            while thread.is_alive():
-                thread.join(timeout=15)
-                if thread.is_alive() and time.monotonic() - last_report >= 30:
-                    _report_size(target, archive)
-                    last_report = time.monotonic()
-        except KeyboardInterrupt:
-            output.warn("Interrupted. Killing remote tar and cleaning up...")
-            # Read the PID that run_detached's wrapper wrote, kill the process group
-            pid_result = target.run(f"cat {shlex.quote(detached_base)}.pid", sudo=True, check=False)
-            pid = pid_result.stdout.strip() if pid_result.ok else ""
-            if pid.isdigit():
-                # Kill the wrapper shell's process group (tar + wrapper)
-                target.run(f"kill -TERM -{pid} 2>/dev/null", sudo=True, check=False)
-            from agentworks.errors import UserAbort
-
-            raise UserAbort("backup interrupted") from None
-
-        if error_holder:
-            raise error_holder[0]
-        if not result_holder:
-            raise BackupError("tar did not produce a result")
-
-        result = result_holder[0]
-        if result.exit_code != 0:
-            detail = f"Command: {tar_cmd}"
-            if result.output:
-                detail += f"\nOutput:\n{result.output.strip()}"
-            raise BackupError(f"tar failed (exit {result.exit_code})\n{detail}")
-
-        _report_size(target, archive)
-
-        if result.output.strip():
+        archive_size = observation.work.get(ARCHIVE_NAME, 0)
+        output.detail(f"Archive size: {_fmt_size(archive_size)}")
+        if tail:
             output.warn("tar warnings:")
-            # The captured tar-warning lines sit one level under the
-            # "tar warnings:" line (was detail(indent=2)).
             with output.section():
-                for line in result.output.strip().splitlines()[-10:]:
+                for line in tail.splitlines():
                     output.detail(line)
 
-        # Transfer to local. Chown the temp dir and archive to the admin
-        # user so scp can read it (avoids making it world-readable).
-        admin = shlex.quote(admin_username)
-        target.run(f"chown {admin} {q_tmp} {q_archive}", sudo=True)
-
-        # Get remote archive size for progress reporting
-        size_result = target.run(f"stat -c %s {q_archive}", sudo=True, check=False)
-        remote_size = int(size_result.stdout.strip()) if size_result.ok else 0
-
         output.detail("Transferring remote archive to local...")
-        _transfer_with_progress(target, archive, local_archive, remote_size)
-
+        progress = _TransferProgress(archive_size)
+        detached.download(launch, ARCHIVE_NAME, ToFile(local_archive, on_progress=progress))
+        output.detail(f"Saved: {format_host_path(local_archive)} ({_fmt_size(local_archive.stat().st_size)})")
     finally:
-        try:
-            target.run(f"rm -rf {q_tmp}", sudo=True, check=False)
-        except Exception as error:
-            output.warn(f"Could not remove remote backup staging directory: {error}")
-        if staging_paths is not None:
-            try:
-                target.run(f"rm -f {shlex.quote(staging_paths)}", check=False)
-            except Exception as error:
-                output.warn(f"Could not remove remote backup path list: {error}")
-        if detached_dir is not None:
-            try:
-                target.run(f"rm -rf {shlex.quote(detached_dir)}", check=False)
-            except Exception as error:
-                output.warn(f"Could not remove remote backup command directory: {error}")
+        if launched:
+            if not ended:
+                _interrupt(detached, launch)
+            _discard(detached, launch)
 
     return [ws.workspace_path for ws in valid], skipped
 
 
-def _transfer_with_progress(
-    target: SSHTransport,
-    remote_path: str,
-    local_path: Path,
-    remote_size: int,
-) -> None:
-    """Transfer a file via scp with progress reporting based on local file size.
-
-    Uses Popen so the process can be terminated on Ctrl-C and the partially
-    downloaded file cleaned up. SSH-only because we bypass the polymorphic
-    ``copy_from`` to drive scp via ``Popen`` for the progress reporting.
-    """
-    from agentworks.ssh import SSHError
-
-    args = [resolve_program("scp"), "-q", *target.host_key_options(), "-o", "BatchMode=yes"]
-    if target.port is not None:
-        args.extend(["-P", str(target.port)])
-    if target.identity_file is not None:
-        args.extend(["-i", str(target.identity_file)])
-    if target.proxy_jump is not None:
-        args.extend(["-J", target.proxy_jump])
-    src = f"{target.user}@{target.host}:{remote_path}" if target.user else f"{target.host}:{remote_path}"
-    args.append(src)
-    args.append(str(local_path))
-
-    proc = subprocess.Popen(
-        args,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
+def _lookup(access: VMAccess, argv: tuple[str, ...]) -> tuple[bool | None, str]:
+    """Whether a lookup found its name, and its output stripped; ``None`` when the request did not complete."""
     try:
-        last_report = time.monotonic()
-        while proc.poll() is None:
-            time.sleep(15)
-            if time.monotonic() - last_report >= 30:
-                try:
-                    local_size = local_path.stat().st_size
-                    if remote_size > 0:
-                        pct = local_size / remote_size * 100
-                        output.detail(f"Transfer: {_fmt_size(local_size)} / {_fmt_size(remote_size)} ({pct:.0f}%)")
-                    else:
-                        output.detail(f"Transfer: {_fmt_size(local_size)}")
-                except FileNotFoundError:
-                    pass
-                last_report = time.monotonic()
+        result = access.run(Command(argv))
+        status = result.require_completed(access.vm_name)
+    except ExecutionIncomplete:
+        return None, ""
+    return status == 0, result.stdout.decode("utf-8", errors="replace").strip()
 
-        if proc.returncode != 0:
-            assert proc.stderr is not None
-            stderr = (proc.stderr.read() or b"").decode("utf-8", errors="replace").strip()
-            raise SSHError(f"scp failed: {stderr}")
 
-        output.detail(f"Saved: {format_host_path(local_path)} ({_fmt_size(local_path.stat().st_size)})")
+def _directory_exists(access: VMAccess, path: str) -> bool:
+    """Whether ``path`` is a directory on the VM, tested as root; an outcome that is not a completion raises."""
+    return access.run(Command(("test", "-d", path), elevated=True)).require_completed(access.vm_name) == 0
 
-    except (KeyboardInterrupt, Exception):
-        proc.terminate()
+
+def _total_size(access: VMAccess, paths: list[str]) -> int | None:
+    """The paths' total size in bytes, counted once where they overlap, or ``None`` when ``du`` gave no total."""
+    result = access.run(Command(("du", "-sbc", "--", *paths), elevated=True))
+    if not isinstance(result.completion, Completed) or result.completion.status != 0:
+        return None
+    lines = result.stdout.decode("utf-8", errors="replace").splitlines()
+    size, _, label = lines[-1].partition("\t") if lines else ("", "", "")
+    return int(size) if label == "total" and size.isdigit() else None
+
+
+def _wait_for_archive(detached: Detached, launch: Launch, vm_name: str) -> Observation:
+    """Poll the archive until it is no longer running, and return the observation that showed it.
+
+    A poll that cannot reach the VM is not a failure: the archive keeps
+    running there, so the loss is reported once, and every 30 seconds either
+    a reminder or the archive's size, then the recovery once. There is no
+    give-up bound; Ctrl-C ends the wait.
+    """
+    last_report = time.monotonic()
+    connected = True
+    while True:
         try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
-        # Clean up partial download
-        if local_path.exists():
-            local_path.unlink()
-        raise
+            observation = detached.observe(launch)
+        except ExecutionIncomplete as error:
+            if error.result.completion not in reachability.POLLED:
+                raise
+            if connected:
+                connected, last_report = False, time.monotonic()
+                output.warn(
+                    f"Lost the connection to VM '{vm_name}'; the archive keeps running there. Waiting to reconnect..."
+                )
+        else:
+            if not connected:
+                connected = True
+                output.info(f"Reconnected to VM '{vm_name}'.")
+            if observation.state is not State.RUNNING:
+                return observation
+        now = time.monotonic()
+        if now - last_report >= REPORT_SECONDS:
+            last_report = now
+            if connected:
+                output.detail(f"Archive size: {_fmt_size(observation.work.get(ARCHIVE_NAME, 0))}")
+            else:
+                output.detail(f"Still waiting to reconnect to VM '{vm_name}'...")
+        time.sleep(POLL_SECONDS)
+
+
+def _interrupt(detached: Detached, launch: Launch) -> None:
+    """Stop the archive's process group; a failure, or a second Ctrl-C, warns, since the backup is already ending."""
+    try:
+        output.warn("Stopping the remote archive...")
+        observation = detached.interrupt(launch)
+    except (AgentworksError, KeyboardInterrupt) as error:
+        output.warn(f"Could not stop the remote archive (launch {launch.id}): {str(error) or 'interrupted'}")
+        return
+    if observation.state is State.RUNNING:
+        output.warn(f"The remote archive is still running (launch {launch.id}).")
+
+
+def _discard(detached: Detached, launch: Launch) -> None:
+    """Remove the launch's directory; a failure, or a second Ctrl-C, warns."""
+    try:
+        detached.discard(launch)
+    except (AgentworksError, KeyboardInterrupt) as error:
+        output.warn(
+            f"Could not remove the archive's directory on the VM (launch {launch.id}): {str(error) or 'interrupted'}."
+            " A later backup on this VM removes it once the archive has ended and is a week old."
+        )
+
+
+class _TransferProgress:
+    """The download's progress callback: reports the bytes written at most every 30 seconds."""
+
+    def __init__(self, total: int) -> None:
+        self._total = total
+        self._last_report = time.monotonic()
+
+    def __call__(self, written: int) -> None:
+        now = time.monotonic()
+        if now - self._last_report < REPORT_SECONDS:
+            return
+        self._last_report = now
+        if self._total > 0:
+            output.detail(f"Transfer: {_fmt_size(written)} / {_fmt_size(self._total)} ({written / self._total:.0%})")
+        else:
+            output.detail(f"Transfer: {_fmt_size(written)}")
+
+
+def _decoded(tail: bytes) -> str:
+    """The last ten lines of the archive's output, decoded and safe to show on a terminal."""
+    lines = [line for line in tail.decode("utf-8", errors="replace").splitlines() if line.strip()]
+    return sanitize_terminal_output("\n".join(lines[-10:]))
 
 
 def _fmt_size(size_bytes: int) -> str:
@@ -527,16 +465,6 @@ def _fmt_size(size_bytes: int) -> str:
     if size_bytes >= 1024:
         return f"{size_bytes / 1024:.1f} KB"
     return f"{size_bytes} B"
-
-
-def _report_size(target: Transport, remote_path: str) -> None:
-    """Print the size of a remote file."""
-    try:
-        result = target.run(f"stat -c %s {shlex.quote(remote_path)}", sudo=True, check=False)
-        if result.ok:
-            output.detail(f"Archive size: {_fmt_size(int(result.stdout.strip()))}")
-    except Exception:
-        pass
 
 
 def _write_json(path: Path, data: object) -> None:

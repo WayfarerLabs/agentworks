@@ -18,6 +18,7 @@ from agentworks.path_rendering import format_host_path
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from pathlib import Path
 
     from agentworks.capabilities.base import OperationScope
     from agentworks.config import Config
@@ -25,7 +26,7 @@ if TYPE_CHECKING:
     from agentworks.env import EnvEntry
     from agentworks.resources import Registry
     from agentworks.secrets import SecretTarget
-    from agentworks.vms.initializer.phase_a import OperationLog
+    from agentworks.vms.initializer.steps import InitLog
 
 
 class _VmAdminEnvScopes(NamedTuple):
@@ -71,11 +72,17 @@ def _resolve_vm_admin_env_scopes(
         # base disappears. A workspace without either still contributes an
         # empty scope, preserving copied-workspace compatibility.
         from agentworks.errors import ConfigError, NotFoundError
-        from agentworks.instance_specs import UnsupportedStoredOverlayError
+        from agentworks.instance_specs import ExplicitReplacementRequired, UnsupportedStoredOverlayError
         from agentworks.workspaces.templates import resolve_live_template, resolve_ws_template_env_or_empty
 
         try:
             ws_env = resolve_live_template(db, registry, ws.name, ws.template).env
+        except ExplicitReplacementRequired as error:
+            output.warn(
+                f"{error}; using its base template for this environment operation."
+                + (f"\n{error.hint}" if error.hint else "")
+            )
+            ws_env = resolve_ws_template_env_or_empty(registry, ws.template)
         except UnsupportedStoredOverlayError:
             output.warn(
                 f"Stored workspace instance spec for {ws.name!r} requires a compatible or newer "
@@ -220,15 +227,19 @@ def _init_log_hint(vm_name: str) -> str:
 
 
 @contextlib.contextmanager
-def _operation_log(vm_name: str, command_stem: str, *, redactions: tuple[str, ...]) -> Iterator[OperationLog]:
+def operation_log(
+    vm_name: str, command_stem: str, *, redactions: tuple[str, ...] = (), path: Path | None = None
+) -> Iterator[InitLog]:
     """An operation log for ``command_stem``, closed on exit, with ``redactions`` registered before its first write.
 
-    Typed by the small ``OperationLog`` protocol, never as ``SSHLogger``, so a
-    manager module that imports nothing legacy can use it.
+    The log is written under the log directory, or to ``path`` when given
+    (backup keeps its log beside the archive). Typed by the ``InitLog``
+    protocol, never as ``SSHLogger``, so a manager module that imports
+    nothing legacy can use it.
     """
     from agentworks.ssh import SSHLogger
 
-    log = SSHLogger(vm_name, command_stem, redactions=redactions)
+    log = SSHLogger(vm_name, command_stem, redactions=redactions, path=path)
     try:
         yield log
     finally:
@@ -297,40 +308,49 @@ def _guard_incomplete_vm(vm: VMRow, *, allow_failed_init: bool = False) -> None:
         )
 
 
+_LIVE_RESOURCES_DEADLINE = 30
+"""How long ``vm describe`` waits for the VM's live resources, in seconds; one dispatch."""
+
+_LIVE_RESOURCES_SCRIPT = (
+    "nproc && "
+    "uptime | grep -oP 'load average: \\K[^,]+' && "
+    "free -b | awk '/^Mem:/{print $2,$3} /^Swap:/{print $2,$3}' && "
+    "df -h / | awk 'NR==2{print $2,$3,$5}'"
+)
+
+
 def _query_live_resources(db: Database, vm: VMRow, config: Config) -> dict[str, str] | None:
-    """Query live resource usage from a VM over SSH."""
+    """Query live resource usage from a VM: one request as the admin, bounded at 30 seconds.
+
+    Describe leaves live resources out rather than failing: any outcome but
+    ``Completed(0)`` with every line present is ``None``. A missing host-key
+    record or an unsupported ssh client also says why.
+    """
+    import agentworks.execution as execution
     from agentworks import output
     from agentworks.errors import AgentworksError
-    from agentworks.execution.errors import TrustMissing
-    from agentworks.transports import transport
+    from agentworks.execution.access import Admin
+    from agentworks.execution.errors import ClientUnsupported, TrustMissing
+    from agentworks.execution.requests import Script, Shell
+    from agentworks.execution.results import Completed
+    from agentworks.terminal import sanitize_fact_line
+    from agentworks.vms.manager.boundary import require_vm_ssh_boundary
 
     try:
-        from agentworks.vms.manager.boundary import require_vm_ssh_boundary
-
         require_vm_ssh_boundary(db, config, vm)
-        target = transport(vm, config)
-    except TrustMissing as exc:
-        # Describe leaves live resources out rather than refusing, but says why.
-        output.warn(f"{exc}. {exc.hint}")
+        access = execution.vm_access(vm, config, Admin())
+        result = access.run(Script(_LIVE_RESOURCES_SCRIPT, Shell.SH, deadline=_LIVE_RESOURCES_DEADLINE))
+    except (TrustMissing, ClientUnsupported) as exc:
+        output.warn(f"{exc}. {exc.hint}" if exc.hint else str(exc))
         return None
     except AgentworksError:
         return None
-    cmd = (
-        "nproc && "
-        "uptime | grep -oP 'load average: \\K[^,]+' && "
-        "free -b | awk '/^Mem:/{print $2,$3} /^Swap:/{print $2,$3}' && "
-        "df -h / | awk 'NR==2{print $2,$3,$5}'"
-    )
-
-    try:
-        result = target.run(cmd, check=False, retries=3)
-    except Exception:
+    if result.completion != Completed(0):
         return None
 
-    if not result.ok:
-        return None
-
-    lines = result.stdout.strip().splitlines()
+    # Guest output reaches the operator's terminal and JSON as is, so no control character survives.
+    text = result.stdout.decode("utf-8", errors="replace").strip()
+    lines = [sanitize_fact_line(line) for line in text.splitlines()]
     if len(lines) < 5:
         return None
 

@@ -13,8 +13,12 @@ from agentworks.db import AppliedStateKey, VersionedPayload
 from agentworks.errors import ExternalError, StateError, UserAbort
 from agentworks.harness_setup.cleanup import _relocated_record
 from agentworks.harness_setup.dispatch import destination_id
+from agentworks.harness_setup.inputs import SetupInputs
 from agentworks.harness_setup.model import NativeClaim, NativeSetupState, SetupRecord
+from agentworks.harness_setup.readiness import evaluate_setup
 from agentworks.harness_setup.state import read_native_setup, write_native_setup
+from agentworks.schema import CapabilityConfig
+from agentworks.secrets.orchestration import SecretTarget
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.workspaces.manager import rehome_workspace
 from tests.artifacts.test_git_excludes import file, git
@@ -51,7 +55,7 @@ def test_repeated_move_rebases_common_metadata(db, deletion, move_case, remove_o
         claims = value
 
     reconcile_workspace_excludes(
-        target,
+        target.access(),
         str(old),
         "codex",
         (skill,),
@@ -59,6 +63,7 @@ def test_repeated_move_rebases_common_metadata(db, deletion, move_case, remove_o
         checkpoint,
         group=group,
         report_incomplete=lambda value: pytest.fail(value),
+        redactions=(),
         shared_paths=(str(native),) if include_mcp else (),
     )
     db.update_workspace_path("project", str(old))
@@ -68,7 +73,7 @@ def test_repeated_move_rebases_common_metadata(db, deletion, move_case, remove_o
         integration="codex",
         declaration={},
         complete=True,
-        destination_id=destination_id(vm, target, location=str(old)),
+        destination_id=destination_id(vm, target.access(), location=str(old)),
         claims=claims,
         artifact_files=(skill,),
         skipped=(ArtifactSkip(path=str(old / ".agents/skipped"), origins=("d" * 64,), reason="fixture"),),
@@ -90,7 +95,7 @@ def test_repeated_move_rebases_common_metadata(db, deletion, move_case, remove_o
         moved = tuple(claim for claim in current.claims if claim.role == MCP_CLAIM_ROLE)
         expected = (server.model_copy(update={"destination": str(new / ".codex/config.toml")}),) if include_mcp else ()
         assert moved == expected
-        assert current.destination_id == destination_id(vm, target, location=str(new))
+        assert current.destination_id == destination_id(vm, target.access(), location=str(new))
         assert current.destination_id not in identities
         identities.add(current.destination_id)
         assert current.complete and not current.pending_cleanup
@@ -118,6 +123,18 @@ def test_foreign_or_malformed_claim_is_not_relocated(path):
     )
     with pytest.raises(StateError):
         _relocated_record(record, "/old", "/new", "b" * 64)
+
+
+def test_path_under_a_dot_dot_root_is_not_rebased_lexically():
+    record = SetupRecord(
+        component="workspace",
+        integration="codex",
+        destination_id="a" * 64,
+        declaration={},
+        skipped=(ArtifactSkip(path="/data/ws/skipped", origins=("b" * 64,), reason="fixture"),),
+    )
+    with pytest.raises(StateError):
+        _relocated_record(record, "/data/link/../ws", "/new", "c" * 64)
 
 
 def test_all_existing_record_shapes_follow_copy_without_inventing_activation(db, deletion, move_case, monkeypatch):
@@ -149,9 +166,9 @@ def test_all_existing_record_shapes_follow_copy_without_inventing_activation(db,
     write_native_setup(db, "workspace", "project", NativeSetupState(records=records), operation="workspace-create")
     observations = []
 
-    def observe(vm, runner, **kwargs):
+    def observe(vm, access, **kwargs):
         observations.append(kwargs["location"])
-        return destination_id(vm, runner, **kwargs)
+        return destination_id(vm, access, **kwargs)
 
     monkeypatch.setattr("agentworks.harness_setup.cleanup.destination_id", observe)
     for index in range(2):
@@ -166,7 +183,7 @@ def test_all_existing_record_shapes_follow_copy_without_inventing_activation(db,
             interaction=TtyInteractionPolicy.REFUSE,
         )
         current = read_native_setup(db, "workspace", "project").records
-        identity = destination_id(db.get_vm("box"), target, location=str(new))
+        identity = destination_id(db.get_vm("box"), target.access(), location=str(new))
         assert len(current) == len(records)
         for before, after in zip(records, current, strict=True):
             assert after.destination_id == identity and after.destination_id != before.destination_id
@@ -185,6 +202,78 @@ def test_all_existing_record_shapes_follow_copy_without_inventing_activation(db,
         records = current
     assert observations == [str(target.home / f"moved-{index}") for index in range(2)]
     assert all(opaque.destination not in command and legacy.destination not in command for command in target.commands)
+
+
+def test_dot_dot_row_relocates_records_with_nothing_to_rebase(db, deletion, move_case, captured_output):
+    # An earlier release stored such a path; its records can hold no path under it.
+    target, _ = move_case
+    (target.home / "original").mkdir()
+    (target.home / "elsewhere").mkdir()
+    db.update_workspace_path("project", f"{target.home}/elsewhere/../original")
+    legacy = NativeClaim(role="settings", identifier="legacy", destination="not a path", written_keys=(("x",),))
+    base = SetupRecord(
+        component="workspace", integration="empty", destination_id="a" * 64, declaration={}, complete=True
+    )
+    records = (base, base.model_copy(update={"integration": "settings", "claims": (legacy,)}))
+    write_native_setup(db, "workspace", "project", NativeSetupState(records=records), operation="workspace-create")
+    new = target.home / "moved"
+    rehome_workspace(
+        db,
+        deletion.config,
+        "project",
+        target_path=str(new),
+        remove_old=False,
+        yes=True,
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
+    identity = destination_id(db.get_vm("box"), target.access(), location=str(new))
+    assert db.get_workspace("project").workspace_path == str(new)
+    assert read_native_setup(db, "workspace", "project").records == tuple(
+        record.model_copy(update={"destination_id": identity}) for record in records
+    )
+    assert captured_output.warnings == []
+
+
+def test_rehome_brings_a_migrated_relative_rows_setup_readiness_current(db, deletion, move_case):
+    # 0.19 ran setup from the admin's home and fingerprinted the row's relative
+    # spelling; migration 40 stores the same directory absolute.
+    target, _ = move_case
+    (target.home / "project").mkdir()
+    db.update_workspace_path("project", str(target.home / "project"))
+    vm = db.get_vm("box")
+    inputs = SetupInputs(
+        kind="workspace",
+        name="project",
+        component="workspace",
+        activations={"shell": CapabilityConfig()},
+        target=SecretTarget(vm={}, workspace={}),
+    )
+    record = SetupRecord(
+        component="workspace",
+        integration="shell",
+        destination_id=destination_id(vm, target.access(), location="project"),
+        declaration=inputs.declaration("shell", inputs.activations["shell"]),
+        complete=True,
+    )
+    write_native_setup(db, "workspace", "project", NativeSetupState(records=(record,)), operation="workspace-create")
+
+    def readiness() -> str:
+        location = db.get_workspace("project").workspace_path
+        return evaluate_setup(
+            db, inputs, "shell", vm=vm, access=target.access(), location=location, remediation="fixture"
+        ).status
+
+    assert readiness() == "stale"
+    rehome_workspace(
+        db,
+        deletion.config,
+        "project",
+        target_path=str(target.home / "moved"),
+        remove_old=False,
+        yes=True,
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
+    assert readiness() == "current"
 
 
 @pytest.mark.parametrize("evidence", ["absent", "empty", "future", "malformed"])
@@ -343,7 +432,7 @@ def test_cancellation_and_internal_failures_escape(db, deletion, move_case, monk
     write_native_setup(db, "workspace", "project", NativeSetupState(records=(record,)), operation="workspace-create")
     db.update_workspace_path("project", str(old))
 
-    def reconcile(runner, path, *args, **kwargs):
+    def reconcile(access, path, *args, **kwargs):
         if path == str(old if stage == "old-git" else new):
             raise failure
 

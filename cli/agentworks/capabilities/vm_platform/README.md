@@ -381,7 +381,7 @@ author most needs to get right.
 `RunContext` (`../base.py`) is a frozen dataclass, rebuilt fresh per stage (never mutated, never
 `replace()`'d). It carries `config` and `operation_scope` as plain fields, and grants power through
 accessor methods rather than bare fields so a future permission model can gate them without changing
-signatures: `admin_target()` / `agent_target()` return execution `Transport`s, and `secret(name)`
+signatures: `admin_access()` / `agent_access()` return that user's `VMAccess`, and `secret(name)`
 returns a resolved secret value. `ctx.secret(name)` raises a typed `ConfigError` if the context was
 assembled without a resolve pass, and it is scoped: an op can read only the names its config model
 marked.
@@ -619,7 +619,7 @@ and the operator-facing command banners that the rest of the codebase calls "pha
   the address itself. A failure before the contract passes leaves the VM failed, and an interrupt
   leaves it incomplete; every ordinary command refuses either, and the guidance names delete.
 - **Initialization** is `run_initialization` (`agentworks.vms.initializer`) plus VM hardening
-  (`agentworks.vms.hardening`), run over a `Transport` against the created VM. It is
+  (`agentworks.vms.hardening`), run on the admin's `VMAccess` to the created VM. It is
   platform-agnostic. **It is re-runnable and is exactly what `agw vm reinit` re-runs.** The Phase A
   record-and-verify driver `bootstrap_vm` is provisioning, not this stage, and runs only at create.
 
@@ -643,14 +643,16 @@ The seam between the two stages is the source of the most important gotcha below
 
 Because create-time bootstrap is baked into the backend's create mechanism, **a change to it reaches
 new VMs only.** `agw vm reinit` (`manager.reinit_vm`) re-runs initialization (`run_initialization`
--> the platform-agnostic setup and hardening) over a transport; it does not call `platform.create()`
-again or re-run the backend's create-time user-data. So decide deliberately where a fix belongs:
+-> the platform-agnostic setup and hardening) over the admin's `VMAccess`; it does not call
+`platform.create()` again or re-run the backend's create-time user-data. So decide deliberately
+where a fix belongs:
 
 - **Must reach already-provisioned VMs?** Put it in initialization, as an idempotent reconciliation
   step. The models are `initializer._preserve_ssh_host_keys` and the sysctl / `hidepid` steps in
-  `agentworks.vms.hardening` (ADR 0012): each is written at create and re-applied on `reinit`,
-  content-diffed so a steady-state VM produces no change. Initialization is platform-agnostic, so
-  weigh whether the fix is truly generic before putting it there.
+  `agentworks.vms.hardening` (ADR 0012): each is written at create and re-applied on `reinit`, the
+  sysctl baseline through `Files.update` so a steady-state VM produces no change, and the host-key
+  drop-in rewritten with the same content. Initialization is platform-agnostic, so weigh whether the
+  fix is truly generic before putting it there.
 - **Genuinely platform-specific, and new-VMs-only is acceptable?** Put it in the platform's
   create-time provisioning and remediate existing VMs out of band. The Lima `subuid` cap took this
   route on purpose (below).

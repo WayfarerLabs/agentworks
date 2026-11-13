@@ -31,6 +31,8 @@ that caller must switch to package-object indirection.
 
 from __future__ import annotations
 
+from agentworks.vms.home_layout import AGENTWORKS_PROFILE, AGENTWORKS_RC
+
 from .driver import (
     VMInitializationOperation,
     _phase_b_setup,
@@ -51,8 +53,6 @@ from .packages import (
 )
 from .shell_env import (
     AGENTWORKS_IDENTITY_PROFILE_PATH,
-    AGENTWORKS_PROFILE,
-    AGENTWORKS_RC,
     AGENTWORKS_SSHD_ACCEPT_ENV_PATH,
     AGENTWORKS_SUDOERS_CONSOLE_SETENV_PATH,
     AGENTWORKS_SUDOERS_ENV_KEEP_PATH,

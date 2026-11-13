@@ -563,3 +563,62 @@ def test_binary_stdio_round_trips_every_byte_and_end_of_file() -> None:
 
     assert bytes(run.out.data) == data
     run.assert_closed()
+
+
+class _FailingReader(io.RawIOBase):
+    """A raw stream that yields ``data`` and then fails to read, as a file on failing storage does."""
+
+    def __init__(self, data: bytes) -> None:
+        self._data = data
+
+    def readable(self) -> bool:
+        return True
+
+    def read(self, size: int = -1) -> bytes:
+        if not self._data:
+            raise OSError(5, "Input/output error")
+        chunk, self._data = self._data[:size], self._data[size:]
+        return chunk
+
+
+ECHO_INPUT = "start(); out.write(sys.stdin.buffer.read()); finish()"
+
+
+def test_a_read_error_in_file_input_ends_the_client_and_raises_the_error() -> None:
+    out, err = Capture(), Capture()
+    session = PipeSession(
+        [sys.executable, "-c", PRELUDE + ECHO_INPUT],
+        request=b"",
+        nonce=NONCE,
+        stdin=_FailingReader(b"partial"),  # type: ignore[arg-type]
+        fail_on_input_error=True,
+        on_stdout=out,
+        on_stderr=err,
+        deadline=Deadline.after(10),
+    )
+
+    with session, pytest.raises(OSError, match="Input/output error"):
+        session.pump()
+
+    # The pump raised instead of reporting the child's outcome, and ended the client.
+    process = session._proc  # noqa: SLF001 - the point is that the client was ended
+    assert process is not None and process.poll() is not None
+
+
+def test_a_read_error_in_the_operators_input_still_reads_as_its_end() -> None:
+    out, err = Capture(), Capture()
+    session = PipeSession(
+        [sys.executable, "-c", PRELUDE + ECHO_INPUT],
+        request=b"",
+        nonce=NONCE,
+        stdin=_FailingReader(b"partial"),  # type: ignore[arg-type]
+        on_stdout=out,
+        on_stderr=err,
+        deadline=Deadline.after(10),
+    )
+
+    with session:
+        assert session.pump() is StopReason.DONE
+        session.end()
+
+    assert bytes(out.data) == b"partial"

@@ -370,6 +370,31 @@ def _rename_harness_integration_state(conn: sqlite3.Connection, _context: Migrat
     )
 
 
+def _anchor_relative_workspace_paths(conn: sqlite3.Connection, _context: MigrationContext) -> None:
+    """v40: store a relative workspace path as the absolute path it named on the VM.
+
+    A relative ``paths.vm_workspaces`` was accepted until this release, and
+    the workspace commands then ran ``sudo`` from the admin's login directory,
+    so a relative row named a path under the admin's home. The workspace
+    commands now run root's requests from root's home, so the row is anchored
+    once here rather than in each command. A row starting with ``~`` is left
+    as it is: which home it named depended on whether the command quoted it.
+    """
+    from agentworks.execution.files import normalized_guest_path
+    from agentworks.linux_users import managed_home
+
+    conn.execute("BEGIN IMMEDIATE")
+    rows = conn.execute(
+        "SELECT workspaces.name, workspaces.workspace_path, vms.admin_username "
+        "FROM workspaces JOIN vms ON vms.name = workspaces.vm_name"
+    ).fetchall()
+    for name, path, admin_username in rows:
+        if path.startswith(("/", "~")) or normalized_guest_path(path) == ".":
+            continue
+        anchored = normalized_guest_path(f"{managed_home(admin_username)}/{path}")
+        conn.execute("UPDATE workspaces SET workspace_path = ? WHERE name = ?", (anchored, name))
+
+
 MIGRATIONS: dict[int, str | Callable[[sqlite3.Connection, MigrationContext], None]] = {
     1: """
         CREATE TABLE vm_hosts (
@@ -830,6 +855,8 @@ MIGRATIONS: dict[int, str | Callable[[sqlite3.Connection, MigrationContext], Non
     """,
     38: _add_session_identity,
     39: _add_desired_runtime_state,
+    # Relative workspace paths, from a relative paths.vm_workspaces. --------
+    40: _anchor_relative_workspace_paths,
 }
 
 LATEST_VERSION = max(MIGRATIONS)

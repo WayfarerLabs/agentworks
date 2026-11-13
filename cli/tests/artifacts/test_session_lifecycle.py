@@ -32,7 +32,11 @@ from tests.conftest import stub_build_registry
 from tests.native_setup_fixtures import LocalFixtureTransport
 from tests.sessions.test_create_start_restart_orchestrated import _patch_transports, _restart_fixture
 
-pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="local Linux guest filesystem execution")
+# Every access a command builds is the recording fake: these tests run no ssh.
+pytestmark = [
+    pytest.mark.skipif(sys.platform != "linux", reason="local Linux guest filesystem execution"),
+    pytest.mark.usefixtures("vm_access_recorder"),
+]
 
 
 @dataclass
@@ -392,7 +396,7 @@ def test_deleted_name_reuses_no_private_run_or_uuid(lifecycle):
     old = lifecycle.db.get_session("s1")
     assert old is not None
     files = lifecycle.files()
-    cleanup_session_artifacts(lifecycle.db, old, lifecycle.target)
+    cleanup_session_artifacts(lifecycle.db, old, lifecycle.target.access())
     lifecycle.db.delete_session("s1")
     assert all(not path.exists() for path in files)
     replacement = lifecycle.db.insert_session(
@@ -413,7 +417,7 @@ def test_modified_session_file_keeps_ownership_for_recovery(lifecycle):
     files = lifecycle.files()
     files[0].write_text("operator modification")
     with pytest.raises(StateError):
-        cleanup_session_artifacts(lifecycle.db, session, lifecycle.target)
+        cleanup_session_artifacts(lifecycle.db, session, lifecycle.target.access())
     assert lifecycle.db.get_session("s1") is not None
     assert files[0].exists()
     assert any(
@@ -475,13 +479,13 @@ def test_unconfirmed_new_runtime_keeps_its_run_and_artifacts(lifecycle, monkeypa
 
 
 def test_partial_publication_retains_old_run_and_retry_cleans_staged_files(lifecycle, monkeypatch):
-    from agentworks.native_files import NativeFiles
+    from agentworks.execution.files import Files
 
     lifecycle.restart()
     previous = lifecycle.db.get_session("s1")
     old_files = lifecycle.files()
     assert previous is not None
-    original = NativeFiles.publish
+    original = Files.write_if
     calls = 0
 
     def fail_second(self, *args, **kwargs):
@@ -492,7 +496,7 @@ def test_partial_publication_retains_old_run_and_retry_cleans_staged_files(lifec
         return original(self, *args, **kwargs)
 
     lifecycle.events.clear()
-    monkeypatch.setattr(NativeFiles, "publish", fail_second)
+    monkeypatch.setattr(Files, "write_if", fail_second)
     with pytest.raises(StateError):
         lifecycle.restart()
     interrupted_files = lifecycle.files()
@@ -502,7 +506,7 @@ def test_partial_publication_retains_old_run_and_retry_cleans_staged_files(lifec
     assert current is not None and current.run_id == previous.run_id
     assert "kill" not in lifecycle.events
     assert not read_native_setup(lifecycle.db, "session", "s1").records[0].complete
-    monkeypatch.setattr(NativeFiles, "publish", original)
+    monkeypatch.setattr(Files, "write_if", original)
     lifecycle.restart()
     assert len(lifecycle.files()) == 2
     assert all(not path.exists() for path in interrupted_files)
@@ -656,8 +660,9 @@ def test_real_native_probe_failure_preserves_existing_runtime_before_teardown(
     monkeypatch.setattr(module, "probe_native", observed)
     lifecycle.events.clear()
 
-    # A failed guest login produces a real process failure before native discovery.
-    (lifecycle.target.root / "login-shell").write_text("#!/bin/sh\nexit 9\n")
+    # The real probe runs in the fixture's account, whose login startup fails,
+    # so discovery fails with the probe's own status rather than a fabricated exception.
+    (lifecycle.target.home / ".profile").write_text("exit 1\n")
     with pytest.raises(StateError) as failure:
         lifecycle.restart()
     assert (failure.value.entity_kind, failure.value.entity_name) == ("session", "s1")

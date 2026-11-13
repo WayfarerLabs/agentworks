@@ -1,19 +1,34 @@
-"""Tests for SSH authorized_keys reconciliation during VM init."""
+"""SSH authorized_keys reconciliation, through the file program.
+
+The admin's own write runs the real program on the test's paths
+(``tests/phase_b_support.py``). The agent's, which is root's work with the
+agent as owner, is checked by the operations it asks for; the program's
+ownership and link handling under sudo are ``tests/execution/test_file_program.py``'s.
+"""
 
 from __future__ import annotations
 
+import stat
 from pathlib import Path
-from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
-from agentworks.config import OperatorConfig
-from agentworks.ssh import SSHError
-from agentworks.vms.initializer import AUTHORIZED_KEYS_HEADER, _reconcile_authorized_keys
-from agentworks.vms.initializer.ssh_keys import AuthorizedKeysUnproven
-from tests.ssh_fixtures import TEST_SSH_PUBLIC_KEY, write_test_ssh_keypair
+import pytest
 
-if TYPE_CHECKING:
-    from tests.conftest import CapturedOutput
+from agentworks.config import OperatorConfig
+from agentworks.execution.errors import (
+    CommandFailed,
+    ExecutionIncomplete,
+    FileLockTimeout,
+    PathRefusal,
+    PathRefused,
+    RequestRefused,
+)
+from agentworks.execution.requests import PythonProgram
+from agentworks.execution.results import Completed, NotDelivered, NotDeliveredReason, Result, Unknown, UnknownReason
+from agentworks.vms.initializer import _reconcile_authorized_keys
+from agentworks.vms.initializer.ssh_keys import AuthorizedKeysApplied, AuthorizedKeysUnproven
+from tests.phase_b_support import StepGuest, is_file_operation, requires_file_program
+from tests.ssh_fixtures import TEST_SSH_PUBLIC_KEY, write_test_ssh_keypair
 
 
 def _make_config(tmp_path: Path, extra_keys: list[str] | None = None) -> MagicMock:
@@ -38,216 +53,105 @@ def _make_config(tmp_path: Path, extra_keys: list[str] | None = None) -> MagicMo
     return config
 
 
-def test_primary_key_only(tmp_path: Path) -> None:
+def _keys(path: Path) -> list[str]:
+    return [line for line in path.read_text().splitlines() if line.strip() and not line.startswith("#")]
+
+
+@requires_file_program
+def test_the_admin_file_holds_exactly_the_configured_keys_at_0600(tmp_path: Path) -> None:
+    config = _make_config(tmp_path, extra_keys=["ssh-rsa BBBB-extra1", "ssh-ed25519 CCCC-extra2"])
+    home = tmp_path / "home"
+    guest = StepGuest()
+
+    outcome = _reconcile_authorized_keys(guest.files, config, str(home), guest.log)
+
+    assert isinstance(outcome, AuthorizedKeysApplied)
+    keys = home / ".ssh" / "authorized_keys"
+    assert _keys(keys) == [TEST_SSH_PUBLIC_KEY.strip(), "ssh-rsa BBBB-extra1", "ssh-ed25519 CCCC-extra2"]
+    assert stat.S_IMODE(keys.stat().st_mode) == 0o600
+    assert stat.S_IMODE(keys.parent.stat().st_mode) == 0o700
+    assert not any(request.elevated for request in guest.access.requests())
+
+
+@requires_file_program
+def test_a_key_no_longer_configured_is_removed(tmp_path: Path) -> None:
     config = _make_config(tmp_path)
-    target = MagicMock()
-    logger = MagicMock()
-    logger.has_warnings = False
+    keys = tmp_path / "home" / ".ssh" / "authorized_keys"
+    keys.parent.mkdir(parents=True)
+    keys.write_text("ssh-rsa REMOVED-key\n")
+    keys.chmod(0o644)
+    guest = StepGuest()
 
-    _reconcile_authorized_keys(target, config, "/home/agentworks", logger)
+    _reconcile_authorized_keys(guest.files, config, str(tmp_path / "home"), guest.log)
 
-    target.write_file.assert_called_once()
-    path, content = target.write_file.call_args.args
-    assert path == "/home/agentworks/.ssh/authorized_keys"
-    assert TEST_SSH_PUBLIC_KEY in content
-    assert content.startswith(AUTHORIZED_KEYS_HEADER)
-
-
-def test_primary_plus_extra_keys(tmp_path: Path) -> None:
-    config = _make_config(
-        tmp_path,
-        extra_keys=[
-            "ssh-rsa BBBB-extra1",
-            "ssh-ed25519 CCCC-extra2",
-        ],
-    )
-    target = MagicMock()
-    logger = MagicMock()
-    logger.has_warnings = False
-
-    _reconcile_authorized_keys(target, config, "/home/agentworks", logger)
-
-    content = target.write_file.call_args.args[1]
-    assert TEST_SSH_PUBLIC_KEY in content
-    assert "ssh-rsa BBBB-extra1" in content
-    assert "ssh-ed25519 CCCC-extra2" in content
-    assert content.startswith(AUTHORIZED_KEYS_HEADER)
+    assert _keys(keys) == [TEST_SSH_PUBLIC_KEY.strip()]
+    assert stat.S_IMODE(keys.stat().st_mode) == 0o600
 
 
-def test_header_present(tmp_path: Path) -> None:
-    config = _make_config(tmp_path)
-    target = MagicMock()
-    logger = MagicMock()
-    logger.has_warnings = False
+@pytest.mark.parametrize(
+    "error",
+    [
+        CommandFailed("box", 1, Result(Completed(1)), streams_logged=True),
+        ExecutionIncomplete("box", Result(Unknown(UnknownReason.CONNECTION))),
+        PathRefused("box", "write", "/home/agentworks/.ssh/authorized_keys", PathRefusal.UNSUITABLE),
+        RequestRefused("box", "cwd", Result(NotDelivered(NotDeliveredReason.REFUSED, "cwd"))),
+        FileLockTimeout("box", "write", "/home/agentworks/.ssh/authorized_keys"),
+    ],
+    ids=["CommandFailed", "ExecutionIncomplete", "PathRefused", "RequestRefused", "FileLockTimeout"],
+)
+def test_any_step_failure_of_the_admin_write_leaves_the_identity_unproven(tmp_path: Path, error: Exception) -> None:
+    guest = StepGuest(local_files=False)
+    guest.access.default_outcome = error
 
-    _reconcile_authorized_keys(target, config, "/home/agentworks", logger)
-
-    content = target.write_file.call_args.args[1]
-    assert "Managed by agentworks" in content
-    assert "manual edits will be overwritten" in content
-    assert "extra_ssh_public_keys" in content
-
-
-def test_file_mode_600(tmp_path: Path) -> None:
-    config = _make_config(tmp_path)
-    target = MagicMock()
-    logger = MagicMock()
-    logger.has_warnings = False
-
-    _reconcile_authorized_keys(target, config, "/home/agentworks", logger)
-
-    assert target.write_file.call_args.kwargs["mode"] == "600"
-
-
-def test_full_overwrite_semantics(tmp_path: Path) -> None:
-    """Verify the file is a complete replacement, not an append."""
-    config = _make_config(tmp_path, extra_keys=["ssh-rsa BBBB-extra1"])
-    target = MagicMock()
-    logger = MagicMock()
-    logger.has_warnings = False
-
-    _reconcile_authorized_keys(target, config, "/home/agentworks", logger)
-
-    content = target.write_file.call_args.args[1]
-    # Should have exactly the header + 2 keys (primary + 1 extra), each on its own line
-    lines = [ln for ln in content.splitlines() if not ln.startswith("#") and ln.strip()]
-    assert len(lines) == 2
-
-
-def test_direct_write_failure_does_not_expose_transport_detail(
-    tmp_path: Path,
-    captured_output: CapturedOutput,
-) -> None:
-    sentinel = "sensitive-transport-diagnostic-sentinel"
-    config = _make_config(tmp_path)
-    target = MagicMock()
-    target.write_file.side_effect = SSHError(sentinel)
-    logger = MagicMock()
-
-    outcome = _reconcile_authorized_keys(target, config, "/home/agentworks", logger)
+    outcome = _reconcile_authorized_keys(guest.files, _make_config(tmp_path), "/home/agentworks", guest.log)
 
     assert isinstance(outcome, AuthorizedKeysUnproven)
-    diagnostics = (
-        repr(outcome),
-        repr(getattr(outcome, "args", ())),
-        repr(logger.warning.call_args_list),
-        repr(captured_output.warnings),
-        repr(captured_output.lines),
-    )
-    assert all(sentinel not in diagnostic for diagnostic in diagnostics)
+    (warning,) = guest.log.warned
+    assert TEST_SSH_PUBLIC_KEY.split()[1] not in warning
 
 
-# -- owner= (stage-and-install) path ---------------------------------------
+def test_the_admin_write_failure_warning_shows_none_of_the_program_s_streams(tmp_path: Path) -> None:
+    guest = StepGuest(local_files=False)
+    failed = Result(Completed(1), stderr=b"Traceback\nstream-only-detail\n")
+    guest.access.default_outcome = CommandFailed("box", 1, failed, streams_logged=True)
+
+    _reconcile_authorized_keys(guest.files, _make_config(tmp_path), "/home/agentworks", guest.log)
+
+    (warning,) = guest.log.warned
+    assert "stream-only-detail" not in warning
 
 
-def _build_owner_target(staging_path: str = "/tmp/agw-ak.ABC123") -> MagicMock:
-    """``Transport`` mock whose mktemp returns a deterministic staging path."""
-    target = MagicMock()
-
-    def _run_side_effect(cmd: str, *_, **__) -> MagicMock:
-        result = MagicMock()
-        result.ok = True
-        if cmd.startswith("mktemp"):
-            result.stdout = staging_path + "\n"
-        else:
-            result.stdout = ""
-        return result
-
-    target.run.side_effect = _run_side_effect
-    return target
+AGENT_HOME = "/home/agt-foo"
 
 
-def test_owner_branch_stages_then_installs(tmp_path: Path) -> None:
-    """owner= path: install -d, mktemp, write_file (private mode), install, rm."""
-    config = _make_config(tmp_path)
-    target = _build_owner_target()
-    logger = MagicMock()
-    logger.has_warnings = False
-
-    _reconcile_authorized_keys(target, config, "/home/agt-foo", logger, owner="agt-foo")
-
-    # Sequence of target.run commands (run is called 4 times: install -d,
-    # mktemp, install -o ..., rm -f).
-    run_cmds = [call.args[0] for call in target.run.call_args_list]
-    assert any(cmd.startswith("install -d -o agt-foo -g agt-foo -m 0700 /home/agt-foo/.ssh") for cmd in run_cmds), (
-        f"missing install -d in {run_cmds}"
-    )
-    assert any(cmd.startswith("mktemp") for cmd in run_cmds), f"missing mktemp in {run_cmds}"
-    assert any(
-        "install -o agt-foo -g agt-foo -m 0600" in cmd and "/home/agt-foo/.ssh/authorized_keys" in cmd
-        for cmd in run_cmds
-    ), f"missing final install in {run_cmds}"
-    assert any(cmd.startswith("rm -f") for cmd in run_cmds), f"missing rm -f cleanup in {run_cmds}"
-
-    # write_file must land in the mktemp staging path with 0600 perms so the
-    # content is private before the atomic install lands it in agent home.
-    target.write_file.assert_called_once()
-    staging_path, content = target.write_file.call_args.args
-    assert staging_path == "/tmp/agw-ak.ABC123"
-    assert target.write_file.call_args.kwargs["mode"] == "0600"
-    assert content.startswith(AUTHORIZED_KEYS_HEADER)
+def _operation(request: object) -> str | None:
+    """The file operation ``request`` runs, or ``None`` for any other request."""
+    return request.args[0] if isinstance(request, PythonProgram) and is_file_operation(request) else None
 
 
-def test_owner_branch_cleans_up_on_install_failure(tmp_path: Path) -> None:
-    """If install -o ... fails, the staging rm -f still runs (try/finally)."""
-    config = _make_config(tmp_path)
-    target = MagicMock()
-    run_calls: list[str] = []
+def test_the_agent_s_ssh_directory_and_file_are_placed_as_root_with_the_agent_as_owner(tmp_path: Path) -> None:
+    guest = StepGuest(local_files=False)
 
-    def _run_side_effect(cmd: str, *_, **__) -> MagicMock:
-        run_calls.append(cmd)
-        if cmd.startswith("mktemp"):
-            r = MagicMock()
-            r.stdout = "/tmp/agw-ak.ABC123\n"
-            r.ok = True
-            return r
-        if "install -o agt-foo" in cmd:
-            raise SSHError("simulated install failure")
-        r = MagicMock()
-        r.ok = True
-        r.stdout = ""
-        return r
+    outcome = _reconcile_authorized_keys(guest.files, _make_config(tmp_path), AGENT_HOME, guest.log, owner="agt-foo")
 
-    target.run.side_effect = _run_side_effect
-    logger = MagicMock()
-    logger.has_warnings = False
-
-    import contextlib
-
-    with contextlib.suppress(SSHError):
-        _reconcile_authorized_keys(target, config, "/home/agt-foo", logger, owner="agt-foo")
-
-    # Cleanup must have run despite the install failure.
-    assert any(cmd.startswith("rm -f /tmp/agw-ak.ABC123") for cmd in run_calls), (
-        f"expected staging cleanup, got: {run_calls}"
-    )
+    assert isinstance(outcome, AuthorizedKeysApplied)
+    (directory, directory_params), (write, write_params) = guest.file_operations()
+    assert (directory, write) == ("ensure_directory", "write")
+    assert directory_params == {"path": f"{AGENT_HOME}/.ssh", "mode": 0o700, "owner": "agt-foo", "group": "agt-foo"}
+    assert (write_params["path"], write_params["mode"]) == (f"{AGENT_HOME}/.ssh/authorized_keys", 0o600)
+    assert (write_params["owner"], write_params["group"]) == ("agt-foo", "agt-foo")
+    assert all(request.elevated for request in guest.access.requests())
+    assert guest.commands() == []
 
 
-def test_owner_branch_raises_on_failure(tmp_path: Path) -> None:
-    """owner= path raises (unlike owner=None which warns).
+@pytest.mark.parametrize("failing", ["ensure_directory", "write"])
+def test_a_failed_agent_placement_raises(tmp_path: Path, failing: str) -> None:
+    """Agent SSH depends on the file, so a failure raises and the caller rolls back."""
+    guest = StepGuest(local_files=False)
+    refused = PathRefused("box", failing, "/home/agt-foo/.ssh", PathRefusal.UNSUITABLE)
+    guest.access.answer = lambda call: refused if _operation(call.request) == failing else None
 
-    The caller relies on this so a half-set-up agent triggers rollback
-    rather than continuing with downstream agent SSH calls that all fail
-    with cryptic exit 255 errors.
-    """
-    config = _make_config(tmp_path)
-    target = MagicMock()
+    with pytest.raises(PathRefused):
+        _reconcile_authorized_keys(guest.files, _make_config(tmp_path), AGENT_HOME, guest.log, owner="agt-foo")
 
-    def _run_side_effect(cmd: str, *_, **__) -> MagicMock:
-        if cmd.startswith("install -d"):
-            raise SSHError("simulated install -d failure")
-        r = MagicMock()
-        r.ok = True
-        r.stdout = ""
-        return r
-
-    target.run.side_effect = _run_side_effect
-    logger = MagicMock()
-    logger.has_warnings = False
-
-    raised = False
-    try:
-        _reconcile_authorized_keys(target, config, "/home/agt-foo", logger, owner="agt-foo")
-    except SSHError:
-        raised = True
-    assert raised, "owner= path must raise on failure"
+    assert guest.log.warned == []

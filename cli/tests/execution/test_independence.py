@@ -43,6 +43,13 @@ import agentworks.capabilities.vm_platform.public_ssh
 import agentworks.vms.contract
 import agentworks.vms.recovery
 
+# Every plugin, which loads the plugin index and so every first-party
+# plugin's registration.
+import agentworks.plugins
+
+for module in pkgutil.walk_packages(agentworks.plugins.__path__, agentworks.plugins.__name__ + "."):
+    importlib.import_module(module.name)
+
 assert not any(
     loaded == name or loaded.startswith(name + ".")
     for loaded in sys.modules for name in retired

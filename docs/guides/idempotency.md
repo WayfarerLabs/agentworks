@@ -56,26 +56,39 @@ Cancellation, shared persistence failures, invalid activation preflight and unex
 errors still abort. An integration failure does not report complete setup.
 
 If the VM was created with `--spec` or `--admin-spec`, reinit consumes both stored final layers
-after their selected VM and admin templates. It does not accept a flag to change or clear either
-layer.
+after their selected VM and admin templates. `vm reinit --admin-template <name>` re-points the admin
+user and `--admin-spec` replaces the admin layer (`'{}'` or `''` clears it), with the same
+validation, retry behavior and tolerance of a stored layer that needs replacing as
+`agent reinit --update-template` and `--spec` above. Both are stored only once the VM contract's
+checks have passed, just before initialization. The VM layer cannot change after create.
+
+Reinit never writes Agentworks' own files in a home through a symbolic link: the profile and rc
+fragments, the rc files' source lines, the mise config and lockfile, and `~/.ssh` and its
+`authorized_keys`. A linked rc file (`~/.profile`, `~/.bashrc`, `~/.zprofile`, `~/.zshrc`) whose
+target already sources the Agentworks fragment is accepted as it is; one whose target does not is
+left alone with a warning naming the line to add, and every reinit stays partial until the line is
+there. Git checkouts of dotfiles, and what your install commands and dotfiles installer do, follow
+links as before. The same holds for agent reinit.
 
 ### Fully idempotent
 
-| Step                   | Notes                                                                                  |
-| ---------------------- | -------------------------------------------------------------------------------------- |
-| Apt sources            | Key downloaded if missing, source list overwritten                                     |
-| SSH host key preserve  | cloud-init drop-in written so host keys survive stop/start                             |
-| Shell                  | Overwritten from config                                                                |
-| SSH authorized keys    | Overwritten from config                                                                |
-| Git credentials        | Complete desired list rebuilt; empty removes Agentworks-owned credential/routing state |
-| Dotfiles (git source)  | `git pull` if already cloned, fresh clone if not                                       |
-| Mise packages          | Installed if missing, pruned if removed (when `mise_prune_on_reinit = true`)           |
-| Mise activation        | Overwritten from config (disabled comment written when off)                            |
-| PATH additions         | Overwritten from config                                                                |
-| Tailscale DNS          | Startup-ordering drop-in rewritten only when content differs                           |
-| sshd AcceptEnv         | Drop-in overwritten; sshd reloaded                                                     |
-| sudoers env_keep       | Fragment overwritten, staged and `visudo -cf` validated before promotion               |
-| sudoers console setenv | Same; scoped to the VM's admin user                                                    |
+| Step                   | Notes                                                                                                                                                                                                                                            |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Apt sources            | Key downloaded if missing; source list rewritten, and apt refreshed, only on a change                                                                                                                                                            |
+| SSH host key preserve  | cloud-init drop-in written so host keys survive stop/start                                                                                                                                                                                       |
+| Shell                  | Overwritten from config                                                                                                                                                                                                                          |
+| Shell source lines     | Appended to an rc file only when it does not already source the fragment; a linked rc file is never written through                                                                                                                              |
+| SSH authorized keys    | Overwritten from config                                                                                                                                                                                                                          |
+| Git credentials        | Complete desired list rebuilt; empty removes Agentworks-owned credential/routing state                                                                                                                                                           |
+| Dotfiles (git source)  | Cloned if absent; then the `ref` (the remote's default branch without one) is fetched and checked out, so a changed or dropped `ref` takes effect. A failed sync skips the install                                                               |
+| Mise packages          | Installed if missing, pruned if removed (when `mise_prune_on_reinit = true`)                                                                                                                                                                     |
+| Mise activation        | Overwritten from config (disabled comment written when off)                                                                                                                                                                                      |
+| PATH additions         | Overwritten from config                                                                                                                                                                                                                          |
+| VM hardening           | Sysctl baseline rewritten, and loaded, only when content differs; a failed load puts the prior baseline back. The `/proc` line in `/etc/fstab` is edited only when it has no `hidepid`, or `hidepid=0` (`off`); any other value is left as it is |
+| Tailscale DNS          | Startup-ordering drop-in rewritten, and systemd reloaded, only when content differs; a failed reload puts the prior drop-in back                                                                                                                 |
+| sshd AcceptEnv         | Drop-in rewritten, validated and sshd reloaded only when its content differs; any failure puts the prior drop-in back, so the next reinit retries                                                                                                |
+| sudoers env_keep       | Fragment overwritten, staged and `visudo -cf` validated before promotion                                                                                                                                                                         |
+| sudoers console setenv | Same; scoped to the VM's admin user                                                                                                                                                                                                              |
 
 ### Additive only
 
@@ -91,9 +104,9 @@ These add things on reinit but do not remove them when removed from config:
 
 ### Other
 
-| Step                    | Notes                                                                    |
-| ----------------------- | ------------------------------------------------------------------------ |
-| Dotfiles (local source) | Overwritten, not merged. Side effects from previous installs may linger. |
+| Step                    | Notes                                                                                                                                                                                                                                                                                            |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Dotfiles (local source) | Replaced whole through a temporary sibling, not merged; the previous tree comes back if the upload fails. Side effects from previous installs may linger. A destination at a tool's own directory, such as `~/.claude` or `~/.codex`, is replaced whole on every reinit, runtime state included. |
 
 ## Agent reinit
 
@@ -121,17 +134,18 @@ access was restored.
 
 ### Fully idempotent
 
-| Step                       | Notes                                                                                                                                                                    |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| User creation              | Detection-based: created if absent, shell corrected if diverged, else no-op                                                                                              |
-| Workspace group            | Skipped if exists                                                                                                                                                        |
-| Workspace grant membership | Reconciled from the agent's recorded grants: idempotent group add per granted workspace, no-op if already a member. Repairs a recreated user whose memberships were lost |
-| Shell rc (prompt)          | Overwritten from template                                                                                                                                                |
-| Git credentials            | Complete desired list rebuilt; empty removes Agentworks-owned credential/routing state                                                                                   |
-| Dotfiles (git source)      | `git pull` if already cloned                                                                                                                                             |
-| Mise packages              | Installed if missing, pruned if removed (when `mise_prune_on_reinit = true`)                                                                                             |
-| Mise activation            | Overwritten from template                                                                                                                                                |
-| PATH additions             | Appended idempotently                                                                                                                                                    |
+| Step                       | Notes                                                                                                                                                                              |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| User creation              | Detection-based: created if absent, shell corrected if diverged, else no-op                                                                                                        |
+| Workspace group            | Skipped if exists                                                                                                                                                                  |
+| Workspace grant membership | Reconciled from the agent's recorded grants: idempotent group add per granted workspace, no-op if already a member. Repairs a recreated user whose memberships were lost           |
+| Shell rc (prompt)          | Overwritten from template                                                                                                                                                          |
+| Git credentials            | Complete desired list rebuilt; empty removes Agentworks-owned credential/routing state                                                                                             |
+| Dotfiles (git source)      | Cloned if absent; then the `ref` (the remote's default branch without one) is fetched and checked out, so a changed or dropped `ref` takes effect. A failed sync skips the install |
+| Mise packages              | Installed if missing, pruned if removed (when `mise_prune_on_reinit = true`)                                                                                                       |
+| Mise activation            | Overwritten from template                                                                                                                                                          |
+| PATH additions             | Overwritten from template                                                                                                                                                          |
+| Shell source lines         | Appended to an rc file only when it does not already source the fragment; a linked rc file is never written through                                                                |
 
 ### Additive only
 
@@ -142,9 +156,9 @@ access was restored.
 
 ### Other
 
-| Step                    | Notes                                                                    |
-| ----------------------- | ------------------------------------------------------------------------ |
-| Dotfiles (local source) | Overwritten, not merged. Side effects from previous installs may linger. |
+| Step                    | Notes                                                                                                                                                                                                                                                                                            |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Dotfiles (local source) | Replaced whole through a temporary sibling, not merged; the previous tree comes back if the upload fails. Side effects from previous installs may linger. A destination at a tool's own directory, such as `~/.claude` or `~/.codex`, is replaced whole on every reinit, runtime state included. |
 
 ## Workspace creation and interruption
 
@@ -186,13 +200,13 @@ Repair does revoke stale agent group memberships when database grants are remove
 
 ### Fully idempotent
 
-| Step                         | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Workspace group + membership | Group created if missing; admin and granted agents reconciled against the grants. Reports `Fixed:` per change, `OK:` when already correct.                                                                                                                                                                                                                                                                                                                               |
-| Ownership, permissions, SGID | Canonical chown/chmod re-run every time (no-ops on already-correct state), but carry `-c` so the step observes whether anything changed and reports `Fixed:` vs `OK:` accordingly.                                                                                                                                                                                                                                                                                       |
-| ACLs                         | Canonical setfacl (the same recursive spec `workspace create`, `copy`, `rehome`, and VM init apply, via one shared helper) re-run every time; the step snapshots the tree's ACLs with `getfacl` before and after and compares, reporting `Fixed:` only on a real change and `OK:` otherwise. Because all workspace ACL paths share the spec, a first repair of a freshly created, copied, or rehomed workspace is a no-op.                                               |
-| Parent traversal             | `chmod a+x` re-applied up each ancestor, seeded from the workspace's PARENT so the walk never touches the workspace dir's own canonical `2770` (which carries no world bits by design). Carries `-c`, so the step reports `Fixed:` when it opened a missing traversal bit and `OK:` when every ancestor was already traversable. A freshly created workspace whose ancestors are already traversable reports `OK:` here, so a first repair after create is a true no-op. |
-| Git identity                 | Template `git_user_name` / `git_user_email` stamped into the checkout's repo-local config; detection-based, so an already-correct value is left as-is. No-op when no identity is declared or the workspace has no repo.                                                                                                                                                                                                                                                  |
+| Step                         | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Workspace group + membership | Group created if missing; admin and granted agents reconciled against the grants. Reports `Fixed:` per change, `OK:` when already correct.                                                                                                                                                                                                                                                                                                                                                            |
+| Ownership, permissions, SGID | Canonical chown/chmod re-run every time (no-ops on already-correct state), but carry `-c` so the step observes whether anything changed and reports `Fixed:` vs `OK:` accordingly.                                                                                                                                                                                                                                                                                                                    |
+| ACLs                         | Canonical setfacl (the same recursive spec `workspace create`, `copy`, `rehome`, and VM init apply, via one shared helper) re-run every time; the step snapshots the tree's ACLs with `getfacl` before and after and compares, reporting `Fixed:` only on a real change and `OK:` otherwise. Because all workspace ACL paths share the spec, a first repair of a freshly created, copied, or rehomed workspace is a no-op. A snapshot that fails or passes 64 MiB leaves the comparison not verified. |
+| Parent traversal             | `chmod a+x` re-applied up each ancestor, seeded from the workspace's PARENT so the walk never touches the workspace dir's own canonical `2770` (which carries no world bits by design). Carries `-c`, so the step reports `Fixed:` when it opened a missing traversal bit and `OK:` when every ancestor was already traversable. A freshly created workspace whose ancestors are already traversable reports `OK:` here, so a first repair after create is a true no-op.                              |
+| Git identity                 | Template `git_user_name` / `git_user_email` stamped into the checkout's repo-local config; detection-based, so an already-correct value is left as-is. No-op when no identity is declared or the workspace has no repo.                                                                                                                                                                                                                                                                               |
 
 ## Harness setup reconciliation
 

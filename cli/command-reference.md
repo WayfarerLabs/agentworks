@@ -16,9 +16,10 @@ authentication may request approval and wait for the configured source timeout.
 An instance spec is an inline JSON object applied as the final layer after a selected template. Use
 `--spec JSON` on `vm create`, `workspace create`, `agent create`, and `session create`. A VM has two
 declarations: `--template` and `--spec` shape the VM, while `--admin-template` and `--admin-spec`
-shape its admin user. `agent reinit` also accepts `--spec JSON` because it is the existing-instance
-command that can change the bound template. No other reinit, repair, start, restart, or copy command
-accepts an instance spec.
+shape its admin user. `agent reinit` also accepts `--spec JSON`, and `vm reinit` accepts
+`--admin-spec JSON`, because they are the existing-instance commands that can change the bound
+template (`--update-template` and `--admin-template`). No other reinit, repair, start, restart, or
+copy command accepts an instance spec, and a VM's own `--spec` layer cannot change after create.
 
 The JSON must be one object written directly on the command line. It cannot be a file path, `null`,
 an array, or multiple JSON values. Duplicate keys, non-finite numbers, unknown fields, and the
@@ -35,11 +36,14 @@ agw vm create build-01 --template dev --spec '{"cpus":8,"memory":16}' \
 agw agent create coder-01 --spec '{"shell":"/bin/bash","mise_activate":true}'
 ```
 
-An omitted `--spec` on `agent reinit` retains the stored instance layer. A supplied object replaces
-the complete prior layer, and `{}` or an empty value clears it. The empty-value shorthand applies
-only to `agent reinit`; create commands still require a JSON object. Template changes and
-instance-spec changes are validated and persisted together before remote convergence. If that remote
-work fails, the new desired state remains stored so a plain `agent reinit NAME` can retry it.
+An omitted `--spec` on `agent reinit`, or `--admin-spec` on `vm reinit`, retains the stored layer. A
+supplied object replaces the complete prior layer, and `{}` or an empty value clears it. The
+empty-value shorthand applies only to these reinit options; create commands still require a JSON
+object. A stored layer this release can no longer use, such as one holding a refused source
+reference, can be replaced or cleared this way, while a plain reinit refuses it. Template changes
+and instance-spec changes are validated and persisted together before remote convergence. If that
+remote work fails, the new desired state remains stored so a plain `agent reinit NAME` or
+`vm reinit NAME` can retry it.
 
 For compound `session create`, `--spec` applies to the new session. `--workspace-spec` is accepted
 only with `--new-workspace`, and `--agent-spec` only with `--new-agent`; each applies to that
@@ -297,16 +301,19 @@ object. Current producers always include it; older JSON v1 producers may omit th
 ```
 
 `instance_spec` is tagged `absent`; `present` with `recorded_at` and the canonical partial `spec`;
-or `unavailable` with reason `malformed` or `unsupported-version`. `current` is the resolved shape
-documented for `resource show`, or `{status: "unresolved", selection: {kind, name}, reason}` where
-reason is `missing-selection`, `instance-spec-unavailable`, or `registry-unavailable`. A fact is
+or `unavailable` with reason `malformed`, `unsupported-version`, `migration-pending`, or
+`replacement-required`, the last for a stored spec this release uses only once it is explicitly
+replaced or cleared (see [Instance specs](#instance-specs)), such as one holding a refused source
+reference or a retired harness activation list. `current` is the resolved shape documented for
+`resource show`, or `{status: "unresolved", selection: {kind, name}, reason}` where reason is
+`missing-selection`, `instance-spec-unavailable`, or `registry-unavailable`. A fact is
 `{key, status}` with status `not-recorded` or `unavailable`, or status `recorded` plus
 `recorded_at`, `operation`, and a typed `value` object. Each entry is a successful lifecycle
 operation's configuration-snapshot slice and may include evidence that its corresponding work
 succeeded. Comparisons are `{key, state, differences?}`; differences are
 `{field, recorded, current}`. Unconsumed records carry only safe type, key, version, and timestamp
-metadata. An issue contains a closed `code` plus optional `slot` or `record_key`; malformed future
-record types use `record-malformed` rather than an applied-state issue code. These explicit
+metadata. An issue contains an enumerated `code` plus optional `slot` or `record_key`; malformed
+future record types use `record-malformed` rather than an applied-state issue code. These explicit
 inspection commands can show authored plaintext declaration values, but never resolved secret
 values; handle their human and JSON output as sensitive. Human describe renders instance specs,
 complete current specs, and lifecycle-evidence value objects as block YAML without the exhaustive
@@ -508,8 +515,16 @@ normal stderr message and nonzero exit status. Doctor is the exception: it conve
 failures into its complete report, emits that JSON document, then exits 1.
 
 JSON v1 is additive. New optional fields may be added while preserving existing meanings and types.
-Removing a field, changing a type, changing a value's meaning, changing collection order, or
-changing an enum spelling requires a new schema version and an explicit compatibility period.
+Enumerated values come in two kinds. A frozen vocabulary is one this reference calls frozen or
+closes with an `unknown` sentinel: the VM list's provisioning and initialization statuses, the
+session mode, and the VM event names. It gains no values, and no case moves between its values.
+Every other enumerated value, including those this reference calls closed or lists as exactly a set,
+such as reasons, issue codes and doctor's check statuses, may gain values under the same schema
+version, and a release may move a case from one such value to another; a release that moves a case
+says so in a `BREAKING CHANGE:` footer and in its upgrade guide. Consumers must accept values they
+do not recognize. Changing the document's shape (removing a field, changing a type, changing
+collection order, or renaming a field or a value) requires a new schema version and an explicit
+compatibility period.
 
 ### Top-Level
 
@@ -701,28 +716,28 @@ just a vm-site.
 > workflows. Use a site on a different platform that provides true long-lived VMs (e.g. Lima, Azure,
 > Proxmox, etc.) if you need a VM that survives independent of your workstation.
 
-| Command                                             | Description                                                    |
-| --------------------------------------------------- | -------------------------------------------------------------- |
-| `agw vm create <name>`                              | Create a new VM (provision + initialize)                       |
-| `agw vm list`                                       | List configured VMs                                            |
-| `agw vm describe <name>`                            | Show VM details, workspaces, and event log                     |
-| `agw vm verify-connection <name>`                   | Test the canonical admin connection without starting the VM    |
-| `agw vm shell <name> [--workspace <ws>]`            | Admin shell on a VM (optionally rooted in a workspace)         |
-| `agw vm shell <name> --platform`                    | A shell through the platform's own channel, without Tailscale  |
-| `agw vm exec <name> [--workspace <ws>] -- <cmd...>` | Run a one-shot command as admin (optionally from a workspace)  |
-| `agw vm start <name>`                               | Record running intent, start the VM, and wait for it to answer |
-| `agw vm set-desired-state <name> <state>`           | Record running, stopped, or on-demand without runtime work     |
-| `agw vm reconcile [<name>] [--all] [--dry-run]`     | Apply the named VM scope or explicitly selected fleet          |
-| `agw vm stop <name>`                                | Stop a VM and keep it stopped (no auto-start)                  |
-| `agw vm reinit <name>`                              | Re-run initialization on a provisioned VM                      |
-| `agw vm confirm-release <name>`                     | Observe and explicitly record the live Debian release          |
-| `agw vm delete <name>`                              | Delete a VM (with confirmation)                                |
-| `agw vm backup <name>`                              | Back up a VM: metadata, agents, workspaces, and files          |
-| `agw vm rekey <name>`                               | Assign a new Tailscale auth key to a VM (logout + rejoin)      |
-| `agw vm recover <name>`                             | Repair a VM's SSH access, python3 and Tailscale node           |
-| `agw vm port-forward <name> <ports...>`             | Forward local port(s) to a VM (like kubectl port-forward)      |
-| `agw vm logs <name>`                                | Show SSH logs for a VM                                         |
-| `agw vm import-host-keys (--all \| <name>...)`      | Import VM host keys from `known_hosts` into the host-key store |
+| Command                                                              | Description                                                    |
+| -------------------------------------------------------------------- | -------------------------------------------------------------- |
+| `agw vm create <name>`                                               | Create a new VM (provision + initialize)                       |
+| `agw vm list`                                                        | List configured VMs                                            |
+| `agw vm describe <name>`                                             | Show VM details, workspaces, and event log                     |
+| `agw vm verify-connection <name>`                                    | Test the canonical admin connection without starting the VM    |
+| `agw vm shell <name> [--workspace <ws>]`                             | Admin shell on a VM (optionally rooted in a workspace)         |
+| `agw vm shell <name> --platform`                                     | A shell through the platform's own channel, without Tailscale  |
+| `agw vm exec <name> [--workspace <ws>] -- <cmd...>`                  | Run a one-shot command as admin (optionally from a workspace)  |
+| `agw vm start <name>`                                                | Record running intent, start the VM, and wait for it to answer |
+| `agw vm set-desired-state <name> <state>`                            | Record running, stopped, or on-demand without runtime work     |
+| `agw vm reconcile [<name>] [--all] [--dry-run]`                      | Apply the named VM scope or explicitly selected fleet          |
+| `agw vm stop <name>`                                                 | Stop a VM and keep it stopped (no auto-start)                  |
+| `agw vm reinit <name> [--admin-template <tmpl>] [--admin-spec JSON]` | Re-run initialization on a provisioned VM                      |
+| `agw vm confirm-release <name>`                                      | Observe and explicitly record the live Debian release          |
+| `agw vm delete <name>`                                               | Delete a VM (with confirmation)                                |
+| `agw vm backup <name>`                                               | Back up a VM: metadata, agents, workspaces, and files          |
+| `agw vm rekey <name>`                                                | Assign a new Tailscale auth key to a VM (logout + rejoin)      |
+| `agw vm recover <name>`                                              | Repair a VM's SSH access, python3 and Tailscale node           |
+| `agw vm port-forward <name> <ports...>`                              | Forward local port(s) to a VM (like kubectl port-forward)      |
+| `agw vm logs <name>`                                                 | Show SSH logs for a VM                                         |
+| `agw vm import-host-keys (--all \| <name>...)`                       | Import VM host keys from `known_hosts` into the host-key store |
 
 `vm rekey <name>` resolves the template's auth-key secret by default. Use `--secret <name>` to
 select another declared secret for this operation, or `--prompt` to enter the replacement key
@@ -801,7 +816,11 @@ ask again. Non-interactive runs never prompt (a later interactive create still a
 
 `vm reinit` re-runs the initialization phase using the current config without reprovisioning the VM.
 Changes to config (new packages, different install commands, etc.) are picked up automatically. It
-consumes both stored VM and admin instance specs but cannot change or clear either one.
+consumes both stored VM and admin instance specs. `--admin-template <tmpl>` re-points the admin user
+to a different declared admin-template (an unknown name fails before anything is stored), and
+`--admin-spec JSON` replaces the stored admin layer or, as `'{}'` or `''`, clears it; see
+[Instance specs](#instance-specs). Without them both are retained, and the stored VM layer is always
+kept.
 
 Reinit starts with the VM contract's base checks, before it changes anything. A live Debian release
 that differs from the recorded one refuses first, naming `vm confirm-release`. A VM without systemd,
@@ -911,12 +930,15 @@ so, and `agw vm rekey <name>` puts the VM back on Tailscale if you would rather 
 
 `vm backup` exports the VM row and exact owner tree of agents, workspaces, sessions, events, grants,
 desired instance specs, and workspace files. It does not create or copy a provider VM snapshot,
-disk, export, or other recovery artifact. On POSIX, its local timestamp directory is created with
-mode 0700 and its JSON files with mode 0600. Native Windows refuses backups containing instance
-specs until private access-control export is supported. Instance specs can contain plaintext
-environment values, so keep the configured backup path on a trusted local filesystem and protect any
-copies of the archive with equivalent access controls. Current archives use manifest version 5;
-their VM and session rows include the nullable latest-start observations.
+disk, export, or other recovery artifact. The workspace archive is built on the VM in a root-only
+directory under `/var/lib/agentworks/detached`, which the backup removes when it ends; it keeps
+running across a dropped connection, and the backup waits for it. On POSIX, the backup's local
+timestamp directory is created with mode 0700 and its JSON files with mode 0600. Native Windows
+refuses backups containing instance specs until private access-control export is supported. Instance
+specs can contain plaintext environment values, so keep the configured backup path on a trusted
+local filesystem and protect any copies of the archive with equivalent access controls. Current
+archives use manifest version 5; their VM and session rows include the nullable latest-start
+observations.
 
 `agw vm shell` is the Agentworks-wrapped entry point; for raw SSH (VS Code Remote-SSH, `scp`, etc.),
 use the `awvm--<vm>` alias documented under [Direct SSH aliases](#direct-ssh-aliases).
@@ -929,18 +951,19 @@ lives on a different VM is rejected with a `ValidationError` before any SSH work
 
 `vm shell`, `vm exec`, `vm verify-connection`, `vm port-forward`, `agent shell` and `agent exec`,
 `vm start` and the automatic start of a stopped VM, `vm rekey` and `vm recover` for their final
-waits, and `vm create`, `vm reinit` and `vm confirm-release` for their checks of the VM, connect
-with the OpenSSH client on the workstation, version 8.5 or newer (`vm shell --platform` uses the
-platform's own path instead and needs no `python3`; Remote Lima and the clouds need the client, and
-check it only once they connect, a cloud inside its temporary network route). Agentworks uses the
-first `ssh` on `PATH`; on Windows it uses only the native Win32-OpenSSH under `System32\OpenSSH` or
-`Program Files\OpenSSH`, never the `ssh` bundled with Git for Windows. `agw doctor` shows which
-client was resolved, and these commands, other than `vm shell --platform`, refuse an unsupported one
-before anything else runs. These commands run `ssh -F none` in batch mode, so `~/.ssh/config` does
-not apply and an encrypted private key must be loaded in the SSH agent. The VM needs `python3`; a VM
-without it is reported as unable to run Agentworks requests, and `agw vm recover <name>` installs
-it. A command that is not found exits 127, one that cannot run exits 126, and a missing workspace
-directory exits 125.
+waits, `vm create`, `vm reinit` and `vm confirm-release` for their checks of the VM, `vm backup`,
+and `vm describe` for its live resources, connect with the OpenSSH client on the workstation,
+version 8.5 or newer (`vm shell --platform` uses the platform's own path instead and needs no
+`python3`; Remote Lima and the clouds need the client, and check it only once they connect, a cloud
+inside its temporary network route). Agentworks uses the first `ssh` on `PATH`; on Windows it uses
+only the native Win32-OpenSSH under `System32\OpenSSH` or `Program Files\OpenSSH`, never the `ssh`
+bundled with Git for Windows. `agw doctor` shows which client was resolved, and these commands,
+other than `vm shell --platform` and `vm describe`, refuse an unsupported one before anything else
+runs; `vm describe` warns and leaves its live resources out instead. These commands run
+`ssh -F none` in batch mode, so `~/.ssh/config` does not apply and an encrypted private key must be
+loaded in the SSH agent. The VM needs `python3`; a VM without it is reported as unable to run
+Agentworks requests, and `agw vm recover <name>` installs it. A command that is not found exits 127,
+one that cannot run exits 126, and a missing workspace directory exits 125.
 
 `vm port-forward` runs until interrupted and exits 0 when stopped with Ctrl-C, on macOS and Linux
 also with `SIGTERM` or `SIGHUP` (a closed terminal), and on Windows also with Ctrl-Break; started
@@ -1032,7 +1055,15 @@ workspace file with VS Code's `code` command; on Windows `agw` does not start VS
 names the file to open.
 
 `workspace copy <source> <name>` copies a workspace to a new VM workspace. Accepts `--vm`. Source
-and destination can be the same VM (a clone) or different VMs.
+and destination can be the same VM (a clone) or different VMs. The tree travels through the
+workstation as a compressed tar stream that is never unpacked there, so modes and links survive any
+workstation, and nothing is staged on either VM. The destination extracts it as root without the
+source's owners and then gives it to the admin and the workspace group; an extraction that fails or
+is interrupted leaves the partial tree in the new directory and no workspace row, so remove the
+directory before retrying.
+
+`workspace rehome <name>` moves the workspace to `--target`, an absolute path on the VM (a trailing
+`/` is dropped), or to the configured workspace directory without it.
 
 `workspace list` accepts `--vm` to narrow the result set to one VM's workspaces. An unknown name in
 the filter is an error, not an empty result.
@@ -1402,9 +1433,12 @@ is the VM-boot behavior: the mutation commands (`add-sessions`, `remove-sessions
 Workspaces with tmuxinator enabled in their template (the default) carry a tmuxinator config
 (`.tmuxinator.yml` in the workspace root, symlinked as `~/.config/tmuxinator/ws-<name>-console.yml`)
 describing a `ws-<name>-console` session: an admin-shell window plus one window per session. It is
-regenerated whenever sessions change. The `agw workspace console` command that attached to it was
-removed (superseded by named consoles); the config remains usable directly on the VM via
-`tmuxinator start ws-<name>-console` (e.g. inside VS Code's integrated terminal).
+regenerated whenever sessions change. Neither the config nor the link is written through a symbolic
+link: a link at the config, above the workspace, or at `~/.config` or `~/.config/tmuxinator` is
+refused. A session command whose regeneration fails warns and still succeeds. The
+`agw workspace console` command that attached to it was removed (superseded by named consoles); the
+config remains usable directly on the VM via `tmuxinator start ws-<name>-console` (e.g. inside VS
+Code's integrated terminal).
 
 #### Shells
 

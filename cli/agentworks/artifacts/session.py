@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
-import shlex
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from uuid import uuid4
@@ -21,22 +19,24 @@ from agentworks.artifacts.reporting import report_applied, report_deferrals
 from agentworks.artifacts.session_paths import session_publication_roots
 from agentworks.artifacts.state import CapturedArtifacts, capture_owner, write_capture
 from agentworks.errors import StateError
+from agentworks.execution.files import guest_path
+from agentworks.execution.requests import Script, Shell
 from agentworks.harness_setup.inputs import SetupInputs
 from agentworks.harness_setup.model import NativeSetupState, SetupRecord
 from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
 from agentworks.harness_setup.state import read_native_setup, replace_setup_record, write_native_setup
 from agentworks.linux_users import managed_home
-from agentworks.native_files import native_path
 from agentworks.schema import CapabilityConfig
+from agentworks.vms.home_layout import AGENTWORKS_ARTIFACTS
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from agentworks.db import Database, SessionRow, VMRow, WorkspaceRow
+    from agentworks.execution.access import VMAccess
     from agentworks.resources.registry import Registry
     from agentworks.secrets.orchestration import SecretTarget
     from agentworks.sessions.templates import ResolvedSessionTemplate
-    from agentworks.transports import Transport
 
 
 @dataclass(frozen=True)
@@ -48,28 +48,16 @@ class PreparedSessionArtifacts:
     unavailable_reasons: tuple[str, ...] = ()
 
 
-def _session_artifact_home(runner: Transport) -> str:
-    """Observe one normalized actual-user home despite shell startup stdout."""
-    command = shlex.join(
-        ["python3", "-c", "import json, os; print('\\nAGW_ARTIFACT_HOME=' + json.dumps(os.environ.get('HOME', '')))"]
-    )
-    result = runner.run(command, check=False)
-    if not result.ok:
+HOME_PROBE = Script('printf "%s" "$HOME"', Shell.SH)
+"""What reads the actual session user's home: ``HOME`` is the passwd entry's in every request."""
+
+
+def _session_artifact_home(access: VMAccess) -> str:
+    """The actual session user's home, which publication and cleanup work beneath."""
+    result = access.run(HOME_PROBE)
+    if result.require_completed(access.vm_name) != 0:
         raise StateError("could not determine the session artifact home")
-    homes = [
-        line.removeprefix("AGW_ARTIFACT_HOME=")
-        for line in result.stdout.splitlines()
-        if line.startswith("AGW_ARTIFACT_HOME=")
-    ]
-    if len(homes) != 1:
-        raise StateError("session artifact home observation must contain exactly one framed path")
-    try:
-        home = json.loads(homes[0])
-        if not isinstance(home, str):
-            raise ValueError
-    except ValueError:
-        raise StateError("session artifact home observation contains an invalid path payload") from None
-    return native_path(home)
+    return guest_path(result.stdout.decode("utf-8", "replace"))
 
 
 def prepare_session_artifacts(
@@ -81,7 +69,7 @@ def prepare_session_artifacts(
     vm: VMRow,
     workspace: WorkspaceRow,
     agent_name: str | None,
-    runner: Transport,
+    access: VMAccess,
     environment: dict[str, str],
     secret_target: SecretTarget,
     linux_user: str,
@@ -105,7 +93,7 @@ def prepare_session_artifacts(
             vm=vm,
             workspace=workspace,
             agent_name=agent_name,
-            runner=runner,
+            access=access,
         )
         if not evidence.current:
             output.warn(
@@ -117,13 +105,13 @@ def prepare_session_artifacts(
     home = managed_home(linux_user)
     prior = read_native_setup(db, "session", name)
     if routed.inputs or any(item.artifact_files for item in prior.records):
-        home = _session_artifact_home(runner)
+        home = _session_artifact_home(access)
     identity = session_uuid or str(uuid4())
     run_id = str(uuid4())
     context = SessionArtifactContext(
         inputs=routed.inputs,
         home=home,
-        directory=f"{home}/.agentworks-artifacts/session/{identity}/{run_id}",
+        directory=f"{home}/{AGENTWORKS_ARTIFACTS}/session/{identity}/{run_id}",
         session_uuid=identity,
         run_id=run_id,
         ancestor_files=routed.ancestor_files,
@@ -174,7 +162,7 @@ def stage_session_artifacts(
     db: Database,
     name: str,
     integration: str,
-    runner: Transport,
+    access: VMAccess,
     prepared: PreparedSessionArtifacts,
     application: ArtifactApplication,
 ) -> None:
@@ -185,7 +173,7 @@ def stage_session_artifacts(
         (file for record in state.records for file in record.artifact_files),
         home=context.home,
         session_uuid=context.session_uuid,
-        directory=f"{context.home}/.agentworks-artifacts/session/{context.session_uuid}",
+        directory=f"{context.home}/{AGENTWORKS_ARTIFACTS}/session/{context.session_uuid}",
     )
     if not context.inputs and not application.files and not state.records and not prepared.unavailable_reasons:
         return
@@ -231,7 +219,7 @@ def stage_session_artifacts(
         directory=context.directory,
         run_id=context.run_id,
     )
-    published = publish_artifacts(runner, application.files, (), checkpoint, roots=roots)
+    published = publish_artifacts(access.files(), application.files, (), checkpoint, roots=roots)
     if published.skipped:
         current = current.model_copy(update={"skipped": published.skipped})
         state = replace_setup_record(state, current)
@@ -256,7 +244,7 @@ def commit_session_artifacts(
     db: Database,
     name: str,
     integration: str,
-    runner: Transport,
+    access: VMAccess,
     prepared: PreparedSessionArtifacts,
     application: ArtifactApplication,
 ) -> None:
@@ -267,7 +255,7 @@ def commit_session_artifacts(
         (file for record in state.records for file in record.artifact_files),
         home=context.home,
         session_uuid=context.session_uuid,
-        directory=f"{context.home}/.agentworks-artifacts/session/{context.session_uuid}",
+        directory=f"{context.home}/{AGENTWORKS_ARTIFACTS}/session/{context.session_uuid}",
     )
     desired = {file.path for file in application.files}
     for record in tuple(state.records):
@@ -287,7 +275,7 @@ def commit_session_artifacts(
             write_native_setup(db, "session", name, state, operation="session-start")
 
         remaining = publish_artifacts(
-            runner,
+            access.files(),
             (),
             obsolete,
             checkpoint,
@@ -311,17 +299,17 @@ def commit_session_artifacts(
     db.set_session_run_id(name, context.run_id)
 
 
-def cleanup_session_artifacts(db: Database, session: SessionRow, runner: Transport) -> None:
+def cleanup_session_artifacts(db: Database, session: SessionRow, access: VMAccess) -> None:
     """Remove known private files before dropping their ownership evidence."""
     state = read_native_setup(db, "session", session.name)
     if not any(item.artifact_files for item in state.records):
         return
-    home = _session_artifact_home(runner)
+    home = _session_artifact_home(access)
     roots = session_publication_roots(
         (file for record in state.records for file in record.artifact_files),
         home=home,
         session_uuid=session.session_uuid,
-        directory=f"{home}/.agentworks-artifacts/session/{session.session_uuid}",
+        directory=f"{home}/{AGENTWORKS_ARTIFACTS}/session/{session.session_uuid}",
     )
     for record in tuple(state.records):
 
@@ -331,7 +319,7 @@ def cleanup_session_artifacts(db: Database, session: SessionRow, runner: Transpo
             write_native_setup(db, "session", session.name, state, operation="session-delete")
 
         remaining = publish_artifacts(
-            runner,
+            access.files(),
             (),
             record.artifact_files,
             checkpoint,

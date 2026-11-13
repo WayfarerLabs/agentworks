@@ -1,34 +1,73 @@
 """Apt source configuration, system/apt package installation, and the
 generic install-command runner (system-install-command /
-user-install-command resources)."""
+user-install-command resources).
+
+Every request runs on the admin's access through Phase B's ``Files``, as
+root where it changes the system. Apt source lists are published with
+``Files.update``, so an unchanged list is not rewritten and no
+``apt-get update`` follows it.
+"""
 
 from __future__ import annotations
 
 import shlex
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.capabilities.vm_platform.cloud_init import INIT_SYSTEM_PACKAGES
-from agentworks.ssh import SSHError, SSHLogger
+from agentworks.execution.requests import Command, Script, Shell
 
 from .mise import MISE_GPG_KEY_PATH, MISE_GPG_KEY_URL, MISE_SOURCE_FILE, MISE_SOURCE_LINE
+from .steps import STEP_FAILURES, describe_failure, status, warn, warn_step
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
     from agentworks.apt import AptPackageEntry, AptSourceEntry
     from agentworks.debian import DebianRelease
+    from agentworks.execution.files import Files
     from agentworks.install_commands import SystemInstallCommandEntry, UserInstallCommandEntry
-    from agentworks.transports import Transport
     from agentworks.vms.templates import ResolvedVMTemplate
+
+    from .steps import InitLog
+
+APT_SOURCES_DIR = "/etc/apt/sources.list.d"
+"""Where each apt source's list is published."""
+
+APT_UPDATE_DEADLINE = 120
+"""Seconds an ``apt-get update`` may take."""
+
+APT_INSTALL_DEADLINE = 300
+"""Seconds one ``apt-get install`` may take."""
+
+INSTALL_CHECK_DEADLINE = 10
+"""Seconds an install command's completion test may take: it should be instant."""
+
+INSTALL_COMMAND_DEADLINE = 120
+"""Seconds one install command may take."""
+
+
+def apt_install(packages: Sequence[str]) -> Command:
+    """``apt-get install`` of ``packages`` as root, noninteractive, taking each package's new conffiles."""
+    return Command(
+        ("apt-get", "install", "-y", "-qq", "-o", "Dpkg::Options::=--force-confnew", *packages),
+        env={"DEBIAN_FRONTEND": "noninteractive"},
+        elevated=True,
+        deadline=APT_INSTALL_DEADLINE,
+    )
+
+
+APT_UPDATE = Command(("apt-get", "update", "-qq"), elevated=True, deadline=APT_UPDATE_DEADLINE)
+"""Refresh apt's package lists, as root."""
 
 
 def _configure_apt_sources(
-    target: Transport,
+    files: Files,
     vm_template: ResolvedVMTemplate,
     apt_packages: Mapping[str, AptPackageEntry],
     apt_sources: Mapping[str, AptSourceEntry],
-    logger: SSHLogger,
+    log: InitLog,
     *,
     debian_release: DebianRelease,
     resolved_sources: Mapping[str, tuple[AptSourceEntry, str]] | None = None,
@@ -44,84 +83,76 @@ def _configure_apt_sources(
     if not resolved_sources:
         return
 
-    logger.step("Apt sources")
+    log.step("Apt sources")
+    try:
+        _apply_apt_sources(files, resolved_sources, log)
+    except STEP_FAILURES as error:
+        warn_step(log, "apt sources failed", error)
 
-    # Detect architecture
-    arch_result = target.run("dpkg --print-architecture", check=False)
-    arch = arch_result.stdout.strip() if arch_result.returncode == 0 else "amd64"
+
+def _apply_apt_sources(files: Files, resolved_sources: Mapping[str, tuple[AptSourceEntry, str]], log: InitLog) -> None:
+    """Fetch each missing key, publish each list that differs, then refresh apt once if any list was written."""
+    arch_result = files.access.run(Command(("dpkg", "--print-architecture"), deadline=files.deadline))
+    arch_ok = arch_result.require_completed(files.access.vm_name) == 0
+    arch = arch_result.stdout.decode("utf-8", "replace").strip() if arch_ok else "amd64"
 
     newly_configured = False
     for name, (src, source_line) in resolved_sources.items():
-        # Check if GPG key already exists
-        key_exists = target.run(f"test -f {shlex.quote(src.key_path)}", check=False).returncode == 0
+        key_exists = status(files.access, Command(("test", "-f", src.key_path), deadline=files.deadline)) == 0
 
         if not key_exists:
             output.info(f"Configuring apt source '{name}'...")
             try:
-                # Ensure parent directory for key_path exists
-                from pathlib import PurePosixPath
-
-                key_dir = str(PurePosixPath(src.key_path).parent)
-                target.run(f"install -m 0755 -d {shlex.quote(key_dir)}", sudo=True)
-
-                # Download GPG key
-                if src.key_dearmor:
-                    # Wrap in sh -c so sudo applies to the entire pipeline,
-                    # not just the curl on the left side of the pipe.
-                    inner = f"curl -fsSL {shlex.quote(src.key_url)} | gpg --dearmor -o {shlex.quote(src.key_path)}"
-                    target.run(
-                        f"sh -c {shlex.quote(inner)}",
-                        sudo=True,
-                        timeout=60,
-                    )
-                else:
-                    target.run(
-                        f"curl -fsSL {shlex.quote(src.key_url)} -o {shlex.quote(src.key_path)}",
-                        sudo=True,
-                        timeout=60,
-                    )
-                target.run(f"chmod a+r {shlex.quote(src.key_path)}", sudo=True)
-            except SSHError as exc:
-                msg = f"apt source '{name}' failed: {exc}"
-                logger.warning(msg)
-                output.warn(msg)
+                _fetch_apt_key(files, src)
+            except STEP_FAILURES as error:
+                warn_step(log, f"apt source '{name}' failed", error)
                 continue
 
         # Always ensure the source list file has the correct content,
         # even when the key already existed (the source URL may have changed).
-        resolved_source = source_line.replace("{arch}", arch)
-        source_path = f"/etc/apt/sources.list.d/{src.source_file}"
-        expected = resolved_source + "\n"
-        current = target.run(f"cat {shlex.quote(source_path)}", check=False)
-        if current.returncode == 0 and current.stdout == expected:
-            if key_exists:
-                output.info(f"Apt source '{name}': already configured, skipping")
-                logger.output(f"apt source {name}: key and source list up to date, skipping")
-            continue
-
-        if key_exists:
-            output.info(f"Apt source '{name}': updating source list...")
-            logger.output(f"apt source {name}: key exists but source list needs update")
-
+        source_path = f"{APT_SOURCES_DIR}/{src.source_file}"
+        desired = (source_line.replace("{arch}", arch) + "\n").encode()
         try:
-            target.run(
-                f"bash -c {shlex.quote(f'printf "%s\\n" {shlex.quote(resolved_source)} > {source_path}')}",
-                sudo=True,
-            )
+            current = files.read(source_path, elevated=True)
+            if current == desired:
+                if key_exists:
+                    output.info(f"Apt source '{name}': already configured, skipping")
+                    log.output(f"apt source {name}: key and source list up to date, skipping")
+                continue
+            if key_exists:
+                output.info(f"Apt source '{name}': updating source list...")
+                log.output(f"apt source {name}: key exists but source list needs update")
+            files.update(source_path, desired, observed=current, mode=0o644, parent_mode=0o755, elevated=True)
             newly_configured = True
-        except SSHError as e:
-            msg = f"apt source '{name}' failed: {e}"
-            logger.warning(msg)
-            output.warn(msg)
+        except STEP_FAILURES as error:
+            warn_step(log, f"apt source '{name}' failed", error)
 
     if newly_configured:
         output.info("Running apt-get update...")
         try:
-            target.run("apt-get update -qq", sudo=True, timeout=120)
-        except SSHError as e:
-            msg = f"apt-get update failed after adding sources: {e}"
-            logger.warning(msg)
-            output.warn(msg)
+            files.access.run(APT_UPDATE, check=True)
+        except STEP_FAILURES as error:
+            warn_step(log, "apt-get update failed after adding sources", error)
+
+
+def _fetch_apt_key(files: Files, src: AptSourceEntry) -> None:
+    """Download ``src``'s signing key to its path as root (dearmored when the source says so), world-readable."""
+    deadline = files.deadline
+    key_dir = str(PurePosixPath(src.key_path).parent)
+    files.access.run(Command(("install", "-m", "0755", "-d", key_dir), elevated=True, deadline=deadline), check=True)
+    if src.key_dearmor:
+        fetch = Script(
+            f"curl -fsSL {shlex.quote(src.key_url)} | gpg --dearmor -o {shlex.quote(src.key_path)}",
+            Shell.SH,
+            elevated=True,
+            deadline=deadline,
+        )
+        files.access.run(fetch, check=True)
+    else:
+        files.access.run(
+            Command(("curl", "-fsSL", src.key_url, "-o", src.key_path), elevated=True, deadline=deadline), check=True
+        )
+    files.access.run(Command(("chmod", "a+r", src.key_path), elevated=True, deadline=deadline), check=True)
 
 
 def _resolve_apt_sources(
@@ -146,49 +177,39 @@ def _resolve_apt_sources(
     return {name: (source, source.source_for(debian_release)) for name, source in required_sources.items()}
 
 
-def _install_system_packages(
-    target: Transport,
-    logger: SSHLogger,
-) -> None:
-    """Install system repos and packages. Always runs on every init/reinit."""
-    logger.step("System packages")
+def _install_system_packages(files: Files, log: InitLog) -> None:
+    """Install system repos and packages. Always runs on every init/reinit.
+
+    Only the package install itself is required: its failure propagates and
+    stops initialization.
+    """
+    log.step("System packages")
 
     # Add mise apt source
     try:
-        target.run(
-            f"curl -fsSL {MISE_GPG_KEY_URL} -o {MISE_GPG_KEY_PATH}",
-            sudo=True,
-            timeout=30,
+        files.access.run(
+            Command(("curl", "-fsSL", MISE_GPG_KEY_URL, "-o", MISE_GPG_KEY_PATH), elevated=True, deadline=30),
+            check=True,
         )
-        inner = f"printf '%s\\n' '{MISE_SOURCE_LINE}' > {MISE_SOURCE_FILE}"
-        target.run(f"sh -c {shlex.quote(inner)}", sudo=True)
-    except SSHError as e:
-        msg = f"mise apt source setup failed: {e}"
-        logger.warning(msg)
-        output.warn(msg)
+        files.write(MISE_SOURCE_FILE, (MISE_SOURCE_LINE + "\n").encode(), mode=0o644, parent_mode=0o755, elevated=True)
+    except STEP_FAILURES as error:
+        warn_step(log, "mise apt source setup failed", error)
 
     output.info("Running apt-get update...")
     try:
-        target.run("apt-get update -qq", sudo=True, timeout=120)
-    except SSHError as e:
-        msg = f"apt-get update failed: {e}"
-        logger.warning(msg)
-        output.warn(msg)
+        files.access.run(APT_UPDATE, check=True)
+    except STEP_FAILURES as error:
+        warn_step(log, "apt-get update failed", error)
 
     output.info(f"Installing {output.count(len(INIT_SYSTEM_PACKAGES), 'system package')}...")
-    apt_str = " ".join(shlex.quote(p) for p in INIT_SYSTEM_PACKAGES)
-    target.run(
-        f"DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -o Dpkg::Options::=--force-confnew {apt_str}",
-        sudo=True,
-        timeout=300,
-    )
+    files.access.run(apt_install(INIT_SYSTEM_PACKAGES), check=True)
 
 
 def _install_apt_packages(
-    target: Transport,
+    files: Files,
     vm_template: ResolvedVMTemplate,
     apt_packages: Mapping[str, AptPackageEntry],
-    logger: SSHLogger,
+    log: InitLog,
 ) -> None:
     """Install apt packages from both direct list and apt-package entries."""
     # Collect all apt packages: direct list + apt-package entries
@@ -201,19 +222,12 @@ def _install_apt_packages(
     if not all_apt:
         return
 
-    logger.step("Apt packages")
+    log.step("Apt packages")
     output.info(f"Installing {output.count(len(all_apt), 'apt package')}...")
-    apt_str = " ".join(shlex.quote(p) for p in all_apt)
     try:
-        target.run(
-            f"DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -o Dpkg::Options::=--force-confnew {apt_str}",
-            sudo=True,
-            timeout=300,
-        )
-    except SSHError as e:
-        msg = f"apt packages failed: {e}"
-        logger.warning(msg)
-        output.warn(msg)
+        files.access.run(apt_install(all_apt), check=True)
+    except STEP_FAILURES as error:
+        warn_step(log, "apt packages failed", error)
 
 
 def _build_test_command(
@@ -240,71 +254,86 @@ def _build_test_command(
     return " && ".join(commands) or None
 
 
+def install_run(shell: str, command: str) -> Command:
+    """The request that runs an install command in ``shell``'s login environment."""
+    return Command((shell, "-lc", command), deadline=INSTALL_COMMAND_DEADLINE)
+
+
+def install_command_paths(
+    command_names: list[str],
+    entries: Mapping[str, SystemInstallCommandEntry | UserInstallCommandEntry],
+) -> list[str]:
+    """The ``PATH`` additions the named install commands declare, in order; an undeclared name adds none.
+
+    They are declarations, not results, so an account's profile can carry
+    them before any of its install commands run. A caller drops the names
+    :func:`_run_install_commands` reports failed once they have run.
+    """
+    return [path for name in command_names if (entry := entries.get(name)) is not None for path in entry.path]
+
+
 def _run_install_commands(
-    target: Transport,
+    files: Files,
     command_names: list[str],
     entries: Mapping[str, SystemInstallCommandEntry | UserInstallCommandEntry],
     shell: str,
     home: str,
-    logger: SSHLogger,
+    log: InitLog,
     *,
     label: str = "Install command",
 ) -> list[str]:
-    """Run install commands from an install-command entry dict. Returns PATH additions.
+    """Run install commands from an install-command entry dict as ``files``' identity; the names that failed.
+
+    A failed command warns and the next runs. Its name is returned so the
+    caller keeps its declared paths out of the account's profile; a command
+    skipped as already installed is not a failure.
+
+    Phase B runs the system and user install commands as the admin, and agent
+    initialization runs the agent's user install commands as the agent.
 
     Runs without env injection: provisioning is hermetic. Install commands
-    see static identity via the on-disk profile fragments (login-shell
-    sourcing) and have no access to operator env (those reach runtime
-    shells only).
+    see static identity and the account's declared ``PATH`` entries
+    (:func:`install_command_paths` and mise's shims) via the on-disk profile
+    fragments (login-shell sourcing), and have no access to operator env
+    (those reach runtime shells only). A completion test that cannot run
+    counts as not installed.
     """
     # DRIFT GUARD (Phase 7, recipe use-gate): this runner consumes
     # install-command rows by name and must never run a disabled plugin's row.
-    # It is reached only via ``_phase_b_setup`` (vm create / reinit); the recipe
+    # It is reached only via ``_phase_b_setup`` (vm create / reinit) and
+    # ``create_agent_on_vm`` (agent create / reinit); the recipe
     # gate lives at each command entry that reaches it (see
     # tests/agents/test_recipe_gate_drift.py's entry table).
-    if not command_names:
-        return []
-
-    path_additions: list[str] = []
     total = len(command_names)
+    failed: list[str] = []
 
     for i, name in enumerate(command_names, 1):
         entry = entries.get(name)
         if entry is None:
             msg = f"'{name}' is not a declared {label.lower()}"
-            logger.warning(msg)
-            output.warn(msg)
+            warn(log, msg)
             continue
-        logger.step(f"{label} {i}/{total}: {name}")
+        log.step(f"{label} {i}/{total}: {name}")
 
-        # Skip if already installed (short timeout -- this should be instant)
+        # Skip if already installed.
         test_cmd = _build_test_command(entry, shell, home)
         if test_cmd:
             try:
-                check = target.run(test_cmd, check=False, timeout=10)
-                if check.returncode == 0:
+                if status(files.access, Script(test_cmd, Shell.SH, deadline=INSTALL_CHECK_DEADLINE)) == 0:
                     output.info(f"{label} {i}/{total} ({name}): already installed, skipping")
-                    logger.output(f"{name}: already installed ({test_cmd}), skipping")
-                    path_additions.extend(entry.path)
+                    log.output(f"{name}: already installed ({test_cmd}), skipping")
                     continue
-            except SSHError as e:
-                # Timeout or connection issue -- assume not installed, proceed
-                logger.output(f"{name}: install check failed ({e}), assuming not installed")
+            except STEP_FAILURES as error:
+                # A deadline or a dropped connection: assume not installed, proceed.
+                reason = describe_failure(error, log.sanitize)
+                log.output(f"{name}: install check failed ({reason}), assuming not installed")
 
         truncated = entry.command[:60]
         output.info(f"{label} {i}/{total} ({name}): {truncated}...")
         try:
-            # Installers share existing home/login state. Declared paths are
-            # returned for the later profile write, not added between commands.
-            target.run(
-                f"{shlex.quote(shell)} -lc {shlex.quote(entry.command)}",
-                timeout=120,
-            )
-        except SSHError as e:
-            msg = f"{label.lower()} '{name}' failed: {truncated}... ({e})"
-            logger.warning(msg)
-            output.warn(msg)
-        else:
-            path_additions.extend(entry.path)
+            files.access.run(install_run(shell, entry.command), check=True)
+        except STEP_FAILURES as error:
+            warn_step(log, f"{label.lower()} '{name}' failed: {truncated}...", error)
+            failed.append(name)
 
-    return path_additions
+    return failed

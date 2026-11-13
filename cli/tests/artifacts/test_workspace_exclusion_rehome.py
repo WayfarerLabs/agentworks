@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
 import sys
 from contextlib import nullcontext
@@ -13,30 +14,42 @@ import pytest
 from agentworks.artifacts.application import OwnedArtifactFile
 from agentworks.artifacts.git_excludes import _pair
 from agentworks.db import Database, InitStatus
+from agentworks.execution.requests import Command, Script
+from agentworks.execution.results import Completed, Result
 from agentworks.harness_setup.cleanup import cleanup_workspace_excludes
 from agentworks.harness_setup.model import NativeClaim, NativeSetupState, SetupRecord
 from agentworks.harness_setup.state import read_native_setup, write_native_setup
 from agentworks.secrets.policy import TtyInteractionPolicy
-from agentworks.ssh import SSHResult
+from agentworks.workspaces.guest import open_parent_traversal
 from agentworks.workspaces.manager import delete_workspace, rehome_workspace
-from tests.artifacts.test_git_excludes import apply, file, git
+from tests.artifacts.test_git_excludes import Guest, apply, file, git
 from tests.capabilities.test_native_setup_deletion import deletion as deletion
-from tests.native_setup_fixtures import LocalFixtureTransport
+from tests.vm_access_support import Call
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux guest filesystem operations")
 
 
-class RehomeTransport(LocalFixtureTransport):
-    """Keep actual copy/Git operations but suppress host ownership and ancestor changes."""
+class RehomeTransport(Guest):
+    """Keep actual copy/Git operations but suppress host ownership and ancestor changes.
 
-    def run(self, command: str, **kwargs) -> SSHResult:
-        if command.startswith(("chown ", "p=$(dirname")):
-            self.commands.append(command)
-            return SSHResult(0, "", "")
-        if command == "which rsync":
-            self.commands.append(command)
-            return SSHResult(1, "", "")
-        return super().run(command, **kwargs)
+    ``commands`` holds every command and script the access was asked to run.
+    """
+
+    def answer(self, call: Call) -> Result | None:
+        request = call.request
+        if isinstance(request, Command | Script):
+            self.commands.append(shlex.join(request.argv) if isinstance(request, Command) else request.source)
+        if isinstance(request, Command) and request.argv[0] == "chown" or _is_traversal(request):
+            return Result(Completed(0))
+        if isinstance(request, Command) and request.argv == ("which", "rsync"):
+            return Result(Completed(1))
+        return super().answer(call)
+
+
+def _is_traversal(request: object) -> bool:
+    """Whether ``request`` is the parent traversal walk, for any path."""
+    walk = open_parent_traversal("/").source.split("\n", 1)[1]
+    return isinstance(request, Script) and request.source.endswith(walk)
 
 
 def save(db: Database, name: str, claims: tuple[NativeClaim, ...], files: tuple[OwnedArtifactFile, ...] = ()) -> None:
@@ -63,6 +76,7 @@ def move_case(db, deletion, tmp_path, monkeypatch):
     db._conn.execute("UPDATE workspaces SET linux_group = ? WHERE name = 'project'", (group,))
     db._conn.commit()
     monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: target)
+    monkeypatch.setattr("agentworks.execution.vm_access", lambda *a, **k: target.access())
     monkeypatch.setattr("agentworks.workspaces.manager.rehome.gated_vm_boundary", lambda *a, **k: nullcontext())
     monkeypatch.setattr("agentworks.workspaces.templates.resolve_live_tmuxinator", lambda *a, **k: False)
     monkeypatch.setattr("agentworks.workspaces.acls.apply_workspace_acls", lambda *a, **k: None)
@@ -160,6 +174,28 @@ def test_actual_rehome_rebinds_only_its_pairs_and_delete_retires_them(db, deleti
         assert db.instance_state.get_applied_slices("workspace", "survivor") == survivor_state
 
 
+@pytest.mark.parametrize("spelling", ["{}/", "/{}"], ids=["trailing-slash", "leading-double-slash"])
+def test_rehome_rebinds_the_pairs_of_a_path_an_earlier_release_stored_unnormalized(db, deletion, move_case, spelling):
+    target, group = move_case
+    old, new = target.home / "repository", target.home / "moved"
+    git("init", "-q", old)
+    item = file(old / ".agents/skills/policy/SKILL.md")
+    claims, _, _ = apply(target, old, (item,))
+    old_pair = _pair(claims[0], "codex")
+    exclude = Path(claims[0].destination)
+    save(db, "project", claims, (item,))
+    db.update_workspace_path("project", spelling.format(old))
+
+    rehome_workspace(
+        db, deletion.config, "project", target_path=str(new), yes=True, interaction=TtyInteractionPolicy.REFUSE
+    )
+
+    current = read_native_setup(db, "workspace", "project").records[0]
+    assert current.complete and [claim.source for claim in current.claims] == [str(new)]
+    assert old_pair not in exclude.read_bytes()
+    assert _pair(current.claims[0], "codex") in Path(current.claims[0].destination).read_bytes()
+
+
 @pytest.mark.parametrize("remove_old", [False, True])
 def test_rehome_does_not_accept_another_owners_source(db, deletion, move_case, remove_old):
     target, group = move_case
@@ -200,9 +236,10 @@ def test_rehome_does_not_accept_another_owners_source(db, deletion, move_case, r
     assert first_pair in exclude.read_bytes() and sentinel.read_bytes() == b"operator sentinel"
     current = read_native_setup(db, "workspace", "project").records[0]
     assert current.claims and all(claim.source == str(new) for claim in current.claims)
-    cleanup_workspace_excludes(db, db.get_workspace("project"), lambda: target)
+    cleanup_workspace_excludes(db, db.get_workspace("project"), target.access, redactions=())
     assert exclude.read_bytes().endswith(first_pair)
     assert sentinel.read_bytes() == b"operator sentinel"
+    assert str(sentinel) not in target.file_paths()
     assert all(str(sentinel) not in command for command in target.commands)
 
 
@@ -212,7 +249,7 @@ def test_rehome_metadata_failure_warns_without_vetoing_the_core_move(
     db, deletion, move_case, remove_old, fault, monkeypatch, captured_output
 ):
     from agentworks.errors import ExternalError
-    from agentworks.native_files import NativeFiles
+    from agentworks.execution.files import Files
 
     target, _ = move_case
     old, new = target.home / "old", target.home / "moved"
@@ -225,7 +262,7 @@ def test_rehome_metadata_failure_warns_without_vetoing_the_core_move(
     new_pair = _pair(new_claim, "codex")
     save(db, "project", claims, (item,))
     db.update_workspace_path("project", str(old))
-    publish = NativeFiles.publish
+    update = Files.update
     failures = []
 
     def fail_selected(self, destination, content, **kwargs):
@@ -239,9 +276,9 @@ def test_rehome_metadata_failure_warns_without_vetoing_the_core_move(
         if selected:
             failures.append(destination)
             raise ExternalError("fixture metadata publication failure")
-        return publish(self, destination, content, **kwargs)
+        return update(self, destination, content, **kwargs)
 
-    monkeypatch.setattr(NativeFiles, "publish", fail_selected)
+    monkeypatch.setattr(Files, "update", fail_selected)
     rehome_workspace(
         db,
         deletion.config,

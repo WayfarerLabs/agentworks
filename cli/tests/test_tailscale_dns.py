@@ -9,58 +9,45 @@ root-cause analysis. These tests cover:
 - the invariant that we never restart tailscaled in phase B
 - the DNS health check's per-branch behavior (silent on healthy, warn
   on broken-but-not-#117, warn on #117-shape-without-known-heal, raise
-  with heal hint on the full #117 latch)
+  on the full #117 latch, warn when a probe cannot run)
 - the ordering invariant (DNS probe before any diagnostic command) and
   the read-only invariant (no writes from any branch, ever)
+
+The drop-in runs over a recording admin access whose file operations
+publish to the test's own paths (``tests/phase_b_support.py``).
 """
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+import contextlib
+import stat
+from pathlib import Path
 
 import pytest
 
+from agentworks.errors import StateError
+from agentworks.execution.errors import CommandFailed, ExecutionIncomplete
+from agentworks.execution.requests import Command
+from agentworks.execution.results import Completed, Result, Unknown, UnknownReason
+from agentworks.vms import tailscale_dns
+from tests.phase_b_support import StepGuest, requires_file_program
 
-def _make_dns_fix_target(*, dropin_content: str | None = None) -> MagicMock:
-    """``Transport`` mock parameterized by current drop-in content.
+RELOAD = Command(("systemctl", "daemon-reload"), elevated=True, deadline=60)
+DNS_PROBE = Command(("getent", "hosts", "deb.debian.org"), deadline=60)
+READ_RESOLV = Command(("cat", "/etc/resolv.conf"), deadline=60)
+RESOLVED_ACTIVE = Command(("systemctl", "is-active", "--quiet", "systemd-resolved"), deadline=60)
 
-    - ``dropin_content=None``: the drop-in file is absent (``cat`` exits non-zero).
-    - ``dropin_content="..."``: ``cat`` returns this content.
-    """
-    target = MagicMock()
-    write_log: list[tuple[str, str]] = []
-    run_log: list[str] = []
-    target.write_log = write_log
-    target.run_log = run_log
 
-    from agentworks.vms.tailscale_dns import TAILSCALED_DROPIN_PATH
+@pytest.fixture
+def guest(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> StepGuest:
+    directory = tmp_path / "tailscaled.service.d"
+    monkeypatch.setattr(tailscale_dns, "TAILSCALED_DROPIN_DIR", str(directory))
+    monkeypatch.setattr(tailscale_dns, "TAILSCALED_DROPIN_PATH", str(directory / "10-after-network-online.conf"))
+    return StepGuest()
 
-    def run_side_effect(cmd, **kwargs):  # noqa: ANN001 -- mock side_effect signature
-        run_log.append(cmd)
-        result = MagicMock()
-        result.stderr = ""
-        if cmd == f"cat {TAILSCALED_DROPIN_PATH}":
-            if dropin_content is None:
-                result.returncode = 1
-                result.ok = False
-                result.stdout = ""
-            else:
-                result.returncode = 0
-                result.ok = True
-                result.stdout = dropin_content
-        elif cmd.startswith("mktemp"):
-            result.returncode = 0
-            result.ok = True
-            result.stdout = "/tmp/agw-tsdns.AAAAAA"
-        else:
-            result.returncode = 0
-            result.ok = True
-            result.stdout = ""
-        return result
 
-    target.run.side_effect = run_side_effect
-    target.write_file.side_effect = lambda path, content, **kw: write_log.append((path, content))
-    return target
+def _dropin() -> Path:
+    return Path(tailscale_dns.TAILSCALED_DROPIN_PATH)
 
 
 # -- Drop-in content semantics (the load-bearing piece of the fix) ------------
@@ -105,287 +92,164 @@ def test_dropin_content_does_not_use_requires() -> None:
 # -- Drop-in install / idempotency --------------------------------------------
 
 
-def test_dropin_written_when_missing() -> None:
-    """First-time install: stage the file, install it, then daemon-reload."""
-    from agentworks.vms.tailscale_dns import (
-        TAILSCALED_DROPIN_CONTENT,
-        TAILSCALED_DROPIN_DIR,
-        TAILSCALED_DROPIN_PATH,
-        _ensure_tailscaled_dropin,
-    )
+@requires_file_program
+def test_dropin_written_with_its_directory_and_reloaded_when_missing(guest: StepGuest) -> None:
+    tailscale_dns.apply_tailscaled_dns_fix(guest.files, guest.log)
 
-    target = _make_dns_fix_target(dropin_content=None)
-    logger = MagicMock()
-
-    _ensure_tailscaled_dropin(target, logger)
-
-    assert any(content == TAILSCALED_DROPIN_CONTENT for _, content in target.write_log)
-    assert any(cmd == f"install -d -m 0755 -o root -g root {TAILSCALED_DROPIN_DIR}" for cmd in target.run_log)
-    assert any("install -m 0644" in cmd and TAILSCALED_DROPIN_PATH in cmd for cmd in target.run_log)
-    assert any(cmd == "systemctl daemon-reload" for cmd in target.run_log)
+    assert _dropin().read_text() == tailscale_dns.TAILSCALED_DROPIN_CONTENT
+    assert stat.S_IMODE(_dropin().stat().st_mode) == 0o644
+    assert stat.S_IMODE(_dropin().parent.stat().st_mode) == 0o755
+    assert guest.commands() == [RELOAD]
+    assert guest.log.warned == []
 
 
-def test_dropin_noop_when_content_matches() -> None:
-    """If the drop-in already matches, no write, no install, no reload."""
-    from agentworks.vms.tailscale_dns import (
-        TAILSCALED_DROPIN_CONTENT,
-        TAILSCALED_DROPIN_PATH,
-        _ensure_tailscaled_dropin,
-    )
+@requires_file_program
+def test_dropin_that_matches_is_neither_written_nor_reloaded(guest: StepGuest) -> None:
+    _dropin().parent.mkdir()
+    _dropin().write_text(tailscale_dns.TAILSCALED_DROPIN_CONTENT)
 
-    target = _make_dns_fix_target(dropin_content=TAILSCALED_DROPIN_CONTENT)
-    logger = MagicMock()
+    tailscale_dns.apply_tailscaled_dns_fix(guest.files, guest.log)
 
-    _ensure_tailscaled_dropin(target, logger)
-
-    assert target.write_log == []
-    assert not any("install -m 0644" in cmd and TAILSCALED_DROPIN_PATH in cmd for cmd in target.run_log)
-    assert not any(cmd == "systemctl daemon-reload" for cmd in target.run_log)
+    assert guest.writes() == []
+    assert guest.commands() == []
 
 
-def test_dropin_rewritten_when_content_differs() -> None:
-    """A stale drop-in (e.g. an earlier managed version) is rewritten."""
-    from agentworks.vms.tailscale_dns import (
-        TAILSCALED_DROPIN_CONTENT,
-        TAILSCALED_DROPIN_PATH,
-        _ensure_tailscaled_dropin,
-    )
+@requires_file_program
+def test_dropin_that_differs_is_rewritten_and_reloaded(guest: StepGuest) -> None:
+    _dropin().parent.mkdir()
+    _dropin().write_text("[Unit]\nAfter=network.target\n")
 
-    # An earlier version of this fix ordered against systemd-resolved
-    # specifically. Confirm that drop-in is recognized as stale and rewritten.
-    stale = "[Unit]\nAfter=systemd-resolved.service\nWants=systemd-resolved.service\n"
-    target = _make_dns_fix_target(dropin_content=stale)
-    logger = MagicMock()
+    tailscale_dns.apply_tailscaled_dns_fix(guest.files, guest.log)
 
-    _ensure_tailscaled_dropin(target, logger)
-
-    assert any(content == TAILSCALED_DROPIN_CONTENT for _, content in target.write_log)
-    assert any("install -m 0644" in cmd and TAILSCALED_DROPIN_PATH in cmd for cmd in target.run_log)
-    assert any(cmd == "systemctl daemon-reload" for cmd in target.run_log)
+    assert _dropin().read_text() == tailscale_dns.TAILSCALED_DROPIN_CONTENT
+    assert guest.commands() == [RELOAD]
 
 
-def test_dropin_does_not_restart_tailscaled() -> None:
-    """Phase B runs over the tailnet; we must never restart tailscaled here."""
-    from agentworks.vms.tailscale_dns import _ensure_tailscaled_dropin
+@requires_file_program
+def test_dropin_never_restarts_tailscaled(guest: StepGuest) -> None:
+    """Phase B runs over the tailnet: restarting tailscaled would cut the connection mid-init."""
+    tailscale_dns.apply_tailscaled_dns_fix(guest.files, guest.log)
 
-    target = _make_dns_fix_target(dropin_content=None)
-    logger = MagicMock()
-
-    _ensure_tailscaled_dropin(target, logger)
-
-    assert not any("restart tailscaled" in cmd for cmd in target.run_log)
+    assert all("tailscaled" not in command.argv for command in guest.commands())  # type: ignore[union-attr]
 
 
 # -- Top-level apply: non-fatal contract --------------------------------------
 
 
-def test_apply_invokes_dropin_install() -> None:
-    """End-to-end smoke: the drop-in install is visible in the run_log."""
-    from agentworks.vms.tailscale_dns import (
-        TAILSCALED_DROPIN_PATH,
-        apply_tailscaled_dns_fix,
-    )
+@requires_file_program
+def test_a_failed_reload_restores_the_prior_dropin_and_the_next_run_retries(guest: StepGuest) -> None:
+    _dropin().parent.mkdir()
+    _dropin().write_text("[Unit]\nAfter=network.target\n")
+    guest.respond(RELOAD, CommandFailed("box", 1, Result(Completed(1)), streams_logged=True))
 
-    target = _make_dns_fix_target(dropin_content=None)
-    logger = MagicMock()
+    tailscale_dns.apply_tailscaled_dns_fix(guest.files, guest.log)
 
-    apply_tailscaled_dns_fix(target, logger)
+    assert _dropin().read_text() == "[Unit]\nAfter=network.target\n"
+    guest.access.responses.clear()
+    guest.access.calls.clear()
 
-    assert any("install -m 0644" in cmd and TAILSCALED_DROPIN_PATH in cmd for cmd in target.run_log)
-    assert any(cmd == "systemctl daemon-reload" for cmd in target.run_log)
+    tailscale_dns.apply_tailscaled_dns_fix(guest.files, guest.log)
+
+    assert _dropin().read_text() == tailscale_dns.TAILSCALED_DROPIN_CONTENT
+    assert guest.commands() == [RELOAD]
 
 
-def test_apply_swallows_ssherror_and_warns() -> None:
-    """The apply function must not propagate SSHError; failures warn and
-    continue, matching the rest of phase B's contract."""
-    from agentworks.ssh import SSHError
-    from agentworks.vms.tailscale_dns import apply_tailscaled_dns_fix
+@requires_file_program
+def test_a_failed_reload_warns_without_raising(guest: StepGuest) -> None:
+    guest.respond(RELOAD, CommandFailed("box", 1, Result(Completed(1)), streams_logged=True))
 
-    target = MagicMock()
-    target.run.side_effect = SSHError("simulated failure")
-    logger = MagicMock()
+    tailscale_dns.apply_tailscaled_dns_fix(guest.files, guest.log)
 
-    # Must not raise.
-    apply_tailscaled_dns_fix(target, logger)
-
-    # The non-fatal contract: a warning was emitted via the logger.
-    assert logger.warning.called
+    assert len(guest.log.warned) == 1
 
 
 # -- Latched-state detection --------------------------------------------------
 
 
-def _make_latch_target(
+def _latch_guest(
     *,
     resolv_readable: bool = True,
     resolv_is_tailscaled: bool = True,
     dns_probe_ok: bool = False,
     resolved_active: bool = True,
-) -> MagicMock:
-    """``Transport`` mock parameterized by the four signals the detector reads.
+) -> StepGuest:
+    """A guest answering the four signals the detector reads.
 
     Defaults describe a latched VM with systemd-resolved as the platform
     resolver, which is the case where detection should raise.
     """
-    target = MagicMock()
-    run_log: list[str] = []
-    target.run_log = run_log
-
-    tailscaled_resolv = "# resolv.conf(5) file generated by tailscale\nnameserver 100.100.100.100\n"
-    foreign_resolv = "nameserver 192.168.1.1\n"
-
-    def run_side_effect(cmd, **kwargs):  # noqa: ANN001 -- mock side_effect signature
-        run_log.append(cmd)
-        result = MagicMock()
-        result.stderr = ""
-        if cmd == "cat /etc/resolv.conf":
-            if not resolv_readable:
-                result.returncode = 1
-                result.ok = False
-                result.stdout = ""
-            elif resolv_is_tailscaled:
-                result.returncode = 0
-                result.ok = True
-                result.stdout = tailscaled_resolv
-            else:
-                result.returncode = 0
-                result.ok = True
-                result.stdout = foreign_resolv
-        elif cmd.startswith("getent hosts"):
-            result.returncode = 0 if dns_probe_ok else 2
-            result.ok = dns_probe_ok
-            result.stdout = "1.2.3.4 example.com\n" if dns_probe_ok else ""
-        elif cmd == "systemctl is-active --quiet systemd-resolved":
-            result.returncode = 0 if resolved_active else 3
-            result.ok = resolved_active
-            result.stdout = ""
-        else:
-            result.returncode = 0
-            result.ok = True
-            result.stdout = ""
-        return result
-
-    target.run.side_effect = run_side_effect
-    return target
+    guest = StepGuest(local_files=False)
+    resolv = (
+        b"# resolv.conf(5) file generated by tailscale\nnameserver 100.100.100.100\n"
+        if resolv_is_tailscaled
+        else b"nameserver 192.168.1.1\n"
+    )
+    guest.respond(DNS_PROBE, Result(Completed(0 if dns_probe_ok else 2)))
+    guest.respond(READ_RESOLV, Result(Completed(0), resolv) if resolv_readable else Result(Completed(1)))
+    guest.respond(RESOLVED_ACTIVE, Result(Completed(0 if resolved_active else 3)))
+    return guest
 
 
 def test_check_silent_when_dns_works() -> None:
-    """The DNS probe is the gate. Working DNS = healthy VM = return silently
-    without digging into resolv.conf or the platform resolver."""
-    from agentworks.vms.tailscale_dns import check_vm_dns
+    """Working DNS = healthy VM: return silently without reading resolv.conf or the resolver."""
+    guest = _latch_guest(dns_probe_ok=True)
 
-    target = _make_latch_target(dns_probe_ok=True)
-    logger = MagicMock()
-    check_vm_dns(target, logger)  # must not raise
+    tailscale_dns.check_vm_dns(guest.files, guest.log)
 
-    # Happy path stops at the DNS probe. No further diagnostic commands.
-    assert not any(cmd.startswith("cat ") for cmd in target.run_log)
-    assert not any(cmd.startswith("systemctl is-active") for cmd in target.run_log)
-    # And no warning was logged: silence on the happy path is intentional.
-    assert not logger.warning.called
-
-
-def test_check_warns_when_dns_fails_and_resolv_unreadable() -> None:
-    """DNS broken AND /etc/resolv.conf unreadable: we can't diagnose, but
-    DNS is still broken so subsequent apt steps will fail. Warn so the
-    operator has a visible link to the failure that follows."""
-    from agentworks.vms.tailscale_dns import check_vm_dns
-
-    target = _make_latch_target(resolv_readable=False)
-    logger = MagicMock()
-    check_vm_dns(target, logger)  # must not raise
-
-    assert logger.warning.called
-    warning_text = " ".join(call.args[0] for call in logger.warning.call_args_list)
-    assert "DNS" in warning_text  # the operator needs to see what we saw
-    # We bailed before checking the platform resolver. Nothing further to read.
-    assert not any(cmd.startswith("systemctl is-active") for cmd in target.run_log)
-
-
-def test_check_warns_when_dns_fails_but_resolv_not_tailscaled() -> None:
-    """DNS broken AND /etc/resolv.conf isn't tailscaled-managed: not the
-    known issue #117 shape. Warn so the operator can investigate before
-    apt fails cryptically; the known heal doesn't apply."""
-    from agentworks.vms.tailscale_dns import check_vm_dns
-
-    target = _make_latch_target(resolv_is_tailscaled=False)
-    logger = MagicMock()
-    check_vm_dns(target, logger)  # must not raise
-
-    assert logger.warning.called
-    warning_text = " ".join(call.args[0] for call in logger.warning.call_args_list)
-    assert "DNS" in warning_text
-    # We didn't gate on resolved: the issue #117 shape didn't match.
-    assert not any(cmd.startswith("systemctl is-active") for cmd in target.run_log)
-
-
-def test_check_warns_when_resolved_not_active() -> None:
-    """DNS broken AND /etc/resolv.conf is tailscaled-managed BUT resolved
-    isn't the active resolver: we recognize the issue #117 shape but the
-    heal we'd suggest doesn't apply to this platform. Surface a warning
-    that says so rather than raising with a hint we know would be wrong."""
-    from agentworks.vms.tailscale_dns import check_vm_dns
-
-    target = _make_latch_target(resolved_active=False)
-    logger = MagicMock()
-    check_vm_dns(target, logger)  # must not raise
-
-    assert logger.warning.called
-    warning_text = " ".join(call.args[0] for call in logger.warning.call_args_list)
-    # When we do recognize the shape, the warning should name it AND
-    # explicitly call out that no heal is implemented for this resolver.
-    assert "latched" in warning_text or "issue #117" in warning_text
-    assert "not implemented" in warning_text or "No heal" in warning_text
-
-
-def test_check_raises_state_error_with_heal_hint() -> None:
-    """All issue #117 signals present (DNS broken, resolv.conf
-    tailscaled-managed, resolved active): raise with the manual heal block."""
-    import pytest
-
-    from agentworks.errors import StateError
-    from agentworks.vms.tailscale_dns import check_vm_dns
-
-    target = _make_latch_target()  # defaults describe the latched state
-
-    with pytest.raises(StateError) as exc_info:
-        check_vm_dns(target, MagicMock())
-
-    err = exc_info.value
-    assert err.entity_kind == "vm"
-    hint = err.hint or ""
-    # The hint must contain the actual heal commands an operator pastes:
-    assert "systemctl stop tailscaled" in hint
-    assert "ln -sf /run/systemd/resolve/stub-resolv.conf" in hint
-    assert "systemctl start tailscaled" in hint
-    # And must direct the operator at the platform's own shell so they
-    # don't kill their Tailscale-SSH session running the first command.
-    # The native shell survives stopping tailscaled; a future contributor who drops this reference back to
-    # the simple-block form re-introduces the lockout footgun.
-    assert "vm shell --platform" in hint
-
-
-def test_check_dns_probe_runs_first() -> None:
-    """Ordering invariant: the DNS probe is the gate. On any failing path,
-    getent must be the first command issued; everything else is
-    diagnosis-of-failure that only matters once we know DNS is broken."""
-    from agentworks.vms.tailscale_dns import check_vm_dns
-
-    # Use the all-latched defaults so we walk the full diagnosis chain.
-    target = _make_latch_target()
-    import contextlib
-
-    from agentworks.errors import StateError
-
-    with contextlib.suppress(StateError):
-        check_vm_dns(target, MagicMock())
-
-    assert target.run_log, "expected at least one command"
-    assert target.run_log[0].startswith("getent hosts"), f"expected DNS probe first, got: {target.run_log[0]!r}"
+    assert guest.commands() == [DNS_PROBE]
+    assert guest.log.warned == []
 
 
 @pytest.mark.parametrize(
-    ("case", "kwargs"),
+    ("case", "signals", "probes"),
+    [
+        ("resolv_unreadable", {"resolv_readable": False}, [DNS_PROBE, READ_RESOLV]),
+        ("resolv_not_tailscaled", {"resolv_is_tailscaled": False}, [DNS_PROBE, READ_RESOLV]),
+        ("resolved_not_active", {"resolved_active": False}, [DNS_PROBE, READ_RESOLV, RESOLVED_ACTIVE]),
+    ],
+)
+def test_check_warns_without_raising_when_dns_is_broken_but_the_heal_does_not_fit(
+    case: str, signals: dict[str, bool], probes: list[Command]
+) -> None:
+    guest = _latch_guest(**signals)
+
+    tailscale_dns.check_vm_dns(guest.files, guest.log)
+
+    assert len(guest.log.warned) == 1, case
+    assert guest.commands() == probes
+
+
+def test_check_raises_state_error_on_the_full_latch() -> None:
+    """All issue #117 signals present (DNS broken, resolv.conf tailscaled-managed, resolved active)."""
+    guest = _latch_guest()
+
+    with pytest.raises(StateError) as exc_info:
+        tailscale_dns.check_vm_dns(guest.files, guest.log)
+
+    assert exc_info.value.entity_kind == "vm"
+    assert exc_info.value.hint
+    assert guest.commands() == [DNS_PROBE, READ_RESOLV, RESOLVED_ACTIVE]
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        ExecutionIncomplete("box", Result(Unknown(UnknownReason.DEADLINE))),
+        ExecutionIncomplete("box", Result(Unknown(UnknownReason.CONNECTION))),
+    ],
+    ids=["deadline", "connection"],
+)
+def test_a_probe_that_cannot_run_warns_that_dns_was_not_checked(failure: Exception) -> None:
+    guest = _latch_guest()
+    guest.respond(READ_RESOLV, failure)
+
+    tailscale_dns.check_vm_dns(guest.files, guest.log)
+
+    assert len(guest.log.warned) == 1
+
+
+@pytest.mark.parametrize(
+    ("case", "signals"),
     [
         ("resolv_unreadable", {"resolv_readable": False}),
         ("resolv_not_tailscaled", {"resolv_is_tailscaled": False}),
@@ -394,43 +258,18 @@ def test_check_dns_probe_runs_first() -> None:
         ("latched", {}),  # defaults describe the all-signals-match latched state
     ],
 )
-def test_check_does_not_modify_anything(case: str, kwargs: dict[str, bool]) -> None:
-    """The DNS check is read-only across every branch: no writes, no service
-    touches, no daemon-reloads, no file restorations. The operator decides
-    whether and how to heal; the check only surfaces the diagnosis.
+def test_check_is_read_only_and_probes_dns_first(case: str, signals: dict[str, bool]) -> None:
+    """The DNS check issues only its three read-only probes, DNS first, unelevated, in every branch.
 
-    Parametrized across all five branches (four no-raise paths plus the
-    latched/raise path) so any future contributor who adds a side effect
-    in any branch trips this regardless of which branch they touched.
-
-    Uses an allow-list shape (every command must start with one of three
-    known read-only prefixes) rather than a deny-list. A deny-list would
-    only catch the specific mutation verbs we thought to enumerate; a
-    contributor could slip ``mv``, ``cp``, ``chmod``, ``sed -i``, ``tee``,
-    or a ``sh -c "... > /etc/foo"`` past it. The allow-list catches any
-    new command shape regardless of how it would mutate state.
+    An allow-list (the exact requests) rather than a deny-list: any new
+    request shape, however read-only it looks, is a contract change that
+    warrants explicit review. No file operation runs.
     """
-    import contextlib
+    guest = _latch_guest(**signals)
 
-    from agentworks.errors import StateError
-    from agentworks.vms.tailscale_dns import check_vm_dns
-
-    target = _make_latch_target(**kwargs)
     with contextlib.suppress(StateError):
-        check_vm_dns(target, MagicMock())
+        tailscale_dns.check_vm_dns(guest.files, guest.log)
 
-    # No file writes via either entry point. write_file is the documented
-    # path; copy_to is the lower-level primitive write_file delegates to.
-    # Asserting both pins down the contract regardless of which API a
-    # future contributor reaches for.
-    target.write_file.assert_not_called()
-    target.copy_to.assert_not_called()
-
-    # Allow-list: detection should only ever issue these three read-only
-    # command shapes. Any other command shape (even one that looks
-    # read-only) is a contract change that warrants explicit review.
-    allowed_prefixes = ("cat ", "getent hosts ", "systemctl is-active ")
-    for cmd in target.run_log:
-        assert cmd.startswith(allowed_prefixes), (
-            f"[{case}] detection issued a command outside the read-only allow-list: {cmd!r}"
-        )
+    requests = guest.access.requests()
+    assert requests[0] == DNS_PROBE, case
+    assert all(request in (DNS_PROBE, READ_RESOLV, RESOLVED_ACTIVE) for request in requests), case

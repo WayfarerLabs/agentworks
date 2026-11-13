@@ -3,20 +3,20 @@
 from __future__ import annotations
 
 import json
-import shlex
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 from agentworks.artifacts.application import ArtifactApplication
 from agentworks.artifacts.native.common import defer
 from agentworks.errors import ConfigError, ConnectivityError, ExternalError, StateError
-from agentworks.native_files import native_path
+from agentworks.execution.files import guest_path
+from agentworks.execution.requests import Bytes, PythonProgram
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from agentworks.capabilities.harness_integration.setup import UserSetupInvocation
-    from agentworks.transports import Transport
+    from agentworks.execution.access import VMAccess
 
 type NativeLayoutTool = Literal["claude", "codex", "grok"]
 NATIVE_USER_DIRECTORIES = {
@@ -49,24 +49,32 @@ print('\nAGW_NATIVE_USER_LAYOUT=' + json.dumps({'root': root, 'mcp_path': path})
 
 
 def resolve_user_layout(
-    tool: NativeLayoutTool, runner: Transport, *, home: str, environment: Mapping[str, str]
+    tool: NativeLayoutTool, access: VMAccess, *, home: str, environment: Mapping[str, str]
 ) -> NativeUserLayout:
-    """Validate only HOME and the native-home export from the actual login shell."""
+    """Validate only HOME and the native-home export from the actual login shell.
+
+    The observation is a Python program run after the account's login and
+    interactive startup, as the native workload's environment is built, with
+    its request on stdin.
+    """
     variable, default = NATIVE_USER_DIRECTORIES[tool]
-    command = shlex.join(["python3", "-c", _USER_LAYOUT])
-    result = runner.run(
-        f'"$SHELL" -lic {shlex.quote(command)}',
-        env=dict(environment),
-        input_data=json.dumps({"tool": tool, "home": home, "variable": variable, "default": default}),
-        tty=False,
-        check=False,
-        timeout=30,
+    request = json.dumps({"tool": tool, "home": home, "variable": variable, "default": default}).encode()
+    result = access.run(
+        PythonProgram(
+            _USER_LAYOUT,
+            login=True,
+            interactive=True,
+            env=dict(environment),
+            stdin=Bytes(request),
+            deadline=30,
+        )
     )
-    if not result.ok:
-        raise ExternalError("Native user configuration location could not be resolved")
+    status = result.require_completed(access.vm_name)
+    if status:
+        raise ExternalError(f"Native user configuration location could not be resolved (exit {status})")
     lines = [
         line.removeprefix("AGW_NATIVE_USER_LAYOUT=")
-        for line in result.stdout.splitlines()
+        for line in result.stdout.decode("utf-8", "replace").splitlines()
         if line.startswith("AGW_NATIVE_USER_LAYOUT=")
     ]
     try:
@@ -75,7 +83,7 @@ def resolve_user_layout(
             isinstance(observed.get(key), str) for key in ("root", "mcp_path")
         ):
             raise ValueError
-        return NativeUserLayout(native_path(observed["root"]), native_path(observed["mcp_path"]))
+        return NativeUserLayout(guest_path(observed["root"]), guest_path(observed["mcp_path"]))
     except (ValueError, RecursionError, StateError):
         raise ConfigError("Native user configuration locations must be absolute normalized paths") from None
 
@@ -83,7 +91,9 @@ def resolve_user_layout(
 def user_layout(tool: NativeLayoutTool, invocation: UserSetupInvocation) -> NativeUserLayout | None:
     """Report unknown current locations without replacing them with defaults."""
     try:
-        return resolve_user_layout(tool, invocation.runner, home=invocation.home, environment=invocation.environment)
+        return resolve_user_layout(
+            tool, invocation.access, home=invocation.home, environment=invocation.request_environment()
+        )
     except (ConfigError, ConnectivityError, ExternalError):
         invocation.report_incomplete(_UNAVAILABLE)
         return None

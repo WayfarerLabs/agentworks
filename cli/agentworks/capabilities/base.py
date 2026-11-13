@@ -50,10 +50,10 @@ if TYPE_CHECKING:
 
     from agentworks.capabilities.descriptor import Facet
     from agentworks.config import Config
+    from agentworks.execution.access import VMAccess
     from agentworks.resources.graph import Readiness
     from agentworks.resources.reference import ConfigReference
     from agentworks.topics import TopicProse
-    from agentworks.transports import Transport
 
 
 class SecretReader(Protocol):
@@ -180,9 +180,9 @@ class RunContext:
     - The DESCRIPTIVE world is plain fields: ``config`` and
       ``operation_scope`` (why the command is running; reading it
       grants no capability, so it is ungated).
-    - The POWER-GRANTING world (execution targets, resolved secrets)
+    - The POWER-GRANTING world (execution accesses, resolved secrets)
       is reached through plain accessor METHODS,
-      :meth:`admin_target` / :meth:`agent_target` / :meth:`secret`.
+      :meth:`admin_access` / :meth:`agent_access` / :meth:`secret`.
       In v1 they are pure pass-through (no requester binding, no
       grant check); the method shape exists so the node-facing
       signature is stable when a later permission model gates by the
@@ -195,8 +195,8 @@ class RunContext:
 
     config: Config | None
     operation_scope: OperationScope | None
-    _admin_target: Transport | None
-    _agent_target: Transport | None
+    _admin_access: VMAccess | None
+    _agent_access: VMAccess | None
     _secrets: SecretReader | None
 
     def __init__(
@@ -204,8 +204,8 @@ class RunContext:
         *,
         config: Config | None = None,
         operation_scope: OperationScope | None = None,
-        admin_target: Transport | None = None,
-        agent_target: Transport | None = None,
+        admin_access: VMAccess | None = None,
+        agent_access: VMAccess | None = None,
         secrets: SecretReader | None = None,
     ) -> None:
         # Hand-written only to store the power-granting inputs under
@@ -219,19 +219,21 @@ class RunContext:
         # per-stage re-assembly rule anyway.
         object.__setattr__(self, "config", config)
         object.__setattr__(self, "operation_scope", operation_scope)
-        object.__setattr__(self, "_admin_target", admin_target)
-        object.__setattr__(self, "_agent_target", agent_target)
+        object.__setattr__(self, "_admin_access", admin_access)
+        object.__setattr__(self, "_agent_access", agent_access)
         object.__setattr__(self, "_secrets", secrets)
 
-    def admin_target(self) -> Transport | None:
-        """The admin execution target, when one exists at this stage's
-        timing. Plain pass-through in v1."""
-        return self._admin_target
+    def admin_access(self) -> VMAccess | None:
+        """The admin's ``VMAccess``, when the admin exists at this stage's
+        timing. Holding one connects to nothing; each operation on it does.
+        Plain pass-through in v1."""
+        return self._admin_access
 
-    def agent_target(self) -> Transport | None:
-        """The agent execution target, when one exists at this stage's
-        timing. Plain pass-through in v1."""
-        return self._agent_target
+    def agent_access(self) -> VMAccess | None:
+        """The agent's ``VMAccess``, when the agent exists at this stage's
+        timing. It refuses an elevated request before dispatch. Plain
+        pass-through in v1."""
+        return self._agent_access
 
     def secret(self, name: str) -> str:
         """A resolved secret value, from the operation's boundary
@@ -494,7 +496,7 @@ class Capability(ABC):
 
         ``ctx`` is the command-start world (:class:`RunContext`): it holds
         targets that ALREADY exist (a `session create` sees the existing
-        VM's ``admin_target``; a `vm create` sees none, which is what
+        VM's ``admin_access``; a `vm create` sees none, which is what
         structurally enforces the blindness above) but NO resolved secrets
         yet. Pre-resolve concerns still read ``self`` (``self.config``).
 
@@ -528,8 +530,8 @@ class Capability(ABC):
         reads resolved secret values from the context (``ctx.secret(name)``,
         the op-start :class:`RunContext`) and does the authenticated reads
         preflight cannot: a git provider's ``GET /user``, a platform's
-        API connection check. It may also use the context's execution
-        targets (``ctx.admin_target()`` / ``ctx.agent_target()``) that an
+        API connection check. It may also use the context's accesses
+        (``ctx.admin_access()`` / ``ctx.agent_access()``) to accounts an
         earlier phase created. Read-only and side-effect-free exactly like
         :meth:`preflight` (it never mints, creates, or mutates), which is
         what lets it be re-run and, via a future ``doctor --runup``,

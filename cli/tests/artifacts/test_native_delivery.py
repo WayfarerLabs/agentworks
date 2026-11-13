@@ -35,6 +35,7 @@ from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.harness_integration import HarnessStart
 from agentworks.capabilities.harness_integration.shell import ShellIntegration
 from agentworks.errors import ConfigError, StateError
+from agentworks.execution.results import Result
 from agentworks.plugins.claude import artifacts as claude
 from agentworks.plugins.claude.harness_integration import ClaudeCodeIntegration
 from agentworks.plugins.codex import artifacts as codex
@@ -42,6 +43,7 @@ from agentworks.plugins.codex.harness_integration import CodexIntegration
 from agentworks.plugins.grok import artifacts as grok
 from agentworks.plugins.grok.harness_integration import GrokBuildIntegration
 from tests.artifacts._fixtures import received
+from tests.vm_access_support import Admin, RecordingVMAccess
 
 
 def enabled(render: Callable[..., NativeSessionArtifacts]) -> list[str]:
@@ -285,31 +287,20 @@ def test_native_home_override_is_used_instead_of_default():
 
 
 def test_native_probe_passes_environment_separately_and_rejects_policy_failures():
-    calls = []
+    from agentworks.execution.requests import PythonProgram
+    from agentworks.execution.results import Completed
 
-    def run(command, **kwargs):
-        calls.append((command, kwargs))
-        if len(calls) == 1:
-            return SimpleNamespace(returncode=0, ok=True, stdout="AGW_PYTHON3=available\n", stderr="")
-        return SimpleNamespace(
-            returncode=0,
-            ok=True,
-            stderr="",
-            stdout="AGW_ARTIFACT_PROBE="
-            + json.dumps(
-                {"native_home": "/home/a/.claude", "problems": ["native-discovery-exclusions"], "inventory": []}
-            ),
-        )
+    observed = {"native_home": "/home/a/.claude", "problems": ["native-discovery-exclusions"], "inventory": []}
+    access = RecordingVMAccess([], Admin())
+    access.default_outcome = Result(Completed(0), f"AGW_ARTIFACT_PROBE={json.dumps(observed)}\n".encode())
 
     with pytest.raises(StateError):
-        probe_native(
-            SimpleNamespace(run=run, logger=None),
-            tool="claude",
-            home="/home/a",
-            environment={"API_TOKEN": "a-secret-value"},
-        )
-    assert "a-secret-value" not in calls[-1][0]
-    assert calls[-1][1]["env"]["API_TOKEN"] == "a-secret-value"
+        probe_native(access, tool="claude", home="/home/a", environment={"API_TOKEN": "a-secret-value"})
+    (request,) = access.requests()
+    assert isinstance(request, PythonProgram)
+    assert all("a-secret-value" not in part for part in (request.source, *request.args))
+    assert request.env["API_TOKEN"] == "a-secret-value"
+    assert request.deadline == 30
 
 
 @pytest.mark.parametrize("implementation", [CodexIntegration, GrokBuildIntegration])
@@ -336,7 +327,6 @@ def test_native_launch_carries_literal_artifact_guidance_on_new_and_resumed_thre
 ):
     from agentworks.capabilities.base import RunContext
     from agentworks.capabilities.harness_integration import HarnessLaunchIntent
-    from tests.conftest import _FakeTarget
 
     monkeypatch.setattr("agentworks.artifacts.native.probe.probe_native", lambda *args, **kwargs: "/home/alice/.native")
     if implementation is GrokBuildIntegration:
@@ -366,7 +356,7 @@ def test_native_launch_carries_literal_artifact_guidance_on_new_and_resumed_thre
     method = "_transcript_exists" if implementation is ClaudeCodeIntegration else "_session_exists"
     monkeypatch.setattr(integration, method, lambda *_args: resume)
     result = integration.start(
-        RunContext(admin_target=_FakeTarget()),
+        RunContext(admin_access=RecordingVMAccess([], Admin())),
         intent=HarnessLaunchIntent.RESUME_OR_NEW if resume else HarnessLaunchIntent.CREATE,
     )
     assert "{{" not in result.command
@@ -521,7 +511,8 @@ def test_user_native_home_boundary_precedes_other_setup(db, monkeypatch, impleme
     integration = implementation.for_setup(owner_kind="agent", owner_name="alice", facet="user", config={})
     invocation = UserSetupInvocation(
         vm=db.insert_vm("vm", "lima", "vm"),
-        runner=SimpleNamespace(),
+        access=(recorded := RecordingVMAccess([], Admin())),
+        files=recorded.files(),
         prior=None,
         checkpoint=lambda claims: None,
         username="alice",
@@ -551,7 +542,8 @@ def test_codex_external_home_does_not_block_home_owned_skills(db, monkeypatch):
     result = integration.user_init(
         UserSetupInvocation(
             vm=db.insert_vm("vm", "lima", "vm"),
-            runner=SimpleNamespace(),
+            access=(recorded := RecordingVMAccess([], Admin())),
+            files=recorded.files(),
             prior=None,
             checkpoint=lambda claims: None,
             username="alice",
@@ -803,7 +795,6 @@ def test_failed_native_probe_is_advisory_only_without_new_carriers(
 ):
     from agentworks.capabilities.harness_integration import HarnessLaunchIntent
     from agentworks.errors import ExternalError
-    from tests.conftest import _FakeTarget
 
     warnings: list[str] = []
     monkeypatch.setattr(output, "warn", warnings.append)
@@ -832,9 +823,13 @@ def test_failed_native_probe_is_advisory_only_without_new_carriers(
     monkeypatch.setattr(integration, "_resume_or_launch", lambda *args, **kwargs: "fixture-launch")
     if own_delivery:
         with pytest.raises(ExternalError):
-            integration.start(RunContext(admin_target=_FakeTarget()), intent=HarnessLaunchIntent.RESUME_OR_NEW)
+            integration.start(
+                RunContext(admin_access=RecordingVMAccess([], Admin())), intent=HarnessLaunchIntent.RESUME_OR_NEW
+            )
     else:
-        result = integration.start(RunContext(admin_target=_FakeTarget()), intent=HarnessLaunchIntent.RESUME_OR_NEW)
+        result = integration.start(
+            RunContext(admin_access=RecordingVMAccess([], Admin())), intent=HarnessLaunchIntent.RESUME_OR_NEW
+        )
         assert result.command == "fixture-launch" and warnings
 
 
@@ -861,7 +856,6 @@ def test_setup_native_name_conflict_defers_only_affected_artifact(implementation
         VMSetupInvocation,
         WorkspaceSetupInvocation,
     )
-    from tests.conftest import _FakeTarget
 
     module = import_module(implementation.__module__)
     module_root = "/home/alice/.native"
@@ -882,7 +876,8 @@ def test_setup_native_name_conflict_defers_only_affected_artifact(implementation
     incomplete: list[str] = []
     common = {
         "vm": db.insert_vm("vm", "site", "host"),
-        "runner": _FakeTarget(),
+        "access": (recorded := RecordingVMAccess([], Admin())),
+        "files": recorded.files(),
         "prior": None,
         "checkpoint": lambda claims: None,
         "report_incomplete": incomplete.append,
@@ -921,7 +916,7 @@ def test_setup_name_conflict_deferral_uses_safe_owned_retirement(tmp_path, db, m
     bad, good = artifact(ArtifactType.SKILL), artifact(ArtifactType.RULE)
     inputs = received(bad, good)
     plan = claude.outer_artifacts(inputs, str(target.home / ".claude"))
-    current = publish_artifacts(target, plan.files, (), lambda files: None, roots=(str(target.home),)).files
+    current = publish_artifacts(target.files(), plan.files, (), lambda files: None, roots=(str(target.home),)).files
     entrypoint = target.home / ".claude/skills/review/SKILL.md"
     if modified:
         entrypoint.write_text("operator changed entrypoint")
@@ -931,7 +926,8 @@ def test_setup_name_conflict_deferral_uses_safe_owned_retirement(tmp_path, db, m
     incomplete: list[str] = []
     invocation = UserSetupInvocation(
         vm=db.insert_vm("vm", "site", "host"),
-        runner=target,
+        access=(recorded := target.access()),
+        files=recorded.files(),
         prior=None,
         checkpoint=lambda claims: None,
         report_incomplete=incomplete.append,
@@ -945,7 +941,7 @@ def test_setup_name_conflict_deferral_uses_safe_owned_retirement(tmp_path, db, m
             raise NativeArtifactConflictError("fixture competing skill", ("skill:review",), hint="fixture repair")
 
     filtered = defer_setup_conflicts(plan, invocation, check)
-    result = publish_artifacts(target, filtered.files, current, lambda files: None, roots=(str(target.home),))
+    result = publish_artifacts(target.files(), filtered.files, current, lambda files: None, roots=(str(target.home),))
     assert incomplete and filtered.deferred[0].input_id == bad.identity
     assert competing.read_text() == "operator content"
     assert entrypoint.exists() is modified

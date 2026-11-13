@@ -18,6 +18,7 @@ are driven for real.
 from __future__ import annotations
 
 import contextlib
+import json
 from collections.abc import Iterator, Mapping
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
@@ -33,6 +34,10 @@ from agentworks.bootstrap import load_request_registry as _real_load_request_reg
 from agentworks.capabilities.harness_integration import HarnessLaunchIntent, HarnessStart, ShellIntegration
 from agentworks.db import Database, InitStatus, ProvisioningStatus, SessionMode, SessionRuntimeSnapshot, SessionStatus
 from agentworks.errors import AgentworksError, NotFoundError, StateError, UserAbort, ValidationError
+from agentworks.execution.access import Admin
+from agentworks.execution.errors import ExecutionIncomplete, FileContentMismatch, PathRefusal, PathRefused
+from agentworks.execution.requests import Command, PythonProgram
+from agentworks.execution.results import Completed, Result, Unknown, UnknownReason
 from agentworks.secrets.orchestration import (
     resolve_for_command as _real_resolve_for_command,
 )
@@ -41,6 +46,7 @@ from agentworks.sessions.manager._scope import _regenerate_tmuxinator as _real_r
 from agentworks.sessions.tmux import FingerprintProbe, ProbeStatus, TmuxServerFingerprint
 from agentworks.vms import manager as vm_manager
 from tests.conftest import seed_vm_trust
+from tests.vm_access_support import check_result, install_access_recorder, is_command_check, presence_check
 
 from ..conftest import (
     ManifestDoc,
@@ -64,6 +70,11 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from agentworks.capabilities.base import RunContext
+    from tests.vm_access_support import Call
+
+
+# Every access a command builds is the recording fake: these tests run no ssh.
+pytestmark = pytest.mark.usefixtures("vm_access_recorder")
 
 
 @pytest.fixture(autouse=True)
@@ -81,27 +92,36 @@ class _Result:
 
 
 class _Target:
-    """Transport double: records probe events into a shared log."""
+    """Launch-target double: records probe events into a shared log.
+
+    Its transport side answers ``run`` and ``write_file``; :meth:`answer`
+    answers its access's required-command checks, finding every command
+    except those in ``missing``.
+    """
 
     def __init__(self, events: list[str], *, missing: set[str] | None = None) -> None:
         self._events = events
         self._missing = missing or set()
 
     def run(self, cmd: str, **kwargs: object) -> _Result:
-        if cmd.startswith("rm -f ") and ".tmuxinator.yml" in cmd:
-            self._events.append("tmuxinator_remove")
-            return _Result()
         if "AGW_RUNTIME_STARTUP=" in cmd:
             result = _Result()
             result.stdout = "\nAGW_RUNTIME_STARTUP=off\n"
             return result
-        if "command -v" in cmd:
-            self._events.append("probe")
-            return _Result(ok=not any(f"command -v {m} " in cmd for m in self._missing))
         return _Result()
 
-    def write_file(self, remote_path: str, content: str, **kwargs: object) -> None:
-        self._events.append(f"tmuxinator_write:{remote_path}")
+    def answer(self, call: Call) -> Result | None:
+        request = call.request
+        if isinstance(request, Command) and request.argv[:2] == ("rm", "-f") and ".tmuxinator.yml" in request.argv[-2]:
+            self._events.append("tmuxinator_remove")
+            return Result(Completed(0))
+        if isinstance(request, PythonProgram) and request.args[:1] == ("write",):
+            self._events.append(f"tmuxinator_write:{json.loads(request.args[1])['path']}")
+            return Result(Completed(0))
+        if not is_command_check(request):
+            return None
+        self._events.append("probe")
+        return check_result(request, 20 if presence_check(request) in self._missing else 0)
 
 
 def _seed_db(tmp_path: Path) -> Database:
@@ -139,11 +159,24 @@ def _requiring_template(monkeypatch: pytest.MonkeyPatch, *commands: str) -> None
 
 
 def _patch_transports(monkeypatch: pytest.MonkeyPatch, admin: _Target, agent: _Target) -> None:
+    """Route the admin's and the agent's transports and accesses to ``admin`` and ``agent``."""
     admin_factory = lambda vm, config, **kwargs: admin  # noqa: E731
     agent_factory = lambda vm, config, agent_row, **kwargs: agent  # noqa: E731
     monkeypatch.setattr("agentworks.transports.transport", admin_factory)
     monkeypatch.setattr("agentworks.sessions.manager.transport", admin_factory)
     monkeypatch.setattr("agentworks.transports.agent_transport", agent_factory)
+    recorder = install_access_recorder(monkeypatch)
+    recorder.answer = lambda call: getattr(
+        admin if isinstance(call.identity, Admin) else agent, "answer", _every_command_present
+    )(call)
+
+
+def _every_command_present(call: Call) -> Result | None:
+    """How a target without its own ``answer`` (a local or native fixture transport) answers its accesses.
+
+    Every required command is present; any other request gets the recording fake's default outcome.
+    """
+    return check_result(call.request, 0) if is_command_check(call.request) else None
 
 
 def test_create_flag_validation_precedes_unrelated_unsupported_live_overlay(
@@ -956,7 +989,6 @@ def test_regenerate_tmuxinator_preserves_missing_base_compatibility_and_overlay(
     expected_event: str,
 ) -> None:
     from agentworks.instance_specs import parse_instance_spec
-    from agentworks.sessions import manager as session_manager
 
     events: list[str] = []
     db = _seed_db(tmp_path)
@@ -965,7 +997,7 @@ def test_regenerate_tmuxinator_preserves_missing_base_compatibility_and_overlay(
     if workspace_spec is not None:
         overlay = parse_instance_spec("workspace", workspace_spec)
         db.instance_state.put_desired_overlay("workspace", "ws1", overlay.payload)
-    monkeypatch.setattr(session_manager, "transport", lambda *args, **kwargs: _Target(events))
+    install_access_recorder(monkeypatch).answer = _Target(events).answer
     vm = db.get_vm("vm1")
     ws = db.get_workspace("ws1")
     assert vm is not None and ws is not None
@@ -1172,6 +1204,114 @@ def test_create_failure_cleans_session_slice_then_unwinds_ephemerals(
     assert db.instance_state.get_desired_overlay("session", "s1") is None
     assert not db.has_any_grant("s1", "s1")
     assert outcomes == []
+    db.close()
+
+
+def test_regenerate_tmuxinator_writes_a_legacy_row_with_a_trailing_slash(
+    tmp_path: Path,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    events: list[str] = []
+    db = _seed_db(tmp_path)
+    db._conn.execute("UPDATE workspaces SET workspace_path = '/home/me/ws1/' WHERE name = 'ws1'")
+    db._conn.commit()
+    install_access_recorder(monkeypatch).answer = _Target(events).answer
+    vm = db.get_vm("vm1")
+    ws = db.get_workspace("ws1")
+    assert vm is not None and ws is not None
+
+    _real_regenerate_tmuxinator(db, make_config(), vm, ws)
+
+    assert events == ["tmuxinator_write:/home/me/ws1/.tmuxinator.yml"]
+    assert captured_output.warnings == []
+    db.close()
+
+
+@pytest.mark.parametrize(
+    ("workspace_spec", "failure"),
+    [
+        # The write: a file operation's failures, and a lost connection.
+        (None, PathRefused("vm1", "write", "/home/me/ws1/.tmuxinator.yml", PathRefusal.UNSUITABLE)),
+        (None, FileContentMismatch("vm1", "/home/me/ws1/.tmuxinator.yml")),
+        (None, ExecutionIncomplete("vm1", Result(Unknown(UnknownReason.CONNECTION)))),
+        # The removal is a plain command, so only a request can fail it.
+        ('{"tmuxinator":false}', ExecutionIncomplete("vm1", Result(Unknown(UnknownReason.CONNECTION)))),
+    ],
+    ids=["write-link-refused", "write-content-mismatch", "write-connection-lost", "remove-connection-lost"],
+)
+def test_regenerate_tmuxinator_failure_warns_and_leaves_the_command_standing(
+    tmp_path: Path,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+    workspace_spec: str | None,
+    failure: Exception,
+) -> None:
+    from agentworks.instance_specs import parse_instance_spec
+
+    db = _seed_db(tmp_path)
+    if workspace_spec is not None:
+        overlay = parse_instance_spec("workspace", workspace_spec)
+        db.instance_state.put_desired_overlay("workspace", "ws1", overlay.payload)
+    install_access_recorder(monkeypatch).access(vm_name="vm1").default_outcome = failure
+    vm = db.get_vm("vm1")
+    ws = db.get_workspace("ws1")
+    assert vm is not None and ws is not None
+
+    _real_regenerate_tmuxinator(db, make_config(), vm, ws)
+
+    [warning] = captured_output.warnings
+    assert "ws1" in warning
+    db.close()
+
+
+@pytest.mark.parametrize("workspace_spec", [None, '{"tmuxinator":false}'], ids=["enabled", "disabled"])
+@pytest.mark.parametrize("stored", ["~/ws1", "/home/me/../srv/ws1"], ids=["tilde", "dotdot"])
+def test_regenerate_tmuxinator_warns_and_sends_nothing_for_a_stored_path_it_cannot_address(
+    tmp_path: Path,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+    workspace_spec: str | None,
+    stored: str,
+) -> None:
+    """A '~' row names no one directory, and a '..' row names its directory only once the VM resolves it."""
+    from agentworks.instance_specs import parse_instance_spec
+
+    db = _seed_db(tmp_path)
+    db._conn.execute("UPDATE workspaces SET workspace_path = ? WHERE name = 'ws1'", (stored,))
+    db._conn.commit()
+    if workspace_spec is not None:
+        overlay = parse_instance_spec("workspace", workspace_spec)
+        db.instance_state.put_desired_overlay("workspace", "ws1", overlay.payload)
+    recorder = install_access_recorder(monkeypatch)
+    vm = db.get_vm("vm1")
+    ws = db.get_workspace("ws1")
+    assert vm is not None and ws is not None
+
+    _real_regenerate_tmuxinator(db, make_config(), vm, ws)
+
+    assert len(captured_output.warnings) == 1
+    assert recorder.requests("run") == []
+    db.close()
+
+
+def test_regenerate_tmuxinator_lets_a_misused_request_raise(
+    tmp_path: Path,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only a failed request or file operation is tolerated: a request the execution layer refuses to build raises."""
+    db = _seed_db(tmp_path)
+    install_access_recorder(monkeypatch).access(vm_name="vm1").default_outcome = ValidationError("misused request")
+    vm = db.get_vm("vm1")
+    ws = db.get_workspace("ws1")
+    assert vm is not None and ws is not None
+
+    with pytest.raises(ValidationError, match="misused request"):
+        _real_regenerate_tmuxinator(db, make_config(), vm, ws)
     db.close()
 
 

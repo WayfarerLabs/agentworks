@@ -14,8 +14,10 @@ from agentworks.errors import (
     StateError,
     ValidationError,
 )
+from agentworks.execution.errors import FileConflict, FileContentMismatch, FileLockTimeout, PathRefused
 from agentworks.name_filters import validate_name_filters
 from agentworks.vms.manager import gated_vm_boundary
+from agentworks.workspaces.guest import REQUEST_FAILURES
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -27,8 +29,19 @@ if TYPE_CHECKING:
     from agentworks.resources import Registry
     from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.sessions.tmux import RunCommand
-    from agentworks.ssh import SSHLogger
     from agentworks.transports import Transport
+    from agentworks.vms.initializer.phase_a import OperationLog
+
+
+_REGENERATION_FAILURES = (
+    *REQUEST_FAILURES,
+    PathRefused,
+    FileConflict,
+    FileContentMismatch,
+    FileLockTimeout,
+)
+"""What the tmuxinator regeneration tolerates: a failed request, or a file operation that was refused,
+conflicted, timed out or wrote nothing."""
 
 
 def _require_workspace(db: Database, name: str) -> WorkspaceRow:
@@ -148,24 +161,51 @@ def _regenerate_tmuxinator(
     vm: VMRow,
     ws: WorkspaceRow,
     *,
-    logger: SSHLogger | None = None,
+    logger: OperationLog | None = None,
 ) -> None:
-    """Regenerate the workspace tmuxinator config from current session state."""
-    from agentworks.bootstrap import load_request_registry
-    from agentworks.workspaces.templates import resolve_live_tmuxinator
-    from agentworks.workspaces.tmuxinator import generate_config, remove_config
+    """Regenerate the workspace tmuxinator config from current session state, on the admin's access.
 
-    registry = load_request_registry(config, live_database=db)
-    target = _mgr.transport(vm, config, logger=logger)
-    if not resolve_live_tmuxinator(db, registry, ws.name, ws.template):
-        remove_config(target, ws.name, ws.workspace_path)
+    Best effort: the config is a convenience, so a request or file operation
+    that fails, a link in its path included, warns naming the workspace and
+    leaves the session command's result as it is. A stored path the file
+    operations cannot address (``guest.addressable_workspace_path``) warns
+    with its next step before anything runs.
+    """
+    import agentworks.execution as execution
+    from agentworks.bootstrap import load_request_registry
+    from agentworks.execution.access import Admin
+    from agentworks.linux_users import managed_home
+    from agentworks.vms.initializer.steps import describe_failure
+    from agentworks.workspaces.guest import addressable_workspace_path
+    from agentworks.workspaces.templates import resolve_live_tmuxinator
+    from agentworks.workspaces.tmuxinator import generate_config, remove_config, write_config
+
+    try:
+        addressable_workspace_path(ws.workspace_path)
+    except ValidationError as error:
+        output.warn(f"The tmuxinator config of workspace '{ws.name}' was not updated: {error}. {error.hint}")
         return
 
-    sessions = db.list_sessions(workspace_name=ws.name)
-    # Build socket paths for tmuxinator (admin sessions have NULL, agent sessions always set)
-    socket_paths = {s.name: s.socket_path for s in sessions}
-    config_text = generate_config(ws.name, ws.workspace_path, sessions=sessions, socket_paths=socket_paths)
-    target.write_file(f"{ws.workspace_path}/.tmuxinator.yml", config_text)
+    registry = load_request_registry(config, live_database=db)
+    admin = execution.vm_access(vm, config, Admin(), log=None if logger is None else logger.record)
+    try:
+        if not resolve_live_tmuxinator(db, registry, ws.name, ws.template):
+            remove_config(
+                admin, home=managed_home(vm.admin_username), ws_name=ws.name, workspace_path=ws.workspace_path
+            )
+            return
+
+        sessions = db.list_sessions(workspace_name=ws.name)
+        # Build socket paths for tmuxinator (admin sessions have NULL, agent sessions always set)
+        socket_paths = {s.name: s.socket_path for s in sessions}
+        config_text = generate_config(ws.name, ws.workspace_path, sessions=sessions, socket_paths=socket_paths)
+        write_config(admin, ws.workspace_path, config_text)
+    except _REGENERATION_FAILURES as error:
+        # Its requests carry no secret, so the stderr tail needs no redaction.
+        output.warn(
+            f"The tmuxinator config of workspace '{ws.name}' was not updated: "
+            f"{describe_failure(error, lambda text: text)}"
+        )
 
 
 def filter_sessions(

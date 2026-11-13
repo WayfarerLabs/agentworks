@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import stat
 import sys
 from dataclasses import replace
 from datetime import date, datetime, time
@@ -22,13 +24,14 @@ from agentworks.capabilities.harness_integration.settings import (
 )
 from agentworks.capabilities.harness_integration.setup import WorkspaceSetupInvocation
 from agentworks.errors import ExternalError, StateConflictError, StateError, UserAbort
+from agentworks.execution.errors import PathRefusal, PathRefused
+from agentworks.execution.files import Files
 from agentworks.harness_setup.model import NativeClaim
-from agentworks.native_files import NativeFilePathError, NativeFiles
 from agentworks.plugins._harness_native.native import setup_workspace
 from agentworks.plugins._harness_native.native_cli import NativeMarket, NativePlugin, identity
 from agentworks.plugins._harness_native.native_config import NativeUserConfig, NativeWorkspaceConfig
 from tests.artifacts._fixtures import received
-from tests.native_setup_fixtures import LocalFixtureTransport, invocation, record, setup_fixture_user
+from tests.native_setup_fixtures import LocalFixtureTransport, invocation, native_cli_double, record, setup_fixture_user
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="executes Linux guest file helpers")
 
@@ -136,8 +139,7 @@ def test_create_adopt_update_and_entry_conflict_are_independent(transport, tool)
     assert table(table(read(path, tool), key), first.content.name)["command"] == "operator-changed"
     assert table(table(read(path, tool), key), second.content.name)["command"] == "new"
     assert read(path, tool)["foreign"] == {"private": "fixture-secret-value"}
-    assert "fixture-secret-value" not in "".join(transport.commands + transport.logged_output)
-    assert not list((transport.root / "tmp").iterdir())
+    assert "fixture-secret-value" not in "".join(transport.logged_output)
 
 
 @pytest.mark.parametrize("modified,unavailable", [(False, False), (True, False), (False, True)])
@@ -166,6 +168,45 @@ def test_retirement_retains_modified_and_unavailable_ancestor_entries(transport,
     assert bool(claims[-1]) is (modified or unavailable)
 
 
+@pytest.mark.parametrize("case", ["new-user", "existing", "new-workspace"])
+def test_mcp_publication_modes_follow_the_owner(transport, case):
+    """A new file is private to a user or shared with a workspace group; an existing file keeps its mode."""
+    import grp
+
+    group = grp.getgrgid(os.getgid()).gr_name
+    root = transport.home if case != "new-workspace" else transport.root / "project"
+    path = root / ".codex/config.toml"
+    if case == "existing":
+        write(path, {"foreign": True})
+        path.chmod(0o644)
+    item = server(component="workspace" if case == "new-workspace" else "agent")
+    if case == "new-workspace":
+        root.mkdir()
+        call = WorkspaceSetupInvocation(
+            vm=object(),
+            access=(access := transport.access()),
+            files=access.files(),
+            prior=None,
+            checkpoint=Mock(),
+            workspace_name="fixture",
+            root=str(root),
+            linux_group=group,
+            artifacts=received(item),
+        )
+    else:
+        call = replace(invocation(transport, []), artifacts=received(item))
+    apply_mcp("codex", call, destination=str(path))
+    assert item.content.name in table(read(path), "mcp_servers")
+    file_mode, parent_mode = stat.S_IMODE(path.stat().st_mode), stat.S_IMODE(path.parent.stat().st_mode)
+    if case == "new-user":
+        assert (file_mode, parent_mode) == (0o600, 0o700)
+    elif case == "existing":
+        assert file_mode == 0o644
+    else:
+        assert (file_mode, parent_mode) == (0o660, 0o2770)
+        assert path.stat().st_gid == path.parent.stat().st_gid == grp.getgrnam(group).gr_gid
+
+
 def test_workspace_shared_paths_include_retained_claims_without_file_ownership(transport):
     item = server(component="workspace")
     root = transport.root / "project"
@@ -173,7 +214,8 @@ def test_workspace_shared_paths_include_retained_claims_without_file_ownership(t
     claims: list[tuple[NativeClaim, ...]] = []
     call = WorkspaceSetupInvocation(
         vm=object(),
-        runner=transport,
+        access=(access := transport.access()),
+        files=access.files(),
         prior=None,
         checkpoint=claims.append,
         workspace_name="fixture",
@@ -206,30 +248,13 @@ def test_checkpoint_failure_and_expected_hash_conflict_escape(transport, monkeyp
         apply_mcp("codex", call, destination=str(path))
     assert item.content.name in table(read(path), "mcp_servers")
     path.unlink()
-    publish = NativeFiles.publish
+    update = Files.update
 
-    def competing_write(
-        files: NativeFiles,
-        destination: str,
-        content: bytes,
-        *,
-        expected: str | None,
-        group: str = "",
-        executable: bool = False,
-        preserve_metadata: bool = False,
-    ) -> None:
+    def competing_write(files: Files, destination: str, content: bytes, **kwargs: object) -> bool:
         Path(destination).write_text('owner = "concurrent"\n')
-        publish(
-            files,
-            destination,
-            content,
-            expected=expected,
-            group=group,
-            executable=executable,
-            preserve_metadata=preserve_metadata,
-        )
+        return update(files, destination, content, **kwargs)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(NativeFiles, "publish", competing_write)
+    monkeypatch.setattr(Files, "update", competing_write)
     checkpoint = Mock()
     with pytest.raises(StateError):
         apply_mcp("codex", replace(call, checkpoint=checkpoint), destination=str(path))
@@ -315,7 +340,7 @@ def test_plugin_progress_is_preserved_in_later_mcp_checkpoint(transport, monkeyp
     write(path, {"foreign": True})
     market = NativeMarket("fixture", identity({"source_type": "local", "source": "/fixture-market"}))
     installed: list[NativePlugin] = []
-    cli = Mock()
+    cli = native_cli_double()
     cli.markets.return_value = (market,)
     cli.plugins.side_effect = lambda _markets: tuple(installed)
     cli.available.return_value = ("one@fixture",)
@@ -349,9 +374,9 @@ def test_native_configuration_failures_defer_without_claiming_or_disclosing(tran
     if fault == "malformed":
         path.write_text("private-fixture-only = [\n")
     elif fault == "read":
-        monkeypatch.setattr(NativeFiles, "read", Mock(side_effect=ExternalError("private-fixture-only")))
+        monkeypatch.setattr(Files, "read", Mock(side_effect=ExternalError("private-fixture-only")))
     else:
-        monkeypatch.setattr(NativeFiles, "publish", Mock(side_effect=ExternalError("private-fixture-only")))
+        monkeypatch.setattr(Files, "update", Mock(side_effect=ExternalError("private-fixture-only")))
     baseline = path.read_bytes()
     claims: list[tuple[NativeClaim, ...]] = []
     item = server()
@@ -384,35 +409,20 @@ def test_shared_document_is_observed_and_published_once(transport, monkeypatch):
     source.write_text("foreign = true\n")
     observed: list[str] = []
     published: list[str] = []
-    native_read, native_publish = NativeFiles.read, NativeFiles.publish
+    native_read, native_update = Files.read, Files.update
 
-    def reading(files: NativeFiles, destination: str) -> bytes | None:
+    def reading(files: Files, destination: str, **kwargs: object) -> bytes | None:
         observed.append(destination)
-        return native_read(files, destination)
+        return native_read(files, destination, **kwargs)  # type: ignore[arg-type]
 
-    def publishing(
-        files: NativeFiles,
-        destination: str,
-        content: bytes,
-        *,
-        expected: str | None,
-        group: str = "",
-        executable: bool = False,
-        preserve_metadata: bool = False,
-    ) -> None:
-        published.append(destination)
-        native_publish(
-            files,
-            destination,
-            content,
-            expected=expected,
-            group=group,
-            executable=executable,
-            preserve_metadata=preserve_metadata,
-        )
+    def publishing(files: Files, destination: str, content: bytes, **kwargs: object) -> bool:
+        wrote = native_update(files, destination, content, **kwargs)  # type: ignore[arg-type]
+        if wrote:
+            published.append(destination)
+        return wrote
 
-    monkeypatch.setattr(NativeFiles, "read", reading)
-    monkeypatch.setattr(NativeFiles, "publish", publishing)
+    monkeypatch.setattr(Files, "read", reading)
+    monkeypatch.setattr(Files, "update", publishing)
     config = NativeUserConfig(settings=SettingsMapping(source=str(source), strategy="merge-overwrite"))
     setup_fixture_user("codex", config, replace(invocation(transport, []), artifacts=received(server())))
     assert observed == published == [str(path)]
@@ -523,11 +533,11 @@ def test_explicit_mapping_takeover_releases_modified_obsolete_claim_in_one_pass(
         retire = replace(retire, prior=record(current, "codex"))
 
 
-@pytest.mark.parametrize("operation", ["read", "publish"])
+@pytest.mark.parametrize("operation", ["read", "update"])
 @pytest.mark.parametrize(
     "error",
     [
-        NativeFilePathError("guarded path"),
+        PathRefused("box", "read", "/guarded", PathRefusal.UNSUITABLE),
         StateError("internal"),
         StateConflictError("concurrent"),
         UserAbort("cancelled"),
@@ -547,8 +557,8 @@ def test_optional_mcp_catches_only_typed_guarded_path_refusals(transport, monkey
     changed = server(command="changed")
     call = replace(call, prior=previous, artifacts=received(changed), report_incomplete=reports.append)
     with monkeypatch.context() as patch:
-        patch.setattr(NativeFiles, operation, Mock(side_effect=error))
-        if isinstance(error, NativeFilePathError):
+        patch.setattr(Files, operation, Mock(side_effect=error))
+        if isinstance(error, PathRefused):
             result = apply_mcp("codex", call, destination=str(path))
             assert reports and {entry.input_id for entry in result.deferred} == {changed.identity}
         else:
@@ -562,7 +572,7 @@ def test_required_mapping_without_mcp_still_propagates_guarded_path_refusals(tra
     path.mkdir(parents=True)
     source = transport.root / "mapping.toml"
     source.write_text('theme = "mapped"\n')
-    with pytest.raises(NativeFilePathError):
+    with pytest.raises(PathRefused):
         setup_fixture_user(
             "codex",
             NativeUserConfig(settings=SettingsMapping(source=str(source), strategy="replace")),

@@ -37,7 +37,8 @@ def _invoke(
         fixture.workspace = workspace
         return WorkspaceSetupInvocation(
             vm=fixture.vm,
-            runner=target,
+            access=(recorded := target.access()),
+            files=recorded.files(),
             prior=None,
             checkpoint=lambda _: None,
             workspace_name="workspace",
@@ -45,7 +46,13 @@ def _invoke(
             linux_group=grp.getgrgid(os.getgid()).gr_name,
         )
     return UserSetupInvocation(
-        vm=fixture.vm, runner=target, prior=None, checkpoint=lambda _: None, username="worker", home=str(target.home)
+        vm=fixture.vm,
+        access=(recorded := target.access()),
+        files=recorded.files(),
+        prior=None,
+        checkpoint=lambda _: None,
+        username="worker",
+        home=str(target.home),
     )
 
 

@@ -13,10 +13,16 @@ import pytest
 
 from agentworks.capabilities.harness_integration.settings import SettingsMapping, parse_settings, serialize_settings
 from agentworks.harness_setup.model import NativeClaim
-from agentworks.native_files import NativeFiles
 from agentworks.plugins._harness_native.native_cli import NativeCLI, NativeTool, identity
 from agentworks.plugins._harness_native.native_config import NativeUserConfig
-from tests.native_setup_fixtures import LocalFixtureTransport, invocation, market_fixture, record, setup_fixture_user
+from tests.native_setup_fixtures import (
+    LocalFixtureTransport,
+    invocation,
+    market_fixture,
+    native_cli,
+    record,
+    setup_fixture_user,
+)
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="local execution of Linux guest setup helpers")
 
@@ -139,8 +145,7 @@ def test_mapping_policy_controls_a_skipped_plugin_while_an_independent_plugin_co
     assert isinstance(table, dict)
     enabled = strategy in ("replace", "merge-overwrite")
     assert table["one@fixture-market"] == ({"enabled": enabled} if tool == "codex" else enabled)
-    with NativeFiles(transport) as files:
-        cli = NativeCLI(tool, files, home=str(transport.home), config_root=str(settings.parent))
+    with native_cli(transport, tool, settings.parent) as cli:
         installed = {item.identifier: item for item in cli.plugins(cli.markets())}
         assert installed["one@fixture-market"].enabled is enabled
         assert installed["two@fixture-market"].enabled
@@ -167,8 +172,7 @@ def test_unowned_market_source_conflict_does_not_block_independent_market(transp
         ("plugin", "two@independent"),
     }
     root = transport.home / (".codex" if tool == "codex" else ".claude")
-    with NativeFiles(transport) as files:
-        cli = NativeCLI(tool, files, home=str(transport.home), config_root=str(root))
+    with native_cli(transport, tool, root) as cli:
         current = {item.name: item for item in cli.markets()}
         observed_source = current["fixture-market"].source
         assert observed_source is not None
@@ -275,8 +279,7 @@ def test_market_replacement_retains_ownership_when_dependent_cannot_retire(trans
     )
     assert incomplete and claims[-1] == previous
     root = transport.home / (".codex" if tool == "codex" else ".claude")
-    with NativeFiles(transport) as files:
-        cli = NativeCLI(tool, files, home=str(transport.home), config_root=str(root))
+    with native_cli(transport, tool, root) as cli:
         current = cli.markets()
         assert current[0].source == next(item.source for item in previous if item.role == "marketplace")
         assert {item.identifier for item in cli.plugins(current)} == {"one@fixture-market"}
@@ -310,8 +313,7 @@ def test_unowned_git_market_optional_identity_is_not_adopted_for_bare_url(transp
     _market, source = git_market(transport, tool)
     root = transport.home / (".codex" if tool == "codex" else ".claude")
     root.mkdir()
-    with NativeFiles(transport) as files:
-        cli = NativeCLI(tool, files, home=str(transport.home), config_root=str(root))
+    with native_cli(transport, tool, root) as cli:
         args = ["plugin", "marketplace", "add", source]
         if option == "ref":
             if tool == "codex":
@@ -340,8 +342,7 @@ def test_unowned_git_market_optional_identity_is_not_adopted_for_bare_url(transp
     assert len(incomplete) == 1
     assert not claims
     setup_fixture_user(tool, None, invocation(transport, claims, prior=record((), tool)))
-    with NativeFiles(transport) as files:
-        cli = NativeCLI(tool, files, home=str(transport.home), config_root=str(root))
+    with native_cli(transport, tool, root) as cli:
         assert cli.markets() == before
         assert {item.identifier for item in cli.plugins(before)} == {"one@fixture-market"}
 
@@ -369,8 +370,7 @@ def test_native_plugin_update_keeps_ownership_for_repeat_and_retirement(transpor
     ):
         assert transport.run(shlex.join(["git", "-C", str(market), *args])).ok
     root = transport.home / (".codex" if tool == "codex" else ".claude")
-    with NativeFiles(transport) as files:
-        cli = NativeCLI(tool, files, home=str(transport.home), config_root=str(root))
+    with native_cli(transport, tool, root) as cli:
         cli.command(["plugin", "marketplace", "upgrade" if tool == "codex" else "update", "fixture-market"])
         if tool == "codex":
             cli.install("one@fixture-market")
@@ -401,8 +401,7 @@ def test_native_plugin_update_keeps_ownership_for_repeat_and_retirement(transpor
     assert not incomplete
     assert claims[-1] == ()
     assert len(reports) == 2
-    with NativeFiles(transport) as files:
-        cli = NativeCLI(tool, files, home=str(transport.home), config_root=str(root))
+    with native_cli(transport, tool, root) as cli:
         assert cli.markets() == ()
         assert cli.plugins(()) == ()
 
@@ -480,8 +479,7 @@ def test_legacy_plugin_ownership_still_protects_the_full_parent_source(transport
     assert len(incomplete) == 2
     assert len(claims) == count
     root = transport.home / (".codex" if tool == "codex" else ".claude")
-    with NativeFiles(transport) as files:
-        cli = NativeCLI(tool, files, home=str(transport.home), config_root=str(root))
+    with native_cli(transport, tool, root) as cli:
         markets = cli.markets()
         assert markets[0].source == market_claim.source
         assert {item.identifier for item in cli.plugins(markets)} == {"one@fixture-market"}

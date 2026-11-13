@@ -92,7 +92,7 @@ printf 'username={org}\\npassword=%s\\n\\n' "$token"
 class AzDOCredentialProvider(GitCredentialProvider):
     """Produces stored or Azure-CLI-backed Azure DevOps credentials."""
 
-    contract_version: ClassVar[int] = 3
+    contract_version: ClassVar[int] = 4
     name: ClassVar[str] = "azdo"
     description: ClassVar[str] = "Azure DevOps HTTPS credentials from a secret or Azure CLI"
     config_model: ClassVar[type[AzDOConfig]] = AzDOConfig
@@ -138,14 +138,14 @@ class AzDOCredentialProvider(GitCredentialProvider):
 
     def _check_cli_readiness(self, ctx: RunContext) -> None:
         from agentworks import output
-        from agentworks.errors import StateError
-        from agentworks.ssh import SSHError
+        from agentworks.errors import ConnectivityError, ExternalError, StateError
+        from agentworks.execution.errors import VMNotReady
 
-        target = ctx.admin_target() or ctx.agent_target()
-        if target is None:
-            raise StateError("Azure CLI runup requires a current user target")
+        access = ctx.admin_access() or ctx.agent_access()
+        if access is None:
+            raise StateError("Azure CLI runup requires a current user's access")
         try:
-            missing = check_required_commands(("az",), target, timeout=10)
+            missing = check_required_commands(("az",), access, deadline=10)
             if missing:
                 output.warn(
                     f"Azure CLI credentials are currently unavailable for git-credential/{self.owner_name}; "
@@ -153,13 +153,15 @@ class AzDOCredentialProvider(GitCredentialProvider):
                     "if it is installed later, or install it for the target user"
                 )
                 return
-            result = run_user_shell_command(_AZ_AUTH_CHECK, target, timeout=10)
-        except SSHError:
+            status = run_user_shell_command(_AZ_AUTH_CHECK, access, deadline=10)
+        except (ConnectivityError, ExternalError, VMNotReady):
+            # Indeterminate, a VM without python3 included: warn, never block the helper. A host-key
+            # or other state error is not indeterminate and propagates.
             output.warn(f"Could not determine Azure CLI readiness for git-credential/{self.owner_name}")
             return
-        if result.returncode == 0:
+        if status == 0:
             output.detail(f"Verified Azure CLI readiness for git-credential/{self.owner_name}")
-        elif result.returncode == 21:
+        elif status == 21:
             output.warn(
                 f"Azure CLI credentials are currently unavailable for git-credential/{self.owner_name}; "
                 "the target user must authenticate the intended identity with the appropriate 'az login' form"

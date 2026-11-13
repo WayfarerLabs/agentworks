@@ -22,6 +22,8 @@ fakes.
 from __future__ import annotations
 
 import contextlib
+import json
+import shlex
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
@@ -31,6 +33,7 @@ from agentworks.agents import grants as agent_grants
 from agentworks.capabilities.base import RunContext
 from agentworks.db import InitStatus, SessionMode, VMStatus
 from agentworks.errors import (
+    ConnectivityError,
     ExternalError,
     NotFoundError,
     StateError,
@@ -38,7 +41,9 @@ from agentworks.errors import (
     ValidationError,
 )
 from agentworks.execution import trust
-from agentworks.execution.errors import TrustMissing
+from agentworks.execution.errors import CommandFailed, TrustMissing
+from agentworks.execution.requests import Command, FromFile, PythonProgram, Script, ToFile
+from agentworks.execution.results import Completed, Result
 from agentworks.execution.trust import HOST_TRUST
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
@@ -46,7 +51,9 @@ from agentworks.transports import SSHTransport
 from agentworks.vms import manager as vm_manager
 from agentworks.vms.manager.boundary import require_vm_ssh_boundary
 from agentworks.workspaces import manager as workspace_manager
+from agentworks.workspaces.guest import path_occupied
 from tests.conftest import ManifestDoc, seed_vm_trust, stub_vm_ssh_identity
+from tests.vm_access_support import AccessRecorder, Call, install_access_recorder
 
 # Captured at import, before the autouse fixture stubs the SSH precondition.
 _REAL_SSH_BOUNDARY = require_vm_ssh_boundary
@@ -167,34 +174,83 @@ class _FakeAdminTarget:
         self.written: list[tuple[str, str]] = []
         self._events = events
         self._failing = failing
+        # Directory links the guest resolves: each link's path to its target.
+        self.links: dict[str, str] = {}
 
     def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
         self.commands.append(cmd)
         if self._events is not None:
             self._events.append(f"run:{cmd}")
-        ok = not any(needle in cmd for needle in self._failing)
+        ok = not any(_hit(needle, cmd) for needle in self._failing)
         return SimpleNamespace(ok=ok, returncode=0 if ok else 1, stdout="", stderr="")
 
-    def write_file(self, remote_path: str, content: str, **kwargs: object) -> None:
-        self.written.append((remote_path, content))
+    def answer(self, call: Call) -> Result | None:
+        """Answer the admin's access as the guest :meth:`run` models.
 
-    def copy_to(self, local_path: object, remote_path: str, **kwargs: object) -> None:
-        self.commands.append(f"copy_to:{remote_path}")
+        A command is its ``shlex.join``, a script its source without the
+        ``set --`` line that carries its arguments; an elevated request gets
+        ``sudo=True``. A file operation is recorded as written and succeeds.
+        A failed request raises ``CommandFailed`` under ``check``, as the
+        access does. Rehome's ``realpath`` probe prints its arguments with
+        ``links`` resolved.
+        """
+        request = call.request
+        if isinstance(request, PythonProgram):
+            if request.args[:1] == ("write",):
+                self.written.append((json.loads(request.args[1])["path"], ""))
+            return Result(Completed(0))
+        if isinstance(request, Command):
+            line = shlex.join(request.argv)
+        else:
+            assert isinstance(request, Script)
+            line = request.source.split("\n", 1)[1] if request.source.startswith("set -- ") else request.source
+        check = bool(call.options["check"])
+        try:
+            outcome = self.run(line, sudo=request.elevated, check=check)
+        except ConnectivityError as error:
+            raise CommandFailed("box", 1, Result(Completed(1)), streams_logged=True) from error
+        stdout = outcome.stdout.encode()
+        if isinstance(request, Script) and line.startswith("realpath -z -e") and not outcome.returncode:
+            paths = shlex.split(request.source.split("\n", 1)[0])[2:]
+            stdout = b"".join(self._resolved(path).encode() + b"\0" for path in paths)
+        result = Result(Completed(outcome.returncode), stdout, outcome.stderr.encode())
+        if check and outcome.returncode:
+            raise CommandFailed("box", outcome.returncode, result, streams_logged=True)
+        return result
+
+    def _resolved(self, path: str) -> str:
+        for link, target in self.links.items():
+            if path == link or path.startswith(link + "/"):
+                return target + path.removeprefix(link)
+        return path
+
+
+_OCCUPIED_PROBE = path_occupied("/").source.split("\n", 1)[1]
+"""``path_occupied``'s script body, as :meth:`_FakeAdminTarget.answer` renders it to ``run``."""
+
+
+def _hit(needle: str, cmd: str) -> bool:
+    """Whether a fake's failing ``needle`` names ``cmd``: the occupancy probe whole, any other needle within it.
+
+    The probe's body is also part of delete's empty-reservation removal, which must not fail with it.
+    """
+    return cmd == needle if needle == _OCCUPIED_PROBE else needle in cmd
+
+
+def _route(monkeypatch: pytest.MonkeyPatch, fake: _FakeAdminTarget) -> AccessRecorder:
+    """Route the admin's transport and access to ``fake``: delete's session teardown still takes a transport."""
+    factory = lambda vm, config, **kwargs: fake  # noqa: E731
+    monkeypatch.setattr("agentworks.transports.transport", factory)
+    recorder = install_access_recorder(monkeypatch)
+    recorder.answer = fake.answer
+    return recorder
 
 
 @pytest.fixture
 def target(monkeypatch: pytest.MonkeyPatch) -> _FakeAdminTarget:
-    """One recording admin target behind the canonical transport
-    factory (the lifecycle bodies import ``transport``
-    function-locally) AND the workspace VM backend's eager module
-    import (pre-imported before patching so the module can never
-    first-import mid-patch and capture the fake as its original)."""
-    import agentworks.workspaces.backends.vm  # noqa: F401
-
+    """One recording admin target behind the canonical transport factory and the admin's access."""
     fake = _FakeAdminTarget()
-    factory = lambda vm, config, **kwargs: fake  # noqa: E731
-    monkeypatch.setattr("agentworks.transports.transport", factory)
-    monkeypatch.setattr("agentworks.workspaces.backends.vm.transport", factory)
+    _route(monkeypatch, fake)
     return fake
 
 
@@ -323,14 +379,6 @@ class _RevParseFailingTarget(_FakeAdminTarget):
         return SimpleNamespace(ok=True, returncode=0, stdout="", stderr="")
 
 
-def _wire_target(monkeypatch: pytest.MonkeyPatch, fake: _FakeAdminTarget) -> None:
-    import agentworks.workspaces.backends.vm  # noqa: F401
-
-    factory = lambda vm, config, **kwargs: fake  # noqa: E731
-    monkeypatch.setattr("agentworks.transports.transport", factory)
-    monkeypatch.setattr("agentworks.workspaces.backends.vm.transport", factory)
-
-
 def test_repair_skips_git_identity_when_not_a_repo(
     db: Database,
     make_config,  # noqa: ANN001
@@ -343,7 +391,7 @@ def test_repair_skips_git_identity_when_not_a_repo(
     fake = _RevParseFailingTarget(
         rev_parse_stderr="fatal: not a git repository (or any of the parent directories): .git"
     )
-    _wire_target(monkeypatch, fake)
+    _route(monkeypatch, fake)
 
     config = make_config(manifests=[ManifestDoc("workspace-template", "default", {"git_user_name": "Ada Lovelace"})])
     _seed(db)
@@ -365,7 +413,7 @@ def test_repair_git_identity_warns_on_unexpected_probe_failure(
     broken checkout) warns rather than reporting a misleading OK, and still
     skips the config write."""
     fake = _RevParseFailingTarget(rev_parse_stderr="git: command not found")
-    _wire_target(monkeypatch, fake)
+    _route(monkeypatch, fake)
 
     config = make_config(manifests=[ManifestDoc("workspace-template", "default", {"git_user_name": "Ada Lovelace"})])
     _seed(db)
@@ -520,7 +568,7 @@ def test_repair_healthy_workspace_reports_ok_for_every_step(
     'No issues found', and convergence still runs (the canonical commands
     execute even when they are no-ops)."""
     fake = _RepairProbeTarget()
-    _wire_target(monkeypatch, fake)
+    _route(monkeypatch, fake)
     config = make_config()
     _seed(db)
     _reachable(monkeypatch, True)
@@ -548,7 +596,7 @@ def test_repair_fully_damaged_workspace_reports_fixed_per_step(
     the truthful 'Repaired 3 issue(s)' (ownership/permissions/SGID collapse
     to one category), and convergence still runs."""
     fake = _RepairProbeTarget(damaged=frozenset({"owner", "mode", "sgid", "acl", "traversal"}))
-    _wire_target(monkeypatch, fake)
+    _route(monkeypatch, fake)
     config = make_config()
     _seed(db)
     _reachable(monkeypatch, True)
@@ -573,7 +621,7 @@ def test_repair_partial_damage_reports_only_the_diverged_step(
     and parent traversal report OK, and the count is the truthful 'Repaired
     1 issue(s)' (no over-counting of the still-correct steps)."""
     fake = _RepairProbeTarget(damaged=frozenset({"acl"}))
-    _wire_target(monkeypatch, fake)
+    _route(monkeypatch, fake)
     config = make_config()
     _seed(db)
     _reachable(monkeypatch, True)
@@ -598,7 +646,7 @@ def test_repair_sgid_only_damage_reports_permissions_fixed(
     AND collapse the two silent (healthy) commands would force OK and this
     would fail."""
     fake = _RepairProbeTarget(damaged=frozenset({"sgid"}))
-    _wire_target(monkeypatch, fake)
+    _route(monkeypatch, fake)
     config = make_config()
     _seed(db)
     _reachable(monkeypatch, True)
@@ -621,7 +669,7 @@ def test_repair_mode_only_damage_reports_permissions_fixed(
     isolated case pinning the OR-collapse from a different member (again
     fails under an AND collapse, where owner's silence would force OK)."""
     fake = _RepairProbeTarget(damaged=frozenset({"mode"}))
-    _wire_target(monkeypatch, fake)
+    _route(monkeypatch, fake)
     config = make_config()
     _seed(db)
     _reachable(monkeypatch, True)
@@ -643,7 +691,7 @@ def test_repair_owner_only_damage_reports_permissions_fixed(
     collapse (fails under an AND collapse, where mode/sgid silence forces
     OK). Together the three isolated tests pin every sub-signal."""
     fake = _RepairProbeTarget(damaged=frozenset({"owner"}))
-    _wire_target(monkeypatch, fake)
+    _route(monkeypatch, fake)
     config = make_config()
     _seed(db)
     _reachable(monkeypatch, True)
@@ -666,7 +714,7 @@ def test_repair_acl_churn_does_not_report_false_fixed(
     spurious Fixed, keeping 'No issues found' truthful. A whole-output
     byte-compare would fail here."""
     fake = _RepairProbeTarget(acl_churn=True)
-    _wire_target(monkeypatch, fake)
+    _route(monkeypatch, fake)
     config = make_config()
     _seed(db)
     _reachable(monkeypatch, True)
@@ -690,7 +738,7 @@ def test_repair_acls_indeterminate_when_getfacl_fails(
     only the verification is missing. Fails before the fix, where empty-vs-empty
     snapshots compared equal and printed a confirmed OK: ACLs."""
     fake = _RepairProbeTarget(getfacl_ok=False)
-    _wire_target(monkeypatch, fake)
+    _route(monkeypatch, fake)
     config = make_config()
     _seed(db)
     _reachable(monkeypatch, True)
@@ -707,20 +755,17 @@ def test_repair_acls_indeterminate_when_getfacl_fails(
     assert any("-exec setfacl -m g::rwx" in c for c in fake.commands)
 
 
-def test_repair_parent_traversal_quotes_a_spaced_path(
+def test_repair_opens_traversal_above_a_spaced_path(
     db: Database,
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
     captured_output: CapturedOutput,
 ) -> None:
-    """Regression for the traversal quoting fix: a workspace_path with a space
-    and a shell metacharacter is passed as the positional `$1` (shlex-quoted),
-    never interpolated raw into the sh -c script. Guards against a re-introduced
-    raw interpolation, which would split the path on the space and execute the
-    metacharacter."""
-    import shlex
-
+    """A workspace path with a space and a shell metacharacter reaches the
+    traversal walk as its argument (``test_guest.py`` proves the walk treats
+    it as one path and starts at its parent)."""
     from agentworks.db import InitStatus
+    from agentworks.workspaces.guest import open_parent_traversal
 
     spaced_path = "/srv/my ws;danger"
     db.insert_vm("box", site="proxmox", hostname="box")
@@ -734,20 +779,13 @@ def test_repair_parent_traversal_quotes_a_spaced_path(
         template="default",
         linux_group="ws-ws1",
     )
-    fake = _RepairProbeTarget()
-    _wire_target(monkeypatch, fake)
+    recorder = _route(monkeypatch, _RepairProbeTarget())
     config = make_config()
     _reachable(monkeypatch, True)
 
     workspace_manager.repair_workspace(db, config, "ws1", interaction=TtyInteractionPolicy.REFUSE)
 
-    traversal = next(c for c in fake.commands if "chmod -c a+x" in c)
-    # The path rides in as the shlex-quoted positional arg after `_`, and the
-    # loop seeds from the PARENT of "$1" (dirname), so the raw path never
-    # touches the script body and the workspace dir itself is never a+x'd.
-    assert traversal.endswith(f"_ {shlex.quote(spaced_path)}")
-    assert 'p=$(dirname "$1")' in traversal
-    assert f"p={spaced_path}" not in traversal
+    assert open_parent_traversal(spaced_path) in recorder.requests("run")
 
 
 # -- the ACL intersect-compare helper (churn-robust change detection) ---------
@@ -824,7 +862,7 @@ class _CreateThenRepairTarget(_FakeAdminTarget):
         self.commands.append(cmd)
         stdout = ""
         ok = True
-        if cmd.startswith("test -d"):
+        if cmd.startswith(_OCCUPIED_PROBE):
             ok = False  # create's existence precheck must see "absent" to proceed
         elif "chmod -c 2770" in cmd:
             self._ws_mode = 0o2770  # repair step 3 stamps the canonical mode
@@ -855,7 +893,7 @@ def test_first_repair_after_create_is_a_noop(
     from agentworks.workspaces.templates import ResolvedTemplate
 
     fake = _CreateThenRepairTarget()
-    _wire_target(monkeypatch, fake)
+    _route(monkeypatch, fake)
     config = make_config()
     _seed(db)
     _reachable(monkeypatch, True)
@@ -930,7 +968,7 @@ def test_repair_hardens_other_bits_on_a_pre254_workspace(
     every other step reports OK. The setfacl commands carry ``o::---`` on both
     the default-on-dirs and recursive-access applications."""
     fake = _OtherStillGrantedTarget()
-    _wire_target(monkeypatch, fake)
+    _route(monkeypatch, fake)
     config = make_config()
     _seed(db)
     _reachable(monkeypatch, True)
@@ -961,7 +999,7 @@ def test_delete_reachable_vm_is_one_boundary_burst(
     workspace_manager.delete_workspace(db, config, "ws1", yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
     assert resolve_counter == [["proxmox-token"]]
-    assert any("rm -rf /srv/ws1" in c for c in target.commands)
+    assert any("rm -rf -- /srv/ws1" in c for c in target.commands)
     assert db.get_workspace("ws1") is None
     assert "Workspace 'ws1' deleted" in captured_output.info
 
@@ -1033,7 +1071,7 @@ def test_delete_removes_the_workspace_group_after_the_directory(
 
     workspace_manager.delete_workspace(db, config, "ws1", yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
-    dir_removed = next(i for i, c in enumerate(target.commands) if "rm -rf /srv/ws1" in c)
+    dir_removed = next(i for i, c in enumerate(target.commands) if "rm -rf -- /srv/ws1" in c)
     group_removed = next(i for i, c in enumerate(target.commands) if "groupdel ws-ws1" in c)
     assert group_removed > dir_removed
     assert db.get_workspace("ws1") is None
@@ -1078,7 +1116,7 @@ class _CheckAwareTarget(_FakeAdminTarget):
 
     def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
         self.commands.append(cmd)
-        failing = any(needle in cmd for needle in self._failing)
+        failing = any(_hit(needle, cmd) for needle in self._failing)
         if failing and kwargs.get("check", True):
             from agentworks.ssh import SSHError
 
@@ -1097,7 +1135,7 @@ def test_delete_group_removal_failure_does_not_break_the_delete(
     non-zero exit never raises, the delete still finishes (row gone,
     success reported), and no 'remote cleanup failed' warning fires."""
     fake = _CheckAwareTarget(failing=("groupdel",))
-    _wire_target(monkeypatch, fake)
+    _route(monkeypatch, fake)
 
     config = make_config()
     _seed(db)
@@ -1146,10 +1184,10 @@ def test_create_rollback_removes_the_fresh_workspace_group(
     removes the group create just made. The removed group carries the
     fresh ``ws-`` prefix (``workspace_group('ws1')``), and the
     ``groupdel`` runs after the directory ``rm -rf``, mirroring the
-    delete path. ``failing=('test -d',)`` makes the create-time
+    delete path. ``failing=(_OCCUPIED_PROBE,)`` makes the create-time
     existence probe report the directory absent so create proceeds."""
-    fake = _FakeAdminTarget(failing=("test -d",))
-    _wire_target(monkeypatch, fake)
+    fake = _FakeAdminTarget(failing=(_OCCUPIED_PROBE,))
+    _route(monkeypatch, fake)
 
     config = make_config()
     _seed_vm_only(db)
@@ -1178,8 +1216,8 @@ def test_create_rollback_tolerates_a_groupdel_failure(
     the removal is issued ``check=False``, so the non-zero exit never
     raises. The original ``ExternalError`` propagates cleanly and no
     'rollback during workspace create' warning fires."""
-    fake = _CheckAwareTarget(failing=("test -d", "groupdel"))
-    _wire_target(monkeypatch, fake)
+    fake = _CheckAwareTarget(failing=(_OCCUPIED_PROBE, "groupdel"))
+    _route(monkeypatch, fake)
 
     config = make_config()
     _seed_vm_only(db)
@@ -1213,12 +1251,10 @@ def test_create_rollback_on_clone_failure_leaves_no_residue(
     exactly once. The original clone error type propagates with safe operation context, the
     directory ``rm -rf`` and the ``groupdel ws-ws1`` are both issued (the
     group after the directory, mirroring delete), and no DB row survives.
-    ``failing=('test -d', 'git clone')`` makes the existence probe report
+    ``failing=(_OCCUPIED_PROBE, 'git clone')`` makes the existence probe report
     the directory absent (so create proceeds) and the clone raise."""
-    from agentworks.ssh import SSHError
-
-    fake = _CheckAwareTarget(failing=("test -d", "git clone"))
-    _wire_target(monkeypatch, fake)
+    fake = _CheckAwareTarget(failing=(_OCCUPIED_PROBE, "git clone"))
+    _route(monkeypatch, fake)
 
     config = make_config(
         manifests=[ManifestDoc("workspace-template", "default", {"repo": "https://example.com/repo.git"})]
@@ -1226,8 +1262,8 @@ def test_create_rollback_on_clone_failure_leaves_no_residue(
     _seed_vm_only(db)
     _reachable(monkeypatch, True)
 
-    # Realize preserves the transport error type and workspace identity.
-    with pytest.raises(SSHError) as caught:
+    # Realize preserves the request's error type and gives it the workspace's identity.
+    with pytest.raises(CommandFailed) as caught:
         workspace_manager.create_workspace(
             db, config, name="ws1", vm_name="box", interaction=TtyInteractionPolicy.REFUSE
         )
@@ -1271,8 +1307,8 @@ def test_cancel_during_clone_cleans_directory_and_group_and_preserves_original_i
                     raise KeyboardInterrupt("fixture second interruption during cleanup")
             return result
 
-    target = Target(failing=("test -d",))
-    _wire_target(monkeypatch, target)
+    target = Target(failing=(_OCCUPIED_PROBE,))
+    _route(monkeypatch, target)
     config = make_config(
         manifests=[ManifestDoc("workspace-template", "default", {"repo": "https://example.com/repo.git"})]
     )
@@ -1425,6 +1461,249 @@ def test_rehome_overlapping_paths_fail_with_zero_resolves_and_zero_gate(
     assert target.commands == []
 
 
+def test_rehome_refuses_a_target_inside_a_stored_path_spelled_with_a_double_slash(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    target: _FakeAdminTarget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = make_config()
+    _seed(db)
+    db._conn.execute("UPDATE workspaces SET workspace_path = '/opt/agentworks/workspaces//ws1' WHERE name = 'ws1'")
+    db._conn.commit()
+    _no_gate(monkeypatch)
+
+    with pytest.raises(ValidationError):
+        workspace_manager.rehome_workspace(
+            db,
+            config,
+            "ws1",
+            target_path="/opt/agentworks/workspaces/ws1/inner",
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert resolve_counter == []
+    assert target.commands == []
+
+
+def _store_a_tilde_path(db: Database) -> None:
+    """A '~' row, which the state migration leaves relative: it names no one directory on the VM."""
+    db._conn.execute("UPDATE workspaces SET workspace_path = '~/ws/ws1' WHERE name = 'ws1'")
+    db._conn.commit()
+
+
+def test_rehome_refuses_a_stored_path_that_is_not_absolute_before_anything_runs(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    target: _FakeAdminTarget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = make_config()
+    _seed(db)
+    _store_a_tilde_path(db)
+    _reachable(monkeypatch, True)
+
+    with pytest.raises(ValidationError):
+        workspace_manager.rehome_workspace(
+            db, config, "ws1", target_path="/dst/ws1", yes=True, interaction=TtyInteractionPolicy.REFUSE
+        )
+
+    assert resolve_counter == []
+    assert target.commands == []
+    assert db.get_workspace("ws1") is not None
+
+
+def test_delete_of_a_stored_path_that_is_not_absolute_removes_the_row_and_link_and_leaves_the_vm_files(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """The console link goes, so a new create of the name can link its config without replacing."""
+    from agentworks.linux_users import managed_home
+    from agentworks.workspaces.tmuxinator import remove_link
+
+    config = make_config()
+    _seed(db)
+    _store_a_tilde_path(db)
+    _reachable(monkeypatch, True)
+    target = _FakeAdminTarget()
+    recorder = _route(monkeypatch, target)
+    vm = db.get_vm("box")
+    assert vm is not None
+
+    workspace_manager.delete_workspace(db, config, "ws1", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert db.get_workspace("ws1") is None
+    assert not any("ws/ws1" in command or "tmuxinator" in command for command in target.commands)
+    assert remove_link(managed_home(vm.admin_username), "ws1") in recorder.requests("run")
+    assert "/usr/sbin/groupdel ws-ws1" in target.commands
+    assert len(captured_output.warnings) == 1
+    assert "~/ws/ws1" in captured_output.warnings[0]
+
+
+def _store_a_dotdot_path(db: Database) -> None:
+    """A row an earlier release stored as typed, or a relative '../srv/ws1' the state migration anchored."""
+    db._conn.execute("UPDATE workspaces SET workspace_path = '/home/admin/../srv/ws1' WHERE name = 'ws1'")
+    db._conn.commit()
+
+
+def test_delete_of_a_stored_path_with_a_dotdot_removes_its_directory_and_link_as_the_vm_resolves_them(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    from agentworks.linux_users import managed_home
+    from agentworks.workspaces.tmuxinator import remove_link_to
+
+    config = make_config()
+    _seed(db)
+    _store_a_dotdot_path(db)
+    _reachable(monkeypatch, True)
+    fake = _FakeAdminTarget()
+    recorder = _route(monkeypatch, fake)
+    vm = db.get_vm("box")
+    assert vm is not None
+
+    workspace_manager.delete_workspace(db, config, "ws1", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert db.get_workspace("ws1") is None
+    assert "rm -rf -- /home/admin/../srv/ws1" in fake.commands
+    assert remove_link_to(managed_home(vm.admin_username), "ws1", "/home/admin/../srv/ws1") in recorder.requests("run")
+    assert captured_output.warnings == []
+
+
+def test_rehome_of_a_stored_path_with_a_dotdot_stores_the_target(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """Rehome is how such a row is repaired: the guest resolves the source, and the new row has no '..'."""
+    config = make_config()
+    _seed(db)
+    _store_a_dotdot_path(db)
+    _reachable(monkeypatch, True)
+    fake = _RehomeTarget()
+    _route(monkeypatch, fake)
+
+    workspace_manager.rehome_workspace(
+        db, config, "ws1", target_path="/dst/ws1", yes=True, interaction=TtyInteractionPolicy.REFUSE
+    )
+
+    ws = db.get_workspace("ws1")
+    assert ws is not None and ws.workspace_path == "/dst/ws1"
+    assert "rsync -a -- /home/admin/../srv/ws1/ /dst/ws1/" in fake.commands
+
+
+def test_rehome_refuses_a_target_inside_the_source_through_a_link(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The spellings differ, but the guest resolves the target into the source: nothing is copied or removed."""
+    config = make_config()
+    _seed(db)
+    db._conn.execute("UPDATE workspaces SET workspace_path = '/data/ws/ws1' WHERE name = 'ws1'")
+    db._conn.commit()
+    _reachable(monkeypatch, True)
+    fake = _FakeAdminTarget(failing=("test -d /mnt/x/ws/ws1/inner",))
+    fake.links = {"/data/ws": "/mnt/x/ws"}
+    _route(monkeypatch, fake)
+
+    with pytest.raises(ValidationError):
+        workspace_manager.rehome_workspace(
+            db,
+            config,
+            "ws1",
+            target_path="/mnt/x/ws/ws1/inner",
+            remove_old=True,
+            yes=True,
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert [command.split()[0] for command in fake.commands] == ["test", "test", "realpath"]
+    row = db.get_workspace("ws1")
+    assert row is not None and row.workspace_path == "/data/ws/ws1"
+
+
+def test_rehome_resolves_both_paths_as_root() -> None:
+    """As the copy runs: an unsearchable component would otherwise come back unresolved."""
+    from agentworks.workspaces.manager.rehome import _resolved_paths
+    from tests.vm_access_support import Admin, RecordingVMAccess
+
+    access = RecordingVMAccess([], Admin())
+    access.default_outcome = Result(Completed(0), b"/mnt/x/ws1\0/dst/ws1\0")
+
+    assert _resolved_paths(access, "/data/ws1", "/dst/ws1") == ("/mnt/x/ws1", "/dst/ws1")
+    [request] = access.requests()
+    assert request.elevated
+
+
+@pytest.mark.parametrize(
+    "stdout",
+    [b"/mnt/x/ws1\0", b"/mnt/x/ws1\0/dst/ws1\0/third\0", b"mnt/x/ws1\0/dst/ws1\0", b"/mnt/x/ws1\0/dst/ws1\0trailing"],
+    ids=["one-path", "three-paths", "not-absolute", "trailing-data"],
+)
+def test_rehome_refuses_a_resolution_that_is_not_two_absolute_paths(stdout: bytes) -> None:
+    from agentworks.workspaces.manager.rehome import _resolved_paths
+    from tests.vm_access_support import Admin, RecordingVMAccess
+
+    access = RecordingVMAccess([], Admin())
+    access.default_outcome = Result(Completed(0), stdout)
+
+    with pytest.raises(StateError):
+        _resolved_paths(access, "/data/ws1", "/dst/ws1")
+
+
+@pytest.mark.parametrize("target_path", ["dst/ws1", "host:/dst/ws1", "/", "/dst/../ws1", "/dst//ws1", "/dst/./ws1"])
+def test_rehome_refuses_a_target_that_is_not_an_absolute_directory_before_anything_runs(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    target: _FakeAdminTarget,
+    monkeypatch: pytest.MonkeyPatch,
+    target_path: str,
+) -> None:
+    config = make_config()
+    _seed(db)
+    _no_gate(monkeypatch)
+
+    with pytest.raises(ValidationError):
+        workspace_manager.rehome_workspace(
+            db, config, "ws1", target_path=target_path, interaction=TtyInteractionPolicy.REFUSE
+        )
+
+    assert resolve_counter == []
+    assert target.commands == []
+
+
+def test_rehome_reads_a_target_with_a_trailing_slash_as_the_directory(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    config = make_config()
+    _seed(db)
+    _reachable(monkeypatch, True)
+
+    fake = _RehomeTarget()
+    _route(monkeypatch, fake)
+
+    workspace_manager.rehome_workspace(
+        db, config, "ws1", target_path="/dst/ws1//", yes=True, interaction=TtyInteractionPolicy.REFUSE
+    )
+
+    ws = db.get_workspace("ws1")
+    assert ws is not None and ws.workspace_path == "/dst/ws1"
+    assert "test -d /dst/ws1" in fake.commands
+    assert not any("/dst/ws1/" + "/" in command for command in fake.commands)
+
+
 def test_repair_unknown_workspace_fails_with_zero_resolves_and_zero_gate(
     db: Database,
     make_config,  # noqa: ANN001
@@ -1487,7 +1766,7 @@ def test_delete_nested_platform_path_reuses_the_callers_composition(
     assert resolve_counter == []  # nothing resolved beyond the caller's pass
     assert bound.holds == 1  # the hold was re-entered, nothing else
     assert db.get_workspace("ws1") is None
-    assert any("rm -rf /srv/ws1" in c for c in target.commands)
+    assert any("rm -rf -- /srv/ws1" in c for c in target.commands)
 
 
 def test_delete_nested_rejects_a_mismatched_vm_node(
@@ -1559,8 +1838,9 @@ def test_rehome_confirm_sits_inside_the_span_after_the_dir_checks(
     """The order pin, which doubles as rehome's gate-prompt parity
     carry: on a stopped VM the gate's just-in-time token resolve is
     the ONLY backend pass (the boundary is fully seeded), then the
-    gate events, then the SSH directory existence checks, then the
-    confirm (which renders their results). A declined confirm raises
+    gate events, then the SSH directory existence checks and the
+    resolution of both paths, then the confirm (which renders their
+    results). A declined confirm raises
     UserAbort and leaves the DB path unchanged; by then the gate has
     already run, because the checks the prompt reports on need SSH
     (inherently post-gate)."""
@@ -1571,7 +1851,7 @@ def test_rehome_confirm_sits_inside_the_span_after_the_dir_checks(
     events: list[str] = []
     _stop_the_vm(monkeypatch, events)
     fake = _FakeAdminTarget(events=events, failing=("test -d /dst/ws1",))
-    monkeypatch.setattr("agentworks.transports.transport", lambda vm, config_, **kwargs: fake)
+    _route(monkeypatch, fake)
 
     def _decline(message: str, default: bool = False) -> bool:
         events.append("confirm")
@@ -1591,6 +1871,7 @@ def test_rehome_confirm_sits_inside_the_span_after_the_dir_checks(
         "tailscale",
         "run:test -d /srv/ws1",
         "run:test -d /dst/ws1",
+        'run:realpath -z -e -- "$1" && realpath -z -m -- "$2"',
         "confirm",
     ]
     assert resolve_counter == [["proxmox-token"]]
@@ -1602,30 +1883,20 @@ def test_rehome_confirm_sits_inside_the_span_after_the_dir_checks(
 
 
 def _wire_copy_fakes(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> _FakeAdminTarget:
-    """The copy command's fakes: a transport double that IS an
-    SSHTransport (the pack step asserts the concrete type to read the
-    raw ssh argv off it), a recording ``subprocess.run`` for the tar
-    pipe, and hold-span recording on the platform's ``vm_active``."""
-    import subprocess as subprocess_mod
+    """The copy command's fakes: an admin double that records ``pack`` for the
+    source read, and hold-span recording on the platform's ``vm_active``."""
 
-    from agentworks.transports import SSHTransport
+    class _CopyTarget(_FakeAdminTarget):
+        def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
+            if cmd.startswith("tar czf "):
+                events.append("pack")
+            if cmd.startswith(_OCCUPIED_PROBE):
+                self.commands.append(cmd)
+                return SimpleNamespace(ok=False, returncode=1, stdout="", stderr="")  # the destination is free
+            return super().run(cmd, **kwargs)
 
-    # The fake FIRST in the MRO so its recording run / write_file /
-    # copy_to win; SSHTransport supplies the concrete type (and the
-    # host / user / identity_file attributes the pack step reads).
-    class _FakeSSHTarget(_FakeAdminTarget, SSHTransport):  # type: ignore[misc]  # the fake's recording run deliberately shadows the real signature
-        def __init__(self) -> None:
-            SSHTransport.__init__(self, "100.64.0.9", trust=HOST_TRUST, user="admin")
-            _FakeAdminTarget.__init__(self, events=events)
-
-    fake = _FakeSSHTarget()
-    monkeypatch.setattr("agentworks.transports.transport", lambda vm, config, **kwargs: fake)
-
-    def _fake_pack(args: object, **kwargs: object) -> SimpleNamespace:
-        events.append("pack")
-        return SimpleNamespace(returncode=0, stderr=b"")
-
-    monkeypatch.setattr(subprocess_mod, "run", _fake_pack)
+    fake = _CopyTarget(events=events)
+    _route(monkeypatch, fake)
 
     real_vm_active = ProxmoxPlatform.vm_active
 
@@ -1677,6 +1948,54 @@ def test_copy_cross_vm_runs_two_sequential_boundaries_with_nested_holds(
     assert row is not None and row.vm_name == "box2" and row.template == "copied"
     assert any("tar xzf" in e for e in events if e.startswith("run:"))
     assert "Workspace 'ws1' copied to 'ws2'" in captured_output.info
+
+
+def test_copy_streams_the_source_tree_into_the_destination_with_nothing_staged(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """The source's tar stream lands in a new workstation file and is the
+    destination extraction's input, root's and without the source's owners;
+    nothing is staged on the destination, and the local file is gone after."""
+    config = make_config()
+    _seed(db)
+    db.insert_vm("box2", site="proxmox", hostname="box2")
+    db.update_vm_tailscale("box2", "100.64.0.10")
+    db.update_vm_init_status("box2", InitStatus.COMPLETE)
+    _reachable(monkeypatch, True)
+    from agentworks.workspaces.backends.vm import default_workspace_path
+
+    fake = _wire_copy_fakes(monkeypatch, [])
+    archive = b"\x1f\x8b fixture archive \r\n\x00"
+    delivered: list[tuple[Path, bytes]] = []
+    source = Command(("tar", "czf", "-", "-C", "/srv/ws1", "."))
+
+    def answer(call: Call) -> Result | None:
+        request = call.request
+        if request == source:
+            assert isinstance(call.options["stdout"], ToFile)
+            return Result(Completed(0), archive)
+        if isinstance(request, Command) and isinstance(request.stdin, FromFile):
+            delivered.append((request.stdin.path, request.stdin.path.read_bytes()))
+            assert request == Command(
+                ("tar", "xzf", "-", "--no-same-owner", "-C", default_workspace_path(config, "ws2")),
+                elevated=True,
+                stdin=FromFile(request.stdin.path),
+            )
+        return fake.answer(call)
+
+    install_access_recorder(monkeypatch).answer = answer
+
+    workspace_manager.copy_workspace(
+        db, config, "ws1", dest_name="ws2", vm_name="box2", interaction=TtyInteractionPolicy.REFUSE
+    )
+
+    [(path, content)] = delivered
+    assert content == archive
+    assert not path.exists() and not path.parent.exists()
+    assert not any("/var/tmp" in command or "mktemp" in command for command in fake.commands)
 
 
 def test_copy_same_vm_reuses_the_source_composition(
@@ -1816,13 +2135,12 @@ def test_copy_closes_the_ssh_logger_exactly_once_on_cancellation(
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
-    """The destination-VM mutation span holds an open ``SSHLogger``, and
+    """The destination-VM mutation span holds an open operation log, and
     ``materialize_grant_all_agents``'s sanctioned SIGINT arm re-raises
-    ``KeyboardInterrupt`` through it (every ``dest_target.run`` in the
-    span shares the exposure). The close sits in a ``finally`` (mirroring
-    realize.py's), so a cancellation mid-span still lands the footer and
-    exception section in the per-VM log, exactly once: ``close()`` is not
-    idempotent, each call appends a footer."""
+    ``KeyboardInterrupt`` through it (every request in the span shares the
+    exposure). A cancellation mid-span still lands the footer and exception
+    section in the per-VM log, exactly once: ``close()`` is not idempotent,
+    each call appends a footer. The source read's own log closed before."""
     from agentworks.ssh import SSHLogger
 
     config = make_config()
@@ -1850,7 +2168,8 @@ def test_copy_closes_the_ssh_logger_exactly_once_on_cancellation(
             db, config, "ws1", dest_name="ws2", vm_name="box", interaction=TtyInteractionPolicy.REFUSE
         )
 
-    assert len(closes) == 1  # the finally ran, and no second call site remains
+    # The source read's log, then the destination's, each closed once.
+    assert len(closes) == len(set(closes)) == 2
 
 
 # -- #263: copy and rehome route through the shared canonical ACL helper -------
@@ -1897,23 +2216,23 @@ def test_copy_applies_canonical_acl_after_unpack_and_chown(
 
 
 class _RehomeTarget(_FakeAdminTarget):
-    """Admin target for the rehome happy path: ``test -d`` of the target path
-    reports absent until the rsync copy has run, then present, so rehome's
-    pre-copy 'target must not exist' check and its post-copy verify both pass.
-    Every other command answers ok."""
+    """Admin target for a rehome to ``/dst/ws1``: ``test -d`` of it reports
+    absent until the copy has run, then present, so rehome's pre-copy 'target
+    must not exist' check and its post-copy verify both pass. Every other
+    command answers as the base double does, ``failing`` included."""
 
-    def __init__(self) -> None:
-        super().__init__()
+    def __init__(self, *, failing: tuple[str, ...] = ()) -> None:
+        super().__init__(failing=failing)
         self._copied = False
 
     def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
-        self.commands.append(cmd)
-        if cmd.startswith("rsync") or cmd.startswith("cp -a"):
+        if cmd.startswith(("rsync", "cp -a")):
             self._copied = True
         if cmd == "test -d /dst/ws1":
+            self.commands.append(cmd)
             ok = self._copied
             return SimpleNamespace(ok=ok, returncode=0 if ok else 1, stdout="", stderr="")
-        return SimpleNamespace(ok=True, returncode=0, stdout="", stderr="")
+        return super().run(cmd, **kwargs)
 
 
 def test_rehome_routes_through_the_canonical_acl_helper(
@@ -1930,7 +2249,7 @@ def test_rehome_routes_through_the_canonical_acl_helper(
     _seed(db)
     _reachable(monkeypatch, True)
     fake = _RehomeTarget()
-    monkeypatch.setattr("agentworks.transports.transport", lambda vm, config_, **kwargs: fake)
+    _route(monkeypatch, fake)
 
     workspace_manager.rehome_workspace(
         db, config, "ws1", target_path="/dst/ws1", yes=True, interaction=TtyInteractionPolicy.REFUSE
@@ -1944,7 +2263,7 @@ def test_rehome_routes_through_the_canonical_acl_helper(
     # a future resequencing regression is caught here too.
     rsync_idx = next(i for i, c in enumerate(cmds) if c.startswith(("rsync", "cp -a")))
     acl_idx = next(i for i, c in enumerate(cmds) if "-exec setfacl -m g::rwx" in c)
-    walk_idx = next(i for i, c in enumerate(cmds) if "chmod a+x" in c and "dirname" in c)
+    walk_idx = next(i for i, c in enumerate(cmds) if "chmod -c a+x" in c and "dirname" in c)
     assert rsync_idx < acl_idx < walk_idx
     # The DB moved, confirming the rehome ran to completion (the ACL step is
     # non-fatal but here it succeeded).
@@ -1967,7 +2286,7 @@ def test_rehome_removes_tmuxinator_projections_when_live_overlay_disables_them(
     db.instance_state.put_desired_overlay("workspace", "ws1", overlay.payload)
     _reachable(monkeypatch, True)
     fake = _RehomeTarget()
-    monkeypatch.setattr("agentworks.transports.transport", lambda vm, config_, **kwargs: fake)
+    _route(monkeypatch, fake)
 
     workspace_manager.rehome_workspace(
         db, config, "ws1", target_path="/dst/ws1", yes=True, interaction=TtyInteractionPolicy.REFUSE
@@ -2027,7 +2346,7 @@ def test_first_repair_after_rehome_is_a_noop(
     ``acls.py``, ``rehome.py``, and the idempotency guide, so it is pinned for
     both paths."""
     fake = _RehomeThenRepairTarget()
-    monkeypatch.setattr("agentworks.transports.transport", lambda vm, config, **kwargs: fake)
+    _route(monkeypatch, fake)
 
     config = make_config()
     _seed(db)
@@ -2065,6 +2384,8 @@ class _CopyThenRepairTarget(_FakeAdminTarget, SSHTransport):  # type: ignore[mis
     def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:  # type: ignore[override]  # recording run deliberately shadows SSHTransport.run
         self.commands.append(cmd)
         stdout = ""
+        if cmd.startswith(_OCCUPIED_PROBE):
+            return SimpleNamespace(ok=False, returncode=1, stdout="", stderr="")  # the destination is free
         if "chmod -c 2770" in cmd:
             self._ws_mode = 0o2770  # repair step 3 stamps the canonical mode
         elif "chmod -c a+x" in cmd:
@@ -2092,11 +2413,8 @@ def test_first_repair_after_copy_is_a_noop(
     Copy applies the recursive spec (default ACL on dirs + recursive access with
     ``o::---``), not the old top-dir-only default. Composes the copy path with
     the #247/#254 repair detection."""
-    import subprocess as subprocess_mod
-
     fake = _CopyThenRepairTarget()
-    monkeypatch.setattr("agentworks.transports.transport", lambda vm, config, **kwargs: fake)
-    monkeypatch.setattr(subprocess_mod, "run", lambda args, **kwargs: SimpleNamespace(returncode=0, stderr=b""))
+    _route(monkeypatch, fake)
 
     config = make_config()
     _seed(db)

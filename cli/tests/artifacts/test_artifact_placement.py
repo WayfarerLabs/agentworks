@@ -28,7 +28,14 @@ def test_vm_plans_apply_supported_types_without_descendant_context(monkeypatch, 
         calls = []
         monkeypatch.setattr(module, "probe_native", lambda *args, **kwargs: calls.append(kwargs))
     result = integration.vm_init(
-        SimpleNamespace(artifacts=received(*items), runner=object(), environment={}, secrets={})
+        SimpleNamespace(
+            artifacts=received(*items),
+            access=object(),
+            environment={},
+            request_environment=lambda local=None: {},
+            secrets={},
+            redactions=(),
+        )
     )
     applied = {origin for file in result.files for origin in file.origins}
     expected = {

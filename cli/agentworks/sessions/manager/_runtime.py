@@ -325,11 +325,17 @@ def prepare_session_launch(definition: SessionLaunchDefinition) -> PreparedSessi
     require_unaddressed_session_absence(current, vm=definition.vm, admin_target=admin_target)
     target = _mgr._build_session_target(current, vm=definition.vm, config=config, db=db, admin_target=admin_target)
     if not recovered_startup or definition.replace_running:
+        # Preflight precedes secret resolution, so its accesses log nothing.
+        session_access = _mgr._session_access(current, vm=definition.vm, config=config, db=db, logger=None)
         context = RunContext(
             config=config,
             operation_scope=definition.scope,
-            admin_target=admin_target,
-            agent_target=None if current.agent_name is None else target,
+            admin_access=(
+                session_access
+                if current.agent_name is None
+                else _mgr._identity_access(definition.vm, config, None, logger=None)
+            ),
+            agent_access=None if current.agent_name is None else session_access,
         )
         for node in definition.nodes:
             node.preflight(context)
@@ -340,7 +346,7 @@ def prepare_session_launch(definition: SessionLaunchDefinition) -> PreparedSessi
             vm=definition.vm,
             workspace=definition.workspace,
             agent_name=current.agent_name,
-            runner=target,
+            access=session_access,
         )
     return PreparedSessionLaunch(
         definition=definition,

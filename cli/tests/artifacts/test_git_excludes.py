@@ -2,19 +2,24 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 
 import pytest
 
 from agentworks.artifacts.application import ArtifactFile, OwnedArtifactFile
-from agentworks.artifacts.git_excludes import reconcile_workspace_excludes
+from agentworks.artifacts.git_excludes import _METADATA, reconcile_workspace_excludes
 from agentworks.errors import ExternalError, StateError
+from agentworks.execution.files import program_source
+from agentworks.execution.requests import PythonProgram
+from agentworks.execution.results import Completed, Result
 from agentworks.harness_setup.model import NativeClaim
 from tests.artifacts.test_native_delivery import owned
 from tests.native_setup_fixtures import LocalFixtureTransport
+from tests.vm_access_support import Call, RecordingVMAccess
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="local Linux guest filesystem")
 
@@ -23,20 +28,51 @@ def git(*args: object) -> subprocess.CompletedProcess[str]:
     return subprocess.run(["git", *map(str, args)], check=True, capture_output=True, text=True)
 
 
+class Guest(LocalFixtureTransport):
+    """The fixture account behind one recording access, so a test sees every request made of it.
+
+    With ``metadata`` set, the Git metadata program is answered with it in
+    place of Git, as malformed external output.
+    """
+
+    def __init__(self, root: Path) -> None:
+        super().__init__(root)
+        self.metadata: bytes | None = None
+        self._access = super().access()
+
+    def access(self) -> RecordingVMAccess:
+        return self._access
+
+    def answer(self, call: Call) -> Result | None:
+        if self.metadata is not None and isinstance(call.request, PythonProgram) and call.request.source == _METADATA:
+            return Result(Completed(0), self.metadata)
+        return super().answer(call)
+
+    def file_paths(self) -> list[str]:
+        """The path of every file operation made of the access, in order."""
+        return [
+            json.loads(request.args[1])["path"]
+            for request in self._access.requests()
+            if isinstance(request, PythonProgram) and request.source == program_source()
+        ]
+
+
 @pytest.fixture
-def repository(tmp_path: Path) -> tuple[LocalFixtureTransport, Path]:
-    target = LocalFixtureTransport(tmp_path / "guest")
+def repository(tmp_path: Path) -> tuple[Guest, Path]:
+    target = Guest(tmp_path / "guest")
     workspace = target.home / "project"
     git("init", "-q", workspace)
     return target, workspace
 
 
 def apply(
-    target: LocalFixtureTransport,
+    target: Guest,
     workspace: Path,
     files: Sequence[OwnedArtifactFile],
     claims: tuple[NativeClaim, ...] = (),
     integration: str = "codex",
+    redactions: Iterable[str] = (),
+    group: str = "",
 ) -> tuple[tuple[NativeClaim, ...], list[tuple[NativeClaim, ...]], list[str]]:
     current = claims
     checkpoints: list[tuple[NativeClaim, ...]] = []
@@ -48,7 +84,15 @@ def apply(
         current = value
 
     reconcile_workspace_excludes(
-        target, str(workspace), integration, files, claims, checkpoint, group="", report_incomplete=incomplete.append
+        target.access(),
+        str(workspace),
+        integration,
+        files,
+        claims,
+        checkpoint,
+        group=group,
+        report_incomplete=incomplete.append,
+        redactions=redactions,
     )
     return current, checkpoints, incomplete
 
@@ -59,15 +103,9 @@ def file(path: Path) -> OwnedArtifactFile:
     return owned(ArtifactFile(str(path), path.read_bytes(), ("a" * 64,)))
 
 
-def metadata_destination(target: LocalFixtureTransport, value: object) -> None:
+def metadata_destination(target: Guest, value: object) -> None:
     """An owned responder supplies malformed external metadata, not actual Git output."""
-    import json
-
-    binary = target.root / "bin/python3"
-    binary.parent.mkdir(exist_ok=True)
-    response = json.dumps({"prefix": "", "exclude": value, "tracked": []})
-    binary.write_text("#!/usr/bin/python3\n" + f"print({response!r})\n")
-    binary.chmod(0o700)
+    target.metadata = json.dumps({"prefix": "", "exclude": value, "tracked": []}).encode()
 
 
 def test_exact_literal_exclusions_are_idempotent_and_retire_only_owned_pairs(repository):
@@ -93,6 +131,28 @@ def test_exact_literal_exclusions_are_idempotent_and_retire_only_owned_pairs(rep
     remaining, _, _ = apply(target, workspace, (), claims)
     assert not remaining and exclude.read_bytes() == prefix
     assert other.read_bytes() == b"operator file"
+
+
+@pytest.mark.parametrize("shared", [False, True])
+def test_created_exclude_file_and_parent_are_private_or_shared_with_the_workspace_group(repository, shared):
+    import grp
+    import os
+    import shutil
+    import stat
+
+    target, workspace = repository
+    info = workspace / ".git/info"
+    shutil.rmtree(info)
+    # A supplementary group, where the account has one, shows the group is applied rather than inherited.
+    gid = next((other for other in os.getgroups() if other != os.getgid()), os.getgid())
+    group = grp.getgrgid(gid).gr_name if shared else ""
+    claims, _, incomplete = apply(target, workspace, (file(workspace / ".agents/skills/x/SKILL.md"),), group=group)
+    assert len(claims) == 1 and not incomplete
+    exclude = info / "exclude"
+    modes = (stat.S_IMODE(exclude.stat().st_mode), stat.S_IMODE(info.stat().st_mode))
+    assert modes == ((0o660, 0o2770) if shared else (0o600, 0o700))
+    if shared:
+        assert exclude.stat().st_gid == info.stat().st_gid == gid
 
 
 def test_preexisting_identical_pattern_and_unrelated_claim_survive_retirement(repository):
@@ -156,7 +216,7 @@ def test_forged_persisted_metadata_destination_cannot_authorize_a_write(reposito
     current, _, incomplete = apply(target, workspace, (), (bad,))
     assert not current and not incomplete
     assert unrelated.read_bytes() == b"operator content"
-    assert all(str(unrelated) not in command for command in target.commands)
+    assert str(unrelated) not in target.file_paths()
 
 
 def test_linked_worktree_resolves_common_metadata_and_preserves_other_owner(repository):
@@ -239,11 +299,11 @@ def test_git_directory_move_rebinds_only_current_metadata_and_converges(reposito
     destination = moved / "info/exclude"
     destination.chmod(0o640)
     metadata = destination.stat()
-    first = len(target.commands)
+    first = len(target.file_paths())
     remaining, _, incomplete = apply(target, workspace, (record,) if reapply else (), claims)
     assert not incomplete
     assert all(claim.destination == str(destination) for claim in remaining)
-    assert all(claims[0].destination not in command for command in target.commands[first:])
+    assert claims[0].destination not in target.file_paths()[first:]
     assert destination.read_bytes() == (before if reapply else prefix)
     after = destination.stat()
     assert (after.st_uid, after.st_gid, after.st_mode) == (metadata.st_uid, metadata.st_gid, metadata.st_mode)
@@ -279,7 +339,7 @@ def test_invalid_persisted_association_is_released_without_writing_its_destinati
 @pytest.mark.parametrize("cleanup", [False, True])
 @pytest.mark.parametrize("field", ["identifier", "destination"])
 def test_claim_diagnostics_bound_untrusted_data_without_using_it_for_io(
-    repository, db, monkeypatch, tmp_path, captured_output, cleanup, field
+    repository, db, captured_output, cleanup, field
 ):
     import json
     import shutil
@@ -288,7 +348,6 @@ def test_claim_diagnostics_bound_untrusted_data_without_using_it_for_io(
     from agentworks.harness_setup.cleanup import cleanup_workspace_excludes
     from agentworks.harness_setup.model import NativeSetupState, SetupRecord
     from agentworks.harness_setup.state import read_native_setup, write_native_setup
-    from agentworks.ssh import SSHLogger
 
     target, workspace = repository
     git("-C", workspace, "init", "-q", "--separate-git-dir", target.home / "metadata")
@@ -299,39 +358,29 @@ def test_claim_diagnostics_bound_untrusted_data_without_using_it_for_io(
     bad = claims[0].model_copy(
         update={"source": str(workspace) + "-old", field: f"/{marker}/{secret}\x1b[31m\x07" + "x" * 5000}
     )
-    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path / "logs")
-    logger = SSHLogger("fixture", "claim-diagnostic", redactions=(secret,))
-    target.logger = logger
-    requests = []
-    original = target.run
-
-    def run(command, **kwargs):
-        requests.append((command, kwargs.get("input_data"), kwargs.get("input_text")))
-        return original(command, **kwargs)
-
-    monkeypatch.setattr(target, "run", run)
-    try:
-        if cleanup:
-            db.insert_vm("box", "site", "host")
-            owner = db.insert_workspace("project", str(workspace), "box", "")
-            record = SetupRecord(
-                component="workspace", integration="codex", destination_id="a" * 64, declaration={}, claims=(bad,)
-            )
-            write_native_setup(db, "workspace", owner.name, NativeSetupState(records=(record,)), operation="create")
-            shutil.rmtree(workspace)
-            cleanup_workspace_excludes(db, owner, lambda: target)
-            assert read_native_setup(db, "workspace", owner.name).records[0].claims == (bad,)
-        else:
-            remaining, _, incomplete = apply(target, workspace, (), (bad,))
-            assert not remaining and not incomplete
-        relevant = [warning for warning in captured_output.warnings if marker in warning]
-        assert len(relevant) == 1
-        assert secret not in relevant[0] and "\x1b" not in relevant[0] and "\x07" not in relevant[0]
-        assert len(relevant[0].encode()) <= 2048
-        assert marker not in json.dumps(requests)
-        assert exclude.read_bytes() == before
-    finally:
-        logger.close()
+    if cleanup:
+        db.insert_vm("box", "site", "host")
+        owner = db.insert_workspace("project", str(workspace), "box", "")
+        record = SetupRecord(
+            component="workspace", integration="codex", destination_id="a" * 64, declaration={}, claims=(bad,)
+        )
+        write_native_setup(db, "workspace", owner.name, NativeSetupState(records=(record,)), operation="create")
+        shutil.rmtree(workspace)
+        cleanup_workspace_excludes(db, owner, target.access, redactions=(secret,))
+        assert read_native_setup(db, "workspace", owner.name).records[0].claims == (bad,)
+    else:
+        remaining, _, incomplete = apply(target, workspace, (), (bad,), redactions=(secret,))
+        assert not remaining and not incomplete
+    relevant = [warning for warning in captured_output.warnings if marker in warning]
+    assert len(relevant) == 1
+    assert secret not in relevant[0] and "\x1b" not in relevant[0] and "\x07" not in relevant[0]
+    assert len(relevant[0].encode()) <= 2048
+    sent = [
+        (list(getattr(request, "args", ())), getattr(getattr(request, "stdin", None), "data", b"").decode("latin-1"))
+        for request in target.access().requests()
+    ]
+    assert marker not in json.dumps(sent)
+    assert exclude.read_bytes() == before
 
 
 def test_exclusion_refuses_paths_outside_the_owning_workspace(repository):
@@ -373,7 +422,7 @@ def test_rebound_git_claims_roundtrip_every_persisted_checkpoint(db, repository)
         checkpoints.append(read_native_setup(db, "workspace", "project"))
 
     reconcile_workspace_excludes(
-        target,
+        target.access(),
         str(workspace),
         "codex",
         (record,),
@@ -381,6 +430,7 @@ def test_rebound_git_claims_roundtrip_every_persisted_checkpoint(db, repository)
         checkpoint,
         group="",
         report_incomplete=lambda reason: pytest.fail(reason),
+        redactions=(),
     )
     assert checkpoints and all(state.records[0].claims == claims for state in checkpoints)
     assert read_native_setup(db, "workspace", "project").records[0].claims == claims
@@ -458,46 +508,26 @@ def test_git_trust_refusal_preserves_its_actual_diagnostic_and_claims(repository
     assert normalize_setup_diagnostic(result.stderr) in incomplete[0]
 
 
-def test_git_failure_diagnostic_uses_existing_secret_control_and_size_boundary(repository, monkeypatch, tmp_path):
-    import json
+def test_git_failure_diagnostic_uses_existing_secret_control_and_size_boundary(repository):
     from uuid import uuid4
-
-    from agentworks.ssh import SSHLogger, SSHResult
 
     target, workspace = repository
     record = file(workspace / ".agents/skills/policy/SKILL.md")
     claims, _, _ = apply(target, workspace, (record,))
     secret, cause = uuid4().hex, uuid4().hex
-    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path / "logs")
-    logger = SSHLogger("fixture", "metadata", redactions=(secret,))
-    target.logger = logger
-    original = target.run
-
-    def run(command, **kwargs):
-        if "rev-parse" in command:
-            return SSHResult(
-                0,
-                json.dumps(
-                    {
-                        "prefix": None,
-                        "exclude": None,
-                        "tracked": [],
-                        "error": f"\x1b[31m{cause}\x1b[0m {secret}\x07 " + "x" * 5000,
-                    }
-                ),
-                "",
-            )
-        return original(command, **kwargs)
-
-    monkeypatch.setattr(target, "run", run)
-    try:
-        remaining, checkpoints, incomplete = apply(target, workspace, (), claims)
-        assert remaining == claims and not checkpoints and len(incomplete) == 1
-        assert cause in incomplete[0] and secret not in incomplete[0]
-        assert "\x1b" not in incomplete[0] and "\x07" not in incomplete[0]
-        assert len(incomplete[0].encode()) <= 2048
-    finally:
-        logger.close()
+    target.metadata = json.dumps(
+        {
+            "prefix": None,
+            "exclude": None,
+            "tracked": [],
+            "error": f"\x1b[31m{cause}\x1b[0m {secret}\x07 " + "x" * 5000,
+        }
+    ).encode()
+    remaining, checkpoints, incomplete = apply(target, workspace, (), claims, redactions=(secret,))
+    assert remaining == claims and not checkpoints and len(incomplete) == 1
+    assert cause in incomplete[0] and secret not in incomplete[0]
+    assert "\x1b" not in incomplete[0] and "\x07" not in incomplete[0]
+    assert len(incomplete[0].encode()) <= 2048
 
 
 @pytest.mark.parametrize("destination", [None, 17, [], {}, True, "relative", "/path/../escape", "/path/"])

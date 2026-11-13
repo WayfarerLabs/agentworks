@@ -38,6 +38,7 @@ from agentworks.sessions.manager._queries import (
 )
 from agentworks.workspaces.manager import workspace_external_explicit_granters, workspace_has_sessions
 from tests._consoles_support import _seed_sessions, _seed_vm, _stub_build_registry, _StubConfig  # noqa: F401
+from tests.vm_access_support import install_access_recorder
 
 if TYPE_CHECKING:
     from tests.conftest import CapturedOutput, _FakeTarget
@@ -753,6 +754,8 @@ def _prep_delete_session(db: Database, monkeypatch: pytest.MonkeyPatch, *, creat
     monkeypatch.setattr(manager_mod, "check_session_status", lambda *a, **k: SessionStatus.STOPPED)
     monkeypatch.setattr(manager_mod, "_regenerate_tmuxinator", lambda *a, **k: None)
     monkeypatch.setattr("agentworks.sessions.multi_console.kill_session_windows", lambda *a, **k: None)
+    # Delete builds the session identity's access for artifact cleanup.
+    install_access_recorder(monkeypatch)
 
 
 def test_delete_session_interactive_offers_now_empty_workspace(
