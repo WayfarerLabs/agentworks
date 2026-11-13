@@ -133,29 +133,10 @@ def main() -> None:
         error(str(e))
         echo_hint(e)
         raise SystemExit(1) from None
-    except click.exceptions.ClickException as e:
-        # Real-`click` parse/usage errors raised through a raw `click_type=`
-        # (e.g. a `click.Choice`, as in resource.py and completion.py). These
-        # reach us because typer vendors its own private copy of click
-        # (`typer._click`) and its internal handler catches only that vendored
-        # ClickException; a real-`click` exception fails typer's isinstance check
-        # and propagates past typer's own Rich renderer, out of app(), to here
-        # (which imports the same real `click`, so this except matches). Render
-        # Click's own message via e.show() (the one-line `Error: <message>`,
-        # already listing the valid choices, plus the usage/"Try --help" pointer
-        # when Click attached a context) and exit with its usage code, instead
-        # of re-raising into typer's Rich excepthook (a full traceback). No
-        # error.log write: these are user input errors, not bugs. This does NOT
-        # cover unknown-option / missing-argument errors from typer-native
-        # params; typer renders those itself as its boxed panel and they never
-        # reach this clause.
-        e.show()
-        raise SystemExit(e.exit_code) from None
     except (click.exceptions.Exit, typer.Exit) as e:
         # Defensive: no known path delivers an Exit here. Typer vendors its own
-        # click (see the ClickException clause above), so `typer.Exit` and the
-        # real `click.exceptions.Exit` are distinct classes. Typer's standalone
-        # runner (typer/core.py, `_main`) normally converts its vendored Exit
+        # click, so typer.Exit and click.exceptions.Exit are distinct classes.
+        # Its standalone runner normally converts its vendored Exit
         # to sys.exit(exit_code) inside app(), and converts KeyboardInterrupt
         # to Exit(130) first, so ctrl-C already exits with the conventional
         # SIGINT code; per-op rollback handlers fire inside the command, before
@@ -164,8 +145,8 @@ def main() -> None:
         # by here we are outside app(), so a bare `raise` would propagate out of
         # main() to Python's default unhandled-exception handler (a traceback,
         # exit code 1), and falling through would hit the generic Exception
-        # clause and pollute error.log. A deliberate exit is not a bug, so, as
-        # in the ClickException clause, there is no debug-mode re-raise here.
+        # clause and pollute error.log. A deliberate exit is not a bug, so,
+        # as with native usage errors, there is no debug-mode re-raise here.
         raise SystemExit(e.exit_code) from None
     except (click.exceptions.Abort, typer.Abort):
         # Defensive, same vendored-vs-real story as Exit above: typer's

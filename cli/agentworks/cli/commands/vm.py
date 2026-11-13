@@ -5,11 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Annotated
 
-import click
 import typer
 
 from agentworks.cli._app import app
 from agentworks.cli._helpers import get_db, ordinary_tty_interaction_policy, parse_csv_sort
+from agentworks.db import DesiredRuntimeState  # noqa: TC001 (Typer resolves annotations at runtime)
 from agentworks.machine_output import OutputFormat
 
 vm_app = typer.Typer(
@@ -18,8 +18,6 @@ vm_app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(vm_app)
-
-_DESIRED_STATE_CHOICES = click.Choice(["running", "stopped", "on-demand"])
 
 
 @vm_app.command("create")
@@ -229,8 +227,8 @@ def vm_verify_connection(
 def vm_set_desired_state(
     name: Annotated[str, typer.Argument(help="VM name")],
     state: Annotated[
-        str,
-        typer.Argument(help="Desired runtime state", click_type=_DESIRED_STATE_CHOICES),
+        DesiredRuntimeState,
+        typer.Argument(help="Desired runtime state"),
     ],
 ) -> None:
     """Set the stored runtime target without changing the running state."""

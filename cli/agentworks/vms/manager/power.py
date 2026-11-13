@@ -48,8 +48,11 @@ def start_vm(
 
     The intent is recorded first, whatever the observed state, so a crashed
     start does not leave the gate refusing to auto-resume a VM the operator
-    asked to run. A VM that does not answer fails naming ``agw vm recover``,
-    which repairs what a start cannot.
+    asked to run. A VM with no host-key record is refused before that, since
+    the wait could only fail; the refusal names ``agw vm recover``, which
+    starts a stopped VM and reads its keys through the platform. A VM that
+    does not answer fails naming recover too, which repairs what a start
+    cannot.
     """
     import agentworks.execution as execution
     import agentworks.vms.manager as _mgr
@@ -62,19 +65,17 @@ def start_vm(
 
     require_exact_tty_interaction_policy(interaction)
     selected = _require_vm(db, name)
-    _guard_incomplete_vm(selected)
     # The wait reaches the VM at its tailnet address through
     # agentworks.execution, so a workstation off Tailscale or an unsupported
     # client refuses before anything is resolved or started.
     _mgr.verify_tailscale_available()
     execution.resolve_ssh()
-    # A VM with no host-key record is not refused here: the start boots it,
-    # and the wait raises TrustMissing, whose hint names 'agw vm recover',
-    # which reads the keys through the platform.
     with native_mutation_guard(db.path, name) as guard:
         registry = load_request_registry(config, live_database=db)
         vm_node = live_vm_node(db, config, registry, selected, held_native_guard=guard)
+        # Before the intent write; prepared runtime's own check comes after it.
         _guard_incomplete_vm(vm_node.reload_row())
+        trust.require_record(name)
         db.set_vm_desired_runtime_state(name, DesiredRuntimeState.RUNNING, expected_vm_uuid=selected.vm_uuid)
         vm = _require_vm(db, name)
         resolver = Resolver(config, registry, interaction=interaction)
@@ -113,10 +114,10 @@ def stop_vm(
 
     require_exact_tty_interaction_policy(interaction)
     selected = _require_vm(db, name)
-    _guard_incomplete_vm(selected)
     with native_mutation_guard(db.path, name) as guard:
         registry = load_request_registry(config, live_database=db)
         vm_node = live_vm_node(db, config, registry, selected, held_native_guard=guard)
+        # Before the intent write; prepared runtime's own check comes after it.
         _guard_incomplete_vm(vm_node.reload_row())
         db.set_vm_desired_runtime_state(name, DesiredRuntimeState.STOPPED, expected_vm_uuid=selected.vm_uuid)
         vm = _require_vm(db, name)

@@ -15,11 +15,8 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
 ]
 dependencies = [
-    "typer>=0.24.1",
-    # click is a direct dep because agentworks/cli imports it for choice
-    # types, output and prompt handling, and exceptions.
-    # Older typer pulled click in transitively; typer 0.26 dropped that,
-    # so declaring it here keeps our imports valid.
+    "typer>=0.29.1",
+    # Click supplies output, prompts and exceptions independently of Typer.
     "click>=8.3",
     "azure-identity>=1.25.1",
     "azure-mgmt-compute>=38.0.0",

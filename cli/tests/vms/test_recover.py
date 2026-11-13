@@ -192,6 +192,39 @@ def test_a_vm_whose_provisioning_changed_before_the_guard_is_refused(
     assert guest.payloads == []
 
 
+def test_a_vm_replaced_before_the_guard_is_refused(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A VM deleted and recreated under the same name before the guard is not the VM recover selected."""
+    from agentworks.harness_setup import locking
+
+    _seed(db)
+    guest = _guest(monkeypatch)
+    real_guard = locking.native_mutation_guard
+    replacements = []
+
+    @contextlib.contextmanager
+    def guard_after_a_replacement(*args: object, **kwargs: object) -> Iterator[object]:
+        db.delete_vm("box")
+        _seed(db)
+        replacements.append(db.get_vm("box"))
+        with real_guard(*args, **kwargs) as held:  # type: ignore[arg-type]
+            yield held
+
+    monkeypatch.setattr(locking, "native_mutation_guard", guard_after_a_replacement)
+
+    with pytest.raises(StateError) as raised:
+        _recover(db, make_config())
+
+    assert raised.value.entity_name == "box"
+    assert resolve_counter == []
+    assert guest.payloads == []
+    assert db.get_vm("box") == replacements[0]
+
+
 def test_the_ssh_config_is_synced_even_when_the_address_did_not_change(
     db: Database,
     make_config,  # noqa: ANN001
@@ -400,9 +433,9 @@ def test_a_stopped_vm_is_started_before_the_hold_then_repaired(
     status: VMStatus,
     record: bool,
 ) -> None:
-    """A VM that stopped (a WSL2 distro that idled out after start, say) is started, with no wait, so a VM with no
-    host-key record is not sent back to a start whose own wait refuses it. The start precedes the hold, as an explicit
-    start's does, and the hold covers everything after it."""
+    """A VM that stopped (a WSL2 distro that idled out after start, say) is started, with no wait, and one with no
+    host-key record has its keys recorded, so recover is the way out of the start that refuses such a VM. The start
+    precedes the hold, as an explicit start's does, and the hold covers everything after it."""
     _seed(db, record=record)
     seeded = db.get_vm("box")
     assert seeded is not None
@@ -423,6 +456,8 @@ def test_a_stopped_vm_is_started_before_the_hold_then_repaired(
     row = db.get_vm("box")
     assert row is not None and row.desired_runtime_state is DesiredRuntimeState.RUNNING
     assert row.last_started_at is not None
+    if not record:
+        assert trust.stored_keys("box") == (HOST_KEY,)
 
 
 class _BootingGuestAgent:

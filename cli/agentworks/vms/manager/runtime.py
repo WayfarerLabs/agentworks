@@ -110,21 +110,19 @@ def start_vm_runtime(context: VMRuntimeContext) -> bool:
 def _start_vm_runtime(context: VMRuntimeContext, *, explicit: bool) -> bool:
     """Start the VM unless it is running, then wait inside a hold for it to answer over SSH.
 
-    A VM that does not answer fails naming ``agw vm recover``, which repairs
-    what a start cannot. An explicit start differs from an activation three
-    ways. It proceeds on an unknown power observation. It boots a VM with no
-    host-key record, whose wait then refuses for want of the record, naming
-    recover, which reads the keys through the platform. And it says what it did
-    before the wait, so a failed wait still reads as one on a running VM.
+    A VM with no host-key record is refused before it is started, since the
+    wait could only fail, and a VM that does not answer fails naming
+    ``agw vm recover``, which repairs what a start cannot. An explicit start
+    differs from an activation two ways. It proceeds on an unknown power
+    observation. And it says what it did before the wait, so a failed wait
+    still reads as one on a running VM.
     """
     import agentworks.vms.manager as manager
 
     row = _current_vm(context)
     if row.desired_runtime_state is DesiredRuntimeState.STOPPED:
         raise StateError("VM has stopped intent", entity_kind="vm", entity_name=row.name)
-    if not explicit:
-        # As the activation gate does: with no record, the wait after a start could only fail.
-        trust.require_record(row.name)
+    trust.require_record(row.name)
     platform = context.node.site.platform
     status = observe_vm_runtime(context)
     if status is VMStatus.UNKNOWN and not explicit:

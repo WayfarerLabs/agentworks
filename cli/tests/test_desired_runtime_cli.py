@@ -7,7 +7,6 @@ import sys
 from types import ModuleType
 from typing import TYPE_CHECKING
 
-import click
 import pytest
 from typer.testing import CliRunner
 
@@ -78,8 +77,8 @@ def test_unsupported_target_fails_parse_before_database_access(monkeypatch: pyte
     command = importlib.import_module(f"agentworks.cli.commands.{kind}")
     monkeypatch.setattr(command, "get_db", lambda: pytest.fail("opened database for rejected state"))
     result = CliRunner().invoke(app, [kind, "set-desired-state", "name", state])
-    assert result.exit_code != 0
-    assert isinstance(result.exception, click.BadParameter)
+    assert result.exit_code == 2
+    assert result.stdout_bytes == b""
 
 
 @pytest.mark.parametrize(

@@ -757,8 +757,8 @@ operation. Describe and `list --status` show target and observation independentl
 over SSH at its tailnet address. A VM that does not answer fails with a hint to run
 `agw vm recover <name>`; the VM is left running. Neither rejoins Tailscale, so a VM whose node was
 removed in the admin console, or whose ephemeral key's node expired while it was offline, fails this
-way, and `agw vm recover` rejoins it. `vm start` also boots a VM with no recorded host key; its wait
-then refuses for want of the record, naming recover, which records the keys.
+way, and `agw vm recover` rejoins it. `vm start` refuses a VM with no recorded host key before it
+starts it, naming recover, which starts a stopped VM and records the keys.
 
 Plain `vm list` is a local inventory read. Add `--status` to query each selected VM platform for
 current power state; this never starts a VM. The human table adds `STATUS` only for that request,

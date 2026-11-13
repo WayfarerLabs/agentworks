@@ -21,7 +21,7 @@ from agentworks.errors import ConfigError
 from agentworks.execution.errors import CommandFailed, ExecutionIncomplete
 from agentworks.execution.requests import Command, Script, Shell
 from agentworks.execution.results import Completed, Result, Unknown, UnknownReason
-from agentworks.install_commands import UserInstallCommandEntry
+from agentworks.install_commands import SystemInstallCommandEntry, UserInstallCommandEntry
 from agentworks.vms.initializer import (
     MISE_GPG_KEY_PATH,
     MISE_GPG_KEY_URL,
@@ -406,6 +406,38 @@ def test_the_declared_paths_are_every_declared_command_s_in_order() -> None:
 
     assert install_command_paths(["second", "missing", "first"], entries) == ["/opt/two", "/opt/one", "/opt/shared"]
     assert install_command_paths([], entries) == []
+
+
+@pytest.mark.parametrize("entry_type", [SystemInstallCommandEntry, UserInstallCommandEntry])
+def test_a_failed_install_command_is_reported_so_its_paths_leave_the_profile(
+    entry_type: type[SystemInstallCommandEntry] | type[UserInstallCommandEntry],
+) -> None:
+    guest = StepGuest(local_files=False)
+    entries = {
+        name: entry_type(
+            name=name,
+            command=f"install-{name}",
+            path=[f"~/.{name}/bin"],
+            test_file="~/.present" if name == "present" else None,
+        )
+        for name in ["first", "broken", "present", "last"]
+    }
+    guest.respond(_install("zsh", "install-broken"), _failed())
+    guest.access.answer = lambda call: Result(Completed(0)) if isinstance(call.request, Script) else None
+
+    failed = _run_install_commands(guest.files, list(entries), entries, "zsh", "/home/agentworks", guest.log)
+
+    assert failed == ["broken"]
+    kept = [name for name in entries if name not in failed]
+    assert install_command_paths(kept, entries) == ["~/.first/bin", "~/.present/bin", "~/.last/bin"]
+    commands = guest.commands()
+    assert [command for command in commands if isinstance(command, Command)] == [
+        _install("zsh", "install-first"),
+        _install("zsh", "install-broken"),
+        _install("zsh", "install-last"),
+    ]
+    assert isinstance(commands[2], Script) and "test -f /home/agentworks/.present" in commands[2].source
+    assert len(guest.log.warned) == 1
 
 
 # -- The completion test itself, run by /bin/sh ------------------------------------------

@@ -185,37 +185,16 @@ def test_start_refuses_before_accepting_intent_resolving_or_touching_the_vm(
     assert db.get_vm("box") == original
 
 
-class _ReachedTrust(Exception):
-    """Recover got as far as re-establishing the missing record."""
-
-
-def test_a_stopped_vm_without_a_host_key_record_starts_then_fails_naming_recover_which_can_then_run(
-    db, make_config, platform, monkeypatch, captured_output
-):
-    """A VM from before the host-key store, stopped while idle: the start boots it, and the real wait's
-    first probe raises TrustMissing (whose hint names recover) before anything spawns. Recover, which
-    refuses a stopped VM, then runs on the now running VM."""
+def test_start_without_host_key_refuses_before_intent_secrets_or_provider(db, make_config, platform, resolve_counter):
     config = make_config()
-    events, _ = platform
-    monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", "ts-key")
-    _seed(db, Target.STOPPED)
+    original = _seed(db, Target.STOPPED)
     trust.remove("box")
-    monkeypatch.setattr(manager, "_await_tailnet", _await_tailnet)
-
+    events, _ = platform
     with pytest.raises(TrustMissing):
         manager.start_vm(db, config, "box", interaction=Policy.REFUSE)
-
-    assert "start" in events
-    assert "VM 'box' started" in captured_output.info
-    assert db.get_vm("box").desired_runtime_state is Target.RUNNING
-    monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)
-
-    def _reached(*_args: object, **_kwargs: object) -> None:
-        raise _ReachedTrust
-
-    monkeypatch.setattr("agentworks.vms.manager.recover._reestablish_trust", _reached)
-    with pytest.raises(_ReachedTrust):
-        manager.recover_vm(db, config, "box", interaction=Policy.REFUSE)
+    assert resolve_counter == []
+    assert events == []
+    assert db.get_vm("box") == original
 
 
 @pytest.mark.parametrize("action,target", [(manager.start_vm, Target.RUNNING), (manager.stop_vm, Target.STOPPED)])
@@ -241,13 +220,15 @@ def test_accepted_target_survives_credential_failure_or_cancellation(
     assert row.last_started_at is None
 
 
-def test_local_refusal_does_not_accept_target(db, make_config):
+@pytest.mark.parametrize("action", [manager.start_vm, manager.stop_vm])
+def test_local_refusal_does_not_accept_target(db, make_config, resolve_counter, action):
     config = make_config()
     vm = _seed(db)
     db.update_vm_provisioning_status("box", ProvisioningStatus.FAILED)
     with pytest.raises(StateError):
-        manager.start_vm(db, config, "box", interaction=Policy.REFUSE)
+        action(db, config, "box", interaction=Policy.REFUSE)
     assert db.get_vm("box").desired_runtime_state is vm.desired_runtime_state
+    assert resolve_counter == []
 
 
 @pytest.mark.parametrize("initial", [VMStatus.RUNNING, VMStatus.STOPPED, VMStatus.DEALLOCATED])

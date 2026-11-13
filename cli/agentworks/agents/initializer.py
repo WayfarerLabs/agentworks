@@ -237,9 +237,9 @@ def create_agent_on_vm(
     # Write the agent's per-user profile fragment first, as the admin's is, so
     # that AGENTWORKS_AGENT and the declared PATH entries reach every later
     # login shell: mise's shims, with the user install commands' own paths
-    # ahead of them on PATH. The entries are declarations, so the fragment is
-    # complete here, written once per run, which lets reinit clear previously
-    # set paths.
+    # ahead of them on PATH. The entries are declarations, written in full
+    # here so every install command sees them, which lets reinit clear
+    # previously set paths; a command that fails is dropped after the batch.
     from agentworks.env import ResourceContext, per_user_identity_env
     from agentworks.resources.access import kind_dict
     from agentworks.vms.initializer.mise import _mise_shims_path
@@ -254,12 +254,14 @@ def create_agent_on_vm(
     )
     agent_identity = per_user_identity_env(agent_identity_ctx)
     user_install_commands = kind_dict(registry, "user-install-command")
-    profile_paths = _mise_shims_path(home) + install_command_paths(
-        agent_tmpl.user_install_commands, user_install_commands
-    )
-    _write_agentworks_profile(
-        agent_files, profile_paths, logger, home=home, shell=agent_shell, identity_env=agent_identity
-    )
+
+    def write_profile(failed: list[str]) -> None:
+        paths = _mise_shims_path(home) + install_command_paths(
+            [name for name in agent_tmpl.user_install_commands if name not in failed], user_install_commands
+        )
+        _write_agentworks_profile(agent_files, paths, logger, home=home, shell=agent_shell, identity_env=agent_identity)
+
+    write_profile([])
 
     # Always write ~/.agentworks-rc.sh, even when there are no shell hooks to
     # install: the writer and both ``_ensure_agentworks_files_sourced`` passes
@@ -338,7 +340,7 @@ def create_agent_on_vm(
     # user-install-command rows by name and must never run a disabled plugin's
     # row; the recipe gate lives at each command entry that reaches this
     # function (tests/agents/test_recipe_gate_drift.py's entry table).
-    _run_install_commands(
+    failed = _run_install_commands(
         agent_files,
         agent_tmpl.user_install_commands,
         user_install_commands,
@@ -347,6 +349,9 @@ def create_agent_on_vm(
         logger,
         label="Agent install command",
     )
+    if failed:
+        # A failed install command keeps no PATH entry in the profile.
+        write_profile(failed)
 
     # Last pass: an install command can replace a shell rc file too. A file
     # that already names a fragment is left alone.

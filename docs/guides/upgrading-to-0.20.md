@@ -67,11 +67,10 @@ node.
 Commands that act on a VM refuse it; commands that only describe or list VMs report the missing
 record for that VM and carry on. Every command that reaches a VM over SSH refuses a VM with no
 record, before it starts the VM, resolves a secret or changes anything, and prints a hint that names
-the import. That covers `vm shell`, `vm exec`, `vm reinit`, `vm backup`, `vm port-forward`,
-`vm rekey`, and the workspace, agent, session and console commands, including the start of a stopped
-VM that any of them would trigger; `vm rekey` checks first so it never spends a Tailscale auth key.
-Two commands differ. `vm start` resolves no key at all: it starts the VM, and its wait then refuses
-with the same hint, so the VM is left running. `vm shell --platform` on a cloud VM (AWS, Azure, GCP)
+the import. That covers `vm start`, `vm shell`, `vm exec`, `vm reinit`, `vm backup`,
+`vm port-forward`, `vm rekey`, and the workspace, agent, session and console commands, including the
+start of a stopped VM that any of them would trigger; `vm rekey` checks first so it never spends a
+Tailscale auth key. One command differs: `vm shell --platform` on a cloud VM (AWS, Azure, GCP)
 resolves the site's credentials first and then refuses, before it opens any network rule.
 `agw vm recover NAME` is the one command that repairs a VM without a record, starting it first if it
 is stopped: it reads the keys through the platform and records them once you confirm their
@@ -393,7 +392,8 @@ place its `authorized_keys`; every later step runs as the agent, which cannot ru
 - **Every account's profile and rc fragments are written first.** Each account's profile, with
   mise's shims and every declared install-command `path`, and its rc fragment are written before its
   dotfiles sync, and their source lines are ensured again after the dotfiles install and the mise
-  install, before the user install commands, and at the end.
+  install, before the user install commands, and at the end. A user install command that fails
+  warns, and its paths leave the profile once the account's install commands finish.
   - An agent's user install commands and their `test_exec` checks now find mise's shims and their
     declared paths on their login shell's `PATH`, on create and reinit alike; at v0.19.0 they found
     neither.
@@ -457,10 +457,10 @@ before they resolve the auth key.
   names the node to remove in the Tailscale admin console instead. It reads the VM's power state
   once it holds the VM, so a stopped WSL2 distro is booted by the hold and logged out. A VM whose
   desired runtime state is stopped is not held (see
-  [Desired runtime state](desired-runtime-state.md)), so it is reported as not logged out, as is any
-  VM that is still stopped or deallocated, and the warning names its node the same way. A backend
-  delete that fails after the logout says how to finish the delete, and that `agw vm rekey NAME`
-  puts the VM back on Tailscale instead.
+  [Desired runtime state](desired-runtime-state.md)), so nothing boots it: it is logged out only if
+  it is already running. Any VM still stopped or deallocated at that point is reported as not logged
+  out, and the warning names its node the same way. A backend delete that fails after the logout
+  says how to finish the delete, and that `agw vm rekey NAME` puts the VM back on Tailscale instead.
 - **A cloud VM's temporary SSH allow closes on `SIGTERM`, `SIGHUP` and Ctrl-Break.** Every allow
   Agentworks opens to a cloud VM (AWS, Azure, GCP) is removed when the command is ended on macOS and
   Linux by `SIGTERM` or `SIGHUP` (a closed terminal), or on Windows by Ctrl-Break, as it is on

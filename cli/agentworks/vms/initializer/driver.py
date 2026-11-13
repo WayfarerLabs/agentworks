@@ -468,7 +468,7 @@ def _phase_b_setup(
         # the VM section: they run via ``{admin_shell} -lc`` explicitly, so
         # they do not depend on the login-shell usermod, and they install
         # system-wide tools rather than touching the admin's rc.
-        _run_install_commands(
+        failed_system = _run_install_commands(
             files,
             vm_template.system_install_commands,
             system_install_commands,
@@ -525,15 +525,24 @@ def _phase_b_setup(
 
         # Non-fatal: the profile and rc fragments, written early as the agent's
         # are, so every later login shell (the dotfiles installer, mise, the user
-        # install commands) reads them. The profile's entries are declarations,
-        # so it is complete here: mise's shims, with the user install commands'
-        # own paths taking precedence over them.
-        profile_paths = (
-            install_command_paths(vm_template.system_install_commands, system_install_commands)
-            + _mise_shims_path(home)
-            + install_command_paths(admin.user_install_commands, user_install_commands)
-        )
-        _write_agentworks_profile(files, profile_paths, logger, home=home, shell=admin_shell)
+        # install commands) reads them. The profile's entries are declarations:
+        # mise's shims, with the user install commands' own paths taking
+        # precedence over them. A system install command that failed above
+        # contributes none; a user install command that fails is dropped after
+        # the batch, below.
+        def profile_paths(failed_user: list[str]) -> list[str]:
+            return (
+                install_command_paths(
+                    [name for name in vm_template.system_install_commands if name not in failed_system],
+                    system_install_commands,
+                )
+                + _mise_shims_path(home)
+                + install_command_paths(
+                    [name for name in admin.user_install_commands if name not in failed_user], user_install_commands
+                )
+            )
+
+        _write_agentworks_profile(files, profile_paths([]), logger, home=home, shell=admin_shell)
         rc_snippets = [MISE_ACTIVATE_LINES] if admin.mise_activate else ["# mise activation disabled"]
         _write_agentworks_rc(files, rc_snippets, logger, home=home, shell=admin_shell)
 
@@ -590,7 +599,7 @@ def _phase_b_setup(
         _ensure_agentworks_files_sourced(files, logger, home=home, shell=admin_shell)
 
         # Non-fatal: user install commands for admin user (may depend on mise tools)
-        _run_install_commands(
+        failed_user = _run_install_commands(
             files,
             admin.user_install_commands,
             user_install_commands,
@@ -599,6 +608,9 @@ def _phase_b_setup(
             logger,
             label="User install command",
         )
+        if failed_user:
+            # A failed install command keeps no PATH entry in the profile.
+            _write_agentworks_profile(files, profile_paths(failed_user), logger, home=home, shell=admin_shell)
 
         # An install command can replace an rc file too.
         _ensure_agentworks_files_sourced(files, logger, home=home, shell=admin_shell)

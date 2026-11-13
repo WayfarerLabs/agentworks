@@ -265,9 +265,9 @@ def install_command_paths(
 ) -> list[str]:
     """The ``PATH`` additions the named install commands declare, in order; an undeclared name adds none.
 
-    They are declarations, not results: a command's paths count whether it
-    ran, was skipped as installed, or failed, so an account's profile can
-    carry them before any of its install commands run.
+    They are declarations, not results, so an account's profile can carry
+    them before any of its install commands run. A caller drops the names
+    :func:`_run_install_commands` reports failed once they have run.
     """
     return [path for name in command_names if (entry := entries.get(name)) is not None for path in entry.path]
 
@@ -281,8 +281,12 @@ def _run_install_commands(
     log: InitLog,
     *,
     label: str = "Install command",
-) -> None:
-    """Run install commands from an install-command entry dict as ``files``' identity.
+) -> list[str]:
+    """Run install commands from an install-command entry dict as ``files``' identity; the names that failed.
+
+    A failed command warns and the next runs. Its name is returned so the
+    caller keeps its declared paths out of the account's profile; a command
+    skipped as already installed is not a failure.
 
     Phase B runs the system and user install commands as the admin, and agent
     initialization runs the agent's user install commands as the agent.
@@ -301,6 +305,7 @@ def _run_install_commands(
     # gate lives at each command entry that reaches it (see
     # tests/agents/test_recipe_gate_drift.py's entry table).
     total = len(command_names)
+    failed: list[str] = []
 
     for i, name in enumerate(command_names, 1):
         entry = entries.get(name)
@@ -329,3 +334,6 @@ def _run_install_commands(
             files.access.run(install_run(shell, entry.command), check=True)
         except STEP_FAILURES as error:
             warn_step(log, f"{label.lower()} '{name}' failed: {truncated}...", error)
+            failed.append(name)
+
+    return failed

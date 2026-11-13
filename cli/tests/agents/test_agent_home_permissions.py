@@ -83,8 +83,9 @@ def _run_create_on_vm(
     from agentworks.bootstrap import build_registry
     from agentworks.ssh import SSHLogger
 
-    db.insert_vm("box", site="proxmox", hostname="box")
-    db.update_vm_tailscale("box", "100.64.0.9")
+    if db.get_vm("box") is None:
+        db.insert_vm("box", site="proxmox", hostname="box")
+        db.update_vm_tailscale("box", "100.64.0.9")
     vm = db.get_vm("box")
     assert vm is not None
     registry = build_registry(config)
@@ -256,6 +257,78 @@ def test_on_a_first_create_an_install_command_s_profile_holds_mise_s_shims_behin
     )
     # Each entry prepends, so the last declared leads.
     assert result.stdout == f"/opt/tools:{HOME}/.local/bin:{HOME}/.local/share/mise/shims:/usr/bin:/bin"
+
+
+INSTALLERS = [
+    ManifestDoc("user-install-command", "first", {"command": "install-first", "path": ["~/.first/bin"]}),
+    ManifestDoc("user-install-command", "broken", {"command": "install-broken", "path": ["~/.broken/bin"]}),
+    ManifestDoc(
+        "user-install-command",
+        "present",
+        {"command": "install-present", "test_file": "~/.present", "path": ["~/.present/bin"]},
+    ),
+    ManifestDoc("user-install-command", "last", {"command": "install-last", "path": ["~/.last/bin"]}),
+]
+
+
+@pytest.mark.parametrize("shell", ["sh", "bash", "zsh"])
+def test_a_failed_install_command_s_path_leaves_the_profile_on_reinit_and_the_rest_continue(
+    db: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, captured_output: Any, shell: str
+) -> None:
+    """Paths of successful and already-installed commands stay; a failed command's go, and the batch goes on."""
+    shell_path = shutil.which(shell)
+    if shell_path is None:
+        pytest.skip(f"{shell} is unavailable")
+    monkeypatch.setenv("AW_SECRET_PROXMOX_TOKEN", "pve-token")
+    config = write_operator_config(tmp_path, manifests=[proxmox_site(), *INSTALLERS])
+    names = ["first", "broken", "present", "last"]
+    for fail_install in (False, True):
+
+        def scripted(recorder: AccessRecorder, fail_install: bool = fail_install) -> None:
+            base = recorder.answer
+
+            def answer(call: Call) -> Result | BaseException | None:
+                request = call.request
+                if fail_install and isinstance(request, Command) and request.argv[-1] == "install-broken":
+                    raise CommandFailed("box", 1, Result(Completed(1)), streams_logged=True)
+                if isinstance(request, Script) and f"test -f {HOME}/.present" in request.source:
+                    return Result(Completed(0))
+                return base(call) if base is not None else None
+
+            recorder.answer = answer
+
+        recorder = _run_create_on_vm(
+            db,
+            config,
+            monkeypatch,
+            user_exists=fail_install,
+            shell=shell_path,
+            before_create=scripted,
+            user_install_commands=names,
+        )
+        profile = tmp_path / "profile.sh"
+        profile.write_text(_profile_writes(recorder)[-1])
+        result = subprocess.run(
+            [shell_path, "-c", '. "$1"; printf "%s\\n" "$PATH" "$AGENTWORKS_AGENT"', shell, str(profile)],
+            env={"HOME": HOME, "PATH": "/usr/bin:/bin"},
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        expected = ["last", "present"] + ([] if fail_install else ["broken"]) + ["first"]
+        assert result.stdout.splitlines() == [
+            ":".join(
+                [*(f"{HOME}/.{name}/bin" for name in expected), f"{HOME}/.local/share/mise/shims", "/usr/bin:/bin"]
+            ),
+            "dev",
+        ]
+        installs = [
+            request.argv[-1]
+            for request in recorder.requests("run")
+            if isinstance(request, Command) and request.argv[-1].startswith("install-")
+        ]
+        assert installs == [f"install-{name}" for name in ["first", "broken", "last"]]
+    assert len([warning for warning in captured_output.warnings if "broken" in warning]) == 1
 
 
 def test_reinit_reapplies_both_enforcements(db: Database, config: Any, monkeypatch: pytest.MonkeyPatch) -> None:

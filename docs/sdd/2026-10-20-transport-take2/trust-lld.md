@@ -99,11 +99,12 @@ policy ignores configuration.
   session, agent and workspace commands already run before the gate and any secret, checks the
   record, so those commands refuse before any prompt or best-effort step. Backup checks it before it
   starts. `vm rekey` checks the store first too, before resolving a secret or touching the VM
-  (`vms/manager/power.py:374`), since it would otherwise spend the new key and record the new
+  (`vms/manager/power.py:421`), since it would otherwise spend the new key and record the new
   address before its final wait raised. The activation gate's start checks it just before it starts
-  the VM (`LiveVMNode.auto_start`, `vms/nodes.py:237`), for a gate opened without that precondition.
-  `vm start` does not: it boots the VM, and its wait raises `TrustMissing`, whose hint names
-  `agw vm recover`, which reads the keys through the platform (`vms/manager/power.py:54-56`).
+  the VM (`LiveVMNode.auto_start`, `vms/nodes.py:257`), for a gate opened without that precondition.
+  `vm start` checks it under the family guard (`vms/manager/power.py:78`), before it accepts intent
+  or resolves a secret, and its `TrustMissing` hint names `agw vm recover`, which starts a stopped
+  VM and reads the keys through the platform.
 - **`ENROLL`** is bound only by create (below), and only to Phase A's first-contact connections: the
   polled wait for the VM to answer, through the distinct factory `execution.enrollment_access`.
 - **`UNVERIFIED`** uses a file the create owns, because the platform builds its create-time
