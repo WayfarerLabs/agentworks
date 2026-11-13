@@ -188,6 +188,24 @@ def test_probe_execution_failure_never_becomes_fresh(status: int) -> None:
         probe_conversation(cast(Transport, _FakeTarget({"": _FakeResult(status)})), _SID)
 
 
+@pytest.mark.parametrize("status", [0, 1])
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        {"candidates": ["../../invalid"]},
+        {"candidates": [1]},
+        {"parked_job_ids": [""]},
+        {"parked_job_ids": ["a" * 129]},
+        {"background_exists": 1},
+    ],
+)
+def test_malformed_probe_output_preserves_only_transcript_existence(status: int, invalid: dict[str, object]) -> None:
+    metadata = {"candidates": [_NEXT], "parked_job_ids": ["af0980f9"], "background_exists": True, **invalid}
+    result = _FakeResult(status, stdout="AGW_CLAUDE_CONVERSATION=" + json.dumps(metadata))
+    observed = probe_conversation(cast(Transport, _FakeTarget({"": result})), _SID)
+    assert observed == ConversationProbe(status == 0)
+
+
 def test_missing_python_keeps_existence_boundary(target: _LocalTarget, tmp_path: Path) -> None:
     _transcript(target.root, [_link()])
     tools = tmp_path / "bin"

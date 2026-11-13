@@ -469,11 +469,12 @@ class ClaudeCodeIntegration(HarnessIntegration):
         forced = self.config.force_uuid
         if forced is not None:
             forced = forced.lower()
-            output.warn(
-                "Claude force_uuid: This has been adopted, please remove it to avoid future problems."
+            warning = (
+                "This has been adopted, please remove it to avoid future problems."
                 if stored_sid == forced
-                else f"Claude force_uuid: adopting exact conversation {forced}; remove this setting after adoption."
+                else f"Adopting exact conversation {forced}; remove this setting after adoption."
             )
+            output.warn(f"Claude force_uuid: {warning} Detachment detection is disabled while this setting remains.")
         self.validate_launch_config(self.config.model_dump(), intent=intent)
         if resume_only and forced is None and not (isinstance(stored_sid, str) and stored_sid):
             raise self._resume_only_error()
@@ -523,8 +524,9 @@ class ClaudeCodeIntegration(HarnessIntegration):
                 elif not observed.transcript_exists and self._session_binding.last_started_at is not None:
                     output.warn(
                         f"session '{self._session_name}': previously started Claude conversation {sid} "
-                        "has no transcript on its launch target. It may have been backgrounded. "
-                        "Inspect claude agents --json and set force_uuid on this session to recover it."
+                        "has no transcript on its launch target. This can occur before the first prompt "
+                        "or after backgrounding. If existing history is expected, inspect claude agents --json "
+                        "before setting force_uuid on this session to recover it."
                     )
         if forced is not None and not resume:
             raise StateError(

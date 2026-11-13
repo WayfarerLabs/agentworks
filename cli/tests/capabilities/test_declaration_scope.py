@@ -135,11 +135,6 @@ def test_scope_error_preserves_source_location_and_declaring_owner() -> None:
     assert template.display in str(caught.value)
 
 
-def test_instance_only_marker_survives_into_json_schema() -> None:
-    properties = Child.model_json_schema()["properties"]
-    assert properties["adopted"]["x-agw-instance-only"] is True
-
-
 @pytest.mark.parametrize("authored", [Child(adopted=None), {"child": Child(adopted="conversation")}])
 def test_authored_model_instances_cannot_bypass_scope(authored: object) -> None:
     model = type(authored) if isinstance(authored, Child) else ScopeConfig

@@ -71,10 +71,9 @@ null. Omission remains valid. Nested model, list, mapping and union fields are c
 validated shape and the authored payload. Effective-config provenance identifies the true field
 declarer, so an instance cannot accidentally inherit an instance-only value from a template.
 
-The marker emits `x-agw-instance-only: true` in JSON Schema. Ordinary pydantic construction and
-runtime `validate_own_config` remain owner-free shape checks: declaration validation is the boundary
-that knows whether a value came from a template. The marker currently applies to capability config
-and capability mapping declarations, not arbitrary resource-spec fields.
+Ordinary pydantic construction and runtime `validate_own_config` remain owner-free shape checks:
+declaration validation is the boundary that knows whether a value came from a template. The marker
+currently applies to capability config declarations, not arbitrary resource-spec fields.
 
 ## Structural unions
 

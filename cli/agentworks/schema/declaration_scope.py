@@ -15,10 +15,6 @@ from agentworks.schema.shorthand import scalar_shorthand_of
 from agentworks.value_provenance import longest_prefix_value
 
 if TYPE_CHECKING:
-    from pydantic import GetJsonSchemaHandler
-    from pydantic.json_schema import JsonSchemaValue
-    from pydantic_core import CoreSchema
-
     from agentworks.schema.markers import RefOwner
     from agentworks.source_location import SourceLocation
     from agentworks.value_provenance import ProvenancePath
@@ -32,15 +28,6 @@ class InstanceOnly:
     declaration ownership, not the runtime owner of an effective config.
     Even an explicit null is a declaration; an omitted field is not.
     """
-
-    def __get_pydantic_json_schema__(
-        self,
-        core_schema: CoreSchema,
-        handler: GetJsonSchemaHandler,
-    ) -> JsonSchemaValue:
-        schema = handler(core_schema)
-        schema["x-agw-instance-only"] = True
-        return schema
 
 
 def validate_declaration_scope(

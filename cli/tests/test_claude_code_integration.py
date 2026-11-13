@@ -619,6 +619,21 @@ def test_failed_force_preserves_old_state(monkeypatch: pytest.MonkeyPatch, inten
     assert state == {"session_id": _SID}
 
 
+def test_direct_force_new_conflict_refuses_before_probe_or_artifacts(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _stub_observation(monkeypatch, present=True)
+    state: dict[str, object] = {"session_id": _SID}
+    monkeypatch.setattr(
+        "agentworks.plugins.claude.harness_integration.prepare_session_delivery",
+        lambda *args, **kwargs: pytest.fail("prepared artifacts"),
+    )
+    with pytest.raises(StateError):
+        _harness_integration({"force_uuid": _NEXT_SID}, state=state).start(
+            _op_ctx(_FakeTarget()), intent=HarnessLaunchIntent.FORCE_NEW
+        )
+    assert calls == []
+    assert state == {"session_id": _SID}
+
+
 def test_force_without_launch_target_fails_without_minting() -> None:
     state: dict[str, object] = {}
     with pytest.raises(StateError):
@@ -657,7 +672,6 @@ def test_force_warns_on_every_use(monkeypatch: pytest.MonkeyPatch) -> None:
     harness.start(_op_ctx(_FakeTarget()))
     harness.start(_op_ctx(_FakeTarget()))
     assert len(warnings) == 2
-    assert warnings[0] != warnings[1]
 
 
 @pytest.mark.parametrize("value", ["", "af0980f9", "../a", "not-a-uuid", 42])

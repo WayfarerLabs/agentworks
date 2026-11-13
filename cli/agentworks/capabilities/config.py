@@ -221,7 +221,6 @@ def validate_capability_mapping(
         return None
     hint = reference_hint(kind, name)
     validated = _validated(model, mapping, owner=owner, location=location, hint=hint)
-    validate_declaration_scope(validated, mapping, owner=owner, location=location, hint=hint)
     return validated
 
 

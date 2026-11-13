@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 from dataclasses import replace
 
 import pytest
@@ -176,6 +177,30 @@ def test_session_replacement_during_consent_preserves_replacement_spec(db, make_
     with pytest.raises(StateError):
         manager.restart_session(
             db, config, name="work", spec='{"env":{"NEW":"after"}}', interaction=TtyInteractionPolicy.ALLOW
+        )
+    assert db.get_session("work").session_uuid != before.session_uuid
+    assert _value(db) == {"env": {"OTHER": {"value": "owner"}}}
+    assert runtime[2] == []
+
+
+def test_session_replacement_before_guard_acquisition_refuses_before_observation(db, make_config, runtime, monkeypatch):
+    _seed(db)
+    before = db.get_session("work")
+
+    @contextmanager
+    def replace_at_guard_entry(*args, **kwargs):
+        with native_mutation_guard(*args, **kwargs) as guard:
+            db.delete_session("work")
+            seed_session(db, "work", "box")
+            _put(db, '{"env":{"OTHER":"owner"}}')
+            yield guard
+
+    monkeypatch.setattr("agentworks.harness_setup.locking.native_mutation_guard", replace_at_guard_entry)
+    monkeypatch.setattr(manager, "observe_session_statuses", lambda *a, **k: pytest.fail("observed stale runtime"))
+    monkeypatch.setattr("agentworks.output.confirm", lambda *a, **k: pytest.fail("requested stale consent"))
+    with pytest.raises(StateError):
+        manager.restart_session(
+            db, make_config(), name="work", spec='{"env":{"NEW":"after"}}', interaction=TtyInteractionPolicy.ALLOW
         )
     assert db.get_session("work").session_uuid != before.session_uuid
     assert _value(db) == {"env": {"OTHER": {"value": "owner"}}}

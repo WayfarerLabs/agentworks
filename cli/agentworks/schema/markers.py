@@ -42,10 +42,11 @@ if TYPE_CHECKING:
 #: The whole placeholder vocabulary an owner template may use.
 OWNER_PLACEHOLDERS: Final = ("owner_kind", "owner_name")
 
-#: The JSON Schema extension key for reference markers. The ``x-agw-``
-#: prefix is reserved for agentworks vocabulary generally. Conforming
-#: validators ignore ``x-`` keys, so editor tooling sees these facts
-#: without being confused by them.
+#: The one JSON Schema extension key the markers emit. The ``x-agw-``
+#: prefix is reserved for agentworks vocabulary generally; this is its
+#: only member today, and a new member needs a consumer, not just an
+#: idea. Conforming validators ignore ``x-`` keys, so editor tooling
+#: sees the facts without being confused by them.
 REF_SCHEMA_KEY: Final = "x-agw-ref"
 
 

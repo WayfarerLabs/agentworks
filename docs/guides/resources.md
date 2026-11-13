@@ -473,10 +473,11 @@ adoption to restore detection. It conflicts with an explicit `--force-new`. No c
 stopped or deleted; unselected branches remain available through Claude.
 
 When a previously started session has no transcript, or a parked job's short ID cannot be resolved
-to a full UUID, Agentworks warns and retains its ordinary launch policy. Inspect Claude's agents
-before continuing work. Unreadable optional detection evidence preserves existing behavior; failures
-to establish transcript existence still refuse to guess. `--resume-only` continues to require a
-resumable conversation.
+to a full UUID, Agentworks warns and retains its ordinary launch policy. An unused Claude session
+may have no transcript before its first prompt; missing history alone does not establish detachment.
+If history was expected, inspect Claude's agents before choosing a recovery UUID. Unreadable
+optional detection evidence preserves existing behavior; failures to establish transcript existence
+still refuse to guess. `--resume-only` continues to require a resumable conversation.
 
 The `codex` integration runs Codex the same way and ships as the opt-in `codex` system plugin.
 

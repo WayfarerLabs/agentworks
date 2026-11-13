@@ -13,7 +13,8 @@ new persistent history field is needed. The existing namespaced blob stores expl
 
 An `InstanceOnly()` annotation is owned by the shared schema vocabulary. Declaration validation
 checks the actual field declarer's kind through provenance, while standalone model construction
-remains owner-free. Emitted schema retains the annotation for tooling. No core code names Claude.
+remains owner-free. Enforcement reads the annotation directly; no unused JSON Schema extension is
+emitted. No core code names Claude.
 
 Migration is additive: existing pins remain unchanged unless the operator explicitly adopts a UUID.
 Automatic traversal and human-prompt recency are deferred. One coherent PR contains the
