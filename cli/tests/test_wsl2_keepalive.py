@@ -100,21 +100,27 @@ def test_malformed_or_missing_ack_fails_entry_and_reaps(monkeypatch, code):
     assert process.stdout.closed
 
 
-@pytest.mark.windows
-@pytest.mark.parametrize("stream", ["stdout", "stderr"])
-def test_a_failing_wsl_exe_is_reported_with_what_it_printed(monkeypatch, stream):
-    """A keeper whose wsl.exe exits non-zero before attaching quotes what it printed, on either stream."""
+def _spawn_with_keeper_streams(monkeypatch, code: str) -> list[subprocess.Popen[bytes]]:
+    """Run ``code`` as the keeper with the streams the keepalive asks Popen for."""
     original_popen = subprocess.Popen
-    # wsl.exe prints its own errors in UTF-16 when redirected, and exits non-zero.
-    printed = "\x00".join("There is no distribution with the supplied name.").encode() + b"\r\n"
-    code = f"import sys; sys.{stream}.buffer.write({printed!r}); sys.{stream}.buffer.flush(); sys.exit(1)"
-    spawned = []
+    spawned: list[subprocess.Popen[bytes]] = []
 
     def spawn(argv, **kwargs):
         spawned.append(original_popen([sys.executable, "-u", "-c", code], **kwargs))
         return spawned[0]
 
     monkeypatch.setattr(subprocess, "Popen", spawn)
+    return spawned
+
+
+@pytest.mark.windows
+def test_a_failing_wsl_exe_is_reported_with_what_it_printed(monkeypatch):
+    """A keeper whose wsl.exe exits non-zero before attaching quotes what it printed on stdout."""
+    # wsl.exe prints its own errors on stdout, in UTF-16 when redirected, and exits non-zero.
+    printed = "\x00".join("There is no distribution with the supplied name.").encode() + b"\r\n"
+    spawned = _spawn_with_keeper_streams(
+        monkeypatch, f"import sys; sys.stdout.buffer.write({printed!r}); sys.stdout.buffer.flush(); sys.exit(1)"
+    )
     with pytest.raises(WSLCommandFailed) as caught, WSL2Platform("wsl2", {}).vm_active(_fake_vm("missing-distro")):
         pytest.fail("body entered without keeper acknowledgement")
     assert "There is no distribution with the supplied name." in str(caught.value)
@@ -122,6 +128,19 @@ def test_a_failing_wsl_exe_is_reported_with_what_it_printed(monkeypatch, stream)
     assert caught.value.hint
     assert spawned[0].poll() is not None
     assert spawned[0].stdout is not None and spawned[0].stdout.closed
+
+
+@pytest.mark.windows
+def test_guest_stderr_before_the_acknowledgement_does_not_refuse_the_hold(monkeypatch):
+    """A guest that writes to stderr before its marker still attaches: only stdout carries the acknowledgement."""
+    spawned = _spawn_with_keeper_streams(
+        monkeypatch,
+        "import sys,time; sys.stderr.buffer.write(b'guest login notice\\n'); sys.stderr.buffer.flush(); "
+        f"{_GUEST_ACK}; time.sleep(30)",
+    )
+    with WSL2Platform("wsl2", {}).vm_active(_fake_vm("distro")):
+        assert spawned[0].poll() is None
+    assert spawned[0].poll() is not None
 
 
 @pytest.mark.windows

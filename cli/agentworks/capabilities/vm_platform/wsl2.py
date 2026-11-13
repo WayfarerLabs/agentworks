@@ -524,8 +524,8 @@ def _refuse_unattached(proc: subprocess.Popen[bytes], distro_name: str, received
 
     A keeper that exits non-zero is ``wsl.exe`` failing to attach (a distro
     unregistered outside Agentworks, a WSL service hiccup), and the error
-    quotes what it printed: ``wsl.exe`` prints its own errors on stdout, which
-    the keeper shares with stderr. Anything else is ``reason``.
+    quotes what it printed: ``wsl.exe`` prints its own errors on stdout, the
+    keeper's acknowledgement pipe. Anything else is ``reason``.
     """
     assert proc.stdout is not None
     printed = bytearray(received)
@@ -596,7 +596,9 @@ def _keepalive(distro_name: str) -> Iterator[None]:
     inside this hold, so the anchor covers the verification without
     duplicating it here.
     """
-    # Both streams share one pipe: wsl.exe prints its own errors on stdout.
+    # stdout carries only the acknowledgement, and wsl.exe's own errors, which it
+    # prints there. stderr is discarded: a guest byte on it before the marker
+    # would otherwise read as a malformed acknowledgement.
     proc = subprocess.Popen(
         [
             _WSL,
@@ -609,7 +611,7 @@ def _keepalive(distro_name: str) -> Iterator[None]:
         ],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
+        stderr=subprocess.DEVNULL,
         bufsize=0,
     )
     h_job: int | None = None
