@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, overload
 
+from agentworks.errors import StateError
 from agentworks.interpolation import render_template
 from agentworks.schema.interpolation import field_interpolation
 
@@ -49,14 +50,20 @@ def render_scalar_field(
     legacy_placeholders: Mapping[str, str] | None = None,
     encode_inserted: Callable[[str], str] | None = None,
 ) -> str | None:
-    """Render authored text at its consuming boundary; leave unmarked data literal.
+    """Render an annotated string field at its consuming boundary.
 
     The declaring model supplies policy even when inheritance has moved the
     effective value into another carrier. Callers select applicable values and
     supply known context; neither declarations nor context are mutated.
     """
-    if value is None or field_interpolation(model.model_fields[field_name]) != "scalar":
-        return value
+    if field_interpolation(model.model_fields[field_name]) != "scalar":
+        raise StateError(
+            f"{model.__name__}.{field_name} does not declare string interpolation",
+            entity_kind="template",
+            entity_name=location,
+        )
+    if value is None:
+        return None
     return render_template(
         value,
         values,
@@ -78,7 +85,11 @@ def render_list_field(
 ) -> list[str]:
     """Render opted-in string elements without changing authored list order."""
     if field_interpolation(model.model_fields[field_name]) != "items":
-        return list(value)
+        raise StateError(
+            f"{model.__name__}.{field_name} does not declare interpolation on string elements",
+            entity_kind="template",
+            entity_name=location,
+        )
     return [
         render_template(
             item,

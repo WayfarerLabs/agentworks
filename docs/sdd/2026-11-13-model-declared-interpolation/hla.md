@@ -16,8 +16,9 @@ validate marker placement.
 
 Keep `agentworks.interpolation` as the pure one-pass substitution engine. A model-aware adapter
 reads a field's interpolation declaration and applies that engine to selected authored values with
-explicitly supplied context and an owning field location. Unmarked values pass through without
-namespace validation.
+explicitly supplied context and an owning field location. Explicit render calls require the matching
+annotation; missing eligibility is a programmer error. Unmarked values are read normally and retain
+their literal contract.
 
 Components adopt the adapter at their existing interpretation boundary. The annotation then controls
 eligibility within that boundary; a marker is not a hook that intercepts all ordinary Python

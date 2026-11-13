@@ -169,10 +169,12 @@ Interpolation annotations hidden inside named type aliases are unsupported and r
 marker directly on the field or string element. Ordinary unmarked aliases remain valid.
 
 Consumers use the model-aware adapters in `agentworks.interpolation_fields`, selecting only
-applicable values and supplying their known context and owning field location. Unmarked values pass
-through literally. A component may continue to use its own literal contract without adopting the
-pattern. See [runtime context](../../../docs/arch/runtime-context.md) for the language, lifecycle,
-secret boundary and destination handling.
+applicable values and supplying their known context and owning field location. An explicit render
+call requires the matching interpolation annotation and fails if it is missing. Unmarked fields
+retain their literal values through ordinary model access. A component may continue to use its own
+literal contract without adopting the pattern. See
+[runtime context](../../../docs/arch/runtime-context.md) for the language, lifecycle, secret
+boundary and destination handling.
 
 ## Adding or changing a derivation
 

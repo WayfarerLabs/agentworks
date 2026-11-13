@@ -38,7 +38,8 @@ remain traversable for declaration discovery through existing schema infrastruct
 Provide a small typed adapter for scalar and list-field consumption around the existing renderer. It
 needs the declaring model and field, authored value, known context values and diagnostic owner.
 Eligibility comes from the declaration; there is no runtime `interpolate=True` switch to contradict
-it. Absence of the marker leaves the value literal.
+it. Explicit rendering without the matching marker raises a located StateError. Components read
+unmarked fields normally; their contents remain literal.
 
 The declaring model may differ from a resolved value carrier. For example, effective agent setup
 currently uses `ResolvedAgentTemplate`, a dataclass. Read policy from `AgentTemplate` and render the
@@ -82,7 +83,8 @@ Use
 `render_scalar_field(model, field_name, value, values, *, location, legacy_placeholders=None, encode_inserted=None)`
 for strings/nullable strings and `render_list_field(...)` for string lists. Scalar overloads
 preserve the caller's nullable type. Both read interpolation eligibility from the declaring model
-and leave unmarked values unchanged. Lists retain order and render each element.
+and reject an explicit call for an unmarked field or incompatible marker shape. This check also
+applies to nullable values and empty lists. Lists retain order and render each element.
 
 For installer PATH additions, existing authored text is a double-quoted profile fragment: leading
 `~` and ordinary authored shell variables continue to expand. Only text inserted by Agentworks must

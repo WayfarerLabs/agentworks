@@ -101,3 +101,14 @@ recommends C/D-only new adoption and a missing-annotation error for explicit ren
 unreleased raw helper removed. Those amendments await operator direction; no requirement change is
 inferred from the review. PR #903 remains draft with `awaiting-direction`, and no implementation
 completion or merge readiness is claimed.
+
+### 2026-11-13 explicit-render contract ruling
+
+The operator accepted the missing-annotation error and removal of the unreleased raw helper, and
+requested an explanation of the proposed adoption reduction. Explicit scalar/list adapters now
+require the matching declaration, including for null and empty values. Ordinary unmarked model
+access remains literal. The existing A-D adoption scope is unchanged pending that discussion.
+
+All 384 affected schema, env, secrets, harness and setup tests passed. Strict Mypy across 448 source
+files, targeted Ruff and repository file-quality checks passed. Private review evidence and the
+exact pushed head will be recorded in the PR update.

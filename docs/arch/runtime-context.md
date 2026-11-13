@@ -178,7 +178,9 @@ Use `render_scalar_field` or `render_list_field` from `agentworks.interpolation_
 consuming boundary. Supply the declaring model, field name, selected authored value, context mapping
 and diagnostic location. The declaring model remains the policy source when a resolved dataclass
 carries the value. For integration argv fields, `render_context_args` binds those facts to the
-session. Helpers return separate values and never replace stored or loaded declarations.
+session. Helpers require the matching annotation, return separate values and never replace stored or
+loaded declarations. Read unmarked values normally; an explicit render call for an unmarked field is
+a programmer error.
 
 Supply the managed identity and resource facts the invocation actually knows. Runtime callers use
 the existing `ResourceContext`; preparation can supply planned facts before a full runtime context

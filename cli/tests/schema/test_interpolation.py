@@ -59,16 +59,26 @@ def test_declaration_projects_into_schema_field_facts_and_runtime() -> None:
     assert "x-agw-interpolation" not in properties["literal"]
     assert render_scalar_field(Consumer, "value", source.value, values, location="owner.value") == "operator"
     assert render_scalar_field(Consumer, "optional", source.optional, {}, location="owner.optional") is None
-    assert render_scalar_field(Consumer, "literal", source.literal, {}, location="owner.literal") == source.literal
+    assert source.literal == "${agw:unterminated"
     assert render_list_field(Consumer, "args", source.args, values, location="owner.args") == [
         "${agw:user_name}",
         "${agw:user_name}",
     ]
-    assert render_list_field(Consumer, "literal_args", source.literal_args, {}, location="owner.literal_args") == [
-        "${agw:unterminated"
-    ]
+    assert source.literal_args == ["${agw:unterminated"]
     assert source.value == "${agw:user_name}"
     assert source.args == ["$${agw:user_name}", "${agw:workspace_dir}"]
+
+
+def test_explicit_rendering_requires_the_matching_annotation() -> None:
+    source = Consumer(value="unchanged", literal_args=["${agw:unterminated"])
+    for name, value in (("literal", source.literal), ("literal", None), ("args", "unchanged")):
+        with pytest.raises(StateError) as caught:
+            render_scalar_field(Consumer, name, value, {}, location=f"owner.{name}")
+        assert caught.value.entity_name == f"owner.{name}"
+    for name in ("literal_args", "value"):
+        with pytest.raises(StateError) as caught:
+            render_list_field(Consumer, name, [], {}, location=f"owner.{name}")
+        assert caught.value.entity_name == f"owner.{name}"
 
 
 def test_list_failure_identifies_the_consumed_field_and_element() -> None:

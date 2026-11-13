@@ -16,7 +16,9 @@ An annotation declares that a string value supports runtime interpolation. Unmar
 literal to this mechanism. Adopting the pattern is optional for a component; the framework must not
 require every string or every plugin to participate. The same declaration supplies field
 documentation, emitted schema metadata and runtime interpolation eligibility. An annotation does not
-add a YAML setting or tag.
+add a YAML setting or tag. Every field rendered by the shared configuration pattern must declare
+interpolation. An explicit render call without the matching annotation fails; components read their
+unmarked fields normally.
 
 ## FR2. Preserve the existing language and consumers
 
@@ -89,3 +91,10 @@ The operator replied "Sounds good!" to the recommendation to include groups A-D 
 command/check/PATH fields, admin/agent dotfiles destination/install commands, Codex writable
 directories and Shell required commands) and defer marketplace sources. These eleven new
 declarations join the six existing declarations in this effort.
+
+### 2026-11-13: explicit rendering contract
+
+The operator replied "Agreed on 2. But please explain 1." to the recommendations. Explicit
+model-aware rendering therefore requires the matching annotation, and the unused, unreleased
+`render_context_argv` helper is removed. The proposed scope reduction in recommendation 1 remains
+undecided; the earlier A-D scope is not amended.
