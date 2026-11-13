@@ -250,7 +250,7 @@ def apply_mcp(
         if item.content.type is ArtifactType.MCP_SERVER:
             grouped.setdefault(item.content.name, []).append(item)
     conflicts = mcp_input_conflicts(invocation.artifacts, tool)
-    ambiguous = {name: items for name, items in grouped.items() if items[0].identity in conflicts}
+    ambiguous = {name for name, items in grouped.items() if items[0].identity in conflicts}
     desired = {name: items for name, items in grouped.items() if name not in ambiguous}
     elsewhere = tuple(claim for claim in old if claim.destination != destination)
     old = tuple(claim for claim in old if claim.destination == destination)
@@ -277,7 +277,7 @@ def apply_mcp(
             for item in items
         ),
     )
-    protected_names = ambiguous.keys() | blocked.keys()
+    protected_names = ambiguous | blocked.keys()
     protected_origins = {item.origin_identity for name in protected_names for item in grouped[name]}
     desired = {name: items for name, items in desired.items() if name not in blocked}
     if not desired and not old and map_document is None:
