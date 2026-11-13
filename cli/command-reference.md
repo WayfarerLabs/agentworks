@@ -1432,9 +1432,10 @@ Workspaces with tmuxinator enabled in their template (the default) carry a tmuxi
 describing a `ws-<name>-console` session: an admin-shell window plus one window per session. It is
 regenerated whenever sessions change. Neither the config nor the link is written through a symbolic
 link: a link at the config, above the workspace, or at `~/.config` or `~/.config/tmuxinator` is
-refused. The `agw workspace console` command that attached to it was removed (superseded by named
-consoles); the config remains usable directly on the VM via `tmuxinator start ws-<name>-console`
-(e.g. inside VS Code's integrated terminal).
+refused. A session command whose regeneration fails warns and still succeeds. The
+`agw workspace console` command that attached to it was removed (superseded by named consoles); the
+config remains usable directly on the VM via `tmuxinator start ws-<name>-console` (e.g. inside VS
+Code's integrated terminal).
 
 #### Shells
 

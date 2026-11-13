@@ -35,8 +35,9 @@ from agentworks.capabilities.harness_integration import HarnessLaunchIntent, Har
 from agentworks.db import Database, InitStatus, ProvisioningStatus, SessionMode, SessionRuntimeSnapshot, SessionStatus
 from agentworks.errors import AgentworksError, NotFoundError, StateError, UserAbort, ValidationError
 from agentworks.execution.access import Admin
+from agentworks.execution.errors import ExecutionIncomplete, PathRefusal, PathRefused
 from agentworks.execution.requests import Command, PythonProgram
-from agentworks.execution.results import Completed, Result
+from agentworks.execution.results import Completed, Result, Unknown, UnknownReason
 from agentworks.secrets.orchestration import (
     resolve_for_command as _real_resolve_for_command,
 )
@@ -1203,6 +1204,41 @@ def test_create_failure_cleans_session_slice_then_unwinds_ephemerals(
     assert db.instance_state.get_desired_overlay("session", "s1") is None
     assert not db.has_any_grant("s1", "s1")
     assert outcomes == []
+    db.close()
+
+
+@pytest.mark.parametrize("workspace_spec", [None, '{"tmuxinator":false}'])
+@pytest.mark.parametrize(
+    "failure",
+    [
+        PathRefused("vm1", "write", "/home/me/ws1/.tmuxinator.yml", PathRefusal.UNSUITABLE),
+        ExecutionIncomplete("vm1", Result(Unknown(UnknownReason.CONNECTION))),
+    ],
+    ids=["link-refused", "connection-lost"],
+)
+def test_regenerate_tmuxinator_failure_warns_and_leaves_the_command_standing(
+    tmp_path: Path,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+    workspace_spec: str | None,
+    failure: Exception,
+) -> None:
+    from agentworks.instance_specs import parse_instance_spec
+
+    db = _seed_db(tmp_path)
+    if workspace_spec is not None:
+        overlay = parse_instance_spec("workspace", workspace_spec)
+        db.instance_state.put_desired_overlay("workspace", "ws1", overlay.payload)
+    install_access_recorder(monkeypatch).access(vm_name="vm1").default_outcome = failure
+    vm = db.get_vm("vm1")
+    ws = db.get_workspace("ws1")
+    assert vm is not None and ws is not None
+
+    _real_regenerate_tmuxinator(db, make_config(), vm, ws)
+
+    [warning] = captured_output.warnings
+    assert "ws1" in warning
     db.close()
 
 

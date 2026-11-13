@@ -150,25 +150,36 @@ def _regenerate_tmuxinator(
     *,
     logger: OperationLog | None = None,
 ) -> None:
-    """Regenerate the workspace tmuxinator config from current session state, on the admin's access."""
+    """Regenerate the workspace tmuxinator config from current session state, on the admin's access.
+
+    Best effort: the config is a convenience, so a request or file operation
+    that fails, a link in its path included, warns naming the workspace and
+    leaves the session command's result as it is.
+    """
     import agentworks.execution as execution
     from agentworks.bootstrap import load_request_registry
     from agentworks.execution.access import Admin
     from agentworks.linux_users import managed_home
+    from agentworks.workspaces.guest import FILE_FAILURES
     from agentworks.workspaces.templates import resolve_live_tmuxinator
     from agentworks.workspaces.tmuxinator import generate_config, remove_config, write_config
 
     registry = load_request_registry(config, live_database=db)
     admin = execution.vm_access(vm, config, Admin(), log=None if logger is None else logger.record)
-    if not resolve_live_tmuxinator(db, registry, ws.name, ws.template):
-        remove_config(admin, home=managed_home(vm.admin_username), ws_name=ws.name, workspace_path=ws.workspace_path)
-        return
+    try:
+        if not resolve_live_tmuxinator(db, registry, ws.name, ws.template):
+            remove_config(
+                admin, home=managed_home(vm.admin_username), ws_name=ws.name, workspace_path=ws.workspace_path
+            )
+            return
 
-    sessions = db.list_sessions(workspace_name=ws.name)
-    # Build socket paths for tmuxinator (admin sessions have NULL, agent sessions always set)
-    socket_paths = {s.name: s.socket_path for s in sessions}
-    config_text = generate_config(ws.name, ws.workspace_path, sessions=sessions, socket_paths=socket_paths)
-    write_config(admin, ws.workspace_path, config_text)
+        sessions = db.list_sessions(workspace_name=ws.name)
+        # Build socket paths for tmuxinator (admin sessions have NULL, agent sessions always set)
+        socket_paths = {s.name: s.socket_path for s in sessions}
+        config_text = generate_config(ws.name, ws.workspace_path, sessions=sessions, socket_paths=socket_paths)
+        write_config(admin, ws.workspace_path, config_text)
+    except FILE_FAILURES as error:
+        output.warn(f"The tmuxinator config of workspace '{ws.name}' was not updated: {error}")
 
 
 def filter_sessions(
