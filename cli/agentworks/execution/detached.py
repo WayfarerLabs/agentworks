@@ -87,17 +87,15 @@ class Observation:
     """A launch's state; ``status`` only for ``EXITED``, ``output_tail`` only once it is not ``RUNNING``.
 
     ``work`` is each regular file in the launch's working directory and its
-    size in bytes. ``output_tail`` is at most ``OUTPUT_TAIL_BYTES`` of the end
-    of everything the payload wrote to either stream.
+    size in bytes. ``output_tail`` is at most
+    ``detached_program.OUTPUT_TAIL_BYTES`` of the end of everything the
+    payload wrote to either stream.
     """
 
     state: State
     status: int | None = None
     work: Mapping[str, int] = field(default_factory=dict)
     output_tail: bytes = field(default=b"", repr=False)
-
-
-OUTPUT_TAIL_BYTES = detached_program.OUTPUT_TAIL_BYTES
 
 
 class Detached:
