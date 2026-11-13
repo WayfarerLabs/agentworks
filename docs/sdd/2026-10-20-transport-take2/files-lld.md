@@ -837,18 +837,20 @@ setup invocation's runner. The merge that brought them in moved them onto `VMAcc
 - **Layout observation.** `resolve_user_layout` (`artifacts/native/layout.py:51-88`) runs as a
   `PythonProgram` after the account's login and interactive startup, with its request on stdin and a
   30 second deadline, over the invocation's access (`user_layout`, `:91`).
-- **MCP publish.** `apply_mcp` (`artifacts/native/mcp.py:243`) reads and writes through
-  `invocation.files` (`:300`). A publish (`:302-311`) is `publish_config`
+- **MCP publish.** `apply_mcp` (`artifacts/native/mcp.py:248`) reads and writes through
+  `invocation.files` (`:305`). A publish (`:309-317`) is `publish_config`
   (`artifacts/config_files.py:13`), the rule native settings and Git exclusions share, with
   `preserve_metadata` for an existing file. `PathRefused`, `ConnectivityError` and `ExternalError`
-  defer the entries (`:338`, `:447`), and `FileConflict` propagates. Codex's joint settings and MCP
+  defer the entries (`:343`, `:452`), and `FileConflict` propagates. Codex's joint settings and MCP
   document is planned by `_MappingPlan.render` (`plugins/_harness_native/native.py:145`, `:183`),
   and only `apply_mcp` publishes it.
 - **Session conflict check.** `session_mcp_conflicts` (`artifacts/native/mcp.py:152`) takes the
-  launch identity's `VMAccess` and reads through `access.files()` (`:182`). It reads the session's
-  workspace through `addressable_workspace_path`, so an earlier release's `/data/ws/` is checked in
-  its normalized spelling, and a row the file operations refuse defers as `PathRefused` and any
-  other read failure do (`:202`).
+  launch identity's `VMAccess` and reads through `access.files()` (`:186`), deferring on
+  `PathRefused` as on any other read failure (`:207`). It reads the session's workspace through
+  `addressable_workspace_path` first, so an earlier release's `/data/ws/` is checked in its
+  normalized spelling, and a row the file operations refuse defers every input with the refusal and
+  its hint as the reason (`:176-180`); a `ValidationError` from the requests themselves still
+  raises.
 
 `VMNotReady`, `RequestRefused` and `TrustMismatch` are not advisory here: the layout observation and
 the session conflict check fail fast on them, as `probe_native` does.
