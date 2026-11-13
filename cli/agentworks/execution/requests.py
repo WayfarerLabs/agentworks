@@ -15,7 +15,8 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Callable, Mapping, Sequence
+    from pathlib import Path
 
 CAPTURE_LIMIT_BYTES = 1_048_576
 """What :class:`CaptureOutput` keeps by default: 1 MiB of one stream."""
@@ -181,7 +182,25 @@ class DiscardOutput:
     """A ``run`` sink that keeps nothing. The stream is still read to its closing marker, so the outcome stands."""
 
 
-OutputSink = CaptureOutput | DiscardOutput
+@dataclass(frozen=True)
+class ToFile:
+    """A ``run`` sink that writes its stream to a new workstation file, kept only for ``Completed(0)``.
+
+    ``run`` creates ``path`` before dispatch, mode 0600 and in binary mode, so
+    an existing path is refused with nothing sent and no newline is ever
+    translated. ``on_progress`` receives the running byte count after each
+    write; a caller that reports progress throttles its own reporting. For
+    any other completion, and for any exception while the request runs (an
+    operator's Ctrl-C included), ``run`` removes the file before it returns
+    or raises, so a partial file is never left behind. The result's field
+    for the stream is empty, and no log sees the bytes.
+    """
+
+    path: Path
+    on_progress: Callable[[int], None] | None = None
+
+
+OutputSink = CaptureOutput | DiscardOutput | ToFile
 """Where ``run`` puts one of the payload's streams."""
 
 Request = RunRequest | LoginShell

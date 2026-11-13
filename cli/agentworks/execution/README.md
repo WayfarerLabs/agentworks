@@ -54,11 +54,17 @@ needs a soft open-file limit (`RLIMIT_NOFILE`) above 100; below it the request i
 `NotDelivered(LAUNCHER_FAILED)` with an error naming the limit.
 
 `run`'s sinks are `CaptureOutput(limit=1 MiB)`, the default, which keeps up to `limit` bytes and
-makes more `Unknown(OUTPUT_LIMIT)`, and `DiscardOutput()`, which keeps nothing while the stream is
-still read to its closing marker. A caller whose output can exceed 1 MiB sets the limit per call.
-Plugins hold an access, so `run` checks what their types promise: input that is neither `NoInput()`
-nor `Bytes` of `bytes`, any other sink, or a limit that is not a positive `int` is a
-`ValidationError` before anything resolves.
+makes more `Unknown(OUTPUT_LIMIT)`; `DiscardOutput()`, which keeps nothing while the stream is still
+read to its closing marker; and `ToFile(path, on_progress=None)`, which writes the stream to a new
+workstation file. A caller whose output can exceed 1 MiB sets the limit per call, or writes it to a
+file. `run` creates a `ToFile` path before dispatch, exclusively, mode 0600 and in binary mode, so
+an existing path is a `ValidationError` with nothing sent and no newline is translated; it calls
+`on_progress` with the running byte count after each write. The file exists afterwards only for
+`Completed(0)`: any other completion, and any exception while the request runs (Ctrl-C included),
+removes it before `run` returns or raises. Plugins hold an access, so `run` checks what their types
+promise: input that is neither `NoInput()` nor `Bytes` of `bytes`, any other sink, a limit that is
+not a positive `int`, or a `ToFile` path that is not a `Path` is a `ValidationError` before anything
+resolves.
 
 `Command`, `Script` and `PythonProgram` take the payload's input as `stdin`: `NoInput()`, the
 default, or `Bytes(data)`, which the client writes after the request and then closes, so the payload

@@ -29,6 +29,9 @@ returns canned outcomes without ssh.
 - `test_access.py`, `test_launcher_source.py`, `test_stream_process.py`: passivity and ordering, the
   launcher's structure, and `stream` in a real process whose stdin stays open.
 - `test_trust.py`: the host-key store.
+- `test_to_file.py`: the `ToFile` sink: an existing path refused before dispatch, bytes unchanged,
+  and the file kept only for `Completed(0)`. Marked `windows`, where binary mode is what keeps CR
+  LF.
 - `test_reachability.py`: what `reachability.wait` polls, what it raises on the first attempt, and
   the confirming probe, over the recording fake.
 - `test_oplog.py`: the operation log record holds a request's shape and never its secrets.

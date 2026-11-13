@@ -92,6 +92,21 @@ class Capture:
             raise OutputLimitExceeded
 
 
+class FileWriter:
+    """A sink that writes every chunk to ``file`` and then reports the running byte count to ``on_progress``."""
+
+    def __init__(self, file: BinaryIO, on_progress: Callable[[int], None] | None = None) -> None:
+        self.written = 0
+        self._file = file
+        self._on_progress = on_progress
+
+    def __call__(self, chunk: bytes) -> None:
+        self._file.write(chunk)
+        self.written += len(chunk)
+        if self._on_progress is not None:
+            self._on_progress(self.written)
+
+
 class StopReason(enum.Enum):
     """Why :meth:`PipeSession.pump` returned."""
 

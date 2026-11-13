@@ -14,6 +14,7 @@ import contextlib
 import os
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from agentworks import output
@@ -23,13 +24,12 @@ from agentworks.execution import client, envelope, forwarding, pump, ssh_process
 from agentworks.execution.agw_launch import refusal_status
 from agentworks.execution.errors import CommandFailed, ExecutionIncomplete, PermissionDenied, describe_refusal
 from agentworks.execution.files import Files
-from agentworks.execution.requests import Bytes, CaptureOutput, DiscardOutput, NoInput
+from agentworks.execution.requests import Bytes, CaptureOutput, DiscardOutput, NoInput, ToFile
 from agentworks.execution.results import Completed, NotDelivered, NotDeliveredReason, Result, Unknown, UnknownReason
 from agentworks.execution.trust import TrustBinding, TrustMode
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Sequence
-    from pathlib import Path
     from typing import BinaryIO
 
     from agentworks.config import Config
@@ -107,32 +107,36 @@ class VMAccess:
         The client writes the request's ``stdin`` after it, then closes ssh's
         stdin. Each stream goes to its sink: a ``CaptureOutput`` keeps up to
         its limit, and more is ``Unknown(OUTPUT_LIMIT)``; a ``DiscardOutput``
-        keeps nothing, and the result's field for it is empty. With ``check``
-        a result that is not ``Completed(0)`` raises its typed error. The
-        access's operation log, when it has one, records every request that
-        reaches an outcome, before raising for a bad one. A request that
-        raises before it is dispatched (no client, no trust record) is not
-        logged.
+        keeps nothing; a ``ToFile`` writes a new file, created before
+        dispatch and kept only for ``Completed(0)``. The result's field for a
+        stream that was not captured is empty. With ``check`` a result that
+        is not ``Completed(0)`` raises its typed error. The access's operation
+        log, when it has one, records every request that reaches an outcome,
+        before raising for a bad one. A request that raises before it is
+        dispatched (no client, no trust record) is not logged.
 
         Plugins hold an access and call this directly, so it validates what
         the type checker cannot promise them: ``stdin`` is ``NoInput()`` or
-        ``Bytes`` of ``bytes``, and each sink is a ``DiscardOutput`` or a
-        ``CaptureOutput`` with a positive ``int`` limit. Anything else is a
-        ``ValidationError`` before anything resolves.
+        ``Bytes`` of ``bytes``, and each sink is a ``DiscardOutput``, a
+        ``CaptureOutput`` with a positive ``int`` limit or a ``ToFile`` of a
+        ``Path``. Anything else is a ``ValidationError`` before anything
+        resolves; so is a ``ToFile`` path that already exists.
         """
         _check_run_inputs(request, (stdout, stderr))
-        kept_stdout, kept_stderr = _capture(stdout), _capture(stderr)
-        with self._passphrase_hint_on_connection_failure():
-            result = self._execute(
-                request, stdin=None, on_stdout=kept_stdout or _discard, on_stderr=kept_stderr or _discard
-            )
-            result = Result(result.completion, _kept(kept_stdout), _kept(kept_stderr), result.client_log_tail)
-            if self._log is not None:
-                self._log(request, result)
-            if check and result.require_completed(self.vm_name) != 0:
-                assert isinstance(result.completion, Completed)
-                raise CommandFailed(self.vm_name, result.completion.status, result, streams_logged=request.log_streams)
-            return result
+        with _OutputFiles() as files:
+            on_stdout, on_stderr = files.sink(stdout), files.sink(stderr)
+            with self._passphrase_hint_on_connection_failure():
+                result = self._execute(request, stdin=None, on_stdout=on_stdout, on_stderr=on_stderr)
+                result = Result(result.completion, _kept(on_stdout), _kept(on_stderr), result.client_log_tail)
+                if self._log is not None:
+                    self._log(request, result)
+                if check and result.require_completed(self.vm_name) != 0:
+                    assert isinstance(result.completion, Completed)
+                    raise CommandFailed(
+                        self.vm_name, result.completion.status, result, streams_logged=request.log_streams
+                    )
+                files.keep = result.completion == Completed(0)
+                return result
 
     def stream(self, request: RunRequest, *, stdin: BinaryIO | None, stdout: BinaryIO, stderr: BinaryIO) -> int:
         """Run ``request`` with live output and return the guest's status.
@@ -310,18 +314,65 @@ def _check_run_inputs(request: RunRequest, sinks: tuple[OutputSink, OutputSink])
     for sink in sinks:
         if isinstance(sink, DiscardOutput):
             continue
+        if isinstance(sink, ToFile):
+            if not isinstance(sink.path, Path):
+                raise ValidationError(f"a ToFile path is a Path, not {type(sink.path).__name__}")
+            if sink.on_progress is not None and not callable(sink.on_progress):
+                raise ValidationError("a ToFile on_progress is a callable or None")
+            continue
         if not isinstance(sink, CaptureOutput):
-            raise ValidationError(f"a run sink is CaptureOutput or DiscardOutput, not {type(sink).__name__}")
+            raise ValidationError(f"a run sink is CaptureOutput, DiscardOutput or ToFile, not {type(sink).__name__}")
         if type(sink.limit) is not int or sink.limit <= 0:
             raise ValidationError("a CaptureOutput limit is a positive int")
 
 
-def _capture(sink: OutputSink) -> pump.Capture | None:
-    return pump.Capture(sink.limit) if isinstance(sink, CaptureOutput) else None
+class _OutputFiles:
+    """The files one ``run``'s ``ToFile`` sinks write: kept only when ``keep`` is set before the block ends (I20).
+
+    Every way out of the block that does not set ``keep`` (another completion,
+    a checked failure, an exception from the pump, a progress callback or
+    the operator's Ctrl-C) closes and removes each file before the exit
+    continues.
+    """
+
+    def __init__(self) -> None:
+        self.keep = False
+        self._opened: list[tuple[Path, BinaryIO]] = []
+
+    def __enter__(self) -> _OutputFiles:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        failure: OSError | None = None
+        for _path, file in self._opened:
+            try:
+                file.close()
+            except OSError as error:  # a final flush that failed leaves an incomplete file
+                failure = failure or error
+        for path, _file in self._opened:
+            if failure is not None or not self.keep:
+                with contextlib.suppress(FileNotFoundError):
+                    path.unlink()
+        if failure is not None and self.keep:
+            raise failure
+
+    def sink(self, sink: OutputSink) -> pump.Sink:
+        if isinstance(sink, CaptureOutput):
+            return pump.Capture(sink.limit)
+        if isinstance(sink, DiscardOutput):
+            return _discard
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+        try:
+            descriptor = os.open(sink.path, flags, 0o600)
+        except FileExistsError:
+            raise ValidationError(f"'{sink.path}' already exists; run writes a new file") from None
+        file = os.fdopen(descriptor, "wb")
+        self._opened.append((sink.path, file))
+        return pump.FileWriter(file, sink.on_progress)
 
 
-def _kept(capture: pump.Capture | None) -> bytes:
-    return b"" if capture is None else bytes(capture.data)
+def _kept(sink: pump.Sink) -> bytes:
+    return bytes(sink.data) if isinstance(sink, pump.Capture) else b""
 
 
 def _discard(_chunk: bytes) -> None:
