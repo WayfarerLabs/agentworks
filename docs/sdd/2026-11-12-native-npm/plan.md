@@ -82,8 +82,7 @@ one-hour feedback window, with PR #902 returned to draft before changing its hea
       before testing package behavior. Require npm's resolver error for the too-new exact pin.
 - [x] Replace the CodeQL false-positive URL assertion with repository setup behavior checks.
 - [x] Explain the agent dotfiles-before-custom-command compatibility change in the operator guide.
-- [ ] Complete the private project, complexity, and correctness reviews, then publish current-head
-      CI and the round handoff.
+- [x] Complete the private project, complexity, and correctness reviews and record their evidence.
 
 Local verification passed 158 focused npm, declaration, initialization, and shell-profile cases,
 plus 13 mise and install-command cases. Native npm 11.16.0 passes six cases with one unavailable
@@ -92,3 +91,11 @@ wrapper directly. Native npm 12.2.2 passes all seven cases. The isolated fixture
 resolved CLI reports the selected version before any negative install case can run. ruff,
 formatting, full mypy, file-quality lint, and whitespace checks pass. Remote VM coverage remains
 unavailable; these results exercise the real local npm resolver and local shells.
+
+The private project and generic correctness lanes found that retaining the first normalized admin
+PATH entry changed lookup precedence. The correction retains the last occurrence, matching prepend
+semantics and the agent flow. Interleaved-path tests now guard both roles and all toggle
+combinations; independent competing-executable probes pass under sh, Bash, and Zsh. All three
+private lanes are clean at code head `09adfebd6`. Current-head CI, thread disposition, and the round
+handoff are tracked on PR #902. An initial draft push found a formatting issue in this evidence
+paragraph; it was fixed before the round handoff.
