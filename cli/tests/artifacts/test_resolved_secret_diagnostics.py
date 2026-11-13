@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from pathlib import Path
 from unittest.mock import Mock
@@ -146,7 +147,12 @@ def test_logger_only_secret_is_removed_from_setup_probe_diagnostics(
     )
     (invocation,) = invocations
     access = RecordingVMAccess([], Admin())
-    access.run_outcomes = [Result(Completed(1), b"", ("\x1b[" + secret + " " + path).encode())]
+    # The native layout observation answers first; the discovery probe then fails, quoting the secret.
+    layout = {"root": "/home/worker/.claude", "mcp_path": "/home/worker/.claude.json"}
+    access.run_outcomes = [
+        Result(Completed(0), b"\nAGW_NATIVE_USER_LAYOUT=" + json.dumps(layout).encode()),
+        Result(Completed(1), b"", ("\x1b[" + secret + " " + path).encode()),
+    ]
     setup = ClaudeCodeIntegration.for_setup(owner_kind="agent", owner_name="agent", facet="user", config={})
     with pytest.raises(ExternalError) as caught:
         setup.user_init(replace(invocation, access=access, artifacts=received(artifact(ArtifactType.SKILL))))

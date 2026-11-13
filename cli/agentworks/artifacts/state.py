@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, cast
 from agentworks.artifacts.bundle import resolve_bundle
 from agentworks.artifacts.capture import capture_artifacts
 from agentworks.artifacts.codec import decode_inputs, encode_inputs
-from agentworks.artifacts.model import ArtifactComponent, ArtifactGroup, ArtifactOrigin
+from agentworks.artifacts.model import ArtifactComponent, ArtifactGroup, ArtifactOrigin, ArtifactType
 from agentworks.db import AppliedStateKey, AppliedStateSlice, Database, VersionedPayload
 from agentworks.errors import StateError
 from agentworks.sources import SourceRefError
@@ -41,7 +41,7 @@ class CapturedArtifacts:
 
     declaration: str
     inputs: ArtifactGroup
-    codec_version: int = 3
+    codec_version: int = 4
 
 
 def _validate_owner(capture: CapturedArtifacts, kind: InstanceKind, name: str, component: ArtifactComponent) -> None:
@@ -68,6 +68,7 @@ def declaration_digest(registry: Registry, config: ArtifactsConfig) -> str:
         maps = {
             kind.map_name: {key: spec.model_dump(mode="json") for key, spec in entries.items()}
             for kind, entries in bundle.type_maps()
+            if kind != ArtifactType.MCP_SERVER or entries
         }
         payload.append((name, maps))
     return hashlib.sha256(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
@@ -97,7 +98,7 @@ def capture_owner(
 
 def encode_captures(captures: dict[ArtifactComponent, CapturedArtifacts]) -> VersionedPayload:
     return VersionedPayload(
-        max((snapshot.codec_version for snapshot in captures.values()), default=3),
+        max((snapshot.codec_version for snapshot in captures.values()), default=4),
         cast(
             "JsonObject",
             {
@@ -117,7 +118,7 @@ def decode_captures(record: AppliedStateSlice) -> dict[ArtifactComponent, Captur
     """Validate persisted input content and its actual owner without echoing values."""
     if record.key is not AppliedStateKey.ARTIFACT_INPUTS:
         raise TypeError("artifact capture requires its matching applied slice")
-    if record.payload.payload_version not in (2, 3):
+    if record.payload.payload_version not in (2, 3, 4):
         raise UnsupportedArtifactCaptureVersionError(
             "artifact captures require a different Agentworks version",
             hint="Use an Agentworks version that supports this capture. Stored data and file ownership were retained.",
@@ -184,6 +185,6 @@ def write_capture(
 
 
 def canonicalize_captures(record: AppliedStateSlice) -> VersionedPayload:
-    if record.payload.payload_version not in (2, 3):
+    if record.payload.payload_version not in (2, 3, 4):
         return record.payload
     return encode_captures(decode_captures(record))

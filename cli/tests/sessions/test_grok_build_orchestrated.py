@@ -9,11 +9,12 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.artifacts.declarations import ArtifactsConfig
-from agentworks.db import Database, SessionMode, SessionStatus
+from agentworks.db import Database, InitStatus, ProvisioningStatus, SessionMode, SessionStatus
 from agentworks.execution.results import Completed, Result
 from agentworks.plugins.grok.harness_integration import session_probe
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.tmux import FingerprintProbe, ProbeStatus, TmuxServerFingerprint
+from tests.conftest import seed_vm_trust
 from tests.vm_access_support import check_result, install_access_recorder, is_command_check
 
 from ..conftest import stub_build_registry, stub_session_resolvers, stub_vm_gates
@@ -69,10 +70,11 @@ class _GrokTarget:
 
 def _seed_db(tmp_path: Path) -> Database:
     db = Database(tmp_path / "test.db")
-    db._conn.execute(
-        "INSERT INTO vms (name, site, hostname, admin_username, tailscale_host, init_status) "
-        "VALUES ('vm1', 'lima', 'h', 'admin', '100.64.0.5', 'complete')"
-    )
+    db.insert_vm("vm1", "lima", "h", admin_username="admin")
+    db.update_vm_provisioning_status("vm1", ProvisioningStatus.COMPLETE)
+    seed_vm_trust("vm1")
+    db.update_vm_tailscale("vm1", "100.64.0.5")
+    db.update_vm_init_status("vm1", InitStatus.COMPLETE)
     db._conn.execute(
         "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "
         "VALUES ('ws1', 'vm1', '/home/me/ws1', 'ws-ws1')"
@@ -264,7 +266,7 @@ def test_restart_reads_uuid_and_detects_before_killing_old_workload(
     def teardown(*args: object, **kwargs: object) -> None:
         events.append("kill")
 
-    monkeypatch.setattr("agentworks.sessions.manager._lifecycle._teardown_session", teardown)
+    monkeypatch.setattr("agentworks.sessions.manager._teardown_session", teardown)
     session_manager.restart_session(
         db,
         SimpleNamespace(session=SimpleNamespace(history_limit=1)),  # type: ignore[arg-type]

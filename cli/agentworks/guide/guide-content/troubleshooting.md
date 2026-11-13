@@ -48,6 +48,33 @@ then waits for SSH. A step that fails stops it and names `agw vm logs NAME`. If 
 change the VM, delete and recreate it instead. `agw vm shell NAME --platform` remains an interactive
 escape hatch where the platform offers one.
 
+## Runtime recovery and busy operations
+
+A runtime exiting does not retire its desired-running target. Inspect the target separately from
+status, and do not infer intent from an outage. Legacy sessions or consoles awaiting adoption need
+the operator's intended target recorded through their `set-desired-state` command. A stopped VM
+blocks running children while preserving their targets; `vm start` restores the parent alone.
+
+For recovery already authorized by the operator, preview the narrow scope with
+`agw vm reconcile NAME --dry-run` or the focused session/console equivalent. Apply that existing
+target only when those runtime changes are intended. A focused console retry restores its view
+without starting member sessions. Otherwise report the proposed work or blocker and leave intent and
+runtimes unchanged. Unknown observations and unsafe recovery remain blockers, not permission to
+replace a runtime.
+
+A required workload secret failure prevents all deferred changes in the selected batch. Earlier
+infrastructure activation may remain. An infrastructure credential failure blocks only dependent
+families unless an eligible workload also requires it. Correct the input, inspect completed effects,
+and retry the intended scope; cancellation does not erase accepted targets or roll back provider
+work.
+
+A busy VM family can be held by reconciliation secret interaction or console deletion consent.
+Finish that operation and retry instead of bypassing the guard. Even diagnostic access to a live VM
+can report busy during hold admission. On WSL2, a live VM with stopped intent has no idle protection
+during access or management work and can disappear mid-command. If the operator intends normal holds
+and future activation, explicitly select `agw vm set-desired-state NAME on-demand` or `running`;
+otherwise retain stopped intent and report that limitation.
+
 ## Git authentication
 
 First inspect the selected `git-credential` and its provider with `agw resource show` and

@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import contextlib
 from dataclasses import FrozenInstanceError
-from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
 from uuid import uuid4
 
 import pytest
 
 from agentworks.db import PID_STOPPED, Database, SessionMode, SessionRuntimeSnapshot, SessionStatus
-from agentworks.errors import ExternalError, StateError
+from agentworks.errors import StateError
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import manager as session_manager
 from agentworks.sessions import tmux as tmux_mod
@@ -23,7 +22,6 @@ from .test_session_batch_stop_parallelism import BOOT_ID, _seed_session, _Target
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from agentworks.config import Config
     from agentworks.db import SessionRow
     from agentworks.transports import Transport
 
@@ -184,7 +182,7 @@ def test_runtime_snapshot_copies_nullable_fields_before_mutable_row_changes(db: 
 @pytest.mark.parametrize("mode", ["serial", "batch"])
 @pytest.mark.parametrize("field,value", [("pid", 0), ("pid", -2), ("boot_id", "bad"), ("tmux_server_start_ticks", 0)])
 def test_malformed_complete_fields_never_authorize_native_work(
-    db: Database, monkeypatch: pytest.MonkeyPatch, mode: str, field: str, value: object
+    db: Database, monkeypatch: pytest.MonkeyPatch, mode: str, field: str, value: object, make_config
 ) -> None:
     session = _seed_session(
         db,
@@ -199,7 +197,12 @@ def test_malformed_complete_fields_never_authorize_native_work(
         with pytest.raises(StateError):
             _stop(db, session)
     else:
-        monkeypatch.setattr(session_manager, "_batch_vm_boundary", lambda *args, **kwargs: contextlib.nullcontext())
+        from agentworks.db import DesiredRuntimeState
+
+        from .test_session_batch_stop_parallelism import _prepared_stop_config
+
+        config = _prepared_stop_config(db, make_config, monkeypatch)
+        session.desired_runtime_state = DesiredRuntimeState.STOPPED
         monkeypatch.setattr(session_manager, "ensure_pids_batch", lambda sessions, **kwargs: [session])
         monkeypatch.setattr(
             session_manager,
@@ -207,10 +210,8 @@ def test_malformed_complete_fields_never_authorize_native_work(
             lambda sessions, **kwargs: {session.name: SessionStatus.RUNNING},
         )
         monkeypatch.setattr(session_manager, "transport", lambda *args, **kwargs: _Target("invalid"))
-        with pytest.raises(ExternalError):
-            lifecycle_mod.stop_all_sessions(
-                db, cast("Config", SimpleNamespace()), interaction=TtyInteractionPolicy.REFUSE
-            )
+        with pytest.raises(StateError):
+            lifecycle_mod.stop_all_sessions(db, config, interaction=TtyInteractionPolicy.REFUSE)
     current = db.get_session(session.name)
     assert current is not None and (current.pid, current.boot_id, current.tmux_server_start_ticks) == (
         101,

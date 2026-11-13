@@ -10,6 +10,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, ValidationError
 
 from agentworks.artifacts.capture import content_from_members, normalize_text, rule_content, validate_provenance
+from agentworks.artifacts.mcp import content_from_definition, parse_definition
 from agentworks.artifacts.model import (
     ArtifactComponent,
     ArtifactContent,
@@ -45,12 +46,12 @@ class _Member(_Record):
 
 
 class _Content(_Record):
-    type: Literal["hint", "rule", "skill", "agent"]
+    type: Literal["hint", "rule", "skill", "agent", "mcp-server"]
     name: ArtifactName
     description: SmallString
     text: Annotated[StrictStr, Field(max_length=_LIMITS.member_bytes)]
     members: Annotated[list[_Member], Field(max_length=_LIMITS.members)]
-    metadata_json: MetadataString
+    metadata_json: Annotated[StrictStr, Field(max_length=_LIMITS.member_bytes)]
     native_options_json: MetadataString
     digest: Annotated[StrictStr, Field(pattern=r"^[a-f0-9]{64}$")]
 
@@ -109,7 +110,15 @@ class _Envelope(_Record):
         )
 
 
-def encode_inputs(inputs: ArtifactGroup, *, version: int = 3) -> dict[str, object]:
+class _EnvelopeV4(_Envelope):
+    version: Annotated[StrictInt, Field(ge=4, le=4)]
+    mcp_servers: dict[ArtifactName, _Input]
+
+    def type_maps(self) -> tuple[tuple[ArtifactType, dict[str, _Input]], ...]:
+        return (*super().type_maps(), (ArtifactType.MCP_SERVER, self.mcp_servers))
+
+
+def encode_inputs(inputs: ArtifactGroup, *, version: int = 4) -> dict[str, object]:
     """Validate the persisted write boundary against the same schema used on read.
 
     No native state or source access is involved. Acquisition also calls this before
@@ -117,7 +126,11 @@ def encode_inputs(inputs: ArtifactGroup, *, version: int = 3) -> dict[str, objec
     """
     from dataclasses import asdict
 
-    result: dict[str, dict[str, object]] = {kind.map_name: {} for kind in ArtifactType}
+    if version < 4 and inputs.mcp_servers:
+        raise SourceRefError("MCP artifacts require capture version 4")
+    result: dict[str, dict[str, object]] = {
+        kind.map_name: {} for kind in ArtifactType if version >= 4 or kind != ArtifactType.MCP_SERVER
+    }
     for item in inputs.items():
         content = item.content
         entries = result[content.type.map_name]
@@ -159,7 +172,11 @@ def decode_inputs(payload: object) -> tuple[int, ArtifactGroup]:
     """
     try:
         _bound_payload(payload)
-        envelope = _Envelope.model_validate(payload)
+        envelope = (
+            _EnvelopeV4.model_validate(payload)
+            if isinstance(payload, dict) and payload.get("version") == 4
+            else _Envelope.model_validate(payload)
+        )
         owner = ArtifactOwner(**envelope.owner.model_dump())
         result: dict[str, dict[str, ArtifactInput]] = {kind.map_name: {} for kind in ArtifactType}
         total_bytes = 0
@@ -183,12 +200,16 @@ def decode_inputs(payload: object) -> tuple[int, ArtifactGroup]:
                     total_members += 1
                 validate_member_set([member.path for member in members], depth=_LIMITS.depth)
                 content_row = record.content
+                if envelope.version < 4 and len(content_row.metadata_json) > 65536:
+                    raise SourceRefError("persisted artifact metadata exceeds its size limit")
                 if len(content_row.text.encode()) > _LIMITS.member_bytes:
                     raise SourceRefError("persisted artifact instructions exceed their size limit")
                 if normalize_text(content_row.text.encode()) != content_row.text:
                     raise SourceRefError("persisted artifact text is not normalized")
                 if not members:
-                    total_bytes += len(content_row.text.encode())
+                    total_bytes += len(
+                        (content_row.metadata_json if content_row.type == "mcp-server" else content_row.text).encode()
+                    )
                     total_members += 1
                 if total_bytes > _LIMITS.total_bytes or total_members > _LIMITS.members:
                     raise SourceRefError("persisted artifacts exceed their total content limit")
@@ -206,7 +227,11 @@ def decode_inputs(payload: object) -> tuple[int, ArtifactGroup]:
                 origin = ArtifactOrigin(**record.origin.model_dump())
                 provenance = ArtifactProvenance(**record.provenance.model_dump())
                 validate_provenance(provenance)
-                if content.members:
+                if content.type == ArtifactType.MCP_SERVER:
+                    if envelope.version < 4:
+                        raise SourceRefError("MCP artifacts require capture version 4")
+                    expected = content_from_definition(origin.entry, parse_definition(content.metadata))
+                elif content.members:
                     expected = content_from_members(
                         content.type,
                         origin.entry,
@@ -217,14 +242,14 @@ def decode_inputs(payload: object) -> tuple[int, ArtifactGroup]:
                 elif content.type in (ArtifactType.HINT, ArtifactType.RULE) and content.text.strip():
                     expected = (
                         rule_content(origin.entry, content.text, content.metadata)
-                        if content.type == ArtifactType.RULE and envelope.version == 3
+                        if content.type == ArtifactType.RULE and envelope.version >= 3
                         else ArtifactContent(content.type, origin.entry, text=content.text)
                     )
                 else:
                     raise SourceRefError("persisted artifact is missing its entrypoint")
                 if expected != content:
                     raise SourceRefError("persisted artifact metadata does not match its entrypoint")
-                if bool(content.members) != (provenance.source != "inline"):
+                if content.type != ArtifactType.MCP_SERVER and bool(content.members) != (provenance.source != "inline"):
                     raise SourceRefError("persisted artifact source does not match its content")
                 replacements = tuple(
                     ArtifactReplacement(

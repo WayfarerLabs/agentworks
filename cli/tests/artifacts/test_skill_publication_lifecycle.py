@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from agentworks.artifacts.application import OwnedArtifactFile
+from agentworks.artifacts.application import ArtifactApplication, OwnedArtifactFile
 from agentworks.artifacts.bundle import ArtifactBundle
 from agentworks.artifacts.capture import capture_artifacts
 from agentworks.artifacts.declarations import SkillArtifactSpec
@@ -28,7 +28,9 @@ pytestmark = requires_posix_shell
 def large_skill_setup(tmp_path, db, monkeypatch):
     target = LocalFixtureTransport(tmp_path)
     probe(tmp_path, tool="claude", identities=())
-    monkeypatch.setattr("agentworks.plugins.claude.harness_integration.setup_user", lambda *args: None)
+    monkeypatch.setattr(
+        "agentworks.plugins.claude.harness_integration.setup_user", lambda *args, **kwargs: ArtifactApplication()
+    )
     source = tmp_path / "source/review"
     (source / "support").mkdir(parents=True)
     (source / "SKILL.md").write_text("---\nname: review\ndescription: Review fixture\n---\nRead the fixture.\n")

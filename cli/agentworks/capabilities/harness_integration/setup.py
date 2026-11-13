@@ -47,6 +47,8 @@ class SetupInvocation:
     environment: Mapping[str, str] = field(default_factory=dict, repr=False)
     secrets: Mapping[str, str] = field(default_factory=dict, repr=False)
     redactions: tuple[str, ...] = field(default=(), repr=False)
+    # Unavailable ancestor routing must not retire its previously applied effects.
+    retain_artifact_origins: frozenset[str] = field(default_factory=frozenset, repr=False)
 
     def __post_init__(self) -> None:
         # Narrowing ``secrets`` for an integration never narrows what is redacted.

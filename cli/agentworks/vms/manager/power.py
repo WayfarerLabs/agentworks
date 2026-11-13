@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import contextlib
 from functools import partial
 from typing import TYPE_CHECKING
 
 from agentworks import output
-from agentworks.db import VMStatus
+from agentworks.db import DesiredRuntimeState, VMStatus
 from agentworks.errors import AgentworksError, StateError, UserAbort, ValidationError
 from agentworks.execution import trust
 from agentworks.naming import MAX_SECRET_NAME_LENGTH, NAME_RE, validate_name
@@ -22,6 +23,20 @@ if TYPE_CHECKING:
     from agentworks.secrets.policy import TtyInteractionPolicy
 
 
+def set_vm_desired_runtime_state(db: Database, *, name: str, state: str | DesiredRuntimeState) -> None:
+    """Record VM intent without registry, credentials, or runtime work."""
+    from agentworks.errors import ValidationError
+    from agentworks.harness_setup.locking import native_mutation_guard
+
+    try:
+        target = DesiredRuntimeState(state)
+    except (ValueError, TypeError):
+        raise ValidationError("invalid VM desired runtime state", entity_kind="vm", entity_name=name) from None
+    selected = _require_vm(db, name)
+    with native_mutation_guard(db.path, name):
+        db.set_vm_desired_runtime_state(name, target, expected_vm_uuid=selected.vm_uuid)
+
+
 def start_vm(
     db: Database,
     config: Config,
@@ -29,63 +44,56 @@ def start_vm(
     *,
     interaction: TtyInteractionPolicy,
 ) -> None:
-    """Start a stopped VM. Clears the operator-stopped flag so the
-    activation gate resumes auto-starting on demand.
+    """Accept running intent, then start the retained VM and wait for it to answer.
 
-    Orchestrated, composition only: the graph derives from the VM's
-    row and the power ops drive through the node's held platform
-    (:func:`_live_vm_boundary`). No activation gate opens here: the
-    start IS this command's operation, and the operator-stopped flag
-    is CLEARED by it, never consulted.
+    The intent is recorded first, whatever the observed state, so a crashed
+    start does not leave the gate refusing to auto-resume a VM the operator
+    asked to run. A VM that does not answer fails naming ``agw vm recover``,
+    which repairs what a start cannot.
     """
     import agentworks.execution as execution
     import agentworks.vms.manager as _mgr
     from agentworks.bootstrap import load_request_registry
+    from agentworks.harness_setup.locking import native_mutation_guard
+    from agentworks.secrets.resolver import Resolver
+    from agentworks.vms.nodes import live_vm_node
 
-    vm = _require_vm(db, name)
-    _guard_incomplete_vm(vm)
-    # The wait below reaches the VM at its tailnet address through
+    from .runtime import prepare_vm_runtime, start_vm_runtime
+
+    require_exact_tty_interaction_policy(interaction)
+    selected = _require_vm(db, name)
+    _guard_incomplete_vm(selected)
+    # The wait reaches the VM at its tailnet address through
     # agentworks.execution, so a workstation off Tailscale or an unsupported
     # client refuses before anything is resolved or started.
     _mgr.verify_tailscale_available()
     execution.resolve_ssh()
     # A VM with no host-key record is not refused here: the start boots it,
-    # and the wait below raises TrustMissing, whose hint names
-    # 'agw vm recover', which reads the keys through the platform.
-    registry = load_request_registry(config, live_database=db)
-    vm_node, ops_ctx = _live_vm_boundary(
-        db,
-        config,
-        vm,
-        registry=registry,
-        interaction=interaction,
-    )
-    platform = vm_node.site.platform
-    # An explicit start is operator intent, whatever the observed state:
-    # clear the flag first so a crashed start doesn't leave the gate
-    # refusing to auto-resume a VM the operator asked to run.
-    db.set_operator_stopped(name, False)
-    # Probe status and issue the start BEFORE entering the hold: the
-    # WSL2 keepalive subprocess boots a stopped distro as a side effect,
-    # which would make status() report RUNNING and mislabel the VM as
-    # "already running". The keepalive then anchors the (now running) VM
-    # through the wait for SSH below.
-    status = platform.status(vm, ops_ctx)
-    if status == VMStatus.RUNNING:
-        output.info(f"VM '{name}' is already running")
-    else:
-        platform.start(vm, ops_ctx)
-        # Before the wait, so a wait that fails still says the VM is up.
-        output.info(f"VM '{name}' started")
-        if status in (VMStatus.STOPPED, VMStatus.DEALLOCATED):
-            db.record_vm_started(name)
-        else:
-            db.clear_vm_start_observation(name)
-
-    # The keepalive anchors the VM through the wait. A VM that does not answer
-    # fails naming 'agw vm recover', which repairs what a start cannot.
-    with vm_node.hold_active():
-        _mgr._await_tailnet(db, config, vm, already_running=status == VMStatus.RUNNING)
+    # and the wait raises TrustMissing, whose hint names 'agw vm recover',
+    # which reads the keys through the platform.
+    with native_mutation_guard(db.path, name) as guard:
+        registry = load_request_registry(config, live_database=db)
+        vm_node = live_vm_node(db, config, registry, selected, held_native_guard=guard)
+        _guard_incomplete_vm(vm_node.reload_row())
+        db.set_vm_desired_runtime_state(name, DesiredRuntimeState.RUNNING, expected_vm_uuid=selected.vm_uuid)
+        vm = _require_vm(db, name)
+        resolver = Resolver(config, registry, interaction=interaction)
+        context = None
+        try:
+            context = prepare_vm_runtime(
+                db,
+                config,
+                registry,
+                vm,
+                resolve_secret=resolver.resolve_gate,
+                held_native_guard=guard,
+                vm_node=vm_node,
+            )
+            start_vm_runtime(context)
+        finally:
+            if context is not None:
+                context.clear_values()
+            resolver.close()
 
 
 def stop_vm(
@@ -95,39 +103,44 @@ def stop_vm(
     *,
     interaction: TtyInteractionPolicy,
 ) -> None:
-    """Stop a running VM and record the operator's intent.
+    """Accept stopped intent before provider work, preserving it on failure."""
+    from agentworks.bootstrap import load_request_registry
+    from agentworks.harness_setup.locking import native_mutation_guard
+    from agentworks.secrets.resolver import Resolver
+    from agentworks.vms.nodes import live_vm_node
 
-    Orchestrated, composition only, mirroring :func:`start_vm`: no
-    activation gate (the stop IS the operation), power ops through the
-    node's held platform.
-    """
-    vm = _require_vm(db, name)
-    _guard_incomplete_vm(vm)
-    vm_node, ops_ctx = _live_vm_boundary(db, config, vm, interaction=interaction)
-    platform = vm_node.site.platform
-    # Record intent BEFORE the already-stopped short-circuit: an
-    # operator stopping an already-stopped VM still means "keep it
-    # stopped" (e.g. the VM idled out and they don't want the next op
-    # to auto-resume it).
-    db.set_operator_stopped(name, True)
-    status = platform.status(vm, ops_ctx)
-    if status in (VMStatus.STOPPED, VMStatus.DEALLOCATED):
-        # Never conflate an auto-stop with an explicit one: when the VM
-        # stopped on its own, this command still CHANGED something (the
-        # intent flag above) and the message says what.
-        if vm.operator_stopped:
-            output.info(f"VM '{name}' is already manually stopped")
-        else:
-            output.info(
-                f"VM '{name}' had already stopped on its own; it is now "
-                f"marked manually stopped and will not be auto-started"
+    from .runtime import prepare_vm_runtime, stop_vm_runtime
+
+    require_exact_tty_interaction_policy(interaction)
+    selected = _require_vm(db, name)
+    _guard_incomplete_vm(selected)
+    with native_mutation_guard(db.path, name) as guard:
+        registry = load_request_registry(config, live_database=db)
+        vm_node = live_vm_node(db, config, registry, selected, held_native_guard=guard)
+        _guard_incomplete_vm(vm_node.reload_row())
+        db.set_vm_desired_runtime_state(name, DesiredRuntimeState.STOPPED, expected_vm_uuid=selected.vm_uuid)
+        vm = _require_vm(db, name)
+        resolver = Resolver(config, registry, interaction=interaction)
+        context = None
+        try:
+            context = prepare_vm_runtime(
+                db,
+                config,
+                registry,
+                vm,
+                resolve_secret=resolver.resolve_gate,
+                held_native_guard=guard,
+                vm_node=vm_node,
             )
-        return
-    # No hold here: stop is the inverse of what the keepalive is for.
-    # The platform stop call doesn't need SSH to the VM, and holding a
-    # wsl.exe sleep subprocess open would fight `wsl --terminate`.
-    platform.stop(vm, ops_ctx)
-    output.result(f"VM '{name}' stopped")
+            changed = stop_vm_runtime(context)
+        finally:
+            if context is not None:
+                context.clear_values()
+            resolver.close()
+        if changed:
+            output.result(f"VM '{name}' stopped")
+        else:
+            output.info(f"VM '{name}' is already stopped")
 
 
 def delete_vm(
@@ -148,8 +161,10 @@ def delete_vm(
     holds, the node is logged out of the tailnet through the platform's root
     channel, best effort, and the provider delete follows: whoever deletes a
     VM wants it gone, and ``vm rekey`` rejoins one whose delete then fails.
-    Deletion never starts the guest or tears down individual workloads, which
-    the provider delete ends.
+    Deletion never tears down individual workloads, which the provider delete
+    ends, and starts the guest only as a side effect of the logout's hold: a
+    WSL2 hold boots a stopped distro, unless the VM's intent is stopped, which
+    admits no hold.
 
     Without ``force``, a row is removed only once its backend VM is deleted,
     because a removed row would leave a surviving backend VM with nothing to
@@ -199,14 +214,18 @@ def delete_vm(
 
     from agentworks.harness_setup.locking import native_mutation_guard
 
-    with native_mutation_guard(db.path, vm.name):
+    with native_mutation_guard(db.path, vm.name) as guard:
+        selected = _require_vm(db, name)
+        if selected.vm_uuid != vm.vm_uuid:
+            raise StateError("selected VM was replaced", entity_kind="vm", entity_name=name)
+        vm = selected
         backend_left = False
         # Why a row with a tailnet address was not logged out, reported once the
         # row goes; None while nothing kept it from that. A row without one is
         # never logged out.
         not_logged_out: str | None = None
         try:
-            vm_node, ops_ctx = _live_vm_boundary(db, config, vm, interaction=interaction)
+            vm_node, ops_ctx = _live_vm_boundary(db, config, vm, interaction=interaction, held_native_guard=guard)
         except UserAbort:
             raise
         except Exception as e:
@@ -229,10 +248,11 @@ def delete_vm(
             platform = vm_node.site.platform
             # The logout, best effort and inside a hold-only span: it wants the
             # VM up if it happens to be (the WSL2 hold boots a stopped distro),
-            # but never gates, since an operator-stopped VM would refuse. A
-            # platform that cannot confirm the guest is this VM's is asked
-            # nothing (the helper reads its status first), and its delete
-            # below refuses or finds the guest gone.
+            # but never gates, since a VM with stopped intent would refuse; such
+            # a VM is not held either, since the hold could boot it. A platform
+            # that cannot confirm the guest is this VM's is asked nothing (the
+            # helper reads its status first), and its delete below refuses or
+            # finds the guest gone.
             if vm.tailscale_host:
                 logout_ran = False
                 try:
@@ -386,81 +406,91 @@ def rekey_vm(
         validate_name(secret, max_length=MAX_SECRET_NAME_LENGTH)
 
     vm = _require_vm(db, name)
-    _guard_incomplete_vm(vm)
-    _warn_legacy_release(vm)
-    # Before the auth key resolves: a rekey with no host-key record would spend
-    # the new key and record the new address before its reconnect check raised.
-    trust.require_record(name)
-    # The settle reads the new address from the VM, but the final wait reaches
-    # it over the tailnet, so a workstation off Tailscale is refused before the
-    # key is spent, as recover refuses it.
-    _mgr.verify_tailscale_available()
-    # The final wait runs through agentworks.execution: an unsupported client
-    # refuses before a secret or the platform is touched.
-    execution.resolve_ssh()
+    from agentworks.harness_setup.locking import native_mutation_guard
 
-    vm_node, resolver, ops_ctx, auth_key = _auth_key_boundary(
-        db, config, vm, secret=secret, prompt=prompt, interaction=interaction
-    )
-    platform = vm_node.site.platform
-    status = platform.status(vm, ops_ctx)
-    _require_known_power_state(status, name)
-    if status != VMStatus.RUNNING:
-        raise StateError(
-            f"VM '{name}' is not running (status: {status.value})",
-            entity_kind="vm",
-            entity_name=name,
+    with native_mutation_guard(db.path, name) as guard, contextlib.ExitStack() as cleanup:
+        selected = _require_vm(db, name)
+        if selected.vm_uuid != vm.vm_uuid:
+            raise StateError("selected VM was replaced", entity_kind="vm", entity_name=name)
+        vm = selected
+        _guard_incomplete_vm(vm)
+        _warn_legacy_release(vm)
+        # Before the auth key resolves: a rekey with no host-key record would spend
+        # the new key and record the new address before its reconnect check raised.
+        trust.require_record(name)
+        # The settle reads the new address from the VM, but the final wait reaches
+        # it over the tailnet, so a workstation off Tailscale is refused before the
+        # key is spent, as recover refuses it.
+        _mgr.verify_tailscale_available()
+        # The final wait runs through agentworks.execution: an unsupported client
+        # refuses before a secret or the platform is touched.
+        execution.resolve_ssh()
+
+        vm_node, resolver, ops_ctx, auth_key = _auth_key_boundary(
+            db, config, vm, secret=secret, prompt=prompt, interaction=interaction, held_native_guard=guard
         )
-
-    recover_hint = f"Run 'agw vm recover {name}' to rejoin it."
-    # The log has the key in its redaction set before its first write. The
-    # activation gate converges power state (a race from the running check
-    # above), then holds the VM for the rekey's duration (WSL2 anchors the
-    # distro against vmIdleTimeout through the script's pauses).
-    # Boundary-then-gate means the gate callback SERVES the boundary's cached
-    # values, never resolves or seeds: the union covers the gate secrets, and
-    # ``Resolver.get`` refuses anything outside it.
-    with (
-        operation_log(name, "rekey", redactions=(auth_key,)) as logger,
-        output.section(f"Rekeying '{name}'"),
-        activation_gate(vm_node, resolver.get),
-    ):
-        output.info("Logging out and joining the tailnet with the new key (about a minute)...")
-        logger.step("Rekey")
-        try:
-            result = recovery.rekey(platform, vm, ops_ctx, auth_key=auth_key, log=logger.record)
-        except ChannelUnreachable as error:
-            # The script never ran, so the node is as it was: once the channel's own hint gets the VM
-            # answering, the rekey itself is what is left to do.
-            # Not a rebuilt command line: one that dropped any option, a global one included, would
-            # change the key, the pause or the interaction policy of the retry.
-            error.add_hint(
-                f"Once it answers, run the same 'agw vm rekey {name}' command again, with every option you gave it."
+        cleanup.callback(resolver.close)
+        platform = vm_node.site.platform
+        status = platform.status(vm, ops_ctx)
+        _require_known_power_state(status, name)
+        if status != VMStatus.RUNNING:
+            raise StateError(
+                f"VM '{name}' is not running (status: {status.value})",
+                entity_kind="vm",
+                entity_name=name,
             )
-            raise
-        recovery.require_success(
-            result,
-            script="rekey",
-            vm_name=name,
-            hint=f"Run 'agw vm logs {name}' for its output, then 'agw vm recover {name}'.",
-        )
-        new_ip = settle_tailnet_address(
-            partial(platform.run_as_root, vm, ops_ctx), node=vm.hostname, rerun_hint=recover_hint, log=logger.record
-        )
 
-        # Update DB and SSH config with the new IP (correct regardless of
-        # reachability: the old IP is definitely dead after logout)
-        db.update_vm_tailscale(name, new_ip)
-        sync_ssh_config(config, db)
-        db.insert_vm_event(name, "rekey", f"new_ip={new_ip}")
+        recover_hint = f"Run 'agw vm recover {name}' to rejoin it."
+        # The log has the key in its redaction set before its first write. The
+        # activation gate converges power state (a race from the running check
+        # above), then holds the VM for the rekey's duration (WSL2 anchors the
+        # distro against vmIdleTimeout through the script's pauses). A VM whose
+        # intent is stopped admits no hold, since a hold could boot it, so a
+        # running one is rekeyed without a hold: on WSL2 it can idle out between calls.
+        # Boundary-then-gate means the gate callback SERVES the boundary's cached
+        # values, never resolves or seeds: the union covers the gate secrets, and
+        # ``Resolver.get`` refuses anything outside it.
+        with (
+            operation_log(name, "rekey", redactions=(auth_key,)) as logger,
+            output.section(f"Rekeying '{name}'"),
+            activation_gate(vm_node, resolver.get),
+        ):
+            output.info("Logging out and joining the tailnet with the new key (about a minute)...")
+            logger.step("Rekey")
+            try:
+                result = recovery.rekey(platform, vm, ops_ctx, auth_key=auth_key, log=logger.record)
+            except ChannelUnreachable as error:
+                # The script never ran, so the node is as it was: once the channel's own hint gets the VM
+                # answering, the rekey itself is what is left to do.
+                # Not a rebuilt command line: one that dropped any option, a global one included, would
+                # change the key, the pause or the interaction policy of the retry.
+                error.add_hint(
+                    f"Once it answers, run the same 'agw vm rekey {name}' command again, with every option you gave it."
+                )
+                raise
+            recovery.require_success(
+                result,
+                script="rekey",
+                vm_name=name,
+                hint=f"Run 'agw vm logs {name}' for its output, then 'agw vm recover {name}'.",
+            )
+            new_ip = settle_tailnet_address(
+                partial(platform.run_as_root, vm, ops_ctx), node=vm.hostname, rerun_hint=recover_hint, log=logger.record
+            )
 
-        # If the operator needs to share the VM back, pause before connectivity check
-        if wait_for_share:
-            output.pause("Share the VM back to your tailnet, then press Enter to verify connectivity...")
+            # Update DB and SSH config with the new IP (correct regardless of
+            # reachability: the old IP is definitely dead after logout)
+            db.update_vm_tailscale(name, new_ip)
+            sync_ssh_config(config, db)
+            db.insert_vm_event(name, "rekey", f"new_ip={new_ip}")
 
-        output.info(f"Verifying SSH to {new_ip}...")
-        access = execution.vm_access(_require_vm(db, name), config, Admin(), log=logger.record)
-        # The new address is recorded either way: the old one died with the logout.
-        if not reachability.wait(access, wording=reachability.Wording.RECONNECT):
-            raise VMNotAnswering(name, new_ip)
-        output.result(f"VM '{name}' rekeyed successfully. Tailscale IP: {new_ip}")
+            # If the operator needs to share the VM back, pause before connectivity check
+            if wait_for_share:
+                output.pause("Share the VM back to your tailnet, then press Enter to verify connectivity...")
+
+            output.info(f"Verifying SSH to {new_ip}...")
+            access = execution.vm_access(_require_vm(db, name), config, Admin(), log=logger.record)
+            # The new address is recorded either way: the old one died with the logout.
+            if not reachability.wait(access, wording=reachability.Wording.RECONNECT):
+                raise VMNotAnswering(name, new_ip)
+            output.result(f"VM '{name}' rekeyed successfully. Tailscale IP: {new_ip}")

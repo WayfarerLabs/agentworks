@@ -81,6 +81,7 @@ def deletion(db, tmp_path, monkeypatch):
     class Logger:
         closed = False
         display_path = "fixture.log"
+        redactions: tuple[str, ...] = ()
 
         def __init__(self, *a, **k):
             logs.append(self)

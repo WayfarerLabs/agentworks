@@ -1,0 +1,51 @@
+# Declarations only: copying this file creates no instances or server processes.
+# Before authorizing setup, provide inventory-mcp through normal provisioning,
+# declare inventory-token and docs-token secrets, and select real endpoint/source paths.
+# Copy mcp-servers.jsonc beside your other content at ~/agent-content/mcp.jsonc.
+# Enable claude and codex through plugins.system if selecting their integrations.
+apiVersion: agentworks/v1
+kind: artifact-bundle
+metadata:
+  name: portable-mcp
+spec:
+  mcp_servers:
+    inventory:
+      definition:
+        type: stdio
+        description: Query the provisioned inventory service
+        command: inventory-mcp
+        args: [serve]
+        env:
+          MCP_INVENTORY_TOKEN: ${MCP_INVENTORY_TOKEN}
+    docs:
+      source: file::~/agent-content/mcp.jsonc
+---
+apiVersion: agentworks/v1
+kind: agent-template
+metadata:
+  name: native-mcp-user
+spec:
+  artifacts:
+    bundles: [portable-mcp]
+  env:
+    MCP_INVENTORY_TOKEN: { secret: inventory-token }
+    MCP_DOCS_TOKEN: { secret: docs-token }
+  harness_integrations:
+    claude-code: {}
+    codex: {}
+---
+# This alternative selects a session-owned bundle and the opt-in Claude carrier.
+# It need not use native-mcp-user; choose an existing authorized agent/workspace.
+apiVersion: agentworks/v1
+kind: session-template
+metadata:
+  name: session-mcp
+spec:
+  artifacts:
+    bundles: [portable-mcp]
+  env:
+    MCP_INVENTORY_TOKEN: { secret: inventory-token }
+    MCP_DOCS_TOKEN: { secret: docs-token }
+  harness_integration:
+    name: claude-code
+    enabled_workarounds: [session-mcp-config]

@@ -13,6 +13,7 @@ from agentworks.errors import (
     NotFoundError,
     StateConflictError,
     StateError,
+    UserAbort,
 )
 
 if TYPE_CHECKING:
@@ -472,6 +473,8 @@ def ensure_pids_batch(
 
                 require_vm_ssh_boundary(db, config, vm)
                 vm_cache[ws.vm_name] = _mgr.transport(vm, config)
+            except UserAbort:
+                raise
             except Exception as exc:
                 if announce:
                     output.warn(f"Cannot reach VM '{ws.vm_name}': {exc}")
@@ -490,6 +493,8 @@ def ensure_pids_batch(
             except (ConnectivityError, StateError) as exc:
                 if announce:
                     output.warn(str(exc))
+            except UserAbort:
+                raise
             except Exception as exc:
                 if announce:
                     output.warn(f"Failed to repair session '{session.name}': {exc}")

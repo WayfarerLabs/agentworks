@@ -645,11 +645,13 @@ def stub_vm_gates(monkeypatch: pytest.MonkeyPatch) -> _StubPlatform:
     transport / rollback / env plumbing neither construct real platforms
     nor shell out to Tailscale.
 
-    Two seams: the node factories bind their platform through
-    ``resolve_site`` (the only constructor of platform instances), and
-    the activation gate's fast path probes Tailscale reachability. Stub
-    both so the gate fast-paths and holds via the stub platform's no-op
-    ``vm_active``. Returns the stub platform for assertions.
+    Three seams: the node factories bind their platform through
+    ``resolve_site`` (the only constructor of platform instances), the
+    activation gate's fast path probes Tailscale reachability, and
+    prepared activation waits for the VM to answer over SSH. Stub all
+    three so the gate fast-paths, activation answers at once, and holds
+    go through the stub platform's no-op ``vm_active``. Returns the stub
+    platform for assertions.
     """
     platform = _StubPlatform()
 
@@ -658,6 +660,7 @@ def stub_vm_gates(monkeypatch: pytest.MonkeyPatch) -> _StubPlatform:
 
     monkeypatch.setattr("agentworks.vms.sites.resolve_site", _fake_resolve_site)
     monkeypatch.setattr("agentworks.vms.manager._is_tailscale_reachable", lambda host: True)
+    monkeypatch.setattr("agentworks.vms.manager._await_tailnet", lambda *args, **kwargs: None)
     stub_vm_ssh_identity(monkeypatch)
     return platform
 

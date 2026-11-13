@@ -12,10 +12,16 @@ import pytest
 from agentworks.capabilities.harness_integration.settings import SettingsMapping, SettingsValue
 from agentworks.errors import ExternalError
 from agentworks.harness_setup.model import NativeClaim
-from agentworks.plugins._harness_native.native import setup_user
 from agentworks.plugins._harness_native.native_cli import NativeCLI, NativeMarket, NativeTool
 from agentworks.plugins._harness_native.native_config import NativeUserConfig
-from tests.native_setup_fixtures import LocalFixtureTransport, invocation, market_fixture, native_cli, record
+from tests.native_setup_fixtures import (
+    LocalFixtureTransport,
+    invocation,
+    market_fixture,
+    native_cli,
+    record,
+    setup_fixture_user,
+)
 from tests.test_native_harness_setup import transport as transport
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="executes Linux guest native setup helpers")
@@ -32,7 +38,7 @@ def test_native_add_preserves_unavailable_operator_entry(
 ) -> None:
     market = market_fixture(transport, "claude")
     claims: list[tuple[NativeClaim, ...]] = []
-    setup_user("claude", NativeUserConfig(marketplaces=[str(market)]), invocation(transport, claims))
+    setup_fixture_user("claude", NativeUserConfig(marketplaces=[str(market)]), invocation(transport, claims))
     other = market.with_name("other-market")
     shutil.copytree(market, other)
     manifest = other / ".claude-plugin/marketplace.json"
@@ -40,7 +46,9 @@ def test_native_add_preserves_unavailable_operator_entry(
     content["name"] = "other-market"
     manifest.write_text(json.dumps(content))
     if removal:
-        setup_user("claude", NativeUserConfig(marketplaces=[str(market), str(other)]), invocation(transport, claims))
+        setup_fixture_user(
+            "claude", NativeUserConfig(marketplaces=[str(market), str(other)]), invocation(transport, claims)
+        )
     settings = transport.home / ".claude/settings.json"
     initial = json.loads(settings.read_bytes())
     name = "fixture-market" if relevant else "operator-odd"
@@ -49,7 +57,9 @@ def test_native_add_preserves_unavailable_operator_entry(
     warnings: list[str] = []
     call = replace(invocation(transport, claims, prior=record(claims[-1], "claude")), report_incomplete=warnings.append)
 
-    setup_user("claude", NativeUserConfig(marketplaces=[str(market)] if removal else [str(market), str(other)]), call)
+    setup_fixture_user(
+        "claude", NativeUserConfig(marketplaces=[str(market)] if removal else [str(market), str(other)]), call
+    )
 
     observed = json.loads(settings.read_bytes())
     assert observed["extraKnownMarketplaces"][name] == entry
@@ -94,7 +104,7 @@ def test_active_reinit_reports_missing_claude_user_source_without_reconstructing
     market = market_fixture(transport, "claude")
     config = NativeUserConfig(marketplaces=[str(market)], plugins=["one@fixture-market"])
     claims: list[tuple[NativeClaim, ...]] = []
-    setup_user("claude", config, invocation(transport, claims))
+    setup_fixture_user("claude", config, invocation(transport, claims))
     prior = claims[-1]
     settings = transport.home / ".claude/settings.json"
     document = json.loads(settings.read_bytes())
@@ -102,7 +112,7 @@ def test_active_reinit_reports_missing_claude_user_source_without_reconstructing
     settings.write_text(json.dumps(document))
     warnings: list[str] = []
     call = replace(invocation(transport, claims, prior=record(prior, "claude")), report_incomplete=warnings.append)
-    setup_user("claude", config, call)
+    setup_fixture_user("claude", config, call)
     assert any("fixture-market" in reason for reason in warnings)
     assert set(claims[-1]) == set(prior)
     assert "fixture-market" not in json.loads(settings.read_bytes())["extraKnownMarketplaces"]
@@ -115,7 +125,7 @@ def test_unmanaged_inventory_without_a_source_does_not_poison_reinit(transport, 
     market = market_fixture(transport, tool)
     config = NativeUserConfig(marketplaces=[str(market)], plugins=["one@fixture-market"])
     claims: list[tuple[NativeClaim, ...]] = []
-    setup_user(tool, config, invocation(transport, claims))
+    setup_fixture_user(tool, config, invocation(transport, claims))
     previous = record(claims[-1], tool)
     original = NativeCLI.markets
 
@@ -126,7 +136,9 @@ def test_unmanaged_inventory_without_a_source_does_not_poison_reinit(transport, 
     reasons: list[str] = []
     if add_plugin:
         config = config.model_copy(update={"plugins": ["one@fixture-market", "two@fixture-market"]})
-    setup_user(tool, config, replace(invocation(transport, claims, prior=previous), report_incomplete=reasons.append))
+    setup_fixture_user(
+        tool, config, replace(invocation(transport, claims, prior=previous), report_incomplete=reasons.append)
+    )
     assert reasons == []
     assert set(previous.claims) <= set(claims[-1])
     assert {claim.identifier for claim in claims[-1] if claim.role == "plugin"} == set(config.plugins)
@@ -137,7 +149,7 @@ def test_mapping_can_repair_an_unrelated_unobservable_entry(transport, strategy)
     market = market_fixture(transport, "claude")
     claims: list[tuple[NativeClaim, ...]] = []
     config = NativeUserConfig(marketplaces=[str(market)])
-    setup_user("claude", config, invocation(transport, claims))
+    setup_fixture_user("claude", config, invocation(transport, claims))
     settings = transport.home / ".claude/settings.json"
     document = json.loads(settings.read_bytes())
     document["extraKnownMarketplaces"]["operator-odd"] = 5
@@ -146,7 +158,7 @@ def test_mapping_can_repair_an_unrelated_unobservable_entry(transport, strategy)
     corrected = {"source": {"source": "directory", "path": str(market)}}
     source.write_text(json.dumps({"extraKnownMarketplaces": {"operator-odd": corrected}}))
     reasons: list[str] = []
-    setup_user(
+    setup_fixture_user(
         "claude",
         config.model_copy(update={"settings": SettingsMapping(source=str(source), strategy=strategy)}),
         replace(invocation(transport, claims, prior=record(claims[-1], "claude")), report_incomplete=reasons.append),
@@ -164,7 +176,7 @@ def test_native_publication_does_not_restore_a_stale_skipped_entry(
 ):
     market = market_fixture(transport, "claude")
     claims: list[tuple[NativeClaim, ...]] = []
-    setup_user(
+    setup_fixture_user(
         "claude",
         NativeUserConfig(marketplaces=[str(market)], plugins=["one@fixture-market"]),
         invocation(transport, claims),
@@ -199,10 +211,10 @@ def test_native_publication_does_not_restore_a_stale_skipped_entry(
         settings=SettingsMapping(source=str(mapping), strategy="replace") if mapped else None,
     )
     if failure_type is None:
-        setup_user("claude", config, call)
+        setup_fixture_user("claude", config, call)
     else:
         with pytest.raises(failure_type) as caught:
-            setup_user("claude", config, call)
+            setup_fixture_user("claude", config, call)
         assert caught.value is failure
     observed = json.loads(settings.read_bytes())["enabledPlugins"]
     assert ("one@fixture-market" not in observed) if remove else observed["one@fixture-market"] is True
@@ -212,7 +224,7 @@ def test_native_publication_does_not_restore_a_stale_skipped_entry(
 def test_confirmed_uninstall_is_not_resurrected_after_a_later_add_failure(transport, monkeypatch, failure_type):
     market = market_fixture(transport, "claude")
     claims: list[tuple[NativeClaim, ...]] = []
-    setup_user(
+    setup_fixture_user(
         "claude",
         NativeUserConfig(marketplaces=[str(market)], plugins=["one@fixture-market"]),
         invocation(transport, claims),
@@ -227,7 +239,7 @@ def test_confirmed_uninstall_is_not_resurrected_after_a_later_add_failure(transp
 
     monkeypatch.setattr(NativeCLI, "install", fail_after_install)
     with pytest.raises(failure_type) as caught:
-        setup_user(
+        setup_fixture_user(
             "claude",
             NativeUserConfig(marketplaces=[str(market)], plugins=["two@fixture-market"]),
             invocation(transport, claims, prior=record(claims[-1], "claude")),
@@ -241,7 +253,7 @@ def test_confirmed_uninstall_is_not_resurrected_after_a_later_add_failure(transp
 def test_mapping_repair_allows_a_later_native_retry_without_losing_the_repair(transport):
     market = market_fixture(transport, "claude")
     claims: list[tuple[NativeClaim, ...]] = []
-    setup_user("claude", NativeUserConfig(marketplaces=[str(market)]), invocation(transport, claims))
+    setup_fixture_user("claude", NativeUserConfig(marketplaces=[str(market)]), invocation(transport, claims))
     other = market.with_name("other-market")
     shutil.copytree(market, other)
     manifest = other / ".claude-plugin/marketplace.json"
@@ -262,7 +274,7 @@ def test_mapping_repair_allows_a_later_native_retry_without_losing_the_repair(tr
     reasons: list[str] = []
     for attempt in range(2):
         reasons.clear()
-        setup_user(
+        setup_fixture_user(
             "claude",
             config,
             replace(

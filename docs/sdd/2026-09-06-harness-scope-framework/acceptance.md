@@ -1,9 +1,50 @@
 # Acceptance reconciliation
 
-## Current disposition, 2026-11-10
+## Final functional acceptance, 2026-11-11
+
+PR [871](https://github.com/WayfarerLabs/agentworks/pull/871) merged as `dc3fb557`. The
+[final independent report](https://github.com/WayfarerLabs/agentworks/pull/871#issuecomment-6770963076)
+tested exact `fe2209cfe35dd4703b689d3aed89092128371ab2` against main `438c4546` and recommended
+merge as-is, with no new material finding. Its twelve required gates passed, including 11,560 tests
+with 11 skips.
+
+This completes the changed lifecycle evidence missing from the dated dispositions below. Actual
+Windows Server 2025 workstations, using PowerShell 5.1 and 7.6.9 against remote Lima, demonstrated
+direct and rendered launch-option refusal before staging or teardown. Six refusals preserved all
+three existing Shell sessions' exact identities, runtime processes and artifact files. Four public
+rehome operations covered successive full-repository and nested linked-worktree moves, retaining and
+removing old copies. Current exclusions, tracked-file behavior, other owners and operator bytes and
+metadata were checked after every move. A deliberately duplicated pair and modified pair then
+demonstrated warning-plus-parent-deletion with ambiguous metadata preserved, followed by independent
+disposal of the owned fixture and VM.
+
+The earlier R1-R16 reconciliation retains its exact source attribution for unchanged setup APIs,
+five-owner env delivery, actual-user prerequisites, explicit activation maps, native plugins and all
+four settings policies. The final report supplies the R9 cleanup and supported-rehome evidence
+rather than repeating that vertical or adding an all-platform gate. The companion artifact
+acceptance completes transferred R7/R12/R16.
+
+| Retained requirement group  | Final basis                                                                                                                                                                                                                 |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R1-R6, R8, R10-R11, R13-R15 | The retained clause-by-clause table, its inspected behavioral controls and independently observed real vertical. Later Shell/env placeholder compatibility is a separate main change, not a new facet or artifact contract. |
+| R9                          | Retained convergence, state/backup/restore, adoption and independent-failure evidence, plus the current real rehome and best-effort deletion observations above. Native records add no VM deletion or rehome prerequisite.  |
+| R7/R12/R16                  | Explicit transfer to the companion's completed artifact contract; no duplicate framework acceptance obligation.                                                                                                             |
+
+The post-handoff Muntz corrections remove an unused helper and identify historical exclusion
+patterns and paths in warnings. They do not authorize I/O through stored destinations or change
+parent deletion, runtime replacement, persistence or cancellation semantics. Their validation and
+the final closeout review belong to this follow-up's plan record.
+
+Both efforts' load-bearing contracts have permanent homes listed below. The final requirement and
+plan reconciliation uses the original source pins, distinguishes historical corrected findings from
+final behavior, and retains the reported limits. The accompanying lock records the completed
+contract; it does not promise model cooperation, native transactional cleanup or universal platform
+coverage. MCP artifacts and single-session workspaces are subsequent separate efforts.
+
+## Retained disposition, 2026-11-10
 
 The companion's
-[current disposition](../2026-09-12-agent-artifacts/acceptance.md#current-disposition-2026-11-10)
+[retained disposition](../2026-09-12-agent-artifacts/acceptance.md#retained-disposition-2026-11-10)
 records the complete PR 871 report at `b8c03be5`, including representative native-file lifecycle,
 all required gates and the remaining rendered-argument defect. R7/R12/R16 remain transferred to that
 effort, with their original attribution retained below.

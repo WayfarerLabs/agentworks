@@ -655,11 +655,10 @@ sessions. Five rules, each earned:
   modeled argument, preserving literal profile names, model values, settings, and workload input.
 - **Render declared template fields in the integration.** Render designated `extra_args` once
   against the bound context with `self.render_context_argv`. Validate the effective vector and emit
-  those same values with ordinary shell quoting. `self.quote_context_argv` combines rendering and
-  quoting when the caller does not need to inspect the rendered value. A workspace path containing
-  an apostrophe remains one argument, and namespace-looking replacement data is not interpreted
-  twice. Shell renders its selected command field as operator-authored source with ordinary shell
-  quoting responsibilities. The manager never interpolates returned commands.
+  those same values with ordinary shell quoting. A workspace path containing an apostrophe remains
+  one argument, and namespace-looking replacement data is not interpreted twice. Shell renders its
+  selected command field as operator-authored source with ordinary shell quoting responsibilities.
+  The manager never interpolates returned commands.
 - **Model the common flags; leave the rest to `extra_args`.** A small optional vocabulary
   (`permission_mode`, `model`, `reasoning_effort`, workload inputs, and session preferences) plus an
   explicit `extra_args` list emitted after generated options keeps the integration useful without
@@ -824,8 +823,8 @@ Known holes the current contract leaves open on purpose, so the boundaries read 
 
 - **Features and further artifact types.** Core provisioning prepares scoped env and declared
   artifact bundles before harness integrations handle or defer them. A future feature-emission stage
-  can fit between core and integrations. Core hint emission, hooks and MCP artifacts remain later
-  work; see [agent artifacts](../../artifacts/README.md) for the supported artifact types.
+  can fit between core and integrations. Core hint emission and hooks remain later work; see
+  [agent artifacts](../../artifacts/README.md) for the supported artifact types.
 - **Secrets and integration-owned environment.** The declare-and-receive secret plumbing is in place
   but no shipped integration declares a config secret. The session template's `env` chain, including
   secret-backed entries, is the supported way to put an env var (an API key, a tool config-dir

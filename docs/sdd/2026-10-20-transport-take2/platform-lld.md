@@ -729,12 +729,12 @@ start failure is the signal. The README and ADR 0003 are updated to say so (Coll
    could not report the VM's state, so check it in the provider or with `agw vm describe NAME`.
    `STOPPED` or `DEALLOCATED` is started in step 5, before the hold as `start_vm` starts before its
    own (`power.py:63-67`, since WSL2's keepalive boots a stopped distro itself), through
-   `platform.start` with no wait for SSH, clearing the operator-stopped flag as an explicit start
-   does and printing that it did. Refusing it instead loops for a VM with no record: start boots it
-   and its wait raises `TrustMissing` naming recover, and a WSL2 distro can idle out again after
-   start's hold ends, before recover runs. Recover needs no wait of its own because each remote root
-   channel waits about two minutes for a VM that has just started: the clouds'
-   `wait_until_answering` and Proxmox's guest-agent ping.
+   `platform.start` with no wait for SSH, recording running intent as an explicit start does and
+   printing that it did. Refusing it instead loops for a VM with no record: start boots it and its
+   wait raises `TrustMissing` naming recover, and a WSL2 distro can idle out again after start's
+   hold ends, before recover runs. Recover needs no wait of its own because each remote root channel
+   waits about two minutes for a VM that has just started: the clouds' `wait_until_answering` and
+   Proxmox's guest-agent ping.
 4. The operation log, from a factory in `vms/manager/_helpers.py` (a legacy file, which owns
    `LOG_DIR`'s other uses) that constructs an `SSHLogger` for the `recover` stem with the auth key
    in its redaction set. `recover.py` types it with slice 3's small log Protocol (contract-lld,
@@ -764,6 +764,11 @@ start failure is the signal. The README and ADR 0003 are updated to say so (Coll
     rewrote only the admin's keys, so if `operator.ssh_private_key` changed, each agent account
     still accepts only the previous key until `agw agent reinit` runs for it. Whether the key
     changed since an agent was set up is not recorded, so the note is worded for that condition.
+
+Recover runs under the VM family guard, selecting the VM again by its identity and checking it once
+the guard is held. Its hold follows intent (Desired runtime state, below): a VM that is running
+while its intent is stopped is not held, so on WSL2 a long repair can idle out between root-channel
+calls. Rekey's gate holds the same way.
 
 When the repair fails or its outcome is unknown, the message names the script and its status (or
 "unknown") and points at `agw vm logs NAME`. A repair that exited with a status ran, so its channel
@@ -806,10 +811,12 @@ channel: whoever deletes a VM wants it gone, and `vm rekey` puts one whose delet
 Tailscale. `delete_vm` (`vms/manager/power.py`) runs every check that can refuse first: the child
 count and the confirmation, then the binding. Once the binding holds, and only for a row with a
 tailnet address, `_tailscale_logout` runs inside `vm_node.hold_active()`, a hold-only span that
-wants the VM up if it happens to be (WSL2's hold boots a stopped distro) but never gates, since an
-operator-stopped VM would refuse; a hold that fails is one more reason the node was not logged out.
-Then `platform.delete` runs. No session teardown precedes any of it: the provider delete ends the
-workloads.
+wants the VM up if it happens to be (WSL2's hold boots a stopped distro) but never gates, since a VM
+with stopped intent would refuse; a hold that fails is one more reason the node was not logged out.
+Hold admission depends on intent (Desired runtime state, below): a VM whose intent is stopped is not
+held, since the hold could boot it, so a stopped WSL2 distro with that intent stays stopped and is
+reported as not logged out. Then `platform.delete` runs. No session teardown precedes any of it: the
+provider delete ends the workloads.
 
 `_tailscale_logout(vm, platform, ctx) -> str | None` (`vms/manager/tailscale.py`) reads the power
 state and calls `tailscale_join.log_out(...)` with no log, checking nothing over SSH. It returns
@@ -872,6 +879,30 @@ The rejoin was the protocol's only user, so it goes whole:
   docstring's exception (`:361-375`) goes.
 - `Resolver.resolve_late_repair` (`secrets/resolver.py:217-225`), now without a caller.
 - The `rekey_vm` gate comment that cites the repair key (`power.py:473-477`).
+
+## Desired runtime state
+
+Main's desired runtime state (#885) arrived after this slice's design; the merge keeps this slice's
+structure and adapts its rules as follows.
+
+- **Start and activation.** `vm start` accepts running intent and runs main's prepared runtime
+  (`vms/manager/runtime.py`) under the VM family guard. Its start and activation, and the gate's
+  `auto_start`, end in `_await_tailnet` inside the hold, as above, and resolve no Tailscale key. An
+  explicit start proceeds on an unknown power state, boots a VM with no host-key record, and says
+  what it did before the wait; an activation refuses both, as the gate does.
+- **Incomplete VMs.** `prepare_vm_runtime` runs `_guard_incomplete_vm`, so start, stop and the
+  console paths refuse a VM whose provisioning did not complete, and reconciliation and its preview
+  block that VM's family, as every other command but delete does.
+- **Holds follow intent.** Hold admission checks intent under the family guard, since a hold can
+  boot the VM. A VM whose intent is stopped is never held: delete's logout, recover and rekey run on
+  such a VM without a hold, as their sections say.
+- **No repair credentials.** The desired runtime state FRD's R7
+  ([frd.md:195-198](../2026-11-09-desired-runtime-state/frd.md#r7-prepare-the-entire-batch-before-workload-changes))
+  lets activation acquire conditional Tailscale repair credentials. After this slice's R7 and the
+  operator's [2026-11-01 ruling](./frd.md#2026-11-01) (a start waits for the VM, then names
+  `agw vm recover`), there are none to acquire: activation waits, and a VM that does not answer
+  blocks its family with a failure naming recover. That SDD is locked, so the supersession is
+  recorded here.
 
 ## Error mapping
 

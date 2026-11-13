@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
+from agentworks.artifacts.application import ArtifactApplication
 from agentworks.artifacts.session import HOME_PROBE
 from agentworks.capabilities.harness_integration.setup import UserSetupInvocation
 from agentworks.db import VMRow
@@ -21,7 +22,9 @@ from agentworks.execution.oplog import format_record
 from agentworks.execution.requests import Bytes, Command, PythonProgram, Script, Shell
 from agentworks.execution.results import Completed, Result
 from agentworks.harness_setup.model import NativeClaim, SetupRecord
+from agentworks.plugins._harness_native.native import setup_user
 from agentworks.plugins._harness_native.native_cli import NativeCLI, NativeTool
+from agentworks.plugins._harness_native.native_config import NativeUserConfig
 from agentworks.ssh import SSHResult
 from agentworks.transports import Transport
 from tests.vm_access_support import (
@@ -53,7 +56,8 @@ class LocalFixtureTransport(Transport):
         # the host login shell here could read the operator's startup files.
         login_shell = root / "login-shell"
         login_shell.write_text(
-            '#!/bin/bash\n[ "$1" = "-lc" ] || exit 9\n. "$HOME/.profile"\nexec /bin/bash --noprofile --norc -c "$2"\n'
+            '#!/bin/bash\ncase "$1" in -lc|-lic) ;; *) exit 9 ;; esac\n'
+            '. "$HOME/.profile"\nexec /bin/bash --noprofile --norc -c "$2"\n'
         )
         login_shell.chmod(0o700)
         (self.home / ".profile").write_text('export PATH="$HOME/.local/bin:$PATH"\n')
@@ -209,6 +213,25 @@ def native_cli(
 ) -> NativeCLI:
     """A native CLI for the fixture's account, to use as a context manager."""
     return NativeCLI(tool, invocation(transport, [], env=env, access=access), config_root=str(config_root))
+
+
+def setup_fixture_user(
+    tool: NativeTool,
+    config: NativeUserConfig | None,
+    call: UserSetupInvocation,
+    *,
+    native_root: str | None = None,
+    mcp_destination: str | None = None,
+    skip_mcp: bool = False,
+) -> ArtifactApplication:
+    """Pass this fixture's selected paths without observing another login shell.
+
+    The default native home is the one the fixture's environment exports, beneath its home.
+    """
+    variable = "CODEX_HOME" if tool == "codex" else "CLAUDE_CONFIG_DIR"
+    root = native_root or call.environment.get(variable) or call.home + ("/.codex" if tool == "codex" else "/.claude")
+    destination = mcp_destination or root + ("/config.toml" if tool == "codex" else "/.claude.json")
+    return setup_user(tool, config, call, native_root=root, mcp_destination=destination, skip_mcp=skip_mcp)
 
 
 def record(claims: tuple[NativeClaim, ...], tool: NativeTool) -> SetupRecord:

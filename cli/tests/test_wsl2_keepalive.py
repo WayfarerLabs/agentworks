@@ -1,311 +1,212 @@
-"""Tests for the WSL2 vm_active / keepalive primitive.
-
-The keepalive spawns ``wsl --distribution NAME -- sleep infinity`` as a
-background subprocess so Windows' WSL idle timer doesn't tear the distro
-down while agentworks is still using it. These tests pin the subprocess
-lifecycle without actually running wsl.exe.
-"""
+"""Bounded same-keeper attachment and cleanup using real local pipes."""
 
 from __future__ import annotations
 
 import subprocess
 import sys
-from contextlib import contextmanager
+import time
+from types import SimpleNamespace
 from typing import Any, Literal
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agentworks.capabilities.vm_platform import VMPlatform
+from agentworks.capabilities.vm_platform import VMPlatform, wsl2
 from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform, WSLCommandFailed
-from agentworks.errors import ExternalError
+from agentworks.errors import StateError, UserAbort
 from agentworks.schema import AgwModel
 
 
 def _fake_vm(name: str = "wsltest", tailscale_host: str | None = None) -> Any:
-    vm = MagicMock()
-    vm.name = name
-    vm.site = "wsl2"
-    # The platform reads the distro name from platform metadata (the
-    # backend-side name may differ from vm.name under a system slug).
-    vm.platform_metadata = {"distro_name": name}
-    vm.tailscale_host = tailscale_host
-    vm.admin_username = "agentworks"
-    return vm
+    return SimpleNamespace(name=name, platform_metadata={"distro_name": name}, tailscale_host=tailscale_host)
 
 
-def _running_proc() -> MagicMock:
-    """A Popen mock that models a subprocess that's still running on the
-    initial fast-fail probe (raises TimeoutExpired) and exits cleanly on the
-    final terminate-then-wait. ``_handle`` is set to a dummy int so the
-    job-object assignment path has something to pass to AssignProcessToJobObject.
-    ``stdout`` is set to a MagicMock because spec=Popen doesn't auto-expose
-    it (it's an instance attribute on Popen, set in __init__) and the
-    keepalive's exit path calls proc.stdout.close() to release the fd."""
-    proc = MagicMock(spec=subprocess.Popen)
-    proc.wait.side_effect = [subprocess.TimeoutExpired(cmd="wsl", timeout=0.5), None]
-    proc._handle = 0x1234  # bypass spec=Popen blocking _handle attribute access
-    proc.stdout = MagicMock()
-    return proc
+def _child(code: str):
+    return subprocess.Popen(
+        [sys.executable, "-u", "-c", code],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        bufsize=0,
+    )
 
 
-@contextmanager
-def _job_object_mocks(*, create_returns: int | None = 0xABCD, assign_returns: bool = True):
-    """Patch the Win32 job-object helpers so tests stay in-process.
-
-    Yields (create_mock, assign_mock, close_mock) for assertions.
-    """
-    with (
-        patch(
-            "agentworks.capabilities.vm_platform.wsl2._create_kill_on_close_job",
-            return_value=create_returns,
-        ) as create,
-        patch(
-            "agentworks.capabilities.vm_platform.wsl2._assign_process_to_job",
-            return_value=assign_returns,
-        ) as assign,
-        patch("agentworks.capabilities.vm_platform.wsl2._close_handle") as close,
-    ):
-        yield create, assign, close
+# The simulated guest writes the same LF bytes as guest sh printf, regardless
+# of the workstation Python text stream's newline policy.
+_GUEST_ACK = "sys.stdout.buffer.write(b'agentworks-wsl-keeper-ready\\n'); sys.stdout.buffer.flush()"
 
 
-def test_vm_active_spawns_keepalive_subprocess() -> None:
-    """Entering vm_active spawns `wsl --distribution NAME -- sleep infinity`."""
-    proc = _running_proc()
-    with (
-        patch("agentworks.capabilities.vm_platform.wsl2.subprocess.Popen", return_value=proc) as popen,
-        _job_object_mocks(),
-        WSL2Platform("wsl2", {}).vm_active(_fake_vm("mydistro")),
-    ):
-        popen.assert_called_once()
-        args = popen.call_args[0][0]
-        assert args == ["wsl", "--distribution", "mydistro", "--", "sleep", "infinity"]
-        kwargs = popen.call_args.kwargs
-        # stdin detached so the subprocess doesn't compete for the user's terminal. Both
-        # output streams share one pipe, read on a fast-fail: wsl.exe prints its errors on stdout.
-        assert kwargs["stdin"] == subprocess.DEVNULL
-        assert kwargs["stdout"] == subprocess.PIPE
-        assert kwargs["stderr"] == subprocess.STDOUT
-    # On clean exit: terminate then wait. No kill needed.
-    proc.terminate.assert_called_once()
-    # wait is called twice: once for the fast-fail probe, once after terminate.
-    assert proc.wait.call_count == 2
-    proc.kill.assert_not_called()
+@pytest.mark.windows
+def test_synthetic_guest_acknowledgement_bypasses_windows_text_newline_translation():
+    text_process = _child(
+        "import sys; sys.stdout.reconfigure(newline='\\r\\n'); print('agentworks-wsl-keeper-ready', flush=True)"
+    )
+    text_output, _ = text_process.communicate(timeout=5)
+    assert text_process.returncode == 0
+    assert text_output == b"agentworks-wsl-keeper-ready\r\n"
+
+    binary_process = _child(f"import sys; sys.stdout.reconfigure(newline='\\r\\n'); {_GUEST_ACK}")
+    binary_output, _ = binary_process.communicate(timeout=5)
+    assert binary_process.returncode == 0
+    assert binary_output == b"agentworks-wsl-keeper-ready\n"
 
 
-def test_vm_active_terminates_on_exception() -> None:
-    """If the wrapped block raises, the keepalive is still cleaned up."""
-    proc = _running_proc()
-    with (
-        patch("agentworks.capabilities.vm_platform.wsl2.subprocess.Popen", return_value=proc),
-        _job_object_mocks(),
-        pytest.raises(RuntimeError, match="boom"),
-        WSL2Platform("wsl2", {}).vm_active(_fake_vm()),
-    ):
-        raise RuntimeError("boom")
-    proc.terminate.assert_called_once()
-    proc.wait.assert_called()
+@pytest.mark.windows
+@pytest.mark.parametrize("delay", [0, 0.12])
+def test_entry_waits_for_same_guest_keeper_acknowledgement(monkeypatch, delay):
+    original_popen = subprocess.Popen
+    process = _child(f"import sys,time; time.sleep({delay}); {_GUEST_ACK}; time.sleep(30)")
+    called = []
+
+    def spawn(argv, **kwargs):
+        called.append(argv)
+        return process
+
+    monkeypatch.setattr(subprocess, "Popen", spawn)
+    entered = time.monotonic()
+    with WSL2Platform("wsl2", {}).vm_active(_fake_vm("distro")):
+        assert time.monotonic() - entered >= delay * 0.8
+        assert process.poll() is None
+    assert process.poll() is not None
+    assert process.stdout.closed
+    assert called[0][:6] == [wsl2._WSL, "--distribution", "distro", "--", "sh", "-c"]
+    # Run the actual guest command locally to verify its acknowledgement and
+    # exec form instead of pinning the authored shell spelling.
+    if sys.platform != "win32":
+        actual = original_popen(["sh", "-c", called[0][-1]], stdout=subprocess.PIPE)
+        try:
+            wsl2._await_keeper_attachment(actual, "distro")
+        finally:
+            wsl2._release_keeper(actual)
 
 
-def test_vm_active_kills_if_terminate_doesnt_take() -> None:
-    """If terminate's wait times out, fall back to kill()."""
-    proc = MagicMock(spec=subprocess.Popen)
-    proc._handle = 0x1234
-    proc.stdout = MagicMock()  # spec=Popen hides the instance attr; see _running_proc
-    # 1: fast-fail probe (still running), 2: post-terminate wait (timeout),
-    # 3: post-kill wait (exits).
-    proc.wait.side_effect = [
-        subprocess.TimeoutExpired(cmd="wsl", timeout=0.5),
-        subprocess.TimeoutExpired(cmd="wsl", timeout=5),
-        None,
-    ]
-    with (
-        patch("agentworks.capabilities.vm_platform.wsl2.subprocess.Popen", return_value=proc),
-        _job_object_mocks(),
-        WSL2Platform("wsl2", {}).vm_active(_fake_vm()),
-    ):
-        pass
-    proc.terminate.assert_called_once()
-    proc.kill.assert_called_once()
+@pytest.mark.windows
+@pytest.mark.parametrize(
+    "code",
+    [
+        "print('bad-marker', flush=True)",
+        "pass",
+        "print('agentworks-wsl-keeper', end='', flush=True)",
+        "print('agentworks-wsl-keeper-ready-extra', flush=True)",
+        "import sys; sys.stdout.buffer.write(b'agentworks-wsl-keeper-ready\\r\\n'); sys.stdout.buffer.flush()",
+    ],
+)
+def test_malformed_or_missing_ack_fails_entry_and_reaps(monkeypatch, code):
+    process = _child(code)
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: process)
+    with pytest.raises(StateError), WSL2Platform("wsl2", {}).vm_active(_fake_vm()):
+        pytest.fail("body entered without keeper acknowledgement")
+    assert process.poll() is not None
+    assert process.stdout.closed
 
 
-def test_vm_active_fast_fails_if_keepalive_subprocess_dies_immediately() -> None:
-    """If wsl.exe exits within 0.5s, that's a failed keepalive -- raise loudly.
+def _spawn_with_keeper_streams(monkeypatch, code: str) -> list[subprocess.Popen[bytes]]:
+    """Run ``code`` as the keeper with the streams the keepalive asks Popen for."""
+    original_popen = subprocess.Popen
+    spawned: list[subprocess.Popen[bytes]] = []
 
-    Silent fallthrough would leave callers thinking they're anchored when they
-    aren't, then hitting confusing idle-shutdown timeouts mid-operation.
-    """
-    proc = MagicMock(spec=subprocess.Popen)
-    proc._handle = 0x1234
-    proc.wait.return_value = 1  # rc 1, exited
-    # `spec=subprocess.Popen` doesn't auto-expose stdout (it's an instance attr).
-    proc.stdout = MagicMock()
-    # wsl.exe prints its own errors on stdout, in UTF-16 when redirected.
-    proc.stdout.read.return_value = "\x00".join("There is no distribution with the supplied name.").encode() + b"\r\n"
-    with (
-        patch("agentworks.capabilities.vm_platform.wsl2.subprocess.Popen", return_value=proc),
-        _job_object_mocks(),
-        pytest.raises(WSLCommandFailed) as caught,
-        WSL2Platform("wsl2", {}).vm_active(_fake_vm("missing-distro")),
-    ):
-        pass
-    # A typed error quoting what wsl.exe printed, NULs and all stripped, not a raw RuntimeError.
-    assert isinstance(caught.value, ExternalError)
+    def spawn(argv, **kwargs):
+        spawned.append(original_popen([sys.executable, "-u", "-c", code], **kwargs))
+        return spawned[0]
+
+    monkeypatch.setattr(subprocess, "Popen", spawn)
+    return spawned
+
+
+@pytest.mark.windows
+def test_a_failing_wsl_exe_is_reported_with_what_it_printed(monkeypatch):
+    """A keeper whose wsl.exe exits non-zero before attaching quotes what it printed on stdout."""
+    # wsl.exe prints its own errors on stdout, in UTF-16 when redirected, and exits non-zero.
+    printed = "\x00".join("There is no distribution with the supplied name.").encode() + b"\r\n"
+    spawned = _spawn_with_keeper_streams(
+        monkeypatch, f"import sys; sys.stdout.buffer.write({printed!r}); sys.stdout.buffer.flush(); sys.exit(1)"
+    )
+    with pytest.raises(WSLCommandFailed) as caught, WSL2Platform("wsl2", {}).vm_active(_fake_vm("missing-distro")):
+        pytest.fail("body entered without keeper acknowledgement")
     assert "There is no distribution with the supplied name." in str(caught.value)
     assert "missing-distro" in str(caught.value)
     assert caught.value.hint
-    # The fast-fail path closes the output PIPE handle before raising, so a
-    # caller that retries the keepalive doesn't accumulate one leaked fd per
-    # failed attempt.
-    proc.stdout.close.assert_called_once()
+    assert spawned[0].poll() is not None
+    assert spawned[0].stdout is not None and spawned[0].stdout.closed
 
 
-def test_vm_active_closes_its_output_pipe_on_normal_exit() -> None:
-    """On the normal exit path the output PIPE handle is closed too, so the
-    subprocess's fd doesn't outlive the keepalive context."""
-    proc = _running_proc()
-    with (
-        patch("agentworks.capabilities.vm_platform.wsl2.subprocess.Popen", return_value=proc),
-        _job_object_mocks(),
-        WSL2Platform("wsl2", {}).vm_active(_fake_vm()),
-    ):
-        pass
-    proc.stdout.close.assert_called_once()
+@pytest.mark.windows
+def test_guest_stderr_before_the_acknowledgement_does_not_refuse_the_hold(monkeypatch):
+    """A guest that writes to stderr before its marker still attaches: only stdout carries the acknowledgement."""
+    spawned = _spawn_with_keeper_streams(
+        monkeypatch,
+        "import sys,time; sys.stderr.buffer.write(b'guest login notice\\n'); sys.stderr.buffer.flush(); "
+        f"{_GUEST_ACK}; time.sleep(30)",
+    )
+    with WSL2Platform("wsl2", {}).vm_active(_fake_vm("distro")):
+        assert spawned[0].poll() is None
+    assert spawned[0].poll() is not None
 
 
-def test_vm_active_cleanup_tolerates_already_dead_subprocess() -> None:
-    """If the keepalive subprocess died on its own between the fast-fail probe
-    and context exit (WSL service reset, distro 'wsl --terminate'd by hand),
-    proc.terminate() / proc.kill() raise OSError on POSIX. Cleanup must
-    swallow those so a successful command doesn't fail on the way out and
-    a caller's exception doesn't get masked.
-    """
-    proc = MagicMock(spec=subprocess.Popen)
-    proc._handle = 0x1234
-    proc.stdout = MagicMock()
-    # Fast-fail probe sees the process still running; later terminate()
-    # races and the process is gone -- POSIX raises ProcessLookupError
-    # (an OSError subclass), Windows TerminateProcess raises OSError on
-    # bad handle.
-    proc.wait.side_effect = [subprocess.TimeoutExpired(cmd="wsl", timeout=0.5), None]
-    proc.terminate.side_effect = ProcessLookupError("no such process")
-    with (
-        patch("agentworks.capabilities.vm_platform.wsl2.subprocess.Popen", return_value=proc),
-        _job_object_mocks(),
-        WSL2Platform("wsl2", {}).vm_active(_fake_vm()),
-    ):
-        pass
-    proc.terminate.assert_called_once()
-    # Even though terminate raised, the rest of the cleanup ran.
-    proc.stdout.close.assert_called_once()
+@pytest.mark.windows
+def test_timeout_does_not_accept_live_client_as_guest_attachment(monkeypatch):
+    process = _child("import time; time.sleep(30)")
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: process)
+    monkeypatch.setattr(wsl2, "_KEEPER_ENTRY_SECONDS", 0.05)
+    start = time.monotonic()
+    with pytest.raises(StateError), WSL2Platform("wsl2", {}).vm_active(_fake_vm()):
+        pytest.fail("body entered before delayed keeper attachment")
+    assert time.monotonic() - start < 2
+    assert process.poll() is not None
+    assert process.stdout.closed
 
 
-def test_vm_active_does_not_verify_connectivity() -> None:
-    """vm_active is a pure power-hold: even with a known tailscale_host and
-    a config in hand, it runs no connectivity wait of its own. It only
-    spawns the anchor subprocess (which also boots a stopped distro as a
-    side effect); Tailscale verification is the shared paths' job, done
-    uniformly across platforms inside this hold. This is the guarantee
-    that keeps ``vm start`` from double-printing the reconnect wording.
+@pytest.mark.windows
+@pytest.mark.parametrize("error", [UserAbort("cancelled"), KeyboardInterrupt()])
+def test_cancelled_entry_preserves_cancellation_and_closes_job(monkeypatch, error):
+    process = _child("import time; time.sleep(30)")
+    if sys.platform != "win32":
+        process._handle = 1234
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: process)
+    monkeypatch.setattr(wsl2, "_create_kill_on_close_job", lambda: 5678)
+    monkeypatch.setattr(wsl2, "_assign_process_to_job", lambda *a: True)
+    closed: list[int | None] = []
+    monkeypatch.setattr(wsl2, "_close_handle", closed.append)
 
-    This drives the REAL ``WSL2Platform.vm_active`` -> ``_keepalive``, so
-    it is the regression guard: a wait reintroduced into ``_keepalive``
-    reaches ``reachability.wait``, the one wait, and
-    ``wait.assert_not_called()`` fails for the right reason (an assertion,
-    not an incidental subprocess/SSH crash).
-    """
-    proc = _running_proc()
-    with (
-        patch("agentworks.capabilities.vm_platform.wsl2.subprocess.Popen", return_value=proc) as popen,
-        patch("agentworks.execution.reachability.wait") as wait,
-        _job_object_mocks(),
-    ):
-        vm = _fake_vm(tailscale_host="100.64.0.5")
-        with WSL2Platform("wsl2", {}).vm_active(vm, config=MagicMock()):
-            pass
-        # The anchor subprocess still spawns. `wsl --distribution NAME --
-        # sleep infinity` both anchors against vmIdleTimeout and boots the
-        # distro if it was stopped, so this one call is the boot too.
-        popen.assert_called_once()
-        assert popen.call_args[0][0] == ["wsl", "--distribution", "wsltest", "--", "sleep", "infinity"]
-        # But the hold itself never verifies connectivity.
-        wait.assert_not_called()
+    def interrupt(*args):
+        raise error
+
+    monkeypatch.setattr(wsl2, "_await_keeper_attachment", interrupt)
+    with pytest.raises(type(error)) as caught, WSL2Platform("wsl2", {}).vm_active(_fake_vm()):
+        pytest.fail("body entered after cancelled attachment")
+    assert caught.value is error
+    assert process.poll() is not None
+    assert process.stdout.closed
+    assert closed == [5678]
 
 
-def test_vm_active_assigns_subprocess_to_kill_on_close_job() -> None:
-    """The keepalive subprocess is bound to a Win32 Job Object on entry and
-    the job handle is closed on exit -- this is what kills the orphan if the
-    Python process dies in a way that bypasses the finally:."""
-    proc = _running_proc()
-    proc._handle = 0xDEAD
-    with (
-        patch("agentworks.capabilities.vm_platform.wsl2.subprocess.Popen", return_value=proc),
-        _job_object_mocks(create_returns=0xBEEF) as (create, assign, close),
-        WSL2Platform("wsl2", {}).vm_active(_fake_vm()),
-    ):
-        pass
-    create.assert_called_once_with()
-    assign.assert_called_once_with(0xBEEF, 0xDEAD)
-    # Handle closed exactly once on the way out.
-    close.assert_called_once_with(0xBEEF)
+@pytest.mark.windows
+def test_body_failure_is_preserved_and_keeper_is_reaped(monkeypatch):
+    process = _child(f"import sys,time; {_GUEST_ACK}; time.sleep(30)")
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: process)
+    error = UserAbort("cancelled body")
+    with pytest.raises(UserAbort) as caught, WSL2Platform("wsl2", {}).vm_active(_fake_vm()):
+        raise error
+    assert caught.value is error
+    assert process.poll() is not None
+    assert process.stdout.closed
 
 
-def test_vm_active_closes_job_handle_on_fast_fail() -> None:
-    """Fast-fail path must still release the job handle so we don't leak it."""
-    proc = MagicMock(spec=subprocess.Popen)
-    proc._handle = 0xDEAD
-    proc.wait.return_value = 2
-    proc.stdout = MagicMock()
-    proc.stdout.read.return_value = b""
-    with (
-        patch("agentworks.capabilities.vm_platform.wsl2.subprocess.Popen", return_value=proc),
-        _job_object_mocks(create_returns=0xBEEF) as (_create, _assign, close),
-        pytest.raises(WSLCommandFailed),
-        WSL2Platform("wsl2", {}).vm_active(_fake_vm()),
-    ):
-        pass
-    close.assert_called_with(0xBEEF)
+def test_cleanup_kills_after_bounded_terminate_wait():
+    process = MagicMock()
+    process.wait.side_effect = [subprocess.TimeoutExpired("keeper", 0.5), 0]
+    assert wsl2._release_keeper(process)
+    process.terminate.assert_called_once()
+    process.kill.assert_called_once()
+    assert process.wait.call_count == 2
+    process.stdout.close.assert_called_once()
 
 
-def test_vm_active_falls_back_when_job_object_unavailable() -> None:
-    """If CreateJobObject fails, proceed without orphan cleanup (best-effort).
-
-    The keepalive still works on the happy path; only the hard-kill orphan
-    protection is lost. AssignProcessToJobObject must not be called when the
-    job creation itself failed.
-    """
-    proc = _running_proc()
-    with (
-        patch("agentworks.capabilities.vm_platform.wsl2.subprocess.Popen", return_value=proc),
-        _job_object_mocks(create_returns=None) as (create, assign, close),
-        WSL2Platform("wsl2", {}).vm_active(_fake_vm()),
-    ):
-        pass
-    create.assert_called_once_with()
-    assign.assert_not_called()
-    # Cleanup is a no-op when the handle is None (verified by the helper itself),
-    # but the finally: still passes None through to _close_handle.
-    close.assert_called_with(None)
-
-
-def test_vm_active_releases_job_when_assignment_fails() -> None:
-    """If we managed to create the job but AssignProcessToJobObject failed,
-    immediately close the job handle so we don't leak it -- and continue
-    without orphan protection."""
-    proc = _running_proc()
-    proc._handle = 0xDEAD
-    with (
-        patch("agentworks.capabilities.vm_platform.wsl2.subprocess.Popen", return_value=proc),
-        _job_object_mocks(create_returns=0xBEEF, assign_returns=False) as (create, assign, close),
-        WSL2Platform("wsl2", {}).vm_active(_fake_vm()),
-    ):
-        pass
-    create.assert_called_once()
-    assign.assert_called_once_with(0xBEEF, 0xDEAD)
-    # Closed twice: once when assignment failed (immediate cleanup), once in
-    # the finally: with None (which is a safe no-op).
-    assert close.call_args_list[0].args == (0xBEEF,)
-    assert close.call_args_list[-1].args == (None,)
+def test_cleanup_failure_cannot_skip_pipe_close():
+    process = MagicMock()
+    process.wait.side_effect = subprocess.TimeoutExpired("keeper", 0.5)
+    assert not wsl2._release_keeper(process)
+    process.stdout.close.assert_called_once()
 
 
 def test_base_platform_vm_active_is_nullcontext() -> None:
@@ -379,3 +280,77 @@ def test_native_job_close_terminates_its_child() -> None:
                 child.wait(timeout=5)
     finally:
         _close_handle(job)
+
+
+@pytest.mark.windows
+@pytest.mark.parametrize("assignment", [True, False, None])
+def test_job_handle_cleanup_on_success_assignment_failure_and_unavailable(monkeypatch, assignment):
+    process = _child(f"import sys,time; {_GUEST_ACK}; time.sleep(30)")
+    if sys.platform != "win32":
+        process._handle = 1234
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: process)
+    monkeypatch.setattr(wsl2, "_create_kill_on_close_job", lambda: None if assignment is None else 5678)
+    monkeypatch.setattr(wsl2, "_assign_process_to_job", lambda *a: assignment)
+    closed: list[int | None] = []
+    monkeypatch.setattr(wsl2, "_close_handle", closed.append)
+    with WSL2Platform("wsl2", {}).vm_active(_fake_vm()):
+        pass
+    assert process.poll() is not None and process.stdout.closed
+    assert closed == ([5678] if assignment is True else [5678, None] if assignment is False else [None])
+
+
+@pytest.mark.windows
+def test_vm_stop_cannot_pass_admission_before_delayed_keeper_ack(tmp_path, db, monkeypatch):
+    import threading
+
+    from agentworks.db import Database, DesiredRuntimeState
+    from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
+    from agentworks.vms.manager import set_vm_desired_runtime_state
+    from tests.vms.test_vm_nodes import _GatePlatform, _node, _seed
+
+    marker = tmp_path / "allow-ack"
+    process = _child(
+        "import pathlib,sys,time; "
+        f"p=pathlib.Path({str(marker)!r}); "
+        "exec('while not p.exists(): time.sleep(.01)'); "
+        f"{_GUEST_ACK}; time.sleep(30)"
+    )
+    spawned = threading.Event()
+
+    def spawn(*args, **kwargs):
+        spawned.set()
+        return process
+
+    monkeypatch.setattr(subprocess, "Popen", spawn)
+    monkeypatch.setattr(wsl2, "_KEEPER_ENTRY_SECONDS", 3)
+    vm = _seed(db)
+    platform = _GatePlatform()
+    monkeypatch.setattr(platform, "vm_active", lambda *a, **k: wsl2._keepalive("distro"))
+    node, _ = _node(db, platform, vm)
+    refused = []
+
+    def stop():
+        try:
+            assert spawned.wait(2)
+            other = Database(db.path)
+            try:
+                set_vm_desired_runtime_state(other, name=vm.name, state=DesiredRuntimeState.STOPPED)
+            except NativeSetupBusyError:
+                refused.append(True)
+            finally:
+                other.close()
+        finally:
+            marker.write_text("ack permitted")
+
+    thread = threading.Thread(target=stop)
+    thread.start()
+    try:
+        with node.hold_active():
+            assert refused == [True]
+            assert db.get_vm(vm.name).desired_runtime_state is DesiredRuntimeState.RUNNING
+            with native_mutation_guard(db.path, vm.name):
+                pass
+    finally:
+        thread.join(timeout=3)
+    assert not thread.is_alive()
+    assert process.poll() is not None and process.stdout.closed

@@ -98,6 +98,9 @@ class ArtifactApplication:
     files: tuple[ArtifactFile, ...] = ()
     deferred: tuple[ArtifactDeferral, ...] = ()
     artifacts_dir: str | None = None
+    # Confirmed shared workspace documents for Git exclusions, not file ownership.
+    # Integrations track their entry effects through ordinary native claims.
+    shared_paths: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, kw_only=True)

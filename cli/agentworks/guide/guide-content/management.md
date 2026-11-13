@@ -52,6 +52,33 @@ Restart asks before replacing a live running session; `--yes` skips that confirm
 restart asks once for all running matches. `--force` remains separate and only permits recovery from
 broken runtime state.
 
+## Record intent and recover
+
+Runtime exit and external shutdown leave desired state unchanged. Plain lists expose recorded intent
+without guest work; `list --status` and describe add observations. Before adopting a legacy session
+or console, establish what the operator wants to keep running. Use the owning group's
+`set-desired-state NAME STATE` help to record that decision without changing runtimes. Targets are
+per-instance state, separate from reusable declarations.
+
+When the operator has authorized recovery of a named VM and its workloads, preview with
+`agw vm reconcile NAME --dry-run`, review blockers, then use `agw vm reconcile NAME` to apply its
+recorded targets. Execution can activate the VM, start or stop workloads, rebuild views, or stop the
+VM according to those targets. `--all` selects the fleet only when that broader scope is intended.
+Focused `session reconcile NAME` or `console reconcile NAME` applies only that workload's target;
+console recovery does not start member sessions. VM start alone does not restore children.
+
+If intent or recovery scope is unknown, inspect and report the adoption requirement or blocker
+instead of selecting targets or changing runtimes. A stopped parent blocks running children while
+retaining their targets. Read results before retrying: accepted intent survives later failure or
+cancellation, and infrastructure activation may remain after workload-secret failure.
+
+Batch start/restart collects eligible workload secrets before any deferred runtime changes. A
+required workload secret failure blocks that complete batch, including deferred VM stops during
+reconciliation. An infrastructure credential failure instead blocks the families that require it; if
+an eligible workload also needs that credential, the shared workload-secret boundary still fails.
+No-op targets contribute no unused workload secrets. Busy families may be waiting on secret
+interaction or console deletion consent; finish the existing operation before retrying.
+
 For setup, return to `agw guide show concept-onboarding`. For failures, use
 `agw guide show concept-troubleshooting`. Exceptional conversion from retired configuration belongs
 to `agw guide show concept-migration`.

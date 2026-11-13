@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.db import SessionMode, VMStatus
+from agentworks.db import DesiredRuntimeState, ProvisioningStatus, SessionMode, VMStatus
 from agentworks.errors import StateError, ValidationError
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
@@ -41,6 +41,7 @@ def _outside_tmux(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _seed_vm(db: Database) -> None:
     db.insert_vm("box", site="proxmox", hostname="box")
+    db.update_vm_provisioning_status("box", ProvisioningStatus.COMPLETE)
     db.update_vm_tailscale("box", "100.64.0.9")
     seed_vm_trust("box")
 
@@ -136,6 +137,8 @@ def test_named_console_attach_holds_across_the_interactive_attach(
     _seed_vm(db)
     _seed_named_console(db)
     _reachable(monkeypatch, True)
+    monkeypatch.setattr(ProxmoxPlatform, "status", lambda self, row, ctx: VMStatus.RUNNING)
+    monkeypatch.setattr(vm_manager, "_await_tailnet", lambda *a, **kw: None)
     events: list[str] = []
 
     @contextlib.contextmanager
@@ -157,7 +160,7 @@ def test_named_console_attach_holds_across_the_interactive_attach(
 
     multi_console.attach_console(db, config, name="c1", interaction=TtyInteractionPolicy.REFUSE)
 
-    assert events == ["hold-open", "interactive", "hold-close"]
+    assert events == ["hold-open", "hold-close", "hold-open", "interactive", "hold-close"]
     assert target.interactive_calls == ["tmux attach -t '=aw-console-c1'"]
 
 
@@ -182,10 +185,12 @@ def test_console_restart_multiline_environment_secret_refuses_before_rebuild(
     _seed_vm(db)
     db.insert_console("c1", "box", admin_shell=True)
     _reachable(monkeypatch, True)
+    monkeypatch.setattr(ProxmoxPlatform, "status", lambda self, row, ctx: VMStatus.RUNNING)
+    monkeypatch.setattr(vm_manager, "_await_tailnet", lambda *a, **kw: None)
     monkeypatch.setattr(multi_console, "_console_tmux_presence", lambda *args: ProbeStatus.PRESENT)
     rebuilds: list[str] = []
     monkeypatch.setattr(
-        "agentworks.sessions.multi_console.attach._build_console_tmux",
+        "agentworks.sessions.multi_console._build_console_tmux",
         lambda *args, **kwargs: rebuilds.append("rebuild"),
     )
 
@@ -221,7 +226,7 @@ def test_named_console_stopped_vm_gate_burst_seeds_the_boundary(
 
     assert multi_console.attach_console(db, config, name="c1", interaction=TtyInteractionPolicy.REFUSE) == 0
 
-    assert events == ["status", "start", "tailscale"]
+    assert events == ["status", "status", "start", "tailscale"]
     assert resolve_counter == [["proxmox-token"]]
     assert target.interactive_calls == ["tmux attach -t '=aw-console-c1'"]
 
@@ -234,6 +239,7 @@ def test_named_console_no_tailscale_fails_with_zero_resolves_and_zero_gate(
 ) -> None:
     config = make_config()
     db.insert_vm("box", site="proxmox", hostname="box")  # no tailscale host
+    db.update_vm_provisioning_status("box", ProvisioningStatus.COMPLETE)
     _seed_named_console(db)
     _reachable(monkeypatch, False)
 
@@ -303,10 +309,48 @@ def test_restore_session_stopped_vm_drives_the_real_gated_composition(
         db, config, console_name="c1", session_name="s1", interaction=TtyInteractionPolicy.REFUSE
     )
 
-    assert events == ["status", "start", "tailscale"]  # the gate ran
+    assert events == ["status", "status", "start", "tailscale"]  # the gate ran
     assert resolve_counter == [["proxmox-token"]]
     assert any("has-session -t '=aw-console-c1'" in c for c in fake.commands)
     assert any("list-windows -t '=aw-console-c1'" in c for c in fake.commands)
     # The no-op landing focus still fires (post-restore focus parity).
     assert any("select-pane -t '=aw-console-c1':s1.0" in c for c in fake.commands)
     assert any("already matches config" in m for m in captured_output.info)
+
+
+@pytest.mark.windows
+@pytest.mark.parametrize("status", [VMStatus.RUNNING, VMStatus.STOPPED, VMStatus.DEALLOCATED, VMStatus.UNKNOWN])
+def test_console_attach_with_stopped_parent_intent_is_live_diagnostics_only(
+    db, make_config, target, monkeypatch, resolve_counter, status
+):
+    from agentworks.harness_setup.locking import native_mutation_guard
+
+    config = make_config()
+    _seed_vm(db)
+    _seed_named_console(db)
+    vm = db.get_vm("box")
+    assert vm is not None
+    db.set_vm_desired_runtime_state("box", DesiredRuntimeState.STOPPED, expected_vm_uuid=vm.vm_uuid)
+    before_vm = db.get_vm("box")
+    before_console = db.get_console("c1")
+    monkeypatch.setattr(ProxmoxPlatform, "status", lambda *a: status)
+    monkeypatch.setattr(ProxmoxPlatform, "start", lambda *a: pytest.fail("diagnostic attach started its parent"))
+    monkeypatch.setattr(ProxmoxPlatform, "vm_active", lambda *a, **k: pytest.fail("stopped intent acquired idle hold"))
+    monkeypatch.setattr(vm_manager, "_await_tailnet", lambda *a, **k: pytest.fail("diagnostic attach waited"))
+    attach = target.interactive
+
+    def unlocked_attach(command, **kwargs):
+        with native_mutation_guard(db.path, "box"):
+            return attach(command, **kwargs)
+
+    target.interactive = unlocked_attach
+    if status is VMStatus.RUNNING:
+        assert multi_console.attach_console(db, config, name="c1", interaction=TtyInteractionPolicy.REFUSE) == 0
+        assert len(target.interactive_calls) == 1
+    else:
+        with pytest.raises(StateError):
+            multi_console.attach_console(db, config, name="c1", interaction=TtyInteractionPolicy.REFUSE)
+        assert target.interactive_calls == []
+    assert resolve_counter == [["proxmox-token"]]
+    assert db.get_vm("box") == before_vm
+    assert db.get_console("c1") == before_console

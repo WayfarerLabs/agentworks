@@ -15,10 +15,16 @@ from agentworks.errors import ConnectivityError, ExternalError
 from agentworks.execution.oplog import format_record
 from agentworks.execution.requests import Script
 from agentworks.harness_setup.model import NativeClaim
-from agentworks.plugins._harness_native.native import setup_user
 from agentworks.plugins._harness_native.native_cli import NativeTool
 from agentworks.plugins._harness_native.native_config import NativeUserConfig
-from tests.native_setup_fixtures import LocalFixtureTransport, fixture_access, invocation, market_fixture, native_cli
+from tests.native_setup_fixtures import (
+    LocalFixtureTransport,
+    fixture_access,
+    invocation,
+    market_fixture,
+    native_cli,
+    setup_fixture_user,
+)
 from tests.vm_access_support import Call
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="local execution of Linux guest setup helpers")
@@ -135,7 +141,7 @@ def test_real_marketplace_discovery_reuses_user_login_tool_under_isolated_home(
     claims: list[tuple[NativeClaim, ...]] = []
     # The fixture's isolation (no network, no git configuration) arrives as setup environment.
     isolation = {name: value for name, value in target.environment.items() if name not in ("HOME", "SHELL", "PATH")}
-    setup_user(
+    setup_fixture_user(
         tool,
         NativeUserConfig(marketplaces=[str(market)], plugins=["one@fixture-market"]),
         invocation(target, claims, env=isolation, access=access),

@@ -53,7 +53,9 @@ def validate_application(
     origins = {item.origin_identity for item in inputs.items()}
     deferred: set[str] = set()
     paths: set[str] = set()
-    if not all(isinstance(value, tuple) for value in (application.files, application.deferred)):
+    if not all(
+        isinstance(value, tuple) for value in (application.files, application.deferred, application.shared_paths)
+    ):
         raise StateError("integration returned malformed artifact application sequences")
     for item in application.deferred:
         if not isinstance(item, ArtifactDeferral) or item.input_id not in identities or item.input_id in deferred:
@@ -75,6 +77,13 @@ def validate_application(
             raise StateError("integration returned a file with unknown artifact origins")
         path = guest_path(file.path)
         _validate_package_root(file)
+        if path.casefold() in paths:
+            raise StateError("integration returned conflicting artifact destinations")
+        paths.add(path.casefold())
+    for shared_path in application.shared_paths:
+        if facet != "workspace" or not isinstance(shared_path, str):
+            raise StateError("integration returned an unsupported shared artifact path")
+        path = guest_path(shared_path)
         if path.casefold() in paths:
             raise StateError("integration returned conflicting artifact destinations")
         paths.add(path.casefold())

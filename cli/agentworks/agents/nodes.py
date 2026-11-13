@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from agentworks.errors import StateError
+from agentworks.errors import StateError, UserAbort
 
 if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
@@ -229,6 +229,8 @@ class PendingAgentNode:
                 vm_node=self._vm,
                 interaction=self._interaction,
             )
+        except UserAbort:
+            raise
         except Exception as exc:
             # The teardown contract: name the artifact left standing.
             raise StateError(

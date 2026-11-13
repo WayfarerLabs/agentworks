@@ -35,18 +35,19 @@ from typing import TYPE_CHECKING, Annotated, ClassVar, Literal
 
 from pydantic import Field
 
-from agentworks.artifacts.application import ArtifactApplication
+from agentworks.artifacts.application import ArtifactApplication, ArtifactDeferral
 from agentworks.artifacts.model import ArtifactType
 from agentworks.artifacts.native.common import (
     NativeSessionArtifacts,
     defer_setup_conflicts,
-    native_home,
     prepare_session_delivery,
     render_setup_artifacts,
     validate_discovery_paths,
     validate_native_command,
     validate_user_placement,
 )
+from agentworks.artifacts.native.layout import unavailable_user_artifacts, user_layout
+from agentworks.artifacts.native.mcp import session_mcp_conflicts, user_mcp_location
 from agentworks.artifacts.native.probe import probe_native
 from agentworks.capabilities.harness_integration.base import (
     HarnessIntegration,
@@ -145,7 +146,7 @@ class ClaudeCodeConfig(AgwModel):
     override. A child template's value replaces its parent's."""
 
     enabled_workarounds: Annotated[
-        list[Literal["session-skill-plugin", "session-agent-definitions"]], MergeStrategy.REPLACE
+        list[Literal["session-skill-plugin", "session-agent-definitions", "session-mcp-config"]], MergeStrategy.REPLACE
     ] = Field(default_factory=list)
     """Explicitly enabled session artifact carriers. An authored list replaces inherited opt-ins."""
 
@@ -251,23 +252,39 @@ class ClaudeCodeIntegration(HarnessIntegration):
                     vm_only=True,
                 ),
             )
+        if not self.retiring:
+            plan = replace(
+                plan,
+                deferred=(
+                    *plan.deferred,
+                    *(
+                        ArtifactDeferral(
+                            input_id=item.identity,
+                            destination="user",
+                            reason="Claude Code MCP registration uses native user placement",
+                        )
+                        for item in invocation.artifacts.items()
+                        if item.content.type is ArtifactType.MCP_SERVER
+                    ),
+                ),
+            )
         return plan
 
     def user_init(self, invocation: UserSetupInvocation) -> ArtifactApplication:
         """Apply native setup and return the user's artifact publication plan."""
-        root = (
-            probe_native(
-                invocation.access,
-                tool="claude",
-                environment=invocation.request_environment(),
-                redactions=invocation.redactions,
-                home=invocation.home,
-                check_policy=False,
-            )
-            if invocation.artifacts and not self.retiring
-            else ""
-        )
         config = None if self.retiring else self._config_as(ClaudeCodeUserConfig)
+        if not (
+            invocation.artifacts
+            or (invocation.prior and (invocation.prior.claims or invocation.prior.artifact_files))
+            or (config and (config.settings is not None or config.plugins or config.marketplaces))
+        ):
+            return ArtifactApplication()
+        layout = user_layout("claude", invocation)
+        if layout is None:
+            if self.retiring:
+                setup_user("claude", None, invocation, native_root=None, skip_mcp=True)
+            return unavailable_user_artifacts(invocation, retiring=self.retiring)
+        root = layout.root
         plan = (
             ArtifactApplication()
             if self.retiring
@@ -275,17 +292,33 @@ class ClaudeCodeIntegration(HarnessIntegration):
                 invocation,
                 lambda inputs: outer_artifacts(
                     inputs,
-                    root or native_home(invocation.home, invocation.environment, "CLAUDE_CONFIG_DIR", ".claude"),
+                    root,
                 ),
             )
         )
         validate_user_placement(plan, invocation.home)
-        setup_invocation = (
-            replace(invocation, environment={**invocation.environment, "CLAUDE_CONFIG_DIR": root})
-            if root
-            else invocation
+        if not self.retiring and any(
+            item.content.type is not ArtifactType.MCP_SERVER for item in invocation.artifacts.items()
+        ):
+            probe_native(
+                invocation.access,
+                tool="claude",
+                environment=invocation.request_environment(),
+                redactions=invocation.redactions,
+                home=invocation.home,
+                native_root=root,
+                check_policy=False,
+            )
+        mcp_destination, skip_mcp, mcp_deferred = user_mcp_location(layout, invocation, retiring=self.retiring)
+        mcp = setup_user(
+            "claude",
+            config,
+            invocation,
+            native_root=root,
+            mcp_destination=mcp_destination,
+            skip_mcp=skip_mcp,
         )
-        setup_user("claude", config, setup_invocation)
+        mcp = replace(mcp, deferred=(*mcp.deferred, *mcp_deferred))
         if plan.files:
             plan = defer_setup_conflicts(
                 plan,
@@ -296,10 +329,16 @@ class ClaudeCodeIntegration(HarnessIntegration):
                     environment=invocation.request_environment(),
                     redactions=invocation.redactions,
                     home=invocation.home,
+                    native_root=root,
                     files=files,
                 ),
             )
-        return plan
+        return replace(
+            plan,
+            files=(*plan.files, *mcp.files),
+            deferred=(*plan.deferred, *mcp.deferred),
+            shared_paths=mcp.shared_paths,
+        )
 
     def workspace_init(self, invocation: WorkspaceSetupInvocation) -> ArtifactApplication:
         """Apply project settings and return workspace-owned artifact files."""
@@ -311,7 +350,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
                 invocation, lambda inputs: outer_artifacts(inputs, f"{invocation.root}/.claude")
             )
         )
-        setup_workspace("claude", config, invocation)
+        mcp = setup_workspace("claude", config, invocation)
         if plan.files:
             plan = defer_setup_conflicts(
                 plan,
@@ -326,7 +365,12 @@ class ClaudeCodeIntegration(HarnessIntegration):
                     workspace_only=True,
                 ),
             )
-        return plan
+        return replace(
+            plan,
+            files=(*plan.files, *mcp.files),
+            deferred=(*plan.deferred, *mcp.deferred),
+            shared_paths=mcp.shared_paths,
+        )
 
     @property
     def config(self) -> ClaudeCodeConfig:
@@ -389,6 +433,14 @@ class ClaudeCodeIntegration(HarnessIntegration):
                 prepared,
                 extra_args=self._rendered_extra_args,
                 enabled_workarounds=self.config.enabled_workarounds,
+                mcp_conflicts=lambda inputs, prepared: session_mcp_conflicts(
+                    "claude",
+                    access,
+                    inputs,
+                    home=prepared.home,
+                    environment=prepared.environment,
+                    workspace=self._workspace_path,
+                ),
             ),
             workspace=self._workspace_path,
         )

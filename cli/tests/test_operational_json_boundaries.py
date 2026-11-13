@@ -14,7 +14,7 @@ from typer.testing import CliRunner
 
 from agentworks.capabilities.secret_backend import InteractionBroker, TtyInteractionAccess
 from agentworks.cli import app
-from agentworks.db import PID_STOPPED, SessionMode, SessionStatus, VMStatus
+from agentworks.db import PID_STOPPED, DesiredRuntimeState, SessionMode, SessionStatus, VMStatus
 from agentworks.resources.graph import Readiness
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.secrets.resolve import ActiveSource, ResolutionBatch
@@ -422,7 +422,7 @@ def test_machine_presentation_suppression_keeps_prompts_interactive_on_stderr(
         "box",
         "2026-01-01",
         None,
-        False,
+        DesiredRuntimeState.ON_DEMAND,
     )
     description = VMDescription(
         facts,

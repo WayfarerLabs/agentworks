@@ -119,7 +119,8 @@ def test_migration_to_v38_assigns_ids_once_and_preserves_v37_session_data(tmp_pa
         connection.row_factory = sqlite3.Row
         after = [dict(row) for row in connection.execute("SELECT * FROM sessions ORDER BY name")]
         assert [
-            {key: value for key, value in row.items() if key not in {"session_uuid", "run_id"}} for row in after
+            {key: value for key, value in row.items() if key not in {"session_uuid", "run_id", "desired_runtime_state"}}
+            for row in after
         ] == before
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
         assert connection.execute("SELECT session_name FROM console_sessions").fetchone()[0] == "first"

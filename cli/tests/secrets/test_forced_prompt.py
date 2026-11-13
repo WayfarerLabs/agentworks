@@ -215,3 +215,37 @@ def test_forced_prompt_bypasses_non_env_provider_and_closes_its_context(monkeypa
     assert Provider.calls == [("site",)]
     assert broker.names == ["auth"]
     assert events == ["enter", "exit", "enter", "exit"]
+
+
+def test_forced_prompt_gate_failure_is_memoized_before_later_workload_resolution(
+    make_config, resolve_counter, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from agentworks.bootstrap import build_registry
+    from agentworks.errors import SecretUnavailableError, StateError
+    from agentworks.secrets.policy import TtyInteractionPolicy
+    from agentworks.secrets.resolver import Resolver
+
+    config = make_config('[secret_config]\nsources = ["env-var"]\n')
+    monkeypatch.setenv("AW_SECRET_AUTH", "stale-auth")
+    monkeypatch.setenv("AW_SECRET_WORKLOAD", "workload-value")
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    resolver = Resolver(
+        config, build_registry(config), interaction=TtyInteractionPolicy.REFUSE, prompt_names=frozenset({"auth"})
+    )
+    with pytest.raises(SecretUnavailableError):
+        resolver.resolve_gate("auth")
+    with pytest.raises(SecretUnavailableError):
+        resolver.resolve_gate("auth")
+    resolver.register_name("workload")
+    resolver.register_name("auth")
+    with pytest.raises(SecretUnavailableError):
+        resolver.resolve()
+    assert resolve_counter == [["auth"]]
+    assert not resolver.resolved
+
+    resolver.close()
+    with pytest.raises(StateError):
+        resolver.get("auth")
+    with pytest.raises(StateError):
+        resolver.resolve_gate("workload")
+    assert resolve_counter == [["auth"]]

@@ -85,10 +85,8 @@ def _all_platforms_supported(monkeypatch: pytest.MonkeyPatch) -> None:
 def _seed_db(
     db: Database, *, with_workspace: bool = True, with_agent: bool = False, with_session: bool = False
 ) -> None:
-    db._conn.execute(
-        "INSERT INTO vms (name, site, hostname, admin_username, tailscale_host) "
-        "VALUES ('vm-1', 'lima-local', 'h', 'agentworks', '100.64.0.5')"
-    )
+    db.insert_vm("vm-1", site="lima-local", hostname="h", admin_username="agentworks")
+    db.update_vm_tailscale("vm-1", "100.64.0.5")
     if with_workspace:
         db._conn.execute(
             "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "

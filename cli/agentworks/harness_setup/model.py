@@ -27,9 +27,10 @@ class NativeClaim(AgwModel):
     identifier: _Text
     destination: _Text
     source: str | None = None
-    # Read compatibility for settings claims in previously stored applied state.
-    # New setup drops those claims and never emits these fields with values.
+    # MCP claims fingerprint one canonical native entry, never the shared file.
+    # Historical settings claims also used sha256; new settings mappings do not.
     sha256: _Hash | None = None
+    # Read compatibility for settings claims in previously stored applied state.
     strategy: str | None = None
     # JSON carries tuples as arrays; only sequence representation is lenient.
     written_keys: Annotated[tuple[Annotated[tuple[str, ...], Field(strict=False)], ...], Field(strict=False)] = ()

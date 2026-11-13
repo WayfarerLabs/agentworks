@@ -39,6 +39,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
     from agentworks.harness_setup.inputs import SetupInputs
+    from agentworks.harness_setup.locking import NativeMutationGuard
     from agentworks.harness_setup.outcomes import SetupFailure
     from agentworks.instance_specs import InstanceOverlay
     from agentworks.resources.registry import Registry
@@ -58,6 +59,7 @@ def realize_workspace(
     setup_failures: list[SetupFailure],
     setup_inputs: SetupInputs | None = None,
     setup_values: Mapping[str, str] | None = None,
+    held_native_guard: NativeMutationGuard | None = None,
 ) -> Path:
     """Make workspace ``name`` real on ``vm``: create the on-VM
     directory from its RESOLVED template, generate the VS Code
@@ -119,7 +121,7 @@ def realize_workspace(
     from agentworks.harness_setup.lifecycle import require_prepared_setup
     from agentworks.harness_setup.locking import native_mutation_guard
 
-    with native_mutation_guard(db.path, vm.name) as guard:
+    with native_mutation_guard(db.path, vm.name, held=held_native_guard) as guard:
         require_prepared_setup(db, "workspace", name, ("workspace",), () if setup_inputs is None else (setup_inputs,))
         ssh_logger = SSHLogger(
             vm.name, "workspace-create", redactions=tuple((setup_values or {}).values()) if setup_inputs else ()

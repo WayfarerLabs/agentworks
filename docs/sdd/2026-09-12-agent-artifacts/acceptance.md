@@ -1,6 +1,58 @@
 # Acceptance reconciliation
 
-## Current disposition, 2026-11-10
+## Final functional acceptance, 2026-11-11
+
+The
+[final PR 871 integration report](https://github.com/WayfarerLabs/agentworks/pull/871#issuecomment-6770963076)
+cleared exact `fe2209cfe35dd4703b689d3aed89092128371ab2` against main `438c4546`. PR
+[871](https://github.com/WayfarerLabs/agentworks/pull/871) merged at `dc3fb557`. All twelve required
+gates passed, including 11,560 tests with 11 skips. No new material finding was established. Merge
+is the delivery event; the observations and retained behavioral evidence below are the acceptance
+basis.
+
+| Requirement                                   | Final acceptance basis                                                                                                                                                                                                                                                                                                                                                           |
+| --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R1: reusable bundles and references           | Ordinary declarations, inheritance and per-type whole-entry replacement are established by the retained type-map, owner and routing controls and real independent consumers. Declaration alone installs nothing.                                                                                                                                                                 |
+| R2: local/Git acquisition                     | Retained bounded acquisition controls and real refresh/pinning/source-failure observations establish consistent captured inputs and deliberate updates. No packaged-distribution source is claimed.                                                                                                                                                                              |
+| R3: normalized representation and safety      | Retained strict-format, original-owner/provenance, bounded-member, binary/text and executable-intent controls, corroborated by real native bytes, modes and ownership. The current report independently preserved a 270-byte binary payload in three native homes. Its script named .exe does not establish PE executable intent.                                                |
+| R4: independent routing                       | Retained inactive-diamond, unknown/empty, stale route, partial-failure and independent-recovery controls, with real ancestor routing and convergence observations. Inactive VM defaults to user; inactive user/workspace passes to session.                                                                                                                                      |
+| R5: honest native delivery                    | Generated rule navigation files, per-owner hints and supported native skills/personas have scoped actual native evidence. Current Codex app-server and Grok inspect observed delivered catalogs; earlier Claude private-plugin and genuine resume observations keep their own source/mode. Effective argument refusal is now independently verified on the corrected head.       |
+| R6: hints                                     | Current rendering controls establish one hints aggregate per original owner, separate from per-rule outputs, with literal supporting data. Earlier actual Claude Read and current file/catalog observations retain their distinct claims.                                                                                                                                        |
+| R7: session applicability and lifecycle       | Retained native/private-loader and opt-in home-package controls plus real concurrent-user/session, failed replacement, successful restart, deletion and name-reuse observations. The current six refusal cases preserve every existing Shell session identity, process and artifact byte before teardown. Shared catalogs and voluntary selection remain explicit.               |
+| R8: safe idempotency                          | Retained adoption, drift preservation, ordinary applied state and recovery controls. Current real successive moves, tracked paths and ambiguous shared-metadata deletion establish the corrected behavior while preserving other owners/operator state. Missing/unreadable metadata and persistence/cancellation cases have local controls, not new live fault-injection claims. |
+| R9: optional outcomes and inspection          | Retained metadata-only inspection and reporting controls with actual CLI observations: no acquisition, remote setup, secret/body disclosure or state mutation to explain an owner and its ancestors. Unknown evidence is not confirmed empty; recorded application is not native or model verification.                                                                          |
+| R10: scoped validation and permanent teaching | Required local/CI gates, locked-runtime installed-package/guides and independently driven native/VM lifecycle and cleanup. The permanent homes and limits below remain part of this acceptance. No paid inference or universal native-version/provider matrix is required.                                                                                                       |
+
+Current native guidance rendering is unchanged from the earlier literal-data correction. The actual
+Claude 2.1.319 supporting-file Read at `818ccee9` establishes that measured boundary. The final
+report contains no successful model turn or supporting-file Read; its file and catalog checks do not
+become such a claim. Claude 2.1.322 `agents --json` lists background agents and its empty result is
+not skill discovery evidence. Earlier genuine resume probes retain their exact native versions and
+creation modes.
+
+The tester independently checked provider/guest/controller deletion, database integrity and
+relationships, temporary key/trust retirement, decoded retained evidence and owned process/file
+absence. Deliberate ambiguous exclusion leftovers were recorded and disposed with the disposable Git
+fixture and VM. Concurrent unrelated trust entries were independently attributed and preserved.
+Standing toolchains and public evidence were intentionally retained. This is scoped cleanup, not a
+whole-host restoration or physical-erasure claim.
+
+The inherited unconstrained Typer installation defect remains separately tracked in
+[issue 880](https://github.com/WayfarerLabs/agentworks/issues/880). Passing package/guide checks use
+the tested runtime lock and do not clear that independent fresh-install limitation.
+
+[Issue 869](https://github.com/WayfarerLabs/agentworks/issues/869)'s approved artifact response is
+complete: native file delivery and explicit best-effort workarounds replace the contradicted
+artifact prompt injection. Direct native prompt settings retain their independent native resume
+semantics. The former binary operator question was superseded by the approved design; it is not an
+unanswered closeout decision.
+
+The two small post-handoff Muntz corrections and final record review are tracked in the closeout
+plan. Permanent teaching stands alone in the artifact README/packaged guide, worked examples and
+integration/state guides. MCP support and single-session workspace modes are separate subsequent
+efforts; neither is silently counted as implemented here.
+
+## Retained disposition, 2026-11-10
 
 The
 [complete PR 871 report](https://github.com/WayfarerLabs/agentworks/pull/871#issuecomment-6755957164)
@@ -134,7 +186,10 @@ refusal is a later intentional supported-matrix correction, not a missing carrie
 retain their stated heads and modes; a fresh native conversation is not counted as a genuine native
 resume.
 
-## R1-R10
+## Retained R1-R10 reconciliation, 2026-11-08
+
+This table preserves the earlier acceptance state. The final table above supersedes its pending
+dispositions, with the measured limits retained at their original sources.
 
 | Requirement                                     | Reconciled disposition                                                                                                                                                                                                                                                                                                                                                                       |
 | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -182,7 +237,11 @@ failure, not clean acceptance. Separate exact-mode probes used bounded valid/int
 responses and stayed within their new limits. No failed native fixture termination is presented as a
 successful model turn.
 
-## Implemented correction awaiting independent acceptance
+## Retained implementation awaiting acceptance, 2026-11-08
+
+This section records the earlier implementation and its then-pending acceptance. The final
+functional acceptance above supersedes that pending status; these observations retain their own
+source and native mode.
 
 The measured discrepancy is tracked in
 [issue 869](https://github.com/WayfarerLabs/agentworks/issues/869), separately from PR
@@ -203,7 +262,7 @@ of this correction. R5/R6/R7/R8/R10 need the current independent integration rep
 closeout. The following bounded observations establish specific native mechanics; earlier results
 remain evidence for unchanged behavior, not certification of the new carriers or cleanup.
 
-### Current native and local evidence
+### Native and local evidence at the retained sources
 
 Actual renderers and native tools were exercised in isolated homes without operator credentials,
 real inference, SSH or VM resources. Native state was created by successful synthetic conversations
@@ -243,15 +302,15 @@ different claims; none of these local probes substitutes for the separate full i
 ## Permanent promotion and closeout
 
 The standalone artifact README and packaged guide cover strict authoring, local/Git sources,
-normalization, refresh, maps/overrides, original scopes and deferrals, the native matrix, optional
-workarounds, collisions, legacy-section retirement, ownership/cleanup, privacy and read-only
-inspection. `scoped-artifacts.yaml` and `concurrent-sessions.yaml` provide the worked examples.
-Capability authors use the permanent harness-integration contract. No load-bearing artifact
-knowledge was found stranded solely in this SDD. Current native-file behavior still requires
-independent acceptance before locking.
+contained acquisition and operation budgets, normalization, refresh, maps/overrides, original scopes
+and deferrals, the native matrix, optional workarounds, collisions, legacy-section retirement,
+ownership/cleanup, privacy and read-only inspection. `scoped-artifacts.yaml` and
+`concurrent-sessions.yaml` provide the worked examples. Capability authors use the permanent
+harness-integration contract; the capability and database READMEs describe inheritance and the
+current capture/state boundaries. None of this teaching requires the SDD directory.
 
-The framework's [acceptance record](../2026-09-06-harness-scope-framework/acceptance.md) separately
-reconciles its 16 retained requirements and transferred artifact scope. Both locks still require the
-resolved native disposition, truthful final plan records, independent closeout review and the
-appropriate final gates. The clean intermediate correction neither waives those duties nor needs to
-absorb a new native-resume design.
+The framework's [acceptance record](../2026-09-06-harness-scope-framework/acceptance.md) reconciles
+its 16 retained requirements and transferred artifact scope. The final report completes the changed
+native-file lifecycle evidence. Final local validation, independent closeout review, historical plan
+reconciliation and lock creation are recorded in both plans. The earlier clean intermediate
+correction did not waive those duties.

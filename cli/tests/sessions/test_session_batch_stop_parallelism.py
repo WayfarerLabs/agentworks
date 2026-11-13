@@ -2,17 +2,15 @@
 
 from __future__ import annotations
 
-import contextlib
 import threading
 from concurrent.futures import ThreadPoolExecutor as PythonThreadPoolExecutor
-from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
 from uuid import uuid4
 
 import pytest
 
 from agentworks import output as output_mod
-from agentworks.db import PID_STOPPED, SessionMode, SessionRuntimeSnapshot, SessionStatus
+from agentworks.db import PID_STOPPED, ProvisioningStatus, SessionMode, SessionRuntimeSnapshot, SessionStatus
 from agentworks.errors import ExternalError, StateError
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import manager as session_manager
@@ -26,6 +24,8 @@ from agentworks.sessions.manager._teardown import (
 from agentworks.sessions.tmux import ProbeStatus
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from agentworks.config import Config
     from agentworks.db import Database, SessionRow
     from agentworks.transports import Transport
@@ -87,6 +87,7 @@ def _seed_session(
 ) -> SessionRow:
     if db.get_vm("box") is None:
         db.insert_vm("box", site="test", hostname="box")
+        db.update_vm_provisioning_status("box", ProvisioningStatus.COMPLETE)
         db.update_vm_tailscale("box", "100.64.0.10")
         db.insert_workspace("work", "/srv/work", "box", "ws-work")
     db.insert_session(name, "work", "default", SessionMode.ADMIN, socket_path=socket_path)
@@ -98,6 +99,20 @@ def _seed_session(
     session = db.get_session(name)
     assert session is not None
     return session
+
+
+def _prepared_stop_config(db: Database, make_config: Callable[[], Config], monkeypatch: pytest.MonkeyPatch) -> Config:
+    from agentworks.db import InitStatus, VMStatus
+    from agentworks.plugins.proxmox.platform import ProxmoxPlatform
+    from tests.conftest import seed_vm_trust, stub_vm_ssh_identity
+
+    db._conn.execute("UPDATE vms SET site = 'proxmox'")
+    db._conn.commit()
+    db.update_vm_init_status("box", InitStatus.COMPLETE)
+    seed_vm_trust("box")
+    stub_vm_ssh_identity(monkeypatch)
+    monkeypatch.setattr(ProxmoxPlatform, "status", lambda *args: VMStatus.RUNNING)
+    return make_config()
 
 
 def test_concurrent_teardowns_overlap_under_fixed_bound_and_reconcile_on_main_thread(
@@ -383,6 +398,7 @@ def test_batch_partitions_complete_work_before_serial_compatibility_and_uses_dis
     db: Database,
     monkeypatch: pytest.MonkeyPatch,
     captured_output: CapturedOutput,
+    make_config,
 ) -> None:
     complete_a = _seed_session(
         db,
@@ -409,7 +425,7 @@ def test_batch_partitions_complete_work_before_serial_compatibility_and_uses_dis
     selected = [complete_a, complete_b, incomplete, legacy]
     statuses = {session.name: SessionStatus.RUNNING for session in selected}
 
-    monkeypatch.setattr(session_manager, "_batch_vm_boundary", lambda *args, **kwargs: contextlib.nullcontext())
+    config = _prepared_stop_config(db, make_config, monkeypatch)
     monkeypatch.setattr(session_manager, "ensure_pids_batch", lambda sessions, **kwargs: sessions)
     monkeypatch.setattr(session_manager, "observe_session_statuses", lambda sessions, **kwargs: statuses)
 
@@ -430,37 +446,42 @@ def test_batch_partitions_complete_work_before_serial_compatibility_and_uses_dis
     events: list[str] = []
     concurrent_targets: list[object] = []
 
-    def concurrent(plans: list[DedicatedTeardownPlan], *, db: Database) -> list[tuple[str, str]]:
+    def concurrent(plans: list[DedicatedTeardownPlan], *, db: Database, on_outcome) -> list[tuple[str, str]]:
         events.append("concurrent")
         concurrent_targets.extend(plan.target for plan in plans)
         assert [plan.session_name for plan in plans] == ["complete-a", "complete-b"]
+        for plan in plans:
+            teardown_mod.reconcile_dedicated_teardown(db, plan)
+            on_outcome(plan, None)
+            statuses[plan.session_name] = SessionStatus.STOPPED
         return []
 
-    def serial(
-        targets: list[tuple[SessionRow, Transport, bool]],
-        *,
-        db: Database,
-        force: bool,
-    ) -> list[tuple[str, str]]:
-        events.append("serial")
-        assert [session.name for session, _target, _owns in targets] == ["incomplete", "legacy"]
-        assert targets[0][1] is targets[1][1]
-        return []
+    serial_targets: list[tuple[SessionRow, Transport, bool]] = []
 
-    monkeypatch.setattr(teardown_mod, "execute_concurrent_dedicated_teardowns", concurrent)
-    monkeypatch.setattr(lifecycle_mod, "_execute_stop", serial)
+    def serial(session, *, target, target_owns_session, db, force, legacy_running_authorized):
+        if not serial_targets:
+            events.append("serial")
+        serial_targets.append((session, target, target_owns_session))
+        db.compare_and_set_session_stopped(SessionRuntimeSnapshot.from_session(session))
+        statuses[session.name] = SessionStatus.STOPPED
+
+    monkeypatch.setattr("agentworks.runtime_state._session_stop.execute_concurrent_dedicated_teardowns", concurrent)
+    monkeypatch.setattr(session_manager, "_teardown_session", serial)
+    monkeypatch.setattr(session_manager, "check_session_status", lambda session, **kwargs: statuses[session.name])
+    monkeypatch.setattr(session_manager, "observe_session_runtime", lambda session, **kwargs: statuses[session.name])
 
     lifecycle_mod.stop_all_sessions(
         db,
-        cast("Config", SimpleNamespace()),
+        config,
         interaction=TtyInteractionPolicy.REFUSE,
     )
 
     assert events == ["concurrent", "serial"]
-    assert [(timeout, retries) for timeout, retries, _target in transport_calls] == [
+    assert [session.name for session, _target, _owns in serial_targets] == ["incomplete", "legacy"]
+    assert serial_targets[0][1] is serial_targets[1][1]
+    assert [(timeout, retries) for timeout, retries, target in transport_calls if target in concurrent_targets] == [
         (DEDICATED_TEARDOWN_TIMEOUT_SECONDS, DEDICATED_TEARDOWN_ATTEMPTS),
         (DEDICATED_TEARDOWN_TIMEOUT_SECONDS, DEDICATED_TEARDOWN_ATTEMPTS),
-        (None, 1),
     ]
     assert len({id(target) for target in concurrent_targets}) == 2
     assert not captured_output.warnings
@@ -470,22 +491,26 @@ def test_live_observation_for_stopped_sentinel_is_a_labeled_typed_failure(
     db: Database,
     monkeypatch: pytest.MonkeyPatch,
     captured_output: CapturedOutput,
+    make_config,
 ) -> None:
     session = _seed_session(db, "inconsistent", socket_path=None, pid=PID_STOPPED, start_ticks=None)
 
-    monkeypatch.setattr(session_manager, "_batch_vm_boundary", lambda *args, **kwargs: contextlib.nullcontext())
+    config = _prepared_stop_config(db, make_config, monkeypatch)
     monkeypatch.setattr(session_manager, "ensure_pids_batch", lambda sessions, **kwargs: sessions)
     monkeypatch.setattr(
         session_manager,
         "observe_session_statuses",
         lambda sessions, **kwargs: {session.name: SessionStatus.RUNNING},
     )
-    monkeypatch.setattr(session_manager, "transport", lambda *args, **kwargs: pytest.fail("transport opened"))
+    monkeypatch.setattr(session_manager, "transport", lambda *args, **kwargs: _Target("read-only admin"))
+    monkeypatch.setattr(
+        teardown_mod, "execute_dedicated_teardown", lambda *args: pytest.fail("inconsistent runtime stopped")
+    )
 
-    with pytest.raises(ExternalError):
+    with pytest.raises(StateError):
         lifecycle_mod.stop_all_sessions(
             db,
-            cast("Config", SimpleNamespace()),
+            config,
             interaction=TtyInteractionPolicy.REFUSE,
         )
 

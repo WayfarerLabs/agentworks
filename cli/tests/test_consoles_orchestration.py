@@ -788,4 +788,4 @@ def test_list_consoles_renders_counts(db: Database, captured_output: CapturedOut
     create_console(db, name="con", vm_name="vm1", session_specs=["a", "b"])
     list_consoles(db)
     rows = [m for m in captured_output.info if m.startswith("con")]
-    assert any("vm1" in r and r.endswith("2") for r in rows)
+    assert any(r.split() == ["con", "vm1", "2", "running"] for r in rows)

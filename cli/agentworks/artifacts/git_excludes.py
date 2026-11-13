@@ -129,6 +129,7 @@ def reconcile_workspace_excludes(
     report_incomplete: Callable[[str], None],
     redactions: Iterable[str],
     prior_workspace: str | None = None,
+    shared_paths: Sequence[str] = (),
 ) -> None:
     """Own only our exact marker/pattern pairs, preserving all unrelated lines.
 
@@ -141,7 +142,7 @@ def reconcile_workspace_excludes(
     """
     prior = tuple(claim for claim in claims if claim.role == GIT_EXCLUDE_ROLE)
     workspace = guest_path(workspace)
-    paths = tuple(file.path for file in files if not file.generated_section)
+    paths = tuple(file.path for file in files if not file.generated_section) + tuple(shared_paths)
     if not paths and not prior:
         return
     if any(not path.startswith(workspace + "/") for path in paths):
@@ -155,8 +156,7 @@ def reconcile_workspace_excludes(
         if source_metadata is None:
             return
         source_prefix = source_metadata[0]
-        # Repeated moves retain the initial file inventory. Current verified
-        # exclusion claims carry the relative paths needed for later moves.
+        # Include verified claim paths for shared files and incomplete inventories.
         relative_paths = tuple(
             dict.fromkeys(
                 (
@@ -182,7 +182,13 @@ def reconcile_workspace_excludes(
         index = remaining.index(claim)
         remaining.pop(index)
         if _relative(claim, source_workspace, source_prefix) is None:
-            output.warn("Stored artifact exclusion no longer matches this workspace; its association was released.")
+            output.warn(
+                sanitize_setup_diagnostic(
+                    f"Stored artifact exclusion '{claim.identifier}' at recorded path '{claim.destination}' "
+                    "no longer matches this workspace; its association was released.",
+                    redactions=redactions,
+                )
+            )
             continue
         current_claim = NativeClaim(
             role=GIT_EXCLUDE_ROLE, identifier=claim.identifier, destination=destination, source=source_workspace

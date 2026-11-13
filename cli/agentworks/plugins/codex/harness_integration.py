@@ -111,16 +111,18 @@ from typing import TYPE_CHECKING, Annotated, ClassVar, Literal, NamedTuple
 from pydantic import Field
 
 from agentworks.artifacts.application import ArtifactApplication
+from agentworks.artifacts.model import ArtifactType
 from agentworks.artifacts.native.common import (
     NativeSessionArtifacts,
     defer_setup_conflicts,
-    native_home,
     prepare_session_delivery,
     render_setup_artifacts,
     validate_discovery_paths,
     validate_native_command,
     validate_user_placement,
 )
+from agentworks.artifacts.native.layout import unavailable_user_artifacts, user_layout
+from agentworks.artifacts.native.mcp import session_mcp_conflicts, user_mcp_location
 from agentworks.artifacts.native.probe import probe_native
 from agentworks.capabilities.harness_integration.base import (
     HarnessIntegration,
@@ -128,11 +130,11 @@ from agentworks.capabilities.harness_integration.base import (
     HarnessStart,
     require_commands,
 )
-from agentworks.errors import StateError
+from agentworks.errors import ConfigError, StateError
 from agentworks.execution.requests import Script, Shell
 from agentworks.plugins._harness_native.native import setup_user, setup_workspace
 from agentworks.plugins._harness_native.native_config import NativeUserConfig, NativeWorkspaceConfig
-from agentworks.plugins.codex.artifacts import outer_artifacts, session_artifacts, vm_artifacts
+from agentworks.plugins.codex.artifacts import defer_session_mcp, outer_artifacts, session_artifacts, vm_artifacts
 from agentworks.plugins.codex.recorder import home_word, notify_value_word, provision_fragment, thread_tail
 from agentworks.schema import AgwModel, MergeStrategy
 from agentworks.topics import TopicProse
@@ -240,7 +242,7 @@ class CodexConfig(AgwModel):
     ``config.toml`` a newer codex wrote."""
 
     enabled_workarounds: Annotated[
-        list[Literal["session-home-skills", "session-agent-config"]], MergeStrategy.REPLACE
+        list[Literal["session-home-skills", "session-agent-config", "session-mcp-overrides"]], MergeStrategy.REPLACE
     ] = Field(default_factory=list)
     """Explicitly enabled session artifact carriers. An authored list replaces inherited opt-ins."""
 
@@ -544,21 +546,19 @@ class CodexIntegration(HarnessIntegration):
 
     def user_init(self, invocation: UserSetupInvocation) -> ArtifactApplication:
         """Apply native setup and return the user's artifact publication plan."""
-        root = (
-            probe_native(
-                invocation.access,
-                tool="codex",
-                environment=invocation.request_environment(),
-                redactions=invocation.redactions,
-                home=invocation.home,
-                check_policy=False,
-            )
-            if invocation.artifacts and not self.retiring
-            else ""
-        )
         config = None if self.retiring else self._config_as(CodexUserConfig)
-        if not self.retiring:
-            root = root or native_home(invocation.home, invocation.environment, "CODEX_HOME", ".codex")
+        if not (
+            invocation.artifacts
+            or (invocation.prior and (invocation.prior.claims or invocation.prior.artifact_files))
+            or (config and (config.settings is not None or config.plugins or config.marketplaces))
+        ):
+            return ArtifactApplication()
+        layout = user_layout("codex", invocation)
+        if layout is None:
+            if self.retiring:
+                setup_user("codex", None, invocation, native_root=None, skip_mcp=True)
+            return unavailable_user_artifacts(invocation, retiring=self.retiring)
+        root = layout.root
         plan = (
             ArtifactApplication()
             if self.retiring
@@ -572,10 +572,28 @@ class CodexIntegration(HarnessIntegration):
             )
         )
         validate_user_placement(plan, invocation.home)
-        setup_invocation = (
-            replace(invocation, environment={**invocation.environment, "CODEX_HOME": root}) if root else invocation
+        if not self.retiring and any(
+            item.content.type is not ArtifactType.MCP_SERVER for item in invocation.artifacts.items()
+        ):
+            probe_native(
+                invocation.access,
+                tool="codex",
+                environment=invocation.request_environment(),
+                redactions=invocation.redactions,
+                home=invocation.home,
+                native_root=root,
+                check_policy=False,
+            )
+        mcp_destination, skip_mcp, mcp_deferred = user_mcp_location(layout, invocation, retiring=self.retiring)
+        mcp = setup_user(
+            "codex",
+            config,
+            invocation,
+            native_root=root,
+            mcp_destination=mcp_destination,
+            skip_mcp=skip_mcp,
         )
-        setup_user("codex", config, setup_invocation)
+        mcp = replace(mcp, deferred=(*mcp.deferred, *mcp_deferred))
         if plan.files:
             plan = defer_setup_conflicts(
                 plan,
@@ -586,10 +604,16 @@ class CodexIntegration(HarnessIntegration):
                     environment=invocation.request_environment(),
                     redactions=invocation.redactions,
                     home=invocation.home,
+                    native_root=root,
                     files=files,
                 ),
             )
-        return plan
+        return replace(
+            plan,
+            files=(*plan.files, *mcp.files),
+            deferred=(*plan.deferred, *mcp.deferred),
+            shared_paths=mcp.shared_paths,
+        )
 
     def workspace_init(self, invocation: WorkspaceSetupInvocation) -> ArtifactApplication:
         """Apply project settings and return workspace-owned artifact files."""
@@ -606,7 +630,7 @@ class CodexIntegration(HarnessIntegration):
                 ),
             )
         )
-        setup_workspace("codex", config, invocation)
+        mcp = setup_workspace("codex", config, invocation)
         if plan.files:
             plan = defer_setup_conflicts(
                 plan,
@@ -621,7 +645,12 @@ class CodexIntegration(HarnessIntegration):
                     workspace_only=True,
                 ),
             )
-        return plan
+        return replace(
+            plan,
+            files=(*plan.files, *mcp.files),
+            deferred=(*plan.deferred, *mcp.deferred),
+            shared_paths=mcp.shared_paths,
+        )
 
     @property
     def config(self) -> CodexConfig:
@@ -681,6 +710,15 @@ class CodexIntegration(HarnessIntegration):
                 prepared,
                 extra_args=self._rendered_extra_args,
                 enabled_workarounds=self.config.enabled_workarounds,
+                profile=self.config.profile,
+                mcp_conflicts=lambda inputs, prepared: session_mcp_conflicts(
+                    "codex",
+                    access,
+                    inputs,
+                    home=prepared.home,
+                    environment=prepared.environment,
+                    workspace=self._workspace_path,
+                ),
             ),
             workspace=self._workspace_path,
         )
@@ -716,8 +754,6 @@ class CodexIntegration(HarnessIntegration):
                 self._state.clear()
                 self._state.update(prior_state)
             raise
-        if self._artifact_plan.argv:
-            validate_native_command(command)
         return HarnessStart(command, self._decision_note(intent=intent), self._artifact_plan.application)
 
     def _decision_note(self, *, intent: HarnessLaunchIntent) -> str | None:
@@ -1017,8 +1053,32 @@ class CodexIntegration(HarnessIntegration):
             # recording must not outlive it and re-report a dead id.
             parts.append(f"rm -f {home_word(thread_tail(self._session_name))}")
         parts.append(provision_fragment())
-        parts.append(f"exec codex {self._codex_argv(head, fresh=fresh)}".rstrip())
-        return f"sh -c {shlex.quote('; '.join(parts))}"
+
+        def render() -> str:
+            body = [*parts, f"exec codex {self._codex_argv(head, fresh=fresh)}".rstrip()]
+            return f"sh -c {shlex.quote('; '.join(body))}"
+
+        command = render()
+        if self._artifact_plan.argv:
+            try:
+                validate_native_command(command)
+            except ConfigError:
+                context = self._session_binding.artifact_context
+                if context is None:
+                    raise
+                reduced = defer_session_mcp(
+                    self._artifact_plan,
+                    context.inputs,
+                    "session-mcp-overrides exceeds the complete native command carrier limit",
+                )
+                if reduced is self._artifact_plan:
+                    raise
+                self._artifact_plan = reduced
+                # Rebuild the same selected launch without repeating discovery or adoption.
+                command = render()
+                if self._artifact_plan.argv:
+                    validate_native_command(command)
+        return command
 
     def _resume_command(self, sid: str, *, msg: str, legacy_marker: str | None) -> str:
         """The resume pane command: ``codex resume <sid>`` with

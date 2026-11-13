@@ -8,7 +8,7 @@ import pytest
 
 from agentworks.db import SessionStatus
 from agentworks.env import EnvEntry, PlaintextEnvEntry
-from agentworks.errors import ValidationError
+from agentworks.errors import AgentworksError
 from agentworks.sessions import manager, tmux
 from agentworks.sessions.manager import _env
 
@@ -58,7 +58,7 @@ def test_manager_refuses_composed_reserved_env_before_staging_or_teardown(
     )
     first = len(native.calls)
     try:
-        with pytest.raises(ValidationError):
+        with pytest.raises(AgentworksError):
             invoke(db, operation, **options)
         assert db.get_session("s1") == before
         assert stages == []

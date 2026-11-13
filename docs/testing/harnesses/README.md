@@ -20,6 +20,119 @@ they are living tooling, and are kept working the same way any other part of the
 Each script is self-contained and runnable from the `cli/` directory of an agentworks checkout. The
 CLI drives honor `AGW_CLI_DIR` when it points at another prepared CLI tree.
 
+## `native_resume_fixture.py`: native history and MCP protocol fixture
+
+A standard-library Python loopback server for Claude Messages, Codex Responses and Streamable HTTP
+MCP. It returns a fixed public assistant reply so a native client can create and resume its own
+history without a paid model. It never launches a client, provisions a backend, writes native
+history/config, reads credentials or decides whether Agentworks passed. The pattern has been used in
+separate native print, exec and interactive observations; each managed acceptance run still owns its
+actual version, mode, backend and isolation evidence.
+
+Provision the authorized disposable VM/user first. Run the fixture on the native workload's machine,
+or use an authorized tunnel that gives that workload access to its loopback listener. A workstation
+loopback address alone is not the guest's loopback address. From the checkout's `cli/` directory:
+
+```sh
+umask 077
+python3 ../docs/testing/harnesses/native_resume_fixture.py --port 0 --lifetime 1800
+```
+
+The first JSONL event reports the bound port. The default lifetime is 600 seconds; the maximum
+is 3600. Pick a lifetime covering the bounded case, and stop the fixture when finished. It only
+binds `127.0.0.1`, makes no outbound requests and prints safe observations to stdout. Keep any
+redirected log in the test session's owned private proof directory.
+
+| Endpoint        | Purpose                           | Public test authentication                                                  |
+| --------------- | --------------------------------- | --------------------------------------------------------------------------- |
+| `/v1/messages`  | Claude JSON or Messages SSE reply | `ANTHROPIC_API_KEY=AGW_PUBLIC_RESUME_PROVIDER_KEY`                          |
+| `/v1/responses` | Codex JSON or Responses SSE reply | Custom provider with `requires_openai_auth=false`; no real account required |
+| `/mcp`          | MCP handshake and canary tool     | `Authorization: Bearer AGW_PUBLIC_RESUME_MCP_CANARY`                        |
+
+These constants are public fixture data. The MCP endpoint refuses missing/wrong bindings; provider
+endpoints refuse unexpected supplied credentials. Never supply a real credential. This is a
+controlled test endpoint, without OAuth, real inference or model-directed tool execution. Provider
+`auth_valid` records acceptance of its anonymous/public-key policy; MCP `auth_valid` records the
+exact canary comparison.
+
+Prepare only owned native homes and configuration through the test session's normal authorization.
+Record their baseline and the installed native versions. For Claude, select the fixture origin in
+`ANTHROPIC_BASE_URL` and the public API key above in the actual guest workload environment. Normal
+first-run key confirmation and workspace/project trust remain native UI actions. Do not seed
+approval files or fabricate account state. See the supported
+[Claude gateway configuration](https://code.claude.com/docs/en/llm-gateway-connect).
+
+For Codex, an owned native configuration can select a local Responses provider. Substitute the bound
+`PORT`; the model name is only a protocol-fixture label, not a paid-model request:
+
+```toml
+model = "gpt-5.1"
+model_provider = "agw_resume_fixture"
+cli_auth_credentials_store = "file"
+mcp_oauth_credentials_store = "file"
+
+[analytics]
+enabled = false
+
+[model_providers.agw_resume_fixture]
+name = "Owned resume protocol fixture"
+base_url = "http://127.0.0.1:PORT/v1"
+wire_api = "responses"
+requires_openai_auth = false
+supports_websockets = false
+request_max_retries = 0
+stream_max_retries = 0
+```
+
+Use the actual login-selected native home; keep unrelated settings intact. The
+[Codex custom-provider reference](https://learn.chatgpt.com/docs/config-file/config-advanced)
+describes these native settings. Record the UI/daemon mode used rather than treating one mode as
+evidence for every other mode. Disable unrelated external traffic in the owned test environment; do
+not inherit operator provider credentials or reuse an operator's native home.
+
+Define a normal session-scoped MCP artifact pointing to `http://127.0.0.1:PORT/mcp`, with
+`Authorization: Bearer ${AGW_RESUME_MCP_TOKEN}` and the public token supplied through the workload's
+ordinary declared environment. Select the bundle explicitly on the session template. Use
+`agw resource schema artifact-bundle` and `agw resource schema session-template` for current shapes,
+and `agw artifact show --session NAME` for the original-owner native registration name. Enable the
+appropriate existing session workaround (`session-mcp-config` for Claude or `session-mcp-overrides`
+for Codex); preserve the normal profile/conflict checks.
+
+Drive the real installed `agw` CLI and actual native workload:
+
+1. Record an already-running owned neighbor's process/native identity, run/carrier ownership and
+   relevant shared native MCP tables. Keep that neighbor running throughout the target case.
+2. Create/start the target using its ordinary session template and this exact `initial_prompt`:
+   `AGW_PUBLIC_FRESH_PROMPT: Reply with a short public marker only. Do not call tools.` Complete
+   normal owned native onboarding if needed. Wait for the actual native assistant reply and inspect
+   its native-generated conversation ID/history. An immediately exited workload is not a persistent
+   managed conversation; do not wrap it in a delay.
+3. Run `agw session restart NAME --resume-only`, then submit:
+
+   ```text
+   AGW_PUBLIC_RESUME_PROMPT: Continue the same conversation with a short public marker only. Do not call tools.
+   ```
+
+   Observe the continued native conversation and its reply. Keep the native conversation ID and the
+   new Agentworks managed-run/carrier ownership distinct. Never edit history, rollout, UUID or
+   database records to make resume succeed.
+
+4. Correlate fixture requests with the actual operations and native observations. Provider records
+   measure user fresh/resume markers, a prior assistant reply and the canary tool declaration,
+   including nested namespaces. MCP records measure the authenticated handshake/catalog. Pair these
+   observations with the native ID/history and actual managed runtime; no fixture event supplies an
+   Agentworks acceptance verdict or proves real-model cooperation.
+5. Verify current-run files/claims, retired prior-run files, the unchanged neighbor and shared MCP
+   registrations. Attribute ordinary native onboarding/history changes separately; do not claim
+   whole-file byte identity when native trust preferences changed. Run the separate project-consent
+   and linked-worktree relocation cases too; a session-carrier result does not cover those paths.
+
+Keep original refusals, expired-endpoint outcomes and corrections. After the case, perform ordinary
+managed session/resource cleanup, stop the fixture, independently check its process/listener and
+owned files are gone, and restore/remove only the test session's owned configuration. Credential
+removal and provider grant revocation are not observations supplied by this fixture. The normal
+integration-testing snapshot, budget, gate, review and independent cleanup requirements still apply.
+
 ## `facet_fixture_cli.py`: process-local facet acceptance fixtures
 
 Launches the selected tree's unchanged CLI with two fixed harness integrations registered through

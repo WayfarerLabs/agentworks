@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from agentworks.db import Database, InitStatus, ProvisioningStatus
+from agentworks.db import DesiredRuntimeState as Target
 from agentworks.debian import DebianRelease
 from agentworks.errors import StateError
 
@@ -31,7 +32,7 @@ def test_roundtrip_vm(db: Database) -> None:
     assert vm.memory_gib == 8
     assert vm.disk_gib == 50
     assert vm.platform_metadata == {}
-    assert vm.operator_stopped is False
+    assert vm.desired_runtime_state is Target.RUNNING
     assert vm.debian_release is None
     assert vm.debian_release_observed_at is None
 
@@ -56,14 +57,18 @@ def test_roundtrip_vm(db: Database) -> None:
     assert vm.debian_release is DebianRelease.TRIXIE
     assert vm.debian_release_observed_at is not None
 
-    db.set_operator_stopped("dev-vm", True)
+    db.set_vm_desired_runtime_state(
+        "dev-vm", Target.STOPPED, expected_vm_uuid=next(vm.vm_uuid for vm in db.list_vms() if vm.name == "dev-vm")
+    )
     vm = db.get_vm("dev-vm")
     assert vm is not None
-    assert vm.operator_stopped is True
-    db.set_operator_stopped("dev-vm", False)
+    assert vm.desired_runtime_state is Target.STOPPED
+    db.set_vm_desired_runtime_state(
+        "dev-vm", Target.ON_DEMAND, expected_vm_uuid=next(vm.vm_uuid for vm in db.list_vms() if vm.name == "dev-vm")
+    )
     vm = db.get_vm("dev-vm")
     assert vm is not None
-    assert vm.operator_stopped is False
+    assert vm.desired_runtime_state is Target.ON_DEMAND
 
 
 def test_vm_resources_nullable(db: Database) -> None:

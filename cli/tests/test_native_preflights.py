@@ -12,9 +12,15 @@ import pytest
 from agentworks.capabilities.harness_integration.settings import SettingsMapping, parse_settings, serialize_settings
 from agentworks.errors import ConfigError, ExternalError
 from agentworks.harness_setup.model import NativeClaim
-from agentworks.plugins._harness_native.native import setup_user
 from agentworks.plugins._harness_native.native_config import NativeUserConfig
-from tests.native_setup_fixtures import LocalFixtureTransport, invocation, market_fixture, native_cli, record
+from tests.native_setup_fixtures import (
+    LocalFixtureTransport,
+    invocation,
+    market_fixture,
+    native_cli,
+    record,
+    setup_fixture_user,
+)
 from tests.test_native_convergence import copied_market, git_market
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="local execution of Linux guest setup helpers")
@@ -80,7 +86,7 @@ def test_incomplete_or_differing_git_source_survives_mapping(transport, tool, de
     mapping.write_bytes(serialize_settings({"mapped": True}, format=format))
     incomplete: list[str] = []
     claims: list[tuple[NativeClaim, ...]] = []
-    setup_user(
+    setup_fixture_user(
         tool,
         NativeUserConfig(
             marketplaces=[source, str(independent)],
@@ -125,7 +131,7 @@ def test_claude_missing_user_declaration_blocks_removal_before_dependent_uninsta
         market = market_fixture(transport, "claude")
         source = str(market)
     claims: list[tuple[NativeClaim, ...]] = []
-    setup_user(
+    setup_fixture_user(
         "claude",
         NativeUserConfig(marketplaces=[source], plugins=["one@fixture-market"] if dependent else []),
         invocation(transport, claims),
@@ -146,7 +152,7 @@ def test_claude_missing_user_declaration_blocks_removal_before_dependent_uninsta
         settings=SettingsMapping(source=str(mapping), strategy="replace"),
     )
     incomplete: list[str] = []
-    setup_user(
+    setup_fixture_user(
         "claude",
         config,
         replace(invocation(transport, claims, prior=record(previous, "claude")), report_incomplete=incomplete.append),
@@ -174,7 +180,7 @@ def test_ambiguous_plugin_preserves_claims_and_mapping_while_unique_selection_co
 ):
     market = market_fixture(transport, tool)
     claims: list[tuple[NativeClaim, ...]] = []
-    setup_user(
+    setup_fixture_user(
         tool,
         NativeUserConfig(marketplaces=[str(market)], plugins=["one@fixture-market"]),
         invocation(transport, claims),
@@ -192,7 +198,7 @@ def test_ambiguous_plugin_preserves_claims_and_mapping_while_unique_selection_co
         settings=SettingsMapping(source=str(mapping), strategy="replace"),
     )
     incomplete: list[str] = []
-    setup_user(
+    setup_fixture_user(
         tool,
         config,
         replace(invocation(transport, claims, prior=record(previous, tool)), report_incomplete=incomplete.append),
@@ -205,7 +211,7 @@ def test_ambiguous_plugin_preserves_claims_and_mapping_while_unique_selection_co
         assert {item.identifier for item in cli.plugins(observed)} == {"one@fixture-market", "two@operator-market"}
     qualified = NativeUserConfig(marketplaces=[str(market)], plugins=["one@fixture-market"])
     incomplete.clear()
-    setup_user(
+    setup_fixture_user(
         tool,
         qualified,
         replace(invocation(transport, claims, prior=record(claims[-1], tool)), report_incomplete=incomplete.append),
@@ -214,7 +220,7 @@ def test_ambiguous_plugin_preserves_claims_and_mapping_while_unique_selection_co
     before = (root / ("config.toml" if tool == "codex" else "settings.json")).read_bytes()
     missing = "fixture-missing-selector"
     with pytest.raises(ConfigError) as caught:
-        setup_user(tool, NativeUserConfig(plugins=[missing]), invocation(transport, []))
+        setup_fixture_user(tool, NativeUserConfig(plugins=[missing]), invocation(transport, []))
     assert missing in str(caught.value)
     assert (root / ("config.toml" if tool == "codex" else "settings.json")).read_bytes() == before
 
@@ -225,22 +231,22 @@ def test_malformed_persisted_plugin_source_retains_on_retirement_and_heals_desir
     market = market_fixture(transport, tool)
     config = NativeUserConfig(marketplaces=[str(market)], plugins=["one@fixture-market"])
     claims: list[tuple[NativeClaim, ...]] = []
-    setup_user(tool, config, invocation(transport, claims))
+    setup_fixture_user(tool, config, invocation(transport, claims))
     previous = tuple(
         item.model_copy(update={"source": malformed}) if item.role == "plugin" else item for item in claims[-1]
     )
     incomplete: list[str] = []
     count = len(claims)
-    setup_user(
+    setup_fixture_user(
         tool,
         None,
         replace(invocation(transport, claims, prior=record(previous, tool)), report_incomplete=incomplete.append),
     )
     assert incomplete and len(claims) == count
-    setup_user(tool, config, invocation(transport, claims, prior=record(previous, tool)))
+    setup_fixture_user(tool, config, invocation(transport, claims, prior=record(previous, tool)))
     assert all(item.source != malformed for item in claims[-1])
     assert {item.role for item in claims[-1]} == {"marketplace", "plugin"}
-    setup_user(tool, None, invocation(transport, claims, prior=record(claims[-1], tool)))
+    setup_fixture_user(tool, None, invocation(transport, claims, prior=record(claims[-1], tool)))
     assert claims[-1] == ()
 
 
@@ -249,10 +255,10 @@ def test_ambiguous_selection_retains_both_previously_owned_marketplaces(transpor
     market = market_fixture(transport, tool)
     second = copied_market(market, tool, name="second-market")
     claims: list[tuple[NativeClaim, ...]] = []
-    setup_user(tool, NativeUserConfig(marketplaces=[str(market), str(second)]), invocation(transport, claims))
+    setup_fixture_user(tool, NativeUserConfig(marketplaces=[str(market), str(second)]), invocation(transport, claims))
     previous = claims[-1]
     incomplete: list[str] = []
-    setup_user(
+    setup_fixture_user(
         tool,
         NativeUserConfig(plugins=["one"]),
         replace(invocation(transport, claims, prior=record(previous, tool)), report_incomplete=incomplete.append),
@@ -273,7 +279,7 @@ def test_claude_invalid_named_declaration_holds_unsafe_native_writes_but_not_oth
 ):
     market = market_fixture(transport, "claude")
     claims: list[tuple[NativeClaim, ...]] = []
-    setup_user(
+    setup_fixture_user(
         "claude",
         NativeUserConfig(marketplaces=[str(market)], plugins=["one@fixture-market"]),
         invocation(transport, claims),
@@ -291,7 +297,7 @@ def test_claude_invalid_named_declaration_holds_unsafe_native_writes_but_not_oth
     mapping.write_text('{"mapped": true}')
     incomplete: list[str] = []
     before_checkpoints = len(claims)
-    setup_user(
+    setup_fixture_user(
         "claude",
         NativeUserConfig(
             marketplaces=[str(market), str(independent)],
@@ -303,7 +309,7 @@ def test_claude_invalid_named_declaration_holds_unsafe_native_writes_but_not_oth
     assert incomplete and any("fixture-market" in item for item in incomplete)
     codex_market = market_fixture(transport, "codex")
     codex_claims: list[tuple[NativeClaim, ...]] = []
-    setup_user(
+    setup_fixture_user(
         "codex",
         NativeUserConfig(marketplaces=[str(codex_market)], plugins=["one@fixture-market"]),
         invocation(transport, codex_claims),
@@ -377,7 +383,7 @@ def test_native_operation_failure_identifies_request_without_provider_output_or_
 @pytest.mark.parametrize("declaration", [False, {"source": {"source": "directory", "path": "/missing-unrelated"}}])
 def test_conflicting_foreign_settings_hold_native_rewrites_without_losing_the_entry(transport, declaration):
     market = market_fixture(transport, "claude")
-    setup_user("claude", NativeUserConfig(marketplaces=[str(market)]), invocation(transport, []))
+    setup_fixture_user("claude", NativeUserConfig(marketplaces=[str(market)]), invocation(transport, []))
     destination = transport.home / ".claude/settings.json"
     document = json.loads(destination.read_bytes())
     document["extraKnownMarketplaces"]["fixture-market"] = declaration
@@ -385,7 +391,7 @@ def test_conflicting_foreign_settings_hold_native_rewrites_without_losing_the_en
     independent = copied_market(market, "claude", name="independent")
     claims: list[tuple[NativeClaim, ...]] = []
     incomplete: list[str] = []
-    setup_user(
+    setup_fixture_user(
         "claude",
         NativeUserConfig(marketplaces=[str(independent)], plugins=["two@independent"]),
         replace(invocation(transport, claims), report_incomplete=incomplete.append),

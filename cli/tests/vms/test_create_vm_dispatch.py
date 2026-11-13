@@ -16,6 +16,7 @@ import pytest
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import ProvisionRequest, ProvisionResult, RetainedProvisioningError
 from agentworks.config import load_config
+from agentworks.db import DesiredRuntimeState as Target
 from agentworks.debian import DebianRelease
 from agentworks.errors import (
     AuthorizationError,
@@ -175,7 +176,7 @@ def test_create_vm_request_shape_and_row(
     assert vm.platform_metadata == {"instance_name": "dvm"}
     assert vm.debian_release is DebianRelease.TRIXIE
     assert vm.debian_release_observed_at is not None
-    assert vm.operator_stopped is False
+    assert vm.desired_runtime_state is Target.RUNNING
     assert vm.last_started_at is not None
     assert attested_release == [DebianRelease.TRIXIE]
     assert initialized_release == [DebianRelease.TRIXIE]

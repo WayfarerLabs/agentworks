@@ -82,7 +82,9 @@ def delete_workspace(
 
     from agentworks.harness_setup.locking import native_mutation_guard
 
-    with native_mutation_guard(db.path, ws.vm_name):
+    with native_mutation_guard(
+        db.path, ws.vm_name, held=None if vm_node is None else vm_node.held_native_guard
+    ) as guard:
         # Create SSH logger for VM operations
         import contextlib
 
@@ -113,6 +115,7 @@ def delete_workspace(
                                 vm,
                                 scope=_workspace_scope(db, vm, name),
                                 interaction=interaction,
+                                held_native_guard=guard,
                             )
                         )
                     else:
@@ -141,7 +144,7 @@ def delete_workspace(
                                 entity_kind="workspace",
                                 entity_name=name,
                             )
-                        _keepalive_stack.enter_context(vm_node.hold_active())
+                        _keepalive_stack.enter_context(vm_node.hold_active(held_native_guard=guard))
 
                 if vm is not None and vm.tailscale_host is not None:
                     from agentworks.sessions.manager import (
@@ -180,7 +183,12 @@ def delete_workspace(
                     from agentworks.harness_setup.cleanup import cleanup_workspace_excludes
                     from agentworks.sessions.manager import _identity_access
 
-                    cleanup_workspace_excludes(db, ws, lambda: _identity_access(vm, config, None, logger=ssh_logger))
+                    cleanup_workspace_excludes(
+                        db,
+                        ws,
+                        lambda: _identity_access(vm, config, None, logger=ssh_logger),
+                        redactions=ssh_logger.redactions,
+                    )
                 if vm is not None and target is not None:
                     from agentworks.artifacts.session import cleanup_session_artifacts
                     from agentworks.harness_setup.state import read_native_setup

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from agentworks.db import SYSTEM_SLUG_KEY, VMStatus
+from agentworks.db import SYSTEM_SLUG_KEY, DesiredRuntimeState, VMStatus
 from agentworks.errors import AgentworksError, UserAbort
 
 from ._helpers import _vm_scope
@@ -20,11 +20,14 @@ if TYPE_CHECKING:
     from agentworks.vms.nodes import LiveVMNode
 
 
-def project_vm_status(status: VMStatus, *, operator_stopped: bool) -> tuple[str, str | None]:
+def project_vm_status(status: VMStatus, *, desired_runtime_state: DesiredRuntimeState) -> tuple[str, str | None]:
     """Project provider power state and stored operator intent for display."""
     disposition = None
     if status in (VMStatus.STOPPED, VMStatus.DEALLOCATED):
-        disposition = "manual" if operator_stopped else "idle"
+        if desired_runtime_state is DesiredRuntimeState.STOPPED:
+            disposition = "manual"
+        elif desired_runtime_state is DesiredRuntimeState.ON_DEMAND:
+            disposition = "idle"
     return status.value, disposition
 
 

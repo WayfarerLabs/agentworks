@@ -10,8 +10,10 @@ from pathlib import Path
 
 import pytest
 
+from agentworks.artifacts.application import ArtifactApplication
 from agentworks.artifacts.model import ArtifactType
 from agentworks.artifacts.native.common import MAX_CODEX_PERSONA_BYTES
+from agentworks.artifacts.native.layout import NATIVE_USER_DIRECTORIES
 from agentworks.artifacts.native.probe import _PROBE, _inventory_problems
 from agentworks.package_sources import CaptureLimits
 from tests.artifacts.test_native_delivery import artifact
@@ -58,6 +60,7 @@ def probe(
     workspace.mkdir(exist_ok=True)
     request = {
         "tool": tool,
+        "native_directory": NATIVE_USER_DIRECTORIES[tool],
         "codex_persona_bytes": MAX_CODEX_PERSONA_BYTES,
         "inventory_bytes": inventory_bytes,
         "home": str(home),
@@ -673,7 +676,9 @@ def test_user_setup_preflight_allows_retry_after_interrupted_skill_retirement(
 
     target = LocalFixtureTransport(tmp_path)
     probe(tmp_path, tool="claude", identities=())  # Provision the offline native executable.
-    monkeypatch.setattr("agentworks.plugins.claude.harness_integration.setup_user", lambda *args: None)
+    monkeypatch.setattr(
+        "agentworks.plugins.claude.harness_integration.setup_user", lambda *args, **kwargs: ArtifactApplication()
+    )
     removed = artifact(ArtifactType.SKILL)
     kept = artifact(ArtifactType.SKILL, name="kept")
     kept = replace(

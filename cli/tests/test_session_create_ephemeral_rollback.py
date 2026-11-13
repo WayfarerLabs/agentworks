@@ -17,7 +17,7 @@ from types import SimpleNamespace
 import pytest
 
 from agentworks import output
-from agentworks.db import Database
+from agentworks.db import Database, InitStatus
 from agentworks.errors import ValidationError
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.secrets.resolver import Resolver
@@ -54,10 +54,9 @@ def test_eager_resolve_fires_exactly_once_for_new_workspace_and_new_agent(
     from agentworks.sessions.manager import create_session
 
     db = Database(tmp_path / "test.db")
-    db._conn.execute(
-        "INSERT INTO vms (name, site, hostname, admin_username, tailscale_host, init_status) "
-        "VALUES ('vm1', 'lima', 'h', 'admin', '100.64.0.5', 'complete')"
-    )
+    db.insert_vm("vm1", "lima", "h", admin_username="admin")
+    db.update_vm_tailscale("vm1", "100.64.0.5")
+    db.update_vm_init_status("vm1", InitStatus.COMPLETE)
     db._conn.commit()
     _install_session_prep_stubs(monkeypatch)
 
@@ -132,10 +131,9 @@ def test_session_create_frames_phases_like_a_plan(
     from agentworks.sessions.manager import create_session
 
     db = Database(tmp_path / "test.db")
-    db._conn.execute(
-        "INSERT INTO vms (name, site, hostname, admin_username, tailscale_host, init_status) "
-        "VALUES ('vm1', 'lima', 'h', 'admin', '100.64.0.5', 'complete')"
-    )
+    db.insert_vm("vm1", "lima", "h", admin_username="admin")
+    db.update_vm_tailscale("vm1", "100.64.0.5")
+    db.update_vm_init_status("vm1", InitStatus.COMPLETE)
     db._conn.commit()
     _install_session_prep_stubs(monkeypatch)
 
@@ -214,10 +212,9 @@ def test_realizers_receive_the_same_prepared_setup_after_one_resolve(
     from agentworks.sessions.manager import create_session
 
     db = Database(tmp_path / "test.db")
-    db._conn.execute(
-        "INSERT INTO vms (name, site, hostname, admin_username, tailscale_host, init_status) "
-        "VALUES ('vm1', 'lima', 'h', 'admin', '100.64.0.5', 'complete')"
-    )
+    db.insert_vm("vm1", "lima", "h", admin_username="admin")
+    db.update_vm_tailscale("vm1", "100.64.0.5")
+    db.update_vm_init_status("vm1", InitStatus.COMPLETE)
     db._conn.commit()
     _install_session_prep_stubs(monkeypatch)
 
@@ -299,10 +296,9 @@ def test_failure_after_ephemeral_create_rolls_back_ephemerals(tmp_path: Path, mo
     from agentworks.sessions.manager import create_session
 
     db = Database(tmp_path / "test.db")
-    db._conn.execute(
-        "INSERT INTO vms (name, site, hostname, admin_username, tailscale_host, init_status) "
-        "VALUES ('vm1', 'lima', 'h', 'admin', '100.64.0.5', 'complete')"
-    )
+    db.insert_vm("vm1", "lima", "h", admin_username="admin")
+    db.update_vm_tailscale("vm1", "100.64.0.5")
+    db.update_vm_init_status("vm1", InitStatus.COMPLETE)
     db._conn.commit()
     _install_session_prep_stubs(monkeypatch)
 

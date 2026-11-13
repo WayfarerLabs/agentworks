@@ -194,7 +194,7 @@ def reinit_vm(
         # (inside the live node's site edge) with the manifest hint instead
         # of after git-token prompts. Construction is cheap; the walk union
         # below is the boundary's source, nothing resolves yet.
-        vm_node = live_vm_node(db, config, registry, vm)
+        vm_node = live_vm_node(db, config, registry, vm, held_native_guard=guard)
 
         ensure_effective_references_enabled(
             registry,

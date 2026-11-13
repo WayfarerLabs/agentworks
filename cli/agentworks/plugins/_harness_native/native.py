@@ -7,10 +7,13 @@ and reported without preventing independent entries from converging.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from agentworks import output
+from agentworks.artifacts.application import ArtifactApplication
+from agentworks.artifacts.model import ArtifactInputs
+from agentworks.artifacts.native.mcp import apply_mcp
 from agentworks.capabilities.harness_integration.settings import (
     PreparedSettings,
     SettingsFormat,
@@ -136,8 +139,38 @@ class _MappingPlan:
         that changed since ``current`` was read is ``FileConflict``, and
         nothing is written.
         """
-        if self.skipped:
+        content, _ = self.render(destination, current=current, overlays=overlays, removed=removed, protected=protected)
+        if content is None:
             return
+        try:
+            files.update(
+                destination,
+                content,
+                observed=current,
+                mode=0o600 if group is None else 0o660,
+                parent_mode=0o700 if group is None else 0o2770,
+                group=group,
+            )
+        except FileConflict as conflict:
+            raise FileConflict(
+                conflict.vm_name,
+                "settings publication",
+                destination,
+                hint="Another writer changed the file between setup's read and its write.",
+            ) from None
+
+    def render(
+        self,
+        destination: str,
+        *,
+        current: bytes | None,
+        overlays: tuple[tuple[tuple[str, str], SettingsValue], ...] = (),
+        removed: tuple[tuple[str, str], ...] = (),
+        protected: tuple[tuple[str, str], ...] = (),
+    ) -> tuple[bytes | None, SettingsObject]:
+        """The planned settings over ``current``, and the mapping's policy-winning contributions."""
+        if self.skipped:
+            return current, {}
         # Keep the initial skip decision even when plugin commands create the file.
         result = self.prepared.apply(
             None if self.prepared.strategy == "skip-existing" else current, destination_path=destination
@@ -161,46 +194,46 @@ class _MappingPlan:
         contributions = self.prepared.contributions(current, destination_path=destination)
         retained = tuple((key, name) for key, name in protected if name not in _table(contributions, key))
         _preserve_entries(document, native, retained)
-        content = serialize_settings(document, format=self.prepared.format)
-        try:
-            files.update(
-                destination,
-                content,
-                observed=current,
-                mode=0o600 if group is None else 0o660,
-                parent_mode=0o700 if group is None else 0o2770,
-                group=group,
-            )
-        except FileConflict as conflict:
-            raise FileConflict(
-                conflict.vm_name,
-                "settings publication",
-                destination,
-                hint="Another writer changed the file between setup's read and its write.",
-            ) from None
+        return serialize_settings(document, format=self.prepared.format), contributions
+
+
+def _map_settings(
+    prepared: PreparedSettings, destination: str, current: bytes | None
+) -> tuple[bytes | None, SettingsObject]:
+    """Plan against the same snapshot the MCP entry updater will publish."""
+    return _MappingPlan.build(prepared, current, destination).render(destination, current=current)
 
 
 def setup_workspace(
     tool: NativeTool, config: NativeWorkspaceConfig | None, invocation: WorkspaceSetupInvocation
-) -> None:
+) -> ArtifactApplication:
     """Publish one fixed project role; workspace setup never installs plugins."""
     claims = list(invocation.prior.claims if invocation.prior else ())
     preserved = tuple(claim for claim in claims if claim.role != "settings")
+    if config is None:
+        invocation = replace(invocation, artifacts=ArtifactInputs())
     mapping = None if config is None else config.settings
-    if mapping is None:
-        if len(preserved) != len(claims):
-            output.info("Removed settings mapping; native settings and their current values are retained.")
-            invocation.checkpoint(preserved)
-        return
-    prepared = prepare_settings(mapping, format=_format(tool))
+    prepared = None if mapping is None else prepare_settings(mapping, format=_format(tool))
     root = guest_path(invocation.root) + ("/.claude" if tool == "claude" else "/.codex")
     destination = root + "/" + _filename(tool)
-    files = invocation.files
-    initial = files.read(destination)
-    plan = _MappingPlan.build(prepared, initial, destination)
-    plan.publish(files, destination, current=initial, group=invocation.linux_group)
     if len(preserved) != len(claims):
+        if mapping is None:
+            output.info("Removed settings mapping; native settings and their current values are retained.")
         invocation.checkpoint(preserved)
+    if tool == "claude" and prepared is not None:
+        files = invocation.files
+        initial = files.read(destination)
+        plan = _MappingPlan.build(prepared, initial, destination)
+        plan.publish(files, destination, current=initial, group=invocation.linux_group)
+    return apply_mcp(
+        tool,
+        invocation,
+        destination=guest_path(invocation.root) + "/.mcp.json" if tool == "claude" else destination,
+        claims=preserved,
+        map_document=(lambda current: _map_settings(prepared, destination, current))
+        if tool == "codex" and prepared is not None
+        else None,
+    )
 
 
 def _is_directory(files: Files, path: str) -> bool:
@@ -268,16 +301,23 @@ def _check_contributions(
             raise ConfigError("mapped settings still request a native association removed from explicit setup")
 
 
-def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: UserSetupInvocation) -> None:
+def setup_user(
+    tool: NativeTool,
+    config: NativeUserConfig | None,
+    invocation: UserSetupInvocation,
+    *,
+    native_root: str | None,
+    mcp_destination: str | None = None,
+    skip_mcp: bool = False,
+) -> ArtifactApplication:
     """Reconcile actual-user native associations using confirmed prior claims."""
     mapping = None if config is None else config.settings
+    if config is None:
+        invocation = replace(invocation, artifacts=ArtifactInputs())
     prepared = None if mapping is None else prepare_settings(mapping, format=_format(tool))
     claims = list(invocation.prior.claims if invocation.prior else ())
     preserved = tuple(claim for claim in claims if claim.role not in ("settings", "plugin", "marketplace"))
-    override = "CLAUDE_CONFIG_DIR" if tool == "claude" else "CODEX_HOME"
-    root = guest_path(
-        invocation.environment.get(override) or (invocation.home + ("/.claude" if tool == "claude" else "/.codex"))
-    )
+    root = native_root
     if mapping is None and any(claim.role == "settings" for claim in claims):
         output.info("Removed settings mapping; native settings and their current values are retained.")
     native_claims = [claim for claim in claims if claim.role in ("plugin", "marketplace")]
@@ -289,18 +329,34 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
         if len(roots) != 1:
             raise StateError("native retirement requires one recorded config home; ownership evidence was retained")
         root = roots.pop()
+    if root is None:
+        return ArtifactApplication()
+    root = guest_path(root)
     destination = root + "/" + _filename(tool)
+    if not skip_mcp and mcp_destination is None:
+        raise StateError("native MCP setup requires the selected current config role")
+    joint_mapping = tool == "codex" and mcp_destination == destination and not skip_mcp
     if any(claim.destination != root for claim in native_claims):
         raise StateError("native config home differs from existing ownership claims; clean up the previous home first")
     sources = [] if config is None else config.marketplaces
     requested = [] if config is None else config.plugins
     if not native_claims and not sources and not requested:
-        if prepared is None or mapping is None:
-            return
-        initial = invocation.files.read(destination)
-        settings_plan = _MappingPlan.build(prepared, initial, destination)
-        settings_plan.publish(invocation.files, destination, current=initial)
-        return
+        if prepared is not None and not joint_mapping:
+            initial = invocation.files.read(destination)
+            settings_plan = _MappingPlan.build(prepared, initial, destination)
+            settings_plan.publish(invocation.files, destination, current=initial)
+        if skip_mcp:
+            return ArtifactApplication()
+        assert mcp_destination is not None
+        return apply_mcp(
+            tool,
+            invocation,
+            destination=mcp_destination,
+            claims=(*preserved, *claims),
+            map_document=(lambda current: _map_settings(prepared, destination, current))
+            if joint_mapping and prepared is not None
+            else None,
+        )
     files = invocation.files
     with NativeCLI(tool, invocation, config_root=root) as cli:
         initial = files.read(destination)
@@ -648,7 +704,6 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
         # Confirmed removals take precedence over an earlier inventory snapshot.
         protected.difference_update(removed_keys)
         if plan is not None:
-            current = files.read(destination)
             overlays: tuple[tuple[tuple[str, str], SettingsValue], ...] = tuple(
                 (_native_key(tool, "marketplace", market.name), _market_fields(market))
                 for market in desired
@@ -658,11 +713,35 @@ def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: Us
                 for selector in selectors
                 if selector not in blocked_plugins
             )
-            plan.publish(
-                files,
-                destination,
-                current=current,
-                overlays=overlays,
-                removed=removed_keys,
-                protected=tuple(sorted(protected)),
+            if not joint_mapping:
+                current = files.read(destination)
+                plan.publish(
+                    files,
+                    destination,
+                    current=current,
+                    overlays=overlays,
+                    removed=removed_keys,
+                    protected=tuple(sorted(protected)),
+                )
+        else:
+            overlays = ()
+        if skip_mcp:
+            return ArtifactApplication()
+        assert mcp_destination is not None
+        return apply_mcp(
+            tool,
+            invocation,
+            destination=mcp_destination,
+            claims=(*preserved, *claims),
+            map_document=(
+                lambda current: plan.render(
+                    destination,
+                    current=current,
+                    overlays=overlays,
+                    removed=removed_keys,
+                    protected=tuple(sorted(protected)),
+                )
             )
+            if joint_mapping and plan is not None
+            else None,
+        )

@@ -158,6 +158,10 @@ def test_incomplete_shared_cleanup_warns_and_keeps_parent_deletion_best_effort(
         assert first_claims[0] in observed[0].claims
         if problem == "unreachable":
             assert expected in observed[0].incomplete_reasons
+        assert any(
+            first_claims[0].identifier in warning and first_claims[0].destination in warning
+            for warning in captured_output.warnings
+        )
         if before is not None:
             assert exclude.read_bytes() == before
         assert db.get_workspace("survivor") is not None and second.exists()

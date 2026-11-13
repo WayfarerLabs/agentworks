@@ -71,6 +71,8 @@ MIGRATED_FILES = (
     "artifacts/publication.py",
     "artifacts/session.py",
     "artifacts/native/common.py",
+    "artifacts/native/layout.py",
+    "artifacts/native/mcp.py",
     "harness_setup/dispatch.py",
     "harness_setup/readiness.py",
     "plugins/codex/artifacts.py",

@@ -455,10 +455,8 @@ def test_create_session_rolls_back_on_keyboard_interrupt(tmp_path: Path, monkeyp
     db_path = tmp_path / "test.db"
     db = Database(db_path)
     # Minimal fixture: VM with tailscale_host + workspace.
-    db._conn.execute(
-        "INSERT INTO vms (name, site, hostname, admin_username, tailscale_host) "
-        "VALUES ('vm1', 'lima', 'h', 'admin', '100.64.0.5')"
-    )
+    db.insert_vm("vm1", site="lima", hostname="h", admin_username="admin")
+    db.update_vm_tailscale("vm1", "100.64.0.5")
     db._conn.execute(
         "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "
         "VALUES ('ws1', 'vm1', '/home/me/ws1', 'ws-ws1')"
@@ -528,10 +526,8 @@ def test_create_session_releases_group_membership_on_keyboard_interrupt(
     from agentworks.sessions import tmux as tmux_mod
 
     db = Database(tmp_path / "test.db")
-    db._conn.execute(
-        "INSERT INTO vms (name, site, hostname, admin_username, tailscale_host) "
-        "VALUES ('vm1', 'lima', 'h', 'admin', '100.64.0.5')"
-    )
+    db.insert_vm("vm1", site="lima", hostname="h", admin_username="admin")
+    db.update_vm_tailscale("vm1", "100.64.0.5")
     db._conn.execute(
         "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "
         "VALUES ('ws1', 'vm1', '/home/me/ws1', 'ws-ws1')"
@@ -608,10 +604,8 @@ def test_create_session_rollback_failure_does_not_mask_keyboard_interrupt(
     from agentworks.sessions import tmux as tmux_mod
 
     db = Database(tmp_path / "test.db")
-    db._conn.execute(
-        "INSERT INTO vms (name, site, hostname, admin_username, tailscale_host) "
-        "VALUES ('vm1', 'lima', 'h', 'admin', '100.64.0.5')"
-    )
+    db.insert_vm("vm1", site="lima", hostname="h", admin_username="admin")
+    db.update_vm_tailscale("vm1", "100.64.0.5")
     db._conn.execute(
         "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "
         "VALUES ('ws1', 'vm1', '/home/me/ws1', 'ws-ws1')"
@@ -695,10 +689,8 @@ def test_create_session_surfaces_dead_workload_output_through_rollback(
     from agentworks.sessions import tmux as tmux_mod
 
     db = Database(tmp_path / "test.db")
-    db._conn.execute(
-        "INSERT INTO vms (name, site, hostname, admin_username, tailscale_host) "
-        "VALUES ('vm1', 'lima', 'h', 'admin', '100.64.0.5')"
-    )
+    db.insert_vm("vm1", site="lima", hostname="h", admin_username="admin")
+    db.update_vm_tailscale("vm1", "100.64.0.5")
     db._conn.execute(
         "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "
         "VALUES ('ws1', 'vm1', '/home/me/ws1', 'ws-ws1')"

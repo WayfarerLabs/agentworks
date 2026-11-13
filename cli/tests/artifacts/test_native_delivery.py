@@ -26,6 +26,7 @@ from agentworks.artifacts.model import (
     ArtifactType,
 )
 from agentworks.artifacts.native.common import NativeSessionArtifacts, native_home, validate_ancestor_names
+from agentworks.artifacts.native.layout import NativeUserLayout
 from agentworks.artifacts.native.probe import NativeArtifactConflictError, probe_native
 from agentworks.artifacts.native.shell import filesystem_artifacts
 from agentworks.artifacts.publication import validate_application
@@ -68,9 +69,14 @@ def artifact(
             type,
             name,
             description="Review changes",
-            text="before ${agw:session_name} after\n",
+            text="" if type is ArtifactType.MCP_SERVER else "before ${agw:session_name} after\n",
             members=members,
-            native_options_json=json.dumps(options or {}),
+            metadata_json=json.dumps(
+                {"type": "stdio", "command": "fixture-server", "args": [], "env": {}, "description": "Review changes"}
+                if type is ArtifactType.MCP_SERVER
+                else {}
+            ),
+            native_options_json=json.dumps({} if type is ArtifactType.MCP_SERVER else options or {}),
         ),
         ArtifactProvenance(),
         ArtifactOrigin("session", "session", owner, bundle="team", entry=name),
@@ -159,7 +165,10 @@ def test_session_artifact_directory_is_bound_to_the_prepared_run():
 
 
 def test_codex_outer_installs_guidance_skills_and_standard_skills_and_personas():
-    items = tuple(artifact(type, name=type.value) for type in ArtifactType)
+    items = tuple(
+        artifact(type, name=type.value)
+        for type in (ArtifactType.HINT, ArtifactType.RULE, ArtifactType.SKILL, ArtifactType.AGENT)
+    )
     result = codex.outer_artifacts(
         received(*items), skills_root="/home/a/.agents/skills", agents_root="/home/a/.codex/agents"
     )
@@ -493,9 +502,12 @@ def test_user_native_home_boundary_precedes_other_setup(db, monkeypatch, impleme
     plugin = import_module(module)
     setup_calls = []
     if hasattr(plugin, "setup_user"):
-        monkeypatch.setattr(plugin, "setup_user", lambda *args: setup_calls.append(args))
+        monkeypatch.setattr(
+            plugin, "setup_user", lambda *args, **kwargs: setup_calls.append(args) or ArtifactApplication()
+        )
     root = "/mnt/native" if outside_home else "/home/alice/custom-native"
     monkeypatch.setattr(plugin, "probe_native", lambda *args, **kwargs: root)
+    monkeypatch.setattr(plugin, "user_layout", lambda *args, **kwargs: NativeUserLayout(root, root + "/config.toml"))
     integration = implementation.for_setup(owner_kind="agent", owner_name="alice", facet="user", config={})
     invocation = UserSetupInvocation(
         vm=db.insert_vm("vm", "lima", "vm"),
@@ -521,8 +533,11 @@ def test_codex_external_home_does_not_block_home_owned_skills(db, monkeypatch):
     from agentworks.capabilities.harness_integration.setup import UserSetupInvocation
     from agentworks.plugins.codex import harness_integration as plugin
 
-    monkeypatch.setattr(plugin, "setup_user", lambda *args: None)
+    monkeypatch.setattr(plugin, "setup_user", lambda *args, **kwargs: ArtifactApplication())
     monkeypatch.setattr(plugin, "probe_native", lambda *args, **kwargs: "/mnt/native")
+    monkeypatch.setattr(
+        plugin, "user_layout", lambda *args, **kwargs: NativeUserLayout("/mnt/native", "/mnt/native/config.toml")
+    )
     integration = CodexIntegration.for_setup(owner_kind="agent", owner_name="alice", facet="user", config={})
     result = integration.user_init(
         UserSetupInvocation(
@@ -561,7 +576,7 @@ def test_shell_index_preserves_declared_key_order_with_fixed_type_order():
     application = filesystem_artifacts(inputs, "/private", session=True)
     index = json.loads(next(file.data for file in application.files if file.path.endswith("/index.json")))
     owner = index["groups"][0]
-    assert list(owner) == ["owner", "hints", "rules", "skills", "agents"]
+    assert list(owner) == ["owner", "hints", "rules", "skills", "agents", "mcp_servers"]
     assert list(owner["hints"]) == list(owner["rules"]) == ["zebra", "alpha"]
 
 
@@ -853,6 +868,9 @@ def test_setup_native_name_conflict_defers_only_affected_artifact(implementation
         return module_root
 
     monkeypatch.setattr(module, "probe_native", check)
+    monkeypatch.setattr(
+        module, "user_layout", lambda *args, **kwargs: NativeUserLayout(module_root, module_root + "/config.toml")
+    )
     bad = artifact(ArtifactType.SKILL)
     good = artifact(ArtifactType.RULE)
     incomplete: list[str] = []

@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 import agentworks.sessions.manager as _mgr
 from agentworks import output
 from agentworks.db import PID_STOPPED, SessionMode, SessionRuntimeSnapshot
-from agentworks.errors import BrokenStateError, ConnectivityError, ExternalError, StateError
+from agentworks.errors import BrokenStateError, ConnectivityError, ExternalError, StateError, UserAbort
 from agentworks.sessions.tmux import ADMIN_SOCKET_ROOT, AGENT_SOCKET_ROOT, ProbeStatus
 
 if TYPE_CHECKING:
@@ -549,8 +549,13 @@ def execute_concurrent_dedicated_teardowns(
     plans: Sequence[DedicatedTeardownPlan],
     *,
     db: Database,
+    on_outcome: Callable[[DedicatedTeardownPlan, str | None], None] | None = None,
 ) -> list[tuple[str, str]]:
-    """Execute complete dedicated plans concurrently and reconcile serially."""
+    """Execute remotely, then persist and notify each outcome on the caller thread.
+
+    The observer receives None after stopped persistence, otherwise a failure reason.
+    Interrupted notifications retry the same receipt and must be idempotent.
+    """
     if not plans:
         return []
     validate_concurrent_dedicated_teardown_plans(plans)
@@ -558,6 +563,7 @@ def execute_concurrent_dedicated_teardowns(
     gate = _SubmissionGate()
     failures: list[tuple[str, str]] = []
     pending: set[Future[None]] = set()
+    outcomes: dict[Future[None], str | None] = {}
     primary_error: BaseException | None = None
     executor = ThreadPoolExecutor(max_workers=min(DEDICATED_TEARDOWN_MAX_WORKERS, len(plans)))
     future_plans: dict[Future[None], DedicatedTeardownPlan] = {}
@@ -593,42 +599,77 @@ def execute_concurrent_dedicated_teardowns(
                     pending.remove(future)
                     continue
                 plan = future_plans[future]
-                try:
-                    future.result()
-                except Exception as exc:
-                    failures.append((plan.session_name, str(exc)))
-                    pending.remove(future)
-                    output.warn(f"Session '{plan.session_name}' failed to stop: {exc}")
-                    continue
-                except BaseException as exc:
-                    if primary_error is None:
-                        primary_error = exc
-                    pending.remove(future)
-                    output.warn(f"Session '{plan.session_name}' teardown aborted: {exc}")
-                    _enter_reconciliation(tuple(pending), exc)
-                    continue
+                if future not in outcomes:
+                    # Stored worker exceptions are data; caller interruption leaves
+                    # successful work pending for reconciliation.
+                    worker_error = future.exception()
+                    if worker_error is not None:
+                        if isinstance(worker_error, Exception) and not isinstance(worker_error, UserAbort):
+                            outcomes[future] = str(worker_error)
+                            failures.append((plan.session_name, str(worker_error)))
+                            output.warn(f"Session '{plan.session_name}' failed to stop: {worker_error}")
+                        else:
+                            pending.remove(future)
+                            if primary_error is None:
+                                primary_error = worker_error
+                            output.warn(f"Session '{plan.session_name}' teardown aborted: {worker_error}")
+                            _enter_reconciliation(tuple(pending), worker_error)
+                            continue
+                    else:
+                        try:
+                            reconcile_dedicated_teardown(db, plan)
+                        except (UserAbort, KeyboardInterrupt) as exc:
+                            if primary_error is None:
+                                primary_error = exc
+                            _enter_reconciliation(tuple(pending), exc)
+                            break
+                        except Exception as exc:
+                            outcomes[future] = str(exc)
+                            failures.append((plan.session_name, str(exc)))
+                            output.warn(f"Session '{plan.session_name}' failed to persist stopped state: {exc}")
+                        except BaseException as exc:
+                            if primary_error is None:
+                                primary_error = exc
+                            pending.remove(future)
+                            output.warn(f"Session '{plan.session_name}' teardown completion aborted: {exc}")
+                            _enter_reconciliation(tuple(pending), exc)
+                            continue
+                        else:
+                            outcomes[future] = None
 
+                # Keep the established receipt through notification interruption.
+                # Retrying it must never reclassify a failed CAS or rerun native work.
+                failure_reason = outcomes[future]
                 try:
-                    reconcile_dedicated_teardown(db, plan)
-                except Exception as exc:
-                    failures.append((plan.session_name, str(exc)))
-                    pending.remove(future)
-                    output.warn(f"Session '{plan.session_name}' failed to persist stopped state: {exc}")
-                    continue
-                except KeyboardInterrupt as exc:
+                    if on_outcome is not None:
+                        on_outcome(plan, failure_reason)
+                except (UserAbort, KeyboardInterrupt) as exc:
                     if primary_error is None:
                         primary_error = exc
                     _enter_reconciliation(tuple(pending), exc)
                     break
+                except Exception as exc:
+                    if failure_reason is None:
+                        outcomes[future] = str(exc)
+                        failures.append((plan.session_name, str(exc)))
+                        output.warn(f"Session '{plan.session_name}' failed to record completed teardown: {exc}")
+                        continue
+                    if primary_error is None:
+                        primary_error = exc
+                    pending.remove(future)
+                    output.warn(f"Session '{plan.session_name}' failed to record teardown failure: {exc}")
+                    _enter_reconciliation(tuple(pending), exc)
+                    continue
                 except BaseException as exc:
                     if primary_error is None:
                         primary_error = exc
                     pending.remove(future)
-                    output.warn(f"Session '{plan.session_name}' stopped-state persistence aborted: {exc}")
+                    output.warn(f"Session '{plan.session_name}' teardown notification aborted: {exc}")
                     _enter_reconciliation(tuple(pending), exc)
                     continue
                 pending.remove(future)
-                output.info(f"Session '{plan.session_name}' stopped")
+                if failure_reason is None:
+                    output.info(f"Session '{plan.session_name}' stopped")
         except BaseException as exc:
             if primary_error is None:
                 primary_error = exc

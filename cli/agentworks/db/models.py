@@ -5,12 +5,18 @@ TypedDict, and the small constants owned by these types.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import TYPE_CHECKING, TypedDict
+from enum import Enum, StrEnum
+from typing import TYPE_CHECKING, Literal, TypedDict, overload
 from uuid import UUID, uuid4
 
 if TYPE_CHECKING:
     from agentworks.debian import DebianRelease
+
+
+class DesiredRuntimeState(StrEnum):
+    RUNNING = "running"
+    STOPPED = "stopped"
+    ON_DEMAND = "on-demand"
 
 
 class ProvisioningStatus(Enum):
@@ -116,9 +122,8 @@ class VMRow:
     # platform is the only reader (azure resource_id, wsl2 distro_name,
     # proxmox vmid/node, lima instance_name).
     platform_metadata: dict[str, str] = field(default_factory=dict)
-    # Operator intent flag: the operator explicitly stopped this VM, so
-    # the activation gate's auto-start must not restart it.
-    operator_stopped: bool = False
+    desired_runtime_state: DesiredRuntimeState = DesiredRuntimeState.RUNNING
+    vm_uuid: str = field(default_factory=lambda: str(uuid4()))
     # The most recent successful provider create/start observed by Agentworks.
     # NULL is retained for rows created before the observation existed.
     last_started_at: str | None = None
@@ -197,6 +202,7 @@ class SessionRow:
     session_uuid: str = field(default_factory=lambda: str(uuid4()))
     # Prospective managed launch identity; legacy rows have no recorded run.
     run_id: str | None = None
+    desired_runtime_state: DesiredRuntimeState | None = DesiredRuntimeState.RUNNING
 
 
 @dataclass(frozen=True)
@@ -241,6 +247,8 @@ class ConsoleRow:
     # The most recent successful canonical tmux publication observed by Agentworks.
     last_started_at: str | None = None
 
+    desired_runtime_state: DesiredRuntimeState | None = DesiredRuntimeState.RUNNING
+
 
 @dataclass
 class ConsoleSessionRow:
@@ -256,3 +264,38 @@ def _canonical_session_identity(value: str) -> str:
         return str(UUID(value))
     except (ValueError, TypeError, AttributeError):
         raise ValueError("session identities must be UUID strings") from None
+
+
+@overload
+def _runtime_state(value: object, kind: str, *, nullable: Literal[False] = False) -> DesiredRuntimeState: ...
+
+
+@overload
+def _runtime_state(value: object, kind: str, *, nullable: Literal[True]) -> DesiredRuntimeState | None: ...
+
+
+def _runtime_state(value: object, kind: str, *, nullable: bool = False) -> DesiredRuntimeState | None:
+    """Validate target values crossing database input or persisted-row boundaries."""
+    from agentworks.errors import StateError
+
+    if value is None and nullable:
+        return None
+    if not isinstance(value, str):
+        raise StateError("desired runtime state is invalid", entity_kind=kind)
+    try:
+        target = DesiredRuntimeState(value)
+    except (ValueError, TypeError):
+        raise StateError("desired runtime state is invalid", entity_kind=kind) from None
+    if kind != "vm" and target is DesiredRuntimeState.ON_DEMAND:
+        raise StateError("desired runtime state is invalid for this resource kind", entity_kind=kind)
+    return target
+
+
+def _canonical_vm_identity(value: str) -> str:
+    """Validate VM identity crossing database input or persisted-row boundaries."""
+    from agentworks.errors import StateError
+
+    try:
+        return str(UUID(value))
+    except (ValueError, TypeError, AttributeError):
+        raise StateError("VM identity is malformed", entity_kind="vm") from None

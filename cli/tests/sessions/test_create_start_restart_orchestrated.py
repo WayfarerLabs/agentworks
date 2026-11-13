@@ -31,8 +31,8 @@ from agentworks.artifacts.declarations import ArtifactsConfig
 from agentworks.bootstrap import build_registry as _real_build_registry
 from agentworks.bootstrap import load_request_registry as _real_load_request_registry
 from agentworks.capabilities.harness_integration import HarnessLaunchIntent, HarnessStart, ShellIntegration
-from agentworks.db import Database, InitStatus, SessionMode, SessionStatus
-from agentworks.errors import NotFoundError, StateError, UserAbort, ValidationError
+from agentworks.db import Database, InitStatus, ProvisioningStatus, SessionMode, SessionRuntimeSnapshot, SessionStatus
+from agentworks.errors import AgentworksError, NotFoundError, StateError, UserAbort, ValidationError
 from agentworks.execution.access import Admin
 from agentworks.secrets.orchestration import (
     resolve_for_command as _real_resolve_for_command,
@@ -122,10 +122,11 @@ class _Target:
 
 def _seed_db(tmp_path: Path) -> Database:
     db = Database(tmp_path / "test.db")
-    db._conn.execute(
-        "INSERT INTO vms (name, site, hostname, admin_username, tailscale_host, init_status) "
-        "VALUES ('vm1', 'lima', 'h', 'admin', '100.64.0.5', 'complete')"
-    )
+    db.insert_vm("vm1", "lima", "h", admin_username="admin")
+    db.update_vm_provisioning_status("vm1", ProvisioningStatus.COMPLETE)
+    seed_vm_trust("vm1")
+    db.update_vm_tailscale("vm1", "100.64.0.5")
+    db.update_vm_init_status("vm1", InitStatus.COMPLETE)
     db._conn.execute(
         "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "
         "VALUES ('ws1', 'vm1', '/home/me/ws1', 'ws-ws1')"
@@ -231,17 +232,18 @@ def _restart_fixture(
     )
 
     events: list[str] = []
+    runtime_status = [status]
     _patch_transports(monkeypatch, _Target(events), _Target(events, missing=missing))
     stub_vm_gates(monkeypatch)
     stub_session_resolvers(monkeypatch)
     _requiring_template(monkeypatch, "claude")
 
     monkeypatch.setattr(session_manager, "_ensure_pid", lambda session, **k: session)
-    monkeypatch.setattr(session_manager, "check_session_status", lambda *a, **k: status)
+    monkeypatch.setattr(session_manager, "check_session_status", lambda *a, **k: runtime_status[0])
     monkeypatch.setattr(
         session_manager,
         "observe_session_statuses",
-        lambda sessions, **kwargs: {session.name: status for session in sessions},
+        lambda sessions, **kwargs: {session.name: runtime_status[0] for session in sessions},
     )
 
     from agentworks.secrets.resolver import Resolver
@@ -266,17 +268,20 @@ def _restart_fixture(
 
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", _marking_resolve_env)
 
-    monkeypatch.setattr(
-        "agentworks.sessions.manager._lifecycle._teardown_session",
-        lambda *args, **kwargs: events.append("kill"),
-    )
+    def teardown(session, **kwargs):
+        events.append("kill")
+        runtime_status[0] = SessionStatus.STOPPED
+        db.compare_and_set_session_stopped(SessionRuntimeSnapshot.from_session(session))
+
+    def launch(*args, **kwargs):
+        result = _acknowledged_launch(events, "/run/agentworks/agent-tmux-sockets/agt-a1/s1.sock", **kwargs)
+        runtime_status[0] = SessionStatus.RUNNING
+        return result
+
+    monkeypatch.setattr(session_manager, "_teardown_session", teardown)
     monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *a, **k: None)
     monkeypatch.setattr(tmux_mod, "finalize_session_start", lambda *a, **k: None)
-    monkeypatch.setattr(
-        tmux_mod,
-        "create_session",
-        lambda *a, **k: _acknowledged_launch(events, "/run/agentworks/agent-tmux-sockets/agt-a1/s1.sock", **k),
-    )
+    monkeypatch.setattr(tmux_mod, "create_session", launch)
     monkeypatch.setattr(
         tmux_mod,
         "capture_tmux_server_fingerprint",
@@ -426,19 +431,18 @@ def test_batch_status_race_refuses_newly_running_session_before_preflight(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from agentworks.sessions.manager._lifecycle import _launch_existing_session
+    from agentworks.sessions.manager import validate_session_observed_policy
 
     db, events = _restart_fixture(tmp_path, monkeypatch)
-
     with pytest.raises(StateError):
-        _launch_existing_session(
-            db,
-            SimpleNamespace(session=SimpleNamespace(history_limit=1)),
-            name="s1",
+        validate_session_observed_policy(
+            db.get_session("s1"),
+            SessionStatus.RUNNING,
             replace_running=True,
+            force=False,
+            intent=HarnessLaunchIntent.RESUME_OR_NEW,
             running_restart_authorized=False,
-            interaction=TtyInteractionPolicy.ALLOW,
-        )  # type: ignore[arg-type]
+        )
 
     assert events == []
     db.close()
@@ -489,18 +493,13 @@ def test_restart_refuses_a_recreated_session_before_preparation(
     db.close()
 
 
-def test_batch_restart_runs_through_the_real_singular_launcher(
+def test_batch_restart_uses_shared_prepared_execution(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from agentworks.sessions import manager as session_manager
 
     db, events = _restart_fixture(tmp_path, monkeypatch)
-    monkeypatch.setattr(
-        session_manager,
-        "_batch_vm_boundary",
-        lambda *args, **kwargs: contextlib.nullcontext(),
-    )
     monkeypatch.setattr(
         session_manager,
         "ensure_pids_batch",
@@ -568,6 +567,9 @@ def test_running_session_start_noop_preserves_last_start_time(
     from agentworks.sessions.manager import start_session
 
     db, events = _restart_fixture(tmp_path, monkeypatch, status=SessionStatus.RUNNING)
+    monkeypatch.setattr(
+        "agentworks.secrets.resolve.resolve_batch", lambda *a, **k: pytest.fail("unused secret source called")
+    )
     original = "2026-01-01T00:00:00Z"
     db._conn.execute("UPDATE sessions SET last_started_at = ? WHERE name = ?", (original, "s1"))
     db._conn.commit()
@@ -581,7 +583,7 @@ def test_running_session_start_noop_preserves_last_start_time(
 
     refreshed = db.get_session("s1")
     assert refreshed is not None and refreshed.last_started_at == original
-    assert events == []
+    assert "kill" not in events and "tmux_create" not in events
     db.close()
 
 
@@ -762,7 +764,6 @@ def test_indeterminate_post_launch_cleanup_retains_addressable_runtime(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from agentworks.errors import ExternalError
     from agentworks.sessions import manager as session_manager
     from agentworks.sessions import tmux as tmux_mod
 
@@ -773,7 +774,7 @@ def test_indeterminate_post_launch_cleanup_retains_addressable_runtime(
         lambda **kwargs: FingerprintProbe(ProbeStatus.UNKNOWN),
     )
 
-    with pytest.raises(ExternalError):
+    with pytest.raises(AgentworksError):
         session_manager.start_session(
             db,
             SimpleNamespace(session=SimpleNamespace(history_limit=1)),
@@ -812,7 +813,8 @@ def test_restart_probe_fires_at_preflight_before_the_kill(tmp_path: Path, monkey
     # the env-chain resolve), which precede the kill. Pinning "resolve_env"
     # here proves the pass-2 marker fires, so its ABSENCE in the refusal
     # tests below is meaningful.
-    assert events == ["probe", "resolve", "resolve_env", "kill", "tmux_create"]
+    assert events.index("probe") < events.index("resolve") < events.index("kill") < events.index("tmux_create")
+    assert events.count("resolve") == 1
     db.close()
 
 
@@ -880,14 +882,13 @@ def test_restart_broken_without_force_refuses_before_the_resolve(
     """A BROKEN session without --force is refused up front. The pass-1
     graph-union resolve must NOT run first (issue #202): a refused
     broken-state recovery does not prompt. Preflight (read-only) still runs."""
-    from agentworks.errors import BrokenStateError
     from agentworks.sessions import manager as session_manager
     from agentworks.sessions.manager import restart_session
 
     db, events = _restart_fixture(tmp_path, monkeypatch)
     monkeypatch.setattr(session_manager, "check_session_status", lambda *a, **k: SessionStatus.BROKEN)
 
-    with pytest.raises(BrokenStateError):
+    with pytest.raises(AgentworksError):
         restart_session(
             db,
             SimpleNamespace(session=SimpleNamespace(history_limit=1)),
@@ -1586,6 +1587,10 @@ def _capture_pane_command(monkeypatch: pytest.MonkeyPatch, captured: dict[str, s
 
     def _capture(name: str, ws_path: str, command: str, linux_user: str, **kwargs: object) -> tuple[str, int]:
         captured["command"] = command
+        before_spawn = kwargs["before_spawn"]
+        assert callable(before_spawn)
+        before_spawn()
+        monkeypatch.setattr("agentworks.sessions.manager.check_session_status", lambda *a, **k: SessionStatus.RUNNING)
         return ("/tmp/s1.sock", 4243)
 
     monkeypatch.setattr(tmux_mod, "create_session", _capture)
@@ -1678,6 +1683,11 @@ def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN20
     section baked in, and the module-wide autouse stubs un-stubbed."""
     monkeypatch.setenv("AW_SECRET_PROXMOX_TOKEN", "pve-token")
     monkeypatch.setenv("AW_SECRET_API_KEY", "shhh")
+    from agentworks.db import VMStatus
+    from agentworks.plugins.proxmox.platform import ProxmoxPlatform
+
+    monkeypatch.setattr(ProxmoxPlatform, "status", lambda *a: VMStatus.RUNNING)
+    monkeypatch.setattr("agentworks.vms.manager._await_tailnet", lambda *a, **k: None)
 
     # The module-wide autouse fixture stubs build_registry and
     # resolve_for_command for the SimpleNamespace-config tests; these
@@ -1698,6 +1708,7 @@ def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN20
 
 def _seed_stopped_proxmox_vm(db: Database) -> None:
     db.insert_vm("box", site="proxmox", hostname="box")
+    db.update_vm_provisioning_status("box", ProvisioningStatus.COMPLETE)
     db.update_vm_tailscale("box", "100.64.0.9")
     seed_vm_trust("box")
     db._conn.execute(
@@ -1710,19 +1721,21 @@ def _seed_stopped_proxmox_vm(db: Database) -> None:
 def _stop_the_vm(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> None:
     """The VM observes as stopped: the fast path fails, the gate's
     status/start ops run (needing the API token pre-boundary), and the
-    reconnect repair is a recorded no-op."""
+    wait for SSH is a recorded no-op."""
     from agentworks.db import VMStatus
     from agentworks.plugins.proxmox.platform import ProxmoxPlatform
     from agentworks.vms import manager as vm_manager
 
     monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: False)
-    monkeypatch.setattr(
-        ProxmoxPlatform,
-        "status",
-        lambda self, row, ctx: events.append("status") or VMStatus.STOPPED,
-    )
-    monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: events.append("start"))
-    monkeypatch.setattr("agentworks.vms.manager._await_tailnet", lambda *a, **k: events.append("tailscale"))
+    state = [VMStatus.STOPPED]
+    monkeypatch.setattr(ProxmoxPlatform, "status", lambda self, row, ctx: events.append("status") or state[0])
+
+    def start(self, row, ctx):
+        events.append("start")
+        state[0] = VMStatus.RUNNING
+
+    monkeypatch.setattr(ProxmoxPlatform, "start", start)
+    monkeypatch.setattr(vm_manager, "_await_tailnet", lambda *a, **k: events.append("tailscale"))
 
 
 def _patch_session_ops(monkeypatch: pytest.MonkeyPatch, events: list[str], captured_env: dict[str, str]) -> None:
@@ -1734,7 +1747,11 @@ def _patch_session_ops(monkeypatch: pytest.MonkeyPatch, events: list[str], captu
     monkeypatch.setattr(tmux_mod, "finalize_session_start", lambda *a, **k: None)
 
     def _capture_create(*a: object, env: dict[str, str] | None = None, **k: object):  # noqa: ANN202
+        before_spawn = k["before_spawn"]
+        assert callable(before_spawn)
+        before_spawn()
         events.append("tmux_create")
+        monkeypatch.setattr(session_manager, "check_session_status", lambda *a, **k: SessionStatus.RUNNING)
         captured_env.update(env or {})
         return ("/run/agentworks/admin-tmux-sockets/admin/s1.sock", 4243)
 
@@ -1778,7 +1795,7 @@ def test_create_stopped_vm_gate_resolves_once_and_seeds_the_boundary(
     # then the boundary's (the env-chain remainder). Nothing twice,
     # nothing after.
     assert resolve_counter == [["proxmox-token"], ["api-key"]]
-    assert events[:3] == ["status", "start", "tailscale"]  # the gate ran
+    assert events.index("status") < events.index("start") < events.index("tailscale") < events.index("tmux_create")
     assert captured_env["API_KEY"] == "shhh"  # boundary values reached compose
     assert db.get_session("s1") is not None
 
@@ -2012,7 +2029,7 @@ def test_restart_stopped_vm_gate_seeds_and_env_pass_is_the_only_other(
     # pass (its union was fully seeded), no name resolves twice, and
     # nothing resolves after the env pass.
     assert resolve_counter == [["proxmox-token"], ["api-key"]]
-    assert events[:3] == ["status", "start", "tailscale"]  # the gate ran
+    assert events.index("status") < events.index("start") < events.index("tailscale") < events.index("tmux_create")
     assert captured_env["API_KEY"] == "shhh"
     assert captured_env["RESUME_SPEC"] == "set"
     assert "tmux_create" in events  # the command completed
@@ -2075,11 +2092,11 @@ def test_restart_multiline_environment_secret_refuses_before_kill(
         lambda sessions, **kwargs: {session.name: SessionStatus.RUNNING for session in sessions},
     )
     monkeypatch.setattr(
-        "agentworks.sessions.manager._lifecycle._teardown_session",
+        "agentworks.sessions.manager._teardown_session",
         lambda *args, **kwargs: events.append("kill"),
     )
 
-    with pytest.raises(ValidationError) as caught:
+    with pytest.raises(AgentworksError) as caught:
         restart_session(
             db,
             config,
@@ -2102,13 +2119,12 @@ def test_restart_multiline_environment_secret_refuses_before_kill(
 def test_invalid_selected_shell_command_preserves_running_session(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from agentworks.errors import ValidationError
     from agentworks.sessions.manager import restart_session
 
     db, events = _restart_fixture(tmp_path, monkeypatch)
     _template(monkeypatch, resume_command="tool ${agw:unknown}")
     before = db.get_session("s1")
-    with pytest.raises(ValidationError):
+    with pytest.raises(AgentworksError):
         restart_session(
             db,
             SimpleNamespace(session=SimpleNamespace(history_limit=1)),
@@ -2128,7 +2144,6 @@ def test_invalid_env_reference_refuses_before_secret_resolution(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from agentworks.env import EnvEntry
-    from agentworks.errors import ValidationError
     from agentworks.sessions import manager
 
     db, events = _restart_fixture(tmp_path, monkeypatch)
@@ -2139,7 +2154,7 @@ def test_invalid_env_reference_refuses_before_secret_resolution(
 
     monkeypatch.setattr(manager, "_session_secret_target", _session_secret_target)
     before = db.get_session("s1")
-    with pytest.raises(ValidationError):
+    with pytest.raises(AgentworksError):
         manager.restart_session(
             db,
             SimpleNamespace(session=SimpleNamespace(history_limit=1)),

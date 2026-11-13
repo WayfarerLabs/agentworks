@@ -151,13 +151,6 @@ def _admin_only_secret_target(
     admin login shell with vm + admin scope. Workspace and session
     contexts don't apply (the admin shell isn't tied to either).
 
-    Note: today ``_build_console_tmux`` creates the admin-shell window
-    via ``tmux new-session -d ... 'exec $SHELL -l'`` with no SetEnv /
-    ``tmux new-session -e`` flags, so the resolved env doesn't yet
-    reach the admin shell. The eager-resolve here still produces the
-    right operator-facing UX (prompt up front, before any tmux work);
-    the admin-shell env-injection wiring consumes the same values dict
-    when it lands as a follow-up.
     """
     from agentworks.secrets import SecretTarget
     from agentworks.vms.admin_templates import resolve_live_template as _resolve_admin_template
@@ -364,3 +357,65 @@ def _resolve_pane_env(
         workspace=ws_tmpl.env,
         agent=agent_tmpl.env,
     )
+
+
+def _resolve_admin_env(
+    db: Database,
+    registry: Registry,
+    *,
+    values: Mapping[str, str],
+    vm: VMRow,
+) -> dict[str, str]:
+    """Compose the VM/admin environment for a standalone admin shell."""
+    from agentworks.env import ResourceContext, compose_env
+    from agentworks.vms.admin_templates import resolve_live_template as resolve_admin
+    from agentworks.vms.sites import site_platform_name
+    from agentworks.vms.templates import resolve_live_template as resolve_vm
+
+    return compose_env(
+        values=values,
+        ctx=ResourceContext(
+            vm_name=vm.name,
+            platform=site_platform_name(vm.site, registry),
+            site=vm.site,
+            user=vm.admin_username,
+        ),
+        vm=resolve_vm(db, registry, vm.name, vm.template).env,
+        admin=resolve_admin(db, registry, vm.name, vm.admin_template).env,
+    )
+
+
+def _validate_console_build_values(
+    db: Database,
+    registry: Registry,
+    *,
+    console: _ConsoleDefinition,
+    vm: VMRow,
+    members: Sequence[ConsoleSessionRow],
+    values: Mapping[str, str],
+) -> None:
+    """Compose every new console shell environment before runtime mutation."""
+    if console.admin_shell:
+        _mc._resolve_admin_env(db, registry, values=values, vm=vm)
+    for member in members:
+        if not member.shells:
+            continue
+        session = db.get_session(member.session_name)
+        if session is None:
+            raise NotFoundError(
+                f"session '{member.session_name}' not found",
+                entity_kind="session",
+                entity_name=member.session_name,
+            )
+        session_user = _mc._session_linux_user(db, session, vm)
+        for shell in member.shells:
+            use_admin = shell["admin"] or session_user == vm.admin_username
+            _mc._resolve_pane_env(
+                db,
+                registry,
+                values=values,
+                vm=vm,
+                session=session,
+                pane_user=vm.admin_username if use_admin else session_user,
+                is_admin_pane=use_admin,
+            )

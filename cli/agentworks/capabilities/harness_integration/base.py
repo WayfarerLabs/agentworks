@@ -20,7 +20,6 @@ addressing.
 
 from __future__ import annotations
 
-import shlex
 from abc import abstractmethod
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
@@ -353,14 +352,6 @@ class HarnessIntegration(Capability):
             self._session_binding.context_values,
             field=f"{self.owner_kind}/{self.owner_name}.extra_args",
         )
-
-    def quote_context_argv(self, value: str) -> str:
-        """Render one structured extra argument as data, then quote it once.
-
-        The returned command is consumed directly, so replacement contents
-        remain literal without another rendering pass.
-        """
-        return shlex.quote(self.render_context_argv(value))
 
     @property
     def _session_binding(self) -> SessionBinding:

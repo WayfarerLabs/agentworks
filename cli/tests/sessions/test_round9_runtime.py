@@ -18,6 +18,7 @@ from agentworks.sessions import manager, tmux
 from agentworks.sessions.manager import _teardown
 from tests.vm_access_support import files_over_target
 
+from ._runtime_assertions import assert_runtime_preserved
 from .test_create_start_restart_orchestrated import _create_stubs, _restart_fixture
 from .test_create_start_restart_orchestrated import _stub_build_registry as _stub_build_registry
 from .test_native_startup import _NATIVE_CAPTURE, launch
@@ -78,7 +79,7 @@ def test_unrecorded_native_server_is_never_adopted_or_destroyed(
                 manager._teardown_session(
                     before, target=native, target_owns_session=True, db=db, force=force, legacy_running_authorized=False
                 )
-        assert db.get_session("s1") == before
+        assert_runtime_preserved(db, before, operation=operation)
         assert _NATIVE_CAPTURE(target=native, socket_path=native.socket).fingerprint == fingerprint
         if operation in {"start_session", "restart_session"}:
             assert "resolve" not in events and "resolve_env" not in events
@@ -169,7 +170,7 @@ def test_unacknowledged_recovery_requires_exact_attempt_and_stable_server(tmp_pa
 
     monkeypatch.setattr(tmux, "create_session", lost_ack)
     try:
-        with pytest.raises(ExternalError):
+        with pytest.raises(AgentworksError):
             invoke(db, "start_session")
         before = db.get_session("s1")
         assert before is not None and before.pid is None
@@ -237,7 +238,7 @@ def test_failed_admin_launch_recovers_after_boot_absence(tmp_path, monkeypatch, 
         before = db.get_session("s1")
         with pytest.raises(StateError):
             invoke(db, operation)
-        assert db.get_session("s1") == before
+        assert_runtime_preserved(db, before, operation=operation)
         monkeypatch.setattr(native, "run", original_run)
         # Simulate only the authoritative boot observation, with real native
         # default/dedicated server absence. No VM or host boot is changed.
@@ -457,7 +458,7 @@ def test_rejected_create_recovery_row_cannot_adopt_preexisting_server(tmp_path, 
         first = len(native.calls)
         with pytest.raises(StateError):
             invoke(db, operation, force=True)
-        assert db.get_session("s1") == before
+        assert_runtime_preserved(db, before, operation=operation)
         assert _NATIVE_CAPTURE(target=native, socket_path=native.socket).fingerprint == observed
         assert native.native("has-session -t '=preexisting'").ok
         assert not any("kill-server" in command for command, _ in native.calls[first:])
