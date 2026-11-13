@@ -259,7 +259,7 @@ A launch directory, mode 0700, holds:
 
 `observe` reads the directory as one of four states. The lock is the process identity: a held
 `flock` on `process` is held only through the launch's own descriptors, by the launching process
-until it exits (step 7), the supervisor, and the payload's process tree, every descendant of which
+until it exits (step 6), the supervisor, and the payload's process tree, every descendant of which
 inherits the descriptor (tar's `zstd` child included). So no pid is compared and a reused pid cannot
 read as running. A descendant that left the payload's process group and outlived it would keep the
 launch `RUNNING`; tar starts no such process, so this is accepted for backup.
@@ -299,22 +299,17 @@ VM"). Every other outcome raises its typed error at once, since the payload neve
 1. Read the spec, a JSON object of `argv` and `env`, from stdin. The environment stays in memory: it
    reaches the payload's environment and no file.
 2. Create the base, then the launch directory and `work/`.
-3. Prune: remove every sibling launch directory, other than this one, that is not `RUNNING` and
-   whose directory is older than seven days: `EXITED` and `LOST`, a directory a launch that died
-   setting up left included. A killed `agw` can leave a multi-gigabyte archive behind, and nothing
-   ages `/var/lib`; today's `/var/tmp` staging is aged out only on Debian 13 (its 30-day `/var/tmp`
-   cleanup, recalled from its release notes, not measured), and never on Debian 12.
-4. Create `process.new`, take `flock(LOCK_EX)` on it, and rename it to `process`, all before the
+3. Create `process.new`, take `flock(LOCK_EX)` on it, and rename it to `process`, all before the
    fork, so `process` is never visible unlocked while anything of the launch lives. Until the rename
    the directory reads as `LOST`, so setup holds an exclusive `flock` on the launch directory itself
    from just after its `mkdir` until the rename is done, and `discard` takes the same lock before it
    reads the state and holds it through its removal. A discard that loses the race finds `RUNNING`
    and refuses; one that wins removes the directory, and setup's next path operation fails, so the
    launch ends with a setup failure before anything forks.
-5. Fork once. The child calls `setsid`, so it belongs to no session and no terminal, points its
+4. Fork once. The child calls `setsid`, so it belongs to no session and no terminal, points its
    descriptors 0, 1 and 2 at `/dev/null` and closes every other one but the lock and a report pipe,
    so it holds nothing of the connection. It is the supervisor.
-6. The supervisor starts the payload with `subprocess.Popen`: `cwd` is `work/`, stdin `/dev/null`,
+5. The supervisor starts the payload with `subprocess.Popen`: `cwd` is `work/`, stdin `/dev/null`,
    stdout and stderr `output`, the environment the inherited one plus the spec's, with
    `start_new_session=True`, `restore_signals=True` and `pass_fds=(lock,)`. The inherited
    environment is the one agw-launch rebuilt for root (`agw_launch.py:116-138`). The payload's own
@@ -323,8 +318,15 @@ VM"). Every other outcome raises its typed error at once, since the payload neve
    `LOST`. The supervisor writes the payload's pid into `process`, reports `started` over the pipe,
    and waits; on exit it writes `status` by rename. When the payload cannot be executed it writes
    the refusal's status and reports the `exec` errno, and the launch reads `EXITED`.
-7. The launching process reads the report and exits: 0, or a refusal status naming the `exec`
-   failure (`RequestRefused`'s codes). So `launch` returns only once the payload has started.
+6. The launching process reads the report. Once the payload has started it prunes, best effort: it
+   removes every sibling launch directory, other than this one, that is not `RUNNING` and whose
+   directory is older than seven days: `EXITED` and `LOST`, a directory a launch that died setting
+   up left included. A killed `agw` can leave a multi-gigabyte archive behind, and nothing ages
+   `/var/lib`; today's `/var/tmp` staging is aged out only on Debian 13 (its 30-day `/var/tmp`
+   cleanup, recalled from its release notes, not measured), and never on Debian 12. Pruning after
+   the report keeps setup, while the launch reads `LOST`, short. It then exits 0; a launch that did
+   not start exits with a refusal status naming the `exec` failure (`RequestRefused`'s codes) or a
+   setup failure. So `launch` returns only once the payload has started.
 
 This is incident row I8 in its new form. There is no `nohup` and no `sudo` inside the wrapper,
 because the whole operation is elevated (`sudo -n` is stage 0's prefix), and `setsid` with no
@@ -370,7 +372,7 @@ after `observe` reported `EXITED` with status 0, so the file is complete and not
 has no deadline: the archive takes as long as the link needs, the keepalives end a dead connection
 (I7), and Ctrl-C ends it.
 
-`discard(launch)` removes the launch directory under the directory lock setup holds (step 4),
+`discard(launch)` removes the launch directory under the directory lock setup holds (step 3),
 refusing a `RUNNING` one; an absent one is done.
 
 ## Session environment and the terminal handover

@@ -186,9 +186,16 @@ def _make_base(base: str) -> None:
 
 
 def _prune(base: str, keep: str) -> None:
-    """Remove every launch directory but ``keep`` that is not running and is older than the prune age."""
+    """Remove every launch directory but ``keep`` that is not running and is older than the prune age.
+
+    Best effort, and never a reason to fail the launch, whose payload is already running.
+    """
     now = time.time()
-    for name in os.listdir(base):
+    try:
+        names = os.listdir(base)
+    except OSError:
+        return
+    for name in names:
         path = os.path.join(base, name)
         if path == keep:
             continue
@@ -197,8 +204,8 @@ def _prune(base: str, keep: str) -> None:
                 continue
             if _state(path)[0] != RUNNING:
                 shutil.rmtree(path)
-        except (OSError, ValueError):
-            continue  # best effort, and never a reason to fail this launch: the next launch looks again
+        except OSError:
+            continue  # the next launch looks again
 
 
 def _launch(base: str, directory: str) -> int:
@@ -218,7 +225,6 @@ def _launch(base: str, directory: str) -> int:
         # removed the directory, and every path below then fails before anything forks.
         with _directory_lock(directory):
             os.mkdir(os.path.join(directory, "work"), 0o700)
-            _prune(base, directory)
             # Locked before it is visible, so no observer ever sees this launch's ``process``
             # unlocked without a status while anything of it lives.
             partial = os.path.join(directory, "process.new")
@@ -242,6 +248,8 @@ def _launch(base: str, directory: str) -> int:
     while chunk := os.read(report_read, 256):
         report += chunk
     if report == b"started":
+        # After the report, so setup (while the launch reads lost) stays short.
+        _prune(base, directory)
         return 0
     code = report.decode("ascii", "replace")
     sys.stderr.write(code + "\n" if code else "the supervisor ended before the payload started\n")
