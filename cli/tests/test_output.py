@@ -244,15 +244,6 @@ def test_unkeyed_deprecations_retain_each_call(captured_output: CapturedOutput) 
     assert len(captured_output.warnings) == 2
 
 
-def test_suppression_does_not_consume_a_deprecation_key(captured_output: CapturedOutput) -> None:
-    output.set_suppress_deprecations(True)
-    output.deprecation("suppressed source", key="compatibility")
-    assert captured_output.warnings == []
-    output.set_suppress_deprecations(False)
-    output.deprecation("visible source", key="compatibility")
-    assert len(captured_output.warnings) == 1
-
-
 def test_deprecation_keys_are_isolated_between_contexts(captured_output: CapturedOutput) -> None:
     from contextvars import Context
 

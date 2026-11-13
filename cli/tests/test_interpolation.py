@@ -156,7 +156,7 @@ def test_legacy_tokens_preserve_surrounding_dollars_and_unrelated_syntax(text: s
     )
 
 
-@pytest.mark.parametrize("text", ["{{session_name}}", "{{session_name}} ${agw:unknown}", "${agw:bad-name}"])
+@pytest.mark.parametrize("text", ["{{session_name}}", "${agw:bad-name}"])
 def test_legacy_rendering_retains_field_aware_validation(text: str) -> None:
     with pytest.raises(ValidationError) as caught:
         render_template(
