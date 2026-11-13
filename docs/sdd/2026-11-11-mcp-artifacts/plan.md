@@ -514,10 +514,34 @@ claimed.
       complete-command deferral attribution and recorded-alias migration with meaningful tests.
 - [x] Update requirements, architecture, LLD, acceptance, migration and permanent operator teaching
       for literal keys and the existing cleanup/native-scope behavior.
-- [ ] Complete required gates, installed-package guidance checks and independent project, Muntz and
+- [x] Complete required gates, installed-package guidance checks and independent project, Muntz and
       generic correctness reviews; preserve failures and verify owned cleanup.
 - [ ] Publish the complete green correction with exact-head CI and a scoped ready handoff, without
       `review-requested`. Monitor the independent pipeline and critically assess feedback; at most
       two operator-authorized feedback/fix cycles follow the initial handoff.
 
 No automatic merge, MCP SDD lock, artifact-probe fixes or unrelated Typer work is included.
+
+The complete `e62e23ea` source passed 13,078 tests with 35 skips, full mypy across 1,033 files,
+Ruff/format, CI-equivalent Typer isolation, repository checks, 160 Python and 103 Node website
+tests, and both deterministic build comparisons. Frozen wheel/source archive and installation checks
+passed, including two installed guide topics in both modes (four renders), help, an untouched empty
+profile and 504 matching source/wheel/installed package members. The archive contains 1,111 regular
+files.
+
+All three private lanes cleared that source after focused tests and static contract review. Their
+156-case selections overlap the full suite and are not additional distinct cases. Each initially
+encountered unchanged metadata-preservation failures on workspace-mounted fixtures; measured
+`os.fchown` calls returned `EINVAL`. Separately owned `/tmp` fixture replays passed without
+weakening product checks. The lead read every report and independently found the recorded
+environments, caches, fixture roots and website build directory absent. Original setup/metadata
+failures remain retained alongside successful replays.
+
+Muntz's deletion experiments confirmed the need for conflict detection, original-owner alias
+protection and all-input command deferral. Its optional dictionary-to-set simplification was taken
+at `bbc1e7e`; all 156 focused cases, full mypy and Ruff/format pass afterward.
+Wheel/archive/install, all four guide renders, help and 504-file parity were rebuilt and rechecked
+at that source. The earlier lead's scoped lint failure (unused import and formatting) was corrected
+before the complete green gate run. Final record checks, private follow-ups and pushed-head CI/ready
+state are verified before handoff and recorded in its public comment. New literal-name native
+acceptance remains owed.
