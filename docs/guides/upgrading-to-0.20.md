@@ -126,8 +126,9 @@ path for now.
 
 Each of them checks the client first, so an unsupported one is refused before `vm create` builds a
 VM, `vm start` starts one, or `vm rekey` and `vm recover` spend a Tailscale auth key. The automatic
-start, which other commands trigger, is the exception: it checks the client at its wait, once the VM
-has started.
+start, which other commands trigger, is one exception: it checks the client at its wait, once the VM
+has started. `vm describe` is the other: it warns and leaves the live resources out instead of
+refusing.
 
 - **OpenSSH 8.5 or newer on the workstation.** Agentworks uses the first `ssh` on your `PATH`
   (ignoring empty and relative `PATH` entries) and checks its version once per run. A missing or

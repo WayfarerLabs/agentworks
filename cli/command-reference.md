@@ -877,18 +877,19 @@ lives on a different VM is rejected with a `ValidationError` before any SSH work
 
 `vm shell`, `vm exec`, `vm verify-connection`, `vm port-forward`, `agent shell` and `agent exec`,
 `vm start` and the automatic start of a stopped VM, `vm rekey` and `vm recover` for their final
-waits, and `vm create`, `vm reinit` and `vm confirm-release` for their checks of the VM, connect
-with the OpenSSH client on the workstation, version 8.5 or newer (`vm shell --platform` uses the
-platform's own path instead and needs no `python3`; Remote Lima and the clouds need the client, and
-check it only once they connect, a cloud inside its temporary network route). Agentworks uses the
-first `ssh` on `PATH`; on Windows it uses only the native Win32-OpenSSH under `System32\OpenSSH` or
-`Program Files\OpenSSH`, never the `ssh` bundled with Git for Windows. `agw doctor` shows which
-client was resolved, and these commands, other than `vm shell --platform`, refuse an unsupported one
-before anything else runs. These commands run `ssh -F none` in batch mode, so `~/.ssh/config` does
-not apply and an encrypted private key must be loaded in the SSH agent. The VM needs `python3`; a VM
-without it is reported as unable to run Agentworks requests, and `agw vm recover <name>` installs
-it. A command that is not found exits 127, one that cannot run exits 126, and a missing workspace
-directory exits 125.
+waits, `vm create`, `vm reinit` and `vm confirm-release` for their checks of the VM, `vm backup`,
+and `vm describe` for its live resources, connect with the OpenSSH client on the workstation,
+version 8.5 or newer (`vm shell --platform` uses the platform's own path instead and needs no
+`python3`; Remote Lima and the clouds need the client, and check it only once they connect, a cloud
+inside its temporary network route). Agentworks uses the first `ssh` on `PATH`; on Windows it uses
+only the native Win32-OpenSSH under `System32\OpenSSH` or `Program Files\OpenSSH`, never the `ssh`
+bundled with Git for Windows. `agw doctor` shows which client was resolved, and these commands,
+other than `vm shell --platform` and `vm describe`, refuse an unsupported one before anything else
+runs; `vm describe` warns and leaves its live resources out instead. These commands run
+`ssh -F none` in batch mode, so `~/.ssh/config` does not apply and an encrypted private key must be
+loaded in the SSH agent. The VM needs `python3`; a VM without it is reported as unable to run
+Agentworks requests, and `agw vm recover <name>` installs it. A command that is not found exits 127,
+one that cannot run exits 126, and a missing workspace directory exits 125.
 
 `vm port-forward` runs until interrupted and exits 0 when stopped with Ctrl-C, on macOS and Linux
 also with `SIGTERM` or `SIGHUP` (a closed terminal), and on Windows also with Ctrl-Break; started
