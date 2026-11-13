@@ -16,7 +16,6 @@ from agentworks.artifacts.codec import decode_inputs, encode_inputs
 from agentworks.artifacts.declarations import ArtifactsConfig, MCPServerArtifactSpec, RuleArtifactSpec
 from agentworks.artifacts.mcp import content_from_definition, parse_definition
 from agentworks.artifacts.model import ArtifactGroup, ArtifactOrigin, ArtifactType
-from agentworks.artifacts.names import mcp_native_name
 from agentworks.artifacts.state import capture_owner, declaration_digest, read_captures, write_capture
 from agentworks.origin import Origin
 from agentworks.package_sources import CaptureLimits, PackageCapture
@@ -230,20 +229,6 @@ def test_inheritance_replaces_the_whole_connection_and_never_opens_discarded_sou
     assert resolved.mcp_servers["inventory"].definition is not None
     result = capture_owner(registry, "agent", "worker", "agent", ArtifactsConfig(bundles=["child"]))
     assert result.inputs.mcp_servers["inventory"].content.metadata == HTTP
-
-
-def test_native_name_uses_full_original_owner_and_key_but_not_content_or_bundle():
-    item = capture(inline()).mcp_servers["inventory"]
-    changed = replace(item, content=content_from_definition("inventory", parse_definition(HTTP)))
-    assert mcp_native_name(changed) == mcp_native_name(item)
-    assert mcp_native_name(replace(item, origin=replace(item.origin, bundle="elsewhere"))) == mcp_native_name(item)
-    assert mcp_native_name(replace(item, origin=replace(item.origin, component="workspace"))) != mcp_native_name(item)
-    prefix = "a" * 23 + "-"
-    first = replace(item, content=replace(item.content, name=prefix + "one"))
-    second = replace(item, content=replace(item.content, name=prefix + "two"))
-    assert mcp_native_name(first).startswith("agentworks-" + "a" * 23 + "-")
-    assert mcp_native_name(first) != mcp_native_name(second)
-    assert len(mcp_native_name(first)) <= 56
 
 
 @pytest.mark.parametrize("version", [2, 3])

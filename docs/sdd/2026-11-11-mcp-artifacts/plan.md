@@ -478,3 +478,153 @@ before the public handoff; its comment records their actual outcome.
 
 The earlier integration report's missing managed resume evidence remains owed. Conflict resolution
 does not satisfy R6, complete phase 1, ship OAuth or justify the MCP SDD lock.
+
+## Declared MCP names, 2026-11-13
+
+The operator directed: "fix the mcp implementation to drop the unique naming approach and just use
+the specified name with standard adoption semantics. use our agentic dev process. i authorize up to
+2 PR feedback/fix cycles if needed."
+
+Use a new focused correction PR from main `bb040c3d`. The open MCP SDD still governs; neither locked
+predecessor is amended and OAuth remains a later implementation. The previous registration
+[integration report](https://github.com/WayfarerLabs/agentworks/pull/888#issuecomment-6817058957)
+and [post-merge report](https://github.com/WayfarerLabs/agentworks/pull/888#issuecomment-6830247771)
+are clean within their stated source, version and mode limits. They used the former generated names;
+their observations do not establish acceptance of this correction.
+
+This supersedes the registration phase's generated-name policy; earlier checked tasks remain
+historical records.
+
+The declared key becomes the native name everywhere, including invocation carriers and inspection.
+Existing claims and expected-content writes retain standard creation, equal-entry adoption, owned
+updates and foreign/modified-entry protection. Ordinary obsolete-claim retirement removes unchanged
+recorded generated aliases on owning setup. It does not delete unclaimed aliases by prefix or move
+native auth state. An unchanged old alias still retires if a foreign literal key blocks replacement.
+
+Multiple equal same-name inputs delivered to one destination share its ordinary entry/claim while
+retaining all original input outcomes. Differing definitions all defer and preserve prior evidence;
+independent names continue. Native user/project roles remain separate and follow normal native
+loading and precedence. The lead proposed this existing-behavior default in an optional operator
+clarification and proceeded with it; no new global cross-scope inventory or ownership mechanism is
+claimed.
+
+- [x] Remove generated MCP naming and retain literal keys in shared native and session delivery,
+      inspection and existing regression fixtures.
+- [x] Cover literal-key adoption, owned updates, foreign conflicts, equal/differing input groups,
+      complete-command deferral attribution and recorded-alias migration with meaningful tests.
+- [x] Update requirements, architecture, LLD, acceptance, migration and permanent operator teaching
+      for literal keys and the existing cleanup/native-scope behavior.
+- [x] Complete required gates, installed-package guidance checks and independent project, Muntz and
+      generic correctness reviews; preserve failures and verify owned cleanup.
+- [x] Publish the initial complete green correction with exact-head CI and a scoped ready handoff,
+      without `review-requested`. Monitor the independent pipeline and critically assess feedback;
+      at most two operator-authorized feedback/fix cycles follow the initial handoff.
+
+No automatic merge, MCP SDD lock, artifact-probe fixes or unrelated Typer work is included.
+
+The complete `e62e23ea` source passed 13,078 tests with 35 skips, full mypy across 1,033 files,
+Ruff/format, CI-equivalent Typer isolation, repository checks, 160 Python and 103 Node website
+tests, and both deterministic build comparisons. Frozen wheel/source archive and installation checks
+passed, including two installed guide topics in both modes (four renders), help, an untouched empty
+profile and 504 matching source/wheel/installed package members. The archive contains 1,111 regular
+files.
+
+All three private lanes cleared that source after focused tests and static contract review. Their
+156-case selections overlap the full suite and are not additional distinct cases. Each initially
+encountered unchanged metadata-preservation failures on workspace-mounted fixtures; measured
+`os.fchown` calls returned `EINVAL`. Separately owned `/tmp` fixture replays passed without
+weakening product checks. The lead read every report and independently found the recorded
+environments, caches, fixture roots and website build directory absent. Original setup/metadata
+failures remain retained alongside successful replays.
+
+Muntz's deletion experiments confirmed the need for conflict detection, original-owner alias
+protection and all-input command deferral. Its optional dictionary-to-set simplification was taken
+at `bbc1e7e`; all 156 focused cases, full mypy and Ruff/format pass afterward.
+Wheel/archive/install, all four guide renders, help and 504-file parity were rebuilt and rechecked
+at that source. The earlier lead's scoped lint failure (unused import and formatting) was corrected
+before the complete green gate run. Final record checks, private follow-ups and pushed-head CI/ready
+state are verified before handoff and recorded in its public comment. New literal-name native
+acceptance remains owed.
+
+### Declared-name feedback/fix round 1
+
+The initial correction was handed off ready at `1ba31f61`, with all ten CI jobs passing in
+run 43428516304. The lead waited for the actual
+[integration report](https://github.com/WayfarerLabs/agentworks/pull/900#issuecomment-6855734546)
+before starting this round. The batch also includes
+[Muntz's review](https://github.com/WayfarerLabs/agentworks/pull/900#issuecomment-6854545642). The
+operator's two-round allowance authorizes these bounded corrections; round 1 uses the first. The PR
+was independently verified draft at the unchanged head before source changes.
+
+Integration B1 is an actual installed-CLI defect: equal coalescing replaces a protected ancestor's
+representative with a readable local source, allowing later overwrite or removal while ancestor
+routing remains unresolved. Preserve the existing ordinary claim and defer differing replacements;
+no new ownership registry or dispatch repair workflow is needed. Integration I2 and Muntz's material
+item identify the same missing identifier-retention regression; the current guard remains correct.
+
+- [x] Preserve protected ancestor ownership across equal reapplication, changed local inputs,
+      withdrawal and retry; cover all three adapters and convergence after routing repair.
+- [x] Add historical-alias conflict coverage with a withdrawn origin, all input deferrals,
+      independent progress and repeat setup; prove it distinguishes the identifier guard.
+- [x] Cover combined persona/MCP carrier-size reduction and raw literal-name overrides for equal
+      inputs. Report saved adoption and correct the small naming/teaching nits.
+- [x] Complete the bound private project, Muntz and generic correctness lanes, required gates and
+      installed-package checks; retain original failures and verify owned cleanup.
+- [ ] Publish the exact green head with CI and a scoped ready handoff, then obtain and critically
+      assess the next independent report. One further authorized round remains afterward.
+
+The optional conflict-helper interface refactor is declined: its original-ID result serves native
+and session consumers, and changing it would broaden this fix to save one local grouping. Keep the
+empty-input inspector guard to avoid invoking an optional callback without eligible work. Copilot's
+quota notice is a service limitation, not product evidence.
+
+The independent report ran 12 required gates successfully and reports 13,252 pytest passes with 61
+skips, 160 Python and 103 Node website tests, 504-package-member parity and 38 installed guide
+topics. It established literal-name native registration, adoption/migration and managed carrier
+behavior on Linux with remote Lima, Claude Code 2.1.323, Codex 0.169.0 and Grok 1.0.77. Its provider
+health attempt did not establish a successful model conversation, model-mediated tool use or
+genuine-history resume. The overlapping Codex create was a tester sequencing failure before
+invocation. No new Windows, WSL2 or cloud observations are claimed. Those limits, original fixture
+timeouts and separately verified cleanup remain part of that report; they are not promoted into
+passes here.
+
+The native correction was integrated as `6ff88cf4` from the isolated developer's `cab1de17`. Nine B1
+cases failed before the behavior change; three historical-alias cases passed with the existing guard
+and failed when only that guard was deleted. The final native/dispatch selection passed 131 tests,
+with full mypy across 1,033 files and Ruff/format passing. Its final diagnostic-only wording
+correction received Ruff/format checks; the frozen combined gates below cover the exact integrated
+source. The lead's session selection passed 44 tests after correcting an initial read-only uv cache
+startup failure; these selections overlap the forthcoming full suite.
+
+An initial dispatch-test expectation also failed: generic unknown routing conservatively carries
+previous deferral IDs until routing recovery, while explicit unresolved route IDs permit pruning.
+The tests now preserve that existing contract and require carried deferrals to clear on recovery; no
+dispatch production behavior changed. Workspace fixture metadata failures and the successful owned
+`/tmp` replay remain recorded. The lead read the developer's complete report and independently
+checked removal of the reported fixtures, environment and caches before freezing the combined work.
+
+The frozen `f4751929` combined suite passed 13,102 tests with 35 skips. Fifteen of sixteen gate
+records passed, including full mypy, Ruff/format, Typer isolation, repository locks/Rulesync, 160
+Python and 103 Node website tests and both deterministic build comparisons. File lint found only
+Prettier wrapping in four changed documents; Markdown and spelling checks passed. Formatting is
+corrected before the final file check. The original failed gate record remains retained.
+
+All three private lanes cleared `f4751929`. The lead read their complete reports. Muntz's four
+deletion/order experiments distinguished both protected-source branches, the historical-alias guard
+and notice-after-checkpoint behavior; its 74-case baseline and restored replay both passed. The
+generic lane passed 143 focused cases and nine temporary edge probes, including multiple equal local
+inputs against absent/modified protected placement and failed publication during adoption. These
+overlapping selections are not extra full-suite coverage or native acceptance. Frozen
+wheel/archive/install, dependency consistency, four installed guide renders, help and 504-file
+source/wheel/installation parity passed, with 1,111 archive members and no profile state created.
+The documentation formatting correction receives rebuilt package checks because it changes packaged
+guide bytes; it does not change the tested Python implementation.
+
+At `9c0fbe3b`, corrected file lint, locked-SDD and diff checks all pass. Rebuilt frozen package
+checks also pass: 504 matching source/wheel/installed members, 1,111 archive files, four installed
+guide renders, dependency consistency, help and an untouched empty profile. The tested Python bytes
+remain unchanged from `f4751929`. The lead independently found the reported review/worker fixtures,
+environments and caches absent; full reports and original failed setup/formatting/mutation records
+remain retained. Final private record follow-ups, exact-head CI and the ready transition are checked
+before the public handoff. The corrected native ownership sequence still needs the next actual
+independent integration report; one authorized fix round remains.

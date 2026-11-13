@@ -9,7 +9,6 @@ from dataclasses import replace
 import pytest
 
 from agentworks.artifacts.model import ArtifactOrigin, ArtifactType
-from agentworks.artifacts.names import mcp_native_name
 from agentworks.artifacts.native.mcp import render_mcp, resolve_mcp_user_path, session_mcp_conflicts
 from agentworks.capabilities.harness_integration.settings import SettingsObject, serialize_settings
 from agentworks.capabilities.harness_integration.setup import UserSetupInvocation
@@ -57,7 +56,7 @@ def test_claude_wrapper_uses_actual_default_or_profile_override_mcp_role(db, tar
     result = integration.user_init(invocation)
     destination = root / ".claude.json" if override is not None else target.home / ".claude.json"
     assert not result.files and not result.deferred
-    assert json.loads(destination.read_bytes())["mcpServers"][mcp_native_name(server)] == render_mcp(server, "claude")
+    assert json.loads(destination.read_bytes())["mcpServers"][server.content.name] == render_mcp(server, "claude")
     assert checkpoints[-1][0].destination == str(destination)
     if override is None:
         assert not (root / ".claude.json").exists()
@@ -72,7 +71,7 @@ def test_session_native_conflict_defers_transport_change_without_modifying_confi
     workspace.mkdir()
     desired = mcp(metadata={"type": "http", "url": "https://mcp.example.test", "headers": {}})
     existing = render_mcp(mcp(), tool)
-    name = mcp_native_name(desired)
+    name = desired.content.name
     key = "mcpServers" if tool == "claude" else "mcp_servers"
     user = resolve_mcp_user_path(tool, target.access(), home=str(target.home), environment={})
     destination = (
@@ -117,7 +116,7 @@ def test_equal_native_entry_and_unrelated_entries_allow_private_invocation(targe
     path.parent.mkdir(parents=True, exist_ok=True)
     key = "mcpServers" if tool == "claude" else "mcp_servers"
     before = serialize_settings(
-        {key: {mcp_native_name(item): render_mcp(item, tool), "unrelated": {"command": "other"}}},
+        {key: {item.content.name: render_mcp(item, tool), "unrelated": {"command": "other"}}},
         format="json" if tool == "claude" else "toml",
     )
     path.write_bytes(before)
@@ -326,7 +325,7 @@ def test_saved_mcp_path_is_never_io_authority_and_independent_current_entries_st
     assert sentinel.read_bytes() == before and reported
     assert {entry.input_id for entry in result.deferred} == {blocked.identity}
     document = parse_settings(destination.read_bytes(), format="toml")
-    assert document["theme"] == "operator" and set(document["mcp_servers"]) == {mcp_native_name(independent)}
+    assert document["theme"] == "operator" and set(document["mcp_servers"]) == {independent.content.name}
     assert claim in confirmed[-1]
     assert result.shared_paths == (str(destination),)
     assert str(sentinel) not in " ".join(reported)
@@ -459,7 +458,7 @@ def test_unknown_mcp_role_preserves_confirmed_claims_through_plugin_progress_and
     document = parse_settings(path.read_bytes(), format="toml")
     plugins, servers = document["plugins"], document["mcp_servers"]
     assert isinstance(plugins, dict) and isinstance(servers, dict)
-    plugin, server = plugins["one@fixture"], servers[mcp_native_name(item)]
+    plugin, server = plugins["one@fixture"], servers[item.content.name]
     assert isinstance(plugin, dict) and isinstance(server, dict)
     assert document["theme"] == "operator" and plugin["enabled"] is True
     assert server["command"] == "inventory-server"

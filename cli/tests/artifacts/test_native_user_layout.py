@@ -14,7 +14,6 @@ from unittest.mock import Mock
 import pytest
 
 from agentworks.artifacts.model import ArtifactType
-from agentworks.artifacts.names import mcp_native_name
 from agentworks.artifacts.native.layout import NATIVE_USER_DIRECTORIES
 from agentworks.capabilities.harness_integration.settings import parse_settings, serialize_settings
 from agentworks.errors import ExternalError, StateConflictError, StateError, UserAbort
@@ -80,7 +79,7 @@ def test_profile_banner_does_not_hide_the_observed_native_layout(target, monkeyp
     if tool == "grok":
         assert checkpoints[-1][0].destination == str(path)
         entries = document["mcp_servers"]
-        assert isinstance(entries, dict) and mcp_native_name(item) in entries
+        assert isinstance(entries, dict) and item.content.name in entries
     else:
         assert document["selected"] == "profile"
 
@@ -297,7 +296,7 @@ def test_current_root_change_retains_old_claims_without_opening_the_recorded_rol
         replace(call, artifacts=received(), prior=record(old, "codex"), report_incomplete=reports.append)
     )
     assert reports and not result.files and checkpoints[-1] == old and path.read_bytes() == before
-    assert mcp_native_name(item) in before.decode()
+    assert item.content.name in before.decode()
 
 
 @pytest.mark.parametrize("tool,class_name", TOOLS[:2])

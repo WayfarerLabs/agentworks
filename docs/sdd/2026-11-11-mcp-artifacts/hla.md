@@ -129,12 +129,14 @@ existing native claims, checkpoints, parsers/serializers and expected-content fi
 of ownership is a server entry. A small MCP-specific helper is sufficient; a general config mutation
 framework is outside this design.
 
-Native names are deterministic and qualified by original owner, independent of receiving facet,
-bundle and content revision. Identical unowned entries can be adopted. Different unowned entries are
-skipped with specific reasons. Owned entries converge; obsolete entries are removed only when their
-recorded fingerprint still matches. Preserve modified obsolete entries and retry evidence. Current
-context determines file authority, never a stored destination alone. Do not call native remove
-commands that also erase OAuth state.
+Native names are the declared keys, with original-owner provenance tracked internally. Separate
+native user/project roles retain the harness's loading and precedence rules. Within one destination,
+equal same-name inputs share one entry; differing definitions are all deferred without losing any
+input's outcome. Identical unowned entries can be adopted. Different unowned entries are skipped
+with specific reasons. Owned entries converge; obsolete entries are removed only when their recorded
+fingerprint still matches. Preserve modified obsolete entries and retry evidence. Current context
+determines file authority, never a stored destination alone. Do not call native remove commands that
+also erase OAuth state.
 
 Codex settings mappings can already write `mcp_servers`. Plan mapping and canonical contributions
 together before publication. For a managed identity, identical contributions agree; differing
