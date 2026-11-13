@@ -37,9 +37,12 @@ class UnknownReason(StrEnum):
     CONSUMER_LEFT = "consumer_left"
 
 
+EXEC_REFUSAL = r"exec [A-Z][A-Z0-9]*"
+"""An ``exec`` failure's refusal code: ``exec`` and the errno's name. Detached launches report it too."""
+
 # What the guest's ``refused`` trailer may name. The text arrives from the
 # guest, so anything else is a protocol violation, not a refusal to repeat.
-REFUSAL_CODE = re.compile(r"cwd|handover|exec [A-Z][A-Z0-9]*")
+REFUSAL_CODE = re.compile(rf"cwd|handover|{EXEC_REFUSAL}")
 
 
 @dataclass(frozen=True)

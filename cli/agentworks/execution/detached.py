@@ -28,6 +28,7 @@ from agentworks.execution import detached_program, reachability
 from agentworks.execution.envelope import checked_argv, checked_env
 from agentworks.execution.errors import CommandFailed, DetachedRefused, ExecutionIncomplete, RequestRefused
 from agentworks.execution.requests import Bytes, Command, NoInput, PythonProgram
+from agentworks.execution.results import EXEC_REFUSAL
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -42,7 +43,7 @@ INTERRUPT_DEADLINE = 30
 DISCARD_DEADLINE = 60
 
 _ID = re.compile(r"[0-9a-f]{32}")
-_EXEC_REFUSAL = re.compile(r"exec [A-Z][A-Z0-9]*")
+_EXEC_REFUSAL = re.compile(EXEC_REFUSAL)
 
 
 def _exec_refusal(status: int, result: Result) -> str | None:
