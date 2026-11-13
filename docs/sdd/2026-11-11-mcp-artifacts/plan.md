@@ -516,7 +516,7 @@ claimed.
       for literal keys and the existing cleanup/native-scope behavior.
 - [x] Complete required gates, installed-package guidance checks and independent project, Muntz and
       generic correctness reviews; preserve failures and verify owned cleanup.
-- [ ] Publish the complete green correction with exact-head CI and a scoped ready handoff, without
+- [x] Publish the initial complete green correction with exact-head CI and a scoped ready handoff, without
       `review-requested`. Monitor the independent pipeline and critically assess feedback; at most
       two operator-authorized feedback/fix cycles follow the initial handoff.
 
@@ -545,3 +545,44 @@ at that source. The earlier lead's scoped lint failure (unused import and format
 before the complete green gate run. Final record checks, private follow-ups and pushed-head CI/ready
 state are verified before handoff and recorded in its public comment. New literal-name native
 acceptance remains owed.
+
+### Declared-name feedback/fix round 1
+
+The initial correction was handed off ready at `1ba31f61`, with all ten CI jobs passing in run
+43428516304. The lead waited for the actual
+[integration report](https://github.com/WayfarerLabs/agentworks/pull/900#issuecomment-6855734546)
+before starting this round. The batch also includes
+[Muntz's review](https://github.com/WayfarerLabs/agentworks/pull/900#issuecomment-6854545642).
+The operator's two-round allowance authorizes these bounded corrections; round 1 uses the first.
+The PR was independently verified draft at the unchanged head before source changes.
+
+Integration B1 is an actual installed-CLI defect: equal coalescing replaces a protected ancestor's
+representative with a readable local source, allowing later overwrite or removal while ancestor
+routing remains unresolved. Preserve the existing ordinary claim and defer differing replacements;
+no new ownership registry or dispatch repair workflow is needed. Integration I2 and Muntz's material
+item identify the same missing identifier-retention regression; the current guard remains correct.
+
+- [ ] Preserve protected ancestor ownership across equal reapplication, changed local inputs,
+      withdrawal and retry; cover all three adapters and convergence after routing repair.
+- [ ] Add historical-alias conflict coverage with a withdrawn origin, all input deferrals,
+      independent progress and repeat setup; prove it distinguishes the identifier guard.
+- [ ] Cover combined persona/MCP carrier-size reduction and raw literal-name overrides for equal
+      inputs. Report saved adoption and correct the small naming/teaching nits.
+- [ ] Complete the bound private project, Muntz and generic correctness lanes, required gates and
+      installed-package checks; retain original failures and verify owned cleanup.
+- [ ] Publish the exact green head with CI and a scoped ready handoff, then obtain and critically
+      assess the next independent report. One further authorized round remains afterward.
+
+The optional conflict-helper interface refactor is declined: its original-ID result serves native
+and session consumers, and changing it would broaden this fix to save one local grouping. Keep the
+empty-input inspector guard to avoid invoking an optional callback without eligible work. Copilot's
+quota notice is a service limitation, not product evidence.
+
+The independent report ran 12 required gates successfully and reports 13,252 pytest passes with 61
+skips, 160 Python and 103 Node website tests, 504-package-member parity and 38 installed guide topics.
+It established literal-name native registration, adoption/migration and managed carrier behavior on
+Linux with remote Lima, Claude Code 2.1.323, Codex 0.169.0 and Grok 1.0.77. Its provider health attempt
+did not establish a successful model conversation, model-mediated tool use or genuine-history
+resume. The overlapping Codex create was a tester sequencing failure before invocation. No new
+Windows, WSL2 or cloud observations are claimed. Those limits, original fixture timeouts and
+separately verified cleanup remain part of that report; they are not promoted into passes here.

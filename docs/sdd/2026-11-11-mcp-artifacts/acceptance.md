@@ -28,6 +28,12 @@ deferral retains every affected input. Exercise migration of recorded generated 
 modified/unclaimed protection and a foreign literal-key conflict. Separate native user/project roles
 retain native scope precedence.
 
+Exercise equal ancestor/local coalescing followed by unavailable ancestor routing, equal local
+reapplication, changed local definition, local withdrawal and retry. Preserve the ancestor entry and
+original claim while unresolved; verify ordinary convergence after repair. Include a withdrawn old
+key whose historical generated alias becomes a conflicting literal key under different origins;
+retain its prior entry/claim and both deferrals on retry while independent entries progress.
+
 R11 belongs to phase 2: require native OAuth configuration and the agreed explicit auth workflow,
 actual authenticated MCP access, actual-user credential isolation, remote flow/cancellation,
 advertised refresh/logout and independent credential cleanup.

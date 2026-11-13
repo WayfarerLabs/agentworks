@@ -143,7 +143,10 @@ Group pending inputs by name within one receiving destination. Equal rendered de
 entry and one receiving setup record's ordinary claim, with a representative original-owner source.
 Every input still receives a handled or deferred outcome. A remaining same-name input keeps the
 entry desired when another input disappears; normal equal-entry adoption can update the recorded
-representative. Differing definitions defer every member and preserve affected prior claims and
+representative when its origin is not protected by unresolved ancestor routing. A protected claim
+keeps its original source: equal local inputs do not replace it, differing replacements defer, and
+local withdrawal cannot retire it. Ordinary updates and cleanup resume once routing is known.
+Differing definitions defer every member and preserve affected prior claims and
 entries. No reference count or separate co-ownership mechanism is introduced. Separate native
 user/project roles retain the harness's normal loading and precedence rules.
 

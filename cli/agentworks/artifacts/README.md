@@ -363,9 +363,10 @@ deliver the same name to one destination, equal native definitions share one ent
 definitions are all deferred with a warning while independent names continue. Native policy can
 still affect discovery; registration alone makes no availability guarantee.
 
-User/workspace application manages an entry inside a shared document. An absent entry is created; an
-identical unowned entry is adopted. A matching recorded fingerprint permits an owned update. A
-differing unowned or externally modified entry is preserved and that artifact is deferred while
+User/workspace application manages an entry inside a shared document. An absent entry is created;
+an identical unowned entry is adopted, with a notice after ownership is saved. A matching recorded
+fingerprint permits an owned update. A differing unowned or externally modified entry is preserved
+and that artifact is deferred while
 independent entries continue. Removing an unchanged owned entry removes only that entry; modified
 obsolete entries remain recorded and warn. Native document values are preserved outside the managed
 entries unless an explicit settings mapping changes them; comments/formatting can change during
@@ -374,6 +375,10 @@ but claim persistence fails, an entry can remain unrecorded. Retrying the same d
 identical entry; withdrawing it before that retry leaves an unowned entry for operator review. See
 [native setup](https://github.com/WayfarerLabs/agentworks/blob/main/docs/guides/native-harness-setup.md#mcp-registrations)
 for mapping interaction and credential cleanup.
+
+If ancestor routing is unresolved, its existing entry and ownership remain retained. An equal local
+declaration does not replace that ownership; a different local definition is deferred until the
+ancestor's setup is repaired.
 
 Codex session MCP overrides remain unhandled with an explicit modeled or raw native profile. Native
 profile overlays can introduce same-named fields that deep-merge with an invocation override; this
@@ -764,7 +769,7 @@ become an empty successful result. Selectors must describe one actual lineage.
 
 The command reads existing state and declarations. It does not fetch sources, apply integrations,
 resolve secrets, or attest to the current filesystem or model context. Artifact bodies are omitted.
-For MCP, logical/native names and recorded destinations explain registration; URLs, command
+For MCP, declared names and recorded destinations explain registration; URLs, command
 arguments, env/header values and connection payloads stay omitted. Native inventory commands can
 attempt connections and are not part of this read-only view. To change setup, first establish
 authorization for the owning operation and inspect its impact.
