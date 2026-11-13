@@ -1,9 +1,9 @@
 """Backup's workspace archive on detached work, over the recording fake.
 
 A scripted guest answers each request: the path and zstd checks, ``du``, the
-detached program's operations and the download's ``cat``. Every test runs on
-every CI host; the live cells (a forced disconnect, an interrupt) are in the
-LLD's live evidence.
+detached program's operations and the download's ``cat``. Nothing here is
+host-sensitive, so these run in the Linux CI suite only; the live cells (a
+forced disconnect, an interrupt) are in the LLD's live evidence.
 """
 
 from __future__ import annotations

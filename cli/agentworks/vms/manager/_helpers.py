@@ -308,7 +308,7 @@ def _guard_incomplete_vm(vm: VMRow, *, allow_failed_init: bool = False) -> None:
         )
 
 
-LIVE_RESOURCES_DEADLINE = 30
+_LIVE_RESOURCES_DEADLINE = 30
 """How long ``vm describe`` waits for the VM's live resources, in seconds; one dispatch."""
 
 _LIVE_RESOURCES_SCRIPT = (
@@ -339,7 +339,7 @@ def _query_live_resources(db: Database, vm: VMRow, config: Config) -> dict[str, 
     try:
         require_vm_ssh_boundary(db, config, vm)
         access = execution.vm_access(vm, config, Admin())
-        result = access.run(Script(_LIVE_RESOURCES_SCRIPT, Shell.SH, deadline=LIVE_RESOURCES_DEADLINE))
+        result = access.run(Script(_LIVE_RESOURCES_SCRIPT, Shell.SH, deadline=_LIVE_RESOURCES_DEADLINE))
     except (TrustMissing, ClientUnsupported) as exc:
         output.warn(f"{exc}. {exc.hint}" if exc.hint else str(exc))
         return None

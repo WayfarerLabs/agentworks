@@ -7,6 +7,9 @@ what keeps CR LF from being translated.
 
 from __future__ import annotations
 
+import errno
+import io
+import os
 import stat
 import sys
 from typing import TYPE_CHECKING
@@ -149,3 +152,28 @@ def test_a_progress_callback_that_is_not_callable_is_refused(monkeypatch: pytest
 
     assert dispatched == []
     assert not (tmp_path / "archive").exists()
+
+
+def test_a_file_whose_final_flush_fails_is_removed_and_the_failure_raised(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    pump_delivers(monkeypatch, Completed(0))
+    target = tmp_path / "archive"
+    real_fdopen = os.fdopen
+
+    class FullDisk(io.BufferedWriter):
+        def close(self) -> None:
+            super().close()
+            raise OSError(errno.ENOSPC, "No space left on device")
+
+    def fdopen(descriptor: int, mode: str) -> io.BufferedWriter:
+        assert mode == "wb"
+        return FullDisk(real_fdopen(descriptor, "wb", buffering=0))  # type: ignore[arg-type]
+
+    monkeypatch.setattr(os, "fdopen", fdopen)
+
+    with pytest.raises(OSError) as failed:
+        access(tmp_path).run(Command(("cat",)), stdout=ToFile(target))
+
+    assert failed.value.errno == errno.ENOSPC
+    assert not target.exists()

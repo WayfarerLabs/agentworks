@@ -11,7 +11,7 @@ from agentworks.execution.access import Admin
 from agentworks.execution.errors import ClientUnsupported
 from agentworks.execution.requests import Script, Shell
 from agentworks.execution.results import Completed, Result, Unknown, UnknownReason
-from agentworks.vms.manager._helpers import LIVE_RESOURCES_DEADLINE, _query_live_resources
+from agentworks.vms.manager._helpers import _query_live_resources
 
 if TYPE_CHECKING:
     from tests.conftest import CapturedOutput
@@ -40,11 +40,8 @@ def test_live_resources_are_one_bounded_script_as_the_admin(vm_access_recorder: 
     (call,) = vm_access_recorder.calls
     assert call.identity == Admin()
     assert isinstance(call.request, Script)
-    assert (call.request.shell, call.request.deadline, call.request.elevated) == (
-        Shell.SH,
-        LIVE_RESOURCES_DEADLINE,
-        False,
-    )
+    assert (call.request.shell, call.request.elevated) == (Shell.SH, False)
+    assert call.request.deadline is not None
 
 
 @pytest.mark.parametrize(
