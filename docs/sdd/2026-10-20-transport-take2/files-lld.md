@@ -847,3 +847,6 @@ setup invocation's runner. The merge that brought them in moved them onto `VMAcc
 - **Session conflict check.** `session_mcp_conflicts` (`artifacts/native/mcp.py:130`) takes the
   launch identity's `VMAccess` and reads through `access.files()` (`:153`), deferring on
   `PathRefused` as on any other read failure (`:171`).
+
+`VMNotReady`, `RequestRefused` and `TrustMismatch` are not advisory here: the layout observation and
+the session conflict check fail fast on them, as `probe_native` does.
