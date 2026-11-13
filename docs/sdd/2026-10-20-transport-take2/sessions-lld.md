@@ -572,17 +572,18 @@ then not absolute and normalized (`guest_path`'s rule) is a `ValidationError`, s
 (`normalized_guest_path`: empty and `.` components dropped, a leading `//` included, `..` kept)
 before the equality and overlap checks. Those checks compare spellings, and a link can make two
 spellings one directory, so inside the held span, after the directory checks and before the confirm,
-one probe resolves both on the guest as root, as the copy runs (`realpath -z -e` of the source,
-`realpath -z -m` of the target, which need not exist, and which prints a component it cannot search
-unresolved), and the overlap check runs again on the resolved paths, with the same refusal. The walk
-itself stops at any path that is not absolute and has a 30-second deadline. `paths.vm_workspaces` is
-refused at load when it is not absolute, is `/`, or has a `..` component, which collapsing would
-move past a link, and is stored normalized.
+one probe resolves both on the guest as root, as the target is created (`realpath -z -e` of the
+source, `realpath -z -m` of the target, which need not exist, and which prints a component it cannot
+search unresolved), and the overlap check runs again on the resolved paths, with the same refusal.
+The walk itself stops at any path that is not absolute and has a 30-second deadline.
+`paths.vm_workspaces` is refused at load when it is not absolute, is `/`, or has a `..` component,
+which collapsing would move past a link, and is stored normalized.
 
 **Stored workspace paths.** A row is persisted state, so it is read through one of two checks in
 `workspaces/guest.py`. `stored_workspace_path` normalizes it and refuses one that is not absolute;
-`addressable_workspace_path` refuses a `..` component too, which names a directory only once the VM
-resolves it and which the file operations never resolve. Migration 40 anchors a relative row to
+`addressable_workspace_path` then applies the file operations' own check (`guest_path`), refusing a
+`..` component, which names a directory only once the VM resolves it and which they never resolve,
+and a character that is not printable. Migration 40 anchors a relative row to
 `managed_home(admin)/<path>` normalized, as 0.19's sudo ran from the admin's home, and leaves a `~`
 row as it is. The rows they treat differently:
 
@@ -592,13 +593,15 @@ row as it is. The rows they treat differently:
 - A `..` row names its directory on the VM. Rehome takes it as a source, its probe resolving it, and
   stores the target; that is its repair. Delete removes the directory on the stored spelling, and
   the console link while its target and the stored config path agree canonicalized on both sides
-  (`realpath -s -m`); a relative target is never ours, since `realpath` would read it from the
-  request's directory.
+  (`realpath -s -m`), both calls succeeding; a relative target is never ours, since `realpath` would
+  read it from the request's directory.
 - The session commands' tmuxinator regeneration checks `addressable_workspace_path` before anything
   runs and warns with the refusal's next step for either; a `ValidationError` from the requests
   themselves still raises. `config_path` builds from the same check, so an earlier release's row
   such as `/data/ws/` regenerates in its normalized spelling, and the Git exclusion work of delete
-  and rehome reads the row through `stored_workspace_path`.
+  and rehome reads the row through `stored_workspace_path`. That work checks the old path with the
+  file operations only where it addresses a file under it, so rehome relocates a `..` row's setup
+  records: no release stored a path under such a row.
 
 ### Workspace copy
 
