@@ -11,6 +11,7 @@ tmux session using the same wrapper pattern as the VM console.
 
 from __future__ import annotations
 
+import posixpath
 import shlex
 from typing import TYPE_CHECKING
 
@@ -36,8 +37,13 @@ def console_session_name(ws_name: str) -> str:
 
 
 def config_path(workspace_path: str) -> str:
-    """The generated config in the workspace itself."""
-    return f"{workspace_path}/.tmuxinator.yml"
+    """The generated config in the workspace itself, normalized.
+
+    A stored workspace path can carry a trailing ``/`` or a ``.`` component
+    (a row from an earlier release, a ``paths.vm_workspaces`` written that
+    way), which the file operations refuse, so the path is normalized first.
+    """
+    return f"{posixpath.normpath(workspace_path)}/.tmuxinator.yml"
 
 
 def config_link(home: str, ws_name: str) -> str:

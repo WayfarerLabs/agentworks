@@ -481,3 +481,22 @@ def test_clone_failure_has_safe_structured_context_without_changing_identity(bac
     assert original.result.stdout == original.result.stderr == b""
     assert original.__cause__ is None and original.__suppress_context__
     assert not final.exists() and not target.groups
+
+
+@pytest.mark.parametrize("points_here", [True, False])
+def test_delete_of_a_legacy_row_with_a_trailing_slash_removes_only_its_own_link(backend, points_here):
+    from agentworks.workspaces.backends.vm import delete_vm_workspace
+
+    target, vm, config, final = backend
+    final.mkdir(parents=True)
+    (final / ".tmuxinator.yml").write_text("generated\n")
+    stored = f"{final}/"
+    link = target.home / f".config/tmuxinator/{console_session_name('project')}.yml"
+    link.parent.mkdir(parents=True)
+    # An earlier release linked the config as spelled from the stored path.
+    link.symlink_to(f"{stored}/.tmuxinator.yml" if points_here else str(target.root / "other/.tmuxinator.yml"))
+
+    delete_vm_workspace(vm, config, "project", stored, "ws-project")
+
+    assert not final.exists()
+    assert link.is_symlink() is not points_here

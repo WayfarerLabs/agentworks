@@ -1207,6 +1207,28 @@ def test_create_failure_cleans_session_slice_then_unwinds_ephemerals(
     db.close()
 
 
+def test_regenerate_tmuxinator_writes_a_legacy_row_with_a_trailing_slash(
+    tmp_path: Path,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    events: list[str] = []
+    db = _seed_db(tmp_path)
+    db._conn.execute("UPDATE workspaces SET workspace_path = '/home/me/ws1/' WHERE name = 'ws1'")
+    db._conn.commit()
+    install_access_recorder(monkeypatch).answer = _Target(events).answer
+    vm = db.get_vm("vm1")
+    ws = db.get_workspace("ws1")
+    assert vm is not None and ws is not None
+
+    _real_regenerate_tmuxinator(db, make_config(), vm, ws)
+
+    assert events == ["tmuxinator_write:/home/me/ws1/.tmuxinator.yml"]
+    assert captured_output.warnings == []
+    db.close()
+
+
 @pytest.mark.parametrize("workspace_spec", [None, '{"tmuxinator":false}'])
 @pytest.mark.parametrize(
     "failure",

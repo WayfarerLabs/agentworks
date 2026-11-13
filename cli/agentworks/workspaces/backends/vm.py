@@ -307,10 +307,12 @@ def delete_vm_workspace(
                 return
         else:
             admin.run(root("rm", "-rf", "--", workspace_path, deadline=CLEANUP_DEADLINE), check=True)
-        # The link only while it still points at this workspace's config.
+        # The link only while it still points at this workspace's config. The
+        # target is compared normalized without following links (realpath -s -m):
+        # an earlier release wrote it from the stored path as it was spelled.
         admin.run(
             script(
-                'if test -L "$1" && test "$(readlink -- "$1")" = "$2"; then rm -- "$1"; fi',
+                'if test -L "$1" && test "$(realpath -s -m -- "$(readlink -- "$1")")" = "$2"; then rm -- "$1"; fi',
                 config_link(managed_home(vm.admin_username), ws_name),
                 config_path(workspace_path),
                 deadline=PROBE_DEADLINE,
