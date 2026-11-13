@@ -599,9 +599,10 @@ row as it is. The rows they treat differently:
   runs and warns with the refusal's next step for either; a `ValidationError` from the requests
   themselves still raises. `config_path` builds from the same check, so an earlier release's row
   such as `/data/ws/` regenerates in its normalized spelling, and the Git exclusion work of delete
-  and rehome reads the row through `stored_workspace_path`. That work checks the old path with the
-  file operations only where it addresses a file under it, so rehome relocates a `..` row's setup
-  records: no release stored a path under such a row.
+  and rehome reads the row through `stored_workspace_path`. A session's MCP conflict check reads it
+  through `addressable_workspace_path` too, and defers delivery for a row it refuses. The exclusion
+  work checks the old path with the file operations only where it addresses a file under it, so
+  rehome relocates a `..` row's setup records: no release stored a path under such a row.
 
 ### Workspace copy
 
