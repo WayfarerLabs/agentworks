@@ -1,7 +1,7 @@
 """The guest program for detached work: launch, observe, interrupt and discard one launch.
 
 ``detached.Detached`` sends this file's source as an elevated ``PythonProgram``
-whose arguments are the operation and the launch id, 32 lowercase hex digits.
+whose arguments are the operation and the launch id, which the client checked.
 ``launch`` reads its spec, one JSON object of ``argv`` and ``env``, from
 stdin, so the environment reaches the payload and no file or argument. The
 exit status is the answer (the ``EXIT_*`` constants); ``observe`` and
@@ -30,7 +30,6 @@ import contextlib
 import errno
 import json
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -52,7 +51,7 @@ PRUNE_AGE_SECONDS = 7 * 24 * 3600
 """How old a sibling launch directory that is not running must be before a new launch removes it."""
 
 EXIT_INVALID = 2
-"""A malformed launch id or spec."""
+"""A malformed launch spec."""
 EXIT_EXISTS = 3
 """``launch`` of an id whose directory already exists; nothing was changed."""
 EXIT_RUNNING = 4
@@ -60,7 +59,6 @@ EXIT_RUNNING = 4
 
 ABSENT, RUNNING, EXITED, LOST = "absent", "running", "exited", "lost"
 
-_ID = re.compile(r"[0-9a-f]{32}")
 _POLL_SECONDS = 0.05
 
 
@@ -80,9 +78,6 @@ def main(
     signal.signal(signal.SIGHUP, end)
     signal.signal(signal.SIGTERM, end)
     operation, launch_id = argv
-    if not _ID.fullmatch(launch_id):
-        sys.stderr.write("the launch id is not 32 lowercase hex digits\n")
-        return EXIT_INVALID
     directory = os.path.join(base, launch_id)
     if operation == "launch":
         return _launch(base, directory)
@@ -199,7 +194,7 @@ def _prune(base: str, keep: str) -> None:
     now = time.time()
     for name in os.listdir(base):
         path = os.path.join(base, name)
-        if path == keep or not _ID.fullmatch(name):
+        if path == keep:
             continue
         try:
             if not os.path.isdir(path) or os.path.islink(path) or now - os.stat(path).st_mtime < PRUNE_AGE_SECONDS:

@@ -281,8 +281,8 @@ exit and report a complete launch as `LOST`.
 the launch directory with `mkdir`, which fails on an existing name: an existing directory is
 `DetachedRefused`, never adopted. So an independent new launch never matches an earlier one,
 whatever its command or paths (R6), which is what `run_detached`'s reuse of a leftover status file
-broke (`remote_exec.py:96-103`, `fd220164a`). The guest validates the id as 32 lowercase hex digits,
-because a later invocation could supply a recorded one.
+broke (`remote_exec.py:96-103`, `fd220164a`). The client checks the id as 32 lowercase hex digits
+before anything is sent, since a plugin can build a `Launch`; the guest trusts what it is sent.
 
 `launch` is a mutation and is never dispatched again. When its outcome is one of the connection
 outcomes (`Unknown(CONNECTION)`, `Unknown(TRUNCATED)`, `Unknown(DEADLINE)`, the set
@@ -816,12 +816,12 @@ None restates the implementation or our prose (`no-prose-policing-tests`).
 
 **The plan's Tests box:**
 
-| Plan item                                       | Test                                                                                                                                                                                                                                                                                                              |
-| ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A fresh launch never matches an earlier one     | `test_detached_program.py` runs the program in-process against a temporary base: two launches of one command get two directories and each observation reports only its own status and output; a launch whose id already exists is refused and the earlier launch's files are unchanged; a malformed id is refused |
-| Observation resumes across a dropped connection | Unit, over `RecordingVMAccess`: `observe` returning `Unknown(CONNECTION)` twice and then `EXITED` makes backup's loop report the loss once and the recovery once, launch nothing again, and download; and a supervisor killed while its payload runs still reads `RUNNING`. Live: backup with a forced disconnect |
-| Interrupt stops the work                        | In-process: a launch of `("sh", "-c", "sleep 600 & sleep 600")`; `interrupt` leaves no process in its group and the state `EXITED` with 143. Live: backup interrupted on WSL2 and Remote Lima                                                                                                                     |
-| The detached base is never world-writable       | In-process, under the sudo lane: the created `detached` directory is mode 0700                                                                                                                                                                                                                                    |
+| Plan item                                       | Test                                                                                                                                                                                                                                                                                                                                                            |
+| ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A fresh launch never matches an earlier one     | `test_detached_program.py` runs the program in-process against a temporary base: two launches of one command get two directories and each observation reports only its own status and output; a launch whose id already exists is refused and the earlier launch's files are unchanged; and, over the recording fake, a malformed id is refused before dispatch |
+| Observation resumes across a dropped connection | Unit, over `RecordingVMAccess`: `observe` returning `Unknown(CONNECTION)` twice and then `EXITED` makes backup's loop report the loss once and the recovery once, launch nothing again, and download; and a supervisor killed while its payload runs still reads `RUNNING`. Live: backup with a forced disconnect                                               |
+| Interrupt stops the work                        | In-process: a launch of `("sh", "-c", "sleep 600 & sleep 600")`; `interrupt` leaves no process in its group and the state `EXITED` with 143. Live: backup interrupted on WSL2 and Remote Lima                                                                                                                                                                   |
+| The detached base is never world-writable       | In-process, under the sudo lane: the created `detached` directory is mode 0700                                                                                                                                                                                                                                                                                  |
 
 **Unit, every CI host:**
 

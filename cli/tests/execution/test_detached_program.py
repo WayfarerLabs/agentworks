@@ -199,16 +199,6 @@ def test_an_existing_id_is_refused_and_the_earlier_launch_is_unchanged(guest: Gu
     assert after == before
 
 
-@pytest.mark.parametrize("launch_id", ["A" * 32, "a" * 31, "../" + "a" * 29, "a" * 33, ""])
-def test_a_malformed_id_is_refused_and_creates_nothing(guest: Guest, launch_id: str) -> None:
-    for operation in ("observe", "interrupt", "discard"):
-        assert guest.run(operation, launch_id).returncode == detached_program.EXIT_INVALID
-    _, launched = guest.launch(("true",), launch_id=launch_id)
-
-    assert launched.returncode == detached_program.EXIT_INVALID
-    assert not guest.base.exists()
-
-
 # -- How a launch runs (I8) -------------------------------------------------------------
 
 
