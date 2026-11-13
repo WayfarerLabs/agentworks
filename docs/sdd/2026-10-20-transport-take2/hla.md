@@ -69,7 +69,7 @@ is checked on the connections that follow.
 | `execution/errors.py`                    | Typed failures, each subclassing the matching `agentworks.errors` kind                                                                                                                        | new                                                               |
 | `execution/access.py`                    | `VMAccess`: identity-bound, passive entry point holding `run`, `stream`, `attach` and `forward`, plus `files` and `detached`                                                                  | new                                                               |
 | `execution/files.py`                     | File operations built on `run` (D6)                                                                                                                                                           | semantics from `native_files.py` callers                          |
-| `execution/detached.py`                  | Launch, observe and stop work that outlives its connection (D7)                                                                                                                               | `remote_exec.py` wrapper idea, copied                             |
+| `execution/detached.py`                  | Launch, observe, interrupt, download from and discard work that outlives its connection (D7)                                                                                                  | `remote_exec.py` wrapper idea, copied                             |
 | `execution/attach.py`, `forwarding.py`   | Terminal attach under `agentworks.terminal.guarded_terminal`; port forwards with an explicit lifetime                                                                                         | `transports/base.py`, `vms/manager/tailscale.py`                  |
 | `execution/reachability.py`              | Wait until a VM answers over SSH, with the operator-facing wait wording                                                                                                                       | `transports.wait_for_reconnect`                                   |
 | `execution/oplog.py` (slice 3)           | Format one request's log record: label, request shape, outcome and streams; never environment values, script source or stdin                                                                  | `SSHLogger` record shape                                          |
@@ -243,13 +243,15 @@ if one proves necessary, is the same installed program (`2026-08-04-next-steps/t
      never reads the account's `~/.bashrc`, whichever of Debian bash's triggers is present), then
      the session variables today's shells and session workloads use, each taken from a source
      startup files cannot touch: `TERM` from the envelope (the operator's terminal type, with a
-     default the LLD sets for a Windows workstation that has none), except for a console pane's
-     handover (D8), whose envelope carries none, so `TERM` comes from the inherited environment that
-     the terminal's owner, tmux, set, or the same default, and `SSH_TTY` from the terminal's name in
-     TTY mode, and `XDG_RUNTIME_DIR` as `/run/user/<uid>` when that directory exists and belongs to
-     the identity; then the request's environment. Nothing is copied from the inherited environment,
-     since only these sources are out of startup files' reach, so `SSH_CLIENT` and `SSH_CONNECTION`
-     are no longer passed, and release notes say so;
+     default the LLD sets for a Windows workstation that has none), `SSH_TTY` from the terminal's
+     name in TTY mode, and `XDG_RUNTIME_DIR` as `/run/user/<uid>` when that directory exists and
+     belongs to the identity; then the request's environment. The one exception is a console pane's
+     handover (D8), whose envelope carries no `TERM`: there `TERM` comes from the inherited
+     environment that the terminal's owner, tmux, set, or the same default. tmux runs the pane
+     command through the admin's `default-shell -c`, whose startup file could change it, which is
+     acceptable because `TERM` is the terminal owner's description of the terminal, not a trust
+     property. Nothing else is copied from the inherited environment, so `SSH_CLIENT` and
+     `SSH_CONNECTION` are no longer passed, and release notes say so;
    - the working directory (the home directory by default) and a fixed umask;
    - signal dispositions back to their defaults, the signal mask cleared, and no inherited
      descriptor above 2 other than a script's.
