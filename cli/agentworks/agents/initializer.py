@@ -78,6 +78,7 @@ def create_agent_on_vm(
     credential_requests: tuple[CredentialRequest, ...],
     logger: SSHLogger,
     admin_git_force_safe_directory: bool,
+    mise_enabled: bool = True,
 ) -> None:
     """Create an agent Linux user on a VM and configure their environment.
 
@@ -258,7 +259,7 @@ def create_agent_on_vm(
     # the agent's .bashrc/.zshrc unconditionally; if the file doesn't
     # exist, every interactive login hits "No such file or directory".
     # Matches the admin pattern in vms/initializer/shell_env.py:_write_agentworks_rc.
-    _write_agent_shell_rc(agent_target, home=home, agent_cfg=agent_cfg)
+    _write_agent_shell_rc(agent_target, home=home, agent_cfg=agent_cfg, mise_enabled=mise_enabled)
 
     # No PS1 setup: operators who want an agent indicator can read
     # $AGENTWORKS_AGENT (exported by the per-user profile fragment we
@@ -362,16 +363,16 @@ def create_agent_on_vm(
         except (SourceRefError, Exception) as e:
             output.warn(f"agent dotfiles failed: {e}")
 
-    # Mise.
-    _run_agent_mise_setup(agent_target=agent_target, agent_tmpl=agent_tmpl, home=home)
+    if mise_enabled:
+        _run_agent_mise_setup(agent_target=agent_target, agent_tmpl=agent_tmpl, home=home)
 
     # Native npm uses whichever runtime the user has provisioned. Neither
     # package installer invokes or requires the other.
     from agentworks.vms.initializer.npm import run_npm_install
 
     package_paths = []
-    if agent_cfg.mise_packages or agent_cfg.mise_lockfile:
-        package_paths.extend([f"{home}/.local/share/mise/shims"])
+    if mise_enabled and (agent_cfg.mise_packages or agent_cfg.mise_lockfile):
+        package_paths.append(f"{home}/.local/share/mise/shims")
     if agent_cfg.npm_enabled:
         package_paths.extend(
             run_npm_install(
@@ -616,6 +617,7 @@ def _write_agent_shell_rc(
     *,
     home: str,
     agent_cfg: ResolvedAgentTemplate,
+    mise_enabled: bool = True,
 ) -> None:
     """Write the agent's ``~/.agentworks-rc.sh`` and source it from the
     agent's shell rc files.
@@ -630,7 +632,7 @@ def _write_agent_shell_rc(
     from agentworks.ssh import SSHError
     from agentworks.vms.initializer import AGENTWORKS_RC, MISE_ACTIVATE_LINES
 
-    snippet = MISE_ACTIVATE_LINES if agent_cfg.mise_activate else "# mise activation disabled"
+    snippet = MISE_ACTIVATE_LINES if mise_enabled and agent_cfg.mise_activate else "# mise activation disabled"
     content = f"# Managed by agentworks -- do not edit\n{snippet}\n"
     try:
         rc_path = f"{home}/{AGENTWORKS_RC}"

@@ -73,6 +73,7 @@ KINDS = {
         row=VMTemplate,
         resolve=resolve_vm,
         declared={
+            "mise_enabled": False,
             "cpus": 32,
             "memory": 64,
             "disk": 500,

@@ -37,6 +37,7 @@ class ResolvedVMTemplate:
     disk: int = 50
     swap: int = 4
     # System-wide init
+    mise_enabled: bool = True
     apt: list[str] = field(default_factory=list)
     apt_packages: list[str] = field(default_factory=list)
     snap: list[str] = field(default_factory=list)
