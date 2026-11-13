@@ -565,12 +565,16 @@ teardown and to `kill_session_windows`; `workspaces/realize.py` types its log as
 which sent its requests with no log, keeps a `workspace-repair` operation log, and every step
 warning shows the failed command's redacted stderr tail (`describe_failure`).
 
-**The rehome target** is the operator's `--target`, so `rehome_workspace` checks it before anything
-runs: a trailing `/` is dropped, and a path that is then not absolute and normalized (`guest_path`'s
-rule) is a `ValidationError`, since rsync reads `host:x` as a remote and the traversal walk needs an
-absolute path. The walk itself stops at any path that is not absolute and has a 30-second deadline.
-A stored workspace path is normalized for its tmuxinator config, so an earlier release's row such as
-`/data/ws/` still regenerates, and delete compares the console link's target normalized.
+**The rehome target** is the operator's `--target`, or the default built from `paths.vm_workspaces`,
+so `rehome_workspace` checks it before anything runs: a trailing `/` is dropped, and a path that is
+then not absolute and normalized (`guest_path`'s rule) is a `ValidationError`, since rsync reads
+`host:x` as a remote and the traversal walk needs an absolute path. The stored path is normalized
+(`normalized_guest_path`, a leading `//` included) before the equality and overlap checks. The walk
+itself stops at any path that is not absolute and has a 30-second deadline. `paths.vm_workspaces` is
+refused at load when it is not absolute and stored normalized. A stored workspace path is normalized
+for its tmuxinator config, so an earlier release's row such as `/data/ws/` still regenerates, and
+delete compares the console link's target normalized, and only an absolute one, since `realpath`
+would read a relative target from the request's directory.
 
 ### Workspace copy
 
