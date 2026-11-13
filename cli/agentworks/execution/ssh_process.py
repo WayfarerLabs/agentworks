@@ -258,17 +258,46 @@ def child_environment() -> dict[str, str] | None:
     return {name: value for name, value in os.environ.items() if name.upper() not in hidden}
 
 
+# Written out rather than read from ``subprocess``, which defines it only on
+# Windows, so the flag's selection can be tested on any host.
+# https://learn.microsoft.com/en-us/windows/win32/procthread/process-creation-flags
+_CREATE_NO_WINDOW = 0x08000000
+
+
 def spawn(
-    argv: Sequence[str], *, stdin: int | None, stdout: int | None, stderr: int | None, bufsize: int = -1
+    argv: Sequence[str],
+    *,
+    stdin: int | None,
+    stdout: int | None,
+    stderr: int | None,
+    bufsize: int = -1,
+    share_console: bool = True,
 ) -> subprocess.Popen[bytes]:
     """Start the client, or raise :class:`ClientUnsupported` when the operating system cannot.
 
     The one place a client process is started, so the environment strip and the
     error mapping exist once. ``None`` for a stream inherits the operator's.
+
+    ``share_console=False`` is for a client that never uses the operator's
+    terminal while another client does. Windows-only by design: there it starts
+    the client with ``CREATE_NO_WINDOW``, off the operator's console. A parked
+    client left on the console was measured to turn the terminal client's UTF-8
+    into code-page glyphs (issue #889); the mechanism is not established, but
+    Win32-OpenSSH opens ``CONIN$`` and ``CONOUT$`` itself whatever its stdio are.
+    It also stops the console's Ctrl-C from reaching that client, which then
+    ends only when agw ends it. Elsewhere it changes nothing: with
+    ``BatchMode=yes`` the client never opens the terminal.
     """
+    console_free = not share_console and sys.platform == "win32"
     try:
         return subprocess.Popen(
-            list(argv), stdin=stdin, stdout=stdout, stderr=stderr, bufsize=bufsize, env=child_environment()
+            list(argv),
+            stdin=stdin,
+            stdout=stdout,
+            stderr=stderr,
+            bufsize=bufsize,
+            env=child_environment(),
+            creationflags=_CREATE_NO_WINDOW if console_free else 0,
         )
     except OSError as error:
         reason = error.strerror or error

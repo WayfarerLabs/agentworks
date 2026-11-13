@@ -62,8 +62,16 @@ def attach(
     touched. So is a parking connection that never reports ``parked`` (a
     startup file that reads stdin would hold it forever).
     """
+    # The parking connection never uses the terminal, and on Windows it must not
+    # share the console the terminal half runs on (issue #889).
     with PipeSession(
-        parking_argv, request=wire, nonce=nonce, hold_stdin_open=True, on_stdout=_ignore, on_stderr=_ignore
+        parking_argv,
+        request=wire,
+        nonce=nonce,
+        hold_stdin_open=True,
+        share_console=False,
+        on_stdout=_ignore,
+        on_stderr=_ignore,
     ) as session:
         stop = session.pump(lambda: session.stdout.parked, budget=Deadline.after(PARKING_WAIT_SECONDS))
         if not session.stdout.parked:

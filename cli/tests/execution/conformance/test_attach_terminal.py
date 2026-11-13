@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import subprocess
 import sys
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
@@ -11,10 +12,11 @@ import pytest
 
 from agentworks import output
 from agentworks.execution import attach as attach_module
+from agentworks.execution import ssh_process
 from agentworks.execution.requests import LoginShell
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterator, Sequence
 
     from tests.execution.conformance.lanes import LocalLane
 
@@ -100,3 +102,21 @@ def test_the_login_shell_gets_the_requested_environment_without_it_touching_a_co
     assert code == 0
     assert terminal.stdout.splitlines()[:2] == [f"token={secret}".encode(), b"home=/tmp"]
     assert not any(secret in argument for argument in terminal.argv)
+
+
+def test_only_the_parking_connection_leaves_the_operators_console(
+    local_lane: LocalLane, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Issue #889: the parked client must not share the console the terminal half runs on."""
+    spawned: list[bool] = []
+    real_spawn = ssh_process.spawn
+
+    def spawn(argv: Sequence[str], **kwargs: Any) -> subprocess.Popen[bytes]:
+        spawned.append(kwargs.get("share_console", True))
+        return real_spawn(argv, **kwargs)
+
+    monkeypatch.setattr(ssh_process, "spawn", spawn)
+    with local_lane.terminal(behavior=lambda argv, half: 0):
+        local_lane.access.attach(LoginShell(cwd=local_lane.workdir))
+
+    assert spawned == [False]  # the terminal half is stubbed here; it spawns with the default

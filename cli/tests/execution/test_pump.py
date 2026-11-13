@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import io
 import os
+import subprocess
 import sys
 import time
 from typing import TYPE_CHECKING
@@ -553,6 +554,102 @@ def test_the_child_environment_is_inherited_off_windows() -> None:
     if os.name == "nt":
         pytest.skip("covered by the Windows test")
     assert ssh_process.child_environment() is None
+
+
+@pytest.fixture
+def popen_flags(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    """Record each spawn's ``creationflags`` instead of starting a process."""
+    flags: list[int] = []
+
+    class Started:
+        def wait(self) -> int:
+            return 0
+
+    def record(*_args: object, creationflags: int = 0, **_kwargs: object) -> Started:
+        flags.append(creationflags)
+        return Started()
+
+    monkeypatch.setattr(subprocess, "Popen", record)
+    return flags
+
+
+@pytest.mark.parametrize(("platform", "expected"), [("win32", 0x08000000), ("linux", 0), ("darwin", 0)])
+def test_a_client_that_does_not_share_the_console_gets_one_of_its_own_only_on_windows(
+    monkeypatch: pytest.MonkeyPatch, popen_flags: list[int], platform: str, expected: int
+) -> None:
+    monkeypatch.setattr("sys.platform", platform)
+
+    ssh_process.spawn(["ssh"], stdin=None, stdout=None, stderr=None, share_console=False)
+
+    assert popen_flags == [expected]
+
+
+def test_clients_share_the_operators_console_by_default(
+    monkeypatch: pytest.MonkeyPatch, popen_flags: list[int]
+) -> None:
+    monkeypatch.setattr("sys.platform", "win32")
+
+    ssh_process.spawn(["ssh"], stdin=None, stdout=None, stderr=None)
+    ssh_process.run_terminal(["ssh"])
+
+    assert popen_flags == [0, 0]
+
+
+@pytest.mark.parametrize("share_console", [None, True, False])
+def test_a_session_passes_its_console_choice_to_the_spawn(
+    monkeypatch: pytest.MonkeyPatch, share_console: bool | None
+) -> None:
+    asked: list[bool] = []
+
+    def spawn(*_args: object, share_console: bool, **_kwargs: object) -> None:
+        asked.append(share_console)
+        raise ClientUnsupported("recorded")
+
+    monkeypatch.setattr(ssh_process, "spawn", spawn)
+    if share_console is None:
+        session = PipeSession(["ssh"], request=b"", nonce=NONCE, on_stdout=Capture(), on_stderr=Capture())
+    else:
+        session = PipeSession(
+            ["ssh"], request=b"", nonce=NONCE, share_console=share_console, on_stdout=Capture(), on_stderr=Capture()
+        )
+
+    with pytest.raises(ClientUnsupported):
+        session.start()
+    assert asked == [share_console is not False]
+
+
+@pytest.mark.parametrize("share_console", [True, False])
+def test_a_console_free_client_is_not_attached_to_the_operators_console(share_console: bool) -> None:
+    if sys.platform != "win32":  # a statement, not a skipif mark, so the type checker narrows too
+        pytest.skip("Win32 consoles")
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.GetConsoleProcessList.argtypes = [ctypes.POINTER(wintypes.DWORD), wintypes.DWORD]
+    kernel32.GetConsoleProcessList.restype = wintypes.DWORD
+
+    def attached() -> set[int]:
+        ids = (wintypes.DWORD * 1024)()
+        count = kernel32.GetConsoleProcessList(ids, len(ids))
+        return {ids[index] for index in range(min(count, len(ids)))}
+
+    if not attached():
+        pytest.skip("this test process has no console")
+    child = ssh_process.spawn(
+        [sys.executable, "-c", "import sys, time; print('ready', flush=True); time.sleep(30)"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        share_console=share_console,
+    )
+    try:
+        assert child.stdout is not None
+        assert child.stdout.readline().strip() == b"ready"
+        assert (child.pid in attached()) is share_console
+    finally:
+        child.kill()
+        child.wait()
 
 
 def test_binary_stdio_round_trips_every_byte_and_end_of_file() -> None:

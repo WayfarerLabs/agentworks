@@ -241,16 +241,22 @@ stderr after the marker; the terminal half takes neither.
 **Spawning.** One `spawn(argv, ...)` in `ssh_process.py` runs
 `subprocess.Popen(argv, stdin=PIPE, stdout=PIPE, stderr=PIPE, bufsize=0)` (the forward passes no
 pipes) with the proof's Windows environment strip (`_io.py:104-114`, at `fd1256b1f`), and maps a
-failure to start to `ClientUnsupported`. The pump lives in `pump.py`. The pump is the proof's
-single-threaded loop (`_io.py:32-205`): non-blocking pipes (supported on Windows pipes from Python
-3.12), 64 KiB chunks, a 10 ms sleep when nothing moved, the deadline, then kill and a 0.5 s reap,
-and cleanup on `BaseException`. It is argv-agnostic, which is what lets the conformance suite run it
-against a local shell.
+failure to start to `ClientUnsupported`. A client that never uses the operator's terminal while
+another client does passes `share_console=False`, which on Windows starts it with `CREATE_NO_WINDOW`
+so it is not attached to the operator's console, and changes nothing elsewhere. Only the parking
+connection of an attach passes it: left on the console, it turned the terminal half's UTF-8 into
+code-page glyphs on Windows Terminal (issue #889). Clients that keep the console keep receiving its
+Ctrl-C. The pump lives in `pump.py`. The pump is the proof's single-threaded loop (`_io.py:32-205`):
+non-blocking pipes (supported on Windows pipes from Python 3.12), 64 KiB chunks, a 10 ms sleep when
+nothing moved, the deadline, then kill and a 0.5 s reap, and cleanup on `BaseException`. It is
+argv-agnostic, which is what lets the conformance suite run it against a local shell.
 
 - **Who uses it.** `run`, `stream` and the parking connection of an attach reuse the one pump. The
   terminal half (inherited stdio, `subprocess` wait) and the forward (no pipes) do not. The parking
   connection sets `hold_stdin_open`, so the pump sends the request and leaves the pipe open: the
-  parked launcher reads end of file as the client giving up.
+  parked launcher reads end of file as the client giving up. It also sets `share_console=False`, so
+  on Windows a Ctrl-C before `parked` reaches only agw, whose interrupt ends the session and kills
+  the client.
 - **Deadline and output limit.** Either stops the pump and kills the client at once, then reaps for
   0.5 s; only a natural end waits for the client to exit.
 - **Operator stdin for `stream`.** The caller passes `sys.stdin.buffer.raw`. A daemon thread reads
