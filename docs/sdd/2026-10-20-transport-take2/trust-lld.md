@@ -227,13 +227,16 @@ existing ones:
 
 ```text
     HostKeyAlias agentworks-vm-<name>
-    UserKnownHostsFile "<store file>"
+    UserKnownHostsFile <store file>
     StrictHostKeyChecking yes
-        GlobalKnownHostsFile /dev/null
+    GlobalKnownHostsFile /dev/null
     CheckHostIP no
     UpdateHostKeys no
     HashKnownHosts no
 ```
+
+The store path is written bare, and quoted only when it holds whitespace or an apostrophe
+(`trust.option_value`).
 
 (`NUL` replaces `/dev/null` on Windows.) An unreadable record or an unsafe store path for one VM
 warns and omits that VM's block; it never aborts the rebuild for the others.
