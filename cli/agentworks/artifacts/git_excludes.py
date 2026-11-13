@@ -8,6 +8,7 @@ import re
 from typing import TYPE_CHECKING
 
 from agentworks import output
+from agentworks.artifacts.config_files import publish_config
 from agentworks.errors import ExternalError, StateError
 from agentworks.execution.files import guest_path
 from agentworks.execution.requests import Bytes, PythonProgram
@@ -255,13 +256,13 @@ def reconcile_workspace_excludes(
         else:
             replacement = existing
         if replacement != existing:
-            guest.update(
+            publish_config(
+                guest,
                 destination,
                 replacement,
                 observed=current,
-                mode=0o660 if group else 0o600,
-                parent_mode=0o2770 if group else 0o700,
-                group=group or None,
+                group=group,
+                operation="artifact exclusion",
                 preserve_metadata=current is not None,
             )
             current = replacement

@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.artifacts.application import ArtifactApplication
+from agentworks.artifacts.config_files import publish_config
 from agentworks.artifacts.model import ArtifactInputs
 from agentworks.artifacts.native.mcp import apply_mcp
 from agentworks.capabilities.harness_integration.settings import (
@@ -24,7 +25,7 @@ from agentworks.capabilities.harness_integration.settings import (
     serialize_settings,
 )
 from agentworks.errors import ConfigError, StateError
-from agentworks.execution.errors import FileConflict, PathRefusal, PathRefused
+from agentworks.execution.errors import PathRefusal, PathRefused
 from agentworks.execution.files import Absent, Directory, guest_path
 from agentworks.harness_setup.model import NativeClaim
 from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
@@ -131,33 +132,15 @@ class _MappingPlan:
         removed: tuple[tuple[str, str], ...] = (),
         protected: tuple[tuple[str, str], ...] = (),
     ) -> None:
-        """Publish the planned settings over ``current``, what was last read, through :meth:`Files.update`.
+        """Publish the planned settings over ``current``, what was last read, through :func:`publish_config`.
 
-        User files are 0600 under 0700 parents; workspace files, with
-        ``group``, 0660 under setgid 2770 parents. Settings equal to
-        ``current`` write nothing, so the file keeps its permissions. A file
-        that changed since ``current`` was read is ``FileConflict``, and
-        nothing is written.
+        Settings equal to ``current`` write nothing, so the file keeps its
+        permissions. A file that changed since ``current`` was read is
+        ``FileConflict``, and nothing is written.
         """
         content, _ = self.render(destination, current=current, overlays=overlays, removed=removed, protected=protected)
-        if content is None:
-            return
-        try:
-            files.update(
-                destination,
-                content,
-                observed=current,
-                mode=0o600 if group is None else 0o660,
-                parent_mode=0o700 if group is None else 0o2770,
-                group=group,
-            )
-        except FileConflict as conflict:
-            raise FileConflict(
-                conflict.vm_name,
-                "settings publication",
-                destination,
-                hint="Another writer changed the file between setup's read and its write.",
-            ) from None
+        if content is not None:
+            publish_config(files, destination, content, observed=current, group=group, operation="settings publication")
 
     def render(
         self,

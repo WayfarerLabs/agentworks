@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Literal, cast
 
 from agentworks import output
 from agentworks.artifacts.application import ArtifactApplication, ArtifactDeferral
+from agentworks.artifacts.config_files import publish_config
 from agentworks.artifacts.model import ArtifactInput, ArtifactInputs, ArtifactType
 from agentworks.artifacts.names import mcp_native_name
 from agentworks.artifacts.native.layout import NativeUserLayout, resolve_user_layout
@@ -252,22 +253,18 @@ def apply_mcp(
         return ArtifactApplication(deferred=blocked_deferrals)
     format: SettingsFormat = "json" if tool == "claude" else "toml"
     key = "mcpServers" if tool == "claude" else "mcp_servers"
-    group = (invocation.linux_group or None) if isinstance(invocation, WorkspaceSetupInvocation) else None
+    group = invocation.linux_group if isinstance(invocation, WorkspaceSetupInvocation) else None
     files = invocation.files
 
     def publish(content: bytes, initial: bytes | None) -> None:
-        """Write ``content`` over ``initial``, keeping an existing file's owner, mode and attributes.
-
-        A new file takes the modes settings publication uses: 0600 under 0700
-        parents for a user, 0660 under setgid 2770 parents for a workspace.
-        """
-        files.update(
+        """Write ``content`` over ``initial``, keeping an existing file's owner, mode and attributes."""
+        publish_config(
+            files,
             destination,
             content,
             observed=initial,
-            mode=0o600 if group is None else 0o660,
-            parent_mode=0o700 if group is None else 0o2770,
             group=group,
+            operation="MCP publication",
             preserve_metadata=initial is not None,
         )
 

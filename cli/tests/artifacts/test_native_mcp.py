@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import grp
 import json
+import os
+import stat
 import sys
 from dataclasses import replace
 from datetime import date, datetime, time
@@ -165,6 +168,43 @@ def test_retirement_retains_modified_and_unavailable_ancestor_entries(transport,
     assert present is (modified or unavailable)
     assert bool(reasons) is modified
     assert bool(claims[-1]) is (modified or unavailable)
+
+
+@pytest.mark.parametrize("case", ["new-user", "existing", "new-workspace"])
+def test_mcp_publication_modes_follow_the_owner(transport, case):
+    """A new file is private to a user or shared with a workspace group; an existing file keeps its mode."""
+    group = grp.getgrgid(os.getgid()).gr_name
+    root = transport.home if case != "new-workspace" else transport.root / "project"
+    path = root / ".codex/config.toml"
+    if case == "existing":
+        write(path, {"foreign": True})
+        path.chmod(0o644)
+    item = server(component="workspace" if case == "new-workspace" else "agent")
+    if case == "new-workspace":
+        root.mkdir()
+        call = WorkspaceSetupInvocation(
+            vm=object(),
+            access=(access := transport.access()),
+            files=access.files(),
+            prior=None,
+            checkpoint=Mock(),
+            workspace_name="fixture",
+            root=str(root),
+            linux_group=group,
+            artifacts=received(item),
+        )
+    else:
+        call = replace(invocation(transport, []), artifacts=received(item))
+    apply_mcp("codex", call, destination=str(path))
+    assert mcp_native_name(item) in table(read(path), "mcp_servers")
+    file_mode, parent_mode = stat.S_IMODE(path.stat().st_mode), stat.S_IMODE(path.parent.stat().st_mode)
+    if case == "new-user":
+        assert (file_mode, parent_mode) == (0o600, 0o700)
+    elif case == "existing":
+        assert file_mode == 0o644
+    else:
+        assert (file_mode, parent_mode) == (0o660, 0o2770)
+        assert path.stat().st_gid == path.parent.stat().st_gid == grp.getgrnam(group).gr_gid
 
 
 def test_workspace_shared_paths_include_retained_claims_without_file_ownership(transport):
