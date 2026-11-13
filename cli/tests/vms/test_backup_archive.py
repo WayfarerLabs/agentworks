@@ -32,6 +32,7 @@ if TYPE_CHECKING:
 ARCHIVE_BYTES = b"zstd archive bytes"
 LOST_CONNECTION = Result(Unknown(UnknownReason.CONNECTION))
 LAUNCHED = Result(Completed(0))
+MAX_POLLS = 50
 
 
 def observed(state: str, status: int | None = None, *, size: int = 0, tail: bytes = b"") -> Result:
@@ -48,12 +49,16 @@ class Guest:
         self.missing: set[str] = set()
         self.interrupt: Result | BaseException = observed("exited", 143)
         self.discard = Result(Completed(0))
+        self.polls = 0
 
     def answer(self, call: Call) -> Result | BaseException | None:
         request = call.request
         if isinstance(request, PythonProgram):
             operation = request.args[0]
             if operation == "observe":
+                self.polls += 1
+                if self.polls > MAX_POLLS:
+                    raise AssertionError("backup kept polling an archive that had ended")
                 return self.observations.pop(0) if len(self.observations) > 1 else self.observations[0]
             if operation == "launch":
                 return self.launch
@@ -145,7 +150,9 @@ def test_a_dropped_connection_is_reported_once_with_its_recovery_and_nothing_lau
 
 
 @pytest.mark.parametrize(
-    "ended", [observed("lost"), observed("exited", 2, tail=b"tar: srv/a: Cannot open\n")], ids=["lost", "failed"]
+    "ended",
+    [observed("lost"), observed("absent"), observed("exited", 2, tail=b"tar: srv/a: Cannot open\n")],
+    ids=["lost", "absent", "failed"],
 )
 def test_an_archive_that_did_not_succeed_raises_and_is_discarded_without_a_download(
     tmp_path: Path, ended: Result
@@ -156,6 +163,7 @@ def test_an_archive_that_did_not_succeed_raises_and_is_discarded_without_a_downl
     with pytest.raises(BackupError):
         vm_backup._archive_workspaces(access, workspaces("/srv/a"), local)  # noqa: SLF001
 
+    assert operations(access).count("observe") == 1  # the ended archive is never polled again
     assert "cat" not in operations(access)
     assert operations(access)[-1] == "discard"
     assert not local.exists()

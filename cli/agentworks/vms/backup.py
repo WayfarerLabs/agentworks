@@ -319,7 +319,8 @@ def _archive_workspaces(
                 " as the VM restarting leaves it",
                 hint="Run the backup again.",
             )
-        assert observation.state is State.EXITED  # _wait_for_archive returns only once the archive ended
+        if observation.state is State.ABSENT:
+            raise BackupError(f"the archive's directory on VM '{access.vm_name}' disappeared (launch {launch.id})")
         tail = _decoded(observation.output_tail)
         if observation.status != 0:
             detail = f"\nOutput:\n{tail}" if tail else ""
@@ -375,43 +376,36 @@ def _wait_for_archive(detached: Detached, launch: Launch, vm_name: str) -> Obser
     """Poll the archive until it is no longer running, and return the observation that showed it.
 
     A poll that cannot reach the VM is not a failure: the archive keeps
-    running there, so the loss is reported once, a reminder every 30
-    seconds, and the recovery once. There is no give-up bound; Ctrl-C ends
-    the wait.
+    running there, so the loss is reported once, and every 30 seconds either
+    a reminder or the archive's size, then the recovery once. There is no
+    give-up bound; Ctrl-C ends the wait.
     """
     last_report = time.monotonic()
-    lost_since: float | None = None
-    reminded = 0.0
+    connected = True
     while True:
         try:
             observation = detached.observe(launch)
         except ExecutionIncomplete as error:
             if error.result.completion not in reachability.POLLED:
                 raise
-            now = time.monotonic()
-            if lost_since is None:
-                lost_since = reminded = now
+            if connected:
+                connected, last_report = False, time.monotonic()
                 output.warn(
                     f"Lost the connection to VM '{vm_name}'; the archive keeps running there. Waiting to reconnect..."
                 )
-            elif now - reminded >= REPORT_SECONDS:
-                reminded = now
-                output.detail(f"Still waiting to reconnect to VM '{vm_name}' ({int(now - lost_since)}s)...")
-            time.sleep(POLL_SECONDS)
-            continue
+        else:
+            if not connected:
+                connected = True
+                output.info(f"Reconnected to VM '{vm_name}'.")
+            if observation.state is not State.RUNNING:
+                return observation
         now = time.monotonic()
-        if lost_since is not None:
-            lost_since = None
-            output.info(f"Reconnected to VM '{vm_name}'.")
-        if observation.state in (State.EXITED, State.LOST):
-            return observation
-        if observation.state is State.ABSENT:
-            raise BackupError(
-                f"the archive's directory on VM '{vm_name}' disappeared while it ran (launch {launch.id})"
-            )
         if now - last_report >= REPORT_SECONDS:
             last_report = now
-            output.detail(f"Archive size: {_fmt_size(observation.work.get(ARCHIVE_NAME, 0))}")
+            if connected:
+                output.detail(f"Archive size: {_fmt_size(observation.work.get(ARCHIVE_NAME, 0))}")
+            else:
+                output.detail(f"Still waiting to reconnect to VM '{vm_name}'...")
         time.sleep(POLL_SECONDS)
 
 
