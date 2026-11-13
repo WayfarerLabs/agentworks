@@ -162,6 +162,8 @@ def _annotation_of(entry: FieldEntry) -> list[str]:
         facts.append(f"default: {render_value(entry.doc.default)}")
     if entry.doc.ref is not None:
         facts.append(f"names a {entry.doc.ref.kind}")
+    if entry.doc.interpolation is not None:
+        facts.append("interpolated elements" if entry.doc.interpolation == "items" else "interpolated")
     lines = [] if entry.doc.description is None else [entry.doc.description]
     lines.append(f"({', '.join(facts)})")
     return lines

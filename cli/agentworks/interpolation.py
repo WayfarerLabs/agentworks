@@ -9,7 +9,7 @@ from agentworks.errors import ValidationError
 from agentworks.linux_users import managed_home
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
 
     from agentworks.env.identity import ResourceContext
 
@@ -62,6 +62,7 @@ def render_template(
     *,
     field: str,
     legacy_placeholders: Mapping[str, str] | None = None,
+    encode_inserted: Callable[[str], str] | None = None,
 ) -> str:
     """Render operator-authored text once, interpreting the reserved prefix.
 
@@ -70,7 +71,10 @@ def render_template(
     A consumer may explicitly supply literal legacy tokens mapped to context
     names during its compatibility window. Other shell expressions, Go templates,
     and replacement contents remain literal data.
+    ``encode_inserted`` adapts replacement data and escaped namespace prefixes
+    to a source destination while retaining authored source chunks unchanged.
     """
+    encode = encode_inserted if encode_inserted is not None else str
     token_start = (
         re.compile("|".join((_TOKEN_START.pattern, *(re.escape(token) for token in legacy_placeholders))))
         if legacy_placeholders
@@ -81,7 +85,7 @@ def render_template(
     while match := token_start.search(text, cursor):
         chunks.append(text[cursor : match.start()])
         if match.group() == _ESCAPE:
-            chunks.append(_PREFIX)
+            chunks.append(encode(_PREFIX))
             cursor = match.end()
             continue
         name = legacy_placeholders.get(match.group()) if legacy_placeholders else None
@@ -110,6 +114,6 @@ def render_template(
                 entity_kind="template",
                 entity_name=field,
             )
-        chunks.append(values[name])
+        chunks.append(encode(values[name]))
     chunks.append(text[cursor:])
     return "".join(chunks)

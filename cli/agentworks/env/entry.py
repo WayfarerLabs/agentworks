@@ -10,6 +10,7 @@ from pydantic import AfterValidator, ConfigDict
 from agentworks.schema import (
     AgwModel,
     AgwRootModel,
+    Interpolated,
     MergeStrategy,
     ScalarShorthand,
     SecretRef,
@@ -41,7 +42,7 @@ class PlaintextEnvEntry(AgwModel):
 
     scalar_shorthand: ClassVar = ScalarShorthand(annotation=str, field="value")
 
-    value: str
+    value: Annotated[str, Interpolated()]
     """The plaintext value to export. Supports ${agw:NAME} references to the
     consuming invocation's managed context, such as ${agw:user_home_dir}.
     Use $${agw:NAME} to preserve a literal reference. Session-scope values
