@@ -446,6 +446,7 @@ def test_substitution_preserves_workload_values_and_substitutes_extra_args(
 
     db = _seed_db(tmp_path)
     workspace_path = "/srv/a project's $cache/${agw:unknown}"
+    literal_directory = f"/srv/a '{literal}/path"
     db.update_workspace_path("ws1", workspace_path)
     events: list[str] = []
     captured: dict[str, str] = {}
@@ -457,7 +458,7 @@ def test_substitution_preserves_workload_values_and_substitutes_extra_args(
             "model": literal,
             "reasoning_effort": literal,
             "profile": literal,
-            "writable_dirs": [f"/srv/a '{literal}/path"],
+            "writable_dirs": [literal_directory.replace("${agw:", "$${agw:")],
             "approvals_reviewer": literal,
             "web_search": literal,
             "goal": "goal ${agw:session_name} ${agw:component}",
@@ -510,7 +511,7 @@ def test_substitution_preserves_workload_values_and_substitutes_extra_args(
     profiles = [argv[index + 1] for index, token in enumerate(argv) if token == "-p"]
     assert profiles == [literal, "profile-s1"]
     assert argv[argv.index("-m") + 1] == literal
-    assert argv[argv.index("--add-dir") + 1] == f"/srv/a '{literal}/path"
+    assert argv[argv.index("--add-dir") + 1] == literal_directory
     for key in ("approvals_reviewer", "model_reasoning_effort", "web_search"):
         token = next(token for token in argv if token.startswith(f"{key}="))
         assert tomllib.loads(token)[key] == literal

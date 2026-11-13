@@ -346,14 +346,18 @@ class HarnessIntegration(Capability):
         """Bind known launch facts before preflight selects or renders input."""
         self._session = replace(self._session_binding, context_values=dict(values), launch_intent=intent)
 
-    def render_context_argv(self, value: str) -> str:
-        """Render one structured extra argument, leaving replacement text literal."""
-        from agentworks.interpolation import render_template
+    def render_context_args(self, field_name: str, value: list[str]) -> tuple[str, ...]:
+        """Render an opted-in argument field against this invocation's context."""
+        from agentworks.interpolation_fields import render_list_field
 
-        return render_template(
-            value,
-            self._session_binding.context_values,
-            field=f"{self.owner_kind}/{self.owner_name}.extra_args",
+        return tuple(
+            render_list_field(
+                type(self.config),
+                field_name,
+                value,
+                self._session_binding.context_values,
+                location=f"{self.owner_kind}/{self.owner_name}.{field_name}",
+            )
         )
 
     @property

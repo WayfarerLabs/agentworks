@@ -1,0 +1,102 @@
+"""Render selected model fields using their declared interpolation eligibility."""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, overload
+
+from agentworks.errors import StateError
+from agentworks.interpolation import render_template
+from agentworks.schema.interpolation import field_interpolation
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping
+
+    from pydantic import BaseModel
+
+
+@overload
+def render_scalar_field(
+    model: type[BaseModel],
+    field_name: str,
+    value: str,
+    values: Mapping[str, str],
+    *,
+    location: str,
+    legacy_placeholders: Mapping[str, str] | None = None,
+    encode_inserted: Callable[[str], str] | None = None,
+) -> str: ...
+
+
+@overload
+def render_scalar_field(
+    model: type[BaseModel],
+    field_name: str,
+    value: None,
+    values: Mapping[str, str],
+    *,
+    location: str,
+    legacy_placeholders: Mapping[str, str] | None = None,
+    encode_inserted: Callable[[str], str] | None = None,
+) -> None: ...
+
+
+def render_scalar_field(
+    model: type[BaseModel],
+    field_name: str,
+    value: str | None,
+    values: Mapping[str, str],
+    *,
+    location: str,
+    legacy_placeholders: Mapping[str, str] | None = None,
+    encode_inserted: Callable[[str], str] | None = None,
+) -> str | None:
+    """Render an annotated string field at its consuming boundary.
+
+    The declaring model supplies policy even when inheritance has moved the
+    effective value into another carrier. Callers select applicable values and
+    supply known context; neither declarations nor context are mutated.
+    """
+    if field_interpolation(model.model_fields[field_name]) != "scalar":
+        raise StateError(
+            f"{model.__name__}.{field_name} does not declare string interpolation",
+            entity_kind="template",
+            entity_name=location,
+        )
+    if value is None:
+        return None
+    return render_template(
+        value,
+        values,
+        field=location,
+        legacy_placeholders=legacy_placeholders,
+        encode_inserted=encode_inserted,
+    )
+
+
+def render_list_field(
+    model: type[BaseModel],
+    field_name: str,
+    value: list[str],
+    values: Mapping[str, str],
+    *,
+    location: str,
+    legacy_placeholders: Mapping[str, str] | None = None,
+    encode_inserted: Callable[[str], str] | None = None,
+) -> list[str]:
+    """Render opted-in string elements without changing authored list order."""
+    if field_interpolation(model.model_fields[field_name]) != "items":
+        raise StateError(
+            f"{model.__name__}.{field_name} does not declare interpolation on string elements",
+            entity_kind="template",
+            entity_name=location,
+        )
+    return [
+        render_template(
+            item,
+            values,
+            field=f"{location}[{index}]",
+            legacy_placeholders=legacy_placeholders,
+            encode_inserted=encode_inserted,
+        )
+        for index, item in enumerate(value)
+    ]

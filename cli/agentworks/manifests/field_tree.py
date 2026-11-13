@@ -427,6 +427,7 @@ def _add_element(
         choices=(),
         examples=(),
         ref=holder.key_ref,
+        interpolation="scalar" if holder.interpolation == "items" else None,
         key_ref=None,
         nested_model=nested_model,
         item_model=None,

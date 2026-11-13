@@ -4,6 +4,19 @@ Agentworks substitutes explicit resource context in plaintext env values and wor
 `${agw:NAME}`. It does not read arbitrary shell variables or build references between env entries.
 Secret reference names and secret contents are literal data.
 
+## Supported fields
+
+Interpolation is an opt-in contract declared on configuration model fields. Run
+`agw resource explain KIND` or `agw resource explain harness-integration/NAME` to identify
+interpolated values and list elements; generated samples carry the same fact.
+`agw guide show concept-templating` introduces the syntax and normal inspection path.
+
+Supported families include winning plaintext env values, selected Shell command source, Shell
+required-command operands, native extra arguments, Codex writable directories, installer
+commands/completion checks and target-user dotfiles destinations/install commands. Ordinary model
+construction keeps authored text intact. Each consuming invocation selects its applicable values and
+supplies context before rendering them.
+
 ## Context values
 
 | Name             | Meaning                            | Availability                         |
@@ -54,13 +67,13 @@ remains literal. Both syntaxes render in one pass, so inserted values containing
 not scanned again. A dollar before an old token remains a literal dollar followed by its
 replacement.
 
-These aliases remain supported throughout CLI 1.x, with deliberate removal planned for 2.0.0 in
-[issue #878](https://github.com/WayfarerLabs/agentworks/issues/878). Affected operations warn once
-per CLI request; `--no-deprecations` suppresses that notice. `agw doctor` reports affected effective
-session templates and stored session overrides even when ambient warnings are suppressed. Session
-env compatibility applies to every integration; other env scopes and native integration arguments
-use only the namespaced syntax. Secrets and losing or identity-discarded entries bypass the alias
-renderer. See the [compatibility and deprecation pattern](deprecations.md).
+These aliases remain supported through CLI 0.20.x and 0.21.x, with deliberate removal planned for
+0.22.0 in [issue #878](https://github.com/WayfarerLabs/agentworks/issues/878). Affected operations
+warn once per CLI request; `--no-deprecations` suppresses that notice. `agw doctor` reports affected
+effective session templates and stored session overrides even when ambient warnings are suppressed.
+Session env compatibility applies to every integration; other env scopes and native integration
+arguments use only the namespaced syntax. Secrets and losing or identity-discarded entries bypass
+the alias renderer. See the [compatibility and deprecation pattern](deprecations.md).
 
 ## Scope, lifecycle, and inspection
 
@@ -155,6 +168,19 @@ The shared resource context also supplies `AGENTWORKS_*` identity variables:
 profile fragments. Placeholder values come from explicit context rather than reading these exports.
 
 ## Adding a consumer
+
+Declare `Annotated[str, Interpolated()]` on an eligible string, including the string element of an
+opted-in list. The marker is exported by `agentworks.schema`. Unmarked values retain their existing
+literal contract. The annotation feeds schema, field documentation and runtime eligibility; do not
+maintain another eligible-field registry.
+
+Use `render_scalar_field` or `render_list_field` from `agentworks.interpolation_fields` at the
+consuming boundary. Supply the declaring model, field name, selected authored value, context mapping
+and diagnostic location. The declaring model remains the policy source when a resolved dataclass
+carries the value. For integration argv fields, `render_context_args` binds those facts to the
+session. Helpers require the matching annotation, return separate values and never replace stored or
+loaded declarations. Read unmarked values normally; an explicit render call for an unmarked field is
+a programmer error.
 
 Supply the managed identity and resource facts the invocation actually knows. Runtime callers use
 the existing `ResourceContext`; preparation can supply planned facts before a full runtime context

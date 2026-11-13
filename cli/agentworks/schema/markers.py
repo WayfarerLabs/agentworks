@@ -43,11 +43,25 @@ if TYPE_CHECKING:
 OWNER_PLACEHOLDERS: Final = ("owner_kind", "owner_name")
 
 #: The one JSON Schema extension key the markers emit. The ``x-agw-``
-#: prefix is reserved for agentworks vocabulary generally; this is its
-#: only member today, and a new member needs a consumer, not just an
-#: idea. Conforming validators ignore ``x-`` keys, so editor tooling
+#: prefix is reserved for agentworks vocabulary generally. Extensions
+#: have concrete consumers in field documentation and runtime adapters.
+#: Conforming validators ignore ``x-`` keys, so editor tooling
 #: sees the facts without being confused by them.
 REF_SCHEMA_KEY: Final = "x-agw-ref"
+INTERPOLATION_SCHEMA_KEY: Final = "x-agw-interpolation"
+
+
+@dataclass(frozen=True)
+class Interpolated:
+    """A string value interpreted against its consuming runtime context."""
+
+    def __get_pydantic_json_schema__(self, core_schema: CoreSchema, handler: GetJsonSchemaHandler) -> JsonSchemaValue:
+        """Expose the declaration on the string node without evaluating it."""
+        schema = handler(core_schema)
+        for node in schema.get("anyOf", [schema]):
+            if node.get("type") == "string":
+                node[INTERPOLATION_SCHEMA_KEY] = True
+        return schema
 
 
 @dataclass(frozen=True)

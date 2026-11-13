@@ -600,6 +600,41 @@ def test_preflight_checks_required_commands_without_executing_or_parsing_shell_s
     assert "deliberately" not in probe.commands[0]
 
 
+def test_required_commands_render_for_the_bound_target_without_changing_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    checked: list[str] = []
+
+    def record(commands: tuple[str, ...], *_args: object, **_kwargs: object) -> None:
+        checked.extend(commands)
+
+    monkeypatch.setattr("agentworks.capabilities.harness_integration.shell.require_commands", record)
+    integration = _harness_integration({"required_commands": ["${agw:workspace_dir}/bin/tool"]})
+    integration.prepare_context({"workspace_dir": "/srv/a project's files"}, intent=HarnessLaunchIntent.CREATE)
+
+    integration.preflight(RunContext(operation_scope=_session_scope(), admin_target=_Probe()))
+
+    assert checked == ["/srv/a project's files/bin/tool"]
+    assert integration.config.required_commands == ["${agw:workspace_dir}/bin/tool"]
+
+
+def test_pending_target_validates_required_command_references_before_remote_probes() -> None:
+    from agentworks.errors import ValidationError
+
+    integration = _harness_integration(
+        {"required_commands": ["${agw:unknown}"]},
+        target=SimpleNamespace(name="dev", realized=False),
+        admin=False,
+    )
+    integration.prepare_context({}, intent=HarnessLaunchIntent.CREATE)
+    probe = _Probe()
+
+    with pytest.raises(ValidationError) as caught:
+        integration.preflight(RunContext(operation_scope=_session_scope(agent="dev", admin=False), agent_target=probe))
+
+    assert caught.value.entity_name is not None
+    assert caught.value.entity_name.startswith("session=s1.required_commands")
+    assert probe.commands == []
+
+
 def test_resume_only_remains_unsupported_without_validating_unused_shell_commands() -> None:
     integration = _harness_integration({"command": "${agw:unknown}", "resume_command": "${agw:unknown}"})
     integration.prepare_context({}, intent=HarnessLaunchIntent.RESUME_ONLY)

@@ -648,12 +648,13 @@ sessions. Five rules, each earned:
   `shlex.quote`d, and `exec` the tool inside it so the pane process becomes the tool.
 - **Quote generated argv data.** Build a token list and use `shlex.quote` for each generated or
   modeled argument, preserving literal profile names, model values, settings, and workload input.
-- **Render declared template fields in the integration.** Render designated `extra_args` once
-  against the bound context with `self.render_context_argv`. Validate the effective vector and emit
-  those same values with ordinary shell quoting. A workspace path containing an apostrophe remains
-  one argument, and namespace-looking replacement data is not interpreted twice. Shell renders its
-  selected command field as operator-authored source with ordinary shell quoting responsibilities.
-  The manager never interpolates returned commands.
+- **Render declared template fields in the integration.** Annotate string argument elements with
+  `Interpolated()` and render the field against the bound context using
+  `self.render_context_args("extra_args", self.config.extra_args)`. Validate the effective vector
+  and emit those same values with ordinary shell quoting. A workspace path containing an apostrophe
+  remains one argument, and namespace-looking replacement data is not interpreted twice. Shell
+  renders its selected command field as operator-authored source with ordinary shell quoting
+  responsibilities. The manager never interpolates returned commands.
 - **Model the common flags; leave the rest to `extra_args`.** A small optional vocabulary
   (`permission_mode`, `model`, `reasoning_effort`, workload inputs, and session preferences) plus an
   explicit `extra_args` list emitted after generated options keeps the integration useful without

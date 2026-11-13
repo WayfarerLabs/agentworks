@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, Annotated, ClassVar
 
 from pydantic import Field
 
@@ -17,13 +17,13 @@ from agentworks.capabilities.harness_integration.base import (
     HarnessStartResult,
     require_commands,
 )
-from agentworks.interpolation import render_template
 from agentworks.interpolation_compat import (
     LEGACY_PLACEHOLDERS,
     uses_legacy_placeholders,
     warn_legacy_placeholders,
 )
-from agentworks.schema import AgwModel
+from agentworks.interpolation_fields import render_list_field, render_scalar_field
+from agentworks.schema import AgwModel, Interpolated
 from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
@@ -58,19 +58,19 @@ class ShellConfig(AgwModel):
     empty" at every read.
     """
 
-    command: str = Field(default="", examples=["htop"])
+    command: Annotated[str, Interpolated()] = Field(default="", examples=["htop"])
     """The command the session's pane runs. Empty (the default) is a bare
     login shell. Supports ${agw:NAME} context substitution; ordinary shell
     expressions and Go templates retain their own syntax. The legacy
     {{session_name}} and {{workspace_name}} placeholders remain accepted
-    with a deprecation warning until removal in 2.0.0."""
+    with a deprecation warning until removal in 0.22.0."""
 
-    resume_command: str = ""
+    resume_command: Annotated[str, Interpolated()] = ""
     """The command a resumed session's pane runs. Empty (the default)
     reruns ``command``. Supports ${agw:NAME} context substitution. Legacy
-    {{session_name}} and {{workspace_name}} are deprecated for removal in 2.0.0."""
+    {{session_name}} and {{workspace_name}} are deprecated for removal in 0.22.0."""
 
-    required_commands: list[str] = Field(default_factory=list, examples=[["htop"]])
+    required_commands: list[Annotated[str, Interpolated()]] = Field(default_factory=list, examples=[["htop"]])
     """Commands that must exist on the session's target before it starts.
     Inheritance combines parent and child entries."""
 
@@ -146,6 +146,7 @@ class ShellIntegration(HarnessIntegration):
         super().preflight(ctx)
         scope = ctx.operation_scope
         if scope is not None and scope.level is ScopeLevel.SESSION:
+            self._render_required_commands()
             intent = self._session_binding.launch_intent
             if intent is not HarnessLaunchIntent.RESUME_ONLY:
                 self._render_selected_command(intent)
@@ -156,15 +157,26 @@ class ShellIntegration(HarnessIntegration):
             field, command = "resume_command", config.resume_command
         else:
             field, command = "command", config.command
-        rendered = render_template(
+        rendered = render_scalar_field(
+            type(config),
+            field,
             command,
             self._session_binding.context_values,
-            field=f"session={self._session_name}.{field}",
+            location=f"session={self._session_name}.{field}",
             legacy_placeholders=LEGACY_PLACEHOLDERS,
         )
         if uses_legacy_placeholders(command):
             warn_legacy_placeholders()
         return rendered
+
+    def _render_required_commands(self) -> list[str]:
+        return render_list_field(
+            type(self.config),
+            "required_commands",
+            self.config.required_commands,
+            self._session_binding.context_values,
+            location=f"session={self._session_name}.required_commands",
+        )
 
     def start(
         self,
@@ -188,7 +200,7 @@ class ShellIntegration(HarnessIntegration):
 
     def _probe_target(self, transport: Transport) -> None:
         require_commands(
-            tuple(self.config.required_commands),
+            tuple(self._render_required_commands()),
             transport,
             harness_integration_name=self.name,
             template_name=self.owner_name,

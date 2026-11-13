@@ -20,7 +20,7 @@ from agentworks.declared_resource import DeclaredResource
 from agentworks.env.entry import EnvTable, env_references
 from agentworks.execution.requests import AccountShell, account_shell_basename
 from agentworks.git_credentials.credential import credential_references
-from agentworks.schema import CapabilityConfig, NonEmptyStr, ResourceRef
+from agentworks.schema import CapabilityConfig, Interpolated, NonEmptyStr, ResourceRef
 from agentworks.schema.reference import RefRelationship
 
 if TYPE_CHECKING:
@@ -119,10 +119,10 @@ class AgentTemplate(DeclaredResource):
     dotfiles_source: str | None = None
     """Where to fetch the agent user's dotfiles from."""
 
-    dotfiles_destination: str | None = None
+    dotfiles_destination: Annotated[str | None, Interpolated()] = None
     """Where the fetched dotfiles are checked out."""
 
-    dotfiles_install_cmd: str | None = None
+    dotfiles_install_cmd: Annotated[str | None, Interpolated()] = None
     """The command run inside the checkout to install the dotfiles."""
 
     mise_activate: bool | None = None
