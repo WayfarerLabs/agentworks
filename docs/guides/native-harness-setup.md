@@ -98,13 +98,12 @@ names and destinations without querying a native MCP inventory or exposing conne
 
 Application owns an entry, not the whole shared file. Missing entries are created; identical unowned
 entries can be adopted and become managed, with a notice after ownership is saved. Matching the
-recorded entry fingerprint permits an owned update. Different unowned or externally modified
-entries are retained and deferred individually.
-Removing a declaration or activation retires unchanged owned entries wherever safely possible;
-modified obsolete entries keep their claims and warn. Unrelated entries and settings remain unless
-an explicit settings mapping changes them. JSON/TOML serialization preserves values, not comments or
-formatting. Concurrent changes refuse publication rather than replacing them from a saved document
-snapshot.
+recorded entry fingerprint permits an owned update. Different unowned or externally modified entries
+are retained and deferred individually. Removing a declaration or activation retires unchanged owned
+entries wherever safely possible; modified obsolete entries keep their claims and warn. Unrelated
+entries and settings remain unless an explicit settings mapping changes them. JSON/TOML
+serialization preserves values, not comments or formatting. Concurrent changes refuse publication
+rather than replacing them from a saved document snapshot.
 
 When ancestor routing is unresolved, its existing entry and ownership are retained. An equal local
 declaration keeps that ownership; a different local definition is deferred until ancestor setup is

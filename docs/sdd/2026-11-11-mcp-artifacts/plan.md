@@ -516,9 +516,9 @@ claimed.
       for literal keys and the existing cleanup/native-scope behavior.
 - [x] Complete required gates, installed-package guidance checks and independent project, Muntz and
       generic correctness reviews; preserve failures and verify owned cleanup.
-- [x] Publish the initial complete green correction with exact-head CI and a scoped ready handoff, without
-      `review-requested`. Monitor the independent pipeline and critically assess feedback; at most
-      two operator-authorized feedback/fix cycles follow the initial handoff.
+- [x] Publish the initial complete green correction with exact-head CI and a scoped ready handoff,
+      without `review-requested`. Monitor the independent pipeline and critically assess feedback;
+      at most two operator-authorized feedback/fix cycles follow the initial handoff.
 
 No automatic merge, MCP SDD lock, artifact-probe fixes or unrelated Typer work is included.
 
@@ -548,13 +548,13 @@ acceptance remains owed.
 
 ### Declared-name feedback/fix round 1
 
-The initial correction was handed off ready at `1ba31f61`, with all ten CI jobs passing in run
-43428516304. The lead waited for the actual
+The initial correction was handed off ready at `1ba31f61`, with all ten CI jobs passing in
+run 43428516304. The lead waited for the actual
 [integration report](https://github.com/WayfarerLabs/agentworks/pull/900#issuecomment-6855734546)
 before starting this round. The batch also includes
-[Muntz's review](https://github.com/WayfarerLabs/agentworks/pull/900#issuecomment-6854545642).
-The operator's two-round allowance authorizes these bounded corrections; round 1 uses the first.
-The PR was independently verified draft at the unchanged head before source changes.
+[Muntz's review](https://github.com/WayfarerLabs/agentworks/pull/900#issuecomment-6854545642). The
+operator's two-round allowance authorizes these bounded corrections; round 1 uses the first. The PR
+was independently verified draft at the unchanged head before source changes.
 
 Integration B1 is an actual installed-CLI defect: equal coalescing replaces a protected ancestor's
 representative with a readable local source, allowing later overwrite or removal while ancestor
@@ -579,25 +579,43 @@ empty-input inspector guard to avoid invoking an optional callback without eligi
 quota notice is a service limitation, not product evidence.
 
 The independent report ran 12 required gates successfully and reports 13,252 pytest passes with 61
-skips, 160 Python and 103 Node website tests, 504-package-member parity and 38 installed guide topics.
-It established literal-name native registration, adoption/migration and managed carrier behavior on
-Linux with remote Lima, Claude Code 2.1.323, Codex 0.169.0 and Grok 1.0.77. Its provider health attempt
-did not establish a successful model conversation, model-mediated tool use or genuine-history
-resume. The overlapping Codex create was a tester sequencing failure before invocation. No new
-Windows, WSL2 or cloud observations are claimed. Those limits, original fixture timeouts and
-separately verified cleanup remain part of that report; they are not promoted into passes here.
+skips, 160 Python and 103 Node website tests, 504-package-member parity and 38 installed guide
+topics. It established literal-name native registration, adoption/migration and managed carrier
+behavior on Linux with remote Lima, Claude Code 2.1.323, Codex 0.169.0 and Grok 1.0.77. Its provider
+health attempt did not establish a successful model conversation, model-mediated tool use or
+genuine-history resume. The overlapping Codex create was a tester sequencing failure before
+invocation. No new Windows, WSL2 or cloud observations are claimed. Those limits, original fixture
+timeouts and separately verified cleanup remain part of that report; they are not promoted into
+passes here.
 
-The native correction was integrated as `6ff88cf4` from the isolated developer's `cab1de17`.
-Nine B1 cases failed before the behavior change; three historical-alias cases passed with the
-existing guard and failed when only that guard was deleted. The final native/dispatch selection
-passed 131 tests, with full mypy across 1,033 files and Ruff/format passing. Its final diagnostic-only
-wording correction received Ruff/format checks; the frozen combined gates below cover the exact
-integrated source. The lead's session selection passed 44 tests after correcting an initial
-read-only uv cache startup failure; these selections overlap the forthcoming full suite.
+The native correction was integrated as `6ff88cf4` from the isolated developer's `cab1de17`. Nine B1
+cases failed before the behavior change; three historical-alias cases passed with the existing guard
+and failed when only that guard was deleted. The final native/dispatch selection passed 131 tests,
+with full mypy across 1,033 files and Ruff/format passing. Its final diagnostic-only wording
+correction received Ruff/format checks; the frozen combined gates below cover the exact integrated
+source. The lead's session selection passed 44 tests after correcting an initial read-only uv cache
+startup failure; these selections overlap the forthcoming full suite.
 
 An initial dispatch-test expectation also failed: generic unknown routing conservatively carries
 previous deferral IDs until routing recovery, while explicit unresolved route IDs permit pruning.
-The tests now preserve that existing contract and require carried deferrals to clear on recovery;
-no dispatch production behavior changed. Workspace fixture metadata failures and the successful
-owned `/tmp` replay remain recorded. The lead read the developer's complete report and independently
+The tests now preserve that existing contract and require carried deferrals to clear on recovery; no
+dispatch production behavior changed. Workspace fixture metadata failures and the successful owned
+`/tmp` replay remain recorded. The lead read the developer's complete report and independently
 checked removal of the reported fixtures, environment and caches before freezing the combined work.
+
+The frozen `f4751929` combined suite passed 13,102 tests with 35 skips. Fifteen of sixteen gate
+records passed, including full mypy, Ruff/format, Typer isolation, repository locks/Rulesync, 160
+Python and 103 Node website tests and both deterministic build comparisons. File lint found only
+Prettier wrapping in four changed documents; Markdown and spelling checks passed. Formatting is
+corrected before the final file check. The original failed gate record remains retained.
+
+All three private lanes cleared `f4751929`. The lead read their complete reports. Muntz's four
+deletion/order experiments distinguished both protected-source branches, the historical-alias guard
+and notice-after-checkpoint behavior; its 74-case baseline and restored replay both passed. The
+generic lane passed 143 focused cases and nine temporary edge probes, including multiple equal local
+inputs against absent/modified protected placement and failed publication during adoption. These
+overlapping selections are not extra full-suite coverage or native acceptance. Frozen
+wheel/archive/install, dependency consistency, four installed guide renders, help and 504-file
+source/wheel/installation parity passed, with 1,111 archive members and no profile state created.
+The documentation formatting correction receives rebuilt package checks because it changes packaged
+guide bytes; it does not change the tested Python implementation.
