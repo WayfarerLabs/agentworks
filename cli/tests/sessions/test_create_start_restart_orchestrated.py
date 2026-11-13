@@ -35,7 +35,7 @@ from agentworks.capabilities.harness_integration import HarnessLaunchIntent, Har
 from agentworks.db import Database, InitStatus, ProvisioningStatus, SessionMode, SessionRuntimeSnapshot, SessionStatus
 from agentworks.errors import AgentworksError, NotFoundError, StateError, UserAbort, ValidationError
 from agentworks.execution.access import Admin
-from agentworks.execution.errors import ExecutionIncomplete, PathRefusal, PathRefused
+from agentworks.execution.errors import ExecutionIncomplete, FileContentMismatch, PathRefusal, PathRefused
 from agentworks.execution.requests import Command, PythonProgram
 from agentworks.execution.results import Completed, Result, Unknown, UnknownReason
 from agentworks.secrets.orchestration import (
@@ -1235,8 +1235,9 @@ def test_regenerate_tmuxinator_writes_a_legacy_row_with_a_trailing_slash(
     [
         PathRefused("vm1", "write", "/home/me/ws1/.tmuxinator.yml", PathRefusal.UNSUITABLE),
         ExecutionIncomplete("vm1", Result(Unknown(UnknownReason.CONNECTION))),
+        FileContentMismatch("vm1", "/home/me/ws1/.tmuxinator.yml"),
     ],
-    ids=["link-refused", "connection-lost"],
+    ids=["link-refused", "connection-lost", "content-mismatch"],
 )
 def test_regenerate_tmuxinator_failure_warns_and_leaves_the_command_standing(
     tmp_path: Path,

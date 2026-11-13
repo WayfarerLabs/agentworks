@@ -14,6 +14,7 @@ from agentworks.execution.errors import (
     CommandFailed,
     ExecutionIncomplete,
     FileConflict,
+    FileContentMismatch,
     FileLockTimeout,
     PathRefused,
     RequestRefused,
@@ -37,8 +38,14 @@ elevated request on an agent's access are not among them: every later
 request would fail the same way, so they propagate.
 """
 
-FILE_FAILURES: tuple[type[AgentworksError], ...] = (*REQUEST_FAILURES, PathRefused, FileConflict, FileLockTimeout)
-""":data:`REQUEST_FAILURES` and a refused or conflicting file operation, for a step that writes a file."""
+FILE_FAILURES: tuple[type[AgentworksError], ...] = (
+    *REQUEST_FAILURES,
+    PathRefused,
+    FileConflict,
+    FileContentMismatch,
+    FileLockTimeout,
+)
+""":data:`REQUEST_FAILURES` and a file operation that was refused, conflicted, timed out or wrote nothing."""
 
 
 def root(*argv: str, deadline: float | None = None) -> Command:
