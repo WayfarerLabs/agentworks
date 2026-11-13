@@ -36,7 +36,7 @@ def _no_ssh_config(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _seed(db: Database, *, site: str = "proxmox", target: Target = Target.STOPPED) -> None:
-    """A VM with a tailnet address; stopped intent by default, which must not matter: delete never gates."""
+    """A VM with a tailnet address; stopped intent by default (delete never gates on it; hold tests pass `target`)."""
     db.insert_vm("dvm", site=site, hostname="dvm")
     db.update_vm_tailscale("dvm", "100.64.0.3")
     db.set_vm_desired_runtime_state(

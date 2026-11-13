@@ -115,7 +115,8 @@ def _reload_vm(db: Database, target_vm_name: str) -> VMRow:
     ``vm rekey`` that finished before this command took the guard may have
     updated ``vms.tailscale_host``, and neither can run while the guard is
     held. Without the reload the address check below could spuriously
-    raise. (The pre-create
+    raise. Create reads it once more inside the activation gate, whose
+    start records ``last_started_at``. (The pre-create
     SecretTarget read only ``vm.template``, which a refresh cannot
     change, so the pre-refresh row was safe to target; the nodes keep
     their construction row, whose identity fields a refresh cannot change

@@ -286,10 +286,12 @@ before they resolve the auth key.
   delete, and no longer stops each session first. It reports whether the logout worked, and goes on
   with the delete either way. It does not log out a cloud VM whose host key was never recorded, and
   names the node to remove in the Tailscale admin console instead. It reads the VM's power state
-  once it holds the VM, so a WSL2 distro that the hold boots is still logged out, unless the VM's
-  intent is stopped, which admits no hold; a VM that is still stopped or deallocated is not, and the
-  warning names its node the same way. A backend delete that fails after the logout says how to
-  finish the delete, and that `agw vm rekey NAME` puts the VM back on Tailscale instead.
+  once it holds the VM, so a stopped WSL2 distro is booted by the hold and logged out. A VM whose
+  desired runtime state is stopped is not held (see
+  [Desired runtime state](desired-runtime-state.md)), so it is reported as not logged out, as is any
+  VM that is still stopped or deallocated, and the warning names its node the same way. A backend
+  delete that fails after the logout says how to finish the delete, and that `agw vm rekey NAME`
+  puts the VM back on Tailscale instead.
 - **A cloud VM's temporary SSH allow closes on `SIGTERM`, `SIGHUP` and Ctrl-Break.** Every allow
   Agentworks opens to a cloud VM (AWS, Azure, GCP) is removed when the command is ended on macOS and
   Linux by `SIGTERM` or `SIGHUP` (a closed terminal), or on Windows by Ctrl-Break, as it is on
