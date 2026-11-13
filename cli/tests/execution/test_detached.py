@@ -110,7 +110,7 @@ def test_a_launch_that_new_launch_could_not_have_chosen_is_refused_by_every_oper
     assert access.requests() == []
 
 
-@pytest.mark.parametrize("seen", [State.STARTING, State.RUNNING, State.EXITED])
+@pytest.mark.parametrize("seen", [State.RUNNING, State.EXITED, State.LOST])
 def test_after_a_lost_connection_launch_returns_when_the_follow_up_sees_the_launch(seen: State) -> None:
     access = admin()
     access.run_outcomes = [

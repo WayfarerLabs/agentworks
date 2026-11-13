@@ -8,14 +8,15 @@ exit status is the answer (the ``EXIT_*`` constants); ``observe`` and
 ``interrupt`` write one JSON line to stdout, then the output tail's raw bytes.
 
 Every launch lives in ``BASE/<id>/``: ``process`` (the payload's pid, locked
-while the supervisor or the payload's process tree lives), ``output`` (both of
-the payload's streams), ``status`` (its exit status, written by rename) and
-``work/`` (its working directory). The lock is the process identity, so no pid
-is ever compared. A held lock is ``running``; a free one with ``status`` is
-``exited``, without it ``lost``; a directory with no ``process`` is
-``starting``. The lock is tested before ``status`` is read: the supervisor
-writes ``status`` before it exits and releases its hold, so that order never
-reads a finished launch as ``lost``.
+from before it is visible until the launching process, the supervisor and the
+payload's process tree have all exited), ``output`` (both of the payload's
+streams), ``status`` (its exit status, written by rename) and ``work/`` (its
+working directory). The lock is the process identity, so no pid is ever
+compared. A held lock is ``running``; a free one with ``status`` is ``exited``,
+and anything else, a directory with no ``process`` included, is ``lost``. The
+lock is tested before ``status`` is read: the supervisor writes ``status``
+before it exits and releases its hold, so that order never reads a finished
+launch as ``lost``.
 
 Plain syntax and the standard library only, as for agw-launch: the guest's
 python3 may be any release a supported Debian ships. It has no import-time
@@ -57,7 +58,7 @@ EXIT_EXISTS = 3
 EXIT_RUNNING = 4
 """``discard`` of a running launch; nothing was removed."""
 
-ABSENT, STARTING, RUNNING, EXITED, LOST = "absent", "starting", "running", "exited", "lost"
+ABSENT, RUNNING, EXITED, LOST = "absent", "running", "exited", "lost"
 
 _ID = re.compile(r"[0-9a-f]{32}")
 _POLL_SECONDS = 0.05
@@ -99,14 +100,14 @@ def main(
 # -- State -------------------------------------------------------------------------------
 
 
-def _lock_held(directory: str) -> bool | None:
-    """Whether ``process`` is locked; ``None`` when there is no ``process`` yet."""
+def _lock_held(directory: str) -> bool:
+    """Whether ``process`` is there and locked."""
     import fcntl
 
     try:
         descriptor = os.open(os.path.join(directory, "process"), os.O_RDONLY | os.O_CLOEXEC)
     except FileNotFoundError:
-        return None
+        return False
     try:
         fcntl.flock(descriptor, fcntl.LOCK_SH | fcntl.LOCK_NB)
     except BlockingIOError:
@@ -133,10 +134,7 @@ def _state(directory: str) -> tuple[str, int | None]:
     """The launch's state, and its status when it has exited. The lock is tested before ``status`` is read."""
     if not os.path.isdir(directory):
         return ABSENT, None
-    held = _lock_held(directory)
-    if held is None:
-        return STARTING, None
-    if held:
+    if _lock_held(directory):
         return RUNNING, None
     status = _read_status(directory)
     return (LOST, None) if status is None else (EXITED, status)
@@ -146,7 +144,7 @@ def _report(directory: str, observed: tuple[str, int | None]) -> None:
     """Write the observation's JSON line, then the output tail once the launch has ended."""
     state, status = observed
     work: dict[str, int] = {}
-    if state not in (ABSENT, STARTING):
+    if state != ABSENT:
         try:
             with os.scandir(os.path.join(directory, "work")) as entries:
                 for entry in entries:
@@ -224,12 +222,19 @@ def _launch(base: str, directory: str) -> int:
         os.mkdir(directory, 0o700)
     except FileExistsError:
         return EXIT_EXISTS
-    os.mkdir(os.path.join(directory, "work"), 0o700)
-    _prune(base, directory)
-    # Locked before the payload exists and renamed to ``process`` only once it runs, so until
-    # then the launch reads as starting, never as an unlocked ``process`` with no status.
-    lock = os.open(os.path.join(directory, "process.new"), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC, 0o600)
-    fcntl.flock(lock, fcntl.LOCK_EX)
+    try:
+        os.mkdir(os.path.join(directory, "work"), 0o700)
+        _prune(base, directory)
+        # Locked before it is visible, so no observer ever sees this launch's ``process`` unlocked
+        # without a status while anything of it lives.
+        partial = os.path.join(directory, "process.new")
+        lock = os.open(partial, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC, 0o600)
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        os.rename(partial, os.path.join(directory, "process"))
+    except FileNotFoundError:
+        # A discard removed the directory, which read as lost until the rename: start nothing.
+        sys.stderr.write("the launch directory was removed while the launch was being set up\n")
+        return 1
     report_read, report_write = os.pipe()
     if os.fork() == 0:
         status = 1
@@ -289,15 +294,12 @@ def _supervise(directory: str, spec: tuple[list[str], dict[str, str]], lock: int
             pass_fds=(lock,),
         )
     except OSError as error:
-        # The status first and then ``process``, so a recorded status always has a ``process``.
         _write_status(directory, 127 if error.errno == errno.ENOENT else 126)
-        os.rename(os.path.join(directory, "process.new"), os.path.join(directory, "process"))
         with contextlib.suppress(OSError):  # the launching process may be gone
             os.write(report, f"exec {errno.errorcode.get(error.errno or 0, 'EIO')}".encode("ascii"))
         return
     os.close(output)
     os.write(lock, f"{payload.pid}\n".encode("ascii"))
-    os.rename(os.path.join(directory, "process.new"), os.path.join(directory, "process"))
     with contextlib.suppress(OSError):  # the launching process may be gone; the payload runs on
         os.write(report, b"started")
         os.close(report)
@@ -320,26 +322,40 @@ def _write_status(directory: str, status: int) -> None:
 
 
 def _interrupt(directory: str, grace: float, kill_wait: float) -> tuple[str, int | None]:
-    """Stop a running payload's process group, ``SIGTERM`` and then ``SIGKILL``, and return the state after."""
+    """Stop a running payload's process group, ``SIGTERM`` and then ``SIGKILL``, and return the state after.
+
+    The pid is read while the lock shows the launch alive, and again on each
+    poll until it is there: a launch interrupted before its supervisor has
+    started the payload gets its signal once the pid is written.
+    """
     import signal
 
     observed = _state(directory)
     if observed[0] != RUNNING:
         return observed
-    # Read only while the lock shows the payload or its supervisor alive.
-    # An empty one is a payload that could not be executed, whose supervisor is about to exit.
-    with open(os.path.join(directory, "process")) as process:
-        recorded = process.read().strip()
     for number, wait in ((signal.SIGTERM, grace), (signal.SIGKILL, kill_wait)):
-        if recorded:
-            with contextlib.suppress(ProcessLookupError):
-                os.killpg(int(recorded), number)
-        deadline = time.monotonic() + wait
-        while _lock_held(directory) and time.monotonic() < deadline:
+        deadline, signalled = time.monotonic() + wait, False
+        while _lock_held(directory):
+            group = None if signalled else _recorded_pid(directory)
+            if group is not None:
+                with contextlib.suppress(ProcessLookupError):
+                    os.killpg(group, number)
+                signalled = True
+            if time.monotonic() >= deadline:
+                break
             time.sleep(_POLL_SECONDS)
-        if not _lock_held(directory):
-            break
+        else:
+            break  # the lock is free: everything of the launch has exited
     return _state(directory)
+
+
+def _recorded_pid(directory: str) -> int | None:
+    """The payload's pid from ``process``, or ``None`` before the supervisor has written it."""
+    try:
+        with open(os.path.join(directory, "process"), "rb") as process:
+            return int(process.read())
+    except (OSError, ValueError):
+        return None
 
 
 def _discard(directory: str) -> int:

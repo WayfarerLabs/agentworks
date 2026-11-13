@@ -216,17 +216,17 @@ with every descriptor of the connection closed, which starts the payload in a se
 with both streams in the launch's `output`, records its status (128 plus the signal for a signalled
 one) and exits. `launch` returns once the payload has started.
 
-The launch's `process` file is locked with `flock` while the supervisor or any process of the
-payload's tree lives, and that lock is the process identity: no pid is compared. `observe` tests the
-lock before it reads the status, since the supervisor writes the status before it releases its hold:
+The launch's `process` file is locked with `flock` before it appears and stays locked while the
+launching process, the supervisor or any process of the payload's tree lives, and that lock is the
+process identity: no pid is compared. `observe` tests the lock before it reads the status, since the
+supervisor writes the status before it releases its hold:
 
-| State      | Evidence                        |
-| ---------- | ------------------------------- |
-| `ABSENT`   | no launch directory             |
-| `STARTING` | the directory, no `process`     |
-| `RUNNING`  | `process` locked                |
-| `EXITED`   | `process` unlocked, a `status`  |
-| `LOST`     | `process` unlocked, no `status` |
+| State     | Evidence                          |
+| --------- | --------------------------------- |
+| `ABSENT`  | no launch directory               |
+| `RUNNING` | `process` locked                  |
+| `EXITED`  | `process` unlocked, a `status`    |
+| `LOST`    | no `process` lock and no `status` |
 
 The guest refuses an id whose directory exists (`DetachedRefused`), so a launch never adopts an
 earlier one's files or status, and each new launch removes sibling launches that are not running and

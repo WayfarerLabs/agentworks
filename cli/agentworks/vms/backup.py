@@ -14,7 +14,7 @@ from agentworks import output
 from agentworks.errors import AgentworksError, BackupError, NotFoundError, StateError, UserAbort
 from agentworks.execution import detached_program, reachability
 from agentworks.execution.access import Admin
-from agentworks.execution.detached import LAUNCH_DEADLINE, State
+from agentworks.execution.detached import State
 from agentworks.execution.errors import ExecutionIncomplete
 from agentworks.execution.requests import Command, Script, Shell, ToFile
 from agentworks.execution.results import Completed
@@ -377,7 +377,7 @@ def _wait_for_archive(detached: Detached, launch: Launch, vm_name: str) -> Obser
     seconds, and the recovery once. There is no give-up bound; Ctrl-C ends
     the wait.
     """
-    started = last_report = time.monotonic()
+    last_report = time.monotonic()
     lost_since: float | None = None
     reminded = 0.0
     while True:
@@ -407,8 +407,6 @@ def _wait_for_archive(detached: Detached, launch: Launch, vm_name: str) -> Obser
             raise BackupError(
                 f"the archive's directory on VM '{vm_name}' disappeared while it ran (launch {launch.id})"
             )
-        if observation.state is State.STARTING and now - started > LAUNCH_DEADLINE:
-            raise BackupError(f"the archive on VM '{vm_name}' never started (launch {launch.id})")
         if now - last_report >= REPORT_SECONDS:
             last_report = now
             output.detail(f"Archive size: {_fmt_size(observation.work.get(ARCHIVE_NAME, 0))}")

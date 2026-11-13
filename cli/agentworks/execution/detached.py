@@ -69,14 +69,12 @@ class State(StrEnum):
 
     ABSENT = detached_program.ABSENT
     """No launch directory: never launched, or discarded."""
-    STARTING = detached_program.STARTING
-    """The directory, but no ``process``: ``launch`` is starting the payload, or died doing so."""
     RUNNING = detached_program.RUNNING
     """The payload's process tree or its supervisor still lives."""
     EXITED = detached_program.EXITED
     """The payload ended and its status was recorded."""
     LOST = detached_program.LOST
-    """The supervisor and the payload are both gone with no status: a reboot, or both killed."""
+    """Nothing of the launch lives and no status was recorded: a reboot, both killed, or a failed setup."""
 
 
 @dataclass(frozen=True)

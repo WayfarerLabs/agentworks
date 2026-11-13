@@ -287,28 +287,59 @@ def test_a_launching_process_that_dies_after_the_fork_leaves_the_payload_to_fini
 # -- States ------------------------------------------------------------------------------
 
 
-def test_a_launch_reads_starting_until_its_payload_runs(guest: Guest) -> None:
-    release = guest.root / "release"
-    # Holds the supervisor just before it starts the payload, so the launch is between mkdir and rename.
-    patch = (
+def held_until(release: Path, function: str) -> str:
+    """A patch that holds the program's ``function`` until ``release`` exists, then runs it."""
+    return (
         "import os, time\n"
-        "_popen = detached_program.subprocess.Popen\n"
+        f"_held = {function}\n"
         "def held(*args, **kwargs):\n"
         f"    while not os.path.exists({str(release)!r}):\n"
         "        time.sleep(0.02)\n"
-        "    return _popen(*args, **kwargs)\n"
-        "detached_program.subprocess.Popen = held\n"
+        "    return _held(*args, **kwargs)\n"
+        f"{function} = held\n"
     )
+
+
+def test_a_launch_interrupted_before_its_payload_starts_is_stopped_once_it_does(guest: Guest) -> None:
+    release = guest.root / "release"
+    guest.interrupt_grace = 5.0
     launch_id = secrets.token_hex(16)
     spec = json.dumps({"argv": ["sleep", "600"], "env": {}}).encode()
-    launching = guest.start("launch", launch_id, stdin=spec, patch=patch)
+    # The supervisor waits just before it starts the payload, so ``process`` is locked with no pid yet.
+    launching = guest.start(
+        "launch", launch_id, stdin=spec, patch=held_until(release, "detached_program.subprocess.Popen")
+    )
     try:
-        wait_for(guest.directory(launch_id) / "process.new")
-        assert guest.observe(launch_id).state == detached_program.STARTING
+        wait_for(guest.directory(launch_id) / "process")
+        assert guest.observe(launch_id).state == detached_program.RUNNING
+        interrupting = guest.start("interrupt", launch_id)
+        time.sleep(0.3)
     finally:
         release.touch()
     assert guest.finish(launching).returncode == 0
-    assert guest.observe(launch_id).state == detached_program.RUNNING
+    done = guest.finish(interrupting)
+
+    observed = json.loads(done.stdout.partition(b"\n")[0])
+    assert (observed["state"], observed["status"]) == (detached_program.EXITED, 128 + signal.SIGTERM)
+
+
+def test_a_discard_that_wins_the_race_with_setup_leaves_the_launch_failed_and_nothing_started(guest: Guest) -> None:
+    release, marker = guest.root / "release", guest.root / "payload-ran"
+    launch_id = secrets.token_hex(16)
+    spec = json.dumps({"argv": ["touch", str(marker)], "env": {}}).encode()
+    # Setup waits after creating the directory and before ``process`` exists, where the launch reads lost.
+    launching = guest.start("launch", launch_id, stdin=spec, patch=held_until(release, "detached_program._prune"))
+    try:
+        wait_for(guest.directory(launch_id) / "work")
+        assert guest.observe(launch_id).state == detached_program.LOST
+        assert guest.run("discard", launch_id).returncode == 0
+    finally:
+        release.touch()
+
+    assert guest.finish(launching).returncode != 0
+    time.sleep(0.5)
+    assert not marker.exists()
+    assert guest.observe(launch_id).state == detached_program.ABSENT
 
 
 def test_a_killed_supervisor_leaves_its_payload_running_and_then_lost(guest: Guest) -> None:
@@ -364,11 +395,11 @@ def test_a_launch_prunes_old_launches_that_are_not_running(guest: Guest) -> None
     os.killpg(payload, signal.SIGKILL)
     assert guest.wait_until_ended(lost).state == detached_program.LOST
     running, _ = guest.launch(("sleep", "600"))
-    starting = secrets.token_hex(16)
-    guest.directory(starting).mkdir()
+    set_up_only = secrets.token_hex(16)  # a launch that died before its process existed
+    guest.directory(set_up_only).mkdir()
     young, _ = guest.launch(("true",))
     guest.wait_until_ended(young)
-    for launch_id in (exited, lost, running, starting):
+    for launch_id in (exited, lost, running, set_up_only):
         os.utime(guest.directory(launch_id), (old, old))
 
     newest, _ = guest.launch(("true",))

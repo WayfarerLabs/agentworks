@@ -247,16 +247,16 @@ given. Nothing on the path is world-writable, which replaces today's predictable
 
 A launch directory, mode 0700, holds:
 
-| Entry     | Mode | Written by                                   | Content                                                                          |
-| --------- | ---- | -------------------------------------------- | -------------------------------------------------------------------------------- |
-| `process` | 0600 | `launch`, created locked and then renamed in | the payload's pid; its `flock` is held while the supervisor or the payload lives |
-| `output`  | 0600 | the payload's descriptors 1 and 2            | everything the payload writes, both streams in one file                          |
-| `status`  | 0600 | the supervisor, by rename                    | the payload's exit status (128 plus the signal for a signalled payload)          |
-| `work/`   | 0700 | `launch`                                     | the payload's working directory; `download` reads here                           |
+| Entry     | Mode | Written by                                   | Content                                                                      |
+| --------- | ---- | -------------------------------------------- | ---------------------------------------------------------------------------- |
+| `process` | 0600 | `launch`, created locked and then renamed in | the payload's pid; its `flock` is held while the launch or the payload lives |
+| `output`  | 0600 | the payload's descriptors 1 and 2            | everything the payload writes, both streams in one file                      |
+| `status`  | 0600 | the supervisor, by rename                    | the payload's exit status (128 plus the signal for a signalled payload)      |
+| `work/`   | 0700 | `launch`                                     | the payload's working directory; `download` reads here                       |
 
 ### States
 
-`observe` reads the directory as one of five states. The lock is the process identity: a held
+`observe` reads the directory as one of four states. The lock is the process identity: a held
 `flock` on `process` is held only through the launch's own descriptors, by the launching process
 until it exits (step 7), the supervisor, and the payload's process tree, every descendant of which
 inherits the descriptor (tar's `zstd` child included). So no pid is compared and a reused pid cannot
@@ -268,13 +268,12 @@ The supervisor writes `status` (by rename) before it exits and releases its hold
 with no `status` really is `LOST`; reading `status` first could straddle the supervisor's write and
 exit and report a complete launch as `LOST`.
 
-| State      | Evidence                                               | Means                                                                                   |
-| ---------- | ------------------------------------------------------ | --------------------------------------------------------------------------------------- |
-| `ABSENT`   | no launch directory                                    | never launched, or discarded                                                            |
-| `STARTING` | the directory, no `process`                            | `launch` is between its `mkdir` and its rename, or died there                           |
-| `RUNNING`  | `process` locked (a non-blocking shared `flock` fails) | the payload's process tree or its supervisor still lives                                |
-| `EXITED`   | `process` unlocked, `status` present                   | the payload ended and its status was recorded                                           |
-| `LOST`     | `process` unlocked, no `status`                        | the supervisor and the payload are both gone without a status: a reboot, or both killed |
+| State     | Evidence                                               | Means                                                                                                           |
+| --------- | ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
+| `ABSENT`  | no launch directory                                    | never launched, or discarded                                                                                    |
+| `RUNNING` | `process` locked (a non-blocking shared `flock` fails) | the payload's process tree or its supervisor still lives                                                        |
+| `EXITED`  | `process` unlocked, `status` present                   | the payload ended and its status was recorded                                                                   |
+| `LOST`    | `process` unlocked or absent, no `status`              | nothing of the launch lives and no status was recorded: a reboot, both killed, or a launch that died setting up |
 
 ### Launch identity
 
@@ -300,13 +299,14 @@ VM"). Every other outcome raises its typed error at once, since the payload neve
    reaches the payload's environment and no file.
 2. Create the base, then the launch directory and `work/`.
 3. Prune: remove every sibling launch directory, other than this one, that is not `RUNNING` and
-   whose directory is older than seven days: `EXITED`, `LOST`, and a `STARTING` one a dead launch
-   left. A killed `agw` can leave a multi-gigabyte archive behind, and nothing ages `/var/lib`;
-   today's `/var/tmp` staging is aged out only on Debian 13 (its 30-day `/var/tmp` cleanup, recalled
-   from its release notes, not measured), and never on Debian 12.
-4. Create `process.new`, take `flock(LOCK_EX)` on it, and rename it to `process` only after the
-   payload has started (step 6). Until then the launch reads as `STARTING`, so no observer ever sees
-   an unlocked `process` with no status before the payload runs.
+   whose directory is older than seven days: `EXITED` and `LOST`, a directory a launch that died
+   setting up left included. A killed `agw` can leave a multi-gigabyte archive behind, and nothing
+   ages `/var/lib`; today's `/var/tmp` staging is aged out only on Debian 13 (its 30-day `/var/tmp`
+   cleanup, recalled from its release notes, not measured), and never on Debian 12.
+4. Create `process.new`, take `flock(LOCK_EX)` on it, and rename it to `process`, all before the
+   fork, so `process` is never visible unlocked while anything of the launch lives. Until the rename
+   the directory reads as `LOST`; a discard that removes it then makes the rename fail, and the
+   launch ends with a failure before anything forks.
 5. Fork once. The child calls `setsid`, so it belongs to no session and no terminal, points its
    descriptors 0, 1 and 2 at `/dev/null` and closes every other one but the lock and a report pipe,
    so it holds nothing of the connection. It is the supervisor.
@@ -316,11 +316,9 @@ VM"). Every other outcome raises its typed error at once, since the payload neve
    environment is the one agw-launch rebuilt for root (`agw_launch.py:116-138`). The payload's own
    session makes its pid its process-group id, which `interrupt` signals. Because the payload holds
    the lock's descriptor too, a supervisor killed while tar runs does not make the launch read as
-   `LOST`. The supervisor writes the payload's pid into `process.new`, renames it to `process`,
-   reports `started` over the pipe, and waits; on exit it writes `status` by rename. When the
-   payload cannot be executed it writes the refusal's status first and then renames `process.new` to
-   `process` too, before reporting the `exec` errno, so a recorded status always has a `process` and
-   the launch reads `EXITED`, never `STARTING` with a status.
+   `LOST`. The supervisor writes the payload's pid into `process`, reports `started` over the pipe,
+   and waits; on exit it writes `status` by rename. When the payload cannot be executed it writes
+   the refusal's status and reports the `exec` errno, and the launch reads `EXITED`.
 7. The launching process reads the report and exits: 0, or a refusal status naming the `exec`
    failure (`RequestRefused`'s codes). So `launch` returns only once the payload has started.
 
@@ -351,10 +349,11 @@ released, sends `SIGKILL` to the group if it has not been and waits up to
 returns the observation, which is `EXITED` unless a descendant outside the group still holds the
 lock (above). The supervisor is in its own session, outside the group, so it survives and records
 `128 + 15` or `128 + 9`. A launch that is not `RUNNING` is returned as it is with nothing signalled.
-The pid is read only while the lock shows the payload or its supervisor alive; the one residual
-window, a payload that exited while its supervisor writes `status`, signals a group that no longer
-exists. It is never dispatched again. Backup calls it from its `KeyboardInterrupt` handler, as it
-calls `kill -TERM -<pid>` today (`vms/backup.py:389-399`).
+The pid is read only while the lock shows the launch alive, and again on each poll until the
+supervisor has written it, so a launch interrupted before its payload started is signalled once it
+does; the one residual window, a payload that exited while its supervisor writes `status`, signals a
+group that no longer exists. It is never dispatched again. Backup calls it from its
+`KeyboardInterrupt` handler, as it calls `kill -TERM -<pid>` today (`vms/backup.py:389-399`).
 
 ### Download and discard
 
@@ -692,8 +691,7 @@ access; the gate and the SSH boundary are as today, with the pane secrets as the
   lines as warnings, as today (`:415-421`). `EXITED` with another status raises `BackupError` with
   the tail (`:407-411`). `LOST` raises `BackupError` saying the archive's process ended without
   recording a status, as the VM restarting would leave it; today a missing status reads as exit 1
-  and raises the same error (`remote_exec.py:293-299`). `STARTING` for longer than the launch
-  deadline after `launch` returned raises `BackupError` naming the launch id.
+  and raises the same error (`remote_exec.py:293-299`).
 - **Cleanup.** The `finally` discards by the launch's id, whatever `launch` did, since `new_launch`
   chose it first: an `ABSENT` launch is done, and a discard that fails (the VM unreachable, or a
   payload still running after an interrupt that could not reach it) warns naming the id, and the
@@ -833,11 +831,12 @@ None restates the implementation or our prose (`no-prose-policing-tests`).
 - `launch`: after `Unknown(CONNECTION)` it returns when the follow-up observation sees the launch,
   and raises naming the id when it is `ABSENT` or the follow-up fails; after `NotDelivered` it makes
   no follow-up; a request with `stdin`, `cwd` or a `deadline`, or not elevated, is refused.
-- The program's states: `STARTING` before the rename, `RUNNING` while the lock is held, `LOST` when
-  it is released with no status, `EXITED` with a `process` after an `exec` failure, and the prune
-  removing old `EXITED`, `LOST` and `STARTING` directories but no `RUNNING` one. The read order: an
-  observer stopped between its lock test and its `status` read while the supervisor writes `status`
-  and exits reports `RUNNING` or `EXITED`, never `LOST`.
+- The program's states: `RUNNING` while the lock is held, from before the payload starts, `LOST`
+  when it is released with no status, `EXITED` with a `process` after an `exec` failure, and the
+  prune removing old `EXITED` and `LOST` directories, one with no `process` included, but no
+  `RUNNING` one. A discard that wins the race with setup leaves the launch failed and nothing
+  started. The read order: an observer stopped between its lock test and its `status` read while the
+  supervisor writes `status` and exits reports `RUNNING` or `EXITED`, never `LOST`.
 - `interrupt` of a payload that ignores `SIGTERM` returns `EXITED` with 137 after the kill wait.
 - `park`: a split that raises closes the parking stdin at once; an uncollected handover reports
   `collected=False`; `Handover.command` puts `sudo -n -u` in front only for another account; a `cwd`
