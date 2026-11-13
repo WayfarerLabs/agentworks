@@ -45,7 +45,10 @@ def stored_workspace_path(path: str) -> str:
     if not normalized.startswith("/"):
         raise ValidationError(
             f"workspace path {path!r} is not an absolute path on the VM",
-            hint="Recreate the workspace: which directory this stored path names is not recorded.",
+            hint=(
+                "Delete and recreate the workspace: which directory this stored path names is not recorded, "
+                "so delete leaves it on the VM for you to check."
+            ),
         )
     return normalized
 

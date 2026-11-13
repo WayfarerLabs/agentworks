@@ -340,18 +340,32 @@ def delete_vm_workspace(
                 deadline=PROBE_DEADLINE,
             )
         ).require_completed(vm.name)
-        # Remove the workspace's Linux group. Its status is not checked, so a
-        # group that is already gone (or, defensively, one groupdel refuses to
-        # remove) is tolerated rather than failing the delete, mirroring the
-        # best-effort group-membership teardown in agents/grants.py.
-        admin.run(
-            Command(("/usr/sbin/groupdel", linux_group), elevated=True, deadline=PROBE_DEADLINE)
-        ).require_completed(vm.name)
+        admin.run(_group_removal(linux_group)).require_completed(vm.name)
     except REQUEST_FAILURES:
         output.warn(
             f"Remote cleanup of workspace directory {workspace_path!r} and group {linux_group!r} was not confirmed. "
             "Inspect them before retrying."
         )
+
+
+def remove_workspace_group(vm: VMRow, config: Config, linux_group: str, *, logger: InitLog | None = None) -> None:
+    """Remove only the workspace's Linux group: delete's VM step when the stored path names no one directory."""
+    assert vm.tailscale_host is not None
+    try:
+        admin_access(vm, config, logger).run(_group_removal(linux_group)).require_completed(vm.name)
+    except REQUEST_FAILURES:
+        output.warn(f"Removal of workspace group {linux_group!r} was not confirmed. Inspect it before retrying.")
+
+
+def _group_removal(linux_group: str) -> Command:
+    """``groupdel`` of the workspace's group, as root.
+
+    Its status is not checked, so a group that is already gone (or,
+    defensively, one groupdel refuses to remove) is tolerated rather than
+    failing the delete, mirroring the best-effort group-membership teardown in
+    agents/grants.py.
+    """
+    return Command(("/usr/sbin/groupdel", linux_group), elevated=True, deadline=PROBE_DEADLINE)
 
 
 def generate_vscode_workspace(

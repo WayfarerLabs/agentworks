@@ -1487,33 +1487,53 @@ def test_rehome_refuses_a_target_inside_a_stored_path_spelled_with_a_double_slas
     assert target.commands == []
 
 
-@pytest.mark.parametrize("command", ["rehome", "delete"])
-def test_a_stored_path_that_is_not_absolute_is_refused_before_anything_runs(
+def _store_a_tilde_path(db: Database) -> None:
+    """A '~' row, which the state migration leaves relative: it names no one directory on the VM."""
+    db._conn.execute("UPDATE workspaces SET workspace_path = '~/ws/ws1' WHERE name = 'ws1'")
+    db._conn.commit()
+
+
+def test_rehome_refuses_a_stored_path_that_is_not_absolute_before_anything_runs(
     db: Database,
     make_config,  # noqa: ANN001
     resolve_counter: list[list[str]],
     target: _FakeAdminTarget,
     monkeypatch: pytest.MonkeyPatch,
-    command: str,
 ) -> None:
-    """A '~' row, which the state migration leaves relative, names no one directory to act on."""
     config = make_config()
     _seed(db)
-    db._conn.execute("UPDATE workspaces SET workspace_path = '~/ws/ws1' WHERE name = 'ws1'")
-    db._conn.commit()
+    _store_a_tilde_path(db)
     _reachable(monkeypatch, True)
 
     with pytest.raises(ValidationError):
-        if command == "rehome":
-            workspace_manager.rehome_workspace(
-                db, config, "ws1", target_path="/dst/ws1", yes=True, interaction=TtyInteractionPolicy.REFUSE
-            )
-        else:
-            workspace_manager.delete_workspace(db, config, "ws1", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+        workspace_manager.rehome_workspace(
+            db, config, "ws1", target_path="/dst/ws1", yes=True, interaction=TtyInteractionPolicy.REFUSE
+        )
 
     assert resolve_counter == []
     assert target.commands == []
     assert db.get_workspace("ws1") is not None
+
+
+def test_delete_of_a_stored_path_that_is_not_absolute_removes_the_row_and_leaves_the_vm_files(
+    db: Database,
+    make_config,  # noqa: ANN001
+    target: _FakeAdminTarget,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    config = make_config()
+    _seed(db)
+    _store_a_tilde_path(db)
+    _reachable(monkeypatch, True)
+
+    workspace_manager.delete_workspace(db, config, "ws1", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert db.get_workspace("ws1") is None
+    assert not any("ws/ws1" in command or "tmuxinator" in command for command in target.commands)
+    assert "/usr/sbin/groupdel ws-ws1" in target.commands
+    assert len(captured_output.warnings) == 1
+    assert "~/ws/ws1" in captured_output.warnings[0]
 
 
 def test_rehome_refuses_a_target_inside_the_source_through_a_link(

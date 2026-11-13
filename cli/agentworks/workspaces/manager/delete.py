@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from agentworks import output
-from agentworks.errors import NotFoundError, StateError, UserAbort
+from agentworks.errors import NotFoundError, StateError, UserAbort, ValidationError
 from agentworks.vms.home_layout import AGENTWORKS_ARTIFACTS
 from agentworks.vms.manager import gated_vm_boundary
 from agentworks.workspaces.guest import stored_workspace_path
@@ -60,8 +60,16 @@ def delete_workspace(
             entity_kind="workspace",
             entity_name=name,
         )
-    # Nothing runs against a stored path that names no one directory.
-    stored_workspace_path(ws.workspace_path)
+    # A stored path that names no one directory (a '~' row the state migration
+    # left relative) is never acted on: the row, its sessions, grants and group
+    # still go, so the name can be reused, and the VM's files are left for the
+    # operator to check.
+    try:
+        stored_workspace_path(ws.workspace_path)
+    except ValidationError:
+        path_known = False
+    else:
+        path_known = True
 
     # Check for sessions
     session_count = len(db.list_sessions(workspace_name=name))
@@ -71,6 +79,12 @@ def delete_workspace(
             entity_kind="workspace",
             entity_name=name,
             hint="Delete the sessions first, or pass --force to also delete them.",
+        )
+
+    if not path_known:
+        output.warn(
+            f"Workspace '{name}' has the stored path {ws.workspace_path!r}, which names no one directory on the VM, "
+            "so its directory, tmuxinator config and link are not touched. Check the VM for them by hand."
         )
 
     if not yes:
@@ -185,7 +199,7 @@ def delete_workspace(
                             entity_name=name,
                             hint="Resolve the stuck sessions manually before retrying.",
                         )
-                if vm is not None:
+                if vm is not None and path_known:
                     from agentworks.harness_setup.cleanup import cleanup_workspace_excludes
                     from agentworks.sessions.manager import _identity_access
 
@@ -232,10 +246,14 @@ def delete_workspace(
 
                     revoke_workspace_grants(db, config, name, vm)
 
-                if vm is not None:
+                if vm is not None and path_known:
                     from agentworks.workspaces.backends.vm import delete_vm_workspace
 
                     delete_vm_workspace(vm, config, name, ws.workspace_path, ws.linux_group, logger=ssh_logger)
+                elif vm is not None:
+                    from agentworks.workspaces.backends.vm import remove_workspace_group
+
+                    remove_workspace_group(vm, config, ws.linux_group, logger=ssh_logger)
 
                 # Remove .code-workspace file
                 vscode_path = config.paths.vscode_workspaces / f"{name}.code-workspace"
