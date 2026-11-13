@@ -208,7 +208,7 @@ def _back_up(db: Database, access: VMAccess, vm_name: str, timestamp: str, backu
             )
         _write_json(backup_dir / "instance-applied-state.json", applied_state_data)
 
-        # 8. Workspace files -- single archive of all workspace paths. Ctrl-C
+        # 8. Workspace files: a single archive of all workspace paths. Ctrl-C
         # anywhere in this body ends the backup as UserAbort with a
         # backup_failed event (backup_vm); _archive_workspaces stops and
         # discards the remote archive on its way out.
