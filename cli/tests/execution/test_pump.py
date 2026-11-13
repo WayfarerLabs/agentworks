@@ -610,38 +610,56 @@ def test_a_session_shares_the_console_by_default(monkeypatch: pytest.MonkeyPatch
     assert asked == [True]
 
 
+# Run in a child with a console of its own, so the check never depends on whether
+# pytest has one. Prints whether the child and its client are on that console.
+_CONSOLE_MEMBERSHIP = """
+import ctypes, os, subprocess, sys
+from ctypes import wintypes
+from agentworks.execution import ssh_process
+
+kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+kernel32.GetConsoleProcessList.argtypes = [ctypes.POINTER(wintypes.DWORD), wintypes.DWORD]
+kernel32.GetConsoleProcessList.restype = wintypes.DWORD
+
+def attached():
+    ids = (wintypes.DWORD * 1024)()
+    count = kernel32.GetConsoleProcessList(ids, len(ids))
+    return {ids[index] for index in range(min(count, len(ids)))}
+
+client = ssh_process.spawn(
+    [sys.executable, "-c", "import time; print('ready', flush=True); time.sleep(30)"],
+    stdin=subprocess.DEVNULL,
+    stdout=subprocess.PIPE,
+    stderr=subprocess.DEVNULL,
+    share_console=sys.argv[1] == "share",
+)
+try:
+    assert client.stdout.readline().strip() == b"ready"
+    members = attached()
+    print(os.getpid() in members, client.pid in members)
+finally:
+    client.kill()
+    client.wait()
+"""
+
+
 @pytest.mark.parametrize("share_console", [True, False])
 def test_a_console_free_client_is_not_attached_to_the_operators_console(share_console: bool) -> None:
     if sys.platform != "win32":  # a statement, not a skipif mark, so the type checker narrows too
         pytest.skip("Win32 consoles")
-    import ctypes
-    from ctypes import wintypes
+    hidden = subprocess.STARTUPINFO(dwFlags=subprocess.STARTF_USESHOWWINDOW, wShowWindow=subprocess.SW_HIDE)
 
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    kernel32.GetConsoleProcessList.argtypes = [ctypes.POINTER(wintypes.DWORD), wintypes.DWORD]
-    kernel32.GetConsoleProcessList.restype = wintypes.DWORD
-
-    def attached() -> set[int]:
-        ids = (wintypes.DWORD * 1024)()
-        count = kernel32.GetConsoleProcessList(ids, len(ids))
-        return {ids[index] for index in range(min(count, len(ids)))}
-
-    if not attached():
-        pytest.skip("this test process has no console")
-    child = ssh_process.spawn(
-        [sys.executable, "-c", "import sys, time; print('ready', flush=True); time.sleep(30)"],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        share_console=share_console,
+    probe = subprocess.run(
+        [sys.executable, "-c", _CONSOLE_MEMBERSHIP, "share" if share_console else "own"],
+        capture_output=True,
+        timeout=60,
+        creationflags=subprocess.CREATE_NEW_CONSOLE,
+        startupinfo=hidden,
+        check=False,
     )
-    try:
-        assert child.stdout is not None
-        assert child.stdout.readline().strip() == b"ready"
-        assert (child.pid in attached()) is share_console
-    finally:
-        child.kill()
-        child.wait()
+
+    assert probe.returncode == 0, probe.stderr.decode(errors="replace")
+    assert probe.stdout.split() == [b"True", str(share_console).encode()]
 
 
 def test_binary_stdio_round_trips_every_byte_and_end_of_file() -> None:
