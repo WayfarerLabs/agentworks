@@ -13,9 +13,10 @@ hashes it, and hands both to one of the three shell backends.
    each leaf parameter a `ParamSpec`. Adding a command, option, or argument to the CLI flows into
    this tree automatically; nothing here needs editing for the tree itself.
 
-   The walk is duck-typed against `Protocol` shims rather than `isinstance` checks, because Typer
-   vendors its own copy of Click. Testing against the real `click` package would match nothing and
-   silently produce an empty tree.
+   Parameters use Typer's `type_descriptor.choices` for enum and literal values, and its argument
+   and option classes for flags and repeated operands. Groups recurse through `TyperGroup`. These
+   are Typer's classes, independent of the separate `click` dependency used for output and prompts.
+   Unsupported parameter classes fail generation explicitly.
 
 2. **Dynamic values are not baked in.** `DYNAMIC_COMPLETIONS` in `spec.py` maps a
    `(command path, parameter name)` pair to an abstract completer id such as `workspaces`, `vms`, or
