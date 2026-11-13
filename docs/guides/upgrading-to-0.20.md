@@ -55,8 +55,12 @@ consoles first:
 agw vm reconcile workstation --dry-run
 ```
 
-The preview observes reachable runtimes without changing them or booting a stopped VM. When the
-reported scope and targets match the intended recovery, apply them:
+The preview observes reachable runtimes without changing them or booting a stopped VM. Selected
+sessions and named consoles with unset targets are reported as blocked. Both preview and apply exit
+nonzero while any remain. Apply may still recover other eligible resources, so a nonzero exit does
+not mean nothing changed.
+
+When the reported scope and targets match the intended recovery, apply them:
 
 ```console
 agw vm reconcile workstation
@@ -72,7 +76,8 @@ or `console reconcile NAME` is available when only that resource should be recov
 
 - Explicit `vm start` now records `running` intent even when the VM is already running. Use
   `agw vm set-desired-state NAME on-demand` to return to activation only when needed. Explicit
-  session and console start/stop also record intent, including accepted batch no-ops.
+  session start/stop commands also record intent, including accepted batch no-ops. Named-console
+  start/stop commands record intent for the console view.
 - A VM shutting down or suspending itself, a session exiting, or a console disappearing does not
   clear intent. Recovery requires an explicit reconcile command; there is no background controller.
 - On WSL2, a live VM with `stopped` intent receives no idle-shutdown protection during access or
