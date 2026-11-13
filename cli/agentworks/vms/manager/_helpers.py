@@ -308,40 +308,46 @@ def _guard_incomplete_vm(vm: VMRow, *, allow_failed_init: bool = False) -> None:
         )
 
 
+LIVE_RESOURCES_DEADLINE = 30
+"""How long ``vm describe`` waits for the VM's live resources, in seconds; one dispatch."""
+
+_LIVE_RESOURCES_SCRIPT = (
+    "nproc && "
+    "uptime | grep -oP 'load average: \\K[^,]+' && "
+    "free -b | awk '/^Mem:/{print $2,$3} /^Swap:/{print $2,$3}' && "
+    "df -h / | awk 'NR==2{print $2,$3,$5}'"
+)
+
+
 def _query_live_resources(db: Database, vm: VMRow, config: Config) -> dict[str, str] | None:
-    """Query live resource usage from a VM over SSH."""
+    """Query live resource usage from a VM: one request as the admin, bounded at 30 seconds.
+
+    Describe leaves live resources out rather than failing: any outcome but
+    ``Completed(0)`` with every line present is ``None``. A missing host-key
+    record or an unsupported ssh client also says why.
+    """
+    import agentworks.execution as execution
     from agentworks import output
     from agentworks.errors import AgentworksError
-    from agentworks.execution.errors import TrustMissing
-    from agentworks.transports import transport
+    from agentworks.execution.access import Admin
+    from agentworks.execution.errors import ClientUnsupported, TrustMissing
+    from agentworks.execution.requests import Script, Shell
+    from agentworks.execution.results import Completed
+    from agentworks.vms.manager.boundary import require_vm_ssh_boundary
 
     try:
-        from agentworks.vms.manager.boundary import require_vm_ssh_boundary
-
         require_vm_ssh_boundary(db, config, vm)
-        target = transport(vm, config)
-    except TrustMissing as exc:
-        # Describe leaves live resources out rather than refusing, but says why.
-        output.warn(f"{exc}. {exc.hint}")
+        access = execution.vm_access(vm, config, Admin())
+        result = access.run(Script(_LIVE_RESOURCES_SCRIPT, Shell.SH, deadline=LIVE_RESOURCES_DEADLINE))
+    except (TrustMissing, ClientUnsupported) as exc:
+        output.warn(f"{exc}. {exc.hint}" if exc.hint else str(exc))
         return None
     except AgentworksError:
         return None
-    cmd = (
-        "nproc && "
-        "uptime | grep -oP 'load average: \\K[^,]+' && "
-        "free -b | awk '/^Mem:/{print $2,$3} /^Swap:/{print $2,$3}' && "
-        "df -h / | awk 'NR==2{print $2,$3,$5}'"
-    )
-
-    try:
-        result = target.run(cmd, check=False, retries=3)
-    except Exception:
+    if result.completion != Completed(0):
         return None
 
-    if not result.ok:
-        return None
-
-    lines = result.stdout.strip().splitlines()
+    lines = result.stdout.decode("utf-8", errors="replace").strip().splitlines()
     if len(lines) < 5:
         return None
 

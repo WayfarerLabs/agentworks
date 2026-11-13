@@ -113,12 +113,14 @@ initialization, as the admin and then as the agent, through it (see
 through it. `workspace create`, `workspace repair`, `workspace rehome` and `workspace copy` apply
 the workspace ACLs through it, and `session create` and the session launches set up the tmux socket
 directories through it. `vm backup` runs its checks, its workspace archive and the archive's
-download through it (see [Backups](#backups)). `vm start`, and the automatic start of a VM that
-stopped on its own, use it to wait for the VM to answer; `vm rekey` and `vm recover` use it for the
-same wait after their scripts, which run through the platform's own channel (see
-[Start, recover, rekey and delete](#start-recover-rekey-and-delete)). `vm shell --platform` uses the
-platform's own channel instead and needs no `python3`; on a cloud VM that channel is SSH to its
-public address under the same rules. Everything else keeps its current path for now.
+download through it (see [Backups](#backups)). `vm describe` reads the VM's live resources through
+it, as one request bounded at 30 seconds where it made up to three attempts before. `vm start`, and
+the automatic start of a VM that stopped on its own, use it to wait for the VM to answer; `vm rekey`
+and `vm recover` use it for the same wait after their scripts, which run through the platform's own
+channel (see [Start, recover, rekey and delete](#start-recover-rekey-and-delete)).
+`vm shell --platform` uses the platform's own channel instead and needs no `python3`; on a cloud VM
+that channel is SSH to its public address under the same rules. Everything else keeps its current
+path for now.
 
 ### What these commands need
 

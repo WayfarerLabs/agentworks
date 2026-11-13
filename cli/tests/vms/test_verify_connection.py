@@ -232,7 +232,7 @@ def test_verify_connection_refuses_an_unsupported_client_before_reading_the_data
         )
 
 
-def test_live_resource_probe_degrades_identity_refusal_without_transport(
+def test_live_resource_probe_degrades_identity_refusal_without_access(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from agentworks.vms.manager._helpers import _query_live_resources
@@ -242,8 +242,8 @@ def test_live_resource_probe_degrades_identity_refusal_without_transport(
 
     monkeypatch.setattr("agentworks.vms.manager.boundary.require_vm_ssh_boundary", refuse)
     monkeypatch.setattr(
-        "agentworks.transports.transport",
-        lambda *args, **kwargs: pytest.fail("transport constructed after identity refusal"),
+        "agentworks.execution.vm_access",
+        lambda *args, **kwargs: pytest.fail("access built after identity refusal"),
     )
 
     config = SimpleNamespace()
