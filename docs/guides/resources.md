@@ -623,15 +623,15 @@ commands contribute to the VM admin's profile. Agentworks writes the profile fro
 early in every initialization of that account, before its dotfiles sync and its user install
 commands, including paths from commands skipped by completion checks. A command that fails warns and
 setup continues; its paths leave the profile once that account's install commands finish, so a
-failed system install command contributes none, and a failed user install command's paths are on
-`PATH` only while that account's user install commands run. Shells that source the profile prepend
-these directories to `PATH`, and child processes inherit them. On `PATH`, a user install command's
-directories precede mise's shims, so they take precedence over a shim of the same name; for the
-admin, mise's shims precede the system install commands' directories, so a shim takes precedence
-over them. A leading `~` resolves to the target user's home. A user install command's login shell
-therefore already has every declared directory on `PATH`, its own included. System install commands
-run earlier, before the admin's profile is written: on a first create they see none of it, and on
-reinit they see the previous one.
+failed system install command contributes none, and a failed user install command's paths stay in
+the profile until that account's user install commands finish. Shells that source the profile
+prepend these directories to `PATH`, and child processes inherit them. On `PATH`, a user install
+command's directories precede mise's shims, so they take precedence over a shim of the same name;
+for the admin, mise's shims precede the system install commands' directories, so a shim takes
+precedence over them. A leading `~` resolves to the target user's home. A user install command's
+login shell therefore already has every declared directory on `PATH`, its own included. System
+install commands run earlier, before the admin's profile is written: on a first create they see none
+of it, and on reinit they see the previous one.
 
 `test_exec` resolves a command on `PATH` in the target user's login shell. `test_file` and
 `test_dir` check for an existing path; a leading `~` resolves to the target user's home. Declare a
