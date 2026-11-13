@@ -14,6 +14,15 @@ from agentworks.errors import (
     StateError,
     ValidationError,
 )
+from agentworks.execution.errors import (
+    CommandFailed,
+    ExecutionIncomplete,
+    FileConflict,
+    FileContentMismatch,
+    FileLockTimeout,
+    PathRefused,
+    RequestRefused,
+)
 from agentworks.name_filters import validate_name_filters
 from agentworks.vms.manager import gated_vm_boundary
 
@@ -29,6 +38,19 @@ if TYPE_CHECKING:
     from agentworks.sessions.tmux import RunCommand
     from agentworks.transports import Transport
     from agentworks.vms.initializer.phase_a import OperationLog
+
+
+_REGENERATION_FAILURES = (
+    CommandFailed,
+    ExecutionIncomplete,
+    RequestRefused,
+    PathRefused,
+    FileConflict,
+    FileContentMismatch,
+    FileLockTimeout,
+)
+"""What the tmuxinator regeneration tolerates: a failed request, or a file operation that was refused,
+conflicted, timed out or wrote nothing."""
 
 
 def _require_workspace(db: Database, name: str) -> WorkspaceRow:
@@ -161,7 +183,6 @@ def _regenerate_tmuxinator(
     from agentworks.execution.access import Admin
     from agentworks.linux_users import managed_home
     from agentworks.vms.initializer.steps import describe_failure
-    from agentworks.workspaces.guest import FILE_FAILURES
     from agentworks.workspaces.templates import resolve_live_tmuxinator
     from agentworks.workspaces.tmuxinator import generate_config, remove_config, write_config
 
@@ -179,7 +200,7 @@ def _regenerate_tmuxinator(
         socket_paths = {s.name: s.socket_path for s in sessions}
         config_text = generate_config(ws.name, ws.workspace_path, sessions=sessions, socket_paths=socket_paths)
         write_config(admin, ws.workspace_path, config_text)
-    except FILE_FAILURES as error:
+    except _REGENERATION_FAILURES as error:
         # Its requests carry no secret, so the stderr tail needs no redaction.
         output.warn(
             f"The tmuxinator config of workspace '{ws.name}' was not updated: "

@@ -21,7 +21,7 @@ from agentworks.path_rendering import format_host_path
 from agentworks.secrets.policy import require_exact_tty_interaction_policy
 from agentworks.vms.initializer.steps import describe_failure, status
 from agentworks.vms.manager import gated_vm_boundary
-from agentworks.workspaces.guest import FIND_DEADLINE, PROBE_DEADLINE, REQUEST_FAILURES, open_parent_traversal, root
+from agentworks.workspaces.guest import FIND_DEADLINE, PROBE_DEADLINE, REQUEST_FAILURES, open_parent_traversal
 from agentworks.workspaces.manager._common import _guard_vm_status, _workspace_scope
 from agentworks.workspaces.manager.repair import _rehome_partial_state_hint
 from agentworks.workspaces.tmuxinator import generate_config, publish_tmuxinator_config, remove_config
@@ -222,8 +222,8 @@ def _rehome_vm(
             admin = admin_access(vm, config, ssh_logger)
             try:
                 # Create target directory as root and chown to admin so rsync can write
-                admin.run(root("mkdir", "-p", "--", new_path), check=True)
-                admin.run(root("chown", vm.admin_username, new_path), check=True)
+                admin.run(Command(("mkdir", "-p", "--", new_path), elevated=True), check=True)
+                admin.run(Command(("chown", vm.admin_username, new_path), elevated=True), check=True)
 
                 # Copy with rsync (fall back to cp -a). The trailing slash
                 # matters for rsync: the contents of the source into the target.
@@ -236,7 +236,10 @@ def _rehome_vm(
                     )
                 else:
                     admin.run(
-                        root("cp", "-a", "--", f"{old_path}/.", f"{new_path}/", deadline=COPY_DEADLINE), check=True
+                        Command(
+                            ("cp", "-a", "--", f"{old_path}/.", f"{new_path}/"), elevated=True, deadline=COPY_DEADLINE
+                        ),
+                        check=True,
                     )
 
                 if not _is_directory(admin, new_path):
@@ -248,10 +251,16 @@ def _rehome_vm(
 
                 # Fix ownership, permissions, and ACLs on the new path
                 output.info("Setting permissions...")
-                admin.run(root("chown", f"{vm.admin_username}:{ws.linux_group}", new_path), check=True)
-                admin.run(root("chmod", "2770", new_path), check=True)
                 admin.run(
-                    root("find", new_path, "-type", "d", "-exec", "chmod", "g+s", "{}", "+", deadline=FIND_DEADLINE),
+                    Command(("chown", f"{vm.admin_username}:{ws.linux_group}", new_path), elevated=True), check=True
+                )
+                admin.run(Command(("chmod", "2770", new_path), elevated=True), check=True)
+                admin.run(
+                    Command(
+                        ("find", new_path, "-type", "d", "-exec", "chmod", "g+s", "{}", "+"),
+                        elevated=True,
+                        deadline=FIND_DEADLINE,
+                    ),
                     check=True,
                 )
                 # Canonical workspace ACL, the same shared spec workspace create
@@ -302,7 +311,9 @@ def _rehome_vm(
                 # Handle old directory
                 if remove_old:
                     output.info(f"Removing old directory {old_path}...")
-                    admin.run(root("rm", "-rf", "--", old_path, deadline=REMOVE_OLD_DEADLINE), check=True)
+                    admin.run(
+                        Command(("rm", "-rf", "--", old_path), elevated=True, deadline=REMOVE_OLD_DEADLINE), check=True
+                    )
                     output.detail("Old directory removed")
                 else:
                     output.info(f"Old directory left in place at {old_path}")

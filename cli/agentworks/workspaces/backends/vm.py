@@ -11,7 +11,7 @@ from uuid import uuid4
 
 import agentworks.execution as execution
 from agentworks import output
-from agentworks.errors import AgentworksError, AlreadyExistsError
+from agentworks.errors import AlreadyExistsError
 from agentworks.execution.access import Admin
 from agentworks.execution.errors import (
     CommandFailed,
@@ -30,7 +30,6 @@ from agentworks.workspaces.guest import (
     REQUEST_FAILURES,
     ensure_group,
     path_occupied,
-    root,
     script,
 )
 from agentworks.workspaces.tmuxinator import config_link, config_path, generate_config, link_config, write_config
@@ -66,7 +65,9 @@ def admin_access(vm: VMRow, config: Config, logger: InitLog | None) -> VMAccess:
     return execution.vm_access(vm, config, Admin(), log=None if logger is None else logger.record)
 
 
-def _value_free_clone_failure(error: AgentworksError, *, ws_name: str, vm_name: str) -> None:
+def _value_free_clone_failure(
+    error: CommandFailed | ExecutionIncomplete | RequestRefused, *, ws_name: str, vm_name: str
+) -> None:
     """Strip ``error`` of everything the guest returned, keeping its identity (I87).
 
     Git's stderr and the command line can hold credentials in the repository
@@ -74,8 +75,7 @@ def _value_free_clone_failure(error: AgentworksError, *, ws_name: str, vm_name: 
     and the chained errors dropped.
     """
     error.args = (f"Repository clone failed for workspace {ws_name!r} on VM {vm_name!r}.",)
-    if isinstance(error, CommandFailed | ExecutionIncomplete | RequestRefused):
-        error.result = replace(error.result, stdout=b"", stderr=b"")
+    error.result = replace(error.result, stdout=b"", stderr=b"")
     error.entity_kind = "workspace"
     error.entity_name = ws_name
     error.hint = (
@@ -130,9 +130,9 @@ def create_vm_workspace(
 
     # Reserve exclusively before the cleanup region: a raced-in path or a lost
     # response is not confirmation that the directory belongs to this attempt.
-    admin.run(root("mkdir", "-p", "--", str(PurePosixPath(workspace_path).parent)), check=True)
+    admin.run(Command(("mkdir", "-p", "--", str(PurePosixPath(workspace_path).parent)), elevated=True), check=True)
     try:
-        admin.run(root("mkdir", "--", workspace_path), check=True)
+        admin.run(Command(("mkdir", "--", workspace_path), elevated=True), check=True)
     except BaseException:
         output.warn(
             f"Workspace directory reservation at {workspace_path!r} was not confirmed. "
@@ -145,9 +145,9 @@ def create_vm_workspace(
     try:
         # Create workspace group (idempotent), add admin, and set up directory with setgid
         admin.run(ensure_group(ws_group), check=True)
-        admin.run(root("usermod", "-aG", ws_group, vm.admin_username), check=True)
-        admin.run(root("chown", owner, workspace_path), check=True)
-        admin.run(root("chmod", "2770", workspace_path), check=True)
+        admin.run(Command(("usermod", "-aG", ws_group, vm.admin_username), elevated=True), check=True)
+        admin.run(Command(("chown", owner, workspace_path), elevated=True), check=True)
+        admin.run(Command(("chmod", "2770", workspace_path), elevated=True), check=True)
         # The canonical workspace ACL is applied at the end (apply_workspace_acls),
         # after any clone and other content is placed, so existing entries are
         # covered too. This is the same recursive spec workspace repair applies,
@@ -158,7 +158,7 @@ def create_vm_workspace(
             output.info(f"Cloning repository for workspace {ws_name!r}...")
             candidate = f"{workspace_path}.agentworks-clone-{uuid4().hex}"
             try:
-                admin.run(root("mkdir", "-m", "700", "--", candidate), check=True)
+                admin.run(Command(("mkdir", "-m", "700", "--", candidate), elevated=True), check=True)
             except BaseException:
                 output.warn(
                     f"Private clone directory reservation at {candidate!r} was not confirmed. "
@@ -166,7 +166,7 @@ def create_vm_workspace(
                 )
                 raise
             attempt = candidate
-            admin.run(root("chown", owner, candidate), check=True)
+            admin.run(Command(("chown", owner, candidate), elevated=True), check=True)
             checkout = f"{candidate}/checkout"
             # `--` stops option parsing so a repo URL beginning with `-` can
             # never be read as a git flag.
@@ -175,18 +175,22 @@ def create_vm_workspace(
             except REQUEST_FAILURES as error:
                 _value_free_clone_failure(error, ws_name=ws_name, vm_name=vm.name)
                 raise
-            admin.run(root("chgrp", "-R", ws_group, checkout), check=True)
+            admin.run(Command(("chgrp", "-R", ws_group, checkout), elevated=True), check=True)
             admin.run(
-                root("find", checkout, "-type", "d", "-exec", "chmod", "g+s", "{}", "+", deadline=FIND_DEADLINE),
+                Command(
+                    ("find", checkout, "-type", "d", "-exec", "chmod", "g+s", "{}", "+"),
+                    elevated=True,
+                    deadline=FIND_DEADLINE,
+                ),
                 check=True,
             )
-            admin.run(root("chmod", "2770", checkout), check=True)
+            admin.run(Command(("chmod", "2770", checkout), elevated=True), check=True)
             # -T never follows a destination symlink or merges with a newly
             # populated directory. Both paths share a filesystem; a failed
             # or unconfirmed rename does not establish final ownership.
-            admin.run(root("mv", "-T", "--", checkout, workspace_path), check=True)
+            admin.run(Command(("mv", "-T", "--", checkout, workspace_path), elevated=True), check=True)
             clone_published = True
-            admin.run(root("rmdir", "--", candidate), check=True)
+            admin.run(Command(("rmdir", "--", candidate), elevated=True), check=True)
             attempt = None
 
             # Stamp the checkout with its configured git identity so commits
@@ -235,7 +239,7 @@ def create_vm_workspace(
         # is confirmed. Preserve an occupied or unconfirmed final directory.
         if attempt is not None:
             try:
-                admin.run(root("rm", "-rf", "--", attempt, deadline=CLEANUP_DEADLINE), check=True)
+                admin.run(Command(("rm", "-rf", "--", attempt), elevated=True, deadline=CLEANUP_DEADLINE), check=True)
             except BaseException:
                 output.warn(
                     f"Private clone attempt {attempt!r} could not be removed. "
@@ -318,7 +322,9 @@ def delete_vm_workspace(
                 )
                 return
         else:
-            admin.run(root("rm", "-rf", "--", workspace_path, deadline=CLEANUP_DEADLINE), check=True)
+            admin.run(
+                Command(("rm", "-rf", "--", workspace_path), elevated=True, deadline=CLEANUP_DEADLINE), check=True
+            )
         # The link only while it still points at this workspace's config. The
         # target is compared normalized without following links (realpath -s -m):
         # an earlier release wrote it from the stored path as it was spelled.
@@ -334,7 +340,9 @@ def delete_vm_workspace(
         # group that is already gone (or, defensively, one groupdel refuses to
         # remove) is tolerated rather than failing the delete, mirroring the
         # best-effort group-membership teardown in agents/grants.py.
-        admin.run(root("/usr/sbin/groupdel", linux_group, deadline=PROBE_DEADLINE)).require_completed(vm.name)
+        admin.run(
+            Command(("/usr/sbin/groupdel", linux_group), elevated=True, deadline=PROBE_DEADLINE)
+        ).require_completed(vm.name)
     except REQUEST_FAILURES:
         output.warn(
             f"Remote cleanup of workspace directory {workspace_path!r} and group {linux_group!r} was not confirmed. "

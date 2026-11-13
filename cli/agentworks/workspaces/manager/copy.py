@@ -16,7 +16,7 @@ from agentworks.path_rendering import format_host_path
 from agentworks.vms.initializer.steps import status
 from agentworks.vms.manager import gated_vm_boundary
 from agentworks.workspaces.backends.vm import default_workspace_path
-from agentworks.workspaces.guest import FIND_DEADLINE, ensure_group, path_occupied, root
+from agentworks.workspaces.guest import FIND_DEADLINE, ensure_group, path_occupied
 from agentworks.workspaces.manager._common import _guard_vm_status, _resolve_vm, _workspace_scope
 
 if TYPE_CHECKING:
@@ -196,14 +196,14 @@ def _unpack(db: Database, config: Config, dest_vm: VMRow, dest_name: str, archiv
             entity_name=dest_name,
             hint="Inspect and preserve its contents before removing it, or choose a different workspace name.",
         )
-    dest.run(root("mkdir", "-p", "--", posixpath.dirname(workspace_path)), check=True)
-    dest.run(root("mkdir", "--", workspace_path), check=True)
+    dest.run(Command(("mkdir", "-p", "--", posixpath.dirname(workspace_path)), elevated=True), check=True)
+    dest.run(Command(("mkdir", "--", workspace_path), elevated=True), check=True)
 
     # Set up group, directory, and permissions (same as create_vm_workspace)
     dest.run(ensure_group(ws_group), check=True)
-    dest.run(root("usermod", "-aG", ws_group, dest_vm.admin_username), check=True)
-    dest.run(root("chown", owner, workspace_path), check=True)
-    dest.run(root("chmod", "2770", workspace_path), check=True)
+    dest.run(Command(("usermod", "-aG", ws_group, dest_vm.admin_username), elevated=True), check=True)
+    dest.run(Command(("chown", owner, workspace_path), elevated=True), check=True)
+    dest.run(Command(("chmod", "2770", workspace_path), elevated=True), check=True)
 
     # The archive comes from another VM, so extraction keeps GNU tar's
     # defaults and never passes -P: leading '/' is stripped, '..' members
@@ -219,13 +219,19 @@ def _unpack(db: Database, config: Config, dest_vm: VMRow, dest_name: str, archiv
         check=True,
     )
     # Neither follows a link: -P states the physical walk both default to.
-    dest.run(root("chown", "-R", "-P", owner, workspace_path, deadline=OWNERSHIP_DEADLINE), check=True)
     dest.run(
-        root("find", "-P", workspace_path, "-type", "d", "-exec", "chmod", "g+s", "{}", "+", deadline=FIND_DEADLINE),
+        Command(("chown", "-R", "-P", owner, workspace_path), elevated=True, deadline=OWNERSHIP_DEADLINE), check=True
+    )
+    dest.run(
+        Command(
+            ("find", "-P", workspace_path, "-type", "d", "-exec", "chmod", "g+s", "{}", "+"),
+            elevated=True,
+            deadline=FIND_DEADLINE,
+        ),
         check=True,
     )
     # The archive's own '.' member set the directory's mode to the source's.
-    dest.run(root("chmod", "2770", workspace_path), check=True)
+    dest.run(Command(("chmod", "2770", workspace_path), elevated=True), check=True)
 
     # Canonical workspace ACL, applied AFTER the unpack and the recursive
     # chown/SGID so the recursive access ACL covers every unpacked entry

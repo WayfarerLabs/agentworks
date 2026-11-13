@@ -16,7 +16,7 @@ from agentworks.execution.results import Completed
 from agentworks.vms.initializer.steps import describe_failure, status
 from agentworks.vms.manager import gated_vm_boundary
 from agentworks.workspaces.acls import ACL_DEADLINE, apply_workspace_acls
-from agentworks.workspaces.guest import FIND_DEADLINE, REQUEST_FAILURES, ensure_group, open_parent_traversal, root
+from agentworks.workspaces.guest import FIND_DEADLINE, REQUEST_FAILURES, ensure_group, open_parent_traversal
 from agentworks.workspaces.manager._common import _workspace_scope
 
 if TYPE_CHECKING:
@@ -146,7 +146,7 @@ def repair_workspace(
 
         # 0. Ensure acl package is installed (needed for setfacl)
         try:
-            if status(admin, root("which", "setfacl")) != 0:
+            if status(admin, Command(("which", "setfacl"), elevated=True)) != 0:
                 admin.run(
                     Command(
                         ("apt-get", "install", "-y", "-qq", "acl"),
@@ -165,7 +165,7 @@ def repair_workspace(
 
         # 1. Ensure the workspace group recorded in the DB exists on the VM.
         try:
-            if status(admin, root("getent", "group", ws_group)) != 0:
+            if status(admin, Command(("getent", "group", ws_group), elevated=True)) != 0:
                 admin.run(ensure_group(ws_group), check=True)
                 output.detail(f"Fixed: created group {ws_group}")
                 fixes += 1
@@ -176,9 +176,9 @@ def repair_workspace(
 
         # 2. Ensure admin is in the group
         try:
-            in_group = admin.run(root("id", "-nG", vm.admin_username))
+            in_group = admin.run(Command(("id", "-nG", vm.admin_username), elevated=True))
             if in_group.require_completed(vm.name) == 0 and ws_group not in _text(in_group).split():
-                admin.run(root("usermod", "-aG", ws_group, vm.admin_username), check=True)
+                admin.run(Command(("usermod", "-aG", ws_group, vm.admin_username), elevated=True), check=True)
                 output.detail(f"Fixed: added admin '{vm.admin_username}' to {ws_group}")
                 fixes += 1
             else:
@@ -198,16 +198,24 @@ def repair_workspace(
         # never parse it, just test whether anything was printed.
         try:
             owner = admin.run(
-                root("chown", "-R", "-c", f"{vm.admin_username}:{ws_group}", ws_path, deadline=FIND_DEADLINE),
+                Command(
+                    ("chown", "-R", "-c", f"{vm.admin_username}:{ws_group}", ws_path),
+                    elevated=True,
+                    deadline=FIND_DEADLINE,
+                ),
                 stdout=TREE_OUTPUT,
                 check=True,
             )
-            mode = admin.run(root("chmod", "-c", "2770", ws_path), check=True)
+            mode = admin.run(Command(("chmod", "-c", "2770", ws_path), elevated=True), check=True)
             # Set SGID on all subdirectories so new files inherit the workspace group.
             # This is critical for atomic-write tools (including Claude Code) that
             # create a temp file and rename it over the original.
             sgid = admin.run(
-                root("find", ws_path, "-type", "d", "-exec", "chmod", "-c", "g+s", "{}", "+", deadline=FIND_DEADLINE),
+                Command(
+                    ("find", ws_path, "-type", "d", "-exec", "chmod", "-c", "g+s", "{}", "+"),
+                    elevated=True,
+                    deadline=FIND_DEADLINE,
+                ),
                 stdout=TREE_OUTPUT,
                 check=True,
             )
@@ -294,7 +302,7 @@ def repair_workspace(
         # Get agents that ARE in the group. The agt- prefix check covers both
         # current agents and legacy ones (whose names start with agt--).
         try:
-            group_info = admin.run(root("getent", "group", ws_group))
+            group_info = admin.run(Command(("getent", "group", ws_group), elevated=True))
             group_line = _text(group_info)
             current_members: set[str] = set()
             if group_info.require_completed(vm.name) == 0 and ":" in group_line:
@@ -305,14 +313,14 @@ def repair_workspace(
             # Add missing agents
             to_add = granted_agents - current_members
             for user in sorted(to_add):
-                admin.run(root("usermod", "-aG", ws_group, user), check=True)
+                admin.run(Command(("usermod", "-aG", ws_group, user), elevated=True), check=True)
                 output.detail(f"Fixed: added {user} to {ws_group}")
                 fixes += 1
 
             # Remove agents that shouldn't be there
             to_remove = current_members - granted_agents
             for user in sorted(to_remove):
-                status(admin, root("gpasswd", "-d", user, ws_group))
+                status(admin, Command(("gpasswd", "-d", user, ws_group), elevated=True))
                 output.detail(f"Fixed: removed {user} from {ws_group}")
                 fixes += 1
 
@@ -332,7 +340,9 @@ def repair_workspace(
 
 def _acl_snapshot(access: VMAccess, path: str) -> str | None:
     """``getfacl -R -n`` of the tree at ``path``, as root, or ``None`` when it did not complete with status 0."""
-    result = access.run(root("getfacl", "-R", "-n", path, deadline=ACL_DEADLINE), stdout=TREE_OUTPUT)
+    result = access.run(
+        Command(("getfacl", "-R", "-n", path), elevated=True, deadline=ACL_DEADLINE), stdout=TREE_OUTPUT
+    )
     return _text(result) if result.completion == Completed(0) else None
 
 
