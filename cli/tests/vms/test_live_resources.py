@@ -73,3 +73,13 @@ def test_an_unsupported_client_leaves_live_resources_out_and_says_so(
 
     assert query() is None
     assert len(captured_output.warnings) == 1
+
+
+def test_guest_text_reaches_the_resources_without_terminal_controls(vm_access_recorder: AccessRecorder) -> None:
+    answer = b"4\x1b]0;owned\x07\n0.15\x1b[2J\n8589934592 2147483648\n1073741824 0\n50G 10G\x1b[31m 20%\n"
+    vm_access_recorder.access().default_outcome = Result(Completed(0), answer)
+
+    resources = query()
+
+    assert resources is not None
+    assert not any("\x1b" in value or "\x07" in value for value in resources.values())

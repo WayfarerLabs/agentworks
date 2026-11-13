@@ -333,6 +333,7 @@ def _query_live_resources(db: Database, vm: VMRow, config: Config) -> dict[str, 
     from agentworks.execution.errors import ClientUnsupported, TrustMissing
     from agentworks.execution.requests import Script, Shell
     from agentworks.execution.results import Completed
+    from agentworks.terminal import sanitize_fact_line
     from agentworks.vms.manager.boundary import require_vm_ssh_boundary
 
     try:
@@ -347,7 +348,9 @@ def _query_live_resources(db: Database, vm: VMRow, config: Config) -> dict[str, 
     if result.completion != Completed(0):
         return None
 
-    lines = result.stdout.decode("utf-8", errors="replace").strip().splitlines()
+    # Guest output reaches the operator's terminal and JSON as is, so no control character survives.
+    text = result.stdout.decode("utf-8", errors="replace").strip()
+    lines = [sanitize_fact_line(line) for line in text.splitlines()]
     if len(lines) < 5:
         return None
 
