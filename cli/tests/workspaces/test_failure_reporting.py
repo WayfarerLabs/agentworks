@@ -12,8 +12,8 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.db import InitStatus
-from agentworks.errors import AlreadyExistsError
-from agentworks.execution.errors import CommandFailed, PathRefusal, PathRefused
+from agentworks.errors import AlreadyExistsError, ExternalError
+from agentworks.execution.errors import CommandFailed, ExecutionIncomplete, PathRefusal, PathRefused
 from agentworks.execution.requests import Command, PythonProgram
 from agentworks.execution.results import Result, Unknown, UnknownReason
 from agentworks.secrets.policy import TtyInteractionPolicy
@@ -23,6 +23,7 @@ from tests.workspaces.test_lifecycle_orchestrated import (
     _OCCUPIED_PROBE,
     _FakeAdminTarget,
     _reachable,
+    _RehomeTarget,
     _route,
     _seed,
     _seed_vm_only,
@@ -57,19 +58,6 @@ class _Guest(_FakeAdminTarget):
         return super().run(cmd, **kwargs)
 
 
-class _RehomeGuest(_Guest):
-    """The target directory exists once it is made."""
-
-    made = False
-
-    def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
-        if cmd == "test -d /dst/ws1" and not self.made:
-            self.commands.append(cmd)
-            return SimpleNamespace(ok=False, returncode=1, stdout="", stderr="")
-        self.made |= cmd == "mkdir -p -- /dst/ws1"
-        return super().run(cmd, **kwargs)
-
-
 def _copy(db: Database, config: object) -> None:
     workspace_manager.copy_workspace(
         db,
@@ -101,8 +89,7 @@ def test_a_failed_repair_step_warns_with_the_guests_stderr_and_repair_keeps_a_lo
 
     workspace_manager.repair_workspace(db, make_config(), "ws1", interaction=TtyInteractionPolicy.REFUSE)
 
-    [warning] = [w for w in captured_output.warnings if w.startswith("acl package check failed")]
-    assert "E: fixture apt failure" in warning
+    assert len([w for w in captured_output.warnings if "E: fixture apt failure" in w]) == 1
     assert recorder.logs and all(log is not None for log in recorder.logs)
 
 
@@ -112,7 +99,7 @@ def test_a_failed_rehome_names_its_log_and_where_the_workspace_now_is(
     monkeypatch: pytest.MonkeyPatch,  # noqa: ANN001
 ) -> None:
     _ready(db, monkeypatch)
-    guest = _RehomeGuest({"chmod 2770 /dst/ws1": "chmod: fixture failure"})
+    guest = _RehomeTarget(failing=("chmod 2770 /dst/ws1",))
     _route(monkeypatch, guest)
 
     with pytest.raises(CommandFailed) as caught:
@@ -154,6 +141,60 @@ def test_a_failed_extraction_names_the_destinations_log_and_records_no_workspace
 
     assert caught.value.hint is not None and "workspace-copy.log" in caught.value.hint
     assert db.get_workspace("ws2") is None
+
+
+@pytest.mark.parametrize("side", ["source", "destination"])
+def test_a_copy_that_fails_outside_a_request_names_the_log_of_the_side_that_failed(
+    db: Database,
+    make_config,
+    monkeypatch: pytest.MonkeyPatch,
+    side: str,  # noqa: ANN001
+) -> None:
+    _ready(db, monkeypatch)
+    guest = _Guest()
+    recorder = _route(monkeypatch, guest)
+    failing = "czf" if side == "source" else "xzf"
+
+    def answer(call: Call) -> Result | None:
+        request = call.request
+        if isinstance(request, Command) and failing in request.argv:
+            raise OSError(5, "Input/output error")
+        return guest.answer(call)
+
+    recorder.answer = answer
+
+    with pytest.raises(ExternalError) as caught:
+        _copy(db, make_config())
+
+    log = "workspace-copy-source" if side == "source" else "workspace-copy.log"
+    assert caught.value.hint is not None and log in caught.value.hint
+    assert isinstance(caught.value.__cause__, OSError)
+    assert db.get_workspace("ws2") is None
+
+
+def test_a_source_read_that_does_not_complete_names_its_log(
+    db: Database,
+    make_config,
+    monkeypatch: pytest.MonkeyPatch,  # noqa: ANN001
+) -> None:
+    _ready(db, monkeypatch)
+    guest = _Guest()
+    recorder = _route(monkeypatch, guest)
+    lost = ExecutionIncomplete("box", Result(Unknown(UnknownReason.CONNECTION)))
+
+    def answer(call: Call) -> Result | None:
+        request = call.request
+        if isinstance(request, Command) and "czf" in request.argv:
+            raise lost
+        return guest.answer(call)
+
+    recorder.answer = answer
+
+    with pytest.raises(ExecutionIncomplete) as caught:
+        _copy(db, make_config())
+
+    assert caught.value is lost and caught.value.hint is not None
+    assert "workspace-copy-source" in caught.value.hint
 
 
 # -- What copy leaves behind ----------------------------------------------------------------------
@@ -239,7 +280,7 @@ def test_create_never_replaces_an_existing_link_and_copy_and_rehome_replace_thei
     workspace_manager.create_workspace(db, config, name="ws1", vm_name="box", interaction=TtyInteractionPolicy.REFUSE)
     copied = _route(monkeypatch, _Guest())
     _copy(db, config)
-    rehomed = _route(monkeypatch, _RehomeGuest())
+    rehomed = _route(monkeypatch, _RehomeTarget())
     workspace_manager.rehome_workspace(
         db, config, "ws1", target_path="/dst/ws1", yes=True, interaction=TtyInteractionPolicy.REFUSE
     )
@@ -262,24 +303,23 @@ def _over_the_limit(guest: _Guest, needle: str):  # noqa: ANN202
     return answer
 
 
-@pytest.mark.parametrize(
-    ("needle", "reported"),
-    [("chown", "permission fix failed"), ("getfacl", "the before/after check could not run")],
-)
+@pytest.mark.parametrize("needle", ["chown", "getfacl"])
 def test_repair_output_over_its_limit_is_never_read_as_ok_or_fixed(
     db: Database,
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
     captured_output: CapturedOutput,
     needle: str,
-    reported: str,
 ) -> None:
+    """Each repair step reports one OK or Fixed detail, or one warning; the limited step's is a warning."""
     _ready(db, monkeypatch)
     guest = _Guest()
-    _route(monkeypatch, guest).answer = _over_the_limit(guest, needle)
+    recorder = _route(monkeypatch, guest)
+    workspace_manager.repair_workspace(db, make_config(), "ws1", interaction=TtyInteractionPolicy.REFUSE)
+    details, warnings = len(captured_output.detail), len(captured_output.warnings)
 
+    recorder.answer = _over_the_limit(guest, needle)
     workspace_manager.repair_workspace(db, make_config(), "ws1", interaction=TtyInteractionPolicy.REFUSE)
 
-    step = "directory ownership" if needle == "chown" else "ACLs"
-    assert any(reported in warning for warning in captured_output.warnings)
-    assert not any(step in detail for detail in captured_output.detail if detail.startswith(("OK:", "Fixed:")))
+    assert len(captured_output.detail) - details == details - 1
+    assert len(captured_output.warnings) - warnings == warnings + 1

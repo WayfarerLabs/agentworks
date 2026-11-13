@@ -14,17 +14,10 @@ from agentworks.errors import (
     StateError,
     ValidationError,
 )
-from agentworks.execution.errors import (
-    CommandFailed,
-    ExecutionIncomplete,
-    FileConflict,
-    FileContentMismatch,
-    FileLockTimeout,
-    PathRefused,
-    RequestRefused,
-)
+from agentworks.execution.errors import FileConflict, FileContentMismatch, FileLockTimeout, PathRefused
 from agentworks.name_filters import validate_name_filters
 from agentworks.vms.manager import gated_vm_boundary
+from agentworks.workspaces.guest import REQUEST_FAILURES
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -40,15 +33,7 @@ if TYPE_CHECKING:
     from agentworks.vms.initializer.phase_a import OperationLog
 
 
-_REGENERATION_FAILURES = (
-    CommandFailed,
-    ExecutionIncomplete,
-    RequestRefused,
-    PathRefused,
-    FileConflict,
-    FileContentMismatch,
-    FileLockTimeout,
-)
+_REGENERATION_FAILURES = (*REQUEST_FAILURES, PathRefused, FileConflict, FileContentMismatch, FileLockTimeout)
 """What the tmuxinator regeneration tolerates: a failed request, or a file operation that was refused,
 conflicted, timed out or wrote nothing."""
 

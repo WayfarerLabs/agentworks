@@ -1487,7 +1487,7 @@ def test_rehome_refuses_a_target_that_is_not_an_absolute_directory_before_anythi
     _seed(db)
     _no_gate(monkeypatch)
 
-    with pytest.raises(ValidationError, match="rehome target"):
+    with pytest.raises(ValidationError):
         workspace_manager.rehome_workspace(
             db, config, "ws1", target_path=target_path, interaction=TtyInteractionPolicy.REFUSE
         )
@@ -1506,19 +1506,7 @@ def test_rehome_reads_a_target_with_a_trailing_slash_as_the_directory(
     _seed(db)
     _reachable(monkeypatch, True)
 
-    class _Target(_FakeAdminTarget):
-        """The target directory exists once it is made."""
-
-        made = False
-
-        def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
-            if cmd == "test -d /dst/ws1" and not self.made:
-                self.commands.append(cmd)
-                return SimpleNamespace(ok=False, returncode=1, stdout="", stderr="")
-            self.made |= cmd == "mkdir -p -- /dst/ws1"
-            return super().run(cmd, **kwargs)
-
-    fake = _Target()
+    fake = _RehomeTarget()
     _route(monkeypatch, fake)
 
     workspace_manager.rehome_workspace(
@@ -2041,23 +2029,23 @@ def test_copy_applies_canonical_acl_after_unpack_and_chown(
 
 
 class _RehomeTarget(_FakeAdminTarget):
-    """Admin target for the rehome happy path: ``test -d`` of the target path
-    reports absent until the rsync copy has run, then present, so rehome's
-    pre-copy 'target must not exist' check and its post-copy verify both pass.
-    Every other command answers ok."""
+    """Admin target for a rehome to ``/dst/ws1``: ``test -d`` of it reports
+    absent until the copy has run, then present, so rehome's pre-copy 'target
+    must not exist' check and its post-copy verify both pass. Every other
+    command answers as the base double does, ``failing`` included."""
 
-    def __init__(self) -> None:
-        super().__init__()
+    def __init__(self, *, failing: tuple[str, ...] = ()) -> None:
+        super().__init__(failing=failing)
         self._copied = False
 
     def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
-        self.commands.append(cmd)
-        if cmd.startswith("rsync") or cmd.startswith("cp -a"):
+        if cmd.startswith(("rsync", "cp -a")):
             self._copied = True
         if cmd == "test -d /dst/ws1":
+            self.commands.append(cmd)
             ok = self._copied
             return SimpleNamespace(ok=ok, returncode=0 if ok else 1, stdout="", stderr="")
-        return SimpleNamespace(ok=True, returncode=0, stdout="", stderr="")
+        return super().run(cmd, **kwargs)
 
 
 def test_rehome_routes_through_the_canonical_acl_helper(

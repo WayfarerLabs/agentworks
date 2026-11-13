@@ -7,8 +7,7 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.agents.grants import MAX_WORKSPACE_NAME_LENGTH
-from agentworks.errors import AgentworksError, AlreadyExistsError, NotFoundError, StateError
-from agentworks.execution.errors import CommandFailed
+from agentworks.errors import AgentworksError, AlreadyExistsError, ExternalError, NotFoundError, StateError
 from agentworks.execution.requests import Command, FromFile, ToFile
 from agentworks.linux_users import managed_home
 from agentworks.naming import validate_name
@@ -25,6 +24,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
     from agentworks.secrets.policy import TtyInteractionPolicy
+    from agentworks.vms.initializer.phase_a import OperationLog
     from agentworks.vms.initializer.steps import InitLog
 
 OWNERSHIP_DEADLINE = 60
@@ -131,9 +131,11 @@ def copy_workspace(
                         stdout=ToFile(archive),
                         check=True,
                     )
-                except CommandFailed as error:
+                except AgentworksError as error:
                     error.add_hint(f"SSH log: {source_log.display_path}")
                     raise
+                except Exception as error:
+                    raise _copy_failure(error, source_name, source_log) from error
 
             # --- Unpack to destination VM ---
             dest_vm = _resolve_vm(db, vm_name)
@@ -169,8 +171,17 @@ def copy_workspace(
                 except AgentworksError as error:
                     error.add_hint(f"SSH log: {lg.display_path}")
                     raise
+                except Exception as error:
+                    raise _copy_failure(error, dest_name, lg) from error
 
     output.result(f"Workspace '{source_name}' copied to '{dest_name}'")
+
+
+def _copy_failure(error: Exception, ws_name: str, log: OperationLog) -> ExternalError:
+    """An untyped failure (a local read or write error) as the copy's error, naming the log."""
+    return ExternalError(
+        f"copying workspace: {error}", entity_kind="workspace", entity_name=ws_name, hint=f"SSH log: {log.display_path}"
+    )
 
 
 def _unpack(db: Database, config: Config, dest_vm: VMRow, dest_name: str, archive: Path, lg: InitLog) -> None:
