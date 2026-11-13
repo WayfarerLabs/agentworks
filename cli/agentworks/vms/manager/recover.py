@@ -85,8 +85,10 @@ def recover_vm(db: Database, config: Config, name: str, *, interaction: TtyInter
         selected = _require_vm(db, name)
         if selected.vm_uuid != vm.vm_uuid:
             raise StateError("selected VM was replaced", entity_kind="vm", entity_name=name)
+        if (selected.provisioning_status, selected.init_status) != (vm.provisioning_status, vm.init_status):
+            # Only a status that changed before the guard needs checking again.
+            _guard_incomplete_vm(selected, allow_failed_init=True)
         vm = selected
-        _guard_incomplete_vm(vm, allow_failed_init=True)
         vm_node, resolver, ops_ctx, auth_key = _auth_key_boundary(
             db, config, vm, interaction=interaction, held_native_guard=guard
         )

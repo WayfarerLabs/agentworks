@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.capabilities.vm_platform import tailscale_join
-from agentworks.db import DesiredRuntimeState, ProvisioningStatus, VMStatus
+from agentworks.db import DesiredRuntimeState, InitStatus, ProvisioningStatus, VMStatus
 from agentworks.db.instance_state import AppliedStateKey
 from agentworks.errors import ConnectivityError, StateError, UserAbort, ValidationError
 from agentworks.execution import reachability, trust
@@ -145,6 +145,51 @@ def test_a_healthy_node_is_repaired_read_and_verified_with_the_key_resolved_once
     assert waits == [reachability.Wording.VERIFY]
     row = db.get_vm("box")
     assert row is not None and row.tailscale_host == NEW_ADDRESS
+
+
+def test_a_failed_initialization_warns_once(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """Recover exists to repair such a VM, so it goes on, and the recheck under the guard does not warn again."""
+    _seed(db)
+    db.update_vm_init_status("box", InitStatus.FAILED)
+    guest = _guest(monkeypatch)
+    _waits(monkeypatch)
+
+    _recover(db, make_config())
+
+    assert len(captured_output.warnings) == 1
+    assert [_is_repair(payload) for payload in guest.payloads] == [True, False]
+
+
+def test_a_vm_whose_provisioning_changed_before_the_guard_is_refused(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The row read under the guard decides: a VM whose provisioning failed meanwhile is not repaired."""
+    from agentworks.harness_setup import locking
+
+    _seed(db)
+    guest = _guest(monkeypatch)
+    real_guard = locking.native_mutation_guard
+
+    @contextlib.contextmanager
+    def guard_after_a_change(*args: object, **kwargs: object) -> Iterator[object]:
+        db.update_vm_provisioning_status("box", ProvisioningStatus.FAILED)
+        with real_guard(*args, **kwargs) as held:  # type: ignore[arg-type]
+            yield held
+
+    monkeypatch.setattr(locking, "native_mutation_guard", guard_after_a_change)
+
+    with pytest.raises(StateError) as raised:
+        _recover(db, make_config())
+
+    assert raised.value.entity_name == "box"
+    assert guest.payloads == []
 
 
 def test_the_ssh_config_is_synced_even_when_the_address_did_not_change(
