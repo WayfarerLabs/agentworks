@@ -29,6 +29,8 @@ from agentworks.errors import ProvisioningError
 from agentworks.execution import trust
 from agentworks.git_config import ensure_safe_directory_wildcard
 from agentworks.git_credentials import configure_user_git_credentials
+from agentworks.interpolation import context_values
+from agentworks.interpolation_fields import render_scalar_field
 from agentworks.linux_users import managed_home
 from agentworks.path_rendering import format_host_path
 from agentworks.ssh import SSHError, SSHLogger
@@ -633,6 +635,7 @@ def _phase_b_setup(
         # commands below (which run in it) so they stay in the VM section; the
         # login-shell usermod is a separate admin step further down.
         admin_shell = admin.shell
+        setup_context = context_values(vm_name=vm_name, user=admin_username)
 
         # Non-fatal: system install commands (VM-level, system-wide). Kept in
         # the VM section: they run via ``{admin_shell} -lc`` explicitly, so
@@ -646,6 +649,7 @@ def _phase_b_setup(
             home,
             logger,
             label="System install command",
+            context=setup_context,
         )
 
         # Non-fatal: agent tmux socket directory infrastructure (VM-level:
@@ -736,7 +740,20 @@ def _phase_b_setup(
         # operator can act on and a later failure that looks unrelated to it.
         if admin.dotfiles_source:
             logger.step("Dotfiles")
-            dest = admin.dotfiles_destination.replace("~", home)
+            dest = render_scalar_field(
+                type(admin),
+                "dotfiles_destination",
+                admin.dotfiles_destination,
+                setup_context,
+                location=f"admin/{admin_username}.dotfiles_destination",
+            ).replace("~", home)
+            dotfiles_command = render_scalar_field(
+                type(admin),
+                "dotfiles_install_cmd",
+                admin.dotfiles_install_cmd,
+                setup_context,
+                location=f"admin/{admin_username}.dotfiles_install_cmd",
+            )
             synced = False
             try:
                 from agentworks.sources import fetch_dir, parse_source_ref
@@ -747,20 +764,20 @@ def _phase_b_setup(
                 synced = True
             except Exception as e:
                 msg = (
-                    f"dotfiles sync failed, so '{admin.dotfiles_install_cmd}' did not run and {dest} "
+                    f"dotfiles sync failed, so '{dotfiles_command}' did not run and {dest} "
                     f"still holds its previous contents: {e}"
                 )
                 logger.warning(msg)
                 output.warn(msg)
             if synced:
                 try:
-                    output.info(f"Running dotfiles install: {admin.dotfiles_install_cmd}")
+                    output.info(f"Running dotfiles install: {dotfiles_command}")
                     ts_target.run(
-                        f"cd {dest} && {admin.dotfiles_install_cmd}",
+                        f"cd {shlex.quote(dest)} && {dotfiles_command}",
                         timeout=120,
                     )
                 except Exception as e:
-                    msg = f"dotfiles install '{admin.dotfiles_install_cmd}' failed in {dest}: {e}"
+                    msg = f"dotfiles install '{dotfiles_command}' failed in {dest}: {e}"
                     logger.warning(msg)
                     output.warn(msg)
 
@@ -803,6 +820,7 @@ def _phase_b_setup(
             home,
             logger,
             label="User install command",
+            context=setup_context,
         )
 
         # Non-fatal: shell profile (PATH exports sourced at login)

@@ -17,6 +17,7 @@ from agentworks.apt import AptSourceEntry
 from agentworks.debian import DebianRelease
 from agentworks.errors import ConfigError
 from agentworks.install_commands import SystemInstallCommandEntry, UserInstallCommandEntry
+from agentworks.interpolation import context_values
 from agentworks.ssh import SSHError
 from agentworks.vms.initializer import (
     _configure_apt_sources,
@@ -27,6 +28,8 @@ from agentworks.vms.initializer.driver import VMInitializationOperation, _phase_
 from tests.conftest import CapturedOutput
 
 from ._initializer_support import _make_entries, _make_target, _make_vm_template
+
+_INSTALL_CONTEXT = context_values(vm_name="box", user="agentworks")
 
 # -- Apt source tests --
 
@@ -238,6 +241,7 @@ def test_run_install_commands_returns_path() -> None:
         "zsh",
         "/home/agentworks",
         logger,
+        context=_INSTALL_CONTEXT,
     )
 
     assert result == ["~/.user-tool/bin"]
@@ -266,7 +270,9 @@ def test_run_install_commands_excludes_failed_paths_and_continues(
         return MagicMock(returncode=0)
 
     target.run.side_effect = run
-    paths = _run_install_commands(target, list(entries), entries, "zsh", "/home/agentworks", logger)
+    paths = _run_install_commands(
+        target, list(entries), entries, "zsh", "/home/agentworks", logger, context=_INSTALL_CONTEXT
+    )
 
     assert paths == ["~/.first/bin", "~/.present/bin", "~/.last/bin"]
     assert [call.args[0] for call in target.run.call_args_list] == [
@@ -292,6 +298,7 @@ def test_run_install_commands_missing_entry() -> None:
         "zsh",
         "/home/agentworks",
         logger,
+        context=_INSTALL_CONTEXT,
     )
 
     assert result == []
@@ -304,12 +311,7 @@ def test_run_install_commands_empty() -> None:
     logger = MagicMock()
 
     result = _run_install_commands(
-        target,
-        [],
-        entries.user_install_commands,
-        "zsh",
-        "/home/agentworks",
-        logger,
+        target, [], entries.user_install_commands, "zsh", "/home/agentworks", logger, context=_INSTALL_CONTEXT
     )
 
     assert result == []
@@ -335,12 +337,7 @@ def test_run_install_commands_skips_when_test_exec_found() -> None:
     logger.has_warnings = False
 
     result = _run_install_commands(
-        target,
-        ["my-tool"],
-        entries,
-        "zsh",
-        "/home/agentworks",
-        logger,
+        target, ["my-tool"], entries, "zsh", "/home/agentworks", logger, context=_INSTALL_CONTEXT
     )
 
     # PATH additions should still be returned
@@ -379,12 +376,7 @@ def test_run_install_commands_runs_when_test_exec_missing() -> None:
     logger.has_warnings = False
 
     result = _run_install_commands(
-        target,
-        ["my-tool"],
-        entries,
-        "zsh",
-        "/home/agentworks",
-        logger,
+        target, ["my-tool"], entries, "zsh", "/home/agentworks", logger, context=_INSTALL_CONTEXT
     )
 
     assert result == ["~/.my-tool/bin"]
@@ -407,7 +399,7 @@ def test_run_install_commands_skips_when_all_declared_tests_pass() -> None:
     }
     logger = MagicMock()
 
-    _run_install_commands(target, ["my-tool"], entries, "zsh", "/home/agentworks", logger)
+    _run_install_commands(target, ["my-tool"], entries, "zsh", "/home/agentworks", logger, context=_INSTALL_CONTEXT)
 
     commands = [call.args[0] for call in target.run.call_args_list]
     assert len(commands) == 1
@@ -438,7 +430,7 @@ def test_run_install_commands_runs_when_any_declared_test_fails() -> None:
     }
     logger = MagicMock()
 
-    _run_install_commands(target, ["my-tool"], entries, "zsh", "/home/agentworks", logger)
+    _run_install_commands(target, ["my-tool"], entries, "zsh", "/home/agentworks", logger, context=_INSTALL_CONTEXT)
 
     commands = [call.args[0] for call in target.run.call_args_list]
     assert any("command -v" in command and "test -f" in command for command in commands)
@@ -465,12 +457,7 @@ def test_run_install_commands_no_test_always_runs() -> None:
     logger.has_warnings = False
 
     result = _run_install_commands(
-        target,
-        ["my-tool"],
-        entries,
-        "zsh",
-        "/home/agentworks",
-        logger,
+        target, ["my-tool"], entries, "zsh", "/home/agentworks", logger, context=_INSTALL_CONTEXT
     )
 
     assert result == ["~/.my-tool/bin"]
@@ -501,12 +488,7 @@ def test_run_install_commands_skips_when_test_file_found() -> None:
     logger.has_warnings = False
 
     result = _run_install_commands(
-        target,
-        ["nvm"],
-        entries,
-        "zsh",
-        "/home/agentworks",
-        logger,
+        target, ["nvm"], entries, "zsh", "/home/agentworks", logger, context=_INSTALL_CONTEXT
     )
 
     assert result == ["~/.nvm/bin"]
@@ -543,12 +525,7 @@ def test_run_install_commands_runs_when_test_file_missing() -> None:
     logger.has_warnings = False
 
     result = _run_install_commands(
-        target,
-        ["nvm"],
-        entries,
-        "zsh",
-        "/home/agentworks",
-        logger,
+        target, ["nvm"], entries, "zsh", "/home/agentworks", logger, context=_INSTALL_CONTEXT
     )
 
     assert result == ["~/.nvm/bin"]
@@ -574,12 +551,7 @@ def test_run_install_commands_skips_when_test_dir_found() -> None:
     logger.has_warnings = False
 
     result = _run_install_commands(
-        target,
-        ["oh-my-zsh"],
-        entries,
-        "zsh",
-        "/home/agentworks",
-        logger,
+        target, ["oh-my-zsh"], entries, "zsh", "/home/agentworks", logger, context=_INSTALL_CONTEXT
     )
 
     assert result == []
@@ -616,12 +588,7 @@ def test_run_install_commands_runs_when_test_dir_missing() -> None:
     logger.has_warnings = False
 
     result = _run_install_commands(
-        target,
-        ["oh-my-zsh"],
-        entries,
-        "zsh",
-        "/home/agentworks",
-        logger,
+        target, ["oh-my-zsh"], entries, "zsh", "/home/agentworks", logger, context=_INSTALL_CONTEXT
     )
 
     assert result == []

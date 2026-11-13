@@ -15,10 +15,14 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.git_config import ensure_safe_directory_wildcard
+from agentworks.interpolation import runtime_values
+from agentworks.interpolation_fields import render_scalar_field
 from agentworks.linux_users import managed_home
 from agentworks.transports import transport
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from agentworks.agents.templates import ResolvedAgentTemplate
     from agentworks.config import Config
     from agentworks.db import VMRow
@@ -296,10 +300,28 @@ def create_agent_on_vm(
         agent_tmpl=agent_tmpl,
         home=home,
         identity_env=agent_identity,
+        context=runtime_values(agent_identity_ctx),
     )
 
     # Dotfiles.
     if agent_cfg.dotfiles_source:
+        from agentworks.agents.template import AgentTemplate
+
+        context = runtime_values(agent_identity_ctx)
+        dest = render_scalar_field(
+            AgentTemplate,
+            "dotfiles_destination",
+            agent_cfg.dotfiles_destination,
+            context,
+            location=f"agent/{agent_name}.dotfiles_destination",
+        ).replace("~", home)
+        dotfiles_command = render_scalar_field(
+            AgentTemplate,
+            "dotfiles_install_cmd",
+            agent_cfg.dotfiles_install_cmd,
+            context,
+            location=f"agent/{agent_name}.dotfiles_install_cmd",
+        )
         output.info(f"Syncing agent dotfiles from {agent_cfg.dotfiles_source}...")
         try:
             import shlex as _shlex
@@ -307,7 +329,6 @@ def create_agent_on_vm(
             from agentworks.sources import SourceRefError, fetch_dir, parse_source_ref
 
             ref = parse_source_ref(agent_cfg.dotfiles_source)
-            dest = agent_cfg.dotfiles_destination.replace("~", home)
 
             if ref.kind == "git":
                 # If already cloned from the same repo, pull instead of clone.
@@ -357,13 +378,13 @@ def create_agent_on_vm(
                 # dance. fetch_dir handles existing-dest overwrite.
                 fetch_dir(ref, agent_target, dest)
 
-            output.info(f"Running agent dotfiles install: {agent_cfg.dotfiles_install_cmd}")
+            output.info(f"Running agent dotfiles install: {dotfiles_command}")
             # Wrap in a login shell so the dotfiles install command sees
             # static identity (AGENTWORKS_AGENT via the per-user profile
             # fragment written earlier this phase) and any PATH the agent
             # already has. Provisioning is hermetic: no operator env
             # injected (would only reach runtime shells anyway).
-            inner = f"cd {_shlex.quote(dest)} && {agent_cfg.dotfiles_install_cmd}"
+            inner = f"cd {_shlex.quote(dest)} && {dotfiles_command}"
             agent_target.run(
                 f"{agent_shell} -lc {_shlex.quote(inner)}",
                 timeout=120,
@@ -432,6 +453,7 @@ def _run_agent_install_commands(
     agent_tmpl: ResolvedAgentTemplate,
     home: str,
     identity_env: dict[str, str],
+    context: Mapping[str, str],
 ) -> None:
     """Run user install commands for an agent and rewrite the agent's
     profile fragment with the accumulated PATH. Failures warn but do
@@ -473,7 +495,7 @@ def _run_agent_install_commands(
             output.warn(f"'{name}' is not a declared user install command")
             continue
         # Skip if already installed for this user (short timeout)
-        test_cmd = _build_agent_test_command(entry, home, shell)
+        test_cmd = _build_agent_test_command(entry, home, shell, context=context)
         if test_cmd:
             try:
                 check = agent_target.run(test_cmd, check=False, timeout=10)
@@ -484,14 +506,17 @@ def _run_agent_install_commands(
             except SSHError as e:
                 output.warn(f"install check for '{name}' failed ({e}), assuming not installed")
 
-        truncated = entry.command[:60]
+        command = render_scalar_field(
+            type(entry), "command", entry.command, context, location=f"user-install-command/{name}.command"
+        )
+        truncated = command[:60]
         output.info(f"Agent install command {i}/{total} ({name}): {truncated}...")
         try:
             # The login shell sources identity and existing home/login state.
             # Declared paths are written after the batch, so later installers
             # must use absolute paths for tools absent from the existing PATH.
             agent_target.run(
-                f"{shell} -lc {shlex.quote(entry.command)}",
+                f"{shell} -lc {shlex.quote(command)}",
                 timeout=120,
             )
         except SSHError as e:
@@ -753,6 +778,8 @@ def _build_agent_test_command(
     entry: UserInstallCommandEntry,
     home: str,
     shell: str,
+    *,
+    context: Mapping[str, str],
 ) -> str | None:
     """Build a test command that passes when every declared test passes.
 
@@ -768,9 +795,15 @@ def _build_agent_test_command(
     # Plain reads, matching the VM-side twin in
     # ``vms/initializer/packages.py``: all three are declared fields on the
     # entry model, so a getattr default would only hide a rename.
-    test_exec = entry.test_exec
-    test_file = entry.test_file
-    test_dir = entry.test_dir
+    test_exec = render_scalar_field(
+        type(entry), "test_exec", entry.test_exec, context, location=f"user-install-command/{entry.name}.test_exec"
+    )
+    test_file = render_scalar_field(
+        type(entry), "test_file", entry.test_file, context, location=f"user-install-command/{entry.name}.test_file"
+    )
+    test_dir = render_scalar_field(
+        type(entry), "test_dir", entry.test_dir, context, location=f"user-install-command/{entry.name}.test_dir"
+    )
     commands: list[str] = []
     if test_exec:
         inner = f"command -v {_shlex.quote(test_exec)} > /dev/null 2>&1"

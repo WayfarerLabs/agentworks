@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.capabilities.vm_platform.cloud_init import INIT_SYSTEM_PACKAGES
+from agentworks.interpolation_fields import render_scalar_field
 from agentworks.ssh import SSHError, SSHLogger
 
 from .mise import MISE_GPG_KEY_PATH, MISE_GPG_KEY_URL, MISE_SOURCE_FILE, MISE_SOURCE_LINE
@@ -220,6 +221,8 @@ def _build_test_command(
     entry: SystemInstallCommandEntry | UserInstallCommandEntry,
     shell: str,
     home: str,
+    *,
+    context: Mapping[str, str],
 ) -> str | None:
     """Build a shell command that passes when every declared test passes.
 
@@ -228,14 +231,23 @@ def _build_test_command(
     Empty tests are ignored. Returning ``None`` when none remain prevents
     an empty conjunction from vacuously skipping the install.
     """
+    test_exec = render_scalar_field(
+        type(entry), "test_exec", entry.test_exec, context, location=f"install-command/{entry.name}.test_exec"
+    )
+    test_file = render_scalar_field(
+        type(entry), "test_file", entry.test_file, context, location=f"install-command/{entry.name}.test_file"
+    )
+    test_dir = render_scalar_field(
+        type(entry), "test_dir", entry.test_dir, context, location=f"install-command/{entry.name}.test_dir"
+    )
     commands: list[str] = []
-    if entry.test_exec:
-        commands.append(f"{shell} -lic {shlex.quote(f'command -v {shlex.quote(entry.test_exec)}')} > /dev/null 2>&1")
-    if entry.test_file:
-        path = entry.test_file.replace("~", home, 1) if entry.test_file.startswith("~") else entry.test_file
+    if test_exec:
+        commands.append(f"{shell} -lic {shlex.quote(f'command -v {shlex.quote(test_exec)}')} > /dev/null 2>&1")
+    if test_file:
+        path = test_file.replace("~", home, 1) if test_file.startswith("~") else test_file
         commands.append(f"test -f {shlex.quote(path)}")
-    if entry.test_dir:
-        path = entry.test_dir.replace("~", home, 1) if entry.test_dir.startswith("~") else entry.test_dir
+    if test_dir:
+        path = test_dir.replace("~", home, 1) if test_dir.startswith("~") else test_dir
         commands.append(f"test -d {shlex.quote(path)}")
     return " && ".join(commands) or None
 
@@ -249,6 +261,7 @@ def _run_install_commands(
     logger: SSHLogger,
     *,
     label: str = "Install command",
+    context: Mapping[str, str],
 ) -> list[str]:
     """Run install commands from an install-command entry dict. Returns PATH additions.
 
@@ -278,7 +291,7 @@ def _run_install_commands(
         logger.step(f"{label} {i}/{total}: {name}")
 
         # Skip if already installed (short timeout -- this should be instant)
-        test_cmd = _build_test_command(entry, shell, home)
+        test_cmd = _build_test_command(entry, shell, home, context=context)
         if test_cmd:
             try:
                 check = target.run(test_cmd, check=False, timeout=10)
@@ -291,13 +304,16 @@ def _run_install_commands(
                 # Timeout or connection issue -- assume not installed, proceed
                 logger.output(f"{name}: install check failed ({e}), assuming not installed")
 
-        truncated = entry.command[:60]
+        command = render_scalar_field(
+            type(entry), "command", entry.command, context, location=f"install-command/{name}.command"
+        )
+        truncated = command[:60]
         output.info(f"{label} {i}/{total} ({name}): {truncated}...")
         try:
             # Installers share existing home/login state. Declared paths are
             # returned for the later profile write, not added between commands.
             target.run(
-                f"{shlex.quote(shell)} -lc {shlex.quote(entry.command)}",
+                f"{shlex.quote(shell)} -lc {shlex.quote(command)}",
                 timeout=120,
             )
         except SSHError as e:
