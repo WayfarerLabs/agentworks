@@ -25,6 +25,8 @@ from tests.conftest import ManifestDoc, requires_symlinks, seed_vm_trust
 from tests.orchestrated_fixtures import write_operator_config
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
     from tests.conftest import CapturedOutput
@@ -387,6 +389,37 @@ def _failing_backend_delete(monkeypatch: pytest.MonkeyPatch, counts: dict[str, i
 
     monkeypatch.setattr(ProxmoxPlatform, "delete", _refused)
     return error
+
+
+def test_a_vm_replaced_before_the_guard_is_refused(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A VM deleted and recreated under the same name before the guard is not the VM delete confirmed."""
+    from agentworks.harness_setup import locking
+
+    _seed(db)
+    counts = _fake_backend(monkeypatch)
+    real_guard = locking.native_mutation_guard
+    replacements = []
+
+    @contextlib.contextmanager
+    def guard_after_a_replacement(*args: object, **kwargs: object) -> Iterator[object]:
+        db.delete_vm("dvm")
+        _seed(db)
+        replacements.append(db.get_vm("dvm"))
+        with real_guard(*args, **kwargs) as held:  # type: ignore[arg-type]
+            yield held
+
+    monkeypatch.setattr(locking, "native_mutation_guard", guard_after_a_replacement)
+
+    with pytest.raises(StateError) as raised:
+        vm_manager.delete_vm(db, make_config(), "dvm", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert raised.value.entity_name == "dvm"
+    assert counts == {"status": 0, "delete": 0}
+    assert db.get_vm("dvm") == replacements[0]
 
 
 def test_backend_delete_failure_keeps_the_row(
