@@ -48,7 +48,7 @@ def recover_vm(db: Database, config: Config, name: str, *, interaction: TtyInter
     power state is unknown. A stopped VM is started through the platform,
     with no wait for SSH, since recover reaches it through the platform's own
     channel: a VM with no host-key record could otherwise never be recovered
-    once it stopped, since start's own wait refuses it. Like an explicit
+    once it stopped, since start refuses it. Like an explicit
     start, that records running intent. The auth key resolves in the
     boundary, since the repair joins the tailnet when the node needs a login.
     """

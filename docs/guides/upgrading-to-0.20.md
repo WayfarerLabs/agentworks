@@ -65,11 +65,10 @@ node.
 Commands that act on a VM refuse it; commands that only describe or list VMs report the missing
 record for that VM and carry on. Every command that reaches a VM over SSH refuses a VM with no
 record, before it starts the VM, resolves a secret or changes anything, and prints a hint that names
-the import. That covers `vm shell`, `vm exec`, `vm reinit`, `vm backup`, `vm port-forward`,
-`vm rekey`, and the workspace, agent, session and console commands, including the start of a stopped
-VM that any of them would trigger; `vm rekey` checks first so it never spends a Tailscale auth key.
-Two commands differ. `vm start` resolves no key at all: it starts the VM, and its wait then refuses
-with the same hint, so the VM is left running. `vm shell --platform` on a cloud VM (AWS, Azure, GCP)
+the import. That covers `vm start`, `vm shell`, `vm exec`, `vm reinit`, `vm backup`,
+`vm port-forward`, `vm rekey`, and the workspace, agent, session and console commands, including the
+start of a stopped VM that any of them would trigger; `vm rekey` checks first so it never spends a
+Tailscale auth key. One command differs: `vm shell --platform` on a cloud VM (AWS, Azure, GCP)
 resolves the site's credentials first and then refuses, before it opens any network rule.
 `agw vm recover NAME` is the one command that repairs a VM without a record, starting it first if it
 is stopped: it reads the keys through the platform and records them once you confirm their

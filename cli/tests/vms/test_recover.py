@@ -433,9 +433,9 @@ def test_a_stopped_vm_is_started_before_the_hold_then_repaired(
     status: VMStatus,
     record: bool,
 ) -> None:
-    """A VM that stopped (a WSL2 distro that idled out after start, say) is started, with no wait, so a VM with no
-    host-key record is not sent back to a start whose own wait refuses it. The start precedes the hold, as an explicit
-    start's does, and the hold covers everything after it."""
+    """A VM that stopped (a WSL2 distro that idled out after start, say) is started, with no wait, and one with no
+    host-key record has its keys recorded, so recover is the way out of the start that refuses such a VM. The start
+    precedes the hold, as an explicit start's does, and the hold covers everything after it."""
     _seed(db, record=record)
     seeded = db.get_vm("box")
     assert seeded is not None
@@ -456,6 +456,8 @@ def test_a_stopped_vm_is_started_before_the_hold_then_repaired(
     row = db.get_vm("box")
     assert row is not None and row.desired_runtime_state is DesiredRuntimeState.RUNNING
     assert row.last_started_at is not None
+    if not record:
+        assert trust.stored_keys("box") == (HOST_KEY,)
 
 
 class _BootingGuestAgent:
