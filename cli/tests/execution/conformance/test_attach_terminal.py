@@ -13,6 +13,7 @@ from agentworks import output
 from agentworks.execution import attach as attach_module
 from agentworks.execution import ssh_process
 from agentworks.execution.requests import LoginShell
+from tests.conftest import pretend_windows_console
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -89,6 +90,24 @@ def test_the_login_shell_gets_the_requested_environment_without_it_touching_a_co
     assert code == 0
     assert terminal.stdout.splitlines()[:2] == [f"token={secret}".encode(), b"home=/tmp"]
     assert not any(secret in argument for argument in terminal.argv)
+
+
+@pytest.mark.parametrize(("platform", "first"), [("win32", b"\0hi\n"), ("linux", b"hi\n")])
+def test_on_a_windows_console_the_terminal_half_writes_a_nul_first_and_keeps_the_shells_exit_status(
+    local_lane: LocalLane,
+    events: list[tuple[str, Any]],
+    monkeypatch: pytest.MonkeyPatch,
+    platform: str,
+    first: bytes,
+) -> None:
+    pretend_windows_console(monkeypatch)
+    monkeypatch.setattr("sys.platform", platform)
+    monkeypatch.setattr(ssh_process, "_CREATE_NO_WINDOW", 0)  # this host cannot create a console-free process
+    with local_lane.terminal(b"echo hi\nexit 7\n") as terminal:
+        code = local_lane.access.attach(LoginShell(cwd=local_lane.workdir))
+
+    assert code == 7
+    assert terminal.stdout.startswith(first)
 
 
 def test_only_the_parking_connection_leaves_the_operators_console(

@@ -110,6 +110,13 @@ bound for connecting and running the account's startup files; the 30 seconds abo
 operator's console (`CREATE_NO_WINDOW`): only the terminal half shares it, and the console's Ctrl-C
 never reaches the parked client.
 
+On a Windows console (stdin and stdout both on the terminal) the terminal half's remote command is
+`printf '\000'; <stage 0> <socket path>` (`ssh_process.nul_first_on_a_windows_console`, whose
+docstring has the sources). Win32-OpenSSH moves the console before a first write that contains
+`ESC[2J`, and under Windows Terminal that move deletes the operator's lines above the cursor. A
+first byte of NUL stops that check and is ignored by the terminal. The legacy transports' `ssh -t`
+attaches use the same helper.
+
 ## Host-key trust
 
 `trust.py` owns the per-VM host-key store (`~/.config/agentworks/known_hosts/vm-<name>`, records

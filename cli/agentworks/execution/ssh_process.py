@@ -29,6 +29,7 @@ from agentworks.execution.results import Completion, Result, Unknown
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
+    from typing import IO
 
     from agentworks.execution.client import SSHClient
     from agentworks.execution.pump import PipeSession, StopReason
@@ -71,6 +72,46 @@ def stage0_command(handover_socket: str | None = None, *, python: str = DEFAULT_
     """
     command = f"{python} -I -S -c '{STAGE0_PROGRAM}'"
     return command if handover_socket is None else f"{command} {handover_socket}"
+
+
+_NUL_FIRST = "printf '\\000'; "
+
+
+def nul_first_on_a_windows_console(command: str) -> str:
+    """The remote command of an interactive ``ssh -t``, led by a NUL byte when that matters.
+
+    Win32-OpenSSH searches its first raw-mode console write for ``ESC[2J`` and,
+    when it is there, first moves the console so the cursor is at the top of
+    the visible window:
+    https://github.com/PowerShell/openssh-portable/blob/v9.5.0.0/contrib/win32/win32compat/tnnet.c#L75-L83
+    Under ConPTY that move deletes the lines above the cursor, which never
+    reach scrollback, and a full-screen program's first frame (tmux attaching,
+    a ``clear`` in a startup file) carries ``ESC[2J``. The search is a
+    ``strstr``, so a leading NUL ends it at the first byte; the write itself
+    passes every byte on. Terminals discard the NUL: conhost and Windows Terminal
+    (https://github.com/microsoft/terminal/blob/v1.25.3131.0/src/terminal/parser/OutputStateMachineEngine.cpp#L98-L102)
+    and tmux (https://github.com/tmux/tmux/blob/3.8/input.c#L1320-L1321).
+
+    Only a raw-mode console write makes the search, so the NUL is added only on
+    Windows with stdin and stdout both on the terminal. Without a terminal on
+    stdin the client allocates no pty and stays out of raw mode, and its console
+    write ends at the first NUL:
+    https://github.com/PowerShell/openssh-portable/blob/v9.5.0.0/contrib/win32/win32compat/termio.c#L202-L210
+    Without one on stdout the NUL would land in the output.
+
+    The result is ``printf '\\000'; <command>``, so ``command`` may be any shell
+    command line, compound ones included, and the result's exit status is
+    ``command``'s. The account shell's startup files still run before it.
+    """
+    on_console = sys.platform == "win32" and _is_a_terminal(sys.stdin) and _is_a_terminal(sys.stdout)
+    return _NUL_FIRST + command if on_console else command
+
+
+def _is_a_terminal(stream: IO[str] | None) -> bool:
+    try:
+        return stream is not None and stream.isatty()
+    except (OSError, ValueError):  # a detached or closed stream
+        return False
 
 
 # -- Policy and argv ---------------------------------------------------------------------

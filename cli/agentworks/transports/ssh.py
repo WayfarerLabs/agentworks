@@ -17,6 +17,7 @@ import subprocess
 from typing import TYPE_CHECKING
 
 from agentworks.execution import trust as host_trust
+from agentworks.execution.ssh_process import nul_first_on_a_windows_console
 from agentworks.ssh import (
     SSH_DEFAULT_RETRIES,
     SSH_INTERACTIVE_ALIVE_COUNT_MAX,
@@ -375,7 +376,8 @@ class SSHTransport(Transport):
         env: dict[str, str] | None = None,
     ) -> int:
         """Interactive SSH with ``-t`` (allocates a TTY) and no
-        ``BatchMode``. Empty ``command`` opens a login shell.
+        ``BatchMode``. Empty ``command`` opens a login shell; a command is
+        led by a NUL on a Windows console (``nul_first_on_a_windows_console``).
         """
         args = ["ssh", "-t", *self.host_key_options(), *keepalive_args()]
         if self.port is not None:
@@ -389,7 +391,7 @@ class SSHTransport(Transport):
         args.append(target)
         if command:
             args.append("--")  # fence: see run() for rationale
-            args.append(command)
+            args.append(nul_first_on_a_windows_console(command))
         return subprocess.call(args)
 
     def _note_interactive_exit(self, code: int) -> None:
