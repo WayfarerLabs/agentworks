@@ -121,6 +121,18 @@ def test_foreign_or_malformed_claim_is_not_relocated(path):
         _relocated_record(record, "/old", "/new", "b" * 64)
 
 
+def test_path_under_a_dot_dot_root_is_not_rebased_lexically():
+    record = SetupRecord(
+        component="workspace",
+        integration="codex",
+        destination_id="a" * 64,
+        declaration={},
+        skipped=(ArtifactSkip(path="/data/ws/skipped", origins=("b" * 64,), reason="fixture"),),
+    )
+    with pytest.raises(StateError):
+        _relocated_record(record, "/data/link/../ws", "/new", "c" * 64)
+
+
 def test_all_existing_record_shapes_follow_copy_without_inventing_activation(db, deletion, move_case, monkeypatch):
     target, _ = move_case
     old = target.home / "original"
@@ -186,6 +198,36 @@ def test_all_existing_record_shapes_follow_copy_without_inventing_activation(db,
         records = current
     assert observations == [str(target.home / f"moved-{index}") for index in range(2)]
     assert all(opaque.destination not in command and legacy.destination not in command for command in target.commands)
+
+
+def test_dot_dot_row_relocates_records_with_nothing_to_rebase(db, deletion, move_case, captured_output):
+    # An earlier release stored such a path; its records can hold no path under it.
+    target, _ = move_case
+    (target.home / "original").mkdir()
+    (target.home / "elsewhere").mkdir()
+    db.update_workspace_path("project", f"{target.home}/elsewhere/../original")
+    legacy = NativeClaim(role="settings", identifier="legacy", destination="not a path", written_keys=(("x",),))
+    base = SetupRecord(
+        component="workspace", integration="empty", destination_id="a" * 64, declaration={}, complete=True
+    )
+    records = (base, base.model_copy(update={"integration": "settings", "claims": (legacy,)}))
+    write_native_setup(db, "workspace", "project", NativeSetupState(records=records), operation="workspace-create")
+    new = target.home / "moved"
+    rehome_workspace(
+        db,
+        deletion.config,
+        "project",
+        target_path=str(new),
+        remove_old=False,
+        yes=True,
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
+    identity = destination_id(db.get_vm("box"), target.access(), location=str(new))
+    assert db.get_workspace("project").workspace_path == str(new)
+    assert read_native_setup(db, "workspace", "project").records == tuple(
+        record.model_copy(update={"destination_id": identity}) for record in records
+    )
+    assert captured_output.warnings == []
 
 
 @pytest.mark.parametrize("evidence", ["absent", "empty", "future", "malformed"])

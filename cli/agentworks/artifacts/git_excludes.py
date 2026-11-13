@@ -140,12 +140,14 @@ def reconcile_workspace_excludes(
     ``redactions`` are resolved values to keep out of Git's diagnostics.
     Rehome alone supplies its verified old row path as prior_workspace; saved
     claims never select another source or authorize a migration by themselves.
+    With no files, shared paths or prior claims it returns before checking
+    ``workspace``: nothing addresses a file under it.
     """
     prior = tuple(claim for claim in claims if claim.role == GIT_EXCLUDE_ROLE)
-    workspace = guest_path(workspace)
     paths = tuple(file.path for file in files if not file.generated_section) + tuple(shared_paths)
     if not paths and not prior:
         return
+    workspace = guest_path(workspace)
     if any(not path.startswith(workspace + "/") for path in paths):
         raise StateError("workspace artifact exclusion is outside its workspace")
     relative_paths = tuple(path.removeprefix(workspace + "/") for path in paths)

@@ -43,14 +43,19 @@ def rehome_workspace_artifacts(
 
 
 def _relocated_record(record: SetupRecord, old_path: str, new_path: str, identity: str) -> SetupRecord:
-    """Rebase metadata under verified workspace roots without using it for file I/O."""
-    old_path, new_path = guest_path(old_path), guest_path(new_path)
+    """Rebase metadata under verified workspace roots without using it for file I/O.
+
+    The old root is checked only when a path is rebased under it, so a record
+    holding none relocates whatever the old row's spelling, an earlier
+    release's ``..`` included.
+    """
+    new_path = guest_path(new_path)
 
     def relocate(path: str) -> str:
-        path = guest_path(path)
-        if not path.startswith(old_path + "/"):
+        root, path = guest_path(old_path), guest_path(path)
+        if not path.startswith(root + "/"):
             raise StateError("workspace artifact evidence is outside its owning workspace")
-        return new_path + path.removeprefix(old_path)
+        return new_path + path.removeprefix(root)
 
     return record.model_copy(
         update={
@@ -87,7 +92,9 @@ def _workspace_excludes(
 
     The row's stored path is read normalized (``stored_workspace_path``), as
     an earlier release may have stored it with a trailing ``/`` or a leading
-    ``//``; both callers have already refused one that is not absolute.
+    ``//``; both callers have already refused one that is not absolute. One
+    with a ``..`` component is checked only where a file is addressed under
+    it, so a record with nothing there to retire or rebase still relocates.
     """
     operation = "workspace-rehome" if new_path is not None else "workspace-delete"
     action = "workspace rehome" if new_path is not None else "workspace deletion"
