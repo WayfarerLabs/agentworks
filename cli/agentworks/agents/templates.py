@@ -43,6 +43,9 @@ class ResolvedAgentTemplate:
     mise_allow_unlocked: bool = False
     mise_install_before: str = "7d"
     mise_prune_on_reinit: bool = True
+    npm_enabled: bool = True
+    npm_packages: list[str] = field(default_factory=list)
+    npm_min_release_age_days: int = 7
     harness_integrations: dict[str, CapabilityConfig] = field(default_factory=dict)
     artifacts: ArtifactsConfig = field(default_factory=ArtifactsConfig)
     env: dict[str, EnvEntry] = field(default_factory=dict)

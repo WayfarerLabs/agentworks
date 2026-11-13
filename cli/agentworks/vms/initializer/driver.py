@@ -48,6 +48,7 @@ from .packages import (
     _resolve_apt_sources,
     _run_install_commands,
 )
+from .npm import run_npm_install
 from .shell_env import (
     _ensure_agentworks_files_sourced,
     _harden_admin_home,
@@ -764,6 +765,13 @@ def _phase_b_setup(
                     logger.warning(msg)
                     output.warn(msg)
 
+        # Publish package-manager paths before their installs and the custom
+        # commands, including on the first initialization and after dotfiles.
+        package_paths = system_path + mise_path
+        if admin.npm_enabled and admin.npm_packages:
+            package_paths.append(f"{home}/.local/bin")
+        _write_agentworks_profile(ts_target, package_paths, logger)
+
         # Non-fatal: mise lockfile (after git creds and dotfiles; overrides dotfiles lockfile)
         if admin.mise_lockfile:
             _fetch_mise_lockfile(ts_target, admin.mise_lockfile, home, logger)
@@ -794,7 +802,17 @@ def _phase_b_setup(
             except SSHError:
                 pass
 
-        # Non-fatal: user install commands for admin user (may depend on mise tools)
+        if admin.npm_enabled:
+            run_npm_install(
+                ts_target,
+                admin.npm_packages,
+                admin_shell,
+                home,
+                admin.npm_min_release_age_days,
+                logger,
+            )
+
+        # Non-fatal: custom user commands can use the installed mise/npm tools.
         user_path = _run_install_commands(
             ts_target,
             admin.user_install_commands,
@@ -806,7 +824,7 @@ def _phase_b_setup(
         )
 
         # Non-fatal: shell profile (PATH exports sourced at login)
-        all_paths = system_path + mise_path + user_path
+        all_paths = package_paths + user_path
         _write_agentworks_profile(ts_target, all_paths, logger)
 
         # Non-fatal: shell rc (interactive shell hooks like mise activate)

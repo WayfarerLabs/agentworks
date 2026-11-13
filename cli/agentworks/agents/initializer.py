@@ -289,15 +289,6 @@ def create_agent_on_vm(
         target_role="agent",
     )
 
-    # User install commands + login-shell PATH profile fragment.
-    _run_agent_install_commands(
-        agent_target=agent_target,
-        registry=registry,
-        agent_tmpl=agent_tmpl,
-        home=home,
-        identity_env=agent_identity,
-    )
-
     # Dotfiles.
     if agent_cfg.dotfiles_source:
         output.info(f"Syncing agent dotfiles from {agent_cfg.dotfiles_source}...")
@@ -374,6 +365,42 @@ def create_agent_on_vm(
     # Mise.
     _run_agent_mise_setup(agent_target=agent_target, agent_tmpl=agent_tmpl, home=home)
 
+    # Native npm uses whichever runtime the user has provisioned. Neither
+    # package installer invokes or requires the other.
+    from agentworks.vms.initializer.npm import run_npm_install
+
+    package_paths = []
+    if agent_cfg.mise_packages or agent_cfg.mise_lockfile:
+        package_paths.extend([f"{home}/.local/share/mise/shims"])
+    if agent_cfg.npm_enabled:
+        package_paths.extend(
+            run_npm_install(
+                agent_target,
+                agent_cfg.npm_packages,
+                agent_shell,
+                home,
+                agent_cfg.npm_min_release_age_days,
+                logger,
+            )
+        )
+    # Custom installers must see both package managers' tools on the first
+    # initialization, and the final profile must retain those PATH additions.
+    _write_agent_profile(
+        agent_target,
+        home=home,
+        shell=agent_shell,
+        identity_env=agent_identity,
+        path_additions=package_paths,
+    )
+    _run_agent_install_commands(
+        agent_target=agent_target,
+        registry=registry,
+        agent_tmpl=agent_tmpl,
+        home=home,
+        identity_env=agent_identity,
+        package_paths=package_paths,
+    )
+
     # Defensive final step: re-ensure source lines in case dotfiles
     # install (or any other later step) overwrote a shell rc file in
     # place. Idempotent grep-or-append.
@@ -432,6 +459,7 @@ def _run_agent_install_commands(
     agent_tmpl: ResolvedAgentTemplate,
     home: str,
     identity_env: dict[str, str],
+    package_paths: list[str] | None = None,
 ) -> None:
     """Run user install commands for an agent and rewrite the agent's
     profile fragment with the accumulated PATH. Failures warn but do
@@ -463,7 +491,7 @@ def _run_agent_install_commands(
     # tests/agents/test_recipe_gate_drift.py's entry table).
     user_install_commands = kind_dict(registry, "user-install-command")
     shell = agent_tmpl.shell
-    path_additions: list[str] = []
+    path_additions = list(package_paths or [])
     command_names = agent_tmpl.user_install_commands
     total = len(command_names)
 
