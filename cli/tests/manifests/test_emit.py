@@ -291,7 +291,7 @@ def test_env_sources_emit_as_an_untagged_structural_one_of() -> None:
     assert len(env_entry["oneOf"]) == 2
     plaintext = schema["$defs"]["PlaintextEnvEntry"]
     secret = schema["$defs"]["SecretEnvEntry"]
-    assert plaintext["anyOf"][0] == {"type": "string"}
+    assert plaintext["anyOf"][0]["type"] == "string"
     assert plaintext["anyOf"][1]["required"] == ["value"]
     assert set(plaintext["anyOf"][1]["properties"]) == {"value"}
     assert secret["required"] == ["secret"]

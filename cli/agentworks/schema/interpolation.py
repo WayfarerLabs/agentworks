@@ -77,6 +77,8 @@ def _value_error(annotation: object, metadata: list[object], *, depth: int) -> s
     metadata = [*metadata, *attached]
     present, optional = unwrap_optional(base)
     if optional:
+        if depth and (_markers_in(present) or any(isinstance(item, Interpolated) for item in metadata)):
+            return "interpolated list elements must be non-null strings"
         return _value_error(present, metadata, depth=depth)
     markers = [item for item in metadata if isinstance(item, Interpolated)]
     if markers:
