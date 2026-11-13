@@ -108,11 +108,13 @@ def remove_link_to(home: str, ws_name: str, workspace_path: str) -> Script:
     following links (``realpath -s -m``): a row spelled with a ``..`` or a
     trailing ``/`` still matches the link written from it. A relative target is
     never ours, and ``realpath`` would read it from the request's directory
-    rather than the link's.
+    rather than the link's. The link goes only when both ``realpath`` calls
+    succeed and print the same path, so a failing one leaves it.
     """
     return script(
         'if test -L "$1"; then t=$(readlink -- "$1"); case $t in /*)\n'
-        '  if test "$(realpath -s -m -- "$t")" = "$(realpath -s -m -- "$2/$3")"; then rm -- "$1"; fi ;; esac; fi',
+        '  if a=$(realpath -s -m -- "$t") && b=$(realpath -s -m -- "$2/$3") && test -n "$a" && test "$a" = "$b"\n'
+        '  then rm -- "$1"; fi ;; esac; fi',
         config_link(home, ws_name),
         workspace_path,
         CONFIG_NAME,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -321,6 +322,27 @@ def test_delete_removes_the_console_link_only_while_it_points_at_this_workspace(
     subprocess.run(["/bin/sh", "-c", request.source], check=True)
 
     assert link.is_symlink() != removed
+
+
+@pytest.mark.parametrize("fake", ["exit 1", "exit 0"], ids=["fails", "prints-nothing"])
+def test_delete_keeps_the_console_link_when_realpath_gives_no_path(tmp_path: Path, fake: str) -> None:
+    """The guest script itself, with ``realpath`` shadowed on ``PATH``: two empty answers are no match."""
+    from agentworks.workspaces.tmuxinator import config_link, remove_link_to
+
+    home = tmp_path / "home" / "admin"
+    link = Path(config_link(str(home), "w"))
+    link.parent.mkdir(parents=True)
+    link.symlink_to(tmp_path / "other" / ".tmuxinator.yml")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "realpath").write_text(f"#!/bin/sh\n{fake}\n")
+    (bin_dir / "realpath").chmod(0o755)
+
+    request = remove_link_to(str(home), "w", str(tmp_path / "ws"))
+    environment = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"}
+    subprocess.run(["/bin/sh", "-c", request.source], check=True, env=environment)
+
+    assert link.is_symlink()
 
 
 @pytest.mark.parametrize("entry", ["link", "dangling-link", "file"])
