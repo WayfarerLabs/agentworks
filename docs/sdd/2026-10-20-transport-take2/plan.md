@@ -607,6 +607,9 @@ Definition of done: create and reinit run entirely on the new transport.
       existing VMs.
 - [ ] Move the session callers of `_assert_agent_ssh_works` (`sessions/manager/_create.py`,
       `_create_roll.py`, `_pids.py`) to `_assert_agent_access_works`, and delete the legacy probe.
+- [ ] Move `tests/workspaces/test_lifecycle_orchestrated.py` from substring matches over legacy
+      command strings to assertions on the typed requests, as `test_backend_git_identity.py` did in
+      batch B. Batch C, once `delete_workspace` has no legacy target left.
 - [ ] Re-prove incident rows I6a and I8.
 - [ ] Supersede ADR 0017.
 - [x] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
