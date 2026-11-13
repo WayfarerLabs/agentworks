@@ -5,7 +5,7 @@ the unit test cannot prove on its own.
   probes no session state at all (a brand-new row owns no codex
   conversation, and both identity channels are name-derived, so adopting
   here is how a namesake would inherit a dead session's conversation),
-  provisions the recorder, clears any stale recording, and persists an
+  installs the recorder, clears any stale recording, and persists an
   EMPTY ``codex`` namespace;
 - the binding round trip through a real restart: a session whose recorder
   file already holds a codex-reported thread id adopts it, resumes it, and
@@ -33,7 +33,9 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.artifacts.declarations import ArtifactsConfig
+from agentworks.artifacts.session import HOME_PROBE
 from agentworks.db import Database, InitStatus, ProvisioningStatus, SessionMode, SessionStatus
+from agentworks.execution.requests import PythonProgram
 from agentworks.execution.results import Completed, Result
 from agentworks.plugins.codex.harness_integration import discovery_probe, recorder_probe, rollout_probe
 from agentworks.secrets.policy import TtyInteractionPolicy
@@ -80,7 +82,8 @@ class _CodexTarget:
     readiness ``command -v codex`` check and the three op-time probes (the
     recorder read, the ``*-<sid>.jsonl`` rollout presence probe, and the
     source-filtered discovery probe), recording each into a shared event
-    log. Each probe is matched by its builder, for session ``s1`` in
+    log, and the recorder install's home read and file write. Each probe is
+    matched by its builder, for session ``s1`` in
     workspace ``/home/me/ws1``. ``recorded`` seeds the recorder file with a
     codex-reported thread id; ``rollout_present`` decides the fork for the
     ``bound`` id's rollout; ``discovered`` (rollout paths, one per line)
@@ -113,6 +116,11 @@ class _CodexTarget:
             if self._recorded is None:
                 return Result(Completed(1))  # no recorder file: nothing bound
             return Result(Completed(0), f"{self._recorded}\n".encode())
+        if call.request == HOME_PROBE:
+            return Result(Completed(0), b"/home/me")
+        if isinstance(call.request, PythonProgram) and call.request.args[:1] == ("write",):
+            self._events.append(f"install_recorder:{json.loads(call.request.args[1])['path']}")
+            return Result(Completed(0))
         if call.request == discovery_probe("/home/me/ws1"):
             self._events.append("discover")
             return Result(Completed(0), (self._discovered or "").encode())
@@ -248,8 +256,8 @@ def test_create_launches_fresh_without_probing_any_session_state(
     codex conversation, so the op adopts nothing. This
     target would happily report a recording AND a discovery candidate, and
     rollout-discovery probe is not issued; the recorder is only fingerprinted
-    so a stale notification cannot bind the new session to prior state. The pane provisions
-    the recorder so the following start has something new to bind."""
+    so a stale notification cannot bind the new session to prior state. The op installs
+    the recorder before the launch so the following start has something new to bind."""
     from agentworks.sessions.manager import create_session
 
     db = _seed_db(tmp_path)
@@ -269,12 +277,15 @@ def test_create_launches_fresh_without_probing_any_session_state(
         interaction=TtyInteractionPolicy.REFUSE,
     )
 
-    assert set(events) == {"probe", "read_recorder", "tmux_create"}
+    installs = [event for event in events if event.startswith("install_recorder:")]
+    assert set(events) - set(installs) == {"probe", "read_recorder", "tmux_create"}
+    assert installs == ["install_recorder:/home/admin/.agentworks/codex/record-thread-v1.sh"] and events.index(
+        installs[0]
+    ) < events.index("tmux_create")
     session = db.get_session("s1")
     assert session is not None
     assert session.harness_integration_state == {"codex": {"fresh_pending": _SID}}
     command = captured["command"]
-    assert 'chmod +x "$HOME"/.agentworks/codex/.record-thread-v1.sh."$$"' in command
     # No namesake's binding survives a create.
     assert 'rm -f "$HOME"/.agentworks/codex/s1.thread' in command
     assert "notify=[" in command
@@ -501,10 +512,9 @@ def test_substitution_preserves_workload_values_and_substitutes_extra_args(
     )
 
     command = captured["command"]
-    # The generated skeleton survived substitution unmangled, the recorder
-    # provisioning and the notify override's nested quoting included.
+    # The generated skeleton survived substitution unmangled, the notify
+    # override's nested quoting included.
     assert command.startswith("sh -c ")
-    assert 'mkdir -p "$HOME"/.agentworks/codex' in command
     assert 'notify=["' in command
     assert '"$HOME"/.agentworks/codex/record-thread-v1.sh' in command
     assert "exec codex " in command

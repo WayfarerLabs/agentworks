@@ -404,6 +404,11 @@ Named consoles keep the older path for now.
 - **`session attach` runs `tmux attach` itself.** The connection starts `tmux` directly with its
   arguments rather than through the admin's shell, and `[terminal] clear_on_detach` applies as
   before.
+- **The Codex recorder is written before the launch.** A `codex` session's conversation recorder,
+  `~/.agentworks/codex/record-thread-v1.sh`, is written by one atomic file write before the session
+  starts, instead of by its launch command. The write refuses a symbolic link at the file or a
+  parent (a linked `~/.agentworks`, say), which the launch command followed. A refused or failed
+  write warns and the session starts anyway, finding its conversation by discovery instead.
 
 ## Create, reinit and the VM contract
 

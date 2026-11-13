@@ -36,8 +36,8 @@ inference over every rollout in the workspace directory produced 14
 indistinguishable candidates and a bricked resume: codex SUBAGENTS write
 sibling rollouts with the same cwd as their parent):
 
-1. **The notify binding (primary).** Every generated launch provisions a
-   recorder script under ``~/.agentworks/codex/`` and passes
+1. **The notify binding (primary).** Every launch first installs a
+   recorder script under ``~/.agentworks/codex/``, and its command passes
    ``-c notify=[<recorder>, <destination>]``. Codex runs the recorder after
    every completed turn, handing it the turn's ``thread-id``; the recorder
    writes that uuid to ``~/.agentworks/codex/<session-name>.thread``. The next
@@ -135,7 +135,7 @@ from agentworks.execution.requests import Script, Shell
 from agentworks.plugins._harness_native.native import setup_user, setup_workspace
 from agentworks.plugins._harness_native.native_config import NativeUserConfig, NativeWorkspaceConfig
 from agentworks.plugins.codex.artifacts import defer_session_mcp, outer_artifacts, session_artifacts, vm_artifacts
-from agentworks.plugins.codex.recorder import home_word, notify_value_word, provision_fragment, thread_tail
+from agentworks.plugins.codex.recorder import home_word, install_recorder, notify_value_word, thread_tail
 from agentworks.schema import AgwModel, MergeStrategy
 from agentworks.topics import TopicProse
 
@@ -742,6 +742,9 @@ class CodexIntegration(HarnessIntegration):
         self._decision = None
         self._adopted_id = None
         self._dropped_stale = False
+        # Every launch form passes the recorder to codex, so it is in place first.
+        if access is not None:
+            install_recorder(access, home=None if artifact_context is None else artifact_context.home)
         prior_state = self._state.copy() if intent is HarnessLaunchIntent.RESUME_ONLY else None
         try:
             command = (
@@ -853,8 +856,7 @@ class CodexIntegration(HarnessIntegration):
         never wrote (the blob is only as trustworthy as the DB it came
         from): it is swept out of the namespace rather than left to
         confuse a later read. Every path returns a single ``sh -c`` pane
-        command that echoes the visible decision, provisions the recorder,
-        and ``exec``s ``codex``.
+        command that echoes the visible decision and ``exec``s ``codex``.
         """
         launch_target = ctx.admin_access() if self._admin else ctx.agent_access()
         if launch_target is None:
@@ -1036,9 +1038,9 @@ class CodexIntegration(HarnessIntegration):
         fresh: bool = False,
     ) -> str:
         """The pane command shared by all three launch forms: echo the
-        visible decision, clean up after the retired marker scheme,
-        provision the notify recorder, then ``exec codex`` with ``head``
-        (the form's own leading argv) followed by the config flags.
+        visible decision, clean up after the retired marker scheme, then
+        ``exec codex`` with ``head`` (the form's own leading argv) followed
+        by the config flags. ``start`` installed the notify recorder first.
 
         A single ``sh -c`` so the whole thing survives the ``exec``
         wrapping the tmux pane applies (``exec`` takes one simple
@@ -1052,7 +1054,6 @@ class CodexIntegration(HarnessIntegration):
             # A fresh launch has no conversation bound yet, so a leftover
             # recording must not outlive it and re-report a dead id.
             parts.append(f"rm -f {home_word(thread_tail(self._session_name))}")
-        parts.append(provision_fragment())
 
         def render() -> str:
             body = [*parts, f"exec codex {self._codex_argv(head, fresh=fresh)}".rstrip()]

@@ -138,6 +138,7 @@ MIGRATED_FILES = (
     "sessions/manager/_teardown.py",
     "runtime_state/_execute.py",
     "runtime_state/_session_stop.py",
+    "plugins/codex/recorder.py",
     "workspaces/manager/delete.py",
     "agents/manager/__init__.py",
     "agents/manager/_common.py",

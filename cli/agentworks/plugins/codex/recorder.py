@@ -10,10 +10,11 @@ itself: it runs the recorder after every completed turn with the turn's
 ``thread-id``, and the recorder writes that uuid where the next op will read
 it.
 
-Everything here is target-side text: paths are ``$HOME``-relative tails that
-the LAUNCHING shell expands (never this process, which does not know the
-launch user's home), and each builder returns one shell word or one command
-fragment for splicing into the pane command.
+The recorder itself is published by :func:`install_recorder` through the
+session user's file operations before each launch. Everything else here is
+target-side text: paths are ``$HOME``-relative tails that the LAUNCHING shell
+expands, and each builder returns one shell word for splicing into the pane
+command.
 
 Verified 2026-08-04 against codex-cli 0.146.0, driving real completed turns:
 
@@ -31,8 +32,23 @@ Verified 2026-08-04 against codex-cli 0.146.0, driving real completed turns:
 from __future__ import annotations
 
 import shlex
+from typing import TYPE_CHECKING
 
+from agentworks import output
+from agentworks.errors import StateError
+from agentworks.execution.errors import (
+    CommandFailed,
+    ExecutionIncomplete,
+    FileConflict,
+    FileContentMismatch,
+    FileLockTimeout,
+    PathRefused,
+    RequestRefused,
+)
 from agentworks.vms.home_layout import AGENTWORKS_STATE_DIR
+
+if TYPE_CHECKING:
+    from agentworks.execution.access import VMAccess
 
 # Our own per-user directory on the launch target, holding the recorder
 # script and the per-session ``.thread`` files it writes.
@@ -43,15 +59,10 @@ AGW_CODEX_TAIL = f"{AGENTWORKS_STATE_DIR}/codex"
 # arguments gets ``-v2``, so an Agentworks upgrade mid-session can never
 # reshape the script a running codex is about to invoke.
 _RECORDER_TAIL = f"{AGW_CODEX_TAIL}/record-thread-v1.sh"
-# The atomic-provisioning staging path; the launching shell appends its own
-# ``$$`` so two concurrent launches under one user cannot collide.
-_RECORDER_STAGE_TAIL = f"{AGW_CODEX_TAIL}/.record-thread-v1.sh."
 
-# The recorder script, provisioned verbatim by every launch (see
-# ``provision_fragment`` for why an identical-content overwrite is the right
-# shape for a per-user file). POSIX sh with no jq/python assumptions, and
-# deliberately free of single quotes, so each line survives ``shlex.quote``
-# without an ``'\''`` thicket in the generated pane command.
+# The recorder script, published verbatim before every launch (see
+# ``install_recorder`` for why an identical-content overwrite is the right
+# shape for a per-user file). POSIX sh with no jq/python assumptions.
 #
 # Three rules earn their lines:
 #
@@ -158,24 +169,52 @@ def notify_value_word(session_name: str) -> str:
     )
 
 
-def provision_fragment() -> str:
-    """The shell fragment that installs the recorder before ``exec codex``:
-    stage it, make it executable, then ``mv`` it into place (so codex can
-    never see a half-written or non-executable recorder), removing the
-    staging file if any step fails.
+_INSTALL_FAILURES = (
+    CommandFailed,
+    ExecutionIncomplete,
+    RequestRefused,
+    PathRefused,
+    FileConflict,
+    FileContentMismatch,
+    FileLockTimeout,
+)
+"""What a failed write or home read raises: a request that did not complete or failed, or a refused write.
+
+A conflicting write raises too, and an unreadable or unusable home raises ``StateError`` besides these.
+"""
+
+
+def recorder_script() -> bytes:
+    """The recorder's exact bytes, one line each."""
+    return "".join(f"{line}\n" for line in _RECORDER_LINES).encode()
+
+
+def install_recorder(access: VMAccess, *, home: str | None) -> None:
+    """Publish the recorder under ``home``, executable, in one atomic file write as the session user.
+
+    ``home`` is the session's artifact home; without one, the session user's
+    home is read first.
 
     Every launch overwrites it with byte-identical content, which is what
     keeps a per-USER file inside the session-scoped effects rule (the
     harness-integration contract's "A Note on Scope"): no session can change
     what another session's recorder does, and a recorder from an older
-    Agentworks cannot outlive an upgrade. Provisioning failure is not fatal by
-    design: codex treats a missing notify program as a silent no-op, so the
-    launch proceeds and the session falls back to discovery.
+    Agentworks cannot outlive an upgrade. The write is atomic, so codex never
+    sees a half-written or non-executable recorder, and it refuses a link at
+    the path or a parent rather than following it. A failure, of the home
+    read or the write, is not fatal by design: it warns, and the launch goes
+    on, since codex treats a missing notify program as a silent no-op and the
+    session falls back to discovery.
     """
-    stage = home_word(_RECORDER_STAGE_TAIL) + '"$$"'
-    recorder = home_word(_RECORDER_TAIL)
-    lines = " ".join(shlex.quote(line) for line in _RECORDER_LINES)
-    return (
-        f"mkdir -p {home_word(AGW_CODEX_TAIL)} && printf '%s\\n' {lines} > {stage} "
-        f"&& chmod +x {stage} && mv -f {stage} {recorder} || rm -f {stage}"
-    )
+    from agentworks.artifacts.session import _session_artifact_home
+
+    try:
+        recorder_home = _session_artifact_home(access) if home is None else home
+        access.files().write(
+            f"{recorder_home.rstrip('/')}/{_RECORDER_TAIL}", recorder_script(), mode=0o755, parent_mode=0o755
+        )
+    except (*_INSTALL_FAILURES, StateError) as error:
+        output.warn(
+            f"The codex conversation recorder could not be installed ({error}); "
+            "this session's conversation is found by discovery instead."
+        )

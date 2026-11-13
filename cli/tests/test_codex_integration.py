@@ -40,11 +40,13 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
+from agentworks.artifacts.session import HOME_PROBE
 from agentworks.capabilities.base import OperationScope, RunContext, ScopeLevel
 from agentworks.capabilities.config import capability_config_references, validate_capability_config
 from agentworks.capabilities.harness_integration import HarnessLaunchIntent, HarnessStart
 from agentworks.errors import ConfigError, StateError
-from agentworks.execution.errors import ExecutionIncomplete
+from agentworks.execution.errors import ExecutionIncomplete, PathRefusal, PathRefused
+from agentworks.execution.requests import PythonProgram
 from agentworks.execution.results import Completed, Result, Unknown, UnknownReason
 from agentworks.plugins.codex.harness_integration import (
     CodexConfig,
@@ -53,15 +55,18 @@ from agentworks.plugins.codex.harness_integration import (
     recorder_probe,
     rollout_probe,
 )
+from agentworks.plugins.codex.recorder import recorder_script
 from agentworks.schema import RefOwner, merge_model
 from tests.conftest import requires_posix_shell
 from tests.vm_access_support import (
     Admin,
+    Call,
     RecordingVMAccess,
     account_shell,
     command_check_access,
     local_vm_access,
     presence_check,
+    run_file_program_locally,
 )
 
 if TYPE_CHECKING:
@@ -137,9 +142,12 @@ def _target(
     holding that uuid; ``rollout`` sets the bound id's presence-probe exit;
     ``discovered`` is the discovery probe's stdout (rollout paths, one per
     line). The ``*_exit`` forms force a raw exit code for the failure forks.
+    The recorder's install reads the home as ``/home/me`` and its write
+    succeeds.
     """
     access = RecordingVMAccess([], Admin())
     access.default_outcome = AssertionError("an unscripted request reached the launch target")
+    access.answer = _installs_the_recorder
     if recorder_exit is not None:
         recorder = Result(Completed(recorder_exit))
     elif recorded is not None:
@@ -154,6 +162,19 @@ def _target(
     else:
         access.respond(discovery_probe(workspace_path), Result(Completed(0), (discovered or "").encode()))
     return access
+
+
+def _is_file_write(request: object) -> bool:
+    return isinstance(request, PythonProgram) and request.args[:1] == ("write",)
+
+
+def _installs_the_recorder(call: Call) -> Result | None:
+    """Answer the recorder install's home read with ``/home/me`` and its write as done."""
+    if call.request == HOME_PROBE:
+        return Result(Completed(0), b"/home/me")
+    if _is_file_write(call.request):
+        return Result(Completed(0))
+    return None
 
 
 def _op_ctx(access: VMAccess) -> RunContext:
@@ -305,7 +326,8 @@ def test_create_is_always_fresh_even_with_a_recording_and_a_candidate() -> None:
     target = _target(recorded=_SID, rollout=0, discovered=f"{_ROLLOUT}\n")
     harness_integration = _harness_integration(state=state)
     result = harness_integration.start(_op_ctx(target), intent=HarnessLaunchIntent.CREATE)
-    assert len(target.requests()) == 1  # the recorder is fingerprinted, but no rollout discovery runs
+    # Besides installing the recorder, only the recording is read: no rollout discovery runs.
+    assert [r for r in target.requests() if r != HOME_PROBE and not _is_file_write(r)] == [recorder_probe("s1")]
     assert state == {"fresh_pending": _SID}
     assert "resume" not in _sh_argv(result, home="/home/me")
 
@@ -1103,17 +1125,15 @@ def test_extra_args_with_shell_metacharacters_cannot_inject() -> None:
 # -- the returned pane string shape ------------------------------------------
 
 
-def test_fresh_string_is_a_single_sh_c_that_provisions_then_execs() -> None:
+def test_fresh_string_is_a_single_sh_c_that_execs_after_clearing_the_binding() -> None:
     """A single ``sh -c`` (so it survives the pane's ``exec`` wrapping):
-    echo the visible decision, clear any stale recording, provision the
-    recorder, then exec codex with NO positional prompt (no
-    wrapper-authored turn ever appears in the conversation)."""
+    echo the visible decision, clear any stale recording, then exec codex
+    with NO positional prompt (no wrapper-authored turn ever appears in
+    the conversation)."""
     command = _harness_integration(state={}).start(_op_ctx(_target())).command
     assert command.startswith("sh -c ")
     inner = _inner(command)
     assert inner.startswith("echo ")
-    assert 'mkdir -p "$HOME"/.agentworks/codex' in inner
-    assert 'chmod +x "$HOME"/.agentworks/codex/.record-thread-v1.sh."$$"' in inner
     assert 'rm -f "$HOME"/.agentworks/codex/s1.thread' in inner  # no dead binding survives
     # The exec is last, and there is no positional prompt: the argv is the
     # default-on --strict-config plus the notify override.
@@ -1368,20 +1388,72 @@ _SUBAGENT_PAYLOAD = json.dumps(
 
 
 def _provision(home: Path) -> Path:
-    """Run the REAL generated provisioning fragment through ``sh`` and
-    return the installed recorder's path, so these tests exercise the
-    shipped shell text rather than a copy of the script."""
-    command = _harness_integration(state={}).start(_op_ctx(_target()))
-    fragment = _inner(command).split("; exec codex ", 1)[0]
-    proc = subprocess.run(
-        ["sh", "-c", fragment],
-        env={"HOME": str(home), "PATH": os.environ["PATH"]},
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert proc.returncode == 0, proc.stderr
+    """Run a REAL launch's recorder install against ``home``, its file write on this machine, and return the path.
+
+    These tests exercise the shipped script as the install writes it rather
+    than a copy of it.
+    """
+    access = _target()
+
+    def answer(call: Call) -> Result | None:
+        if call.request == HOME_PROBE:
+            return Result(Completed(0), str(home).encode())
+        return run_file_program_locally(call)
+
+    access.answer = answer
+    _harness_integration(state={}).start(_op_ctx(access))
     return home / ".agentworks/codex/record-thread-v1.sh"
+
+
+def test_the_recorder_is_installed_by_one_write_as_the_session_user_before_the_command() -> None:
+    """I89: the install is one atomic file write, executable, before any launch command exists."""
+    access = _target()
+
+    _harness_integration(state={}).start(_op_ctx(access))
+
+    (write,) = [request for request in access.requests() if _is_file_write(request)]
+    assert isinstance(write, PythonProgram)
+    params = json.loads(write.args[1])
+    assert (params["path"], params["mode"], params["parent_mode"]) == (
+        "/home/me/.agentworks/codex/record-thread-v1.sh",
+        0o755,
+        0o755,
+    )
+    assert write.stdin.data.endswith(recorder_script())  # type: ignore[union-attr]
+    assert not write.elevated
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        # A link at the recorder's path is refused, not followed.
+        "write-refused",
+        # The session user's home cannot be read, or reads back as no usable path.
+        "home-failed",
+        "home-relative",
+    ],
+)
+def test_a_failed_recorder_install_warns_and_the_launch_goes_on(warnings: list[str], failure: str) -> None:
+    """I89: the session falls back to discovery, and the launch command is built as without the failure."""
+    access = _target()
+
+    def answer(call: Call) -> Result | None:
+        if failure == "write-refused" and _is_file_write(call.request):
+            raise PathRefused("box", "write", "/home/me/.agentworks", PathRefusal.UNSUITABLE)
+        if failure == "home-failed" and call.request == HOME_PROBE:
+            return Result(Completed(1))
+        if failure == "home-relative" and call.request == HOME_PROBE:
+            return Result(Completed(0), b"home/me")
+        return _installs_the_recorder(call)
+
+    access.answer = answer
+
+    start = _harness_integration(state={}).start(_op_ctx(access))
+
+    assert start.command.startswith("sh -c ")
+    assert len(warnings) == 1
+    if failure != "write-refused":
+        assert not any(_is_file_write(request) for request in access.requests())
 
 
 def _record(recorder: Path, dest: Path, payload: str) -> int:

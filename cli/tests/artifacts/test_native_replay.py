@@ -13,6 +13,7 @@ from agentworks.artifacts.model import ArtifactType
 from tests.artifacts.test_native_delivery import artifact
 from tests.artifacts.test_native_probe import probe
 from tests.conftest import requires_posix_shell
+from tests.phase_b_support import is_file_operation
 
 pytestmark = requires_posix_shell
 
@@ -142,7 +143,8 @@ def test_inactive_facet_replays_known_persona_without_reusing_old_policy_paths(
     requests = []
 
     def log(request, result):
-        if isinstance(request, PythonProgram):
+        # The artifact probes' requests; a file operation (the codex recorder's install) is not one.
+        if isinstance(request, PythonProgram) and not is_file_operation(request):
             assert isinstance(request.stdin, Bytes)
             requests.append(json.loads(request.stdin.data))
 
