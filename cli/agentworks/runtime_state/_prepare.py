@@ -10,10 +10,7 @@ from agentworks.errors import StateError, UserAbort
 from ._models import Outcome
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from agentworks.db import SessionRow
-    from agentworks.vms.nodes import LiveVMNode
 
     from ._models import Kind, RuntimeInvocation
 
@@ -152,19 +149,6 @@ def prepare_local_workloads(invocation: RuntimeInvocation) -> None:
                 invocation.fail("console", name, error, blocked=True)
 
 
-def infrastructure_reader(invocation: RuntimeInvocation, node: LiveVMNode) -> Callable[[str], str]:
-    gate_names = frozenset(node.gate_secret_refs())
-
-    def resolve(name: str) -> str:
-        if name not in gate_names:
-            raise StateError(
-                "infrastructure requested an undeclared credential", entity_kind="vm", entity_name=node.row.name
-            )
-        return invocation.gate_value(name)
-
-    return resolve
-
-
 def _needs_running_guest(invocation: RuntimeInvocation, vm_name: str) -> bool:
     routes = dict(invocation.selection.session_routes)
     return any(
@@ -232,7 +216,7 @@ def prepare_infrastructure(invocation: RuntimeInvocation) -> None:
                 invocation.config,
                 invocation.registry,
                 vm,
-                resolve_secret=infrastructure_reader(invocation, invocation.nodes[name]),
+                resolve_secret=invocation.gate_value,
                 held_native_guard=invocation.guards[name],
                 vm_node=invocation.nodes[name],
             )

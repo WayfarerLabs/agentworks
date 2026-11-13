@@ -16,7 +16,6 @@ from ._prepare import (
     OFF,
     _block_family,
     _needs_running_vm,
-    infrastructure_reader,
     prepare_local_workloads,
     session_vm_name,
 )
@@ -156,7 +155,7 @@ def _observe_providers(invocation: RuntimeInvocation) -> None:
                 invocation.config,
                 invocation.registry,
                 vm,
-                resolve_secret=infrastructure_reader(invocation, invocation.nodes[name]),
+                resolve_secret=invocation.gate_value,
                 vm_node=invocation.nodes[name],
             )
             invocation.contexts[name] = context
