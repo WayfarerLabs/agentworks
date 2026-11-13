@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from agentworks.env import EnvEntry
     from agentworks.resources import Registry
     from agentworks.secrets import SecretTarget
-    from agentworks.vms.initializer.phase_a import OperationLog
+    from agentworks.vms.initializer.steps import InitLog
 
 
 class _VmAdminEnvScopes(NamedTuple):
@@ -229,13 +229,13 @@ def _init_log_hint(vm_name: str) -> str:
 @contextlib.contextmanager
 def operation_log(
     vm_name: str, command_stem: str, *, redactions: tuple[str, ...] = (), path: Path | None = None
-) -> Iterator[OperationLog]:
+) -> Iterator[InitLog]:
     """An operation log for ``command_stem``, closed on exit, with ``redactions`` registered before its first write.
 
     The log is written under the log directory, or to ``path`` when given
-    (backup keeps its log beside the archive). Typed by the small
-    ``OperationLog`` protocol, never as ``SSHLogger``, so a manager module
-    that imports nothing legacy can use it.
+    (backup keeps its log beside the archive). Typed by the ``InitLog``
+    protocol, never as ``SSHLogger``, so a manager module that imports
+    nothing legacy can use it.
     """
     from agentworks.ssh import SSHLogger
 
