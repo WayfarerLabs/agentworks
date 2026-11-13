@@ -40,6 +40,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import VMRow
     from agentworks.execution.access import VMAccess
+    from agentworks.vms.initializer.phase_a import OperationLog
     from agentworks.vms.initializer.steps import InitLog
     from agentworks.workspaces.templates import ResolvedTemplate
 
@@ -60,7 +61,7 @@ def default_workspace_path(config: Config, ws_name: str) -> str:
     return f"{config.paths.vm_workspaces}/{ws_name}"
 
 
-def admin_access(vm: VMRow, config: Config, logger: InitLog | None) -> VMAccess:
+def admin_access(vm: VMRow, config: Config, logger: OperationLog | None) -> VMAccess:
     """The admin's access to ``vm``, recording into ``logger`` when there is one."""
     return execution.vm_access(vm, config, Admin(), log=None if logger is None else logger.record)
 
