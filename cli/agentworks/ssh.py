@@ -22,6 +22,7 @@ from __future__ import annotations
 import logging
 import shlex
 import subprocess
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -147,6 +148,8 @@ class SSHLogger:
         self.path = path or LOG_DIR / f"{vm_name}-{timestamp}-{command_stem}.log"
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._active_handler: _PropagatingFileHandler | None = None
+        # Concurrent teardowns share one log; each write holds its handler alone.
+        self._write_lock = threading.Lock()
         self._secrets = tuple(dict.fromkeys(secret for secret in redactions if secret))
         normalized: list[str] = []
         for secret in redactions:
@@ -316,15 +319,16 @@ class SSHLogger:
             args=(),
             exc_info=None,
         )
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        handler = _PropagatingFileHandler(self.path, mode="a", encoding="utf-8", errors="replace")
-        self._active_handler = handler
-        try:
-            handler.setFormatter(logging.Formatter("%(message)s"))
-            handler.terminator = ""
-            handler.handle(record)
-        finally:
-            self._close_active_handler()
+        with self._write_lock:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            handler = _PropagatingFileHandler(self.path, mode="a", encoding="utf-8", errors="replace")
+            self._active_handler = handler
+            try:
+                handler.setFormatter(logging.Formatter("%(message)s"))
+                handler.terminator = ""
+                handler.handle(record)
+            finally:
+                self._close_active_handler()
 
     def _close_active_handler(self) -> None:
         handler = self._active_handler

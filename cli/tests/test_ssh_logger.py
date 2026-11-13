@@ -308,3 +308,48 @@ def test_an_operation_log_given_a_path_writes_all_of_it_there(tmp_path: Path, mo
 
     assert destination.stat().st_size > 0
     assert not log_dir.exists() or list(log_dir.iterdir()) == []
+
+
+def test_an_operation_log_shared_by_concurrent_threads_keeps_every_record_and_closes_every_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Stop-all's concurrent teardown plans share one log per VM: every record lands once, no write leaks its file."""
+    import gc
+    import sys
+    import threading
+    import warnings
+
+    from agentworks.execution.requests import Command
+    from agentworks.execution.results import Completed, Result
+    from agentworks.vms.manager import operation_log
+
+    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
+    threads, writes = 8, 200
+    start = threading.Barrier(threads)
+    previous = sys.getswitchinterval()
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", ResourceWarning)
+        # Switch threads as often as the interpreter allows, so unguarded writes would interleave.
+        sys.setswitchinterval(1e-6)
+        try:
+            with operation_log("vm1", "session-stop-all") as log:
+
+                def write(worker: int) -> None:
+                    start.wait()
+                    for index in range(writes):
+                        log.record(Command(("probe", f"w{worker}-{index}")), Result(Completed(0)))
+
+                workers = [threading.Thread(target=write, args=(number,)) for number in range(threads)]
+                for thread in workers:
+                    thread.start()
+                for thread in workers:
+                    thread.join()
+        finally:
+            sys.setswitchinterval(previous)
+        gc.collect()
+
+    assert [warning for warning in caught if issubclass(warning.category, ResourceWarning)] == []
+    text = Path(log.display_path).expanduser().read_text()
+    for worker in range(threads):
+        for index in range(writes):
+            assert text.count(f"argv probe w{worker}-{index},") == 1

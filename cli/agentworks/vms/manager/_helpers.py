@@ -233,7 +233,8 @@ def operation_log(
     """An operation log for ``command_stem``, closed on exit, with ``redactions`` registered before its first write.
 
     The log is written under the log directory, or to ``path`` when given
-    (backup keeps its log beside the archive). Typed by the ``InitLog``
+    (backup keeps its log beside the archive). Each write holds the log's
+    lock, so concurrent work may share one log. Typed by the ``InitLog``
     protocol, never as ``SSHLogger``, so a manager module that imports
     nothing legacy can use it.
     """
