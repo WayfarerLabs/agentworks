@@ -597,8 +597,10 @@ today; the operator removes the directory before retrying.
 The group, directory, `chown -R` and `find` steps (`:171-193`) are `Command`s as in the workspaces
 table, and the tmuxinator write (`:230-233`) is as create's, its link replaced with `ln -sf` as
 today (`:234`). The operation log is the destination's, closed in a `finally` as today
-(`fbf3ed505`); the source read is recorded in it too. Copying within one VM still goes through the
-workstation, as today.
+(`fbf3ed505`). The source read is recorded in the source VM's own log, `workspace-copy-source`,
+since the destination is chosen only after it (`_resolve_vm` may prompt) and each VM's requests stay
+in that VM's log; a distinct stem keeps the two from sharing a file within one second on one VM.
+Copying within one VM still goes through the workstation, as today.
 
 ### Sessions: the tmux primitives
 
@@ -641,7 +643,7 @@ docstring's `Transport.run` half goes.
 | Stop-all                                      | `_lifecycle.py:1053-1078`                                                                                               | admin, root for agent rows                                                                                     | 10 in the concurrent plans                                                                 | `transport(..., default_timeout=10, retries=1)`; logged to a `session-stop-all` log per VM (above) |
 | Attach                                        | `target.interactive("tmux -S S attach -t '=N'")`, `_queries.py:961`                                                     | admin; `TerminalCommand(("tmux", "-S", socket, "attach", "-t", "=" + name))`, or without `-S` for a legacy row | none                                                                                       | `Transport.interactive`                                                                            |
 | Logs                                          | `capture_output`, `_logs.py:80`                                                                                         | admin                                                                                                          | none                                                                                       | the admin `run`                                                                                    |
-| tmuxinator regeneration                       | `_scope.py:150-165`                                                                                                     | admin, `files.write` and `remove_config` as for workspaces                                                     | 10                                                                                         | `write_file` and `remove_config(target)`                                                           |
+| tmuxinator regeneration                       | `_scope.py:150-165`                                                                                                     | admin, `files.write` and `remove_config` as for workspaces; a failure warns and the command stands             | 10                                                                                         | `write_file` and `remove_config(target)`                                                           |
 | `_scope._prepare_vm`                          | `_scope.py:124-128`: a log with no redactions, and a `run_as_root` no caller uses                                       | yields the admin's access; the log takes the operation's redactions                                            |                                                                                            | `run_command`, `run_as_root`                                                                       |
 | Agent delete                                  | `_mgr.transport` into `_teardown_session` and `kill_session_windows`, `agents/manager/lifecycle.py:389-398`, `:423-425` | root for the teardown (`target_owns_session=False`), admin for the windows                                     | none                                                                                       | `_mgr.transport`                                                                                   |
 
