@@ -32,7 +32,14 @@ from agentworks.workspaces.guest import (
     path_occupied,
     script,
 )
-from agentworks.workspaces.tmuxinator import config_path, generate_config, link_config, remove_link_to, write_config
+from agentworks.workspaces.tmuxinator import (
+    config_path,
+    generate_config,
+    link_config,
+    remove_link,
+    remove_link_to,
+    write_config,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -336,13 +343,26 @@ def delete_vm_workspace(
         )
 
 
-def remove_workspace_group(vm: VMRow, config: Config, linux_group: str, *, logger: InitLog | None = None) -> None:
-    """Remove only the workspace's Linux group: delete's VM step when the stored path names no one directory."""
+def delete_vm_workspace_keeping_files(
+    vm: VMRow, config: Config, ws_name: str, linux_group: str, *, logger: InitLog | None = None
+) -> None:
+    """Delete's VM step when the stored path names no one directory: the console link and the group, no files.
+
+    The link's path and the group's name are known without the stored path,
+    and both are this workspace's own; the directory and the config in it are
+    left for the operator. Removing the link lets the name be recreated, since
+    create links without replacing.
+    """
     assert vm.tailscale_host is not None
+    admin = admin_access(vm, config, logger)
     try:
-        admin_access(vm, config, logger).run(_group_removal(linux_group)).require_completed(vm.name)
+        admin.run(remove_link(managed_home(vm.admin_username), ws_name)).require_completed(vm.name)
+        admin.run(_group_removal(linux_group)).require_completed(vm.name)
     except REQUEST_FAILURES:
-        output.warn(f"Removal of workspace group {linux_group!r} was not confirmed. Inspect it before retrying.")
+        output.warn(
+            f"Removal of the tmuxinator link of workspace '{ws_name}' and group {linux_group!r} was not confirmed. "
+            "Inspect them before retrying."
+        )
 
 
 def _group_removal(linux_group: str) -> Command:

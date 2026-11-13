@@ -120,6 +120,16 @@ def remove_link_to(home: str, ws_name: str, workspace_path: str) -> Script:
     )
 
 
+def remove_link(home: str, ws_name: str) -> Script:
+    """Removes the console link under ``home`` whatever it points at, never following it.
+
+    For a workspace whose stored path names no one directory: the link's name
+    is the workspace's own, so it is removed without comparing its target.
+    Anything there that is not a link is left.
+    """
+    return script('if test -L "$1"; then rm -f -- "$1"; fi', config_link(home, ws_name), deadline=PROBE_DEADLINE)
+
+
 def generate_config(
     ws_name: str,
     workspace_path: str,

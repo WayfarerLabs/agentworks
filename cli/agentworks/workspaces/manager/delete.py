@@ -61,9 +61,9 @@ def delete_workspace(
             entity_name=name,
         )
     # A stored path that names no one directory (a '~' row the state migration
-    # left relative) is never acted on: the row, its sessions, grants and group
-    # still go, so the name can be reused, and the VM's files are left for the
-    # operator to check.
+    # left relative) is never acted on: the row, its sessions, grants, group and
+    # console link still go, so the name can be reused, and the VM's files are
+    # left for the operator to check.
     try:
         stored_workspace_path(ws.workspace_path)
     except ValidationError:
@@ -84,7 +84,7 @@ def delete_workspace(
     if not path_known:
         output.warn(
             f"Workspace '{name}' has the stored path {ws.workspace_path!r}, which names no one directory on the VM, "
-            "so its directory, tmuxinator config and link are not touched. Check the VM for them by hand."
+            "so its directory and tmuxinator config are not touched. Check the VM for them by hand."
         )
 
     if not yes:
@@ -251,9 +251,9 @@ def delete_workspace(
 
                     delete_vm_workspace(vm, config, name, ws.workspace_path, ws.linux_group, logger=ssh_logger)
                 elif vm is not None:
-                    from agentworks.workspaces.backends.vm import remove_workspace_group
+                    from agentworks.workspaces.backends.vm import delete_vm_workspace_keeping_files
 
-                    remove_workspace_group(vm, config, ws.linux_group, logger=ssh_logger)
+                    delete_vm_workspace_keeping_files(vm, config, name, ws.linux_group, logger=ssh_logger)
 
                 # Remove .code-workspace file
                 vscode_path = config.paths.vscode_workspaces / f"{name}.code-workspace"

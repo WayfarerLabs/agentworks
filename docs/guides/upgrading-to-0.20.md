@@ -253,8 +253,9 @@ the VM once no backup is running.
   created under a value starting with `~` keeps its stored path, since which home it named is not
   recorded. `workspace rehome` refuses such a path before anything runs, and the session commands
   warn instead of updating its tmuxinator config. `workspace delete` removes its row, sessions,
-  grants and group but nothing the path names, warning that its directory, tmuxinator config and
-  link are left on the VM to check by hand; the workspace can then be recreated under the same name.
+  grants, group and tmuxinator link, but nothing the path names, warning that its directory and
+  tmuxinator config are left on the VM to check by hand; the workspace can then be recreated under
+  the same name.
 - **`workspace rehome --target` takes an absolute path.** A relative path, a `host:path`, the root,
   or a path with an empty, `.` or `..` component is refused before anything runs; a trailing `/` is
   dropped. A target that is the workspace's directory, inside it, or around it once the VM resolves

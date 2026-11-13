@@ -320,3 +320,26 @@ def test_delete_removes_the_console_link_only_while_it_points_at_this_workspace(
     subprocess.run(["/bin/sh", "-c", request.source], check=True)
 
     assert link.is_symlink() != removed
+
+
+@pytest.mark.parametrize("entry", ["link", "dangling-link", "file"])
+def test_delete_of_a_path_unknown_row_removes_its_console_link_and_nothing_else(tmp_path: Path, entry: str) -> None:
+    """The guest script itself: the link goes whatever it points at, its target stays, and a file is not a link."""
+    from agentworks.workspaces.tmuxinator import config_link, remove_link
+
+    home = tmp_path / "home" / "admin"
+    link = Path(config_link(str(home), "w"))
+    link.parent.mkdir(parents=True)
+    pointed = tmp_path / "ws" / ".tmuxinator.yml"
+    if entry == "file":
+        link.write_text("operator's own\n")
+    else:
+        if entry == "link":
+            pointed.parent.mkdir()
+            pointed.write_text("config\n")
+        link.symlink_to(pointed)
+
+    subprocess.run(["/bin/sh", "-c", remove_link(str(home), "w").source], check=True)
+
+    assert (link.exists() or link.is_symlink()) == (entry == "file")
+    assert pointed.exists() == (entry == "link")

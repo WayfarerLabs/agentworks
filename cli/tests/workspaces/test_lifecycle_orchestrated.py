@@ -1515,22 +1515,30 @@ def test_rehome_refuses_a_stored_path_that_is_not_absolute_before_anything_runs(
     assert db.get_workspace("ws1") is not None
 
 
-def test_delete_of_a_stored_path_that_is_not_absolute_removes_the_row_and_leaves_the_vm_files(
+def test_delete_of_a_stored_path_that_is_not_absolute_removes_the_row_and_link_and_leaves_the_vm_files(
     db: Database,
     make_config,  # noqa: ANN001
-    target: _FakeAdminTarget,
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
+    """The console link goes, so a new create of the name can link its config without replacing."""
+    from agentworks.linux_users import managed_home
+    from agentworks.workspaces.tmuxinator import remove_link
+
     config = make_config()
     _seed(db)
     _store_a_tilde_path(db)
     _reachable(monkeypatch, True)
+    target = _FakeAdminTarget()
+    recorder = _route(monkeypatch, target)
+    vm = db.get_vm("box")
+    assert vm is not None
 
     workspace_manager.delete_workspace(db, config, "ws1", yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
     assert db.get_workspace("ws1") is None
     assert not any("ws/ws1" in command or "tmuxinator" in command for command in target.commands)
+    assert remove_link(managed_home(vm.admin_username), "ws1") in recorder.requests("run")
     assert "/usr/sbin/groupdel ws-ws1" in target.commands
     assert len(captured_output.warnings) == 1
     assert "~/ws/ws1" in captured_output.warnings[0]
