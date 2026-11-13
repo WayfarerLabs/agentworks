@@ -828,3 +828,22 @@ This LLD uses `;`.
 The HLA and the plan carry the changes this LLD needed: the `log_streams` option, the renamed sinks,
 `stat`, the lock and hold wording, the new errors, the migration and slice lists, the tests moved to
 slice 6, and incident rows I35 to I53.
+
+### Main's MCP artifacts on this layer
+
+Main's MCP artifacts (#887, #888) arrived after this LLD, written against `native_files` and the
+setup invocation's runner. The merge that brought them in moved them onto `VMAccess` and `Files`:
+
+- **Layout observation.** `resolve_user_layout` (`artifacts/native/layout.py:51-87`) runs as a
+  `PythonProgram` after the account's login and interactive startup, with its request on stdin and a
+  30 second deadline, over the invocation's access (`user_layout`, `:90`).
+- **MCP publish.** `apply_mcp` (`artifacts/native/mcp.py:212`) reads and writes through
+  `invocation.files` (`:256`). A publish is `Files.update` over the observed bytes with
+  `preserve_metadata` for an existing file; a new file takes native settings publication's modes
+  (`:258-271`). `PathRefused`, `ConnectivityError` and `ExternalError` defer the entries (`:297`,
+  `:387`), and `FileConflict` propagates. Codex's joint settings and MCP document is planned by
+  `_MappingPlan.render` (`plugins/_harness_native/native.py:162`, `:200`), and only `apply_mcp`
+  publishes it.
+- **Session conflict check.** `session_mcp_conflicts` (`artifacts/native/mcp.py:130`) takes the
+  launch identity's `VMAccess` and reads through `access.files()` (`:153`), deferring on
+  `PathRefused` as on any other read failure (`:171`).
