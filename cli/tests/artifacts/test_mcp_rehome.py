@@ -13,8 +13,12 @@ from agentworks.db import AppliedStateKey, VersionedPayload
 from agentworks.errors import ExternalError, StateError, UserAbort
 from agentworks.harness_setup.cleanup import _relocated_record
 from agentworks.harness_setup.dispatch import destination_id
+from agentworks.harness_setup.inputs import SetupInputs
 from agentworks.harness_setup.model import NativeClaim, NativeSetupState, SetupRecord
+from agentworks.harness_setup.readiness import evaluate_setup
 from agentworks.harness_setup.state import read_native_setup, write_native_setup
+from agentworks.schema import CapabilityConfig
+from agentworks.secrets.orchestration import SecretTarget
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.workspaces.manager import rehome_workspace
 from tests.artifacts.test_git_excludes import file, git
@@ -228,6 +232,48 @@ def test_dot_dot_row_relocates_records_with_nothing_to_rebase(db, deletion, move
         record.model_copy(update={"destination_id": identity}) for record in records
     )
     assert captured_output.warnings == []
+
+
+def test_rehome_brings_a_migrated_relative_rows_setup_readiness_current(db, deletion, move_case):
+    # 0.19 ran setup from the admin's home and fingerprinted the row's relative
+    # spelling; migration 40 stores the same directory absolute.
+    target, _ = move_case
+    (target.home / "project").mkdir()
+    db.update_workspace_path("project", str(target.home / "project"))
+    vm = db.get_vm("box")
+    inputs = SetupInputs(
+        kind="workspace",
+        name="project",
+        component="workspace",
+        activations={"shell": CapabilityConfig()},
+        target=SecretTarget(vm={}, workspace={}),
+    )
+    record = SetupRecord(
+        component="workspace",
+        integration="shell",
+        destination_id=destination_id(vm, target.access(), location="project"),
+        declaration=inputs.declaration("shell", inputs.activations["shell"]),
+        complete=True,
+    )
+    write_native_setup(db, "workspace", "project", NativeSetupState(records=(record,)), operation="workspace-create")
+
+    def readiness() -> str:
+        location = db.get_workspace("project").workspace_path
+        return evaluate_setup(
+            db, inputs, "shell", vm=vm, access=target.access(), location=location, remediation="fixture"
+        ).status
+
+    assert readiness() == "stale"
+    rehome_workspace(
+        db,
+        deletion.config,
+        "project",
+        target_path=str(target.home / "moved"),
+        remove_old=False,
+        yes=True,
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
+    assert readiness() == "current"
 
 
 @pytest.mark.parametrize("evidence", ["absent", "empty", "future", "malformed"])
