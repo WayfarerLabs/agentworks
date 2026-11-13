@@ -376,8 +376,10 @@ class SSHTransport(Transport):
         env: dict[str, str] | None = None,
     ) -> int:
         """Interactive SSH with ``-t`` (allocates a TTY) and no
-        ``BatchMode``. Empty ``command`` opens a login shell; a command is
-        led by a NUL on a Windows console (``nul_first_on_a_windows_console``).
+        ``BatchMode``. Empty ``command`` opens a login shell, which gets no
+        NUL lead because sshd's MOTD and lastlog fill its first write; a
+        command is led by a NUL on a Windows console
+        (``nul_first_on_a_windows_console``).
         """
         args = ["ssh", "-t", *self.host_key_options(), *keepalive_args()]
         if self.port is not None:

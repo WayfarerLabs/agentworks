@@ -39,14 +39,15 @@ for `attach`). Each takes `env` and `cwd` (absolute; `None` is the home director
 
 ## What a request becomes
 
-Every connection runs the same constant command, `python3 -I -S -c '<stage 0>'` (`ssh_process.py`).
-Stage 0 is a one-line program that reads the launcher's source from stdin with exact-length reads
-and runs it. Its reader is recursive, so a pathological drip of tiny reads fails safely, as not
-delivered, instead of running. The launcher, `agw_launch.py`, reads the request, resets what the
-payload inherits, runs the payload as a child and reports completion. The client writes three things
-to ssh's stdin in order: the launcher source, the JSON envelope (`envelope.py`), and the caller's
-input untouched. A frame is ten ASCII digits then that many bytes, so the payload's stdin starts at
-the caller's first byte.
+Every connection runs the same constant command, `python3 -I -S -c '<stage 0>'` (`ssh_process.py`);
+the terminal half of an attach adds the socket path and, on a Windows console, a NUL lead
+([Terminal handover](#terminal-handover)). Stage 0 is a one-line program that reads the launcher's
+source from stdin with exact-length reads and runs it. Its reader is recursive, so a pathological
+drip of tiny reads fails safely, as not delivered, instead of running. The launcher,
+`agw_launch.py`, reads the request, resets what the payload inherits, runs the payload as a child
+and reports completion. The client writes three things to ssh's stdin in order: the launcher source,
+the JSON envelope (`envelope.py`), and the caller's input untouched. A frame is ten ASCII digits
+then that many bytes, so the payload's stdin starts at the caller's first byte.
 
 The guest's account shell may print or export before stage 0 runs. The launcher brackets the
 payload's output with marker lines (`0x1E`, a per-request nonce, a word, a newline), and the client
@@ -109,12 +110,10 @@ bound for connecting and running the account's startup files; the 30 seconds abo
 `parked`), and raises before the terminal is touched. On Windows the parking client starts off the
 operator's console (`share_console=False`; `ssh_process.spawn` says why).
 
-On a Windows console (stdin and stdout both on the terminal) the terminal half's remote command is
-`printf '\000'; <stage 0> <socket path>` (`ssh_process.nul_first_on_a_windows_console`, whose
-docstring has the sources). Win32-OpenSSH moves the console before a first write that contains
-`ESC[2J`, and under Windows Terminal that move deletes the operator's lines above the cursor. A
-first byte of NUL stops that check and is ignored by the terminal. The legacy transports' `ssh -t`
-attaches use the same helper.
+On a Windows console the terminal half's remote command is led by a NUL, which stops Win32-OpenSSH
+from deleting the operator's lines on its first write; `ssh_process.nul_first_on_a_windows_console`
+says why and when, and the legacy `ssh -t` attaches use it too, except a login shell with no
+command, whose first write sshd's MOTD and lastlog fill.
 
 ## Host-key trust
 
