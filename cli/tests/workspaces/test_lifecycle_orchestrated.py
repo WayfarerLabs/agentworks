@@ -1439,6 +1439,62 @@ def test_rehome_overlapping_paths_fail_with_zero_resolves_and_zero_gate(
     assert target.commands == []
 
 
+@pytest.mark.parametrize("target_path", ["dst/ws1", "host:/dst/ws1", "/", "/dst/../ws1", "/dst//ws1", "/dst/./ws1"])
+def test_rehome_refuses_a_target_that_is_not_an_absolute_directory_before_anything_runs(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    target: _FakeAdminTarget,
+    monkeypatch: pytest.MonkeyPatch,
+    target_path: str,
+) -> None:
+    config = make_config()
+    _seed(db)
+    _no_gate(monkeypatch)
+
+    with pytest.raises(ValidationError, match="rehome target"):
+        workspace_manager.rehome_workspace(
+            db, config, "ws1", target_path=target_path, interaction=TtyInteractionPolicy.REFUSE
+        )
+
+    assert resolve_counter == []
+    assert target.commands == []
+
+
+def test_rehome_reads_a_target_with_a_trailing_slash_as_the_directory(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    config = make_config()
+    _seed(db)
+    _reachable(monkeypatch, True)
+    class _Target(_FakeAdminTarget):
+        """The target directory exists once it is made."""
+
+        made = False
+
+        def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
+            if cmd == "test -d /dst/ws1" and not self.made:
+                self.commands.append(cmd)
+                return SimpleNamespace(ok=False, returncode=1, stdout="", stderr="")
+            self.made |= cmd == "mkdir -p -- /dst/ws1"
+            return super().run(cmd, **kwargs)
+
+    fake = _Target()
+    _route(monkeypatch, fake)
+
+    workspace_manager.rehome_workspace(
+        db, config, "ws1", target_path="/dst/ws1//", yes=True, interaction=TtyInteractionPolicy.REFUSE
+    )
+
+    ws = db.get_workspace("ws1")
+    assert ws is not None and ws.workspace_path == "/dst/ws1"
+    assert "test -d /dst/ws1" in fake.commands
+    assert not any("/dst/ws1/" + "/" in command for command in fake.commands)
+
+
 def test_repair_unknown_workspace_fails_with_zero_resolves_and_zero_gate(
     db: Database,
     make_config,  # noqa: ANN001

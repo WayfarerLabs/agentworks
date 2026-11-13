@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import posixpath
 from typing import TYPE_CHECKING
 
 from agentworks import output
@@ -13,6 +14,7 @@ from agentworks.errors import (
     UserAbort,
     ValidationError,
 )
+from agentworks.execution.files import guest_path
 from agentworks.execution.requests import Command
 from agentworks.linux_users import managed_home
 from agentworks.path_rendering import format_host_path
@@ -67,11 +69,15 @@ def rehome_workspace(
     # Determine target path
     from agentworks.workspaces.backends.vm import default_workspace_path
 
-    new_path = target_path if target_path is not None else default_workspace_path(config, name)
+    new_path = (
+        _target_directory(target_path, ws_name=name)
+        if target_path is not None
+        else posixpath.normpath(default_workspace_path(config, name))
+    )
 
     old_path = ws.workspace_path
 
-    if old_path == new_path:
+    if posixpath.normpath(old_path) == new_path:
         output.info(f"Workspace '{name}' is already at {new_path}")
         return
 
@@ -328,3 +334,22 @@ def _rehome_vm(
 def _is_directory(access: VMAccess, path: str) -> bool:
     """Whether a directory is at ``path``, as the admin sees it; an outcome that is not a completion raises."""
     return access.run(Command(("test", "-d", path), deadline=PROBE_DEADLINE)).require_completed(access.vm_name) == 0
+
+
+def _target_directory(path: str, *, ws_name: str) -> str:
+    """``path`` as a rehome target: the boundary of the operator's ``--target``.
+
+    A trailing ``/`` names the same directory, so it is dropped. Anything
+    else that is not an absolute, normalized path (a relative path, an empty,
+    ``.`` or ``..`` component, the root) is refused before anything runs:
+    the copy would read ``host:path`` as a remote, and the guest steps need
+    the directory's own absolute spelling.
+    """
+    try:
+        return guest_path(path.rstrip("/"))
+    except StateError:
+        raise ValidationError(
+            f"rehome target must be an absolute directory path with no empty, '.' or '..' component, not {path!r}",
+            entity_kind="workspace",
+            entity_name=ws_name,
+        ) from None

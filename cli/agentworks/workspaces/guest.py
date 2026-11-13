@@ -62,14 +62,21 @@ def ensure_group(group: str) -> Script:
     return script('getent group "$1" >/dev/null 2>&1 || /usr/sbin/groupadd "$1"', group, elevated=True)
 
 
+TRAVERSAL_DEADLINE = 30
+"""Seconds the parent traversal walk may take."""
+
+
 def open_parent_traversal(path: str) -> Script:
     """Adds ``a+x`` to every ancestor of ``path`` below ``/``, as root, printing a line for each it changed.
 
     The walk starts at the parent: the workspace's own mode is the canonical
-    2770, which carries no world bits.
+    2770, which carries no world bits. It walks only absolute paths, so a
+    relative one, whose ``dirname`` ends at ``.``, stops it at once.
     """
     return script(
-        'p=$(dirname "$1"); while [ "$p" != "/" ]; do chmod -c a+x "$p"; p=$(dirname "$p"); done',
+        'p=$(dirname "$1")\n'
+        'while [ "$p" != "/" ] && [ "${p#/}" != "$p" ]; do chmod -c a+x "$p"; p=$(dirname "$p"); done',
         path,
         elevated=True,
+        deadline=TRAVERSAL_DEADLINE,
     )

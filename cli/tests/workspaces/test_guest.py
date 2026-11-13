@@ -28,7 +28,13 @@ def run(request: Script, tmp_path: Path) -> subprocess.CompletedProcess[str]:
     chmod.chmod(0o755)
     environment = {"PATH": f"{bin_dir}{os.pathsep}/usr/bin:/bin"}
     return subprocess.run(
-        ["/bin/sh", "-c", request.source], cwd=tmp_path, env=environment, capture_output=True, text=True, check=False
+        ["/bin/sh", "-c", request.source],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
     )
 
 
@@ -43,6 +49,14 @@ def test_parent_traversal_walks_only_the_ancestors_of_a_path_with_spaces_and_met
         "-c a+x /srv",
     ]
     assert not (tmp_path / "injected").exists() and not (tmp_path / "substituted").exists()
+
+
+@pytest.mark.parametrize("path", [".", "relative/ws", "ws"])
+def test_parent_traversal_of_a_relative_path_ends_without_changing_anything(tmp_path: Path, path: str) -> None:
+    completed = run(open_parent_traversal(path), tmp_path)
+
+    assert completed.returncode == 0
+    assert not (tmp_path / "chmod.log").exists()
 
 
 @pytest.mark.parametrize("kind", ["absent", "directory", "file", "dangling-link"])
