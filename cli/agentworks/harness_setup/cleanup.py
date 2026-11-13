@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
 
 def cleanup_workspace_excludes(
-    db: Database, workspace: WorkspaceRow, access: Callable[[], VMAccess], *, redactions: Iterable[str] = ()
+    db: Database, workspace: WorkspaceRow, access: Callable[[], VMAccess], *, redactions: Iterable[str]
 ) -> None:
     """Try known Git retirement without adding a parent-deletion prerequisite.
 
@@ -32,7 +32,7 @@ def cleanup_workspace_excludes(
 
 
 def rehome_workspace_artifacts(
-    db: Database, workspace: WorkspaceRow, new_path: str, access: VMAccess, *, redactions: Iterable[str] = ()
+    db: Database, workspace: WorkspaceRow, new_path: str, access: VMAccess, *, redactions: Iterable[str]
 ) -> None:
     """Transfer associations after copying, while the actual old owner still exists.
 

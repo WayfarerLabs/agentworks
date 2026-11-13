@@ -200,7 +200,7 @@ def test_rehome_does_not_accept_another_owners_source(db, deletion, move_case, r
     assert first_pair in exclude.read_bytes() and sentinel.read_bytes() == b"operator sentinel"
     current = read_native_setup(db, "workspace", "project").records[0]
     assert current.claims and all(claim.source == str(new) for claim in current.claims)
-    cleanup_workspace_excludes(db, db.get_workspace("project"), target.access)
+    cleanup_workspace_excludes(db, db.get_workspace("project"), target.access, redactions=())
     assert exclude.read_bytes().endswith(first_pair)
     assert sentinel.read_bytes() == b"operator sentinel"
     assert str(sentinel) not in target.file_paths()
