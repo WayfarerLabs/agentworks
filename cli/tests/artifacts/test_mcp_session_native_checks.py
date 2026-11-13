@@ -107,6 +107,63 @@ def test_session_native_conflict_defers_transport_change_without_modifying_confi
     assert path.read_bytes() == before
 
 
+@pytest.mark.parametrize("spelling", ["{}/", "{}//", "{}/./"])
+@pytest.mark.parametrize(
+    "tool,role", [("claude", "project"), ("claude", "claude-local"), ("codex", "project"), ("codex", "user")]
+)
+@pytest.mark.parametrize("equal", [True, False])
+def test_unnormalized_stored_workspace_spelling_is_checked_at_its_normalized_location(
+    target, spelling, tool, role, equal
+):
+    from pathlib import Path
+
+    workspace = target.home / "project"
+    workspace.mkdir()
+    item = mcp()
+    entry = render_mcp(
+        item if equal else mcp(metadata={"type": "http", "url": "https://mcp.example.test", "headers": {}}), tool
+    )
+    key = "mcpServers" if tool == "claude" else "mcp_servers"
+    document: SettingsObject = {key: {item.content.name: entry}}
+    if role == "project":
+        path = workspace / (".mcp.json" if tool == "claude" else ".codex/config.toml")
+    else:
+        path = Path(resolve_mcp_user_path(tool, target.access(), home=str(target.home), environment={}))
+        if role == "claude-local":
+            document = {"projects": {str(workspace): document}}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(serialize_settings(document, format="json" if tool == "claude" else "toml"))
+    result = session_mcp_conflicts(
+        tool,
+        target.access(),
+        received(item),
+        home=str(target.home),
+        environment={},
+        workspace=spelling.format(workspace),
+    )
+    assert set(result) == (set() if equal else {item.identity})
+
+
+@pytest.mark.parametrize("tool", ["claude", "codex"])
+@pytest.mark.parametrize("spelling", ["{}/../project", "{}/pro\tject"])
+def test_stored_workspace_the_file_operations_cannot_address_defers_without_reading(
+    target, monkeypatch, tool, spelling
+):
+    def forbid_read(*args, **kwargs):
+        pytest.fail("an unaddressable workspace path was used to read a config")
+
+    monkeypatch.setattr(Files, "read", forbid_read)
+    result = session_mcp_conflicts(
+        tool,
+        target.access(),
+        received(mcp()),
+        home=str(target.home),
+        environment={},
+        workspace=spelling.format(target.home),
+    )
+    assert set(result) == {mcp().identity}
+
+
 @pytest.mark.parametrize("tool", ["claude", "codex"])
 def test_equal_native_entry_and_unrelated_entries_allow_private_invocation(target, tool):
     from pathlib import Path

@@ -21,10 +21,11 @@ from agentworks.capabilities.harness_integration.settings import (
     serialize_settings,
 )
 from agentworks.capabilities.harness_integration.setup import UserSetupInvocation, WorkspaceSetupInvocation
-from agentworks.errors import ConfigError, ConnectivityError, ExternalError
+from agentworks.errors import ConfigError, ConnectivityError, ExternalError, ValidationError
 from agentworks.execution.errors import PathRefused
 from agentworks.execution.files import guest_path
 from agentworks.harness_setup.model import NativeClaim
+from agentworks.workspaces.guest import addressable_workspace_path
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -157,7 +158,13 @@ def session_mcp_conflicts(
     environment: Mapping[str, str],
     workspace: str,
 ) -> dict[str, str]:
-    """Read fixed native roles before optional invocation overrides; never return config values."""
+    """Read fixed native roles before optional invocation overrides; never return config values.
+
+    ``workspace`` is the session's stored workspace path, read as the file
+    operations address it (``workspaces.guest.addressable_workspace_path``);
+    one they cannot address defers every MCP input like any other check that
+    cannot run safely.
+    """
     items = tuple(item for item in inputs.items() if item.content.type is ArtifactType.MCP_SERVER)
     if not items:
         return {}
@@ -167,8 +174,9 @@ def session_mcp_conflicts(
             item.identity: "The native launch target is unavailable for MCP configuration checks." for item in items
         }
     try:
+        root = addressable_workspace_path(workspace)
         user = resolve_mcp_user_path(tool, access, home=home, environment=environment)
-        project = guest_path(workspace) + ("/.mcp.json" if tool == "claude" else "/.codex/config.toml")
+        project = root + ("/.mcp.json" if tool == "claude" else "/.codex/config.toml")
         key = "mcpServers" if tool == "claude" else "mcp_servers"
         format: SettingsFormat = "json" if tool == "claude" else "toml"
         files = access.files()
@@ -178,7 +186,9 @@ def session_mcp_conflicts(
             tables = [_table(document, key)]
             if tool == "claude" and path == user:
                 projects = _table(document, "projects")
-                local = projects.get(workspace, {})
+                # Claude keys a project by the directory it runs in, whose
+                # spelling never has an empty or "." component.
+                local = projects.get(root, {})
                 if not isinstance(local, dict):
                     raise ConfigError("native MCP project config must use an object")
                 tables.append(_table(local, key))
@@ -189,7 +199,7 @@ def session_mcp_conflicts(
                     conflicts[item.identity] = (
                         "An existing native MCP entry differs; invocation delivery leaves it unchanged."
                     )
-    except (ConfigError, ConnectivityError, ExternalError, PathRefused):
+    except (ConfigError, ConnectivityError, ExternalError, PathRefused, ValidationError):
         return {
             item.identity: "Native MCP configuration could not be checked safely; invocation delivery is deferred."
             for item in items
