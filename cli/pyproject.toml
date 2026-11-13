@@ -31,6 +31,8 @@ dependencies = [
     # upper bound excludes a v3, which would be a re-litigation of that design
     # rather than a drop-in upgrade.
     "pydantic>=2.13.4,<3",
+    # Plugin annotations can carry the distinct backport alias runtime type.
+    "typing-extensions>=4.16.0",
     # PyYAML reads manifests. Nothing round-trips YAML any more: ruamel
     # was here only for the migrator's in-place rewrites, and tomlkit only
     # for its comment-preserving config.toml edits. Both went with it

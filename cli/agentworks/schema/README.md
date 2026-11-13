@@ -165,6 +165,9 @@ scalar/element fact to explanation and sample output. Scalar shorthand derives t
 target field. Invalid marker placement, including a resource or secret reference on the same value,
 is rejected at the model/registration boundary.
 
+Interpolation annotations hidden inside named type aliases are unsupported and rejected. Put the
+marker directly on the field or string element. Ordinary unmarked aliases remain valid.
+
 Consumers use the model-aware adapters in `agentworks.interpolation_fields`, selecting only
 applicable values and supplying their known context and owning field location. Unmarked values pass
 through literally. A component may continue to use its own literal contract without adopting the
