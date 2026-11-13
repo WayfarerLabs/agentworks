@@ -125,14 +125,14 @@ def _write_agentworks_profile(
     ``path_additions`` is empty) so that reinit can clear previously set
     paths or identity.
     """
-    # Deduplicate paths while preserving order
-    seen: set[str] = set()
-    unique_paths: list[str] = []
-    for path in path_additions:
-        p = path.replace("~", "$HOME", 1) if path.startswith("~") else path
-        if p not in seen:
-            seen.add(p)
-            unique_paths.append(p)
+    # Each export prepends, so retain the last equivalent path to preserve
+    # lookup precedence when declarations interleave paths such as A, B, A.
+    unique_paths = list(
+        dict.fromkeys(
+            path.replace("~", "$HOME", 1) if path.startswith("~") else path for path in reversed(path_additions)
+        )
+    )
+    unique_paths.reverse()
 
     logger.step("Shell profile")
     output.info(f"Writing agentworks profile ({output.count(len(unique_paths), 'PATH entry', 'PATH entries')})...")

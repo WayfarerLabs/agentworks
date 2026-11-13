@@ -76,7 +76,7 @@ def test_first_init_custom_commands_see_enabled_package_tools(
     target.run.side_effect = run
     target.write_file.side_effect = write_file
     entry = UserInstallCommandEntry(
-        name="custom", command="run-custom-probe", path=["~/.local/bin", "$HOME/.local/bin"]
+        name="custom", command="run-custom-probe", path=["~/custom/bin", "~/.local/bin", "$HOME/.local/bin"]
     )
     monkeypatch.setattr(
         "agentworks.resources.access.kind_dict",
@@ -165,3 +165,4 @@ def test_first_init_custom_commands_see_enabled_package_tools(
         check=True,
     )
     assert result.stdout.split(":").count(str(npm_bin)) == 1
+    assert result.stdout.split(":").index(str(npm_bin)) < result.stdout.split(":").index(str(tmp_path / "custom/bin"))

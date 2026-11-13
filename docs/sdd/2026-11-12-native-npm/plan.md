@@ -74,8 +74,8 @@ process.
 The operator's three-round allowance authorizes this batch. It began after the first handoff's
 one-hour feedback window, with PR #902 returned to draft before changing its head.
 
-- [x] Make the managed profile safe to source repeatedly, covering historical source spellings,
-      Bash startup chains, repeated final source repair, nested shells, and later profile rewrites.
+- [x] Make the managed profile safe to source repeatedly, covering historical source spellings, Bash
+      startup chains, repeated final source repair, nested shells, and later profile rewrites.
 - [x] Use the same home-relative npm bin spelling as custom commands and normalize the admin
       profile's home-relative paths before deduplication. Preserve existing lookup precedence.
 - [x] Resolve wrapper-provided npm to its CLI script and verify the isolated executable's version
