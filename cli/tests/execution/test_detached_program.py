@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from agentworks.execution import detached, detached_program
+from agentworks.execution.results import Completed, Result
 from tests.execution.conformance.lanes import python_interpreters, sudo_granted, unavailable
 
 if TYPE_CHECKING:
@@ -255,8 +256,9 @@ def test_launch_returns_once_the_payload_runs_and_work_sizes_are_observed(guest:
 def test_a_command_that_cannot_be_executed_reads_exited_with_a_process(guest: Guest) -> None:
     launch_id, launched = guest.launch(("/nonexistent/command",))
 
-    assert launched.returncode == 127
-    assert b"exec ENOENT" in launched.stderr
+    # What the client reads as its refusal code, from the program's real report.
+    reported = Result(Completed(launched.returncode), stderr=launched.stderr)
+    assert detached._exec_refusal(launched.returncode, reported) == "exec ENOENT"  # noqa: SLF001
     observed = guest.wait_until_ended(launch_id)
     assert (observed.state, observed.status) == (detached_program.EXITED, 127)
     assert (guest.directory(launch_id) / "process").exists()

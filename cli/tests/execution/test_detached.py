@@ -11,7 +11,13 @@ from agentworks.errors import ExternalError, ValidationError
 from agentworks.execution import detached_program
 from agentworks.execution.access import Admin
 from agentworks.execution.detached import Launch, Observation, State
-from agentworks.execution.errors import CommandFailed, DetachedRefused, ExecutionIncomplete, VMNotReady
+from agentworks.execution.errors import (
+    CommandFailed,
+    DetachedRefused,
+    ExecutionIncomplete,
+    RequestRefused,
+    VMNotReady,
+)
 from agentworks.execution.requests import Bytes, Command, NoInput, PythonProgram, Script, Shell, ToFile
 from agentworks.execution.results import Completed, NotDelivered, NotDeliveredReason, Result, Unknown, UnknownReason
 from tests.vm_access_support import RecordingVMAccess
@@ -144,9 +150,13 @@ def test_after_a_lost_connection_launch_raises_naming_the_id_unless_the_launch_i
         (Result(NotDelivered(NotDeliveredReason.LAUNCHER_FAILED)), ExecutionIncomplete),
         (Result(NotDelivered(NotDeliveredReason.PYTHON_MISSING)), VMNotReady),
         (Result(Completed(detached_program.EXIT_EXISTS)), DetachedRefused),
-        (Result(Completed(127)), CommandFailed),
+        (Result(Completed(127), stderr=b"exec ENOENT\n"), RequestRefused),
+        (Result(Completed(126), stderr=b"exec EACCES\n"), RequestRefused),
+        (Result(Completed(126), stderr=b"exec ENOENT\n"), CommandFailed),
+        (Result(Completed(127), stderr=b"\x1b[31mexec ENOENT; rm -rf\n"), CommandFailed),
+        (Result(Completed(1)), CommandFailed),
     ],
-    ids=["not-delivered", "no-python", "exists", "exec-failed"],
+    ids=["not-delivered", "no-python", "exists", "not-found", "not-executable", "mismatched", "not-a-code", "failed"],
 )
 def test_any_other_outcome_raises_at_once_with_no_follow_up(outcome: Result, error: type[Exception]) -> None:
     access = admin()

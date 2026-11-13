@@ -230,11 +230,12 @@ lock before it reads the status, since the supervisor writes the status before i
 
 The guest refuses an id whose directory exists (`DetachedRefused`), so a launch never adopts an
 earlier one's files or status, and each new launch removes sibling launches that are not running and
-are older than seven days. `launch` is never dispatched again: after a connection outcome it makes
-one `observe`, and returns if the launch is there; otherwise it raises `ExecutionIncomplete` naming
-the id. Resuming after a dropped connection is the caller's polling loop, since `observe` changes
-nothing. A caller holds the id from `new_launch` before anything is sent, so its `finally` can
-discard by id whatever `launch` did.
+are older than seven days. A command the guest cannot execute is `RequestRefused` with its `exec`
+code, as under `run`, and the launch reads `EXITED` with 127 or 126. `launch` is never dispatched
+again: after a connection outcome it makes one `observe`, and returns if the launch is there;
+otherwise it raises `ExecutionIncomplete` naming the id. Resuming after a dropped connection is the
+caller's polling loop, since `observe` changes nothing. A caller holds the id from `new_launch`
+before anything is sent, so its `finally` can discard by id whatever `launch` did.
 
 ## Client and policy
 

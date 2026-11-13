@@ -25,8 +25,10 @@ from typing import TYPE_CHECKING
 
 from agentworks.errors import ExternalError, ValidationError
 from agentworks.execution import detached_program, reachability
-from agentworks.execution.errors import CommandFailed, DetachedRefused, ExecutionIncomplete
+from agentworks.execution.agw_launch import refusal_status
+from agentworks.execution.errors import CommandFailed, DetachedRefused, ExecutionIncomplete, RequestRefused
 from agentworks.execution.requests import Bytes, Command, NoInput, PythonProgram
+from agentworks.execution.results import REFUSAL_CODE
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -41,6 +43,20 @@ INTERRUPT_DEADLINE = 30
 DISCARD_DEADLINE = 60
 
 _ID = re.compile(r"[0-9a-f]{32}")
+
+
+def _exec_refusal(status: int, result: Result) -> str | None:
+    """The ``exec`` refusal code ``launch`` reported, or ``None``.
+
+    A boundary: the code is guest output, so it counts only when it is an
+    ``exec`` code of the refusal grammar and its status is the one that code
+    maps to (127 for ``ENOENT``, 126 for the rest).
+    """
+    lines = result.stderr.decode("ascii", errors="replace").strip().splitlines()
+    code = lines[-1] if lines else ""
+    if code.startswith("exec ") and REFUSAL_CODE.fullmatch(code) and refusal_status(code) == status:
+        return code
+    return None
 
 
 def program_source() -> str:
@@ -109,7 +125,8 @@ class Detached:
         may or may not have reached the guest) is followed by one ``observe``:
         any state but ``ABSENT`` means it launched. ``ABSENT``, or a follow-up
         that does not complete either, raises ``ExecutionIncomplete`` naming
-        the id. An existing id is ``DetachedRefused``.
+        the id. An existing id is ``DetachedRefused``, and a command the guest
+        cannot execute is ``RequestRefused`` with the ``exec`` failure's code.
         """
         launch_id = self._checked(launch)
         # A boundary: plugins holding an admin access can call this directly.
@@ -136,6 +153,9 @@ class Detached:
         status = result.require_completed(self._access.vm_name)
         if status == detached_program.EXIT_EXISTS:
             raise DetachedRefused(self._access.vm_name, launch_id, running=False)
+        code = _exec_refusal(status, result)
+        if code is not None:
+            raise RequestRefused(self._access.vm_name, code, result)
         if status != 0:
             raise CommandFailed(self._access.vm_name, status, result, streams_logged=True)
 
