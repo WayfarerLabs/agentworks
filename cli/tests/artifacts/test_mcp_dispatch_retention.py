@@ -17,7 +17,6 @@ from agentworks.artifacts.model import (
     ArtifactOrigin,
     ArtifactProvenance,
 )
-from agentworks.artifacts.names import mcp_native_name
 from agentworks.artifacts.native.mcp import apply_mcp
 from agentworks.artifacts.routing import RoutingResult
 from agentworks.artifacts.state import CapturedArtifacts, read_captures, write_capture
@@ -120,9 +119,9 @@ def test_ancestor_claim_sources_are_retained_without_retaining_removed_local_def
         assert removed.origin_identity not in observed[0] and current.origin_identity not in observed[0]
         servers = parse_settings(path.read_bytes(), format="toml")["mcp_servers"]
         assert isinstance(servers, dict)
-        assert mcp_native_name(removed) not in servers
-        assert (mcp_native_name(ancestor) in servers) is (unavailable != "none")
-        current_entry = servers[mcp_native_name(current)]
+        assert removed.content.name not in servers
+        assert (ancestor.content.name in servers) is (unavailable != "none")
+        current_entry = servers[current.content.name]
         assert isinstance(current_entry, dict) and current_entry["command"] == "updated"
         assert {claim.source for claim in state.records[0].claims} == {current.origin_identity} | set(expected)
         assert read_captures(db, "agent", "fixture")["agent"].inputs == new_capture.inputs
@@ -131,5 +130,5 @@ def test_ancestor_claim_sources_are_retained_without_retaining_removed_local_def
         assert observed[-1] == frozenset() and failures == []
         assert {claim.source for claim in state.records[0].claims} == {current.origin_identity}
         remaining = parse_settings(path.read_bytes(), format="toml")["mcp_servers"]
-        assert isinstance(remaining, dict) and mcp_native_name(ancestor) not in remaining
+        assert isinstance(remaining, dict) and ancestor.content.name not in remaining
     assert not list((target.root / "tmp").iterdir())

@@ -20,7 +20,13 @@ its backend and resource budget.
 Workspace cases must include untracked shared-config exclusion, tracked-config visibility/warning,
 coexisting foreign keys, repeated rehome with current placement evidence and retained old copies.
 Removal must name the native server and disclose credential retention without a grant probe. Verify
-embedded MCP metadata remains rejected and bounded native names contain a readable key.
+embedded MCP metadata remains rejected and native names equal their full declared keys. Exercise
+adoption of a matching preexisting literal name and conflicts with an unowned literal name. Equal
+same-name inputs from separate original owners must share one entry without losing outcomes;
+different definitions must all defer while independent entries continue. Verify command-budget
+deferral retains every affected input. Exercise migration of recorded generated aliases, including
+modified/unclaimed protection and a foreign literal-key conflict. Separate native user/project roles
+retain native scope precedence.
 
 R11 belongs to phase 2: require native OAuth configuration and the agreed explicit auth workflow,
 actual authenticated MCP access, actual-user credential isolation, remote flow/cancellation,

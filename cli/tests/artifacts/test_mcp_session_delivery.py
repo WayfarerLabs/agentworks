@@ -9,7 +9,6 @@ from dataclasses import replace
 import pytest
 
 from agentworks.artifacts.model import ArtifactContent, ArtifactInput, ArtifactOrigin, ArtifactProvenance, ArtifactType
-from agentworks.artifacts.names import mcp_native_name
 from agentworks.plugins.claude import artifacts as claude
 from agentworks.plugins.codex import artifacts as codex
 from agentworks.plugins.grok import artifacts as grok
@@ -51,7 +50,7 @@ def test_claude_private_json_contains_static_refs_and_no_skill_plugin():
     assert file.path.startswith(current.directory + "/")
     assert file.origins == (item.origin_identity,)
     assert file.native_identity is None and file.package_root is None
-    server = json.loads(file.data)["mcpServers"][mcp_native_name(item)]
+    server = json.loads(file.data)["mcpServers"][item.content.name]
     assert server["args"] == ["--inventory"] and server["env"] == {"TOKEN": "${TOKEN}"}
     assert b"resolved-secret" not in file.data
     assert "--strict-mcp-config" not in result.argv
@@ -87,7 +86,7 @@ def test_codex_mcp_uses_complete_server_tables_and_static_environment_names():
     )
     assert result.application.files == () and not result.application.deferred
     assert result.argv and all(result.argv[index] == "-c" for index in range(0, len(result.argv), 2))
-    servers = [tomllib.loads(value)["mcp_servers"][mcp_native_name(item)] for value in result.argv[1::2]]
+    servers = [tomllib.loads(value)["mcp_servers"][item.content.name] for value in result.argv[1::2]]
     assert servers == [{"url": "https://mcp.example.test/path", "env_http_headers": {"X.Token": "TOKEN"}}]
     assert "resolved-secret" not in " ".join(result.argv)
     assert all(value.startswith("mcp_servers.") for value in result.argv[1::2])
@@ -106,12 +105,12 @@ def test_codex_conflicting_server_defers_only_that_entry():
     blocked, allowed = mcp(name="blocked"), mcp(name="allowed")
     result = codex.session_artifacts(
         context(blocked, allowed),
-        extra_args=["--config", f'mcp_servers.{mcp_native_name(blocked)}.command="operator"'],
+        extra_args=["--config", f'mcp_servers.{blocked.content.name}.command="operator"'],
         enabled_workarounds=["session-mcp-overrides"],
     )
     assert {entry.input_id for entry in result.application.deferred} == {blocked.identity}
-    assert mcp_native_name(allowed) in " ".join(result.argv)
-    assert mcp_native_name(blocked) not in " ".join(result.argv)
+    assert allowed.content.name in " ".join(result.argv)
+    assert blocked.content.name not in " ".join(result.argv)
 
 
 def test_codex_unrelated_raw_config_does_not_block_mcp():
@@ -147,7 +146,7 @@ def test_old_opt_in_never_claims_or_embeds_mcp(module, workaround):
     assert result.application.files
     assert {entry.input_id for entry in result.application.deferred} == {server.identity}
     assert all(server.origin_identity not in file.origins for file in result.application.files)
-    assert all(mcp_native_name(server).encode() not in file.data for file in result.application.files)
+    assert all(server.content.name.encode() not in file.data for file in result.application.files)
 
 
 def test_codex_vm_mcp_uses_user_placement_without_machine_files():
@@ -259,7 +258,7 @@ def test_start_rebinds_mcp_to_current_inputs_and_run_without_accumulating_argv(
     if module_name == "claude":
         assert first.directory + "/mcp.json" in a.command
     else:
-        assert mcp_native_name(server) in a.command
+        assert server.content.name in a.command
     second_server = replace(
         server,
         content=replace(
@@ -274,8 +273,7 @@ def test_start_rebinds_mcp_to_current_inputs_and_run_without_accumulating_argv(
     if module_name == "claude":
         assert second.directory + "/mcp.json" in b.command and first.directory + "/mcp.json" not in b.command
         assert (
-            json.loads(b.artifacts.files[0].data)["mcpServers"][mcp_native_name(server)]["command"]
-            == "replacement-server"
+            json.loads(b.artifacts.files[0].data)["mcpServers"][server.content.name]["command"] == "replacement-server"
         )
         assert b.command.count("--mcp-config") == 1
     else:
@@ -320,4 +318,4 @@ def test_codex_modeled_profile_remains_usable_with_optional_mcp_deferred(monkeyp
     )
     assert {entry.input_id for entry in result.artifacts.deferred} == {item.identity}
     assert "--profile operator" in result.command or "-p operator" in result.command
-    assert mcp_native_name(item) not in result.command
+    assert item.content.name not in result.command

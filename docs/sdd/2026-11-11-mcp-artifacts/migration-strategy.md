@@ -40,9 +40,9 @@ enum before adapter handling cannot land as a working partial release.
 An existing user selects bundle `base` containing one rule. Its stored v3 capture, declaration hash,
 user placement and handled routing remain valid after upgrade. The operator adds `mcp_servers.docs`
 to `base`. Inspection identifies changed prepared input; it never acquires the source or repairs the
-user. The normal user reinit captures a v4 group and adds a qualified native server entry. A later
-removal retires only that unchanged owned entry. An edited obsolete entry stays in place with a
-warning and retry evidence. Other user settings and OAuth state remain.
+user. The normal user reinit captures a v4 group and adds native server `docs`. A later removal
+retires only that unchanged owned entry. An edited obsolete entry stays in place with a warning and
+retry evidence. Other user settings and OAuth state remain.
 
 An existing workspace with no MCP remains usable without rebuilding. A workspace that needs new
 workspace-scoped MCP registration follows the currently supported create/recreate workflow; this
@@ -62,9 +62,9 @@ run with the version that provisioned the entries before an operator elects to d
 existing unknown-state behavior remains intact.
 
 Settings mappings and existing hand-written MCP entries remain visible foreign content unless an
-identical desired registration is adopted. Derived names reduce collisions without claiming that
-native endpoint deduplication or cross-harness discovery cannot occur. A conflicting explicit
-mapping at a managed key is diagnosed before canonical mutation, with no new broad settings ban.
+identical desired registration is adopted under its declared name. Native user/project loading and
+precedence apply across separate config roles. A conflicting explicit mapping at a managed key is
+diagnosed before canonical mutation, with no new broad settings ban.
 
 ## Verification
 
@@ -73,3 +73,23 @@ unchanged four-type placement, known-empty routing and existing-workspace startu
 entry creation/adoption/update/removal/conflict/partial-progress paths and settings strategies.
 Downgrade limits and native formatting changes belong in permanent operator teaching alongside the
 implementation.
+
+## Declared-name correction, 2026-11-13
+
+PR 888 wrote generated native names of the form `agentworks-<key-prefix>-<origin-digest-prefix>`.
+The operator directed using the specified name with standard adoption semantics. Captures,
+original-owner/input identities and their version remain unchanged; only native registration names
+change.
+
+On the next owning reinit, ordinary obsolete-entry reconciliation removes a recorded old alias only
+when its saved fingerprint matches the current entry. The same document plan creates or adopts the
+literal declared key. A modified alias remains recorded and warns; an unclaimed alias is foreign
+content and is never removed because of its spelling. If a different unowned literal entry prevents
+replacement, retain that entry and defer the requested artifact. An unchanged obsolete alias still
+retires in that case. Explicit settings mappings keep their existing authority and policy.
+
+Native credentials are untouched; a native client may associate credentials or approvals with the
+old name and require operator review when the name changes. Private session carriers use literal
+names on the next managed start/restart. Existing outer registrations need owning setup to apply the
+change; there is no automatic ancestor repair or new workspace reinit operation. Rollback does not
+rewrite native registrations or credentials automatically.

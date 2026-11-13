@@ -355,11 +355,13 @@ Native-home overrides follow the actual user's native conventions. In particular
 publishes canonical `mcp_servers/<name>.json` files beneath its normal scope directory, including
 `/opt/agentworks/artifacts/` at VM scope. Shell does not connect or launch servers.
 
-Native server names use `agentworks-<key-prefix>-<origin-digest-prefix>`. The readable prefix uses
-up to 24 key characters, with 20 digest characters qualifying the original owner, artifact type and
-full key. Equal names from different scopes remain distinct. Names stay stable across content
-changes, bundle changes and workspace rehome. Native endpoint deduplication or policy can still
-affect which connections a harness exposes; registration alone makes no availability guarantee.
+The declared map key is the native server name: `mcp_servers.github` registers `github`, with no
+prefix, truncation or suffix. Original-owner identities remain internal provenance. Separate native
+user/project configurations follow the harness's normal loading and precedence rules; use different
+names when both connections must remain independently addressable. If multiple original scopes
+deliver the same name to one destination, equal native definitions share one entry. Different
+definitions are all deferred with a warning while independent names continue. Native policy can
+still affect discovery; registration alone makes no availability guarantee.
 
 User/workspace application manages an entry inside a shared document. An absent entry is created; an
 identical unowned entry is adopted. A matching recorded fingerprint permits an owned update. A

@@ -478,3 +478,46 @@ before the public handoff; its comment records their actual outcome.
 
 The earlier integration report's missing managed resume evidence remains owed. Conflict resolution
 does not satisfy R6, complete phase 1, ship OAuth or justify the MCP SDD lock.
+
+## Declared MCP names, 2026-11-13
+
+The operator directed: "fix the mcp implementation to drop the unique naming approach and just use
+the specified name with standard adoption semantics. use our agentic dev process. i authorize up to
+2 PR feedback/fix cycles if needed."
+
+Use a new focused correction PR from main `bb040c3d`. The open MCP SDD still governs; neither locked
+predecessor is amended and OAuth remains a later implementation. The previous registration
+[integration report](https://github.com/WayfarerLabs/agentworks/pull/888#issuecomment-6817058957)
+and [post-merge report](https://github.com/WayfarerLabs/agentworks/pull/888#issuecomment-6830247771)
+are clean within their stated source, version and mode limits. They used the former generated names;
+their observations do not establish acceptance of this correction.
+
+This supersedes the registration phase's generated-name policy; earlier checked tasks remain
+historical records.
+
+The declared key becomes the native name everywhere, including invocation carriers and inspection.
+Existing claims and expected-content writes retain standard creation, equal-entry adoption, owned
+updates and foreign/modified-entry protection. Ordinary obsolete-claim retirement removes unchanged
+recorded generated aliases on owning setup. It does not delete unclaimed aliases by prefix or move
+native auth state. An unchanged old alias still retires if a foreign literal key blocks replacement.
+
+Multiple equal same-name inputs delivered to one destination share its ordinary entry/claim while
+retaining all original input outcomes. Differing definitions all defer and preserve prior evidence;
+independent names continue. Native user/project roles remain separate and follow normal native
+loading and precedence. The lead proposed this existing-behavior default in an optional operator
+clarification and proceeded with it; no new global cross-scope inventory or ownership mechanism is
+claimed.
+
+- [x] Remove generated MCP naming and retain literal keys in shared native and session delivery,
+      inspection and existing regression fixtures.
+- [x] Cover literal-key adoption, owned updates, foreign conflicts, equal/differing input groups,
+      complete-command deferral attribution and recorded-alias migration with meaningful tests.
+- [x] Update requirements, architecture, LLD, acceptance, migration and permanent operator teaching
+      for literal keys and the existing cleanup/native-scope behavior.
+- [ ] Complete required gates, installed-package guidance checks and independent project, Muntz and
+      generic correctness reviews; preserve failures and verify owned cleanup.
+- [ ] Publish the complete green correction with exact-head CI and a scoped ready handoff, without
+      `review-requested`. Monitor the independent pipeline and critically assess feedback; at most
+      two operator-authorized feedback/fix cycles follow the initial handoff.
+
+No automatic merge, MCP SDD lock, artifact-probe fixes or unrelated Typer work is included.
