@@ -568,7 +568,7 @@ item identify the same missing identifier-retention regression; the current guar
       independent progress and repeat setup; prove it distinguishes the identifier guard.
 - [x] Cover combined persona/MCP carrier-size reduction and raw literal-name overrides for equal
       inputs. Report saved adoption and correct the small naming/teaching nits.
-- [ ] Complete the bound private project, Muntz and generic correctness lanes, required gates and
+- [x] Complete the bound private project, Muntz and generic correctness lanes, required gates and
       installed-package checks; retain original failures and verify owned cleanup.
 - [ ] Publish the exact green head with CI and a scoped ready handoff, then obtain and critically
       assess the next independent report. One further authorized round remains afterward.
@@ -619,3 +619,12 @@ wheel/archive/install, dependency consistency, four installed guide renders, hel
 source/wheel/installation parity passed, with 1,111 archive members and no profile state created.
 The documentation formatting correction receives rebuilt package checks because it changes packaged
 guide bytes; it does not change the tested Python implementation.
+
+At `9c0fbe3b`, corrected file lint, locked-SDD and diff checks all pass. Rebuilt frozen package
+checks also pass: 504 matching source/wheel/installed members, 1,111 archive files, four installed
+guide renders, dependency consistency, help and an untouched empty profile. The tested Python bytes
+remain unchanged from `f4751929`. The lead independently found the reported review/worker fixtures,
+environments and caches absent; full reports and original failed setup/formatting/mutation records
+remain retained. Final private record follow-ups, exact-head CI and the ready transition are checked
+before the public handoff. The corrected native ownership sequence still needs the next actual
+independent integration report; one authorized fix round remains.
