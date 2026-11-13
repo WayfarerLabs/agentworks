@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import shlex
+import shutil
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -35,13 +36,24 @@ def access_user():
     return candidates[0]
 
 
-def bind_access_group(monkeypatch, native: NativeTarget, members: str, *, lookup_exit: int = 0):
+def bind_access_group(
+    monkeypatch, native: NativeTarget, members: str, *, lookup_exit: int = 0, shell: str | None = None
+):
     """Control NSS enumeration without creating users or changing real groups."""
     native_run = native.run
     lookup = f"printf '%s\\n' {shlex.quote('fixture:x:1000:' + members)}; return {lookup_exit}"
+    executable = shutil.which(shell) if shell is not None else None
+    if shell is not None and executable is None:
+        pytest.skip(f"requires {shell}")
 
     def run(command, **kwargs):
-        return native_run(f"getent() {{ {lookup}; }}; {command}", **kwargs)
+        payload = f"getent() {{ {lookup}; }}; {command}"
+        if executable is not None:
+            # Exercise filename expansion even when zsh's default omits it.
+            prefix = "setopt GLOB_SUBST; " if shell == "zsh" else ""
+            options = "-f -c" if shell == "zsh" else "-c"
+            payload = f"{shlex.quote(executable)} {options} {shlex.quote(prefix + payload)}"
+        return native_run(payload, **kwargs)
 
     monkeypatch.setattr(native, "run", run)
     monkeypatch.setattr(tmux, "_grant_server_access", _GRANT_ACCESS)
@@ -213,12 +225,15 @@ def test_present_empty_group_needs_no_access_mutation(monkeypatch, native):
 
 
 @pytest.mark.parametrize("include_member", [False, True])
-def test_intrinsic_root_and_owner_access_converges_without_acl_errors(monkeypatch, native, access_user, include_member):
+@pytest.mark.parametrize("shell", ["sh", "zsh"])
+def test_intrinsic_root_and_owner_access_converges_without_acl_errors(
+    monkeypatch, native, access_user, include_member, shell
+):
     import pwd
 
     owner = pwd.getpwuid(os.geteuid()).pw_name
     members = f"root,{owner}" + (f",{access_user}" if include_member else "")
-    bind_access_group(monkeypatch, native, members)
+    bind_access_group(monkeypatch, native, members, shell=shell)
     launch(native, "sleep 120", is_admin=False)
     before_access = native.native("server-access -l").stdout.splitlines()
     fingerprint = _NATIVE_CAPTURE(target=native, socket_path=native.socket).fingerprint
@@ -235,12 +250,16 @@ def test_intrinsic_root_and_owner_access_converges_without_acl_errors(monkeypatc
         assert _NATIVE_CAPTURE(target=native, socket_path=native.socket).fingerprint == fingerprint
 
 
-@pytest.mark.parametrize("failure", ["owner", "member"])
+@pytest.mark.parametrize("failure", ["caller", "member"])
 def test_failed_uid_lookup_does_not_report_successful_access(monkeypatch, native, access_user, failure):
     bind_access_group(monkeypatch, native, access_user)
     launch(native, "sleep 120", is_admin=False)
     before_access = native.native("server-access -l").stdout
-    lookup = "return 49" if failure == "owner" else 'if [ "$#" -gt 1 ]; then return 49; fi; command id "$@"'
+    lookup = (
+        'if [ "$#" -eq 1 ]; then return 49; fi; command id "$@"'
+        if failure == "caller"
+        else 'if [ "$#" -gt 1 ]; then return 49; fi; command id "$@"'
+    )
 
     def run(command, **kwargs):
         return native.run(f"id() {{ {lookup}; }}; {command}", **kwargs)
@@ -249,6 +268,36 @@ def test_failed_uid_lookup_does_not_report_successful_access(monkeypatch, native
         _GRANT_ACCESS(run, native.socket)
 
     assert native.native("server-access -l").stdout == before_access
+
+
+@pytest.mark.parametrize("member_case", ["--", "-r", "*", "whitespace"])
+@pytest.mark.parametrize("shell", ["sh", "zsh"])
+def test_unknown_member_is_a_literal_identity_without_acl_mutation(
+    monkeypatch, native, access_user, member_case, shell
+):
+    import pwd
+
+    member = f" {access_user} " if member_case == "whitespace" else member_case
+    with pytest.raises(KeyError):
+        pwd.getpwnam(member)
+    bind_access_group(monkeypatch, native, member, shell=shell)
+    launch(native, "sleep 120", is_admin=False)
+    before_access = native.native("server-access -l").stdout
+    fingerprint = _NATIVE_CAPTURE(target=native, socket_path=native.socket).fingerprint
+    assert fingerprint is not None
+    directory = native.root / "operands"
+    directory.mkdir()
+    (directory / access_user).touch()
+
+    def run(command, **kwargs):
+        return native.run(f"cd {shlex.quote(str(directory))}; {command}", **kwargs)
+
+    with pytest.raises(ExternalError):
+        _GRANT_ACCESS(run, native.socket)
+
+    assert native.native("server-access -l").stdout == before_access
+    assert _NATIVE_CAPTURE(target=native, socket_path=native.socket).fingerprint == fingerprint
+    assert tmux._probe_pane_liveness("s1", run_command=native.run, socket_path=native.socket)[0] == "alive"
 
 
 def test_intrinsic_access_does_not_hide_workload_death_after_grant(monkeypatch, native):

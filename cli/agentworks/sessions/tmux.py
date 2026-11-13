@@ -591,14 +591,17 @@ def _grant_server_access(
     """
     q_sock = shlex.quote(socket_path)
     grp = shlex.quote(AGENT_SOCKET_GROUP)
+    # Command substitution applies comma splitting in both POSIX shells and zsh.
     run_command(
         f"agw_socket_group=$(getent group {grp}) || exit $?; "
-        "agw_socket_owner_uid=$(id -u) || exit $?; "
-        "for u in $(printf '%s' \"$agw_socket_group\" | cut -d: -f4 | tr ',' ' '); do "
-        'agw_socket_member_uid=$(id -u "$u") || exit $?; '
+        "agw_socket_caller_uid=$(id -u) || exit $?; "
+        "agw_socket_members=${agw_socket_group##*:}; "
+        "set -o noglob || exit $?; IFS=,; "
+        "for u in $(printf '%s' \"$agw_socket_members\"); do "
+        'agw_socket_member_uid=$(id -u -- "$u") || exit $?; '
         'if [ "$agw_socket_member_uid" = 0 ] || '
-        '[ "$agw_socket_member_uid" = "$agw_socket_owner_uid" ]; then continue; fi; '
-        f'tmux -S {q_sock} server-access -w "$u" || exit $?; done',
+        '[ "$agw_socket_member_uid" = "$agw_socket_caller_uid" ]; then continue; fi; '
+        f'tmux -S {q_sock} server-access -w -- "$u" || exit $?; done',
     )
 
 
