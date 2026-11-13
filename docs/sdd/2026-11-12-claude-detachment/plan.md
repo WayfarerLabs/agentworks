@@ -27,3 +27,7 @@ validation evidence before the next handoff.
 Round 1's warning/schema corrections and behavioral regressions were implemented at `835861d1d` and
 validated locally, including the full suite and all three private review lanes. Its ready handoff
 and remaining publication duties continue in the PR record above.
+
+Round 2's independent-candidate correction and four added cases were implemented at `1d92957f3` and
+validated locally through the full suite and all three private lanes. Warning policy remains the
+accepted requirement; the next handoff and external gates continue in the PR record.

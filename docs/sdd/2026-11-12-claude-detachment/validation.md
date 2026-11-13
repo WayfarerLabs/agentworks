@@ -163,3 +163,41 @@ The initial ready head's separate integration-test lane withdrew without startin
 returned to draft; that report supplies no merge clearance. Its next ready transition starts a fresh
 cycle. Final closeout review, pushed-head handoff, CI, external validation and required team
 approval remain recorded by the PR workflow; these local results do not claim those duties finished.
+
+## PR feedback round 2, 2026-11-13
+
+The next review confirmed closure of both earlier material findings and identified one candidate
+omission at `f7be90d23`. A parked-job candidate prevented the fallback scan from discovering a
+different continuation buried before the transcript tail. Both versions refused launch and preserved
+the pin, but the recovery hint omitted the buried continuation UUID. Independent actual login-shell
+probes reproduced tail-plus-parked (two candidates), buried-only (one), and buried-plus-parked
+(incorrectly one). The minimum correction returned both in the last case without changing the other
+results or the one-roundtrip contract.
+
+The one-hour collection minimum elapsed at 22:09:40 UTC. No additional integration findings or
+status response had been published after the status check at 22:01; external validation remains
+pending rather than being counted as clearance. Draft state was confirmed at 22:10:06 before edits.
+This is round 2 of the existing three-round allowance. Main remained `3ad615680`.
+
+Implementation `1d92957f3` removes only the parked-candidate condition from the fallback decision.
+The existing independence test now covers tail and buried continuations; it produced one pass and
+one failure against the prior source, then passed after correction. Extra cases cover a
+string-valued parked-job list and a forced background conversation with no transcript emitting only
+the force warning. A leftover mapping local is removed. The accepted warning policy and FRD are
+unchanged.
+
+The architecture and prior-art notes now state the actual cost boundary: a tail continuation can
+avoid reading the full transcript, while ordinary history and buried continuations require a full
+scan in addition to the initial tail read. The retained path is bounded in memory; no claim is made
+that it saves reads on ordinary pointer-free restarts.
+
+Focused tests passed 216 cases; Mypy passed across 1,041 files. The complete suite passed 13,273
+tests, with 35 skipped and 15 nested test cases, exit 0. All three private source lanes cleared
+`1d92957f3`, independently passing 216 affected tests each. Reintroducing the scan shortcut,
+removing the list check and bypassing the forced guard made all four added cases fail; restoring the
+source passed all four.
+
+Ruff lint/format, repository lint, rulesync drift, locked-SDD protection and Typer isolation pass.
+Website Python and Node runs passed 160/103 tests, and both deterministic double builds passed.
+Final closeout review, pushed-head handoff, CI, external validation and required team approval are
+tracked by the PR workflow. These local results do not supply external integration clearance.

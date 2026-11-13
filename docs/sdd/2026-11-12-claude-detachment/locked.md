@@ -16,3 +16,7 @@ Publication: [PR 905](https://github.com/WayfarerLabs/agentworks/pull/905), init
 warning clarity, unused metadata and behavioral coverage at implementation `835861d1d`. Its final
 validation and review evidence belongs in `validation.md`; ready handoff and approval remain the
 PR's operational record.
+
+Round 2: implementation `1d92957f3` fixes the independent-candidate fallback and qualifies the tail
+cost model. Its full-suite and private-review evidence is in `validation.md`. No requirement was
+amended. PR 905 remains the delivery and external-approval record.
