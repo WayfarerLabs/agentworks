@@ -105,12 +105,18 @@ def run_section(db: Database, monkeypatch: pytest.MonkeyPatch) -> Callable[..., 
     monkeypatch.setattr("agentworks.vms.sites.site_platform_name", lambda site, registry: "lima")
     kinds: dict[str, dict[str, Any]] = {
         "system-install-command": {
-            "sys-tool": SystemInstallCommandEntry(name="sys-tool", description="", command="install-sys-tool")
+            "sys-tool": SystemInstallCommandEntry(name="sys-tool", description="", command="install-sys-tool"),
+            "sys-broken": SystemInstallCommandEntry(
+                name="sys-broken", description="", command="install-sys-broken", path=["/opt/sys-broken/bin"]
+            ),
         },
         "user-install-command": {
             "user-tool": UserInstallCommandEntry(
                 name="user-tool", description="", command="install-user-tool", path=["/opt/user-tool/bin"]
-            )
+            ),
+            "user-broken": UserInstallCommandEntry(
+                name="user-broken", description="", command="install-user-broken", path=["/opt/user-broken/bin"]
+            ),
         },
     }
     registry: Any = MagicMock()
@@ -122,13 +128,14 @@ def run_section(db: Database, monkeypatch: pytest.MonkeyPatch) -> Callable[..., 
         guest: Guest,
         admin: AdminConfig | None = None,
         operation: driver.VMInitializationOperation = driver.VMInitializationOperation.VM_REINIT,
+        system_install_commands: tuple[str, ...] = ("sys-tool",),
     ) -> None:
         log: Any = guest.log
         driver._phase_b_setup(
             db,
             config,
             registry,
-            ResolvedVMTemplate(name="default", apt=["jq"], system_install_commands=["sys-tool"]),
+            ResolvedVMTemplate(name="default", apt=["jq"], system_install_commands=list(system_install_commands)),
             admin or AdminConfig(user_install_commands=["user-tool"]),
             "box",
             guest.files,
@@ -250,6 +257,37 @@ def test_on_a_first_create_the_user_install_commands_profile_holds_mise_s_shims_
     assert exports == [f'export PATH="{HOME}/.local/share/mise/shims:$PATH"', 'export PATH="/opt/user-tool/bin:$PATH"']
     # Written once, so a steady reinit does not rewrite it after the install commands.
     assert not any(_is_write_of(PROFILE)(request) for request in requests[install:])
+
+
+@pytest.mark.parametrize("failing", [True, False], ids=["failures", "no-failure"])
+def test_a_failed_install_command_s_paths_leave_the_admin_s_profile(
+    run_section: Callable[..., None], failing: bool
+) -> None:
+    """A failed system command never reaches the profile; a failed user command leaves it after the batch."""
+    guest = Guest()
+    if failing:
+        for command in ("install-sys-broken", "install-user-broken"):
+            guest.fail(
+                _is(install_run("bash", command)), CommandFailed("box", 1, Result(Completed(1)), streams_logged=True)
+            )
+
+    run_section(
+        guest,
+        AdminConfig(user_install_commands=["user-tool", "user-broken"]),
+        system_install_commands=("sys-tool", "sys-broken"),
+    )
+
+    writes = [_written(request) for request in guest.access.requests() if _is_write_of(PROFILE)(request)]
+    if not failing:
+        (only,) = writes
+        assert "/opt/sys-broken/bin" in only and "/opt/user-broken/bin" in only
+        assert guest.log.warned == []
+        return
+    first, last = writes
+    assert "/opt/sys-broken/bin" not in first and "/opt/user-broken/bin" in first
+    assert "/opt/sys-broken/bin" not in last and "/opt/user-broken/bin" not in last
+    assert "/opt/user-tool/bin" in last
+    assert len(guest.log.warned) == 2
 
 
 def test_the_admin_writes_its_fragments_first_and_ensures_their_lines_around_its_install_commands(
