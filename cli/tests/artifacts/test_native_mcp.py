@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import grp
 import json
 import os
 import stat
@@ -173,6 +172,8 @@ def test_retirement_retains_modified_and_unavailable_ancestor_entries(transport,
 @pytest.mark.parametrize("case", ["new-user", "existing", "new-workspace"])
 def test_mcp_publication_modes_follow_the_owner(transport, case):
     """A new file is private to a user or shared with a workspace group; an existing file keeps its mode."""
+    import grp
+
     group = grp.getgrgid(os.getgid()).gr_name
     root = transport.home if case != "new-workspace" else transport.root / "project"
     path = root / ".codex/config.toml"
