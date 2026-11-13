@@ -117,10 +117,15 @@ def _lock_held(directory: str) -> bool | None:
 
 
 def _read_status(directory: str) -> int | None:
+    """The recorded status, or ``None`` when there is none or it is unreadable.
+
+    The file persists across executions (a crash or a full disk can leave
+    it empty or truncated), so anything that is not a status counts as none.
+    """
     try:
-        with open(os.path.join(directory, "status")) as recorded:
+        with open(os.path.join(directory, "status"), "rb") as recorded:
             return int(recorded.read())
-    except FileNotFoundError:
+    except (FileNotFoundError, ValueError):
         return None
 
 
@@ -203,8 +208,8 @@ def _prune(base: str, keep: str) -> None:
                 continue
             if _state(path)[0] != RUNNING:
                 shutil.rmtree(path)
-        except OSError:
-            continue  # best effort: the next launch looks again
+        except (OSError, ValueError):
+            continue  # best effort, and never a reason to fail this launch: the next launch looks again
 
 
 def _launch(base: str, directory: str) -> int:
@@ -305,6 +310,7 @@ def _write_status(directory: str, status: int) -> None:
     descriptor = os.open(partial, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_CLOEXEC, 0o600)
     try:
         os.write(descriptor, f"{status}\n".encode("ascii"))
+        os.fsync(descriptor)  # durable before the rename publishes it
     finally:
         os.close(descriptor)
     os.rename(partial, os.path.join(directory, "status"))

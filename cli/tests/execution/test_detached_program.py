@@ -377,6 +377,23 @@ def test_a_launch_prunes_old_launches_that_are_not_running(guest: Guest) -> None
     assert remaining == {running, young, newest}
 
 
+def test_an_empty_status_reads_lost_and_never_breaks_a_later_launch(guest: Guest) -> None:
+    old = time.time() - detached_program.PRUNE_AGE_SECONDS - 60
+    observed_id, _ = guest.launch(("true",))
+    sibling, _ = guest.launch(("true",))
+    for launch_id in (observed_id, sibling):
+        guest.wait_until_ended(launch_id)
+        (guest.directory(launch_id) / "status").write_bytes(b"")
+    os.utime(guest.directory(sibling), (old, old))
+
+    newest, launched = guest.launch(("true",))
+
+    assert launched.returncode == 0, launched.stderr
+    assert guest.wait_until_ended(newest).state == detached_program.EXITED
+    assert not guest.directory(sibling).exists()
+    assert guest.observe(observed_id).state == detached_program.LOST
+
+
 # -- Interrupt and discard (I82) ---------------------------------------------------------
 
 
