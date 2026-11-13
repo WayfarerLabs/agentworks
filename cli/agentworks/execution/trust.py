@@ -151,7 +151,9 @@ def option_value(path_text: str) -> str:
     list of files) and reads ``'`` as a quote, so a path with either is wrapped
     in double quotes to stay one literal value. Any other path stays bare:
     quoting it gains nothing, and the ssh shipped with Git for Windows rejects a
-    quoted value without whitespace with ``invalid quotes``. Every path written
+    quoted value without whitespace with ``invalid quotes``. A path with an
+    apostrophe and no whitespace has no form both accept, so that client still
+    refuses one; the execution core never runs that client. Every path written
     into an option goes through here, for the ``-o`` arguments and the managed
     SSH config entries alike. Callers pass :func:`literal_path` output, so
     ``path_text`` holds no double quote that could end the quoting early.

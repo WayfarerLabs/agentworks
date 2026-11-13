@@ -57,7 +57,7 @@ them:
 | `tests/vm_access_support.py`                     | `RecordingVMAccess`                                                                                               |
 
 `trust.py` makes `_literal_path` (`trust.py:122`) public as `literal_path(path, what)`, so the VM
-policy quotes the identity file by the same rules as the store path and its refusal names what it
+policy checks the identity file by the same rules as the store path, and its refusal names what it
 was refusing.
 
 ## The proof modules

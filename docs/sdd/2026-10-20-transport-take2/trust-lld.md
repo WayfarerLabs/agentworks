@@ -68,8 +68,9 @@ is only useful to a client that can connect.
   than adding a third copy.
 - **Path quoting.** Option values follow the proof's `_literal_path` rules
   (`execution/carriers/ssh/connection.py:19` at `fd1256b1f`): an absolute path, forward slashes on
-  Windows, and a refusal of `%`, `$`, `"`, backslash and control characters. The path is always
-  double-quoted. A home directory that breaks those rules is a `ConfigError` naming the path.
+  Windows, and a refusal of `%`, `$`, `"`, backslash and control characters. The path is written
+  bare, and double-quoted only when it holds whitespace or an apostrophe (`trust.option_value`). A
+  home directory that breaks those rules is a `ConfigError` naming the path.
 
 ## Trust modes and options
 
@@ -238,8 +239,8 @@ existing ones:
 The store path is written bare, and quoted only when it holds whitespace or an apostrophe
 (`trust.option_value`).
 
-(`NUL` replaces `/dev/null` on Windows.) An unreadable record or an unsafe store path for one VM
-warns and omits that VM's block; it never aborts the rebuild for the others.
+(`NUL` replaces `/dev/null` on Windows.) An unreadable record for one VM warns and omits that VM's
+trust lines; an unsafe store directory does the same for every VM. Neither aborts the rebuild.
 
 The pins match `ssh_options`: the operator's own `ssh` consults only the store for the alias, never
 writes to it, and never hashes it. Entries for a VM without a record stay unchanged until slice 8
