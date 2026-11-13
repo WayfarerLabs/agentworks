@@ -264,6 +264,26 @@ def test_a_command_that_cannot_be_executed_reads_exited_with_a_process(guest: Gu
     assert (guest.directory(launch_id) / "process").exists()
 
 
+def test_a_launching_process_that_dies_after_the_fork_leaves_the_payload_to_finish(guest: Guest) -> None:
+    # The launching process exits the moment it has forked, as a dropped connection can end it.
+    patch = (
+        "import os\n"
+        "_fork = os.fork\n"
+        "def fork():\n"
+        "    pid = _fork()\n"
+        "    if pid:\n"
+        "        os._exit(9)\n"
+        "    return pid\n"
+        "os.fork = fork\n"
+    )
+
+    launch_id, launched = guest.launch(("sh", "-c", "sleep 0.5; exit 7"), patch=patch)
+
+    assert launched.returncode == 9
+    observed = guest.wait_until_ended(launch_id)
+    assert (observed.state, observed.status) == (detached_program.EXITED, 7)
+
+
 # -- States ------------------------------------------------------------------------------
 
 

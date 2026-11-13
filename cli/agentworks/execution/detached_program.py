@@ -248,8 +248,19 @@ def _launch(base: str, directory: str) -> int:
 
 
 def _supervise(directory: str, spec: tuple[list[str], dict[str, str]], lock: int, report: int) -> None:
-    """The supervisor: its own session, nothing of the connection held; starts the payload and records its status."""
+    """The supervisor: its own session, nothing of the connection held; starts the payload and records its status.
+
+    It outlives the launching process whenever that one dies first, so a
+    report it can no longer deliver is not a failure, and the operation's
+    signal handlers are not its own. They go back to the default rather
+    than to ignored: ``Popen`` would hand an ignored disposition on to the
+    payload, which would then ignore ``interrupt``'s ``SIGTERM``.
+    """
+    import signal
+
     os.setsid()
+    signal.signal(signal.SIGHUP, signal.SIG_DFL)
+    signal.signal(signal.SIGTERM, signal.SIG_DFL)
     null = os.open(os.devnull, os.O_RDWR)
     for descriptor in (0, 1, 2):
         os.dup2(null, descriptor)
@@ -276,13 +287,15 @@ def _supervise(directory: str, spec: tuple[list[str], dict[str, str]], lock: int
         # The status first and then ``process``, so a recorded status always has a ``process``.
         _write_status(directory, 127 if error.errno == errno.ENOENT else 126)
         os.rename(os.path.join(directory, "process.new"), os.path.join(directory, "process"))
-        os.write(report, f"exec {errno.errorcode.get(error.errno or 0, 'EIO')}".encode("ascii"))
+        with contextlib.suppress(OSError):  # the launching process may be gone
+            os.write(report, f"exec {errno.errorcode.get(error.errno or 0, 'EIO')}".encode("ascii"))
         return
     os.close(output)
     os.write(lock, f"{payload.pid}\n".encode("ascii"))
     os.rename(os.path.join(directory, "process.new"), os.path.join(directory, "process"))
-    os.write(report, b"started")
-    os.close(report)
+    with contextlib.suppress(OSError):  # the launching process may be gone; the payload runs on
+        os.write(report, b"started")
+        os.close(report)
     returncode = payload.wait()
     _write_status(directory, 128 - returncode if returncode < 0 else returncode)
 
