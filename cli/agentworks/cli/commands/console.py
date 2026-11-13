@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal
 
-import click
 import typer
 
 from agentworks import output
@@ -16,6 +15,7 @@ from agentworks.cli._helpers import (
     parse_csv_sort,
     prompt_vm,
 )
+from agentworks.db import DesiredRuntimeState  # noqa: TC001 (Typer resolves annotations at runtime)
 from agentworks.machine_output import OutputFormat
 
 console_app = typer.Typer(
@@ -24,8 +24,6 @@ console_app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(console_app)
-
-_DESIRED_STATE_CHOICES = click.Choice(["running", "stopped"])
 
 
 @console_app.command("create")
@@ -247,8 +245,8 @@ def console_attach(
 def console_set_desired_state(
     name: Annotated[str, typer.Argument(help="Console name")],
     state: Annotated[
-        str,
-        typer.Argument(help="Desired runtime state", click_type=_DESIRED_STATE_CHOICES),
+        Literal[DesiredRuntimeState.RUNNING, DesiredRuntimeState.STOPPED],
+        typer.Argument(help="Desired runtime state"),
     ],
 ) -> None:
     """Set the stored runtime target without changing the running state."""
@@ -340,6 +338,7 @@ def console_add_sessions(
         int | None,
         typer.Option(
             "--to-index",
+            parser=int,
             help="Start the new sessions at this zero-based session index",
         ),
     ] = None,
@@ -390,6 +389,7 @@ def console_reorder_sessions(
         int | None,
         typer.Option(
             "--to-index",
+            parser=int,
             help="Start at this index among unlisted members (valid from zero through their count)",
         ),
     ] = None,

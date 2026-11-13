@@ -33,13 +33,8 @@ resource_app = typer.Typer(
 )
 app.add_typer(resource_app)
 
-# The sample-kind argument is deliberately a plain string, not a
-# click.Choice: ANY kind the operator types (a capability kind, a typo,
-# anything) must reach the service layer, which rejects with a clean,
-# kind-aware domain error either way (see
-# manifests.samples._validated_kinds). A Choice would intercept
-# out-of-set strings at parse time, the raw-traceback escape #276 is
-# about. Completions still steer via the completion spec.
+# Kind operands stay open strings so capability kinds and typos reach the
+# service layer's kind-aware errors. The completion spec supplies candidates.
 
 
 @resource_app.command("list")

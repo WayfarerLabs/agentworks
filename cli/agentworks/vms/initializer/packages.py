@@ -294,6 +294,8 @@ def _run_install_commands(
         truncated = entry.command[:60]
         output.info(f"{label} {i}/{total} ({name}): {truncated}...")
         try:
+            # Installers share existing home/login state. Declared paths are
+            # returned for the later profile write, not added between commands.
             target.run(
                 f"{shlex.quote(shell)} -lc {shlex.quote(entry.command)}",
                 timeout=120,
@@ -302,6 +304,7 @@ def _run_install_commands(
             msg = f"{label.lower()} '{name}' failed: {truncated}... ({e})"
             logger.warning(msg)
             output.warn(msg)
-        path_additions.extend(entry.path)
+        else:
+            path_additions.extend(entry.path)
 
     return path_additions
