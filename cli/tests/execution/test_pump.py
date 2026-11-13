@@ -651,6 +651,7 @@ def test_a_console_free_client_is_not_attached_to_the_operators_console(share_co
 
     probe = subprocess.run(
         [sys.executable, "-c", _CONSOLE_MEMBERSHIP, "share" if share_console else "own"],
+        stdin=subprocess.DEVNULL,
         capture_output=True,
         timeout=60,
         creationflags=subprocess.CREATE_NEW_CONSOLE,
@@ -660,6 +661,35 @@ def test_a_console_free_client_is_not_attached_to_the_operators_console(share_co
 
     assert probe.returncode == 0, probe.stderr.decode(errors="replace")
     assert probe.stdout.split() == [b"True", str(share_console).encode()]
+
+
+# Exits 0 when the remote command of an interactive ssh would be led by a NUL, 3 when not.
+_NUL_LEAD = (
+    "import sys; from agentworks.execution import ssh_process; "
+    "sys.exit(0 if ssh_process.nul_first_on_a_windows_console('x') != 'x' else 3)"
+)
+
+
+@pytest.mark.parametrize("on_the_console", [True, False])
+def test_only_a_client_whose_stdio_is_the_console_gets_the_nul_lead(on_the_console: bool) -> None:
+    if sys.platform != "win32":  # a statement, not a skipif mark, so the type checker narrows too
+        pytest.skip("Win32 consoles")
+    hidden = subprocess.STARTUPINFO(dwFlags=subprocess.STARTF_USESHOWWINDOW, wShowWindow=subprocess.SW_HIDE)
+    # None for all three leaves the child's standard handles on its new console.
+    redirect = None if on_the_console else subprocess.PIPE
+
+    probe = subprocess.run(
+        [sys.executable, "-c", _NUL_LEAD],
+        stdin=None if on_the_console else subprocess.DEVNULL,
+        stdout=redirect,
+        stderr=redirect,
+        timeout=60,
+        creationflags=subprocess.CREATE_NEW_CONSOLE,
+        startupinfo=hidden,
+        check=False,
+    )
+
+    assert probe.returncode == (0 if on_the_console else 3)
 
 
 def test_binary_stdio_round_trips_every_byte_and_end_of_file() -> None:
