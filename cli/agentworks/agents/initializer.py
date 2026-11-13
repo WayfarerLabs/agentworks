@@ -363,29 +363,15 @@ def create_agent_on_vm(
         except (SourceRefError, Exception) as e:
             output.warn(f"agent dotfiles failed: {e}")
 
-    if mise_enabled:
-        _run_agent_mise_setup(agent_target=agent_target, agent_tmpl=agent_tmpl, home=home)
-
-    # Native npm uses whichever runtime the user has provisioned. Neither
-    # package installer invokes or requires the other.
+    # Publish package paths once before either installer, so their tools are
+    # available to installation hooks and subsequent custom commands.
     from agentworks.vms.initializer.npm import run_npm_install
 
     package_paths = []
     if mise_enabled and (agent_cfg.mise_packages or agent_cfg.mise_lockfile):
         package_paths.append(f"{home}/.local/share/mise/shims")
-    if agent_cfg.npm_enabled:
-        package_paths.extend(
-            run_npm_install(
-                agent_target,
-                agent_cfg.npm_packages,
-                agent_shell,
-                home,
-                agent_cfg.npm_min_release_age_days,
-                logger,
-            )
-        )
-    # Custom installers must see both package managers' tools on the first
-    # initialization, and the final profile must retain those PATH additions.
+    if agent_cfg.npm_enabled and agent_cfg.npm_packages:
+        package_paths.append(f"{home}/.local/bin")
     _write_agent_profile(
         agent_target,
         home=home,
@@ -393,6 +379,17 @@ def create_agent_on_vm(
         identity_env=agent_identity,
         path_additions=package_paths,
     )
+    if mise_enabled:
+        _run_agent_mise_setup(agent_target=agent_target, agent_tmpl=agent_tmpl, home=home)
+    if agent_cfg.npm_enabled:
+        run_npm_install(
+            agent_target,
+            agent_cfg.npm_packages,
+            agent_shell,
+            home,
+            agent_cfg.npm_min_release_age_days,
+            logger,
+        )
     _run_agent_install_commands(
         agent_target=agent_target,
         registry=registry,
@@ -561,10 +558,9 @@ def _write_agent_profile(
     """Write the agent's ``~/.agentworks-profile.sh`` and source it from
     the agent's shell rc files.
 
-    Used twice in agent setup: once with identity-only (before install
-    commands run, so they see AGENTWORKS_AGENT via login-shell sourcing),
-    and once with identity + accumulated PATH (after install commands).
-    Both writes overwrite the file; the source-line append is
+    Used before setup with identity, before custom commands with package PATH,
+    and after custom commands with accumulated PATH. Each write overwrites the
+    file; the source-line append is
     grep-or-append so the rc files don't accumulate duplicate lines on
     reinit.
     """
@@ -601,6 +597,9 @@ def _write_agent_profile(
         profile_path = f"{home}/{AGENTWORKS_PROFILE}"
         agent_target.write_file(profile_path, content, mode="0644")
         source_line = f". {profile_path}"
+        from agentworks.vms.initializer.shell_env import _source_existing_bash_login_files
+
+        _source_existing_bash_login_files(agent_target)
         rc_files = [f"{home}/.profile", f"{home}/.bashrc"]
         if shell == "zsh":
             rc_files.append(f"{home}/.zprofile")
@@ -652,14 +651,15 @@ def _run_agent_mise_setup(
     agent_tmpl: ResolvedAgentTemplate,
     home: str,
 ) -> None:
-    """Set up mise for an agent: shims PATH, config, lockfile, install.
+    """Set up mise for an agent: config, lockfile, install.
 
-    Runs entirely over agent SSH. Writes the mise config and
-    rc files directly via ``agent_target.write_file``; fetches the
+    Runs entirely over agent SSH. Writes the mise config
+    directly via ``agent_target.write_file``; fetches the
     lockfile via ``fetch_file`` over the same agent transport so the
     file lands at its final path owned by the agent with no sudo step.
 
-    ``mise install`` / ``mise prune`` are wrapped in a login shell
+    The caller publishes the package PATH before this step. ``mise install``
+    and ``mise prune`` are wrapped in a login shell
     (``{shell} -lc``) so the agent's PATH and any other profile-exported
     env (mise's own activation hooks, plugin discovery paths, downstream
     tooling like ``npm`` / ``pip`` that mise plugins shell out to during
@@ -676,26 +676,6 @@ def _run_agent_mise_setup(
 
     if not has_packages and not has_lockfile:
         return
-
-    from agentworks.vms.initializer import AGENTWORKS_PROFILE
-
-    # Append mise shims PATH to agent's agentworks profile
-    shims_path = f"{home}/.local/share/mise/shims"
-    try:
-        profile_path = f"{home}/{AGENTWORKS_PROFILE}"
-        agent_target.run(
-            f"printf '%s' 'export PATH=\"{shims_path}:$PATH\"\n' >> {profile_path}",
-        )
-        source_line = f". {profile_path}"
-        for rc in [f"{home}/.profile", f"{home}/.zprofile"]:
-            agent_target.run(
-                f"grep -q {AGENTWORKS_PROFILE} {rc} 2>/dev/null || printf '%s\\n' '{source_line}' >> {rc}",
-            )
-    except SSHError as e:
-        output.warn(f"agent profile configuration failed: {e}")
-
-    # ``~/.agentworks-rc.sh`` is written unconditionally by
-    # ``_write_agent_shell_rc`` earlier in setup; nothing more to do here.
 
     mise_config_dir = f"{home}/.config/mise"
 

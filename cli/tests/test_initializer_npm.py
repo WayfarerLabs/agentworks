@@ -52,8 +52,8 @@ def test_install_uses_user_prefix_age_policy_and_strict_engines(version: str) ->
     paths = run_npm_install(target, packages, "bash", "/home/a user's home", 14, logger)
 
     assert paths == ["/home/a user's home/.local/bin"]
-    assert target.run.call_count == 3
-    for call, package in zip(target.run.call_args_list[1:], packages, strict=True):
+    assert target.run.call_count == 4
+    for call, package in zip(target.run.call_args_list[1::2], packages, strict=True):
         argv = _argv(call.args[0])
         assert argv[:5] == ["npm", "install", "--global", "--prefix", "/home/a user's home/.local"]
         assert "--min-release-age=14" in argv
@@ -72,16 +72,48 @@ def test_zero_age_is_passed_explicitly() -> None:
 
 def test_install_failure_keeps_existing_path_and_continues_without_unfiltered_retry() -> None:
     target = _target()
-    target.run.side_effect = [SSHResult(0, "11.17.0\n", ""), SSHError("ETARGET"), SSHResult(0, "", "")]
+    target.run.side_effect = [
+        SSHResult(0, "11.17.0\n", ""),
+        SSHError("ETARGET"),
+        SSHResult(0, "11.17.0\n", ""),
+        SSHResult(0, "", ""),
+    ]
     logger = MagicMock()
 
     paths = run_npm_install(target, ["too-new@1.2.3", "other@1.2.3"], "bash", "/home/user", 7, logger)
 
     assert paths == ["/home/user/.local/bin"]
-    assert target.run.call_count == 3
+    assert target.run.call_count == 4
     logger.warning.assert_called_once()
-    for call in target.run.call_args_list[1:]:
+    for call in target.run.call_args_list[1::2]:
         assert "--min-release-age=7" in _argv(call.args[0])
+
+
+def test_replacement_npm_is_rechecked_before_installing_another_package() -> None:
+    target = _target()
+    target.run.side_effect = [
+        SSHResult(0, "11.16.0\n", ""),
+        SSHResult(0, "", ""),
+        SSHResult(0, "10.9.4\n", ""),
+    ]
+    run_npm_install(target, ["npm@10.9.4", "tool"], "bash", "/home/user", 7)
+    installs = [_argv(call.args[0]) for call in target.run.call_args_list if "install" in _argv(call.args[0])]
+    assert len(installs) == 1
+    assert installs[0][-1] == "npm@10.9.4"
+
+
+def test_upgraded_npm_gets_its_own_exclusion_policy() -> None:
+    target = _target()
+    target.run.side_effect = [
+        SSHResult(0, "11.16.0\n", ""),
+        SSHResult(0, "", ""),
+        SSHResult(0, "12.2.2\n", ""),
+        SSHResult(0, "", ""),
+    ]
+    run_npm_install(target, ["npm@12.2.2", "tool"], "bash", "/home/user", 7)
+    installs = [_argv(call.args[0]) for call in target.run.call_args_list[1::2]]
+    assert "--min-release-age-exclude=" not in installs[0]
+    assert "--min-release-age-exclude=" in installs[1]
 
 
 def test_declared_shell_is_used() -> None:

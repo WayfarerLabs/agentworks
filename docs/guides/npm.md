@@ -12,7 +12,9 @@ also works when mise is enabled, but neither installer invokes or enables the ot
 Use a supported Node.js LTS release and an npm version compatible with it. Agentworks requires npm
 11.10.0 or newer because earlier versions do not enforce the native minimum release age option.
 Package `engines` requirements are enforced with `--engine-strict`; incompatible packages fail
-instead of merely warning. Agentworks does not automatically upgrade or replace the runtime.
+instead of merely warning. Agentworks does not automatically upgrade or replace the runtime. npm's
+own supported Node.js range remains the runtime provisioner's responsibility; Agentworks checks the
+npm feature version and enforces installed packages' engines.
 
 The optional `apt` plugin includes a `nodejs` package entry backed by NodeSource. Its bundled npm
 version depends on the selected Node.js release. Check the runtime's actual `node --version` and
@@ -55,10 +57,12 @@ packages; packages with native extensions may still need reinstallation for the 
 
 ## Release age and reinitialization
 
-The default minimum release age is seven days. npm applies the configured age to the dependency
-tree, including explicitly pinned versions. A tag or range may resolve to an older eligible release;
-an exact version that is too new fails. Set `npm_min_release_age_days: 0` to remove the age
-restriction. Agentworks clears inherited age exclusions on npm versions that support them.
+The default minimum release age is seven days. npm applies the configured age to registry-resolved
+releases, including dependencies and explicitly pinned versions. Git, file, and tarball dependencies
+do not have registry publication timestamps, so npm cannot enforce their age. A tag or range may
+resolve to an older eligible release; an exact version that is too new fails. Set
+`npm_min_release_age_days: 0` to remove the age restriction. Agentworks clears inherited age
+exclusions on npm versions that support them.
 
 Initialization runs each selected install again, letting npm reconcile the requested version or
 range. It does not uninstall packages removed from the list or prune unrelated packages. Failures

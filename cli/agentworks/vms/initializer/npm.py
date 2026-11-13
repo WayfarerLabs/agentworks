@@ -50,36 +50,38 @@ def run_npm_install(
     def login(command: list[str]) -> str:
         return f"{shlex.quote(shell)} -lc {shlex.quote(shlex.join(command))}"
 
-    try:
-        result = target.run(login(["npm", "--version"]), timeout=30)
-    except SSHError as exc:
-        warn(f"npm packages skipped: install Node.js and npm >= 11.10.0 for this user, then reinit ({exc})")
-        return paths
-
-    match = _VERSION.fullmatch(result.stdout.strip())
-    version = tuple(int(part) for part in match.groups()) if match is not None else None
-    if version is None or version < _MIN_NPM_VERSION:
-        warn(
-            "npm packages skipped: npm >= 11.10.0 is required to enforce "
-            "npm_min_release_age_days; install a supported Node.js/npm release, then reinit"
-        )
-        return paths
-
-    args = [
-        "npm",
-        "install",
-        "--global",
-        "--prefix",
-        prefix,
-        f"--min-release-age={min_release_age_days}",
-        "--engine-strict",
-        "--force=false",
-    ]
-    if version >= _AGE_EXCLUDE_VERSION:
-        # Inherited exclusions bypass the age filter, including for dependencies.
-        args.append("--min-release-age-exclude=")
-
     for index, package in enumerate(packages, 1):
+        # Installing npm itself can replace the executable selected by the next
+        # login shell. Verify each invocation before choosing its policy flags.
+        try:
+            result = target.run(login(["npm", "--version"]), timeout=30)
+        except SSHError as exc:
+            warn(f"npm packages skipped: install Node.js and npm >= 11.10.0 for this user, then reinit ({exc})")
+            return paths
+
+        match = _VERSION.fullmatch(result.stdout.strip())
+        version = tuple(int(part) for part in match.groups()) if match is not None else None
+        if version is None or version < _MIN_NPM_VERSION:
+            warn(
+                "npm packages skipped: npm >= 11.10.0 is required to enforce "
+                "npm_min_release_age_days; install a supported Node.js/npm release, then reinit"
+            )
+            return paths
+
+        args = [
+            "npm",
+            "install",
+            "--global",
+            "--prefix",
+            prefix,
+            f"--min-release-age={min_release_age_days}",
+            "--engine-strict",
+            "--force=false",
+        ]
+        if version >= _AGE_EXCLUDE_VERSION:
+            # Inherited exclusions bypass the age filter, including for dependencies.
+            args.append("--min-release-age-exclude=")
+
         output.info(f"Npm package {index}/{len(packages)}: {package}")
         try:
             target.run(login([*args, "--", package]), timeout=300)

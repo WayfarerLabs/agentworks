@@ -20,18 +20,28 @@ session lead owns these artifacts, architecture, and integration.
 
 ## Validation in progress
 
-The real local registry suite passed with npm 11.16.0 (four passes, one exclusion
-case unavailable in that release) and npm 12.2.2 (five passes). It verifies direct
-and transitive age filtering, exact-pin refusal, zero-age installs, stricter age
-on reinit, and inherited exclusion overrides. Native executable invocation runs
-with a provisioned Node binary and no mise configuration in the isolated home.
+The real local registry suite passed with npm 11.16.0 (five passes, one exclusion case unavailable
+in that release) and npm 12.2.2 (six passes). It verifies direct and transitive registry age filtering,
+exact-pin refusal, zero-age installs, stricter age on reinit, and inherited exclusion overrides.
+Native executable invocation runs with a provisioned Node binary and no mise configuration in the
+isolated home.
+The sixth case installs a package that replaces npm with an unsupported version
+and verifies that the remaining batch stops before its age policy can be ignored.
 
-Eight initialization tests cover all mise/npm toggle combinations for both user
-roles, executing PATH lookups inside the actual generated profiles before custom
-commands and after the final profile write. Declaration tests cover inheritance,
-instance overlays, strict input types, and emitted schema fields.
+Eight initialization tests cover all mise/npm toggle combinations for both user roles, executing
+PATH lookups inside the actual generated profiles before custom commands and after the final profile
+write. Declaration tests cover inheritance, instance overlays, strict input types, and emitted
+schema fields.
+Six real Bash login tests additionally cover `.profile`, `.bash_profile`, and
+`.bash_login`, retaining dotfiles and avoiding duplicate package PATH entries.
 
-ruff, mypy, and the repository's file-quality lint pass. The complete
-non-integration suite and independent reviews remain in progress. No VM backend
-has been used for this effort, so the local registry evidence does not claim
-remote SSH or VM create/reinit coverage.
+The first independent review round identified a mid-batch npm replacement bypass,
+Bash startup precedence, and overly broad dependency-age wording. Corrections
+recheck npm before every install, attach the managed profile to existing Bash
+startup files, and qualify age coverage as registry-resolved releases. The
+complexity pass removed the duplicate agent mise PATH writer by publishing package
+paths once before both installers. Correction review is pending.
+
+ruff, mypy, and the repository's file-quality lint pass. The complete non-integration suite and
+independent reviews remain in progress. No VM backend has been used for this effort, so the local
+registry evidence does not claim remote SSH or VM create/reinit coverage.

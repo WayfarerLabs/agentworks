@@ -29,6 +29,12 @@ pytestmark = [pytest.mark.integration, pytest.mark.skipif(os.name != "posix", re
 def _tarball(name: str, version: str, *, dependency: bool = False) -> bytes:
     manifest: dict[str, object] = {"name": name, "version": version}
     files = {}
+    if name == "npm":
+        manifest["bin"] = {"npm": "cli.js"}
+        files["cli.js"] = (
+            "#!/usr/bin/env node\n"
+            f"if (process.argv[2] === '--version') console.log('{version}'); else process.exit(86);\n"
+        )
     if dependency:
         manifest["dependencies"] = {"agw-npm-dep": "*"}
         manifest["bin"] = {"agw-npm-probe": "cli.js"}
@@ -52,7 +58,7 @@ def _tarball(name: str, version: str, *, dependency: bool = False) -> bytes:
 def registry():
     tarballs = {
         (name, version): _tarball(name, version, dependency=name == "agw-npm-tool")
-        for name in ("agw-npm-tool", "agw-npm-dep")
+        for name in ("agw-npm-tool", "agw-npm-dep", "npm")
         for version in ("1.0.0", "2.0.0")
     }
 
@@ -63,7 +69,7 @@ def registry():
         def do_GET(self) -> None:
             path = unquote(urlsplit(self.path).path).strip("/")
             name = path.split("/", 1)[0]
-            if name not in {"agw-npm-tool", "agw-npm-dep"}:
+            if name not in {"agw-npm-tool", "agw-npm-dep", "npm"}:
                 self.send_error(404)
                 return
             if "/-/" in path:
@@ -85,6 +91,8 @@ def registry():
                     if name == "agw-npm-tool":
                         metadata["dependencies"] = {"agw-npm-dep": "*"}
                         metadata["bin"] = {"agw-npm-probe": "cli.js"}
+                    elif name == "npm":
+                        metadata["bin"] = {"npm": "cli.js"}
                     versions[version] = metadata
                 body = json.dumps(
                     {
@@ -142,7 +150,8 @@ def native_target(tmp_path: Path, registry: str):
     npmrc = tmp_path / ".npmrc"
     npmrc.write_text(f"registry={registry}\ncache={tmp_path / 'cache'}\naudit=false\nfund=false\n")
     (tmp_path / ".profile").write_text(
-        f'export PATH={shlex.quote(str(provisioned))}:"$PATH"\nexport NPM_CONFIG_USERCONFIG={shlex.quote(str(npmrc))}\n'
+        f'export PATH={shlex.quote(str(tmp_path / ".local/bin"))}:{shlex.quote(str(provisioned))}:"$PATH"\n'
+        f"export NPM_CONFIG_USERCONFIG={shlex.quote(str(npmrc))}\n"
     )
     child_env = {**os.environ, "HOME": str(tmp_path)}
     target = MagicMock()
@@ -205,3 +214,13 @@ def test_native_npm_age_limit_overrides_inherited_exclusions(native_target: Magi
     run_npm_install(native_target, ["agw-npm-tool@latest"], "sh", str(tmp_path), 7)
     installed = native_target.run(f"sh -lc {shlex.quote(str(tmp_path / '.local/bin/agw-npm-probe'))}")
     assert installed.stdout.strip() == "1.0.0:1.0.0"
+
+
+def test_native_npm_replacement_without_age_support_stops_remaining_installs(
+    native_target: MagicMock, tmp_path: Path
+) -> None:
+    logger = MagicMock()
+    run_npm_install(native_target, ["npm@1.0.0", "agw-npm-tool@latest"], "sh", str(tmp_path), 7, logger)
+    assert native_target.run("sh -lc 'npm --version'").stdout.strip() == "1.0.0"
+    assert not (tmp_path / ".local/bin/agw-npm-probe").exists()
+    logger.warning.assert_called_once()

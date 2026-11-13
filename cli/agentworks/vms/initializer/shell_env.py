@@ -26,6 +26,22 @@ SKEL_BASHRC_PATH = "/etc/skel/.bashrc"
 SKEL_ZSHRC_PATH = "/etc/skel/.zshrc"
 
 
+def _source_existing_bash_login_files(target: Transport) -> None:
+    """Attach the managed profile to Bash's existing higher-priority startup files.
+
+    Do not create either file: creating one would prevent Bash from reading the
+    user's lower-priority login profile.
+    """
+    source_line = f'. "$HOME/{AGENTWORKS_PROFILE}"'
+    for filename in (".bash_profile", ".bash_login"):
+        path = f'"$HOME/{filename}"'
+        target.run(
+            f"if [ -f {path} ]; then grep -Fqx {shlex.quote(source_line)} {path} 2>/dev/null "
+            f"|| printf '%s\\n' {shlex.quote(source_line)} >> {path}; fi",
+            check=False,
+        )
+
+
 def _ensure_agentworks_files_sourced(
     target: Transport,
     *,
@@ -59,6 +75,7 @@ def _ensure_agentworks_files_sourced(
     logger.step("Ensure agentworks files sourced")
 
     profile_source = f". {home}/{AGENTWORKS_PROFILE}"
+    _source_existing_bash_login_files(target)
     profile_rcs = [f"{home}/.profile", f"{home}/.bashrc"]
     if shell == "zsh":
         profile_rcs.append(f"{home}/.zprofile")
@@ -143,6 +160,7 @@ def _write_agentworks_profile(
 
         # Source from ~/.profile (bash/sh) and ~/.zprofile (zsh)
         source_line = f". $HOME/{AGENTWORKS_PROFILE}"
+        _source_existing_bash_login_files(target)
         for rc in ("$HOME/.profile", "$HOME/.zprofile"):
             target.run(
                 f"grep -q {AGENTWORKS_PROFILE} {rc} 2>/dev/null || printf '%s\\n' '{source_line}' >> {rc}",

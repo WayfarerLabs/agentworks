@@ -17,7 +17,11 @@ install. Errors use the existing nonfatal initialization warning convention and 
 the age filter.
 
 Runtime provisioning remains explicit through existing apt or system install mechanisms, as selected
-by the operator. npm does not invoke mise or bootstrap its runtime automatically.
+by the operator. npm does not invoke mise or bootstrap its runtime automatically. The npm version
+gate enforces feature support; package engines enforce declared runtime requirements. Provisioning
+owns npm's own supported Node.js range. Release age uses npm's registry publication timestamps,
+including registry-resolved dependencies; Git, file, and tarball dependencies have no registry age
+to enforce.
 
 ## Ordering and profiles
 

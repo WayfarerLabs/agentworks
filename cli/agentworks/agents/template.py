@@ -160,7 +160,7 @@ class AgentTemplate(DeclaredResource):
     are not supported."""
 
     npm_min_release_age_days: int | None = Field(default=None, ge=0)
-    """Minimum release age in days for npm packages and their dependencies,
+    """Minimum release age in days for npm packages and registry-resolved dependencies,
     including explicitly pinned versions. Zero disables the age restriction."""
 
     harness_integrations: dict[NonEmptyStr, CapabilityConfig | None] | None = None

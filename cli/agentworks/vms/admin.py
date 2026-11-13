@@ -160,7 +160,7 @@ class AdminConfig(DeclaredResource):
     are not supported."""
 
     npm_min_release_age_days: int = Field(default=7, ge=0)
-    """Minimum release age in days for npm packages and their dependencies,
+    """Minimum release age in days for npm packages and registry-resolved dependencies,
     including explicitly pinned versions. Zero disables the age restriction."""
 
     git_force_safe_directory: bool = True
