@@ -569,12 +569,17 @@ warning shows the failed command's redacted stderr tail (`describe_failure`).
 so `rehome_workspace` checks it before anything runs: a trailing `/` is dropped, and a path that is
 then not absolute and normalized (`guest_path`'s rule) is a `ValidationError`, since rsync reads
 `host:x` as a remote and the traversal walk needs an absolute path. The stored path is normalized
-(`normalized_guest_path`, a leading `//` included) before the equality and overlap checks. The walk
-itself stops at any path that is not absolute and has a 30-second deadline. `paths.vm_workspaces` is
-refused at load when it is not absolute and stored normalized. A stored workspace path is normalized
-for its tmuxinator config, so an earlier release's row such as `/data/ws/` still regenerates, and
-delete compares the console link's target normalized, and only an absolute one, since `realpath`
-would read a relative target from the request's directory.
+(`normalized_guest_path`: empty and `.` components dropped, a leading `//` included, `..` kept)
+before the equality and overlap checks. Those checks compare spellings, and a link can make two
+spellings one directory, so inside the held span, after the directory checks and before the confirm,
+one admin probe resolves both on the guest (`realpath -z -e` of the source, `realpath -z -m` of the
+target, which need not exist) and the overlap check runs again on the resolved paths, with the same
+refusal. The walk itself stops at any path that is not absolute and has a 30-second deadline.
+`paths.vm_workspaces` is refused at load when it is not absolute, is `/`, or has a `..` component,
+which collapsing would move past a link, and is stored normalized. A stored workspace path is
+normalized for its tmuxinator config, so an earlier release's row such as `/data/ws/` still
+regenerates, and delete compares the console link's target normalized, and only an absolute one,
+since `realpath` would read a relative target from the request's directory.
 
 ### Workspace copy
 
